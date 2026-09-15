@@ -23,6 +23,7 @@ from types import SimpleNamespace
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.multimodal import VideoFrameCollator
+from pypaimon.multimodal.lerobot.dataset import _decode_video_rows
 from pypaimon.table.row.blob import VideoFrameDescriptor
 
 
@@ -93,6 +94,84 @@ class VideoFrameCollatorTest(unittest.TestCase):
             [row["frame"] for row in result],
         )
         self.assertEqual(descriptors[0], result[0]["video"])
+
+    def test_groups_and_sorts_frames_while_restoring_row_order(self):
+        descriptors = {
+            (video, frame): self._descriptor(
+                "episode-%s.mp4" % video,
+                ("video-%s" % video).encode(),
+                frame,
+            )
+            for video in ("one", "two")
+            for frame in (0, 1, 2, 3)
+        }
+        rows = [
+            {"request": "a", "video": descriptors["one", 3]},
+            {"request": "b", "video": descriptors["two", 2]},
+            {"request": "c", "video": descriptors["one", 1]},
+            {"request": "d", "video": descriptors["two", 0]},
+        ]
+        calls = []
+
+        def decode(decoder, frame, row):
+            video, decoded_frame = decoder.decode(frame)
+            calls.append((video, decoded_frame))
+            return row["request"], video, decoded_frame
+
+        collator = VideoFrameCollator(
+            self.table,
+            video_column="video",
+            decoder_factory=lambda stream: _Decoder(stream, []),
+            decode_fn=decode,
+            collate_fn=lambda decoded_rows: decoded_rows,
+        )
+        try:
+            result = collator(rows)
+        finally:
+            collator.close()
+
+        self.assertEqual(
+            [
+                (b"video-one", 1),
+                (b"video-one", 3),
+                (b"video-two", 0),
+                (b"video-two", 2),
+            ],
+            calls,
+        )
+        self.assertEqual(["a", "b", "c", "d"], [
+            row["request"] for row in result
+        ])
+        self.assertEqual(
+            [3, 2, 1, 0],
+            [row["frame"][2] for row in result],
+        )
+
+    def test_decodes_dataset_row_groups_in_one_batch(self):
+        row_groups = [
+            {4: {"request": "base", "video": b"base"}},
+            {1: {"request": "delta", "video": b"delta"}},
+        ]
+
+        class Collator:
+            video_column = "video"
+
+            def __init__(self):
+                self.calls = []
+
+            def __call__(self, rows):
+                self.calls.append([row["request"] for row in rows])
+                return [
+                    dict(row, video="decoded-" + row["request"])
+                    for row in rows
+                ]
+
+        collator = Collator()
+        _decode_video_rows(row_groups, [collator])
+
+        self.assertEqual([["base", "delta"]], collator.calls)
+        self.assertEqual("decoded-base", row_groups[0][4]["video"])
+        self.assertEqual("decoded-delta", row_groups[1][1]["video"])
 
     def test_evicts_least_recently_used_decoder(self):
         descriptors = [
