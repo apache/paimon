@@ -30,7 +30,7 @@ import java.util.Objects;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Complete semantic model text. Format and dialect support are validated by the server. */
+/** Complete semantic model text. Model format support is validated by the server. */
 @Experimental
 public class SemanticViewDefinition {
 
@@ -38,34 +38,25 @@ public class SemanticViewDefinition {
     public static final int MAX_CONTENT_BYTES = 1024 * 1024;
 
     private final String format;
-    private final String dialect;
     private final String content;
 
     @JsonCreator
-    @ConstructorProperties({"format", "dialect", "content"})
+    @ConstructorProperties({"format", "content"})
     public SemanticViewDefinition(
-            @JsonProperty("format") String format,
-            @JsonProperty("dialect") String dialect,
-            @JsonProperty("content") String content) {
+            @JsonProperty("format") String format, @JsonProperty("content") String content) {
         checkArgument(format != null && !format.trim().isEmpty(), "format must not be blank");
-        checkArgument(dialect != null && !dialect.trim().isEmpty(), "dialect must not be blank");
         checkArgument(content != null && !content.trim().isEmpty(), "content must not be blank");
         checkArgument(
                 content.getBytes(StandardCharsets.UTF_8).length <= MAX_CONTENT_BYTES,
                 "content must not exceed 1 MiB in UTF-8");
         this.format = format;
-        this.dialect = dialect;
         this.content = content;
     }
 
+    /** Identifies both model syntax and document encoding, for example {@code databricks-yaml}. */
     @JsonGetter("format")
     public String getFormat() {
         return format;
-    }
-
-    @JsonGetter("dialect")
-    public String getDialect() {
-        return dialect;
     }
 
     /** Returns the original document without parsing or normalization. */
@@ -83,13 +74,11 @@ public class SemanticViewDefinition {
             return false;
         }
         SemanticViewDefinition that = (SemanticViewDefinition) obj;
-        return format.equals(that.format)
-                && dialect.equals(that.dialect)
-                && content.equals(that.content);
+        return format.equals(that.format) && content.equals(that.content);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(format, dialect, content);
+        return Objects.hash(format, content);
     }
 }

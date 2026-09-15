@@ -388,11 +388,12 @@ function validateCatalogOpenApi() {
     pageSize.schema.minimum === 1 && pageSize.schema.maximum === 1000,
     'Semantic view page size must be between 1 and 1000',
   );
-  contract.requireRequiredProperties('SemanticViewDefinition', ['format', 'dialect', 'content']);
-  const definition = contract.requireProperties('SemanticViewDefinition', ['format', 'dialect', 'content']);
+  contract.requireRequiredProperties('SemanticViewDefinition', ['format', 'content']);
+  const definition = contract.requireProperties('SemanticViewDefinition', ['format', 'content']);
   contract.checkSpec(
-    !definition.dialect.enum && definition.content['x-max-utf8-bytes'] === 1048576,
-    'Semantic definitions require an extensible dialect and a 1 MiB UTF-8 content limit',
+    Object.keys(definition).length === 2 && !definition.format.enum &&
+      definition.content['x-max-utf8-bytes'] === 1048576,
+    'Semantic definitions require only an extensible format and content with a 1 MiB UTF-8 limit',
   );
   contract.requireRequiredProperties('UpsertSemanticViewRequest', ['definition']);
   requireNullableStringProperty(contract, 'UpsertSemanticViewRequest', 'expectedRevision');

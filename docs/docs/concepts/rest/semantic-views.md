@@ -24,7 +24,7 @@ limitations under the License.
 A semantic view is a named catalog object that stores a complete semantic model definition.
 The model describes datasets, relationships, dimensions, measures, and related business semantics.
 This experimental REST Catalog extension manages the object and its definition. The Java client
-preserves the original document text. Servers validate the formats, dialects, syntax versions,
+preserves the original document text. Servers validate the model formats, syntax versions,
 and features they support; consumers provide query execution.
 
 Registration does not imply Spark/Flink execution support or grant access to source data.
@@ -52,17 +52,19 @@ POST creates or atomically replaces one complete definition in an existing datab
 ```json
 {
   "definition": {
-    "format": "yaml",
-    "dialect": "databricks",
+    "format": "databricks-yaml",
     "content": "version: '1.1'\nsource: main.sales.orders\nmeasures:\n  - name: revenue\n    expr: SUM(paid_amount)\n"
   },
   "expectedRevision": "r17"
 }
 ```
 
-`format`, `dialect`, and `content` are required nonblank strings. Version 1 defines YAML encoding;
-`dialect` is an extensible server-supported identifier. The example requires server support for
-the Databricks dialect. Clients do not parse, normalize, or discard fields in the content.
+`format` and `content` are required nonblank strings. `format` identifies both the model syntax
+and document encoding, for example `databricks-yaml`, `snowflake-yaml`, or `ossie-yaml`. These are
+Paimon format identifiers, not a closed enumeration; each server decides which formats it supports.
+The example requires server support for `databricks-yaml`. Model syntax versions and expression
+SQL dialects belong inside the content, following the chosen format's specification.
+Clients do not parse, normalize, or discard fields in the content.
 Content is limited to **1 MiB of UTF-8 bytes**, checked before sending by the Java client.
 
 POST and GET return HTTP 200 with the full object:
@@ -72,8 +74,7 @@ POST and GET return HTTP 200 with the full object:
   "name": "order_metrics",
   "entityName": "sales.order_metrics",
   "definition": {
-    "format": "yaml",
-    "dialect": "databricks",
+    "format": "databricks-yaml",
     "content": "version: '1.1'\nsource: main.sales.orders\nmeasures:\n  - name: revenue\n    expr: SUM(paid_amount)\n"
   },
   "revision": "r18"
@@ -123,7 +124,7 @@ import org.apache.paimon.view.SemanticViewDefinition;
 
 SemanticViewManagement models = restCatalog.semanticViewManagement();
 Identifier id = Identifier.create("sales", "order_metrics");
-SemanticViewDefinition definition = new SemanticViewDefinition("yaml", "databricks", yamlText);
+SemanticViewDefinition definition = new SemanticViewDefinition("databricks-yaml", yamlText);
 SemanticView saved = models.upsertSemanticView(id, definition);
 SemanticView current = models.getSemanticView(id);
 models.upsertSemanticView(id, replacementDefinition, current.getRevision());
@@ -156,7 +157,7 @@ upsert/get/list/paged-list/delete operations; its read and upsert methods return
   follows existing catalog rules and cleans up semantic metadata and its direct bindings.
 - Unsupported model semantics must be rejected without side effects or dropping fields. SQL
   analysis, source validation, dependencies, and execution authorization belong to the server's
-  dialect adapter. The client exposes no generic executable-validation status.
+  model format adapter. The client exposes no generic executable-validation status.
 
 The HTTP client tests verify wire behavior and error propagation. They do not prove a provider's
 storage atomicity, permission enforcement, namespace isolation, or database lifecycle behavior.
@@ -167,7 +168,7 @@ Errors use `ErrorResponse`; semantic view errors use `resourceType=SEMANTIC_VIEW
 
 | HTTP | Meaning | Java client exception |
 | --- | --- | --- |
-| 400 | Invalid input or unsupported format, dialect, syntax version, or feature | `BadRequestException` |
+| 400 | Invalid input or unsupported model format, syntax version, or feature | `BadRequestException` |
 | 401 / 403 | Authentication or permission failure | `NotAuthorizedException` / `ForbiddenException` |
 | 404 | Missing database or model | `NoSuchResourceException` |
 | 409 | Name/revision conflict or dependency blocks deletion | `AlreadyExistsException` (existing REST mapping) |

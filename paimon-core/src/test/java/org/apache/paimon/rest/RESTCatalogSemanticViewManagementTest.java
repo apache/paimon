@@ -49,7 +49,7 @@ class RESTCatalogSemanticViewManagementTest {
     private static final String BASE_PATH = "/v1/catalog%2Fid/databases/sales/semantic-views";
     private static final Identifier ID = Identifier.create("sales", "revenue");
     private static final SemanticViewDefinition DEFINITION =
-            new SemanticViewDefinition("yaml", "provider", "source: orders\n");
+            new SemanticViewDefinition("provider-yaml", "source: orders\n");
 
     private MockWebServer server;
     private RESTCatalog catalog;

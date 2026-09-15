@@ -72,8 +72,7 @@ class RESTApiSemanticViewTest {
     private static final Identifier IDENTIFIER = Identifier.create("sales", "revenue");
     private static final SemanticViewDefinition DEFINITION =
             new SemanticViewDefinition(
-                    "yaml",
-                    "provider-v2",
+                    "provider-v2-yaml",
                     "# 指标\r\nversion: '1.1'\nsource: db.orders\nfuture: {expr: \"a + b\\c\"}\n");
 
     private final Queue<Reply> replies = new ConcurrentLinkedQueue<>();
@@ -140,8 +139,11 @@ class RESTApiSemanticViewTest {
             assertThat(request.authorization).isEqualTo("Bearer test-token");
             Map<?, ?> body = RESTApi.fromJson(request.body, Map.class);
             assertThat(body.keySet()).hasSize(i == 0 ? 1 : 2);
-            assertThat(body.get("definition"))
-                    .isEqualTo(RESTApi.fromJson(RESTApi.toJson(DEFINITION), Map.class));
+            Map<String, String> definition = (Map<String, String>) body.get("definition");
+            assertThat(definition)
+                    .containsOnlyKeys("format", "content")
+                    .containsEntry("format", "provider-v2-yaml")
+                    .containsEntry("content", DEFINITION.getContent());
             assertThat(body.get("expectedRevision")).isEqualTo(i == 0 ? null : "r17");
         }
         assertThat(requests.get(2).method).isEqualTo("GET");
@@ -306,11 +308,9 @@ class RESTApiSemanticViewTest {
     @Test
     void testInvalidInputsAndUtf8SizeBoundaryBeforeHttp() {
         for (String invalid : Arrays.asList(null, "", "  ")) {
-            assertThatThrownBy(() -> new SemanticViewDefinition(invalid, "test", "content"))
+            assertThatThrownBy(() -> new SemanticViewDefinition(invalid, "content"))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> new SemanticViewDefinition("yaml", invalid, "content"))
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> new SemanticViewDefinition("yaml", "test", invalid))
+            assertThatThrownBy(() -> new SemanticViewDefinition("provider-yaml", invalid))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> api.listSemanticViews(invalid))
                     .isInstanceOf(IllegalArgumentException.class);
@@ -340,8 +340,9 @@ class RESTApiSemanticViewTest {
         String limit = new String(chars) + "x";
         assertThat(limit.getBytes(StandardCharsets.UTF_8))
                 .hasSize(SemanticViewDefinition.MAX_CONTENT_BYTES);
-        assertThat(new SemanticViewDefinition("yaml", "test", limit).getContent()).isEqualTo(limit);
-        assertThatThrownBy(() -> new SemanticViewDefinition("yaml", "test", limit + "x"))
+        assertThat(new SemanticViewDefinition("provider-yaml", limit).getContent())
+                .isEqualTo(limit);
+        assertThatThrownBy(() -> new SemanticViewDefinition("provider-yaml", limit + "x"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("1 MiB");
         assertThat(requests).isEmpty();
@@ -367,6 +368,34 @@ class RESTApiSemanticViewTest {
     }
 
     @Test
+    void testModelFormatsUseTwoFieldWireDefinitions() throws Exception {
+        for (String format :
+                Arrays.asList("databricks-yaml", "snowflake-yaml", "ossie-yaml", "provider-json")) {
+            // The REST layer transports provider-defined text without interpreting its grammar.
+            SemanticViewDefinition definition =
+                    new SemanticViewDefinition(format, DEFINITION.getContent());
+            enqueue(
+                    200,
+                    RESTApi.toJson(
+                            new GetSemanticViewResponse(
+                                    "revenue", "opaque/view:123", definition, "r18")));
+            assertThat(api.upsertSemanticView(IDENTIFIER, definition).getDefinition())
+                    .isEqualTo(definition);
+            String body = requests.get(requests.size() - 1).body;
+            Map<?, ?> request = RESTApi.fromJson(body, Map.class);
+            Map<String, String> fields = (Map<String, String>) request.get("definition");
+            assertThat(fields)
+                    .containsOnlyKeys("format", "content")
+                    .containsEntry("format", format)
+                    .containsEntry("content", DEFINITION.getContent());
+            UpsertSemanticViewRequest external =
+                    new ObjectMapper().readValue(body, UpsertSemanticViewRequest.class);
+            assertThat(external.getDefinition()).isEqualTo(definition);
+        }
+        assertThat(requests).hasSize(4);
+    }
+
+    @Test
     void testNestedJacksonCompatibilityAndRequiredFields() throws Exception {
         String json = RESTApi.toJson(new UpsertSemanticViewRequest(DEFINITION, "r17"));
         UpsertSemanticViewRequest external =
@@ -387,7 +416,8 @@ class RESTApiSemanticViewTest {
                         "{}",
                         "{\"definition\":null}",
                         "{\"definition\":{}}",
-                        "{\"definition\":{\"format\":\"yaml\",\"dialect\":\"test\"}}")) {
+                        "{\"definition\":{\"format\":\"databricks-yaml\"}}",
+                        "{\"definition\":{\"content\":\"source: orders\"}}")) {
             assertThatThrownBy(() -> RESTApi.fromJson(invalid, UpsertSemanticViewRequest.class))
                     .hasRootCauseInstanceOf(IllegalArgumentException.class);
         }

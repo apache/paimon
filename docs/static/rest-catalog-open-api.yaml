@@ -2339,7 +2339,7 @@ paths:
         missing objects return 404 and stale revisions return 409 without mutation.
         Omission or null means unconditional upsert. Ordinary SQL views share the view namespace;
         both SQL view creation and semantic view upsert reject cross-type name collisions with 409.
-        The server validates supported formats, dialects, syntax versions, and model features,
+        The server validates supported model formats, syntax versions, and model features,
         rejecting unsupported semantics without side effects or silently dropping fields.
         Registration does not imply query engine support or grant access to sources.
       requestBody:
@@ -2350,8 +2350,7 @@ paths:
               $ref: '#/components/schemas/UpsertSemanticViewRequest'
             example:
               definition:
-                format: yaml
-                dialect: databricks
+                format: databricks-yaml
                 content: |
                   version: "1.1"
                   source: main.sales.orders
@@ -2678,18 +2677,17 @@ components:
   schemas:
     SemanticViewDefinition:
       type: object
-      required: [ format, dialect, content ]
+      required: [ format, content ]
       properties:
         format:
           type: string
           minLength: 1
-          description: Nonblank document encoding. Version 1 defines yaml; servers reject unsupported formats.
-          examples: [ yaml ]
-        dialect:
-          type: string
-          minLength: 1
-          description: Nonblank, extensible server-supported semantic dialect identifier; not a closed enumeration.
-          examples: [ databricks ]
+          description: >-
+            Nonblank, extensible model document format identifying both model syntax and encoding,
+            for example databricks-yaml, snowflake-yaml, or ossie-yaml. These are Paimon format
+            identifiers; servers decide which formats they support and reject unsupported ones.
+            Model syntax versions and expression dialects belong inside the content.
+          examples: [ databricks-yaml, snowflake-yaml, ossie-yaml ]
         content:
           type: string
           minLength: 1
