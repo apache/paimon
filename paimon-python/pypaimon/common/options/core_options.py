@@ -638,6 +638,13 @@ class CoreOptions:
         .with_description("Whether to enable deletion vectors.")
     )
 
+    DELETION_VECTORS_MERGE_ON_READ: ConfigOption[bool] = (
+        ConfigOptions.key("deletion-vectors.merge-on-read")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Whether batch reads merge level-0 files when deletion vectors are enabled.")
+    )
+
     INDEX_FILE_IN_DATA_FILE_DIR: ConfigOption[bool] = (
         ConfigOptions.key("index-file-in-data-file-dir")
         .boolean_type()
@@ -1499,6 +1506,12 @@ class CoreOptions:
 
     def deletion_vectors_enabled(self, default=None):
         return self.options.get(CoreOptions.DELETION_VECTORS_ENABLED, default)
+
+    def batch_scan_skip_level0(self):
+        """Match Java CoreOptions.batchScanSkipLevel0."""
+        if self.deletion_vectors_enabled():
+            return not self.options.get(CoreOptions.DELETION_VECTORS_MERGE_ON_READ)
+        return self.merge_engine() == MergeEngine.FIRST_ROW
 
     def index_file_in_data_file_dir(self, default=None):
         return self.options.get(CoreOptions.INDEX_FILE_IN_DATA_FILE_DIR, default)

@@ -142,6 +142,8 @@ def _read_options(table) -> dict:
             table.options.source_split_target_size()),
         CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(): str(
             table.options.source_split_open_file_cost()),
+        CoreOptions.DELETION_VECTORS_MERGE_ON_READ.key(): _option_value_to_string(
+            table.options.options.get(CoreOptions.DELETION_VECTORS_MERGE_ON_READ)),
     }
     table_options = table.options.options
     for option in (

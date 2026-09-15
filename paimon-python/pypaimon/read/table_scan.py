@@ -46,6 +46,7 @@ _NATIVE_FORWARDED_OPTIONS = frozenset({
     CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(),
     CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(),
     CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(),
+    CoreOptions.DELETION_VECTORS_MERGE_ON_READ.key(),
     CoreOptions.SCAN_SNAPSHOT_ID.key(),
     CoreOptions.SCAN_TAG_NAME.key(),
     CoreOptions.SCAN_TIMESTAMP.key(),
@@ -113,11 +114,9 @@ class TableScan:
     def _native_plan_supported_impl(self) -> bool:
         """Fall back to the Python scanner for scans native can't carry:
         chunk-shuffle, scored or primary-key
-        global-index results, first-row merge-engine (Rust drops L0), deletion
-        vector merge-on-read, postpone bucket,
+        global-index results, first-row scans which include L0, postpone bucket,
         a primary-key table whose trimmed PK is empty (PK equals the partition
-        key; Rust rejects this schema), dynamic
-        bucket / cross-partition PK tables (unconfirmed Rust parity), a stale
+        key; Rust rejects this schema), a stale
         schema without time travel, removed copy() options which Rust cannot
         represent, unsupported time travel selectors,
         query auth, a missing/old
@@ -142,13 +141,6 @@ class TableScan:
         if getattr(fs, 'deletion_vectors_enabled', False):
             # 0.4.0 includes Python-written DV decoding and legacy bucket paths.
             if not native_version_at_least(0, 4, 0):
-                return False
-            # Python DV scans skip L0; Rust can include L0 when this option is
-            # enabled. Keep that mode on the Python planner until aligned.
-            table_options = self.table.options.options.to_map()
-            merge_on_read = table_options.get(
-                'deletion-vectors.merge-on-read', False)
-            if str(merge_on_read).lower() == 'true':
                 return False
         if getattr(fs, 'data_evolution', False):
             if (getattr(fs, 'idx_of_this_subtask', None) is not None
@@ -184,16 +176,16 @@ class TableScan:
         database_name = self.table.identifier.get_database_name()
         if not database_name or database_name == UNKNOWN_DATABASE or '.' in database_name:
             return False
-        if self.table.options.query_auth_enabled \
-                or self.table.options.merge_engine() == 'first-row':
+        if self.table.options.query_auth_enabled:
+            return False
+        # Java batch first-row reads skip L0. Scans including L0 still need
+        # first-row overlap packing that Rust does not currently provide.
+        if (self.table.options.merge_engine() == 'first-row'
+                and not fs.skip_level0):
             return False
         # Rust rejects schemas whose primary keys are all partition keys.
         if getattr(self.table, 'is_primary_key_table', False) \
                 and not self.table.trimmed_primary_keys:
-            return False
-        # Dynamic-bucket / cross-partition PK: Rust parity unconfirmed -> fall back.
-        from pypaimon.table.bucket_mode import BucketMode
-        if self.table.bucket_mode() in (BucketMode.HASH_DYNAMIC, BucketMode.CROSS_PARTITION):
             return False
         options = self.table.options.options
         if (options.contains_key(CoreOptions.SCAN_WATERMARK.key())
@@ -325,7 +317,13 @@ class TableScan:
     def plan_for_write(self) -> Plan:
         if self.__auth_query() is not None:
             raise TableNoPermissionException(self.table.identifier)
-        return self.file_scanner.scan()
+        # Writer restore/overwrite must see L0 even when batch reads hide it.
+        skip_level0 = self.file_scanner.skip_level0
+        try:
+            self.file_scanner.skip_level0 = False
+            return self.file_scanner.scan()
+        finally:
+            self.file_scanner.skip_level0 = skip_level0
 
     def __auth_query(self):
         return resolve_auth_result(self._query_auth_fn, self._read_type)
@@ -430,6 +428,7 @@ class TableScan:
                 self.predicate,
                 self.limit,
                 partition_predicate=self.partition_predicate,
+                skip_level0=False,
             )
 
         if has_time_travel:
@@ -449,6 +448,7 @@ class TableScan:
                 self.predicate,
                 self.limit,
                 partition_predicate=self.partition_predicate,
+                skip_level0=self.table.options.batch_scan_skip_level0(),
             )
 
         def all_manifests():
@@ -461,6 +461,7 @@ class TableScan:
             self.predicate,
             self.limit,
             partition_predicate=self.partition_predicate,
+            skip_level0=self.table.options.batch_scan_skip_level0(),
         )
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
