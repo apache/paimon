@@ -70,6 +70,21 @@ public final class ManifestAvroReader implements AutoCloseable {
         }
     }
 
+    /** Returns a copy of the complete OCF header, including schema, codec and sync marker. */
+    public byte[] headerBytes() {
+        return blockReader.headerBytes();
+    }
+
+    /** Returns the physical block offset; read immediately after {@link #next()}. */
+    public long blockOffset() {
+        return blockReader.blockOffset();
+    }
+
+    /** Returns the last-read block's encoded length, including its header and sync marker. */
+    public long blockLength() {
+        return blockReader.blockLength();
+    }
+
     /** Returns whether another raw Avro block is available. */
     public boolean hasNext() throws IOException {
         return blockReader.hasNextBlock();
