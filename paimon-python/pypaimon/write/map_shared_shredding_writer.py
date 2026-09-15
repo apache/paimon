@@ -22,7 +22,10 @@ from collections import deque
 
 import pyarrow as pa
 
-from pypaimon.data.map_shared_shredding import shared_shredding_metadata
+from pypaimon.data.map_shared_shredding import (
+    _normalized_offsets,
+    shared_shredding_metadata,
+)
 from pypaimon.schema.data_types import (
     ArrayType,
     AtomicType,
@@ -44,7 +47,7 @@ _FIELD_ID_DEPTH_LIMIT = 1 << 10
 class MapSharedShreddingWriter:
     """Converts configured logical MAP columns before each file write."""
 
-    def __init__(self, fields, options, file_format, changelog_format, bucket):
+    def __init__(self, fields, options, file_format, changelog_format):
         self._options = options
         field_by_name = {field.name: field for field in fields}
         configured = self._configured_fields()
@@ -54,6 +57,10 @@ class MapSharedShreddingWriter:
         self._recent_widths = {}
 
         for name, field in field_by_name.items():
+            if name in configured and not isinstance(field.type, MapType):
+                raise ValueError(
+                    "Column '{}' is configured with map.storage-layout but "
+                    "its type is not MAP.".format(name))
             layout = options.map_storage_layout(name)
             if layout not in ("default", "shared-shredding"):
                 raise ValueError(
@@ -80,7 +87,7 @@ class MapSharedShreddingWriter:
         self._validate_format("file.format", file_format)
         self._validate_format("changelog.file.format", changelog_format)
         self._validate_compression("file.compression", options.file_compression())
-        if bucket == BucketMode.POSTPONE_BUCKET.value:
+        if options.bucket() == BucketMode.POSTPONE_BUCKET.value:
             raise ValueError(
                 "MAP shared-shredding does not support postpone bucket mode.")
         if any(_contains_type(field.type, _is_variant)
@@ -228,9 +235,16 @@ class _MapFieldConverter:
             num_columns, item_type, logical_item_type)
 
     def convert(self, column):
+        # Avoid MapScalar conversion: older Arrow versions cannot represent
+        # MAP scalars with non-nullable values.
+        offsets, start, end = _normalized_offsets(column)
+        keys = column.keys.slice(start, end - start).to_pylist()
+        values = column.items.slice(start, end - start).to_pylist()
         rows = []
-        for value in column.to_pylist():
-            rows.append(None if value is None else self._convert_map(value))
+        for index, is_null in enumerate(column.is_null().to_pylist()):
+            start, end = offsets[index:index + 2]
+            rows.append(None if is_null else self._convert_map(
+                zip(keys[start:end], values[start:end])))
         return pa.array(rows, type=self.physical_type)
 
     def _convert_map(self, value):
@@ -340,7 +354,7 @@ def _physical_struct_type(num_columns, item_type, logical_item_type):
         fields.append(_field_with_ids(
             _PHYSICAL_COLUMN_PREFIX + str(column_id),
             item_type,
-            logical_item_type.nullable,
+            True,
             logical_item_type,
             column_id + 1,
         ))

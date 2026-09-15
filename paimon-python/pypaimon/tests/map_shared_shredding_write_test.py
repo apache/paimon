@@ -100,6 +100,79 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
                 "metrics": [[("key", 1)]],
             }, schema=self.arrow_schema))
 
+    def test_non_nullable_values(self):
+        for value_type, value in [
+                (pa.int64(), 1),
+                (pa.struct([pa.field('score', pa.int64(), nullable=False)]),
+                 {'score': 1})]:
+            with self.subTest(value_type=value_type):
+                self.arrow_schema = pa.schema([
+                    pa.field('id', pa.int32()),
+                    pa.field('metrics', pa.map_(
+                        pa.string(), pa.field('value', value_type, nullable=False))),
+                ])
+                expected = [[('a', value)], [], None]
+                data = pa.Table.from_pydict({
+                    'id': [1, 2, 3], 'metrics': expected,
+                }, schema=self.arrow_schema)
+                table = self._create_table('parquet', 2)
+                messages = self._write(table, data)
+                field = pq.read_schema(messages[0].new_files[0].file_path).field('metrics')
+                self.assertTrue(field.type['__col_0'].nullable)
+                self.assertTrue(field.type['__col_1'].nullable)
+                reader = table.new_read_builder()
+                result = reader.new_read().to_arrow(reader.new_scan().plan().splits())
+                # Arrow 6 cannot convert non-nullable MAP values to scalars.
+                actual = result.column('metrics').cast(pa.map_(pa.string(), value_type))
+                self.assertEqual(expected, actual.to_pylist())
+
+    def test_dedicated_columns_preserve_shredding(self):
+        for blob, vector in [(True, False), (False, True), (True, True)]:
+            with self.subTest(blob=blob, vector=vector):
+                fields = [pa.field('id', pa.int32()),
+                          pa.field('metrics', pa.map_(pa.string(), pa.int64()))]
+                values = {'id': [1, 2], 'metrics': [[('a', 1)], []]}
+                options = {'row-tracking.enabled': 'true',
+                           'data-evolution.enabled': 'true'}
+                if blob:
+                    fields.append(pa.field('payload', pa.large_binary()))
+                    values['payload'] = [b'one', b'two']
+                if vector:
+                    fields.append(pa.field('embedding', pa.list_(pa.float32(), 2)))
+                    values['embedding'] = [[1., 2.], [3., 4.]]
+                    options['vector.file.format'] = 'parquet'
+                self.arrow_schema = pa.schema(fields)
+                table = self._create_table('parquet', 2, options)
+                messages = self._write(table, pa.Table.from_pydict(
+                    values, schema=self.arrow_schema))
+                normal_files = [f for m in messages for f in m.new_files
+                                if f.file_name.endswith('.parquet')
+                                and '.vector.' not in f.file_name]
+                self.assertTrue(normal_files)
+                for file in normal_files:
+                    self.assertTrue(is_shared_shredding(
+                        pq.read_schema(file.file_path).field('metrics')))
+                reader = table.new_read_builder().with_projection(["metrics['a']"])
+                result = reader.new_read().to_arrow(reader.new_scan().plan().splits())
+                self.assertEqual([1, None], result.column('metrics_a').to_pylist())
+
+    def test_reject_default_layout_on_non_map(self):
+        table = self._create_table('parquet', 2, {
+            'fields.metrics.map.storage-layout': 'default',
+            'fields.id.map.storage-layout': 'default',
+        })
+        with self.assertRaisesRegex(ValueError, 'its type is not MAP'):
+            self._write(table, pa.Table.from_pydict({
+                'id': [1], 'metrics': [[('a', 1)]],
+            }, schema=self.arrow_schema))
+
+    def test_reject_postpone_with_fixed_output_bucket(self):
+        from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
+
+        table = self._create_table('parquet', 2, {'bucket': '-2'})
+        with self.assertRaisesRegex(ValueError, 'postpone bucket'):
+            AppendOnlyDataWriter(table, (), 0, 0, table.options)
+
     def test_adapts_physical_column_count_between_files(self):
         table = self._create_table(
             "parquet", max_columns=4,

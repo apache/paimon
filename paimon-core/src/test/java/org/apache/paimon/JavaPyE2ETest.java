@@ -1634,6 +1634,22 @@ public class JavaPyE2ETest {
             reader.forEachRemaining(
                     row -> {
                         int id = row.getInt(0);
+                        for (int column = 2; column <= 3; column++) {
+                            if (id == 3) {
+                                assertThat(row.isNullAt(column)).isTrue();
+                            } else {
+                                InternalMap required = row.getMap(column);
+                                assertThat(required.size()).isEqualTo(id == 2 ? 0 : 1);
+                                if (id != 2) {
+                                    InternalArray values = required.valueArray();
+                                    long value =
+                                            column == 2
+                                                    ? values.getLong(0)
+                                                    : values.getRow(0, 1).getLong(0);
+                                    assertThat(value).isEqualTo(id == 1 ? 1L : 2L);
+                                }
+                            }
+                        }
                         if (row.isNullAt(1)) {
                             rows.put(id, null);
                             return;

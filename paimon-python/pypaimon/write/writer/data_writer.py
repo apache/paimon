@@ -111,7 +111,6 @@ class DataWriter(ABC):
             self.file_format,
             self.changelog_file_format
             if self.changelog_producer == ChangelogProducer.INPUT else None,
-            self.bucket,
         )
 
     # Set by the composite writers when a flush landed its normal data file but a

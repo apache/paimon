@@ -1640,6 +1640,11 @@ class JavaPyReadWriteTest(unittest.TestCase):
         schema = pa.schema([
             pa.field('id', pa.int32()),
             pa.field('metrics', pa.map_(pa.string(), pa.int64())),
+            pa.field('required_values', pa.map_(pa.string(), pa.field(
+                'value', pa.int64(), nullable=False))),
+            pa.field('required_rows', pa.map_(pa.string(), pa.field(
+                'value', pa.struct([pa.field('score', pa.int64(), nullable=False)]),
+                nullable=False))),
         ])
         rows = pa.Table.from_pydict({
             'id': [1, 2, 3, 4],
@@ -1649,6 +1654,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 [],
                 None,
             ],
+            'required_values': [[('a', 1)], [], None, [('b', 2)]],
+            'required_rows': [[('a', {'score': 1})], [], None, [('b', {'score': 2})]],
         }, schema=schema)
 
         table_name = 'default.shared_shredding_map_python_test_parquet'
@@ -1661,6 +1668,10 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 'write-only': 'true',
                 'fields.metrics.map.storage-layout': 'shared-shredding',
                 'fields.metrics.map.shared-shredding.max-columns': '2',
+                'fields.required_values.map.storage-layout': 'shared-shredding',
+                'fields.required_values.map.shared-shredding.max-columns': '2',
+                'fields.required_rows.map.storage-layout': 'shared-shredding',
+                'fields.required_rows.map.shared-shredding.max-columns': '2',
             }),
             False,
         )
