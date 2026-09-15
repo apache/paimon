@@ -18,12 +18,14 @@ import unittest
 from unittest import mock
 from types import SimpleNamespace
 
-from pypaimon.common.options.core_options import GlobalIndexSearchMode
+from pypaimon.common.options.core_options import CoreOptions, GlobalIndexSearchMode
+from pypaimon.common.options.options import Options
 from pypaimon.index.pk.primary_key_index_definitions import PrimaryKeyIndexDefinitions
 from pypaimon.index.pk.primary_key_index_source_file import PrimaryKeyIndexSourceFile
 from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourceMeta
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.table_schema import TableSchema
+from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
 from pypaimon.table.source.primary_key_full_text_read import PrimaryKeyFullTextRead
 from pypaimon.table.source.primary_key_full_text_scan import PrimaryKeyFullTextScan
@@ -311,6 +313,7 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
                      "scan.tag-name": "old-tag"})
         snapshot = SimpleNamespace(id=17)
         copied_options = []
+        source_snapshots = []
         index_snapshots = []
 
         class _ScanTable:
@@ -318,6 +321,7 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
             fields = schema.fields
 
             def new_read_builder(self):
+                source_snapshots.append(self._read_snapshot)
                 plan = SimpleNamespace(splits=lambda: [])
                 scan = SimpleNamespace(plan=lambda: plan)
                 return SimpleNamespace(new_scan=lambda: scan)
@@ -325,6 +329,8 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
         class _Table:
             table_schema = schema
             fields = schema.fields
+            options = CoreOptions(Options(schema.options))
+            _copy_with_snapshot = FileStoreTable._copy_with_snapshot
 
             def tag_manager(self):
                 return None
@@ -332,7 +338,7 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
             def snapshot_manager(self):
                 return SimpleNamespace(get_latest_snapshot=lambda: snapshot)
 
-            def copy(self, options):
+            def copy_without_time_travel(self, options):
                 copied_options.append(options)
                 return _ScanTable()
 
@@ -354,10 +360,12 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
                 _Table(), schema.fields[0], index_type="vindex").scan()
 
         self.assertEqual(17, plan.snapshot_id)
+        self.assertEqual([snapshot], source_snapshots)
         self.assertEqual([snapshot], index_snapshots)
         self.assertEqual("from-snapshot", copied_options[0]["scan.mode"])
         self.assertEqual("17", copied_options[0]["scan.snapshot-id"])
         self.assertIsNone(copied_options[0]["scan.tag-name"])
+        self.assertEqual("false", copied_options[0]["scan.native-plan.enabled"])
 
     def test_pk_index_source_policy_matches_java(self):
         compact = SimpleNamespace(file_source=1, level=1)
