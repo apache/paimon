@@ -66,7 +66,6 @@ class PyArrowFileIO(FileIO):
         self.uri_reader_factory = UriReaderFactory(catalog_options)
         self._is_oss = scheme in {"oss"}
         self._is_s3 = scheme in {"s3", "s3a", "s3n"}
-        self._s3_bucket = netloc if self._is_s3 else None
         self._s3_endpoint = (
             self._get_s3_property("endpoint", S3Options.S3_ENDPOINT.key())
             if self._is_s3 else None
@@ -493,12 +492,12 @@ class PyArrowFileIO(FileIO):
         if file_info.type == pafs.FileType.Directory:
             if self._uses_s3_delete_fallback():
                 if recursive:
-                    return self._delete_s3_compatible_directory(path)
+                    return self._delete_s3_compatible_directory(path_str)
                 selector = pafs.FileSelector(
                     path_str, recursive=False, allow_not_found=True)
                 if self.filesystem.get_file_info(selector):
                     raise OSError(f"Directory {path} is not empty")
-                bucket, key = self._split_s3_path(path)
+                bucket, key = self._split_s3_path(path_str)
                 if key:
                     self._get_s3_delete_client().delete_object(
                         Bucket=bucket, Key=key.rstrip("/") + "/")
@@ -561,13 +560,9 @@ class PyArrowFileIO(FileIO):
                 batch = list(islice(keys, 16))
         return deleted
 
-    def _split_s3_path(self, path_str: str):
-        parsed = urlparse(path_str)
-        if parsed.scheme:
-            return parsed.netloc, re.sub(r"/+", "/", parsed.path).lstrip("/")
-
-        normalized = re.sub(r"/+", "/", path_str).lstrip("/")
-        bucket, _, key = normalized.partition("/")
+    @staticmethod
+    def _split_s3_path(path_str: str):
+        bucket, _, key = path_str.partition("/")
         return bucket, key
 
     def _get_s3_delete_client(self):

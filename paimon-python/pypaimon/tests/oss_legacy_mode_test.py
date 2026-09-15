@@ -200,7 +200,7 @@ class OssLegacyModeTest(unittest.TestCase):
             file_io = PyArrowFileIO("oss://test-bucket/", options)
         # _legacy_oss_mode() keys off the bucket-in-endpoint flag (PyArrow < 16).
         file_io._oss_bucket_in_endpoint = legacy
-        file_io.filesystem = mock.Mock()
+        file_io.filesystem = mock.Mock(spec=pafs.S3FileSystem)
         file_io._s3_delete_client = mock.Mock()
         return file_io
 
@@ -365,7 +365,7 @@ class OssLegacyModeTest(unittest.TestCase):
         file_io.filesystem.get_file_info.return_value = [
             _file_info(directory, pafs.FileType.Directory)]
         _set_listed_keys(
-            file_io, [data_dir.lstrip("/") + "/", data_file.lstrip("/")], [])
+            file_io, [data_dir.split("/", 1)[1] + "/", data_file.split("/", 1)[1]], [])
 
         self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
 
@@ -394,7 +394,7 @@ class OssLegacyModeTest(unittest.TestCase):
         late = directory.rstrip("/") + "/late.parquet"
         file_io.filesystem.get_file_info.return_value = [
             _file_info(directory, pafs.FileType.Directory)]
-        _set_listed_keys(file_io, [first.lstrip("/")], [late.lstrip("/")], [])
+        _set_listed_keys(file_io, [first.split("/", 1)[1]], [late.split("/", 1)[1]], [])
 
         self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
 
@@ -552,7 +552,7 @@ class CustomS3EndpointTest(unittest.TestCase):
                 PyArrowFileIO, "_initialize_s3_fs", return_value=mock.Mock()):
             file_io = PyArrowFileIO(
                 "{}://test-bucket/warehouse".format(scheme), options)
-        file_io.filesystem = mock.Mock()
+        file_io.filesystem = mock.Mock(spec=pafs.S3FileSystem)
         file_io._s3_delete_client = mock.Mock()
         return file_io
 
@@ -587,7 +587,7 @@ class CustomS3EndpointTest(unittest.TestCase):
                 data_file = directory + "/data.parquet"
                 file_io.filesystem.get_file_info.return_value = [
                     _file_info(directory, pafs.FileType.Directory)]
-                _set_listed_keys(file_io, [data_file.lstrip("/")], [])
+                _set_listed_keys(file_io, [data_file.split("/", 1)[1]], [])
 
                 self.assertTrue(file_io.delete(path, recursive=True))
 
@@ -719,8 +719,25 @@ class CustomS3EndpointTest(unittest.TestCase):
 
                 self.assertEqual(
                     "target-bucket/parent/child", target.path)
-                self.assertTrue(file_io.delete(
-                    target.path, recursive=True))
+                for path in (
+                        target.path,
+                        "s3://target-bucket/parent/child",
+                        "s3:/target-bucket/parent/child",
+                        "s3:target-bucket/parent/child"):
+                    for recursive in (False, True):
+                        with self.subTest(path=path, recursive=recursive):
+                            server.bucket_objects["target-bucket"] = {
+                                "parent/child/"}
+                            if recursive:
+                                server.bucket_objects["target-bucket"].add(
+                                    "parent/child/delete.parquet")
+                            self.assertTrue(file_io.exists(path))
+                            self.assertTrue(file_io.delete(path, recursive))
+                            self.assertEqual(
+                                set(), server.bucket_objects["target-bucket"])
+                            self.assertEqual(
+                                source_objects,
+                                server.bucket_objects["source-bucket"])
                 file_io._s3_delete_client.close()
 
             self.assertEqual(
@@ -768,12 +785,12 @@ class CustomS3EndpointTest(unittest.TestCase):
                     }):
                 file_io = PyArrowFileIO(
                     "s3://source-bucket/warehouse", options)
-                file_io.filesystem = mock.Mock()
+                file_io.filesystem = mock.Mock(spec=pafs.S3FileSystem)
                 file_io.filesystem.get_file_info.return_value = [
                     _file_info("/ta/ble", pafs.FileType.Directory)]
 
                 self.assertTrue(file_io.delete(
-                    "target-bucket/ta//ble", recursive=True))
+                    "s3://target-bucket/ta//ble", recursive=True))
                 file_io._s3_delete_client.close()
 
             self.assertTrue(server.late_object_added)
