@@ -56,6 +56,8 @@ import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.data.IcebergGenerics;
 import org.apache.iceberg.data.Record;
+import org.apache.iceberg.exceptions.CommitFailedException;
+import org.apache.iceberg.exceptions.CommitStateUnknownException;
 import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
@@ -1730,6 +1732,85 @@ public class IcebergRestMetadataCommitterTest {
         }
     }
 
+    @Test
+    public void testPublicationFailuresReconcileBeforeSuccess() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "2");
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "2");
+        FileStoreTable catalogTable =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        -1,
+                        "avro",
+                        options);
+        FileStoreTable disabledTable =
+                catalogTable.copy(
+                        Collections.singletonMap(
+                                IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "disabled"));
+
+        String commitUser = UUID.randomUUID().toString();
+        FailingIcebergRestMetadataCommitter committer =
+                new FailingIcebergRestMetadataCommitter(catalogTable);
+        IcebergCommitCallback callback = new IcebergCommitCallback(catalogTable, commitUser);
+        setMetadataCommitter(callback, committer);
+        TableWriteImpl<?> write = disabledTable.newWrite(commitUser);
+        TableCommitImpl commit = disabledTable.newCommit(commitUser);
+        TableIdentifier identifier = TableIdentifier.of("mydb", "t");
+
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(true, 1));
+        callback.retry(new org.apache.paimon.manifest.ManifestCommittable(1));
+
+        committer.failNext(FailureType.COMMIT_FAILED, false, 1);
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(true, 2));
+        callback.retry(new org.apache.paimon.manifest.ManifestCommittable(2));
+        assertThat(committer.commitCalls()).isEqualTo(2);
+        assertThat(restCatalog.loadTable(identifier).currentSnapshot().snapshotId()).isEqualTo(2);
+
+        committer.failNext(FailureType.STATE_UNKNOWN, true, 1);
+        write.write(GenericRow.of(3, 30));
+        commit.commit(3, write.prepareCommit(true, 3));
+        callback.retry(new org.apache.paimon.manifest.ManifestCommittable(3));
+        assertThat(committer.commitCalls()).isEqualTo(1);
+        assertThat(restCatalog.loadTable(identifier).currentSnapshot().snapshotId()).isEqualTo(3);
+
+        committer.failNext(FailureType.STATE_UNKNOWN, false, 1);
+        write.write(GenericRow.of(4, 40));
+        commit.commit(4, write.prepareCommit(true, 4));
+        callback.retry(new org.apache.paimon.manifest.ManifestCommittable(4));
+        assertThat(committer.commitCalls()).isEqualTo(2);
+        assertThat(restCatalog.loadTable(identifier).currentSnapshot().snapshotId()).isEqualTo(4);
+
+        committer.failNext(FailureType.COMMIT_FAILED, false, 10);
+        write.write(GenericRow.of(5, 50));
+        commit.commit(5, write.prepareCommit(true, 5));
+        assertThatThrownBy(
+                        () -> callback.retry(new org.apache.paimon.manifest.ManifestCommittable(5)))
+                .hasRootCauseInstanceOf(CommitFailedException.class);
+        assertThat(committer.commitCalls()).isEqualTo(3);
+        write.close();
+        commit.close();
+        callback.close();
+
+        Table published = restCatalog.loadTable(identifier);
+        assertThat(published.currentSnapshot().snapshotId()).isEqualTo(4);
+        for (org.apache.iceberg.Snapshot snapshot : published.snapshots()) {
+            assertThat(catalogTable.fileIO().exists(new Path(snapshot.manifestListLocation())))
+                    .isTrue();
+            assertThat(snapshot.allManifests(published.io())).isNotEmpty();
+        }
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(
+                        IcebergCommitCallback.catalogTableMetadataPath(catalogTable));
+        assertThat(catalogTable.fileIO().exists(pathFactory.toMetadataPath(3))).isTrue();
+    }
+
     private static IcebergMetadata localMetadata(FileStoreTable table, long snapshotId) {
         return IcebergMetadata.fromPath(
                 table.fileIO(),
@@ -1747,6 +1828,61 @@ public class IcebergRestMetadataCommitterTest {
             }
         }
         return files;
+    }
+
+    private static void setMetadataCommitter(
+            IcebergCommitCallback callback, IcebergMetadataCommitter committer) throws Exception {
+        java.lang.reflect.Field field =
+                IcebergCommitCallback.class.getDeclaredField("metadataCommitter");
+        field.setAccessible(true);
+        field.set(callback, committer);
+    }
+
+    private enum FailureType {
+        COMMIT_FAILED,
+        STATE_UNKNOWN
+    }
+
+    private static class FailingIcebergRestMetadataCommitter extends IcebergRestMetadataCommitter {
+
+        private FailureType failureType;
+        private boolean applyBeforeThrow;
+        private int failuresRemaining;
+        private int commitCalls;
+
+        private FailingIcebergRestMetadataCommitter(FileStoreTable table) {
+            super(table);
+        }
+
+        private void failNext(FailureType failureType, boolean applyBeforeThrow, int failures) {
+            this.failureType = failureType;
+            this.applyBeforeThrow = applyBeforeThrow;
+            this.failuresRemaining = failures;
+            this.commitCalls = 0;
+        }
+
+        private int commitCalls() {
+            return commitCalls;
+        }
+
+        @Override
+        protected void commit(BaseTable table, TableMetadata base, TableMetadata updated) {
+            commitCalls++;
+            if (failuresRemaining == 0) {
+                super.commit(table, base, updated);
+                return;
+            }
+
+            failuresRemaining--;
+            if (applyBeforeThrow) {
+                super.commit(table, base, updated);
+            }
+            if (failureType == FailureType.COMMIT_FAILED) {
+                throw new CommitFailedException("injected rejected commit");
+            }
+            throw new CommitStateUnknownException(
+                    "injected ambiguous commit", new RuntimeException("injected"));
+        }
     }
 
     /** Makes the committer's REST client see a server that does not advertise registerTable. */
