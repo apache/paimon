@@ -57,14 +57,15 @@ def _read_manifest_records(buffer, early_entry_filter, partition_filter,
         return
 
     blocks = fastavro.block_reader(buffer)
-    fields = blocks.writer_schema.get('fields', [])
+    schema = blocks.writer_schema
+    fields = schema.get('fields', []) if isinstance(schema, dict) else []
     if (tuple(field.get('name') for field in fields) != _MANIFEST_FIELD_NAMES
             or tuple(field.get('type') for field in fields[:5])
             != _MANIFEST_PREFIX_TYPES
             or not isinstance(fields[5].get('type'), dict)
             or fields[5]['type'].get('type') != 'record'):
         # Avro values follow writer field order. Keep the generic reader for
-        # historical manifests whose top-level fields were reordered.
+        # reordered fields or a top-level union, as written by Rust.
         buffer.seek(0)
         for record in fastavro.reader(buffer):
             yield record, None, False
