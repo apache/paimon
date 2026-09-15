@@ -122,10 +122,6 @@ blocks[]                               // original physical order
 checksum : 32 bytes                     // SHA-256 of all preceding bytes
 ```
 
-The sidecar contains no manifest-name hash. Renaming the manifest does not change sidecar
-bytes. Its stored length and entry count must match the supplied manifest metadata; the
-caller must associate the sidecar with the correct immutable manifest through its reference.
-
 The block ID is its position. Its first entry ordinal is the sum of preceding record counts
 and is not stored. Each complete partition tuple appears once in the dictionary, including
 all its fields and nulls. The scan's partition type interprets the existing serialized tuple.
