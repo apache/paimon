@@ -90,7 +90,7 @@ supplied bytes directly and reports invalid containers with `IOException`.
 
 Version 1 uses the following layout. Container `int` and `long` fields are signed, fixed-width
 4-byte and 8-byte big-endian integers. Encoding IDs are unsigned bytes with separate namespaces.
-Payload counts and envelopes use the same fixed-width types; delta/RLE runs use the
+Payload counts and envelopes use the same fixed-width types; delta streams use the
 variable-length encoding described below.
 
 ```text
@@ -132,9 +132,9 @@ Partition predicates are evaluated once per dictionary entry.
 | Dimension | Encoding | Payload |
 | --- | --- | --- |
 | Any | `0` | Unavailable; only the encoding byte is present. |
-| Partition | `1` | Count and delta/RLE-compressed sorted unique dictionary IDs. |
-| Row ID | `1` | Interval count, minimum, span, and delta/RLE-compressed interior endpoints. |
-| Bucket | `1` | Count and delta/RLE-compressed sorted unique packed bucket/count pairs. |
+| Partition | `1` | Count and delta/varint-compressed sorted unique dictionary IDs. |
+| Row ID | `1` | Interval count, minimum, span, and delta/varint-compressed interior endpoints. |
+| Bucket | `1` | Count and delta/varint-compressed sorted unique packed bucket/count pairs. |
 | Any | Other nonzero ID | Skip the declared payload length; treat only this dimension as unavailable. |
 
 Only nonzero encodings are followed by a length and payload. Payload lengths exclude the
@@ -142,29 +142,29 @@ encoding and length fields, but include the count and other fields within the pa
 All three encoding-1 payloads have positive counts no greater than the block's record count.
 Encoding 0 represents unavailable coverage, rather than encoding 1 with a zero count.
 
-#### Delta and RLE Encoding
+#### Delta Encoding
 
 Each payload starts with a fixed-width count (`int`); row-ID payloads also have fixed-width
-`min` and `span` fields (`long`). Only integers in the following delta/RLE stream use
+`min` and `span` fields (`long`). Only integers in the following delta stream use
 nonnegative unsigned LEB128 varints, occupying one to nine bytes for values from 0 through
 `Long.MAX_VALUE`. Seven value bits are stored per byte, least significant group first; the
 high bit indicates another byte follows.
 Encodings use the shortest representation. There is no ZigZag transformation or padding.
 
-A sorted sequence is delta-encoded from a specified base. Consecutive equal deltas are
-stored as runs:
+A sorted sequence is delta-encoded from a specified base. Each value contributes one
+unsigned varint containing its difference from the preceding value. The first difference
+is relative to the base:
 
 ```text
-runs[]
-  repeatCount : varint                 // positive number of values produced
-  delta : varint                       // add delta for each value in the run
+deltas[] : varint
+value[0] = base + deltas[0]
+value[i] = value[i - 1] + deltas[i]
 ```
 
-Starting with `previous = base`, a run produces `repeatCount` successive values by adding
-`delta` each time. Run counts must sum to the dimension's expected value count. Decoders
-consume values lazily, check overflow and the applicable value bounds, and require the
-payload to end when all expected values have been consumed. They do not allocate expanded
-arrays for runs.
+The shared `DeltaVarintCodec` utility writes each delta immediately and reads values on
+demand, using `VarLengthIntUtils` for varints. Counts and bounds are supplied by the caller.
+The reader checks overflow and value bounds and requires the buffer to end after all
+expected values have been consumed. It can stop early without materializing the sequence.
 
 #### Partition Payload
 
@@ -174,15 +174,14 @@ represented by its entries:
 ```text
 partitionPayload
   partitionIdCount : int               // N > 0
-  runs[]                              // N dictionary IDs, base = 0
+  deltas[]                            // N dictionary IDs, base = 0
 ```
 
 An ID is the zero-based position of a complete tuple in the sidecar's shared dictionary.
 IDs satisfy `0 <= id < partitionCount` and are strictly increasing. Tuple bytes appear only
 in the dictionary and are not repeated in each block. For IDs `[0, 1, 2, 3, 4]`, the deltas
-are `[0, 1, 1, 1, 1]` and the runs are `(1, 0), (4, 1)`. The payload contains a four-byte
-count of 5 followed by the run bytes `[1, 0, 4, 1]`: 8 bytes, or 13 bytes including the
-encoding and length fields.
+are `[0, 1, 1, 1, 1]`. The payload contains a four-byte count of 5 followed by these five
+varint bytes: 9 bytes, or 14 bytes including the encoding and length fields.
 
 With a partition filter, a block matches if any referenced tuple matches. A tuple containing
 a null partition value still has a dictionary ID. Unpartitioned tables record the empty
@@ -200,23 +199,23 @@ rowIdPayload
   rangeCount : int                     // N > 0
   min : long                           // first interval's start
   span : long                          // last interval's end minus min
-  runs[]                              // 2 * (N - 1) interior endpoints, base = min
+  deltas[]                            // 2 * (N - 1) interior endpoints, base = min
 ```
 
 The maximum is `min + span`, which must not exceed `Long.MAX_VALUE`. Flatten the intervals
 as `[start0, end0, start1, end1, ...]`. The first start is supplied by `min`, and the last
-end by `min + span`; only the remaining `2 * (N - 1)` interior endpoints are delta/RLE encoded.
+end by `min + span`; only the remaining `2 * (N - 1)` interior endpoints are delta/varint encoded.
 Pairing the reconstructed endpoints recovers the intervals. Each pair satisfies
 `0 <= start <= end <= Long.MAX_VALUE`; each following start must exceed the preceding end.
 
 For `[(10, 19), (30, 39)]`, the count is 2, minimum is 10, and span is 29. The interior
-endpoints `[19, 30]` have deltas `[9, 11]` from base 10, encoded as `(1, 9), (1, 11)`.
+endpoints `[19, 30]` have deltas `[9, 11]` from base 10, each encoded as one varint byte.
 The payload starts with a four-byte count of 2, an eight-byte minimum of 10, and an eight-byte
-span of 29, followed by the run bytes `[1, 9, 1, 11]`: 24 bytes, or 29 bytes with framing.
+span of 29, followed by the delta bytes `[9, 11]`: 22 bytes, or 27 bytes with framing.
 For a single interval, the 20-byte fixed-width prefix completely defines the interval and
-no runs follow.
+no deltas follow.
 
-The reader first tests the envelope without expanding any runs. A query for row ID 25
+The reader first tests the envelope without decoding any deltas. A query for row ID 25
 passes the example's envelope check but matches neither interval. Unknown or invalid row-ID
 metadata makes that block's row-ID payload unavailable; partition and bucket coverage remain usable.
 
@@ -227,7 +226,7 @@ When `bucketEncoding == 1`, the block stores distinct bucket/count pairs:
 ```text
 bucketPayload
   pairCount : int                      // N > 0
-  runs[]                              // N packed pairs, base = 0
+  deltas[]                            // N packed pairs, base = 0
 
 packedPair = ((long) bucket << 32) | totalBuckets
 ```
@@ -239,9 +238,8 @@ The decoder recovers `bucket = (int) (packedPair >>> 32)` and `totalBuckets = (i
 The same bucket may occur with different totals after rescaling.
 
 For `[(1, 4), (1, 8), (3, 4)]`, the packed values are `[4294967300, 4294967304, 12884901892]`
-and deltas are `[4294967300, 4, 8589934588]`. The payload contains count 3 and three runs
-of length 1, occupying 18 bytes, or 23 bytes with framing. Repeated bucket strides with the
-same total bucket count form a single run.
+and deltas are `[4294967300, 4, 8589934588]`. The payload contains a four-byte count of 3
+and three varints occupying 5, 1 and 5 bytes: 15 bytes total, or 20 bytes with framing.
 
 Missing, invalid or negative/synthetic bucket metadata makes the block's bucket coverage
 unavailable. A caller can supply a predicate on `(bucket, totalBuckets)` which conservatively
@@ -256,9 +254,9 @@ the whole original manifest after its header; record counts must sum to the mani
 count. Unknown nonzero encodings skip their declared bytes without interpreting a count.
 
 Compressed contents are decoded only for dimensions needed by the filters and only until
-that dimension matches. A row-ID envelope rejection skips all its runs; a matching interval,
-partition ID or bucket pair skips remaining values. Invalid varints, run counts, overflows,
-out-of-range values or ordering encountered while decoding invalidate the container. Run
+that dimension matches. A row-ID envelope rejection skips all its deltas; a matching interval,
+partition ID or bucket pair skips remaining values. Invalid varints, value counts, overflows,
+out-of-range values or ordering encountered while decoding invalidate the container. Delta
 contents skipped by short-circuiting are not individually validated.
 
 For conjunctive filters a block is retained only if every dimension is unavailable or matches.

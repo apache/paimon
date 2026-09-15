@@ -27,6 +27,7 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.DeltaVarintCodec;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SerializationUtils;
@@ -56,8 +57,6 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.function.BiPredicate;
-
-import static org.apache.paimon.utils.VarLengthIntUtils.encodeLong;
 
 /** Independently usable partition, row-id and bucket coverage for each manifest block. */
 public final class ManifestSidecar {
@@ -276,17 +275,16 @@ public final class ManifestSidecar {
             out.writeLong(min);
             out.writeLong(max - min);
             // The envelope supplies the first start and last end. Encode only interior endpoints.
-            DeltaRleWriter encoder = new DeltaRleWriter(out, min);
+            DeltaVarintCodec.Writer encoder = new DeltaVarintCodec.Writer(out, min);
             int index = 0;
             for (Map.Entry<Long, Long> range : ranges.entrySet()) {
                 if (index > 0) {
-                    encoder.add(range.getKey());
+                    encoder.write(range.getKey());
                 }
                 if (++index < ranges.size()) {
-                    encoder.add(range.getValue());
+                    encoder.write(range.getValue());
                 }
             }
-            encoder.finish();
             return buffer.toByteArray();
         }
 
@@ -323,11 +321,10 @@ public final class ManifestSidecar {
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(buffer);
             out.writeInt(count);
-            DeltaRleWriter encoder = new DeltaRleWriter(out, 0);
+            DeltaVarintCodec.Writer encoder = new DeltaVarintCodec.Writer(out, 0);
             for (Number value : values) {
-                encoder.add(value.longValue());
+                encoder.write(value.longValue());
             }
-            encoder.finish();
             return buffer.toByteArray();
         }
 
@@ -474,7 +471,10 @@ public final class ManifestSidecar {
             Payload rowPayload = payload(in, records);
             Payload bucketPayload = payload(in, records);
             require(partitionPayload == null || partitionPayload.count <= partitions);
-            require(rowPayload == null || rowPayload.data.remaining() >= 2 * Long.BYTES);
+            require(
+                    rowPayload == null
+                            || rowPayload.data.remaining()
+                                    >= 2 * Long.BYTES + 2L * (rowPayload.count - 1));
             long blockFirstRecord = firstRecord;
             nextOffset = offset + length;
             firstRecord += records;
@@ -484,8 +484,9 @@ public final class ManifestSidecar {
                 long span = rowPayload.data.getLong();
                 require(min >= 0 && span >= 0 && span <= Long.MAX_VALUE - min);
                 long max = min + span;
-                DeltaRleReader endpoints =
-                        new DeltaRleReader(rowPayload.data, 2L * (rowPayload.count - 1), min, max);
+                DeltaVarintCodec.Reader endpoints =
+                        new DeltaVarintCodec.Reader(
+                                rowPayload.data, 2L * (rowPayload.count - 1), min, max);
                 if (!query.intersects(min, max)) {
                     continue;
                 }
@@ -506,8 +507,8 @@ public final class ManifestSidecar {
             }
 
             if (partitionFilter != null && partitionPayload != null) {
-                DeltaRleReader ids =
-                        new DeltaRleReader(
+                DeltaVarintCodec.Reader ids =
+                        new DeltaVarintCodec.Reader(
                                 partitionPayload.data, partitionPayload.count, 0, partitions - 1L);
                 boolean partitionHit = false;
                 long previous = -1;
@@ -523,8 +524,8 @@ public final class ManifestSidecar {
             }
 
             if (bucketFilter != null && bucketPayload != null) {
-                DeltaRleReader pairs =
-                        new DeltaRleReader(
+                DeltaVarintCodec.Reader pairs =
+                        new DeltaVarintCodec.Reader(
                                 bucketPayload.data, bucketPayload.count, 0, Long.MAX_VALUE);
                 boolean bucketHit = false;
                 long previous = -1;
@@ -573,96 +574,10 @@ public final class ManifestSidecar {
         if (encoding != 1) {
             return null;
         }
-        require(result.remaining() >= Integer.BYTES + 2);
+        require(result.remaining() >= Integer.BYTES);
         int count = result.getInt();
-        require(count > 0 && count <= records);
+        require(count > 0 && count <= records && count <= result.remaining());
         return new Payload(count, result);
-    }
-
-    /** Writes equal consecutive deltas as (run length, delta), both unsigned varints. */
-    private static final class DeltaRleWriter {
-        private final DataOutputStream out;
-        private long previous;
-        private long delta;
-        private long repeat;
-
-        private DeltaRleWriter(DataOutputStream out, long base) {
-            this.out = out;
-            previous = base;
-        }
-
-        private void add(long value) throws IOException {
-            require(value >= previous);
-            long nextDelta = value - previous;
-            if (repeat != 0 && nextDelta != delta) {
-                finish();
-            }
-            delta = nextDelta;
-            repeat++;
-            previous = value;
-        }
-
-        private void finish() throws IOException {
-            if (repeat > 0) {
-                encodeLong(out, repeat);
-                encodeLong(out, delta);
-                repeat = 0;
-            }
-        }
-    }
-
-    /** Decodes only requested values; a complete read also checks the payload boundary. */
-    private static final class DeltaRleReader {
-        private final ByteBuffer data;
-        private final long max;
-        private long remaining;
-        private long value;
-        private long repeat;
-        private long delta;
-
-        private DeltaRleReader(ByteBuffer data, long count, long base, long max)
-                throws IOException {
-            require(base >= 0 && max >= base);
-            this.data = data;
-            remaining = count;
-            value = base;
-            this.max = max;
-            require(count != 0 || !data.hasRemaining());
-        }
-
-        private boolean hasNext() {
-            return remaining > 0;
-        }
-
-        private long next() throws IOException {
-            require(remaining > 0);
-            if (repeat == 0) {
-                repeat = readVarLong(data);
-                delta = readVarLong(data);
-                require(repeat > 0 && repeat <= remaining);
-                require(delta == 0 || repeat <= (max - value) / delta);
-            }
-            value += delta;
-            repeat--;
-            remaining--;
-            require(remaining != 0 || (repeat == 0 && !data.hasRemaining()));
-            return value;
-        }
-    }
-
-    /** Nonnegative long encoded in one to nine canonical unsigned LEB128 bytes. */
-    private static long readVarLong(ByteBuffer in) throws IOException {
-        long value = 0;
-        for (int shift = 0; shift < 63; shift += 7) {
-            require(in.hasRemaining());
-            int b = Byte.toUnsignedInt(in.get());
-            value |= (long) (b & 0x7f) << shift;
-            if ((b & 0x80) == 0) {
-                require(shift == 0 || (b & 0x7f) != 0);
-                return value;
-            }
-        }
-        throw new IOException("Invalid manifest sidecar varint");
     }
 
     /** Reads the complete sidecar. Null means read the original manifest. */
