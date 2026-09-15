@@ -58,6 +58,9 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
 
     InnerTableCommit rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot);
 
+    InnerTableCommit rowIdCheckConflict(
+            @Nullable Long rowIdCheckFromSnapshot, @Nullable String baseSnapshotUuid);
+
     InnerTableCommit rowIdCheckConflictForMaterializeDvCompaction(
             @Nullable Long rowIdCheckFromSnapshot);
 
