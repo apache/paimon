@@ -55,7 +55,7 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
         return vectorSchema(mergeEngine, deletionVectorsEnabled, false);
     }
 
-    private Schema vectorSchema(
+    private Schema.Builder vectorSchemaBuilder(
             String mergeEngine, boolean deletionVectorsEnabled, boolean reverseScore) {
         Schema.Builder builder =
                 Schema.newBuilder()
@@ -77,7 +77,12 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
         if (reverseScore) {
             builder.option("test.vector.reverse-score", "true");
         }
-        return builder.build();
+        return builder;
+    }
+
+    private Schema vectorSchema(
+            String mergeEngine, boolean deletionVectorsEnabled, boolean reverseScore) {
+        return vectorSchemaBuilder(mergeEngine, deletionVectorsEnabled, reverseScore).build();
     }
 
     @Test

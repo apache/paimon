@@ -19,7 +19,16 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourcePolicy;
+import org.apache.paimon.index.pkvector.PkVectorBucketIndexState;
+import org.apache.paimon.index.pkvector.PkVectorDataFileReader;
+import org.apache.paimon.index.pkvector.PkVectorSearchResult;
+import org.apache.paimon.index.pkvector.PrimaryKeyVectorBucketSearch;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.FloatType;
@@ -38,8 +47,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -99,6 +111,122 @@ class PrimaryKeyVectorReadTest {
                 .containsExactly(
                         org.assertj.core.groups.Tuple.tuple(0, "file-a", 2L),
                         org.assertj.core.groups.Tuple.tuple(1, "file-b", 1L));
+    }
+
+    @Test
+    void testFilesToSearchIncludesAppendLevel0Files() {
+        // a fresh APPEND level-0 file is not an index source (shouldRead is false) but
+        // must still reach the bucket search: full/detail modes exact-scan it
+        DataFileMeta compact = file("data-compact.parquet", 1, FileSource.COMPACT);
+        DataFileMeta append = file("data-append.parquet", 0, FileSource.APPEND);
+
+        assertThat(PrimaryKeyIndexSourcePolicy.shouldRead(append)).isFalse();
+        assertThat(PrimaryKeyIndexSourcePolicy.shouldRead(compact)).isTrue();
+
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(1L)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(Arrays.asList(compact, append))
+                        .build();
+
+        assertThat(PrimaryKeyVectorRead.filesToSearch(split))
+                .extracting(DataFileMeta::fileName)
+                .containsExactly("data-compact.parquet", "data-append.parquet");
+    }
+
+    @Test
+    void testFullModeBucketSearchExactScansAppendLevel0Files() throws Exception {
+        // no ANN payloads: the fresh level-0 APPEND file is only reachable through the
+        // exact path, which full mode must run over it
+        DataFileMeta append = file("data-append.parquet", 0, FileSource.APPEND);
+        PkVectorBucketIndexState state =
+                PkVectorBucketIndexState.fromActiveDataFiles(
+                        1,
+                        "test-vector-ann",
+                        Collections.singletonList(append),
+                        Collections.emptyList());
+        assertThat(state.annSegments()).isEmpty();
+
+        PkVectorDataFileReader.Factory factory = mock(PkVectorDataFileReader.Factory.class);
+        PkVectorDataFileReader reader = mock(PkVectorDataFileReader.class);
+        when(reader.dimension()).thenReturn(2);
+        when(reader.rowCount()).thenReturn(2L);
+        AtomicInteger read = new AtomicInteger();
+        doAnswer(
+                        invocation -> {
+                            float[] reuse = invocation.getArgument(0, float[].class);
+                            int index = read.getAndIncrement();
+                            if (index == 0) {
+                                reuse[0] = 1;
+                                reuse[1] = 0;
+                                return true;
+                            }
+                            if (index == 1) {
+                                reuse[0] = 100;
+                                reuse[1] = 0;
+                                return true;
+                            }
+                            return false;
+                        })
+                .when(reader)
+                .readNextVector(any());
+        when(factory.create(append)).thenReturn(reader);
+
+        PrimaryKeyVectorBucketSearch search =
+                new PrimaryKeyVectorBucketSearch(
+                        factory, null, Collections.emptyMap(), "l2", GlobalIndexSearchMode.FULL);
+        List<PkVectorSearchResult> results =
+                search.search(
+                        state,
+                        Collections.singletonList(append),
+                        Collections.emptyMap(),
+                        new float[] {0, 0},
+                        1);
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).dataFileName()).isEqualTo("data-append.parquet");
+        assertThat(results.get(0).rowPosition()).isZero();
+
+        // FAST mode still omits files the index does not cover
+        PrimaryKeyVectorBucketSearch fast =
+                new PrimaryKeyVectorBucketSearch(
+                        factory, null, Collections.emptyMap(), "l2", GlobalIndexSearchMode.FAST);
+        assertThat(
+                        fast.search(
+                                state,
+                                Collections.singletonList(append),
+                                Collections.emptyMap(),
+                                new float[] {0, 0},
+                                1))
+                .isEmpty();
+    }
+
+    private static DataFileMeta file(String fileName, int level, FileSource fileSource) {
+        // a fresh write: APPEND source at level 0 (never an index source); a complete
+        // compacted output: COMPACT source at level 1 (an index source)
+        return DataFileMeta.create(
+                fileName,
+                1024L,
+                2L,
+                BinaryRow.EMPTY_ROW,
+                BinaryRow.EMPTY_ROW,
+                SimpleStats.EMPTY_STATS,
+                SimpleStats.EMPTY_STATS,
+                0L,
+                1L,
+                1L,
+                level,
+                Collections.<String>emptyList(),
+                null,
+                null,
+                fileSource,
+                null,
+                null,
+                null,
+                null);
     }
 
     private static PrimaryKeyVectorRead.Candidate candidate(

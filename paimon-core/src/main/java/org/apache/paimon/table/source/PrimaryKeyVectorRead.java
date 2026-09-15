@@ -28,7 +28,6 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.VectorSearchMetric;
 import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.index.pk.PrimaryKeyIndexSourcePolicy;
 import org.apache.paimon.index.pkvector.PkVectorAnnSegmentSearcher;
 import org.apache.paimon.index.pkvector.PkVectorBucketIndexState;
 import org.apache.paimon.index.pkvector.PkVectorDataFileReader;
@@ -68,7 +67,6 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 import static org.apache.paimon.globalindex.VectorSearchMetric.normalize;
@@ -273,6 +271,16 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
                 topK(indexedCandidates, indexedLimit), topK(exactCandidates, limit));
     }
 
+    /**
+     * Files eligible for the bucket search: every data file of the split. Level-0 APPEND files are
+     * never index sources, but full/detail search modes must exact-scan them instead of silently
+     * omitting freshly written rows; FAST still ignores uncovered files inside the bucket search.
+     * The ANN state builder applies the compact-file policy itself.
+     */
+    static List<DataFileMeta> filesToSearch(DataSplit dataSplit) {
+        return dataSplit.dataFiles();
+    }
+
     CompletableFuture<SearchResult> searchAsync(
             BucketVectorSearchSplit split, SearchContext context) throws IOException {
         return searchBatchAsync(split, context, new float[][] {query})
@@ -283,13 +291,10 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
             BucketVectorSearchSplit split, SearchContext context, float[][] queries)
             throws IOException {
         DataSplit dataSplit = split.dataSplit();
-        List<DataFileMeta> activeFiles =
-                dataSplit.dataFiles().stream()
-                        .filter(PrimaryKeyIndexSourcePolicy::shouldRead)
-                        .collect(Collectors.toList());
+        List<DataFileMeta> dataFiles = filesToSearch(dataSplit);
         PkVectorBucketIndexState state =
                 PkVectorBucketIndexState.fromActiveDataFiles(
-                        vectorField.id(), indexType, activeFiles, split.payloadFiles());
+                        vectorField.id(), indexType, dataFiles, split.payloadFiles());
         Map<String, DeletionVector> deletionVectors = deletionVectors(dataSplit, context.fileIO);
         PkVectorDataFileReader.Factory readerFactory =
                 new PkVectorDataFileReader.Factory(
@@ -317,7 +322,7 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
         return bucketSearch
                 .searchBatchAsync(
                         state,
-                        activeFiles,
+                        dataFiles,
                         deletionVectors,
                         rowRangesByFile(split),
                         queries,
