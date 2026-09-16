@@ -261,11 +261,13 @@ class DataVectorWriter(DataWriter):
         if data.num_rows == 0:
             return None
 
+        shredding_stats = {}
+
         file_name = f"{CoreOptions.data_file_prefix(self.options)}{uuid.uuid4()}-0.{self.file_format}"
         file_path = self._generate_file_path(file_name)
 
         if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
-            self.file_io.write_parquet(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
+            shredding_stats = self._write_parquet_data(file_path, data)
         elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
             self.file_io.write_orc(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
         elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
@@ -290,7 +292,7 @@ class DataVectorWriter(DataWriter):
 
         min_seq, max_seq = self._append_file_sequence_range(data.num_rows)
 
-        return DataFileMeta.create(
+        meta = DataFileMeta.create(
             file_name=file_name,
             file_size=self.file_io.get_file_size(file_path),
             row_count=data.num_rows,
@@ -311,6 +313,8 @@ class DataVectorWriter(DataWriter):
             file_path=file_path,
             write_cols=self.write_cols,
         )
+        self._map_shared_shredding.file_completed(shredding_stats)
+        return meta
 
     def _validate_consistency(
             self, normal_meta: DataFileMeta, vector_metas: List[DataFileMeta]):
