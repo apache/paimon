@@ -89,9 +89,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * down is an optimization and must never change the result. A row count alone can not say that, it
  * passes just as well when nothing is pushed down at all.
  *
- * <p>A filter on a column that is not part of the read type has no {@link #query} counterpart:
- * {@link TableRead#executeFilter()} can not project such a predicate onto the read row and silently
- * keeps every row, so only the split level assertion says anything.
+ * <p>Filters on unprojected columns are also checked through {@link TableRead#executeFilter()},
+ * which reads the filter operands before restoring the requested output projection.
  *
  * <p>Filter values are always picked inside the min/max range of the column, otherwise the group
  * level stats pruning in {@link org.apache.paimon.operation.DataEvolutionFileStoreScan} would drop
@@ -325,14 +324,37 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testExecuteFilterWithUnprojectedOverwrittenColumn() throws Exception {
+        FileStoreTable table = createTable("execute_filter_projection", Collections.emptyMap());
+        writeThenOverwriteF1(table, ROW_COUNT);
+        FileStoreTable latest = getTable(identifier(table.name()));
+        RowType outputType = rowType().project("f0");
+        ReadBuilder readBuilder =
+                latest.newReadBuilder().withReadType(outputType).withFilter(equalF1(c1(50)));
+        List<InternalRow> rows =
+                collect(
+                        readBuilder.newRead().executeFilter(),
+                        readBuilder.newScan().plan(),
+                        outputType);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getInt(0)).isEqualTo(50);
+
+        readBuilder = latest.newReadBuilder().withReadType(outputType).withFilter(equalF1(f1(50)));
+        assertThat(
+                        collect(
+                                readBuilder.newRead().executeFilter(),
+                                readBuilder.newScan().plan(),
+                                outputType))
+                .isEmpty();
+    }
+
+    @Test
     public void testFileIndexIsGivenUpForAColumnOutsideTheReadType() throws Exception {
         FileStoreTable table = createTable("projection_index", bloomOptions("f1", "1 B"));
         writeAllColumns(table, ROW_COUNT);
 
-        // the index of this file does prove that no row of it matches, but a file only owns the
-        // columns of the read type: the file that owns f1 can be pruned out of the split, see
-        // testProjectionPruningAwayTheWinnerOfTheFilterColumn, so the push down gives the column
-        // up rather than trust whichever file is left holding it
+        // The split reader only evaluates filters over its read type. Without executeFilter,
+        // f1 remains outside that type even though planning retains its files.
         assertThat(readWithFilter(table, equalF1(MISSING_F1), rowType().project("f0")))
                 .hasSize(ROW_COUNT);
 
@@ -356,14 +378,12 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     }
 
     @Test
-    public void testProjectionPruningAwayTheWinnerOfTheFilterColumn() throws Exception {
+    public void testUnprojectedOverwrittenFilterColumnWithoutExecution() throws Exception {
         FileStoreTable table = createTable("pruned_winner", Collections.emptyMap());
         writeThenOverwriteF1(table, ROW_COUNT);
 
-        // f1 was rewritten as c* by a second file, and projecting f0 prunes that file out of the
-        // split, see DataEvolutionFileStoreScan#pruneByReadType. The old file is left holding a*
-        // and a bloom index that knows nothing about c*, so nothing about it may be used to prove
-        // that a row does not match: the row does match, through the file that is not there.
+        // f1 was rewritten as c* by a second file. Without executeFilter the reader still only
+        // reads f0, so an unprojected filter must not reject the matching row.
         List<InternalRow> rows = readWithFilter(table, equalF1(c1(50)), rowType().project("f0"));
         assertThat(rows).anyMatch(row -> row.getInt(0) == 50);
     }
