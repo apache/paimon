@@ -46,7 +46,6 @@ public abstract class Sorter {
     protected final int[] valueProjectionMap;
     private final int arity;
 
-    private final transient IOManager ioManager;
     private final transient BinaryExternalSortBuffer buffer;
 
     public Sorter(
@@ -77,7 +76,6 @@ public abstract class Sorter {
         CompressOptions spillCompression = options.spillCompressOptions();
         MemorySize maxDiskSize = options.writeBufferSpillDiskSize();
 
-        this.ioManager = ioManager;
         this.buffer =
                 BinaryExternalSortBuffer.create(
                         ioManager,
@@ -119,9 +117,10 @@ public abstract class Sorter {
         if (buffer != null) {
             buffer.clear();
         }
-        if (ioManager != null) {
-            ioManager.close();
-        }
+        reader.close();
+        // note: the IOManager belongs to the caller (the write holds it for its whole
+        // lifetime) and must not be closed here — closing deletes its spill directories,
+        // so any later spill of the same write instance would crash
     }
 
     public static Sorter getSorter(

@@ -107,6 +107,37 @@ public class BucketedAppendClusterManagerTest {
     }
 
     @Test
+    public void testClusterRewriteTwiceKeepsSharedIOManagerUsable() throws Exception {
+        // a tiny sort buffer forces the sorter to spill through the write's shared
+        // IOManager; a second cluster rewrite with the same write instance must still be
+        // able to spill, which requires the sorter to leave the IOManager open
+        FileStoreTable spillTable =
+                createFileStoreTableWith(
+                        "spill_test", "write-buffer-size", "1 kb", "page-size", "128 b");
+        BaseAppendFileStoreWrite spillWrite =
+                (BaseAppendFileStoreWrite)
+                        spillTable
+                                .store()
+                                .newWrite("ss")
+                                .withIOManager(IOManager.create(ioManagerTempDir.toString()));
+        StreamTableCommit spillCommit = spillTable.newStreamWriteBuilder().newCommit();
+        for (int i = 0; i < 200; i++) {
+            spillWrite.write(BinaryRow.EMPTY_ROW, 0, GenericRow.of(0, i % 20, i));
+        }
+        spillCommit.commit(0, spillWrite.prepareCommit(false, 0));
+
+        List<DataFileMeta> toCluster =
+                spillTable.newSnapshotReader().read().dataSplits().get(0).dataFiles();
+        assertThat(toCluster).isNotEmpty();
+
+        List<DataFileMeta> first = spillWrite.clusterRewrite(BinaryRow.EMPTY_ROW, 0, toCluster);
+        assertThat(first).isNotEmpty();
+
+        List<DataFileMeta> second = spillWrite.clusterRewrite(BinaryRow.EMPTY_ROW, 0, first);
+        assertThat(second).isNotEmpty();
+    }
+
+    @Test
     public void testTriggerCompaction() throws Exception {
         List<DataFileMeta> toCluster =
                 table.newSnapshotReader().read().dataSplits().get(0).dataFiles();
@@ -135,8 +166,13 @@ public class BucketedAppendClusterManagerTest {
     }
 
     private FileStoreTable createFileStoreTable() throws Exception {
+        return createFileStoreTableWith("test");
+    }
+
+    private FileStoreTable createFileStoreTableWith(String tableName, String... extraOptions)
+            throws Exception {
         Catalog catalog = new FileSystemCatalog(LocalFileIO.create(), new Path(tempDir.toString()));
-        Schema schema =
+        Schema.Builder builder =
                 Schema.newBuilder()
                         .column("f0", DataTypes.INT())
                         .column("f1", DataTypes.INT())
@@ -145,11 +181,14 @@ public class BucketedAppendClusterManagerTest {
                         .option("bucket-key", "f0")
                         .option("compaction.min.file-num", "10")
                         .option("clustering.columns", "f1, f2")
-                        .option("clustering.strategy", "zorder")
-                        .build();
-        Identifier identifier = Identifier.create("default", "test");
-        catalog.createDatabase("default", false);
-        catalog.createTable(identifier, schema, false);
+                        .option("clustering.strategy", "zorder");
+        for (int i = 0; i < extraOptions.length; i += 2) {
+            builder.option(extraOptions[i], extraOptions[i + 1]);
+        }
+        Schema schema = builder.build();
+        Identifier identifier = Identifier.create("default", tableName);
+        catalog.createDatabase("default", true);
+        catalog.createTable(identifier, schema, true);
         return (FileStoreTable) catalog.getTable(identifier);
     }
 }
