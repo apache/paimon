@@ -74,8 +74,6 @@ import static org.mockito.Mockito.when;
 class ManifestSidecarTest {
 
     @TempDir java.nio.file.Path temp;
-    private final ManifestSidecar.Settings settings =
-            new ManifestSidecar.Settings(true, true, true, true);
 
     static ManifestFileMeta meta(String name, long size, long entries) {
         ManifestFileMeta meta = mock(ManifestFileMeta.class);
@@ -110,40 +108,10 @@ class ManifestSidecarTest {
     @Test
     void emptyManifestHasACompleteSidecar() throws Exception {
         byte[] header = header();
-        byte[] data = new ManifestSidecar.Builder(settings, header).serialize(header.length, 0);
+        byte[] data = new ManifestSidecar.Builder(header, true, true).serialize(header.length, 0);
         assertThat(ByteBuffer.wrap(data).getInt()).isEqualTo(0x504d5343);
         assertThat(ManifestSidecar.select(data, meta("empty", header.length, 0), null).blocks())
                 .isEmpty();
-    }
-
-    @Test
-    void disabledBuildDoesNotAccessFiles() throws Exception {
-        FileIO io = mock(FileIO.class);
-        assertThat(
-                        ManifestSidecar.build(
-                                io,
-                                new Path(temp.toString(), "missing-manifest"),
-                                100,
-                                1,
-                                new ManifestSidecar.Settings(false, true, true, true)))
-                .isNull();
-        verifyNoInteractions(io);
-    }
-
-    @Test
-    void disabledReadsDoNotAccessMetadataCacheOrFiles() {
-        FileIO io = mock(FileIO.class);
-        ManifestFileMeta manifest = mock(ManifestFileMeta.class);
-        SegmentsCache<Object> cache = mock(SegmentsCache.class);
-        Path path = new Path(temp.toString(), "missing-manifest");
-        ManifestSidecar.Settings disabled = new ManifestSidecar.Settings(true, false, true, true);
-        assertThat(ManifestSidecar.read(io, path, manifest, disabled, null)).isNull();
-        assertThat(ManifestSidecar.read(io, path, manifest, disabled, null, null, null)).isNull();
-        assertThat(
-                        ManifestSidecar.read(
-                                io, path, manifest, disabled, null, null, null, null, cache))
-                .isNull();
-        verifyNoInteractions(io, manifest, cache);
     }
 
     @Test
@@ -179,7 +147,7 @@ class ManifestSidecarTest {
         for (ManifestFileMeta meta : Arrays.asList(source, rewritten)) {
             Path path = new Path(temp.toString(), meta.fileName());
             byte[] data =
-                    ManifestSidecar.build(io, path, meta.fileSize(), entries.size(), settings);
+                    ManifestSidecar.build(io, path, meta.fileSize(), entries.size(), true, true);
             ManifestSidecar.Selection selected =
                     ManifestSidecar.select(
                             data,
@@ -231,7 +199,7 @@ class ManifestSidecarTest {
     @Test
     void crossLanguageFormatAndBlockOrdinals() throws Exception {
         byte[] header = header();
-        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(settings, header);
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         builder.beginBlock(header.length, 100, 3);
         builder.add(0L, 10);
         builder.add(5L, 5);
@@ -287,7 +255,7 @@ class ManifestSidecarTest {
     @Test
     void minMaxSkipsExactIntersectionChecksAndHandlesOneInterval() throws Exception {
         byte[] header = header();
-        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(settings, header);
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         builder.beginBlock(header.length, 100, 2);
         builder.add(0L, 10);
         builder.add(20L, 10);
@@ -332,7 +300,7 @@ class ManifestSidecarTest {
                         new Range(0, 0),
                         new Range(42, 51),
                         new Range(Long.MAX_VALUE, Long.MAX_VALUE))) {
-            ManifestSidecar.Builder builder = new ManifestSidecar.Builder(settings, header);
+            ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
             builder.beginBlock(header.length, 100, 1);
             builder.add(range.from, range.to - range.from + 1);
             builder.endBlock();
@@ -362,7 +330,7 @@ class ManifestSidecarTest {
     @Test
     void hugeRangesAreNotExpandedAndInvalidCoverageRetainsBlocks() throws Exception {
         byte[] header = header();
-        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(settings, header);
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         builder.beginBlock(header.length, 100, 2);
         builder.add(0L, Long.MAX_VALUE);
         builder.add(Long.MAX_VALUE, 1);
@@ -372,7 +340,7 @@ class ManifestSidecarTest {
         assertThat(select(data, meta("m", header.length + 100, 2), Long.MAX_VALUE).blocks())
                 .hasSize(1);
         for (Long first : Arrays.asList(null, -1L, Long.MAX_VALUE)) {
-            builder = new ManifestSidecar.Builder(settings, header);
+            builder = new ManifestSidecar.Builder(header, true, true);
             builder.beginBlock(header.length, 100, 1);
             builder.add(first, 2);
             builder.endBlock();
@@ -385,7 +353,7 @@ class ManifestSidecarTest {
                     .hasSize(1);
         }
         for (long count : new long[] {0, -1}) {
-            builder = new ManifestSidecar.Builder(settings, header);
+            builder = new ManifestSidecar.Builder(header, true, true);
             builder.beginBlock(header.length, 100, 1);
             builder.add(0L, count);
             builder.endBlock();
@@ -397,7 +365,7 @@ class ManifestSidecarTest {
                                     .blocks())
                     .hasSize(1);
         }
-        builder = new ManifestSidecar.Builder(settings, header);
+        builder = new ManifestSidecar.Builder(header, true, true);
         builder.beginBlock(header.length, 100, 64);
         for (int i = 0; i < 64; i++) {
             builder.add(i * 10L, 1);
@@ -491,8 +459,7 @@ class ManifestSidecarTest {
         assertThatThrownBy(
                         () ->
                                 ManifestSidecar.read(
-                                        io, path, meta, settings, cancelled, null, null, null,
-                                        cache))
+                                        io, path, meta, cancelled, null, null, null, cache))
                 .isInstanceOf(CancellationException.class);
         assertThat(cache.getIfPresents(sidecar)).isNull();
 
@@ -500,8 +467,7 @@ class ManifestSidecarTest {
         assertThatThrownBy(
                         () ->
                                 ManifestSidecar.read(
-                                        io, path, meta, settings, cancelled, null, null, null,
-                                        cache))
+                                        io, path, meta, cancelled, null, null, null, cache))
                 .isInstanceOf(CancellationException.class);
         assertThat(readCached(io, path, meta, cache).blocks()).hasSize(2);
         verify(io, times(2)).newInputStream(sidecar);
@@ -513,7 +479,6 @@ class ManifestSidecarTest {
                 io,
                 path,
                 meta,
-                settings,
                 RowRangeIndex.create(Collections.singletonList(new Range(20, 20))),
                 null,
                 null,
@@ -528,20 +493,18 @@ class ManifestSidecarTest {
         ManifestFileMeta meta = goldenMeta();
         RowRangeIndex query = RowRangeIndex.create(Collections.singletonList(new Range(11, 11)));
 
-        assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, settings, query))
-                .isNull();
+        assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, query)).isNull();
         byte[] good = golden();
         for (int position : new int[] {0, 9, 11, 15, 16, 55, 63, 67, 75, good.length - 1}) {
             byte[] bad = good.clone();
             bad[position] ^= 2;
             Files.write(index, bad);
-            assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, settings, query))
-                    .isNull();
+            assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, query)).isNull();
         }
         // A valid checksum cannot make an unsupported container version readable.
         for (int version : new int[] {0, 2, 99}) {
             byte[] bad = good.clone();
-            ByteBuffer.wrap(bad).putInt(4, version);
+            bad[4] = (byte) version;
             byte[] hash =
                     MessageDigest.getInstance("SHA-256")
                             .digest(Arrays.copyOf(bad, bad.length - 32));
@@ -550,12 +513,9 @@ class ManifestSidecarTest {
                     .isInstanceOf(IOException.class);
         }
         Files.write(index, Arrays.copyOf(good, good.length - 1));
-        assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, settings, query))
-                .isNull();
+        assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, query)).isNull();
         Files.write(index, good);
-        assertThat(
-                        ManifestSidecar.read(LocalFileIO.create(), manifest, meta, settings, query)
-                                .blocks())
+        assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, query).blocks())
                 .isEmpty();
         // The sidecar is bound to physical coverage, not to a particular file name.
         assertThat(
@@ -593,8 +553,7 @@ class ManifestSidecarTest {
                         suppressed)) {
             FileIO fileIO = mock(FileIO.class);
             when(fileIO.newInputStream(ManifestSidecar.path(path))).thenThrow(failure);
-            assertThat(ManifestSidecar.read(fileIO, path, meta("m", 1, 1), settings, null))
-                    .isNull();
+            assertThat(ManifestSidecar.read(fileIO, path, meta("m", 1, 1), null)).isNull();
             assertThat(Thread.currentThread().isInterrupted()).isFalse();
         }
     }
@@ -607,10 +566,7 @@ class ManifestSidecarTest {
         when(fileIO.newInputStream(ManifestSidecar.path(path))).thenThrow(failure);
         try {
             Thread.currentThread().interrupt();
-            assertThatThrownBy(
-                            () ->
-                                    ManifestSidecar.read(
-                                            fileIO, path, meta("m", 1, 1), settings, null))
+            assertThatThrownBy(() -> ManifestSidecar.read(fileIO, path, meta("m", 1, 1), null))
                     .isInstanceOf(java.io.UncheckedIOException.class)
                     .hasCauseReference(failure);
             assertThat(Thread.currentThread().isInterrupted()).isTrue();
@@ -630,10 +586,7 @@ class ManifestSidecarTest {
                         new AssertionError("error"))) {
             FileIO fileIO = mock(FileIO.class);
             when(fileIO.newInputStream(ManifestSidecar.path(path))).thenThrow(failure);
-            assertThatThrownBy(
-                            () ->
-                                    ManifestSidecar.read(
-                                            fileIO, path, meta("m", 1, 1), settings, null))
+            assertThatThrownBy(() -> ManifestSidecar.read(fileIO, path, meta("m", 1, 1), null))
                     .isSameAs(failure);
         }
     }
@@ -642,7 +595,7 @@ class ManifestSidecarTest {
     void indexReadsUseBoundedBulkRequests() throws Exception {
         byte[] header = header();
         for (int blockCount : new int[] {5000, 25000, 131073}) {
-            ManifestSidecar.Builder builder = new ManifestSidecar.Builder(settings, header);
+            ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
             for (int blockNumber = 0; blockNumber < blockCount; blockNumber++) {
                 builder.beginBlock(header.length + blockNumber * 100L, 100, 1);
                 builder.add((long) blockNumber, 1);
@@ -660,7 +613,6 @@ class ManifestSidecarTest {
                             io,
                             path,
                             meta,
-                            settings,
                             RowRangeIndex.create(Collections.singletonList(new Range(0, 0))));
             assertThat(actual.blocks()).hasSize(1);
             assertThat(actual.blocks().get(0).offset).isEqualTo(header.length);
@@ -678,7 +630,7 @@ class ManifestSidecarTest {
         byte[] value = new byte[17 * 1024 * 1024];
         rowWriter.writeBinary(0, value, 0, value.length);
         rowWriter.complete();
-        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(settings, header);
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         builder.beginBlock(header.length, 100, 1);
         builder.add(0L, 1, SerializationUtils.serializeBinaryRow(partition));
         builder.endBlock();
@@ -693,7 +645,6 @@ class ManifestSidecarTest {
                                         io,
                                         path,
                                         meta("manifest-large", header.length + 100, 1),
-                                        settings,
                                         null)
                                 .blocks())
                 .hasSize(1);
@@ -716,7 +667,6 @@ class ManifestSidecarTest {
                             io,
                             path,
                             goldenMeta(),
-                            settings,
                             RowRangeIndex.create(Collections.singletonList(new Range(20, 20))));
             assertThat(actual.blocks())
                     .extracting(block -> block.firstRecord)
@@ -939,7 +889,7 @@ class ManifestSidecarTest {
         byte[] header = header();
         int cachedLength = (4 << 20) + 17;
         int uncachedLength = 2 * (4 << 20) + 31;
-        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(settings, header);
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         builder.beginBlock(header.length, cachedLength, 1);
         builder.add(0L, 1);
         builder.endBlock();
@@ -989,7 +939,7 @@ class ManifestSidecarTest {
     @Test
     void largeBlockSpansUseBoundedReads() throws Exception {
         byte[] header = header();
-        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(settings, header);
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         long offset = header.length;
         for (int length : new int[] {2 << 20, 2 << 20, 2 << 20, 2 << 20, 1 << 20}) {
             builder.beginBlock(offset, length, 1);

@@ -28,6 +28,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SerializationUtils;
+import org.apache.paimon.utils.VarLengthIntUtils;
 
 import org.junit.jupiter.api.Test;
 
@@ -59,8 +60,6 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 class ManifestBlockIndexTest {
 
     private final RowType type = RowType.of(DataTypes.INT(), DataTypes.STRING());
-    private final ManifestSidecar.Settings defaults =
-            new ManifestSidecar.Settings(true, true, true, true);
 
     private byte[] fixture(String field) throws IOException {
         Properties p = new Properties();
@@ -106,16 +105,15 @@ class ManifestBlockIndexTest {
         for (int mask = 0; mask < 4; mask++) {
             boolean rowIdEnabled = (mask & 1) != 0;
             boolean bucketEnabled = (mask & 2) != 0;
-            ManifestSidecar.Settings settings =
-                    new ManifestSidecar.Settings(true, true, rowIdEnabled, bucketEnabled);
-            ManifestSidecar.Builder builder = new ManifestSidecar.Builder(settings, header);
+            ManifestSidecar.Builder builder =
+                    new ManifestSidecar.Builder(header, rowIdEnabled, bucketEnabled);
             for (int block = 0; block < 2; block++) {
                 builder.beginBlock(header.length + block * 100L, 100, 1);
                 builder.add(100L + block * 100L, 10, partition(7 + block, "p"), 1, 4);
                 builder.endBlock();
             }
             byte[] data = builder.serialize(header.length + 200, 2);
-            assertThat(ByteBuffer.wrap(data).getInt(28 + header.length)).isEqualTo(2);
+            assertThat(partitionCount(data)).isEqualTo(2);
             for (int[] position : positions(data)) {
                 assertThat(data[position[1]]).isEqualTo((byte) 1);
                 assertThat(data[position[2]]).isEqualTo((byte) (rowIdEnabled ? 1 : 0));
@@ -153,7 +151,7 @@ class ManifestBlockIndexTest {
         assertThat(a).isEqualTo(fixture("partitionA"));
         assertThat(b).isEqualTo(fixture("partitionB"));
         byte[] header = fixture("avroHeader");
-        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(defaults, header);
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         builder.beginBlock(header.length, 100, 3);
         builder.add(0L, 10, a);
         builder.add(5L, 5, a);
@@ -186,9 +184,8 @@ class ManifestBlockIndexTest {
 
     @Test
     void unavailableDimensionsAreIndependentAndDoNotPoisonLaterBlocks() throws Exception {
-        ManifestSidecar.Settings settings = defaults;
         byte[] header = fixture("avroHeader");
-        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(settings, header);
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         builder.beginBlock(header.length, 100, 1);
         builder.add(null, 10, partition(7, "left"));
         builder.endBlock();
@@ -211,21 +208,33 @@ class ManifestBlockIndexTest {
                 .containsExactly(1L);
     }
 
-    private List<int[]> positions(byte[] data) {
+    private int partitionCount(byte[] data) throws IOException {
         ByteBuffer in = ByteBuffer.wrap(data);
-        in.position(24);
-        int header = in.getInt();
+        in.position(4);
+        VarLengthIntUtils.decodeLong(in);
+        int header = (int) VarLengthIntUtils.decodeLong(in);
         in.position(in.position() + header);
-        int partitions = in.getInt();
+        return (int) VarLengthIntUtils.decodeLong(in);
+    }
+
+    private List<int[]> positions(byte[] data) throws IOException {
+        ByteBuffer in = ByteBuffer.wrap(data);
+        in.position(4);
+        VarLengthIntUtils.decodeLong(in);
+        int header = (int) VarLengthIntUtils.decodeLong(in);
+        in.position(in.position() + header);
+        int partitions = (int) VarLengthIntUtils.decodeLong(in);
         for (int i = 0; i < partitions; i++) {
-            int length = in.getInt();
+            int length = (int) VarLengthIntUtils.decodeLong(in);
             in.position(in.position() + length);
         }
-        int blocks = in.getInt();
+        int blocks = (int) VarLengthIntUtils.decodeLong(in);
         List<int[]> result = new ArrayList<>();
         for (int i = 0; i < blocks; i++) {
             int block = in.position();
-            in.position(block + 24);
+            VarLengthIntUtils.decodeLong(in);
+            VarLengthIntUtils.decodeLong(in);
+            VarLengthIntUtils.decodeLong(in);
             int partition = skipPayload(in);
             int row = skipPayload(in);
             int bucket = skipPayload(in);
@@ -234,10 +243,10 @@ class ManifestBlockIndexTest {
         return result;
     }
 
-    private int skipPayload(ByteBuffer in) {
+    private int skipPayload(ByteBuffer in) throws IOException {
         int position = in.position();
         if (in.get() != 0) {
-            int length = in.getInt();
+            int length = (int) VarLengthIntUtils.decodeLong(in);
             in.position(in.position() + length);
         }
         return position;
@@ -272,7 +281,7 @@ class ManifestBlockIndexTest {
         byte[] header = fixture("avroHeader");
         byte[] a = partition(7, "left");
         byte[] b = partition(9, null);
-        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(defaults, header);
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         builder.beginBlock(header.length, 100, 3);
         builder.add(0L, 10, a, 1, 4);
         builder.add(5L, 5, a, 1, 4);
@@ -319,8 +328,71 @@ class ManifestBlockIndexTest {
     }
 
     @Test
+    void splitBucketArraysPreserveDecreasingTotalsAndRescaling() throws Exception {
+        byte[] header = fixture("avroHeader");
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, false, true);
+        builder.beginBlock(header.length, 100, 5);
+        for (int[] pair : new int[][] {{3, 4}, {2, 8}, {0, Integer.MAX_VALUE}, {2, 4}, {2, 4}}) {
+            builder.add(null, 0, partition(7, "left"), pair[0], pair[1]);
+        }
+        builder.endBlock();
+        byte[] data = builder.serialize(header.length + 100, 5);
+        ManifestFileMeta meta = meta("m", header.length + 100, 5);
+        List<String> pairs = new ArrayList<>();
+        assertThat(
+                        ManifestSidecar.select(
+                                        data,
+                                        meta,
+                                        null,
+                                        null,
+                                        type,
+                                        (bucket, total) -> {
+                                            pairs.add(bucket + ":" + total);
+                                            return false;
+                                        })
+                                .blocks())
+                .isEmpty();
+        assertThat(pairs).containsExactly("0:2147483647", "2:4", "2:8", "3:4");
+        assertThat(
+                        ManifestSidecar.select(
+                                        data,
+                                        meta,
+                                        null,
+                                        null,
+                                        type,
+                                        (bucket, total) -> bucket == 2 && total == 4)
+                                .blocks())
+                .hasSize(1);
+        assertThat(
+                        ManifestSidecar.select(
+                                        data,
+                                        meta,
+                                        null,
+                                        null,
+                                        type,
+                                        (bucket, total) -> bucket == 3 && total == 8)
+                                .blocks())
+                .isEmpty();
+    }
+
+    @Test
+    void mismatchedBucketCountsAndNegativeTotalsAreRejected() throws Exception {
+        for (byte[] payload :
+                Arrays.asList(
+                        new byte[] {2, 1, 0, 1, 8, 8}, // Two buckets, one total, extra bytes.
+                        bucketPayload(2, new long[] {1, 0}, 1, 0), // ZigZag -1 from zero.
+                        bucketPayload(2, new long[] {1, 0}, 8, 0))) { // Repeated pair.
+            byte[] data = replacePayload(fixture("indexWithBuckets"), 0, 3, payload);
+            assertThatThrownBy(
+                            () ->
+                                    ManifestSidecar.select(
+                                            data, goldenMeta(), null, null, type, bucketFilter(99)))
+                    .isInstanceOf(IOException.class);
+        }
+    }
+
+    @Test
     void unknownOrInvalidBucketPayloadIsUnavailable() throws Exception {
-        ManifestSidecar.Settings settings = defaults;
         byte[] header = fixture("avroHeader");
         for (Integer[] pair :
                 Arrays.asList(
@@ -328,7 +400,7 @@ class ManifestBlockIndexTest {
                         new Integer[] {-1, 4},
                         new Integer[] {4, 4},
                         new Integer[] {0, 0})) {
-            ManifestSidecar.Builder builder = new ManifestSidecar.Builder(settings, header);
+            ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
             builder.beginBlock(header.length, 100, 2);
             builder.add(100L, 10, partition(7, "left"), 1, 4);
             builder.add(200L, 10, partition(7, "left"), pair[0], pair[1]);
@@ -357,7 +429,7 @@ class ManifestBlockIndexTest {
     @Test
     void largePayloadsKeepExactCoverage() throws Exception {
         byte[] header = fixture("avroHeader");
-        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(defaults, header);
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         int blocks = 33;
         int entriesPerBlock = 4097;
         int entries = blocks * entriesPerBlock;
@@ -391,7 +463,7 @@ class ManifestBlockIndexTest {
     @Test
     void absentPayloadsOmitLengthFieldsForEveryDimensionCombination() throws Exception {
         byte[] header = fixture("avroHeader");
-        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(defaults, header);
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         for (int mask = 0; mask < 8; mask++) {
             builder.beginBlock(header.length + mask * 100L, 100, 1);
             builder.add(
@@ -404,7 +476,7 @@ class ManifestBlockIndexTest {
         }
         byte[] data = builder.serialize(header.length + 800, 8);
         List<int[]> positions = positions(data);
-        int[] presentSizes = {10, 25, 10};
+        int[] presentSizes = {4, 19, 6};
         for (int mask = 0; mask < 8; mask++) {
             for (int dimension = 0; dimension < 3; dimension++) {
                 int start = positions.get(mask)[dimension + 1];
@@ -436,7 +508,7 @@ class ManifestBlockIndexTest {
     @Test
     void deltaVarintsCompressSortedPayloadsWithoutCoarseningRowIds() throws Exception {
         byte[] header = fixture("avroHeader");
-        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(defaults, header);
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         int count = 10000;
         builder.beginBlock(header.length, 100, count);
         for (int i = count - 1; i >= 0; i--) {
@@ -445,9 +517,9 @@ class ManifestBlockIndexTest {
         builder.endBlock();
         byte[] data = builder.serialize(header.length + 100, count);
         int[] block = positions(data).get(0);
-        assertThat(ByteBuffer.wrap(data).getInt(block[1] + 1)).isEqualTo(4 + count);
-        assertThat(ByteBuffer.wrap(data).getInt(block[2] + 1)).isEqualTo(20 + 2 * (count - 1));
-        assertThat(ByteBuffer.wrap(data).getInt(block[3] + 1)).isEqualTo(4 + 2 + 5 * (count - 1));
+        assertThat(payloadLength(data, block[1])).isEqualTo(2 + count);
+        assertThat(payloadLength(data, block[2])).isEqualTo(16 + 3 + 2 * (count - 1));
+        assertThat(payloadLength(data, block[3])).isEqualTo(2 * count + 6);
         ManifestFileMeta meta = meta("m", header.length + 100, count);
         assertThat(ManifestSidecar.select(data, meta, query(3)).blocks()).isEmpty();
         assertThat(
@@ -460,14 +532,12 @@ class ManifestBlockIndexTest {
     @Test
     void unpartitionedTablesStillRecordTheEmptyPartition() throws Exception {
         byte[] header = fixture("avroHeader");
-        ManifestSidecar.Builder builder =
-                new ManifestSidecar.Builder(
-                        new ManifestSidecar.Settings(true, true, false, false), header);
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, false, false);
         builder.beginBlock(header.length, 100, 1);
         builder.add(null, 0, SerializationUtils.serializeBinaryRow(BinaryRow.EMPTY_ROW));
         builder.endBlock();
         byte[] data = builder.serialize(header.length + 100, 1);
-        assertThat(ByteBuffer.wrap(data).getInt(28 + header.length)).isEqualTo(1);
+        assertThat(partitionCount(data)).isEqualTo(1);
         int[] block = positions(data).get(0);
         assertThat(data[block[1]]).isEqualTo((byte) 1);
         assertThat(data[block[2]]).isZero();
@@ -487,7 +557,7 @@ class ManifestBlockIndexTest {
     void rowMissSkipsPartitionAndBucketDecoding() throws Exception {
         byte[] data =
                 replacePayload(fixture("indexWithBuckets"), 0, 1, compressedPayload(2, 999, 1));
-        data = replacePayload(data, 0, 3, compressedPayload(2, 0, 0));
+        data = replacePayload(data, 0, 3, bucketPayload(2, new long[] {0, 0}, 0, 0));
         BiPredicate<Integer, Integer> buckets = mock(BiPredicate.class);
         assertThat(
                         ManifestSidecar.select(
@@ -499,7 +569,12 @@ class ManifestBlockIndexTest {
 
     @Test
     void partitionMissSkipsBucketDecodingWithOrWithoutRowQuery() throws Exception {
-        byte[] data = replacePayload(fixture("indexWithBuckets"), 0, 3, compressedPayload(2, 0, 0));
+        byte[] data =
+                replacePayload(
+                        fixture("indexWithBuckets"),
+                        0,
+                        3,
+                        bucketPayload(2, new long[] {0, 0}, 0, 0));
         for (RowRangeIndex rows : Arrays.asList(null, query(0))) {
             BiPredicate<Integer, Integer> buckets = mock(BiPredicate.class);
             assertThat(
@@ -545,7 +620,7 @@ class ManifestBlockIndexTest {
                         fixture("indexWithBuckets"),
                         0,
                         3,
-                        compressedPayload(2, (1L << 32) | 4, Long.MAX_VALUE));
+                        bucketPayload(2, new long[] {1, 0}, 8, Long.MAX_VALUE));
         assertThat(
                         ManifestSidecar.select(
                                         buckets,
@@ -568,7 +643,7 @@ class ManifestBlockIndexTest {
                 .isInstanceOf(IOException.class);
 
         byte[] header = fixture("avroHeader");
-        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(defaults, header);
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         builder.beginBlock(header.length, 100, 3);
         for (long first : new long[] {0, 20, 40}) {
             builder.add(first, 10);
@@ -596,10 +671,10 @@ class ManifestBlockIndexTest {
                         rowPayload(2, 0, 24, 9, 0), // Overlapping intervals.
                         rowPayload(2, 0, 24, Long.MAX_VALUE, 0), // Exceeds the envelope.
                         rowPayload(2, 0, 24, 9, 11, 0), // More values than declared.
-                        rowPayload(1, Long.MAX_VALUE, 1), // Envelope overflows.
+                        rowPayload(1, Long.MAX_VALUE, 1), // Reversed envelope.
                         rowPayload(1, -1, 24),
                         rowPayload(1, 0, -1),
-                        Arrays.copyOf(rowPayload(1, 0, 24), 19), // Truncated fixed-width envelope.
+                        Arrays.copyOf(rowPayload(1, 0, 24), 16), // Missing endpoint count.
                         rowPayload(1, 0, 24, 0)); // Unexpected value for a single interval.
         for (byte[] payload : badRows) {
             byte[] data = replacePayload(fixture("indexWithBuckets"), 0, 2, payload);
@@ -617,9 +692,9 @@ class ManifestBlockIndexTest {
         }
         for (byte[] payload :
                 Arrays.asList(
-                        compressedPayload(2, 0, 4),
-                        compressedPayload(2, 1L << 31, 4),
-                        compressedPayload(2, 0, 0))) {
+                        bucketPayload(2, new long[] {0, 4}, 2, 0),
+                        bucketPayload(2, new long[] {1L << 31, 4}, 8, 0),
+                        bucketPayload(2, new long[] {0, 0}, 2, 0))) {
             byte[] data = replacePayload(fixture("indexWithBuckets"), 0, 3, payload);
             assertThatThrownBy(
                             () ->
@@ -646,7 +721,12 @@ class ManifestBlockIndexTest {
                         overlong)) {
             for (int dimension = 1; dimension <= 3; dimension++) {
                 ByteArrayOutputStream payload = new ByteArrayOutputStream();
-                payload.write(dimension == 2 ? rowPayload(2, 0, 24) : compressedPayload(2));
+                payload.write(
+                        dimension == 2
+                                ? rowPayload(2, 0, 24)
+                                : dimension == 3
+                                        ? bucketPayload(2, new long[] {1, 0})
+                                        : compressedPayload(2));
                 payload.write(deltas);
                 byte[] data =
                         replacePayload(
@@ -671,7 +751,7 @@ class ManifestBlockIndexTest {
         List<byte[]> bad =
                 Arrays.asList(
                         new byte[0],
-                        new byte[3], // Incomplete int count.
+                        new byte[] {(byte) 0x80}, // Incomplete varint count.
                         compressedPayload(-1, 1, 1),
                         compressedPayload(0, 1, 1),
                         compressedPayload(4, 1, 1),
@@ -686,19 +766,23 @@ class ManifestBlockIndexTest {
             }
             byte[] data = fixture("indexWithBuckets");
             int position = positions(data).get(0)[dimension];
-            ByteBuffer.wrap(data).putInt(position + 1, Integer.MAX_VALUE);
+            Arrays.fill(data, position + 1, position + 6, (byte) 0xff);
             checksum(data);
             assertThatThrownBy(() -> ManifestSidecar.select(data, goldenMeta(), query(999)))
                     .isInstanceOf(IOException.class);
         }
         byte[] missingEnvelope =
                 replacePayload(
-                        fixture("indexWithBuckets"), 0, 2, Arrays.copyOf(rowPayload(1, 0, 24), 19));
+                        fixture("indexWithBuckets"), 0, 2, Arrays.copyOf(rowPayload(1, 0, 24), 16));
         assertThatThrownBy(() -> ManifestSidecar.select(missingEnvelope, goldenMeta(), null))
                 .isInstanceOf(IOException.class);
         byte[] data = fixture("indexWithBuckets");
         int block = positions(data).get(0)[0];
-        ByteBuffer.wrap(data).putLong(block + 16, 2);
+        ByteBuffer directory = ByteBuffer.wrap(data);
+        directory.position(block);
+        VarLengthIntUtils.decodeLong(directory);
+        VarLengthIntUtils.decodeLong(directory);
+        data[directory.position()] = 2;
         checksum(data);
         assertThatThrownBy(() -> ManifestSidecar.select(data, goldenMeta(), query(999)))
                 .isInstanceOf(IOException.class);
@@ -733,13 +817,15 @@ class ManifestBlockIndexTest {
     private byte[] replacePayload(byte[] data, int block, int dimension, byte[] payload)
             throws Exception {
         int start = positions(data).get(block)[dimension];
-        int end =
-                data[start] == 0 ? start + 1 : start + 5 + ByteBuffer.wrap(data).getInt(start + 1);
+        ByteBuffer in = ByteBuffer.wrap(data);
+        in.position(start);
+        skipPayload(in);
+        int end = in.position();
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(buffer);
         out.write(data, 0, start);
         out.writeByte(1);
-        out.writeInt(payload.length);
+        VarLengthIntUtils.encodeLong(out, payload.length);
         out.write(payload);
         out.write(data, end, data.length - end);
         return checksum(buffer.toByteArray());
@@ -748,19 +834,33 @@ class ManifestBlockIndexTest {
     private static byte[] compressedPayload(int count, long... values) throws IOException {
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(buffer);
-        out.writeInt(count);
+        out.write(deltaBytes(count));
         out.write(deltaBytes(values));
         return buffer.toByteArray();
     }
 
-    private static byte[] rowPayload(int count, long min, long span, long... values)
+    private static byte[] rowPayload(int count, long min, long max, long... values)
             throws IOException {
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(buffer);
-        out.writeInt(count);
         out.writeLong(min);
-        out.writeLong(span);
+        out.writeLong(max);
+        out.write(deltaBytes(2L * (count - 1)));
         out.write(deltaBytes(values));
+        return buffer.toByteArray();
+    }
+
+    private static int payloadLength(byte[] data, int position) throws IOException {
+        ByteBuffer buffer = ByteBuffer.wrap(data);
+        buffer.position(position + 1);
+        return (int) VarLengthIntUtils.decodeLong(buffer);
+    }
+
+    private static byte[] bucketPayload(int count, long[] bucketDeltas, long... totalDeltas)
+            throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        buffer.write(compressedPayload(count, bucketDeltas));
+        buffer.write(compressedPayload(count, totalDeltas));
         return buffer.toByteArray();
     }
 

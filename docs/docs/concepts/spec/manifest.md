@@ -74,54 +74,52 @@ derived file name. The Avro schemas and `_VERSION` identifiers remain unchanged.
 The utility includes construction, validation, block selection and optional caching. Table
 writers and scans do not yet invoke it automatically. Callers are responsible for publishing
 sidecar references, managing file ownership, applying entry filters and reconciling ADD/DELETE
-entries after block selection. `build` returns null without opening files when `Settings.write`
-is false. Otherwise it reads the completed physical manifest and returns sidecar bytes; it does
-not write or publish another file.
+entries after block selection. `build` reads the completed physical manifest and returns
+sidecar bytes; it does not write or publish another file.
 
-`Settings` contains `write` and `read` switches for the calling writer and scan, and enables
-row-ID and bucket payload generation independently. Partition generation is always enabled,
+Callers decide whether to invoke `build` and `read`; these utilities have no read/write switches.
+`build` and `Builder` accept `rowIdEnabled` and `bucketEnabled` arguments for independent
+payload generation. Partition generation is always enabled,
 including the empty partition tuple for unpartitioned tables. Missing or invalid
 metadata makes only the affected block's dimension unavailable. There is no sidecar byte budget:
 construction keeps complete coverage and `read` consumes the entire file once it is opened.
 
-`read` returns null immediately when `Settings.read` is false, without inspecting metadata,
-accessing the cache or opening files. An absent sidecar reference or an `IOException` also
-returns null, allowing the caller to fall back to the manifest. If the thread is interrupted, the I/O failure is propagated as
+`read` returns null for an absent sidecar reference or an `IOException`, allowing the caller
+to fall back to the manifest. If the thread is interrupted, the I/O failure is propagated as
 `UncheckedIOException`. Other exceptions and errors propagate unchanged. `select` validates
 supplied bytes directly and reports invalid containers with `IOException`.
 
-Version 1 uses the following layout. Container `int` and `long` fields are signed, fixed-width
-4-byte and 8-byte big-endian integers. Encoding IDs are unsigned bytes with separate namespaces.
-Payload counts and envelopes use the same fixed-width types; delta streams use the
-variable-length encoding described below.
+Version 1 uses the following layout. Counts, lengths, offsets and the version use canonical
+nonnegative unsigned LEB128 varints. Counts and payload lengths are bounded by `Integer.MAX_VALUE`;
+block offsets, lengths and record counts are bounded by `Long.MAX_VALUE`. Row-ID envelope
+endpoints remain fixed-width, eight-byte big-endian longs. Encoding IDs are unsigned bytes
+with separate namespaces. The existing serialized partition tuple bytes are unchanged.
 
 ```text
 magic : 4 bytes                         // ASCII PMSC
-formatVersion : int                    // 1
-manifestLength : long
-manifestEntryCount : long               // ADD + DELETE
-avroHeaderLength : int
+formatVersion : varint                 // 1
+avroHeaderLength : varint
 avroHeader : bytes                      // original schema, codec and sync marker
-partitionCount : int
+partitionCount : varint
 partitionDictionary[]
-  partitionByteLength : int
+  partitionByteLength : varint
   partitionBytes : bytes                // existing manifest BinaryRow serialization
-blockCount : int
+blockCount : varint
 blocks[]                               // original physical order
-  offset : long
-  length : long                         // complete encoded block, including sync marker
-  recordCount : long
+  offset : varint
+  length : varint                       // complete encoded block, including sync marker
+  recordCount : varint
   partitionEncoding : byte
   if partitionEncoding != 0:
-    partitionPayloadLength : int
+    partitionPayloadLength : varint
     partitionPayload : bytes
   rowIdEncoding : byte
   if rowIdEncoding != 0:
-    rowIdPayloadLength : int
+    rowIdPayloadLength : varint
     rowIdPayload : bytes
   bucketEncoding : byte
   if bucketEncoding != 0:
-    bucketPayloadLength : int
+    bucketPayloadLength : varint
     bucketPayload : bytes
 checksum : 32 bytes                     // SHA-256 of all preceding bytes
 ```
@@ -134,26 +132,34 @@ Partition predicates are evaluated once per dictionary entry.
 | Dimension | Encoding | Payload |
 | --- | --- | --- |
 | Any | `0` | Unavailable; only the encoding byte is present. |
-| Partition | `1` | Count and delta/varint-compressed sorted unique dictionary IDs. |
-| Row ID | `1` | Interval count, minimum, span, and delta/varint-compressed interior endpoints. |
-| Bucket | `1` | Count and delta/varint-compressed sorted unique packed bucket/count pairs. |
+| Partition | `1` | `intsDeltaPayload` of sorted unique dictionary IDs. |
+| Row ID | `1` | Minimum, maximum, and `intsDeltaPayload` of sorted interior interval endpoints. |
+| Bucket | `1` | Two paired `intsDeltaPayload` sequences: sorted bucket IDs and their recorded total bucket counts. |
 | Any | Other nonzero ID | Skip the declared payload length; treat only this dimension as unavailable. |
 
 Only nonzero encodings are followed by a length and payload. Payload lengths exclude the
 encoding and length fields, but include the count and other fields within the payload.
-All three encoding-1 payloads have positive counts no greater than the block's record count.
-Encoding 0 represents unavailable coverage, rather than encoding 1 with a zero count.
+Partition IDs and bucket pairs have positive counts no greater than the block's record count.
+Row-ID coverage contains one or more intervals; its interior endpoint count can be zero for
+a single interval. Encoding 0 represents unavailable coverage, not an empty known set.
 
-#### Delta Encoding
+#### Integer Delta Payload
 
-Each payload starts with a fixed-width count (`int`); row-ID payloads also have fixed-width
-`min` and `span` fields (`long`). Only integers in the following delta stream use
-nonnegative unsigned LEB128 varints, occupying one to nine bytes for values from 0 through
+Partition, row-ID and both bucket sequences share this structure:
+
+```text
+intsDeltaPayload
+  count : varint
+  deltas[count] : varint
+```
+
+The count is in `[0, Integer.MAX_VALUE]`. Nonnegative deltas use unsigned LEB128 varints,
+occupying one to nine bytes for values from 0 through
 `Long.MAX_VALUE`. Seven value bits are stored per byte, least significant group first; the
 high bit indicates another byte follows.
-Encodings use the shortest representation. There is no ZigZag transformation or padding.
+Encodings use the shortest representation without padding.
 
-A sorted sequence is delta-encoded from a specified base. Each value contributes one
+A nondecreasing sequence is delta-encoded from a specified base. Each value contributes one
 unsigned varint containing its difference from the preceding value. The first difference
 is relative to the base:
 
@@ -163,10 +169,18 @@ value[0] = base + deltas[0]
 value[i] = value[i - 1] + deltas[i]
 ```
 
-The shared `DeltaVarintCodec` utility writes each delta immediately and reads values on
-demand, using `VarLengthIntUtils` for varints. Counts and bounds are supplied by the caller.
-The reader checks overflow and value bounds and requires the buffer to end after all
-expected values have been consumed. It can stop early without materializing the sequence.
+The shared `DeltaVarintCodec` utility writes the count and then each delta immediately,
+and reads values on demand using `VarLengthIntUtils`. A reader consumes exactly the declared
+number of values, leaving any following sequence available in the buffer. Callers check
+their enclosing payload boundaries. Counts, overflow and value bounds are checked without
+materializing arrays. Reads may stop early.
+
+Only the `totalBuckets` sequence uses signed differences, because totals need not increase
+when pairs are sorted by bucket. Its differences use ZigZag before unsigned varint encoding:
+`encoded = (delta << 1) ^ (delta >> 63)` and
+`delta = (encoded >>> 1) ^ -(encoded & 1)`. Values are nonnegative ints, so encoded deltas
+are at most `2 * Integer.MAX_VALUE` and require at most five bytes. The field defines this
+signed mode; no additional mode byte is stored. Other sequences use nonnegative differences.
 
 #### Partition Payload
 
@@ -175,15 +189,14 @@ represented by its entries:
 
 ```text
 partitionPayload
-  partitionIdCount : int               // N > 0
-  deltas[]                            // N dictionary IDs, base = 0
+  intsDeltaPayload                    // N > 0 dictionary IDs, base = 0
 ```
 
 An ID is the zero-based position of a complete tuple in the sidecar's shared dictionary.
 IDs satisfy `0 <= id < partitionCount` and are strictly increasing. Tuple bytes appear only
 in the dictionary and are not repeated in each block. For IDs `[0, 1, 2, 3, 4]`, the deltas
-are `[0, 1, 1, 1, 1]`. The payload contains a four-byte count of 5 followed by these five
-varint bytes: 9 bytes, or 14 bytes including the encoding and length fields.
+are `[0, 1, 1, 1, 1]`. The payload contains a one-byte count of 5 followed by these five
+varint bytes: 6 bytes, or 8 bytes including the encoding and length fields.
 
 With a partition filter, a block matches if any referenced tuple matches. A tuple containing
 a null partition value still has a dictionary ID. Unpartitioned tables record the empty
@@ -198,24 +211,25 @@ sorted and disjoint; they are never expanded into individual row IDs or coarsene
 
 ```text
 rowIdPayload
-  rangeCount : int                     // N > 0
-  min : long                           // first interval's start
-  span : long                          // last interval's end minus min
-  deltas[]                            // 2 * (N - 1) interior endpoints, base = min
+  minRowId : long                      // first interval's start
+  maxRowId : long                      // last interval's inclusive end
+  intsDeltaPayload                    // 2 * (N - 1) sorted interior endpoints, base = minRowId
 ```
 
-The maximum is `min + span`, which must not exceed `Long.MAX_VALUE`. Flatten the intervals
-as `[start0, end0, start1, end1, ...]`. The first start is supplied by `min`, and the last
-end by `min + span`; only the remaining `2 * (N - 1)` interior endpoints are delta/varint encoded.
+The envelope satisfies `0 <= minRowId <= maxRowId <= Long.MAX_VALUE`. Flatten the intervals
+as `[start0, end0, start1, end1, ...]`. The first start is supplied by `minRowId`, and the last
+end by `maxRowId`; only the remaining `2 * (N - 1)` interior endpoints are delta/varint encoded.
+Their count must be even, and the derived interval count `N = count / 2 + 1` must not exceed
+the block's record count. There is no separate stored interval count.
 Pairing the reconstructed endpoints recovers the intervals. Each pair satisfies
 `0 <= start <= end <= Long.MAX_VALUE`; each following start must exceed the preceding end.
 
-For `[(10, 19), (30, 39)]`, the count is 2, minimum is 10, and span is 29. The interior
+For `[(10, 19), (30, 39)]`, the minimum is 10 and maximum is 39. The interior
 endpoints `[19, 30]` have deltas `[9, 11]` from base 10, each encoded as one varint byte.
-The payload starts with a four-byte count of 2, an eight-byte minimum of 10, and an eight-byte
-span of 29, followed by the delta bytes `[9, 11]`: 22 bytes, or 27 bytes with framing.
-For a single interval, the 20-byte fixed-width prefix completely defines the interval and
-no deltas follow.
+The payload starts with an eight-byte minimum of 10 and an eight-byte maximum of 39,
+followed by `intsDeltaPayload` bytes `[2, 9, 11]`: 19 bytes, or 21 bytes with framing.
+For a single interval, the two eight-byte endpoints and a one-byte zero count define the
+interval: 17 payload bytes and no deltas.
 
 The reader first tests the envelope without decoding any deltas. A query for row ID 25
 passes the example's envelope check but matches neither interval. Unknown or invalid row-ID
@@ -227,21 +241,18 @@ When `bucketEncoding == 1`, the block stores distinct bucket/count pairs:
 
 ```text
 bucketPayload
-  pairCount : int                      // N > 0
-  deltas[]                            // N packed pairs, base = 0
-
-packedPair = ((long) bucket << 32) | totalBuckets
+  buckets : intsDeltaPayload           // N > 0, base = 0, nonnegative deltas
+  totalBuckets : intsDeltaPayload      // N values, base = 0, ZigZag signed deltas
 ```
 
-Each pair satisfies `0 <= bucket < totalBuckets`. Packing places the bucket in the high
-32 bits and the recorded total bucket count in the low 32 bits. Packed values are nonnegative,
-sorted and unique, equivalent to sorting first by bucket and then by total bucket count.
-The decoder recovers `bucket = (int) (packedPair >>> 32)` and `totalBuckets = (int) packedPair`.
-The same bucket may occur with different totals after rescaling.
+Pairs are sorted first by bucket, then by total bucket count, with duplicates removed.
+Each pair satisfies `0 <= bucket < totalBuckets <= Integer.MAX_VALUE`. Both sequences have
+the same count, and values at the same position form one pair. The totals must not be sorted
+independently. The same bucket may occur with different totals after rescaling.
 
-For `[(1, 4), (1, 8), (3, 4)]`, the packed values are `[4294967300, 4294967304, 12884901892]`
-and deltas are `[4294967300, 4, 8589934588]`. The payload contains a four-byte count of 3
-and three varints occupying 5, 1 and 5 bytes: 15 bytes total, or 20 bytes with framing.
+For `[(1, 4), (1, 8), (3, 4)]`, bucket values `[1, 1, 3]` have deltas `[1, 0, 2]`.
+Paired totals `[4, 8, 4]` have signed deltas `[4, 4, -4]`, ZigZag-encoded as `[8, 8, 7]`.
+The two payloads are `[3, 1, 0, 2]` and `[3, 8, 8, 7]`: 8 bytes total, or 10 bytes with framing.
 
 Missing, invalid or negative/synthetic bucket metadata makes the block's bucket coverage
 unavailable. A caller can supply a predicate on `(bucket, totalBuckets)` which conservatively
@@ -250,14 +261,18 @@ the entry-filtering stage; omit the bucket predicate if no safe check is availab
 
 #### Validation and Reading
 
-Readers validate the checksum, fixed container fields, payload lengths and count headers,
+Readers validate the checksum, container fields, payload lengths and leading count headers,
 and the complete physical block directory regardless of the query. Byte spans must cover
 the whole original manifest after its header; record counts must sum to the manifest entry
-count. Unknown nonzero encodings skip their declared bytes without interpreting a count.
+count. Manifest length and entry count come from the supplied `ManifestFileMeta` rather
+than being duplicated in the sidecar. Unknown nonzero encodings skip their declared bytes
+without interpreting a count.
 
-Compressed contents are decoded only for dimensions needed by the filters and only until
-that dimension matches. A row-ID envelope rejection skips all its deltas; a matching interval,
-partition ID or bucket pair skips remaining values. Invalid varints, value counts, overflows,
+Compressed contents are decoded only for dimensions needed by the filters. A row-ID envelope
+rejection skips all its deltas; a matching interval or partition ID skips remaining values.
+Bucket filtering first walks the bucket sequence to locate the paired totals without
+allocating arrays, then decodes pairs until a match. Unused totals may be skipped.
+Invalid varints, value counts, overflows,
 out-of-range values or ordering encountered while decoding invalidate the container. Delta
 contents skipped by short-circuiting are not individually validated.
 

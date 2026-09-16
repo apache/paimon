@@ -23,48 +23,81 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Objects;
 
-/** Streaming unsigned delta/varint encoding for nondecreasing, nonnegative long values. */
+/** Streaming count-prefixed delta/varint encoding of nonnegative integer sequences. */
 public final class DeltaVarintCodec {
 
     private DeltaVarintCodec() {}
 
-    /** Writes each delta immediately. The caller owns the output and stores the value count. */
+    /** Writes a varint count followed by deltas, without buffering the sequence. */
     public static final class Writer {
         private final DataOutput out;
+        private final boolean signedDeltas;
+        private long remaining;
         private long previous;
 
-        public Writer(DataOutput out, long base) {
-            if (base < 0) {
-                throw new IllegalArgumentException("Delta base must be nonnegative");
+        public Writer(DataOutput out, int count, long base) throws IOException {
+            this(out, count, base, false);
+        }
+
+        /** Signed deltas support non-monotonic nonnegative int values using ZigZag. */
+        public Writer(DataOutput out, int count, long base, boolean signedDeltas)
+                throws IOException {
+            if (base < 0 || count < 0 || (signedDeltas && base > Integer.MAX_VALUE)) {
+                throw new IllegalArgumentException("Invalid delta/varint count or base");
             }
             this.out = Objects.requireNonNull(out);
+            this.signedDeltas = signedDeltas;
+            this.remaining = count;
             previous = base;
+            VarLengthIntUtils.encodeInt(out, count);
         }
 
         public void write(long value) throws IOException {
-            require(value >= previous);
-            VarLengthIntUtils.encodeLong(out, value - previous);
+            require(remaining > 0 && value >= 0);
+            long delta = value - previous;
+            if (signedDeltas) {
+                require(value <= Integer.MAX_VALUE);
+                delta = (delta << 1) ^ (delta >> 63);
+            } else {
+                require(delta >= 0);
+            }
+            VarLengthIntUtils.encodeLong(out, delta);
             previous = value;
+            remaining--;
         }
     }
 
     /**
-     * Reads values on demand and advances the supplied buffer. The buffer must contain exactly the
-     * encoded sequence; a complete read validates its boundary. Reading may stop early.
+     * Reads the count and then values on demand. A complete read leaves the buffer at the next
+     * payload, allowing count-prefixed sequences to be concatenated. Reading may stop early.
      */
     public static final class Reader {
         private final ByteBuffer data;
         private final long max;
+        private final int count;
+        private final boolean signedDeltas;
         private long remaining;
         private long value;
 
-        public Reader(ByteBuffer data, long count, long base, long max) throws IOException {
+        public Reader(ByteBuffer data, long base, long max) throws IOException {
+            this(data, base, max, false);
+        }
+
+        public Reader(ByteBuffer data, long base, long max, boolean signedDeltas)
+                throws IOException {
             this.data = Objects.requireNonNull(data);
-            require(count >= 0 && count <= data.remaining() && base >= 0 && max >= base);
-            require(count != 0 || !data.hasRemaining());
+            long encodedCount = VarLengthIntUtils.decodeLong(data);
+            require(encodedCount <= Integer.MAX_VALUE && encodedCount <= data.remaining());
+            require(base >= 0 && max >= base && (!signedDeltas || max <= Integer.MAX_VALUE));
+            count = (int) encodedCount;
             remaining = count;
             value = base;
             this.max = max;
+            this.signedDeltas = signedDeltas;
+        }
+
+        public int count() {
+            return count;
         }
 
         public boolean hasNext() {
@@ -74,10 +107,13 @@ public final class DeltaVarintCodec {
         public long next() throws IOException {
             require(remaining > 0);
             long delta = VarLengthIntUtils.decodeLong(data);
-            require(delta <= max - value);
+            if (signedDeltas) {
+                require(delta <= 2L * Integer.MAX_VALUE);
+                delta = (delta >>> 1) ^ -(delta & 1);
+            }
+            require(delta >= -value && delta <= max - value);
             value += delta;
             remaining--;
-            require(remaining != 0 || !data.hasRemaining());
             return value;
         }
     }
