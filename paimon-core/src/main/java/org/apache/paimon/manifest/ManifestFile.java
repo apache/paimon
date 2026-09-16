@@ -18,6 +18,7 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
@@ -59,6 +60,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     private final RowType partitionType;
     private final AvroFileFormat avroFileFormat;
     private final long suggestedFileSize;
+    private final CoreOptions options;
 
     private ManifestFile(
             FileIO fileIO,
@@ -69,7 +71,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             String compression,
             PathFactory pathFactory,
             long suggestedFileSize,
-            @Nullable SegmentsCache<Path> cache) {
+            @Nullable SegmentsCache<Path> cache,
+            CoreOptions options) {
         super(
                 fileIO,
                 serializer,
@@ -85,6 +88,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         this.partitionType = partitionType;
         this.avroFileFormat = avroFileFormat;
         this.suggestedFileSize = suggestedFileSize;
+        this.options = options;
     }
 
     @Override
@@ -301,7 +305,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 serializer,
                 compression,
                 pathFactory,
-                suggestedFileSize);
+                suggestedFileSize,
+                options);
     }
 
     /** Creates an Avro manifest writer for one explicit path. */
@@ -314,7 +319,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 serializer,
                 compression,
                 singlePathFactory(manifestPath),
-                Long.MAX_VALUE);
+                Long.MAX_VALUE,
+                options);
     }
 
     private PathFactory singlePathFactory(Path manifestPath) {
@@ -357,6 +363,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         private final String compression;
         private final FileStorePathFactory pathFactory;
         private final long suggestedFileSize;
+        private final CoreOptions options;
         @Nullable private final SegmentsCache<Path> cache;
 
         public Factory(
@@ -367,7 +374,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 String compression,
                 FileStorePathFactory pathFactory,
                 long suggestedFileSize,
-                @Nullable SegmentsCache<Path> cache) {
+                @Nullable SegmentsCache<Path> cache,
+                CoreOptions options) {
             this.fileIO = fileIO;
             this.schemaManager = schemaManager;
             this.partitionType = partitionType;
@@ -376,6 +384,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             this.pathFactory = pathFactory;
             this.suggestedFileSize = suggestedFileSize;
             this.cache = cache;
+            this.options = options;
         }
 
         public boolean isCacheEnabled() {
@@ -392,7 +401,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     compression,
                     pathFactory.manifestFileFactory(),
                     suggestedFileSize,
-                    cache);
+                    cache,
+                    options);
         }
     }
 }

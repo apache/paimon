@@ -35,6 +35,7 @@ import java.util.List;
 
 /** Synthetic index references for manifest serialization and lifecycle tests. */
 public final class ManifestIndexTestUtils {
+
     private ManifestIndexTestUtils() {}
 
     public static ManifestFileMeta withIndexFileName(ManifestFileMeta meta, String indexFileName) {
