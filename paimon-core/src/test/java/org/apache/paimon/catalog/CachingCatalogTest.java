@@ -646,9 +646,13 @@ class CachingCatalogTest extends CatalogTestBase {
     public void testManifestSidecarCacheOptions() {
         Options options = new Options();
         CachingCatalog caching = new CachingCatalog(catalog, options);
-        assertThat(CACHE_MANIFEST_SIDECAR_MAX_MEMORY.defaultValue()).isNull();
-        assertThat(options.getOptional(CACHE_MANIFEST_SIDECAR_MAX_MEMORY)).isEmpty();
-        assertThat(caching.manifestSidecarCache).isSameAs(caching.manifestCache);
+        assertThat(CACHE_MANIFEST_SIDECAR_MAX_MEMORY.defaultValue())
+                .isEqualTo(MemorySize.ofMebiBytes(64));
+        assertThat(caching.manifestSidecarCache).isNotSameAs(caching.manifestCache);
+        assertThat(caching.manifestSidecarCache.maxMemorySize())
+                .isEqualTo(MemorySize.ofMebiBytes(64));
+        assertThat(caching.manifestSidecarCache.maxElementSize())
+                .isEqualTo(MemorySize.ofMebiBytes(64).getBytes());
 
         options.set(CACHE_MANIFEST_SIDECAR_MAX_MEMORY, MemorySize.ofMebiBytes(8));
         caching = new CachingCatalog(catalog, options);

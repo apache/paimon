@@ -80,13 +80,13 @@ Scans with partition, row-ID or bucket filters select blocks before reading mani
 Normal entry filtering and ADD/DELETE reconciliation still apply. Missing or unusable sidecars
 fall back to normal manifest reads; disabled sidecars and scans without these filters do not
 perform sidecar I/O. Sidecar caching is controlled by the catalog option
-`cache.manifest-sidecar.max-memory` (unset by default). A positive value supplies an
-additional budget independent of the manifest content cache. When unset or set to 0, sidecars
-reuse the manifest content cache, or remain uncached if that cache is disabled. Sidecar caching
-uses the catalog's `cache.expire-after-access` and `cache.manifest.soft-values` policies. Selected block bytes
-still share the manifest content cache without populating the whole-manifest entry cache
-with partial results. The low-level `build` method returns sidecar bytes without writing
-or publishing another file.
+`cache.manifest-sidecar.max-memory` (64 MiB by default). A positive value supplies an
+additional budget independent of the manifest content cache. When set to 0, sidecars reuse
+the manifest content cache, or remain uncached if that cache is disabled. Sidecar caching
+uses the catalog's `cache.expire-after-access` and `cache.manifest.soft-values` policies.
+Selected block bytes still share the manifest content cache without populating the
+whole-manifest entry cache with partial results. The low-level `build` method returns
+sidecar bytes without writing or publishing another file.
 
 Callers decide whether to invoke `build` and `read`; these utilities have no read/write switches.
 `build` and `Builder` accept `rowIdEnabled` and `bucketEnabled` arguments for independent
