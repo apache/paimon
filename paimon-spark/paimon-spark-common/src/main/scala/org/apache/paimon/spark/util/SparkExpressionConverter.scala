@@ -26,7 +26,7 @@ import org.apache.paimon.types.{DecimalType, RowType}
 import org.apache.paimon.types.DataTypeRoot._
 
 import org.apache.spark.sql.catalyst.util.{ArrayData, DateTimeUtils}
-import org.apache.spark.sql.connector.expressions.{Expression, Extract, GeneralScalarExpression, Literal, NamedReference}
+import org.apache.spark.sql.connector.expressions.{Cast, Expression, Extract, GeneralScalarExpression, Literal, NamedReference}
 import org.apache.spark.sql.types.{ArrayType => SparkArrayType, DataType => SparkDataType}
 
 import scala.collection.JavaConverters._
@@ -85,6 +85,14 @@ object SparkExpressionConverter {
           case RTRIM =>
             convertChildren(s.children()).map(
               i => new TrimTransform(i, TrimTransform.Flag.TRAILING))
+          case _ => None
+        }
+      case c: Cast =>
+        c.expression() match {
+          case n: NamedReference =>
+            CastTransform.tryCreate(
+              toPaimonFieldRef(n, rowType),
+              SparkTypeUtils.toPaimonType(c.dataType()))
           case _ => None
         }
       // The connector `Extract` expression was added in Spark 3.4 and does not exist on
