@@ -90,6 +90,7 @@ import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListConsumersResponse;
+import org.apache.paimon.rest.responses.ListDatabaseReferencesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
@@ -109,6 +110,7 @@ import org.apache.paimon.rest.responses.ListViewDetailsResponse;
 import org.apache.paimon.rest.responses.ListViewsGloballyResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.rest.responses.PagedResponse;
+import org.apache.paimon.rest.responses.SingleDatabaseReferenceResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -193,6 +195,11 @@ public class RESTApi {
     public static final String FUNCTION_NAME_PATTERN = "functionNamePattern";
     public static final String PARTITION_NAME_PATTERN = "partitionNamePattern";
     public static final String TAG_NAME_PREFIX = "tagNamePrefix";
+
+    private static final String REFERENCE_NAME = "name";
+    private static final String REFERENCE_TYPE = "type";
+    private static final String REFERENCE_UPDATE_MODE = "mode";
+    private static final String FAST_FORWARD = "FAST_FORWARD";
 
     public static final long TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000L;
 
@@ -358,6 +365,113 @@ public class RESTApi {
                 new AlterDatabaseRequest(removals, updates),
                 AlterDatabaseResponse.class,
                 restAuthFunction);
+    }
+
+    /** List all database-level branches and immutable tags. */
+    @Experimental
+    public List<DatabaseReference> listDatabaseReferences(
+            String databaseName, @Nullable DatabaseReferenceType type) {
+        return listDataFromPageApi(
+                queryParams -> {
+                    if (type != null) {
+                        queryParams.put(REFERENCE_TYPE, type.queryValue());
+                    }
+                    return client.get(
+                            resourcePaths.databaseTrees(databaseName),
+                            queryParams,
+                            ListDatabaseReferencesResponse.class,
+                            restAuthFunction);
+                });
+    }
+
+    /** List one page of database-level branches and immutable tags. */
+    @Experimental
+    public PagedList<DatabaseReference> listDatabaseReferencesPaged(
+            String databaseName,
+            @Nullable DatabaseReferenceType type,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        Map<String, String> queryParams = buildPagedQueryParams(maxResults, pageToken);
+        if (type != null) {
+            queryParams.put(REFERENCE_TYPE, type.queryValue());
+        }
+        ListDatabaseReferencesResponse response =
+                client.get(
+                        resourcePaths.databaseTrees(databaseName),
+                        queryParams,
+                        ListDatabaseReferencesResponse.class,
+                        restAuthFunction);
+        List<DatabaseReference> references = response.getReferences();
+        return new PagedList<>(
+                references == null ? emptyList() : references, response.getNextPageToken());
+    }
+
+    /** Get one database-level branch or immutable tag. */
+    @Experimental
+    public DatabaseReference getDatabaseReference(String databaseName, String referenceName) {
+        SingleDatabaseReferenceResponse response =
+                client.get(
+                        resourcePaths.databaseTree(databaseName, referenceName),
+                        SingleDatabaseReferenceResponse.class,
+                        restAuthFunction);
+        return checkNotNull(response.getReference(), "Reference response must contain reference");
+    }
+
+    /** Create a database-level branch or immutable tag from an existing reference. */
+    @Experimental
+    public DatabaseReference createDatabaseReference(
+            String databaseName,
+            String referenceName,
+            DatabaseReferenceType type,
+            DatabaseReference source) {
+        Map<String, String> queryParams = Maps.newHashMap();
+        queryParams.put(REFERENCE_NAME, referenceName);
+        queryParams.put(REFERENCE_TYPE, type.queryValue());
+        SingleDatabaseReferenceResponse response =
+                client.post(
+                        resourcePaths.databaseTrees(databaseName),
+                        queryParams,
+                        source,
+                        SingleDatabaseReferenceResponse.class,
+                        restAuthFunction);
+        return checkNotNull(response.getReference(), "Reference response must contain reference");
+    }
+
+    /** Fast-forward a database-level branch to an immutable tag. */
+    @Experimental
+    public DatabaseReference fastForwardDatabaseBranch(
+            String databaseName, String targetBranch, String sourceTag) {
+        Map<String, String> queryParams = Maps.newHashMap();
+        queryParams.put(REFERENCE_UPDATE_MODE, FAST_FORWARD);
+        queryParams.put(REFERENCE_TYPE, DatabaseReferenceType.BRANCH.queryValue());
+        SingleDatabaseReferenceResponse response =
+                client.put(
+                        resourcePaths.databaseTree(databaseName, targetBranch),
+                        queryParams,
+                        new DatabaseReference(DatabaseReferenceType.TAG, sourceTag),
+                        SingleDatabaseReferenceResponse.class,
+                        restAuthFunction);
+        return checkNotNull(response.getReference(), "Reference response must contain reference");
+    }
+
+    /** Delete one database-level branch or immutable tag. */
+    @Experimental
+    public DatabaseReference deleteDatabaseReference(
+            String databaseName,
+            String referenceName,
+            @Nullable DatabaseReferenceType expectedType) {
+        Map<String, String> queryParams = Maps.newHashMap();
+        if (expectedType != null) {
+            queryParams.put(REFERENCE_TYPE, expectedType.queryValue());
+        }
+        SingleDatabaseReferenceResponse response =
+                client.delete(
+                        resourcePaths.databaseTree(databaseName, referenceName),
+                        queryParams,
+                        null,
+                        SingleDatabaseReferenceResponse.class,
+                        restAuthFunction);
+        return checkNotNull(response.getReference(), "Reference response must contain reference");
     }
 
     /**

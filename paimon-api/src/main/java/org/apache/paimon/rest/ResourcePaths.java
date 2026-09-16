@@ -36,6 +36,7 @@ public class ResourcePaths {
     protected static final String PARTITIONS = "partitions";
     protected static final String BRANCHES = "branches";
     protected static final String TAGS = "tags";
+    protected static final String TREES = "trees";
     protected static final String SNAPSHOTS = "snapshots";
     protected static final String CONSUMERS = "consumers";
     protected static final String SCHEMAS = "schemas";
@@ -142,6 +143,18 @@ public class ResourcePaths {
 
     public String database(String databaseName) {
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName));
+    }
+
+    /** Database-level branches and immutable tags. */
+    @Experimental
+    public String databaseTrees(String databaseName) {
+        return SLASH.join(database(databaseName), TREES);
+    }
+
+    /** One named database-level branch or immutable tag. */
+    @Experimental
+    public String databaseTree(String databaseName, String referenceName) {
+        return SLASH.join(databaseTrees(databaseName), encodeString(referenceName));
     }
 
     public String tables(String databaseName) {

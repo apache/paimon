@@ -32,6 +32,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessin
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
+import org.apache.hc.client5.http.classic.methods.HttpPut;
 import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
 import org.apache.hc.core5.http.ClassicHttpResponse;
 import org.apache.hc.core5.http.ContentType;
@@ -97,12 +98,21 @@ public class HttpClient implements RESTClient {
             RESTRequest body,
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
-        HttpPost httpPost = HttpClientUtils.newHttpPost(getRequestUrl(path, null));
+        return post(path, Collections.emptyMap(), body, responseType, restAuthFunction);
+    }
+
+    public <T extends RESTResponse> T post(
+            String path,
+            Map<String, String> queryParams,
+            RESTRequest body,
+            Class<T> responseType,
+            RESTAuthFunction restAuthFunction) {
+        HttpPost httpPost = HttpClientUtils.newHttpPost(getRequestUrl(path, queryParams));
         String encodedBody = RESTUtil.encodedBody(body);
         if (encodedBody != null) {
             httpPost.setEntity(new StringEntity(encodedBody, ContentType.APPLICATION_JSON));
         }
-        Header[] authHeaders = getHeaders(path, "POST", encodedBody, restAuthFunction);
+        Header[] authHeaders = getHeaders(path, queryParams, "POST", encodedBody, restAuthFunction);
         httpPost.setHeaders(authHeaders);
         // A POST the server cannot absorb twice is sent exactly once, whatever the status says.
         return exec(
@@ -113,22 +123,53 @@ public class HttpClient implements RESTClient {
                         : null);
     }
 
+    public <T extends RESTResponse> T put(
+            String path,
+            Map<String, String> queryParams,
+            RESTRequest body,
+            Class<T> responseType,
+            RESTAuthFunction restAuthFunction) {
+        HttpPut httpPut = HttpClientUtils.newHttpPut(getRequestUrl(path, queryParams));
+        String encodedBody = RESTUtil.encodedBody(body);
+        if (encodedBody != null) {
+            httpPut.setEntity(new StringEntity(encodedBody, ContentType.APPLICATION_JSON));
+        }
+        Header[] authHeaders = getHeaders(path, queryParams, "PUT", encodedBody, restAuthFunction);
+        httpPut.setHeaders(authHeaders);
+        return exec(
+                httpPut,
+                responseType,
+                body != null && !body.isRetrySafe()
+                        ? ExponentialHttpRequestRetryStrategy.retryUnsafeContext()
+                        : null);
+    }
+
     @Override
     public <T extends RESTResponse> T delete(String path, RESTAuthFunction restAuthFunction) {
-        return delete(path, null, restAuthFunction);
+        return delete(path, Collections.emptyMap(), null, null, restAuthFunction);
     }
 
     @Override
     public <T extends RESTResponse> T delete(
             String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
-        HttpDelete httpDelete = HttpClientUtils.newHttpDelete(getRequestUrl(path, null));
+        return delete(path, Collections.emptyMap(), body, null, restAuthFunction);
+    }
+
+    public <T extends RESTResponse> T delete(
+            String path,
+            Map<String, String> queryParams,
+            RESTRequest body,
+            Class<T> responseType,
+            RESTAuthFunction restAuthFunction) {
+        HttpDelete httpDelete = HttpClientUtils.newHttpDelete(getRequestUrl(path, queryParams));
         String encodedBody = RESTUtil.encodedBody(body);
         if (encodedBody != null) {
             httpDelete.setEntity(new StringEntity(encodedBody, ContentType.APPLICATION_JSON));
         }
-        Header[] authHeaders = getHeaders(path, "DELETE", encodedBody, restAuthFunction);
+        Header[] authHeaders =
+                getHeaders(path, queryParams, "DELETE", encodedBody, restAuthFunction);
         httpDelete.setHeaders(authHeaders);
-        return exec(httpDelete, null);
+        return exec(httpDelete, responseType);
     }
 
     @VisibleForTesting

@@ -98,6 +98,14 @@ public class RESTCatalogOptions {
                     .withDescription(
                             "The user agent of http client connecting to REST Catalog server.");
 
+    /** Database-level branch or immutable tag carried by table API requests. */
+    public static final ConfigOption<String> DATABASE_REFERENCE =
+            ConfigOptions.key("header.Paimon-Reference")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Database-level branch or immutable tag used by REST table requests.");
+
     public static final ConfigOption<String> DLF_OSS_ENDPOINT =
             ConfigOptions.key("dlf.oss-endpoint")
                     .stringType()

@@ -203,6 +203,256 @@ paths:
           $ref: '#/components/responses/DatabaseNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/trees:
+    get:
+      tags:
+        - database-reference
+      summary: List database references
+      operationId: listDatabaseReferences
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ "branch", "tag" ]
+        - name: maxResults
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Database branches and immutable tags.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListDatabaseReferencesResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+    post:
+      tags:
+        - database-reference
+      summary: Create database reference
+      operationId: createDatabaseReference
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [ "branch", "tag" ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatabaseReference'
+      responses:
+        "200":
+          description: Created branch or immutable tag.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleDatabaseReferenceResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+        "409":
+          description: Reference already exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/trees/{name}:
+    get:
+      tags:
+        - database-reference
+      summary: Get database reference
+      operationId: getDatabaseReference
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Named branch or immutable tag.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleDatabaseReferenceResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          description: Database or reference does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+    put:
+      tags:
+        - database-reference
+      summary: Fast-forward database branch from immutable tag
+      operationId: fastForwardDatabaseBranch
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: mode
+          in: query
+          required: true
+          schema:
+            type: string
+            const: "FAST_FORWARD"
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            const: "branch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatabaseReference'
+      responses:
+        "200":
+          description: Updated target branch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleDatabaseReferenceResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          description: Database, target branch, or source tag does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Target is not an ancestor of the source tag.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+    delete:
+      tags:
+        - database-reference
+      summary: Delete database reference
+      operationId: deleteDatabaseReference
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ "branch", "tag" ]
+      responses:
+        "200":
+          description: Deleted branch or immutable tag.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleDatabaseReferenceResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          description: Database or reference does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Reference type does not match or the default branch is protected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/register:
     post:
       tags:
@@ -269,6 +519,7 @@ paths:
           in: query
           schema:
             type: string
+        - $ref: '#/components/parameters/DatabaseReferenceHeader'
       responses:
         "200":
           description: OK
@@ -461,6 +712,7 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: '#/components/parameters/DatabaseReferenceHeader'
       responses:
         "200":
           description: OK
@@ -595,6 +847,7 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: '#/components/parameters/DatabaseReferenceHeader'
       requestBody:
         content:
           application/json:
@@ -810,6 +1063,7 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: '#/components/parameters/DatabaseReferenceHeader'
       responses:
         "200":
           description: OK
@@ -2406,6 +2660,15 @@ paths:
           $ref: '#/components/responses/SemanticViewNotImplementedErrorResponse'
 
 components:
+  parameters:
+    DatabaseReferenceHeader:
+      name: Paimon-Reference
+      in: header
+      required: false
+      description: Database-level branch or immutable tag. Required for a versioned database.
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
   #############################
   # Reusable Response Objects #
   #############################
@@ -3751,6 +4014,36 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Identifier'
+        nextPageToken:
+          type: string
+    DatabaseReference:
+      type: object
+      required:
+        - type
+        - name
+      properties:
+        type:
+          type: string
+          enum: [ "BRANCH", "TAG" ]
+        name:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    SingleDatabaseReferenceResponse:
+      type: object
+      required:
+        - reference
+      properties:
+        reference:
+          $ref: '#/components/schemas/DatabaseReference'
+    ListDatabaseReferencesResponse:
+      type: object
+      required:
+        - references
+      properties:
+        references:
+          type: array
+          items:
+            $ref: '#/components/schemas/DatabaseReference'
         nextPageToken:
           type: string
     ConfigResponse:
