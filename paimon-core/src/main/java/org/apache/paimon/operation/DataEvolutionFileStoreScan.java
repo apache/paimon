@@ -27,6 +27,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.reader.DataEvolutionArray;
 import org.apache.paimon.reader.DataEvolutionRow;
 import org.apache.paimon.schema.SchemaManager;
@@ -215,9 +216,9 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     /**
      * Per-file column pruning within a row-id-range group: drop files whose physical columns have
-     * no overlap with the query's {@code readType}. Necessary for columnar-split DE scenarios where
-     * a logical row is reconstructed from multiple files in the same row id range — a query that
-     * does not reference a file's columns has no reason to read it.
+     * no overlap with the query's {@code readType} or filter. Necessary for columnar-split DE
+     * scenarios where a logical row is reconstructed from multiple files in the same row id range —
+     * a query that does not reference a file's columns has no reason to read it.
      *
      * <p>When every file in the group lacks a requested column (e.g. an ADD COLUMN projection over
      * a row-disjoint pre-ALTER group), one file is kept as a row-count representative so the reader
@@ -235,6 +236,16 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         Set<Integer> readFieldIds = new HashSet<>();
         for (DataField f : readType.getFields()) {
             readFieldIds.add(f.id());
+        }
+        if (inputFilter != null) {
+            // executeFilter may need columns absent from the output projection. Keep their latest
+            // files too, otherwise widening the reader could see an older value or a null.
+            Set<String> filterFields = PredicateVisitor.collectFieldNames(inputFilter);
+            for (DataField field : schema.fields()) {
+                if (filterFields.contains(field.name())) {
+                    readFieldIds.add(field.id());
+                }
+            }
         }
         List<ManifestEntry> kept = new ArrayList<>(group.size());
         for (ManifestEntry entry : group) {

@@ -383,21 +383,31 @@ abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     /**
-     * Push the auth-widened read type to the snapshot reader before planning, so file-level column
-     * pruning keeps the files of the columns the rules read.
+     * Push the read type expanded for filters and auth rules to the snapshot reader before
+     * planning, so file-level column pruning keeps their dependencies.
      */
     private void applyAuthReadType(@Nullable TableQueryAuthResult queryAuthResult) {
         if (readType == null) {
             return;
         }
         RowType desired = readType;
+        if (userFilter != null) {
+            RowType widened =
+                    TableQueryAuthResult.appendMissingFields(
+                            schema.logicalRowType(),
+                            desired,
+                            PredicateVisitor.collectFieldNames(userFilter));
+            if (widened != null) {
+                desired = widened;
+            }
+        }
         if (queryAuthResult != null && queryAuthResult.hasRules()) {
             // post-mask conjuncts are evaluated at read time; their columns must survive planning
             RowType widened =
                     TableQueryAuthResult.appendMissingFields(
                             schema.logicalRowType(),
-                            readType,
-                            queryAuthResult.authFields(readType.getFieldNames(), userFilter));
+                            desired,
+                            queryAuthResult.authFields(desired.getFieldNames(), userFilter));
             if (widened != null) {
                 desired = widened;
             }

@@ -23,14 +23,12 @@ import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
@@ -40,7 +38,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 /** A {@link InnerTableRead} for data table. */
@@ -55,7 +52,7 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     // as read-level TopN already does (see ReadBuilderImpl)
     private final boolean queryAuthEnabled;
 
-    // the auth-widened read type currently applied, or null when the plain read type is
+    // the read type expanded for filters or auth rules, or null for the requested read type
     @Nullable private RowType appliedReadType;
 
     // blob-view columns that only resolve through the dedicated blob-view read path
@@ -147,30 +144,42 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
 
     protected final RecordReader<InternalRow> createDataReader(
             Split split, @Nullable TableQueryAuthResult authResult) throws IOException {
-        // A TableRead can be reused for multiple splits. Authentication may have expanded an
-        // explicitly configured physical projection for the previous split, so restore it before
-        // applying the current split's authorization dependencies. Without an explicit projection,
-        // the underlying reader must retain its own default read type.
+        // A TableRead can be reused for multiple splits. Filtering or authentication may have
+        // expanded the physical projection for the previous split, so restore it before adding
+        // the current dependencies. Without an explicit projection, the underlying reader must
+        // retain its own default read type.
         if (readType != null) {
             applyReadType(readType);
             appliedReadType = null;
         }
+        if (executeFilter && predicate != null) {
+            RowType widened =
+                    TableReadFilter.readType(schema.logicalRowType(), currentReadType(), predicate);
+            if (!widened.equals(currentReadType())) {
+                applyReadType(widened);
+                appliedReadType = widened;
+            }
+        }
         RecordReader<InternalRow> reader;
         if (authResult == null) {
-            reader = backProject(reader(split));
+            reader = reader(split);
         } else {
             reader = authedReader(split, authResult);
         }
-        if (executeFilter) {
-            reader = executeFilter(reader);
+        if (executeFilter && predicate != null) {
+            reader = TableReadFilter.filter(reader, physicalReadType(), predicate);
         }
 
-        return reader;
+        return backProject(reader);
+    }
+
+    private RowType physicalReadType() {
+        return appliedReadType != null ? appliedReadType : currentReadType();
     }
 
     private RecordReader<InternalRow> authedReader(Split split, TableQueryAuthResult authResult)
             throws IOException {
-        List<String> readFields = currentReadType().getFieldNames();
+        List<String> readFields = physicalReadType().getFieldNames();
         // masked filter columns are read and masked like rule fields, then evaluated post-mask
         Set<String> maskedFilterFields =
                 maskedFilterFields(authResult.extractColumnMasking().keySet());
@@ -181,7 +190,7 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
             appliedReadType = widened;
         }
         // the split read emits appliedReadType; rules are remapped against it by name
-        RowType outputType = appliedReadType != null ? appliedReadType : currentReadType();
+        RowType outputType = physicalReadType();
         // masks apply only to columns readable from the query: the ones it projects plus the
         // ones the rules pulled in; a mask on anything else is inert
         Map<String, Transform> masking = authResult.extractColumnMasking();
@@ -202,8 +211,7 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
                         outputType,
                         authResult.extractPredicate(),
                         selectedColumnMasking);
-        reader = filterMaskedConjuncts(reader, outputType, maskedFilterFields);
-        return backProject(reader);
+        return filterMaskedConjuncts(reader, outputType, maskedFilterFields);
     }
 
     private Set<String> maskedFilterFields(Set<String> maskTargets) {
@@ -243,15 +251,12 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         return reader.filter(filter::test);
     }
 
-    /** Project auth-widened rows back to the read type the query asked for. */
+    /** Project rows expanded for filtering or auth back to the requested read type. */
     private RecordReader<InternalRow> backProject(RecordReader<InternalRow> reader) {
         if (appliedReadType == null) {
             return reader;
         }
-        ProjectedRow backRow =
-                ProjectedRow.from(
-                        appliedReadType.projectIndexes(currentReadType().getFieldNames()));
-        return reader.transform(backRow::replaceRow);
+        return TableReadFilter.project(reader, appliedReadType, currentReadType());
     }
 
     /**
@@ -261,7 +266,7 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     @Nullable
     private RowType widenedReadType(TableQueryAuthResult authResult, Set<String> ruleFields) {
         RowType tableType = schema.logicalRowType();
-        RowType readType = currentReadType();
+        RowType readType = physicalReadType();
         Set<String> maskTargets = authResult.extractColumnMasking().keySet();
         for (String name : readType.getFieldNames()) {
             if (!ruleFields.contains(name) && !maskTargets.contains(name)) {
@@ -294,26 +299,6 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
             }
         }
         return TableQueryAuthResult.appendMissingFields(tableType, readType, ruleFields);
-    }
-
-    private RecordReader<InternalRow> executeFilter(RecordReader<InternalRow> reader) {
-        if (predicate == null) {
-            return reader;
-        }
-
-        Predicate predicate = this.predicate;
-        if (readType != null) {
-            int[] projection = schema.logicalRowType().getFieldIndices(readType.getFieldNames());
-            Optional<Predicate> optional =
-                    predicate.visit(PredicateProjectionConverter.fromProjection(projection));
-            if (!optional.isPresent()) {
-                return reader;
-            }
-            predicate = optional.get();
-        }
-
-        Predicate finalFilter = predicate;
-        return reader.filter(finalFilter::test);
     }
 
     /** Split with auth context. */

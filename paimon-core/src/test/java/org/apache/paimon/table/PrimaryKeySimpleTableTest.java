@@ -586,6 +586,32 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
+    public void testExecuteFilterWithUnprojectedValue() throws Exception {
+        writeData();
+        FileStoreTable table = createFileStoreTable();
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        TableRead read =
+                table.newRead()
+                        .withReadType(table.rowType().project(new int[] {1, 0}))
+                        .withFilter(builder.equal(2, 20001L))
+                        .executeFilter();
+        Function<InternalRow, String> toString =
+                row -> {
+                    assertThat(row.getFieldCount()).isEqualTo(2);
+                    return row.getInt(0) + "|" + row.getInt(1);
+                };
+        assertThat(getResult(read, splits, toString)).containsExactly("21|2");
+        // The old value of the same primary key must not survive merge and filtering.
+        read =
+                table.newRead()
+                        .withReadType(table.rowType().project(new int[] {1, 0}))
+                        .withFilter(builder.equal(2, 201L))
+                        .executeFilter();
+        assertThat(getResult(read, splits, toString)).isEmpty();
+    }
+
+    @Test
     public void testBranchBatchReadWrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
         generateBranch(table);
