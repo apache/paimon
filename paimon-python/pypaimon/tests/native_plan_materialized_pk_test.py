@@ -119,3 +119,68 @@ def test_clustered_materialized_dv_files_use_native_raw_splits(tmp_path, engine,
             plan = scan.plan()
         fallback.assert_called_once_with()
         assert any(file.level == 0 for split in plan.splits() for file in split.files)
+
+
+@pytest.mark.parametrize('target_size', ['1b', '1mb'])
+@pytest.mark.parametrize('compacted_partition', [False, True])
+@pytest.mark.parametrize('batch_size', [1, 1024])
+def test_first_row_level_zero_merges_before_filtering(tmp_path, target_size, compacted_partition, batch_size):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(
+        pa.schema([('id', pa.int64()), ('value', pa.string()), ('dt', pa.string())]),
+        primary_keys=['id', 'dt'], partition_keys=['dt'], options={
+            'bucket': '1', 'merge-engine': 'first-row', 'file.format': 'parquet',
+            'deletion-vectors.enabled': 'true', 'deletion-vectors.merge-on-read': 'true',
+            'pk-clustering-override': 'true', 'clustering.columns': 'value',
+            'source.split.target-size': target_size, 'source.split.open-file-cost': '1b',
+            'read.batch-size': str(batch_size),
+        }), False)
+    table = catalog.get_table('default.t')
+    batches = [(0, [{'id': 1, 'value': 'first', 'dt': 'pending'},
+                    {'id': 2, 'value': 'deleted', 'dt': 'pending'}]),
+               (0, [{'id': 1, 'value': 'later', 'dt': 'pending'},
+                    {'id': 3, 'value': 'third', 'dt': 'pending'}])]
+    if compacted_partition:
+        batches.append((1, [{'id': 4, 'value': 'compacted', 'dt': 'ready'}]))
+    first_file = None
+    for level, rows in batches:
+        builder = table.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        try:
+            writer.write_arrow(pa.Table.from_pylist(rows))
+            messages = writer.prepare_commit()
+            for message in messages:
+                message.new_files = [replace(file, level=level) for file in message.new_files]
+                if first_file is None:
+                    first_file = message.new_files[0]
+            commit.commit(messages)
+        finally:
+            writer.close()
+            commit.close()
+    vector = BitmapDeletionVector()
+    vector.delete(1)  # Remove id=2 from the first sorted L0 run.
+    entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+        GenericRow(['pending'], table.partition_keys_fields), 0, {first_file.file_name: vector})
+    commit = table.new_batch_write_builder().new_commit()
+    try:
+        commit.commit([CommitMessage(partition=('pending',), bucket=0, new_files=[], index_adds=[entry])])
+    finally:
+        commit.close()
+    pb = table.new_read_builder().new_predicate_builder()
+    all_ids = [1, 3, 4] if compacted_partition else [1, 3]
+    for predicate, expected in [(None, all_ids), (pb.equal('value', 'later'), []),
+                                (pb.equal('value', 'first'), [1]), (pb.equal('id', 2), [])]:
+        for native in (False, True):
+            builder = table.copy({'scan.native-plan.enabled': str(native).lower()}).new_read_builder()
+            builder.with_projection(['id'])
+            if predicate is not None:
+                builder.with_filter(predicate)
+            scan = builder.new_scan()
+            if native:
+                with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+                    plan = scan.plan()
+            else:
+                plan = scan.plan()
+            assert plan.snapshot_id == len(batches) + 1
+            assert sorted(builder.new_read().to_arrow(plan.splits()).column('id').to_pylist()) == expected

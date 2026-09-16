@@ -50,17 +50,20 @@ Python planner for unsupported scans. New bindings preserve `plan.snapshot_id`
 even when pruning removes every split. Native explain output includes snapshot
 and split metadata; native pruning counters are not exposed.
 
-With Rust main's `Table.from_resolved_schema()` binding, filesystem catalog
+With Rust main's `Table.from_resolved_schema()` binding, filesystem and JDBC catalog
 tables preserve the Python table's resolved schema and complete effective
 options. Stale table objects, historical schemas, and `copy()` overrides or
 option removals no longer require catalog reloading or Python planning.
 Tables opened with `FileStoreTable.from_path(path, file_io_options=None)` use
 the same path with standard local, PyArrow or resolving FileIO. Storage options
 configure FileIO; use `copy()` for table read options.
+JDBC planning uses the resolved table location and storage properties without
+opening another database connection.
 REST tables use `Table.copy_with_resolved_schema()` to preserve the same schema
 and option semantics, including branches whose schemas are catalog-managed.
 The native table retains REST credentials, token refresh and catalog snapshot
-resolution. REST snapshot results (including empty results) take precedence over
+resolution. Database and table names containing dots are passed as separate
+identifier components. REST snapshot results (including empty results) take precedence over
 filesystem snapshots. REST errors, including HTTP 501, are propagated as in Java.
 Custom catalog/FileIO contexts still fall back when they cannot be reproduced.
 
@@ -106,7 +109,10 @@ use native planning. With deletion vectors, batch scans exclude level 0 unless
 `deletion-vectors.merge-on-read=true`, in which case overlapping key ranges stay
 together when they include L0 and require reader-side merging. Fully materialized
 DV files across levels use raw splits, including first-row clustering tables.
-First-row plans that actually include L0 still fall back to Python.
+First-row L0 runs can use native planning, including plans with materialized files
+in separate raw splits. Plans that require merging clustered materialized files
+still fall back to Python. Readers preserve physical row positions until deletion
+vectors are applied, then evaluate residual predicates after merging.
 Write scans and incremental scans retain level 0.
 
 Append and data-evolution chunk shuffle use Rust file and deletion-vector planning.
@@ -122,7 +128,7 @@ planning; Python attaches scores to the selected ranges and reads the data.
 Primary-key sorted indexes refine native batch splits through Python's existing
 index reader, preserving merge-required splits and the selected snapshot.
 
-Query authorization, batch first-row plans containing L0,
+Query authorization, first-row plans mixing L0 with merge-required materialized files,
 and precomputed primary-key global-index results still use the Python planner.
 Continuous streaming and write planning also retain their Python entrypoints.
 Native planning remains optional and is disabled by default.

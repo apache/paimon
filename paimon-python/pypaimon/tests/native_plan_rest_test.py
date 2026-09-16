@@ -127,3 +127,25 @@ def test_resolved_rest_table_keeps_refreshable_file_io(rest_source, rest_catalog
         with pytest.raises(Exception, match='token denied'):
             resolved.new_read_builder().new_scan().plan()
         refresh.assert_called()
+
+
+@pytest.mark.parametrize('branch', [None, 'dev'])
+def test_rest_dotted_database_and_table_keep_identity(rest_catalog, branch):
+    from pypaimon.common.identifier import Identifier
+    from pypaimon.tests.native_plan_resolved_schema_test import _assert_parity, _write
+    catalog, server = rest_catalog
+    identifier = Identifier('namespace.database', 'table.with.dots')
+    catalog.create_database(identifier.get_database_name(), False)
+    catalog.create_table(identifier, Schema.from_pyarrow_schema(
+        pa.schema([('id', pa.int64()), ('value', pa.string())])), False)
+    table = catalog.get_table(identifier)
+    _write(table, [{'id': 1, 'value': 'old'}])
+    if branch:
+        catalog.create_tag(identifier, 'first', 1)
+        catalog.create_branch(identifier, branch, tag_name='first')
+        _write(table, [{'id': 2, 'value': 'main'}])
+        table = catalog.get_table(Identifier('namespace.database', 'table.with.dots', branch=branch))
+    with patch.object(server, '_table_snapshot_handle', wraps=server._table_snapshot_handle) as load:
+        _assert_parity(table, [{'id': 1, 'value': 'old'}], 1)
+        assert all((call.args[1].get_database_name(), call.args[1].get_table_name())
+                   == ('namespace.database', 'table.with.dots') for call in load.call_args_list)

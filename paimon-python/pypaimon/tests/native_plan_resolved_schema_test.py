@@ -35,11 +35,16 @@ pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
 
 
 @pytest.fixture(params=[(mode, catalog) for mode in ('append', 'pk', 'de')
-                        for catalog in ('filesystem', 'rest')])
+                        for catalog in ('filesystem', 'rest', 'jdbc')], ids=lambda case: '-'.join(case))
 def source(request, tmp_path):
     mode, backend = request.param
-    catalog = (request.getfixturevalue('rest_catalog')[0] if backend == 'rest'
-               else CatalogFactory.create({'warehouse': str(tmp_path)}))
+    if backend == 'rest':
+        catalog = request.getfixturevalue('rest_catalog')[0]
+    else:
+        options = {'warehouse': str(tmp_path / 'warehouse')}
+        if backend == 'jdbc':
+            options.update({'metastore': 'jdbc', 'uri': 'jdbc:sqlite:' + str(tmp_path / 'catalog.db')})
+        catalog = CatalogFactory.create(options)
     catalog.create_database('default', True)
     schema = pa.schema([('id', pa.int64()), ('value', pa.string())])
     options = {'file.format': 'parquet'}
@@ -51,7 +56,9 @@ def source(request, tmp_path):
         schema, options=options, primary_keys=['id'] if mode == 'pk' else []), False)
     table = catalog.get_table('default.t')
     _write(table, [{'id': 1, 'value': 'old'}])
-    return catalog, table
+    yield catalog, table
+    if backend == 'jdbc':
+        catalog.close()
 
 
 def _write(table, rows):
@@ -74,6 +81,7 @@ def _read(table, native, predicate=None, projection=None):
         builder.with_projection(projection)
     scan = builder.new_scan()
     if native:
+        from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
         from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
         with ExitStack() as stack:
             stack.enter_context(patch.object(scan.file_scanner, 'scan',
@@ -83,6 +91,9 @@ def _read(table, native, predicate=None, projection=None):
             if type(table.catalog_environment.catalog_loader) is not RESTCatalogLoader:
                 stack.enter_context(patch('pypaimon_rust.datafusion.PaimonCatalog',
                                           side_effect=AssertionError('catalog reload')))
+            if type(table.catalog_environment.catalog_loader) is JdbcCatalogLoader:
+                stack.enter_context(patch.object(JdbcCatalogLoader, 'load',
+                                                 side_effect=AssertionError('JDBC connection during planning')))
             plan = scan.plan()
     else:
         plan = scan.plan()

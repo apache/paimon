@@ -114,16 +114,23 @@ def _catalog_options(table) -> dict:
     loader = getattr(getattr(table, 'catalog_environment', None), 'catalog_loader', None)
     if loader is None:
         raise ValueError("native_plan requires a catalog-backed table (no catalog loader)")
+    metastore = _catalog_metastore(loader)
+    if metastore is None:
+        raise ValueError("native_plan requires an exact built-in catalog loader")
+    normalized = _catalog_context_options(table)
+    normalized[CatalogOptions.METASTORE.key()] = metastore
+    return normalized
+
+
+def _catalog_context_options(table) -> dict:
+    """Normalize catalog storage properties without rebuilding the metastore."""
+    loader = table.catalog_environment.catalog_loader
     options = loader.context().options.to_map()
     normalized = {
         str(key): _option_value_to_string(value)
         for key, value in options.items()
         if value is not None
     }
-    metastore = _catalog_metastore(loader)
-    if metastore is None:
-        raise ValueError("native_plan requires an exact built-in catalog loader")
-    normalized[CatalogOptions.METASTORE.key()] = metastore
     if str(getattr(table, 'table_path', '')).startswith('oss://'):
         from pypaimon.filesystem.jindo_file_system_handler import (
             JINDO_AVAILABLE,
@@ -187,14 +194,17 @@ def _resolved_schema_file_io_options(table) -> Optional[dict]:
         return {str(key): _option_value_to_string(value)
                 for key, value in table.file_io.properties.to_map().items()
                 if value is not None}
-    if _catalog_metastore(loader) != 'filesystem':
+    from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
+    if _catalog_metastore(loader) != 'filesystem' and type(loader) is not JdbcCatalogLoader:
         # REST tables must retain catalog snapshot loading and token refresh.
         return None
     context = loader.context()
     if context.options is None or any(getattr(context, attr, None) is not None for attr in (
             'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader')):
         return None
-    return _catalog_options(table)
+    # JDBC, like filesystem catalogs, uses on-disk snapshots. Its already
+    # resolved table does not need another database connection during planning.
+    return _catalog_context_options(table)
 
 
 def _resolved_schema_json(table) -> str:
@@ -284,7 +294,7 @@ def native_plan(
         if native_method_available('Table', 'copy_with_resolved_schema'):
             # REST may keep branch schemas in the catalog only. Load the base
             # environment, then attach the schema/branch already resolved here.
-            rt = catalog.get_table('%s.%s' % (
+            rt = catalog.get_table((
                 table.identifier.get_database_name(), table.identifier.get_table_name()))
             if rt.location() != table.table_path:
                 raise RuntimeError('Native catalog resolved a different table location')

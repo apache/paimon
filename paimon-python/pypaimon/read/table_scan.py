@@ -179,7 +179,10 @@ class TableScan:
                     'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader')):
                 return False
             database_name = self.table.identifier.get_database_name()
-            if not database_name or database_name == UNKNOWN_DATABASE or '.' in database_name:
+            if not database_name or database_name == UNKNOWN_DATABASE:
+                return False
+            if ('.' in database_name
+                    and not native_method_available('Table', 'copy_with_resolved_schema')):
                 return False
         if self.table.options.query_auth_enabled:
             return False
@@ -289,9 +292,12 @@ class TableScan:
             splits = plan.splits()
             if (self.table.options.merge_engine() == 'first-row'
                     and not fs.skip_level0 and not fs.is_streaming
-                    and any(file.level == 0 for split in splits for file in split.files)):
-                # Materialized clustered files read raw. Mixing L0 with files
-                # sorted by clustering columns still needs a reader audit.
+                    and any(file.level == 0 for split in splits for file in split.files)
+                    and any(not split.raw_convertible and any(file.level > 0 for file in split.files)
+                            for split in splits)):
+                # L0 runs are sorted by PK and can merge using first-row.
+                # Materialized clustered files must stay in raw splits: their
+                # physical order need not match the PK merge comparator.
                 return None
             partition_predicate = self.file_scanner.partition_key_predicate
             if partition_predicate is not None:

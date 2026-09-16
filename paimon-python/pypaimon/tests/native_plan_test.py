@@ -108,6 +108,7 @@ class NativePlanTest(unittest.TestCase):
 
     def test_resolved_schema_keeps_custom_io_and_rest_on_catalog_path(self):
         from pypaimon.catalog.catalog_environment import CatalogEnvironment
+        from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
         from pypaimon.filesystem.local_file_io import LocalFileIO
         from pypaimon.read.native_plan import _resolved_schema_file_io_options
 
@@ -120,6 +121,9 @@ class NativePlanTest(unittest.TestCase):
         class CustomLoader(FileSystemCatalogLoader):
             pass
 
+        class CustomJdbcLoader(JdbcCatalogLoader):
+            pass
+
         table = Mock(file_io=LocalFileIO(), catalog_environment=CatalogEnvironment.empty())
         with patch('pypaimon.read.native_plan.native_method_available', return_value=True):
             self.assertEqual(_resolved_schema_file_io_options(table), {})
@@ -129,15 +133,16 @@ class NativePlanTest(unittest.TestCase):
             table.catalog_environment = CustomEnvironment()
             self.assertIsNone(_resolved_schema_file_io_options(table))
             table.catalog_environment = CatalogEnvironment.empty()
-            for loader_type in (RESTCatalogLoader, CustomLoader):
+            for loader_type in (RESTCatalogLoader, CustomLoader, CustomJdbcLoader):
                 table.catalog_environment.catalog_loader = loader_type(
                     CatalogContext.create_from_options(Options({})))
                 self.assertIsNone(_resolved_schema_file_io_options(table))
-            for attr in ('hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'):
-                context = CatalogContext.create_from_options(Options({}))
-                setattr(context, attr, object())
-                table.catalog_environment.catalog_loader = FileSystemCatalogLoader(context)
-                self.assertIsNone(_resolved_schema_file_io_options(table))
+            for loader_type in (FileSystemCatalogLoader, JdbcCatalogLoader):
+                for attr in ('hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'):
+                    context = CatalogContext.create_from_options(Options({}))
+                    setattr(context, attr, object())
+                    table.catalog_environment.catalog_loader = loader_type(context)
+                    self.assertIsNone(_resolved_schema_file_io_options(table))
 
     def test_switch_defaults_off(self):
         self.assertFalse(CoreOptions(Options({})).native_plan_enabled())
