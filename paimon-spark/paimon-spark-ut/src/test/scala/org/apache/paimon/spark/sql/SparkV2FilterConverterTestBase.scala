@@ -90,6 +90,34 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
 
   lazy val converter: SparkV2FilterConverter = SparkV2FilterConverter(rowType)
 
+  test("V2Filter: legacy timestamp mapping does not push down extract") {
+    if (gteqSpark3_4) {
+      withTimeZone("UTC") {
+        withSparkSQLConf(
+          "spark.paimon.legacy-timestamp-mapping.enabled" -> "true",
+          "spark.sql.session.timeZone" -> "America/Los_Angeles") {
+          withTable("legacy_extract") {
+            sql("""
+                  |CREATE TABLE legacy_extract (id INT, ts TIMESTAMP)
+                  |USING paimon PARTITIONED BY (ts)
+                  |""".stripMargin)
+
+            val legacyRowType = loadTable("legacy_extract").rowType()
+            val legacyConverter = SparkV2FilterConverter(legacyRowType)
+            val filter = "hour(ts) = 1"
+            val condition =
+              sql(s"SELECT * FROM legacy_extract WHERE $filter").queryExecution.analyzed
+                .collectFirst { case f: Filter => f }
+                .get
+                .condition
+            val sparkPredicate = translateFilterV2(condition).get
+            assert(legacyConverter.convert(sparkPredicate).isEmpty)
+          }
+        }
+      }
+    }
+  }
+
   test("V2Filter: all types") {
     var filter = "string_col = 'hello'"
     var actual = converter.convert(v2Filter(filter)).get

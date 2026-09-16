@@ -96,14 +96,23 @@ object SparkExpressionConverter {
             extract.source() match {
               case n: NamedReference =>
                 val fieldRef = toPaimonFieldRef(n, rowType)
-                extract.field() match {
-                  case EXTRACT_YEAR => YearTransform.tryCreate(fieldRef)
-                  case EXTRACT_MONTH => MonthTransform.tryCreate(fieldRef)
-                  case EXTRACT_DAY => DayTransform.tryCreate(fieldRef)
-                  case EXTRACT_HOUR => HourTransform.tryCreate(fieldRef)
-                  case EXTRACT_MINUTE => MinuteTransform.tryCreate(fieldRef)
-                  case EXTRACT_SECOND => SecondTransform.tryCreate(fieldRef)
-                  case _ => None
+                if (
+                  fieldRef.`type`().getTypeRoot == TIMESTAMP_WITHOUT_TIME_ZONE &&
+                  treatPaimonTimestampTypeAsSparkTimestampType()
+                ) {
+                  // Legacy mapping exposes this Paimon type as Spark TIMESTAMP, whose extract
+                  // semantics depend on the Spark session time zone.
+                  None
+                } else {
+                  extract.field() match {
+                    case EXTRACT_YEAR => YearTransform.tryCreate(fieldRef)
+                    case EXTRACT_MONTH => MonthTransform.tryCreate(fieldRef)
+                    case EXTRACT_DAY => DayTransform.tryCreate(fieldRef)
+                    case EXTRACT_HOUR => HourTransform.tryCreate(fieldRef)
+                    case EXTRACT_MINUTE => MinuteTransform.tryCreate(fieldRef)
+                    case EXTRACT_SECOND => SecondTransform.tryCreate(fieldRef)
+                    case _ => None
+                  }
                 }
               case _ => None
             }

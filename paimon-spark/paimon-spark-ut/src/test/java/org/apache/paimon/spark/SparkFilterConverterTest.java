@@ -266,15 +266,20 @@ public class SparkFilterConverterTest {
     @Test
     public void testIgnoreFailure() {
         List<DataField> dataFields = new ArrayList<>();
-        dataFields.add(new DataField(0, "id", new IntType()));
+        dataFields.add(new DataField(0, "id", new FloatType()));
         dataFields.add(new DataField(1, "name", new VarCharType(VarCharType.MAX_LENGTH)));
         RowType rowType = new RowType(dataFields);
         SparkFilterConverter converter = new SparkFilterConverter(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
 
-        Not not = Not.apply(StringStartsWith.apply("name", "paimon"));
-        assertThatThrownBy(() -> converter.convert(not, false))
-                .hasMessageContaining("Not(StringStartsWith(name,paimon)) is unsupported.");
-        assertThat(converter.convert(not, true)).isNull();
-        assertThat(converter.convertIgnoreFailure(not)).isNull();
+        Not notStartsWith = Not.apply(StringStartsWith.apply("name", "paimon"));
+        assertThat(converter.convert(notStartsWith))
+                .isEqualTo(builder.startsWith(1, fromString("paimon")).negate().get());
+
+        Not unsupported = Not.apply(EqualTo.apply("id", Float.NaN));
+        assertThatThrownBy(() -> converter.convert(unsupported, false))
+                .hasMessageContaining("is unsupported.");
+        assertThat(converter.convert(unsupported, true)).isNull();
+        assertThat(converter.convertIgnoreFailure(unsupported)).isNull();
     }
 }
