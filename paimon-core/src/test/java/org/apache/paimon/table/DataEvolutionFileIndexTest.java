@@ -633,6 +633,70 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         return options;
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"parquet", "orc"})
+    public void testSubMicrosecondTimestampBitmapMatchesUnindexed(String format) throws Exception {
+        // A bitmap index maps TIMESTAMP through toMicros(), so on a TIMESTAMP(9) column two values
+        // in the same microsecond share one bitmap key. visitNotIn flips the matched rows over the
+        // whole row count, so answering <> or NOT IN from that bitmap drops rows the residual
+        // filter can no longer recover. The fix makes the indexed read (executeFilter) return
+        // exactly what an unindexed full scan does.
+        FileStoreTable table = createTimestampBitmapTable("bitmap_ts9_" + format, format);
+
+        long base = 1_704_067_200_000L;
+        Timestamp tsA = Timestamp.fromEpochMillis(base, 123_000); // micro bucket base*1000+123
+        Timestamp tsB = Timestamp.fromEpochMillis(base, 123_400); // same bucket as tsA
+        Timestamp tsC = Timestamp.fromEpochMillis(base, 999_000); // a different bucket
+        write(
+                table,
+                GenericRow.of(0, tsA),
+                GenericRow.of(1, tsB),
+                GenericRow.of(2, tsC),
+                GenericRow.of(3, null));
+
+        PredicateBuilder b = new PredicateBuilder(table.rowType());
+
+        // Guard: the sub-microsecond nanos must survive the write/read round trip on this format,
+        // otherwise tsA and tsB collapse and the comparison below would pass vacuously.
+        List<Timestamp> stored = new ArrayList<>();
+        for (InternalRow row : fullScanFiltered(table, b.isNotNull(1))) {
+            stored.add(row.getTimestamp(1, 9));
+        }
+        assertThat(stored).contains(tsA, tsB);
+
+        // notEqual / NOT IN are the ones that lose rows to the micro-bucket collision;
+        // isNull/isNotNull still come from the index; equal / IN only over-select and are
+        // already corrected by the residual filter.
+        List<Predicate> predicates =
+                Arrays.asList(
+                        b.notEqual(1, tsA),
+                        b.notIn(1, Arrays.asList(tsA, tsC)),
+                        b.isNull(1),
+                        b.isNotNull(1),
+                        b.equal(1, tsA),
+                        b.in(1, Arrays.asList(tsA, tsC)),
+                        PredicateBuilder.and(b.notEqual(1, tsA), b.notEqual(1, tsC)),
+                        PredicateBuilder.or(b.equal(1, tsA), b.equal(1, tsC)));
+        for (Predicate p : predicates) {
+            assertThat(query(table, p))
+                    .containsExactlyInAnyOrderElementsOf(fullScanFiltered(table, p));
+        }
+    }
+
+    private FileStoreTable createTimestampBitmapTable(String name, String format) throws Exception {
+        Schema.Builder builder =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.TIMESTAMP(9))
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), format);
+        bitmapOptions("f1").forEach(builder::option);
+        Identifier identifier = identifier(name);
+        catalog.createTable(identifier, builder.build(), false);
+        return getTable(identifier);
+    }
+
     private void writeAllColumns(FileStoreTable table, int count) throws Exception {
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = builder.newWrite();
