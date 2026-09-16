@@ -33,14 +33,15 @@ reuses Paimon's existing [table branches](../../maintenance/manage-branches) and
 
 :::info Implementation status
 
-The Java reference-management client, reference-scoped table client, and their wire contracts are
-implemented. Reference storage, table-level orchestration, and database merge execution must be
+The Java reference-management client, database-name selector parser, and their wire contracts are
+implemented. Ordinary table APIs carry the selector in the database name. Reference storage, table-level orchestration, and database merge execution must be
 implemented by the catalog server. The server implementation below is a design, not a claim that
 an existing service supports it.
 
-Table operations select a database reference through `/trees/{reference}` in the resource path.
-Callers use logical table names without constructing table branch suffixes or remembering a tag's
-source branch. This requires no new reference header or catalog option.
+Table operations select a database reference through a `$branch_<name>` or `$tag_<name>` suffix on
+the database name. The existing table paths and request/response structures are reused. Callers use
+ordinary table names without remembering a tag's source branch. No reference header, catalog
+option, or separately bound client is needed.
 
 :::
 
@@ -201,39 +202,76 @@ individual operations and their documented responses.
 
 ## Reference-scoped table API
 
-Let `S = /v1/{prefix}/databases/{database}/trees/{reference}`. The reference name selects either
-an existing branch or an immutable tag. It is resolved by the server; the client need not first
-fetch its type. These endpoints reuse the ordinary table request and response structures:
+A database name can include exactly one reference selector:
+
+| Database name | Meaning |
+| --- | --- |
+| `training` | The ordinary physical database, with its existing main-table behavior. |
+| `training$branch_experiment` | The writable database branch `experiment`. |
+| `training$branch_main` | Explicit selection of the database branch `main`. |
+| `training$tag_train_v1` | The immutable database tag `train_v1`. |
+
+The selector is carried in the existing database field, including inside `Identifier`. Encode the
+complete database name once as one REST path segment. JSON names remain decoded. For example:
+
+```http
+GET /v1/catalog/databases/training%24branch_experiment/tables/features
+GET /v1/catalog/databases/training%24tag_train_v1/tables/features
+POST /v1/catalog/databases/training%24branch_experiment/tables/features/commit
+```
+
+There are no additional table routes below `/trees/{reference}`. `/trees` remains the reference
+management resource and always takes the physical database name, such as `training`.
+
+Let `D = /v1/{prefix}/databases/{database}` below, where `database` may carry a reference suffix.
+These are the existing operations and request/response structures:
 
 | Method and path | Existing request / response | Scope |
 | --- | --- | --- |
-| `GET S/tables` | `ListTablesResponse`; existing paging/filter query parameters. | Table membership of the reference. |
-| `GET S/table-details` | `ListTableDetailsResponse`; existing paging/filter query parameters. | Table definitions within the reference. |
-| `GET S/tables/{table}` | `GetTableResponse`. | Selected schema, storage options and path. |
-| `POST S/tables` | `CreateTableRequest`. | Create a table in a branch. |
-| `POST S/tables/{table}` | `AlterTableRequest`. | Alter a table in a branch. |
-| `DELETE S/tables/{table}` | Existing drop-table response. | Remove a table from a branch. |
-| `GET S/tables/{table}/snapshot` | `GetTableSnapshotResponse`. | Current branch snapshot or pinned tag snapshot. |
-| `GET S/tables/{table}/snapshots/{version}` | `GetVersionSnapshotResponse`. | Resolve a version within this reference. |
-| `GET S/tables/{table}/snapshots` | `ListSnapshotsResponse`; existing pagination. | Snapshot history visible through this reference. |
-| `GET S/tables/{table}/schemas/{version}` | `GetSchemaResponse`. | Resolve a schema ID or `LATEST` within this reference. |
-| `GET S/tables/{table}/schemas` | `ListSchemasResponse`; existing pagination. | Schema history retained for this reference. |
-| `POST S/tables/{table}/commit` | `CommitTableRequest` / `CommitTableResponse`. | Commit a snapshot to the selected branch. |
-| `GET S/tables/{table}/token` | `GetTableTokenResponse`. | Credentials for the resolved table version. |
-| `POST S/tables/{table}/auth` | `AuthTableQueryRequest` / `AuthTableQueryResponse`. | Authorize a read of the resolved table. |
+| `GET D` | `GetDatabaseResponse`. | Validate the database and selected reference; return virtual database metadata. |
+| `GET D/tables` | `ListTablesResponse`; existing paging/filter query parameters. | Table membership of the reference. |
+| `GET D/table-details` | `ListTableDetailsResponse`; existing paging/filter query parameters. | Table definitions within the reference. |
+| `GET D/tables/{table}` | `GetTableResponse`. | Selected schema, storage options and path. |
+| `POST D/tables` | `CreateTableRequest`. | Create a table in a branch. |
+| `POST D/tables/{table}` | `AlterTableRequest`. | Alter a table in a branch. |
+| `DELETE D/tables/{table}` | Existing drop-table response. | Remove a table from a branch. |
+| `GET D/tables/{table}/snapshot` | `GetTableSnapshotResponse`. | Current branch snapshot or pinned tag snapshot. |
+| `GET D/tables/{table}/snapshots/{version}` | `GetVersionSnapshotResponse`. | Resolve a version within this reference. |
+| `GET D/tables/{table}/snapshots` | `ListSnapshotsResponse`; existing pagination. | Snapshot history visible through this reference. |
+| `GET D/tables/{table}/schemas/{version}` | `GetSchemaResponse`. | Resolve a schema ID or `LATEST` within this reference. |
+| `GET D/tables/{table}/schemas` | `ListSchemasResponse`; existing pagination. | Schema history retained for this reference. |
+| `POST D/tables/{table}/commit` | `CommitTableRequest` / `CommitTableResponse`. | Commit a snapshot to the selected branch. |
+| `GET D/tables/{table}/token` | `GetTableTokenResponse`. | Credentials for the resolved table version. |
+| `POST D/tables/{table}/auth` | `AuthTableQueryRequest` / `AuthTableQueryResponse`. | Authorize a read of the resolved table. |
 
-For example, read the same logical table through a live experiment and a frozen training tag:
+`GetTableResponse` retains the requested database name including its suffix and the logical table
+name, such as `features`. It carries the resolved schema, path and storage options; the server may
+supply a physical branch alias through existing schema options. Request identifiers retain the
+same full database name. A commit keeps the existing `tableId`, `baseSnapshotUuid`, `snapshot`, and
+`statistics` fields. The path selects the reference; request identifiers and table IDs must agree
+with the resolved table.
 
-```http
-GET /v1/catalog/databases/training/trees/experiment/tables/features
-GET /v1/catalog/databases/training/trees/train_v1/tables/features
-```
+### Database lookup and naming rules
 
-The response name remains `features`. `GetTableResponse` carries the resolved schema, path and
-storage options; the server may supply an internal physical branch in the existing schema options.
-A commit keeps the existing `tableId`, `baseSnapshotUuid`, `snapshot`, and `statistics` fields.
-The reference path determines the target; identifiers and table IDs in the request must agree with
-the table resolved from that path. Caller-supplied table branch suffixes are not part of this contract.
+`GET database` must resolve a suffixed name, because SQL engines can check namespace existence
+before accessing a table. The response represents the virtual database and retains its full name.
+Database listing returns physical database names only; use `/trees` to discover branches and tags.
+
+CREATE, DROP and ALTER DATABASE do not accept reference suffixes. In particular, dropping a
+virtual database must never drop its physical database. Create, delete and merge references through
+`/databases/training/trees` instead. This does not prevent ordinary create/alter/drop **table**
+operations from modifying membership or metadata in a writable branch.
+
+The markers `$branch_` and `$tag_` are case-sensitive reserved syntax. The base database must be
+nonblank, and the reference follows the name rules above. Missing names, multiple selectors, or
+invalid reference names are rejected rather than interpreted as literal database names. Other
+uses of `$`, such as `training$archive`, remain literal. Catalogs adopting this contract must resolve
+any pre-existing physical database names containing the reserved markers before enabling it;
+lookup must not switch between literal and reference meanings based on which object exists.
+
+Caller-supplied table branch suffixes cannot be combined with a database selector. For example,
+`training$branch_a.features$branch_b` is rejected. Storage commits can supply a physical table branch
+internally; RESTCatalog removes that internal table suffix while preserving the database selector.
 
 ### Branch and tag behavior
 
@@ -249,57 +287,68 @@ The server rejects content changes through a tag with `409`. Read authorization 
 through `POST .../auth`; HTTP method alone does not determine whether an operation is a write.
 Tag credentials must permit reading without allowing mutation of retained metadata or data.
 
-Missing references and tables return `404`. Unsupported scoped operations return `501`, without
-falling back to the ordinary main-table path. Existing unscoped URLs retain their behavior.
+Missing databases, references and tables return `404`. A selector whose type does not match the
+reference, such as `$branch_train_v1` for a tag, returns `409`. Malformed selectors return `400`.
+Unsupported operations on references return `501`. None of these errors permits retrying the
+request against the physical database without its suffix.
 
 ### Java table usage
 
-Bind a separate client instance to the desired database reference:
+Use the same catalog for ordinary databases and any number of database references:
 
 ```java
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.rest.RESTCatalog;
 import org.apache.paimon.table.Table;
 
-RESTCatalog experimentCatalog = restCatalog.withReference("training", "experiment");
-RESTCatalog trainingCatalog = restCatalog.withReference("training", "train_v1");
+Identifier experiment = Identifier.create("training$branch_experiment", "features");
+Identifier trainingTag = Identifier.create("training$tag_train_v1", "features");
 
-Table experimentFeatures = experimentCatalog.getTable(Identifier.create("training", "features"));
-Table trainingFeatures = trainingCatalog.getTable(Identifier.create("training", "features"));
+Table experimentFeatures = restCatalog.getTable(experiment);
+Table trainingFeatures = restCatalog.getTable(trainingTag);
+restCatalog.listTables("training$branch_experiment");
+restCatalog.getDatabase("training$tag_train_v1");
 
 // Use experimentFeatures with the ordinary Paimon batch write API.
 // Use trainingFeatures with the ordinary Paimon read API.
 ```
 
-`withReference` leaves the original catalog unchanged and does not fetch catalog configuration
-again. Each returned catalog keeps its own binding and local caches. Its serialized
-`RESTCatalogLoader`, and loaders inside serialized table objects, retain the binding for later
-snapshot reads, commits, schema changes and token requests. Storage commits can supply a physical
-table branch internally; the bound catalog sends the logical table name and keeps the reference
-path authoritative.
+`RESTApi` uses these same identifiers with its existing table methods. `Identifier` already retains
+the full database name through serialization and in table loaders; no extra reference fields are
+stored in RESTCatalog or RESTCatalogLoader. Subsequent snapshot reads, schema changes, commits,
+auth and token requests carry the same database name. Caches keyed by full table identifiers
+naturally distinguish the physical database, branches and tags.
 
-The lightweight client supports the same binding through
-`RESTApi.withReference("training", "experiment")`. Existing table methods and DTOs remain usable.
-Table operations must use the bound database. Binding is currently a Java API, not a SQL catalog
-option; engine configuration for selecting a reference is additional integration work.
+SQL clients can pass the selector as a quoted database name, using their ordinary identifier
+quoting rules. For example:
 
-The scoped client does not yet support global table listing, lookup by table ID, rename, register,
-replace, rollback, partition/consumer endpoints, or nested table branch/tag management. Such calls
-fail locally instead of reaching an unscoped table route. Database and reference management,
-functions, views and catalog-level management retain their existing meaning; this binding versions
-only the supported table endpoints. Table policy endpoints are also outside the scoped MVP.
+```sql
+SELECT * FROM `training$branch_experiment`.features;
+SELECT * FROM `training$tag_train_v1`.features;
+```
+
+A REST server implementing virtual database lookup and table resolution is required. There is no
+new engine catalog option or reference-switch operation.
+
+Rename, register, replace, rollback, partition/consumer endpoints, nested table branch/tag
+management, views, functions and table policies do not yet accept database reference suffixes in
+the Java client. Global table listing and lookup by table ID retain their physical-catalog meaning;
+they have no database selector. Extending those operations to discover or address references is
+additional work. Catalog-level permissions and reference management continue to use physical names.
 
 ### Server routing and reuse
 
-Resolve `(database, reference, logical table)` once into an internal request context containing
-reference type, table identity and backing table version. Pass that context into the existing table
-handlers. Validate authentication against the actual scoped request, and authorize access to the
-resolved table. A path rewrite alone is insufficient: listing must use the selected membership,
-tags need frozen metadata, and commits must update the selected branch's recorded table state.
+Decode the database path segment and parse it with `DatabaseIdentifier.parse(name)`. The result
+contains the physical database name and an optional typed `DatabaseReference`. Resolve that
+reference and the logical table once into a request context with table identity and backing version,
+then reuse the existing table handlers. Validate authentication against the actual request path
+and authorize access to the resolved table. Preserve the full requested database name in returned
+identifiers so follow-up calls stay on the same reference.
 
-The additional routing and DTO work is small. Runtime work is a reference/table mapping lookup,
-which can be cached; adding the scope does not require proxying or copying table data. Reference
-creation, retention, namespace changes and merge still require the server orchestration below.
+Parsing the suffix does not replace reference management: listing still needs the selected
+membership, tags need frozen metadata, and commits must update the selected branch's recorded
+table state. The additional request cost is a reference/table mapping lookup, which can be cached;
+this addressing scheme does not require proxying or copying table data. The storage and merge work
+remains the server orchestration described below.
 
 ## Java management usage
 
@@ -489,9 +538,9 @@ without that adapter is insufficient.
 
 Preparing fresh backing branches and publishing a new mapping is one possible server implementation.
 The server can update the reference mapping to those prepared versions while retaining any
-physical branches needed by tags or merge baselines. The client-visible scoped table address must
-continue to resolve correctly. In either case, source and target must remain independently writable: pointing both at
-the same mutable table branch would make future source writes modify the target as well.
+physical branches needed by tags or merge baselines. The client-visible table address must continue
+to resolve correctly. Source and target must remain independently writable: pointing both at the
+same mutable table branch would make future source writes modify the target as well.
 
 ### Repeated merge
 
@@ -509,19 +558,19 @@ an HTTP success must mean that the planned result is installed.
 ## Exercise the fixed-table MVP
 
 The following workflow requires a server that implements the orchestration above. The client tests
-exercise scoped HTTP routing and table loaders; they do not implement database reference storage
-or the database merge algorithm.
+exercise suffix-based HTTP addressing and table loaders; they do not implement database reference
+storage or the database merge algorithm.
 
 1. Create database `training` and two populated managed tables, `features` and `labels`, on `main`.
    Stop writes and create database branch `experiment` from `main` using tree management.
-2. Bind `restCatalog.withReference("training", "experiment")`. List and load `features` and `labels`
-   by their ordinary names, then write experiment data with the usual batch write API. Their
-   metadata reads and commits use `/trees/experiment/tables/...`.
-3. Stop experiment writes and create database tag `train_v1` from `experiment`. Bind a second
-   catalog with `restCatalog.withReference("training", "train_v1")`. Load the same logical table
-   names for training; the service resolves the pinned table versions without a source-branch hint.
-4. Advance the experiment tables, then reload and read them through the tag-bound catalog. The
-   tagged data and schemas must remain unchanged. Verify that writes through the tag are rejected.
+2. List and load `features` and `labels` from database `training$branch_experiment`, then write
+   experiment data with the usual batch write API. Their metadata reads and commits use the
+   existing table paths with the complete suffixed database name.
+3. Stop experiment writes and create database tag `train_v1` from `experiment`. Use the same
+   catalog to access database `training$tag_train_v1`. Load the same logical table names for training;
+   the service resolves the pinned table versions without a source-branch hint.
+4. Advance the experiment tables, then reload and read them through the tag-suffixed database name.
+   The tagged data and schemas must remain unchanged. Verify that writes through the tag are rejected.
 5. With main and experiment writers stopped, merge `train_v1` into `main`. This publishes the
    evaluated source version. Merging the live `experiment` branch would instead include its newer
    state. If both sides changed a table, choose a per-table merge mode when appropriate.
@@ -531,22 +580,22 @@ or the database merge algorithm.
 
 ## Beyond the fixed-table MVP
 
-The REST scope and client binding now identify the selected database view for table listing,
+The database name suffix now identifies the selected database view for database lookup, table listing,
 reads, commits and the ordinary create/alter/drop endpoints. A complete server namespace still
 needs branch-local membership changes, stable identities across rename, and new identities for
 drop-and-recreate. The fixed-table server may return `501` for unsupported scoped DDL.
 
-Global table IDs, global listings, rename and the other deferred endpoints need explicit scope
-semantics before they can be enabled on a bound client. SQL engine configuration also needs to
-preserve the same binding when constructing catalogs. These additions do not require callers to
-construct per-table branch names.
+Global table IDs, global listings, rename and the other deferred endpoints need explicit reference
+semantics before they can be extended. Engine integrations must preserve the full database name in
+identifiers and perform database existence checks through the catalog. These additions do not
+require callers to construct per-table branch names.
 
 ## Validation and implementation sequence
 
 The reference tests validate HTTP paths, request bodies, authentication/configuration, pagination,
-JSON compatibility, exception propagation and reference preservation through serialized catalogs
-and tables. The OpenAPI validator checks that scoped endpoints reuse the corresponding ordinary
-request and success-response structures. A stateful test fixture also uses real Paimon data files
+JSON compatibility, exception propagation and suffix preservation through serialized tables and
+catalog loaders. Tests cover virtual database lookup, mutation guards and malformed or mixed
+selectors. The OpenAPI validator checks that reference access uses the ordinary table paths. A stateful test fixture also uses real Paimon data files
 to exercise batch writes on separate branches, frozen tag reads after source writes, and tag write
 rejection. This validates client integration with a resolving server; production reference
 lifecycle, snapshot retention and database merge still require server integration tests.

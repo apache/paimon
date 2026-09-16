@@ -49,14 +49,10 @@ public class DatabaseReference {
             @JsonProperty(FIELD_TYPE) DatabaseReferenceType type,
             @JsonProperty(FIELD_NAME) String name) {
         checkArgument(type != null, "Reference type must not be null");
-        validateName(name);
-        this.type = type;
-        this.name = name;
-    }
-
-    static void validateName(String name) {
         checkArgument(
                 name != null && name.matches(NAME_PATTERN), "Invalid reference name: %s", name);
+        this.type = type;
+        this.name = name;
     }
 
     @JsonGetter(FIELD_TYPE)

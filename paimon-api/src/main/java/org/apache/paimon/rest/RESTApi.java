@@ -257,26 +257,6 @@ public class RESTApi {
         this.resourcePaths = ResourcePaths.forCatalogProperties(options);
     }
 
-    private RESTApi(RESTApi api, ResourcePaths resourcePaths) {
-        this.client = api.client;
-        this.restAuthFunction = api.restAuthFunction;
-        this.options = api.options;
-        this.resourcePaths = resourcePaths;
-    }
-
-    /**
-     * Returns a client whose table operations address one database branch or immutable tag.
-     *
-     * <p>The original client is unchanged. Table names remain logical names, without a table branch
-     * suffix. The server resolves the reference and enforces tag immutability. Operations without a
-     * reference-scoped table route are unsupported on this client; database and reference
-     * management retain their catalog-wide meaning.
-     */
-    @Experimental
-    public RESTApi withReference(String database, String reference) {
-        return new RESTApi(this, resourcePaths.withReference(database, reference));
-    }
-
     /** Get the configured options which has been merged from REST Server. */
     public Options options() {
         return options;
@@ -340,6 +320,7 @@ public class RESTApi {
      *     this database
      */
     public void createDatabase(String name, Map<String, String> properties) {
+        DatabaseIdentifier.checkNoReference(name, "createDatabase");
         CreateDatabaseRequest request = new CreateDatabaseRequest(name, properties);
         client.post(resourcePaths.databases(), request, restAuthFunction);
     }
@@ -367,6 +348,7 @@ public class RESTApi {
      *     this database
      */
     public void dropDatabase(String name) {
+        DatabaseIdentifier.checkNoReference(name, "dropDatabase");
         client.delete(resourcePaths.database(name), restAuthFunction);
     }
 
@@ -381,6 +363,7 @@ public class RESTApi {
      *     this database
      */
     public void alterDatabase(String name, List<String> removals, Map<String, String> updates) {
+        DatabaseIdentifier.checkNoReference(name, "alterDatabase");
         client.post(
                 resourcePaths.database(name),
                 new AlterDatabaseRequest(removals, updates),
@@ -934,6 +917,7 @@ public class RESTApi {
      *     creating table
      */
     public void createTable(Identifier identifier, Schema schema) {
+        DatabaseIdentifier.checkTableName(identifier.getDatabaseName(), identifier.getObjectName());
         CreateTableRequest request = new CreateTableRequest(identifier, schema);
         client.post(resourcePaths.tables(identifier.getDatabaseName()), request, restAuthFunction);
     }
@@ -949,6 +933,8 @@ public class RESTApi {
      *     renaming table
      */
     public void renameTable(Identifier fromTable, Identifier toTable) {
+        DatabaseIdentifier.checkNoReference(fromTable.getDatabaseName(), "renameTable");
+        DatabaseIdentifier.checkNoReference(toTable.getDatabaseName(), "renameTable");
         RenameTableRequest request = new RenameTableRequest(fromTable, toTable);
         client.post(resourcePaths.renameTable(), request, restAuthFunction);
     }
@@ -2048,6 +2034,8 @@ public class RESTApi {
      *     views
      */
     public void renameView(Identifier fromView, Identifier toView) {
+        DatabaseIdentifier.checkNoReference(fromView.getDatabaseName(), "renameView");
+        DatabaseIdentifier.checkNoReference(toView.getDatabaseName(), "renameView");
         RenameTableRequest request = new RenameTableRequest(fromView, toView);
         client.post(resourcePaths.renameView(), request, restAuthFunction);
     }

@@ -225,43 +225,19 @@ function requireExactEnum(contract, schemaName, expectedValues) {
 
 function validateCatalogOpenApi() {
   const contract = validateCommon('rest-catalog-open-api.yaml');
-  const databasePath = '/v1/{prefix}/databases/{database}';
-  [
-    '/tables',
-    '/table-details',
-    '/tables/{table}',
-    '/tables/{table}/commit',
-    '/tables/{table}/token',
-    '/tables/{table}/auth',
-    '/tables/{table}/snapshot',
-    '/tables/{table}/snapshots',
-    '/tables/{table}/snapshots/{version}',
-    '/tables/{table}/schemas',
-    '/tables/{table}/schemas/{version}',
-  ].forEach((suffix) => {
-    const original = contract.spec.paths[databasePath + suffix];
-    const scopedPath = databasePath + '/trees/{reference}' + suffix;
-    const scoped = contract.spec.paths[scopedPath];
-    contract.checkSpec(scoped, `Missing reference-scoped table path: ${scopedPath}`);
-    Object.entries(original).forEach(([method, operation]) => {
-      if (!HTTP_METHODS.has(method)) {
-        return;
-      }
-      const counterpart = scoped[method];
-      contract.checkSpec(counterpart, `Missing ${method} on ${scopedPath}`);
-      ['requestBody', 'responses'].forEach((field) => {
-        const value = (op) => field === 'responses' ? op.responses['200'] : op[field];
-        contract.checkSpec(
-          JSON.stringify(value(operation)) === JSON.stringify(value(counterpart)),
-          `${scopedPath} must reuse the unscoped ${method} ${field} contract`,
-        );
-      });
-      contract.requireResponses(counterpart.operationId, ['404', '501']);
-      if (method !== 'get' && !suffix.endsWith('/auth')) {
-        contract.requireResponses(counterpart.operationId, ['409']);
-      }
-    });
-  });
+  contract.checkSpec(
+    !Object.keys(contract.spec.paths).some((path) => /\/trees\/\{[^}]+\}\/(tables|table-details)/.test(path)),
+    'Database reference access must reuse ordinary table paths',
+  );
+  const databaseParameter = contract.spec.components.parameters.Database;
+  contract.checkSpec(
+    databaseParameter.examples.branch.value === 'training$branch_experiment' &&
+      databaseParameter.examples.tag.value === 'training$tag_train_v1',
+    'Database reference examples must use the reserved branch and tag suffixes',
+  );
+  ['getDatabase', 'listTables', 'getTable', 'commitTable', 'getSchema', 'listSchemas'].forEach(
+    (operationId) => contract.requireResponses(operationId, ['404', '409', '501']),
+  );
   [
     'getConfig',
     'createDatabase',

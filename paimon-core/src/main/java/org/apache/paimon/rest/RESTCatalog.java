@@ -115,8 +115,6 @@ public class RESTCatalog implements Catalog {
 
     private final RESTApi api;
     private final CatalogContext context;
-    @Nullable private final String referenceDatabase;
-    @Nullable private final String referenceName;
     private final boolean dataTokenEnabled;
     protected final Map<String, String> tableDefaultOptions;
     private final @Nullable LocalCacheManager cacheManager;
@@ -126,30 +124,7 @@ public class RESTCatalog implements Catalog {
     }
 
     public RESTCatalog(CatalogContext context, boolean configRequired) {
-        this(context, configRequired, null, null);
-    }
-
-    RESTCatalog(
-            CatalogContext context,
-            boolean configRequired,
-            @Nullable String referenceDatabase,
-            @Nullable String referenceName) {
-        this(
-                context,
-                new RESTApi(context.options(), configRequired),
-                referenceDatabase,
-                referenceName);
-    }
-
-    private RESTCatalog(
-            CatalogContext context,
-            RESTApi api,
-            @Nullable String referenceDatabase,
-            @Nullable String referenceName) {
-        this.api =
-                referenceName == null ? api : api.withReference(referenceDatabase, referenceName);
-        this.referenceDatabase = referenceDatabase;
-        this.referenceName = referenceName;
+        this.api = new RESTApi(context.options(), configRequired);
         this.context =
                 CatalogContext.create(
                         api.options(),
@@ -168,20 +143,7 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public RESTCatalogLoader catalogLoader() {
-        return new RESTCatalogLoader(context, referenceDatabase, referenceName);
-    }
-
-    /**
-     * Returns a separate catalog whose table operations use one database branch or immutable tag.
-     *
-     * <p>The binding is preserved by {@link #catalogLoader()}. Use ordinary logical table names;
-     * the server resolves their backing versions. No additional configuration request is made.
-     * Database and reference management are not versioned by this binding.
-     */
-    @Experimental
-    public RESTCatalog withReference(String database, String reference) {
-        DatabaseReference.validateName(reference);
-        return new RESTCatalog(context, api, database, reference);
+        return new RESTCatalogLoader(context);
     }
 
     @Experimental
@@ -262,6 +224,7 @@ public class RESTCatalog implements Catalog {
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
         checkNotSystemDatabase(name);
+        DatabaseIdentifier.checkNoReference(name, "dropDatabase");
         try {
             if (!cascade && !this.listTables(name).isEmpty()) {
                 throw new DatabaseNotEmptyException(name);
@@ -571,9 +534,10 @@ public class RESTCatalog implements Catalog {
             Snapshot snapshot,
             List<PartitionStatistics> statistics)
             throws TableNotExistException {
-        // CatalogSnapshotCommit supplies the physical storage branch. A database reference
-        // already selects the write target, so keep its logical table name on the wire.
-        if (referenceName != null && identifier.getBranchName() != null) {
+        // CatalogSnapshotCommit supplies the physical storage branch. The database suffix
+        // already selects the write target; keep the logical table name on the wire.
+        if (DatabaseIdentifier.parse(identifier.getDatabaseName()).getReference() != null
+                && identifier.getBranchName() != null) {
             identifier =
                     new Identifier(
                             identifier.getDatabaseName(),

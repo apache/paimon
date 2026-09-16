@@ -19,13 +19,10 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.annotation.Experimental;
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.options.Options;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
-
-import javax.annotation.Nullable;
 
 import static org.apache.paimon.rest.RESTUtil.encodeString;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -67,47 +64,9 @@ public class ResourcePaths {
     }
 
     private final String prefix;
-    @Nullable private final String referenceDatabase;
-    @Nullable private final String referenceName;
 
     public ResourcePaths(String prefix) {
-        this(encodeString(prefix), null, null);
-    }
-
-    private ResourcePaths(
-            String encodedPrefix,
-            @Nullable String referenceDatabase,
-            @Nullable String referenceName) {
-        this.prefix = encodedPrefix;
-        this.referenceDatabase = referenceDatabase;
-        this.referenceName = referenceName;
-    }
-
-    /** Returns paths for table operations within one database branch or immutable tag. */
-    @Experimental
-    public ResourcePaths withReference(String database, String reference) {
-        checkArgument(database != null && !database.trim().isEmpty(), "database must not be blank");
-        DatabaseReference.validateName(reference);
-        return new ResourcePaths(prefix, database, reference);
-    }
-
-    private String tableScope(String database) {
-        if (referenceName == null) {
-            return database(database);
-        }
-        checkArgument(
-                referenceDatabase.equals(database),
-                "Table operation must use reference database %s, not %s",
-                referenceDatabase,
-                database);
-        return databaseTree(database, referenceName);
-    }
-
-    private void checkUnscoped(String operation) {
-        if (referenceName != null) {
-            throw new UnsupportedOperationException(
-                    operation + " is not supported in a database reference scope");
-        }
+        this.prefix = encodeString(prefix);
     }
 
     /** Labels attached to one entity, whose canonical name is encoded as a single segment. */
@@ -139,6 +98,7 @@ public class ResourcePaths {
     @Experimental
     public String semanticViews(String database) {
         checkArgument(database != null && !database.trim().isEmpty(), "database must not be blank");
+        DatabaseIdentifier.checkNoReference(database, "semanticViews");
         return SLASH.join(V1, prefix, DATABASES, encodePathSegment(database), SEMANTIC_VIEWS);
     }
 
@@ -168,8 +128,8 @@ public class ResourcePaths {
     /** Policy collection nested below its attachment resource. */
     @Experimental
     public String policies(PermissionResource resource) {
-        checkUnscoped("policies");
         resource.validatePolicyAttachment();
+        DatabaseIdentifier.checkNoReference(resource.getDatabase(), "policies");
         return SLASH.join(table(resource.getDatabase(), resource.getTable()), POLICIES);
     }
 
@@ -184,12 +144,14 @@ public class ResourcePaths {
     }
 
     public String database(String databaseName) {
+        DatabaseIdentifier.parse(databaseName);
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName));
     }
 
     /** Database-level branches and immutable tags. */
     @Experimental
     public String databaseTrees(String databaseName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "tree management");
         return SLASH.join(database(databaseName), TREES);
     }
 
@@ -206,38 +168,32 @@ public class ResourcePaths {
     }
 
     public String tables(String databaseName) {
-        return SLASH.join(tableScope(databaseName), TABLES);
+        return SLASH.join(database(databaseName), TABLES);
     }
 
     public String tableDetails(String databaseName) {
-        return SLASH.join(tableScope(databaseName), TABLE_DETAILS);
+        return SLASH.join(database(databaseName), TABLE_DETAILS);
     }
 
     public String tables() {
-        checkUnscoped("tables");
         return SLASH.join(V1, prefix, TABLES);
     }
 
     public String table(String tableId) {
-        checkUnscoped("table");
         return SLASH.join(V1, prefix, TABLES, ID, encodeString(tableId));
     }
 
     public String table(String databaseName, String objectName) {
-        checkArgument(
-                referenceName == null
-                        || Identifier.create(databaseName, objectName).getBranchName() == null,
-                "Table branch suffixes cannot be combined with a database reference");
+        DatabaseIdentifier.checkTableName(databaseName, objectName);
         return SLASH.join(tables(databaseName), encodeString(objectName));
     }
 
     public String renameTable() {
-        checkUnscoped("renameTable");
         return SLASH.join(V1, prefix, TABLES, "rename");
     }
 
     public String replaceTable(String databaseName, String objectName) {
-        checkUnscoped("replaceTable");
+        DatabaseIdentifier.checkNoReference(databaseName, "replaceTable");
         return SLASH.join(
                 V1,
                 prefix,
@@ -253,7 +209,7 @@ public class ResourcePaths {
     }
 
     public String rollbackTable(String databaseName, String objectName) {
-        checkUnscoped("rollbackTable");
+        DatabaseIdentifier.checkNoReference(databaseName, "rollbackTable");
         return SLASH.join(
                 V1,
                 prefix,
@@ -265,7 +221,7 @@ public class ResourcePaths {
     }
 
     public String rollbackSchemaTable(String databaseName, String objectName) {
-        checkUnscoped("rollbackSchemaTable");
+        DatabaseIdentifier.checkNoReference(databaseName, "rollbackSchemaTable");
         return SLASH.join(
                 V1,
                 prefix,
@@ -277,7 +233,7 @@ public class ResourcePaths {
     }
 
     public String registerTable(String databaseName) {
-        checkUnscoped("registerTable");
+        DatabaseIdentifier.checkNoReference(databaseName, "registerTable");
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), REGISTER);
     }
 
@@ -310,7 +266,7 @@ public class ResourcePaths {
     }
 
     public String partitions(String databaseName, String objectName) {
-        checkUnscoped("partitions");
+        DatabaseIdentifier.checkNoReference(databaseName, "partitions");
         return SLASH.join(
                 V1,
                 prefix,
@@ -322,7 +278,7 @@ public class ResourcePaths {
     }
 
     public String dropPartitions(String databaseName, String objectName) {
-        checkUnscoped("dropPartitions");
+        DatabaseIdentifier.checkNoReference(databaseName, "dropPartitions");
         return SLASH.join(
                 V1,
                 prefix,
@@ -335,7 +291,7 @@ public class ResourcePaths {
     }
 
     public String markDonePartitions(String databaseName, String objectName) {
-        checkUnscoped("markDonePartitions");
+        DatabaseIdentifier.checkNoReference(databaseName, "markDonePartitions");
         return SLASH.join(
                 V1,
                 prefix,
@@ -348,7 +304,7 @@ public class ResourcePaths {
     }
 
     public String listPartitionsByNames(String databaseName, String objectName) {
-        checkUnscoped("listPartitionsByNames");
+        DatabaseIdentifier.checkNoReference(databaseName, "listPartitionsByNames");
         return SLASH.join(
                 V1,
                 prefix,
@@ -361,7 +317,7 @@ public class ResourcePaths {
     }
 
     public String listPartitionsByFilter(String databaseName, String objectName) {
-        checkUnscoped("listPartitionsByFilter");
+        DatabaseIdentifier.checkNoReference(databaseName, "listPartitionsByFilter");
         return SLASH.join(
                 V1,
                 prefix,
@@ -374,7 +330,7 @@ public class ResourcePaths {
     }
 
     public String branches(String databaseName, String objectName) {
-        checkUnscoped("branches");
+        DatabaseIdentifier.checkNoReference(databaseName, "branches");
         return SLASH.join(
                 V1,
                 prefix,
@@ -386,7 +342,7 @@ public class ResourcePaths {
     }
 
     public String branch(String databaseName, String objectName, String branchName) {
-        checkUnscoped("branch");
+        DatabaseIdentifier.checkNoReference(databaseName, "branch");
         return SLASH.join(
                 V1,
                 prefix,
@@ -399,7 +355,7 @@ public class ResourcePaths {
     }
 
     public String forwardBranch(String databaseName, String tableName, String branch) {
-        checkUnscoped("forwardBranch");
+        DatabaseIdentifier.checkNoReference(databaseName, "forwardBranch");
         return SLASH.join(
                 V1,
                 prefix,
@@ -413,7 +369,7 @@ public class ResourcePaths {
     }
 
     public String tags(String databaseName, String objectName) {
-        checkUnscoped("tags");
+        DatabaseIdentifier.checkNoReference(databaseName, "tags");
         return SLASH.join(
                 V1,
                 prefix,
@@ -425,7 +381,7 @@ public class ResourcePaths {
     }
 
     public String consumers(String databaseName, String objectName) {
-        checkUnscoped("consumers");
+        DatabaseIdentifier.checkNoReference(databaseName, "consumers");
         return SLASH.join(
                 V1,
                 prefix,
@@ -437,7 +393,7 @@ public class ResourcePaths {
     }
 
     public String resetConsumer(String databaseName, String objectName) {
-        checkUnscoped("resetConsumer");
+        DatabaseIdentifier.checkNoReference(databaseName, "resetConsumer");
         return SLASH.join(
                 V1,
                 prefix,
@@ -450,7 +406,7 @@ public class ResourcePaths {
     }
 
     public String tag(String databaseName, String objectName, String tagName) {
-        checkUnscoped("tag");
+        DatabaseIdentifier.checkNoReference(databaseName, "tag");
         return SLASH.join(
                 V1,
                 prefix,
@@ -463,10 +419,12 @@ public class ResourcePaths {
     }
 
     public String views(String databaseName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "views");
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), VIEWS);
     }
 
     public String viewDetails(String databaseName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "viewDetails");
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), VIEW_DETAILS);
     }
 
@@ -475,6 +433,7 @@ public class ResourcePaths {
     }
 
     public String view(String databaseName, String viewName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "view");
         return SLASH.join(
                 V1, prefix, DATABASES, encodeString(databaseName), VIEWS, encodeString(viewName));
     }
@@ -484,6 +443,7 @@ public class ResourcePaths {
     }
 
     public String functions(String databaseName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "functions");
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), FUNCTIONS);
     }
 
@@ -492,10 +452,12 @@ public class ResourcePaths {
     }
 
     public String functionDetails(String databaseName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "functionDetails");
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), FUNCTION_DETAILS);
     }
 
     public String function(String databaseName, String functionName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "function");
         return SLASH.join(
                 V1,
                 prefix,

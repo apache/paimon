@@ -30,6 +30,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.requests.CommitTableRequest;
+import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.responses.GetSchemaResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -112,37 +113,38 @@ class RESTCatalogReferenceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"experiment", "train_v1"})
+    @ValueSource(strings = {"$branch_experiment", "$tag_train_v1"})
     void testTableAndSerializedLoaderKeepReference(String reference) throws Exception {
-        RESTCatalog scoped = catalog.withReference(DATABASE, reference);
-        String scope = DATABASE_PATH + "/trees/" + reference;
+        String database = DATABASE + reference;
+        Identifier selected = Identifier.create(database, "features");
+        String scope = DATABASE_PATH + reference.replace("$", "%24");
         enqueue(200, "{\"tables\":[\"features\",\"labels\"]}");
-        assertThat(scoped.listTables(DATABASE)).containsExactly("features", "labels");
+        assertThat(catalog.listTables(database)).containsExactly("features", "labels");
         takeRequest("GET", scope + "/tables");
 
-        enqueue(200, tableResponse("physical-experiment"));
-        FileStoreTable table = (FileStoreTable) scoped.getTable(TABLE);
-        assertThat(table.catalogEnvironment().identifier()).isEqualTo(TABLE);
+        enqueue(200, tableResponse(database, "physical-experiment", 2));
+        FileStoreTable table = (FileStoreTable) catalog.getTable(selected);
+        assertThat(table.catalogEnvironment().identifier()).isEqualTo(selected);
         assertThat(table.snapshotManager().branch()).isEqualTo("physical-experiment");
         assertThat(table.schema().id()).isEqualTo(2);
         takeRequest("GET", scope + "/tables/features");
 
-        // A task receives a serialized table. Its snapshot loader must still address the tree.
+        // A task receives a serialized table. Its identifier must retain the database suffix.
         FileStoreTable restored = InstantiationUtil.clone(table);
         enqueue(200, "{\"snapshot\":{\"snapshot\":" + SNAPSHOT_JSON + "}}");
         assertThat(restored.snapshotManager().latestSnapshot().id()).isEqualTo(7);
         takeRequest("GET", scope + "/tables/features/snapshot");
 
-        RESTCatalog loaded = InstantiationUtil.clone(scoped.catalogLoader()).load();
+        RESTCatalog loaded = InstantiationUtil.clone(catalog.catalogLoader()).load();
         enqueue(
                 200,
                 RESTApi.toJson(
                         new GetSchemaResponse(
                                 TableSchema.create(2, schema("physical-experiment")))));
-        assertThat(loaded.loadSchema(TABLE, "LATEST").get().id()).isEqualTo(2);
+        assertThat(loaded.loadSchema(selected, "LATEST").get().id()).isEqualTo(2);
         takeRequest("GET", scope + "/tables/features/schemas/LATEST");
 
-        // Binding another catalog must not change the original catalog's route or metadata.
+        // The same catalog also loads the ordinary database without reference state.
         enqueue(200, tableResponse("main"));
         FileStoreTable main = (FileStoreTable) catalog.getTable(TABLE);
         assertThat(main.snapshotManager().branch()).isEqualTo("main");
@@ -152,10 +154,10 @@ class RESTCatalogReferenceTest {
 
     @Test
     void testStorageCommitUsesLogicalTableAndExistingBody() throws Exception {
-        RESTCatalog scoped = catalog.withReference(DATABASE, "experiment");
-        enqueue(200, tableResponse("physical-experiment"));
-        FileStoreTable table = InstantiationUtil.clone((FileStoreTable) scoped.getTable(TABLE));
-        takeRequest("GET", DATABASE_PATH + "/trees/experiment/tables/features");
+        Identifier selected = Identifier.create(DATABASE + "$branch_experiment", "features");
+        enqueue(200, tableResponse(selected.getDatabaseName(), "physical-experiment", 2));
+        FileStoreTable table = InstantiationUtil.clone((FileStoreTable) catalog.getTable(selected));
+        takeRequest("GET", DATABASE_PATH + "%24branch_experiment/tables/features");
 
         Snapshot snapshot = Snapshot.fromJson(SNAPSHOT_JSON);
         enqueue(200, "{\"success\":true}");
@@ -170,7 +172,7 @@ class RESTCatalogReferenceTest {
                     .isTrue();
         }
         RecordedRequest request =
-                takeRequest("POST", DATABASE_PATH + "/trees/experiment/tables/features/commit");
+                takeRequest("POST", DATABASE_PATH + "%24branch_experiment/tables/features/commit");
         CommitTableRequest body =
                 RESTApi.fromJson(request.getBody().readUtf8(), CommitTableRequest.class);
         assertThat(body.getTableId()).isEqualTo("table-id");
@@ -181,16 +183,18 @@ class RESTCatalogReferenceTest {
 
     @Test
     void testReadFollowUpsAndPaginationReuseProtocol() throws Exception {
-        RESTApi scoped = catalog.api().withReference(DATABASE, "train_v1");
-        String scope = DATABASE_PATH + "/trees/train_v1";
+        RESTApi api = catalog.api();
+        String database = DATABASE + "$tag_train_v1";
+        Identifier selected = Identifier.create(database, "features");
+        String scope = DATABASE_PATH + "%24tag_train_v1";
         String tablePath = scope + "/tables/features";
         enqueue(200, "{\"tables\":[\"features\"],\"nextPageToken\":\"next\"}");
-        assertThat(scoped.listTablesPaged(DATABASE, 1, null, "feat%", null).getNextPageToken())
+        assertThat(api.listTablesPaged(database, 1, null, "feat%", null).getNextPageToken())
                 .isEqualTo("next");
         RecordedRequest first = takeRequest("GET", scope + "/tables");
         assertThat(first.getRequestUrl().queryParameter("tableNamePattern")).isEqualTo("feat%");
         enqueue(200, "{\"tables\":[\"labels\"]}");
-        assertThat(scoped.listTablesPaged(DATABASE, 1, "next", null, null).getElements())
+        assertThat(api.listTablesPaged(database, 1, "next", null, null).getElements())
                 .containsExactly("labels");
         assertThat(
                         takeRequest("GET", scope + "/tables")
@@ -198,55 +202,67 @@ class RESTCatalogReferenceTest {
                                 .queryParameter("pageToken"))
                 .isEqualTo("next");
 
-        enqueue(200, "{\"tableDetails\":[" + tableResponse("physical-experiment") + "]}");
-        assertThat(scoped.listTableDetails(DATABASE).get(0).getName()).isEqualTo("features");
+        enqueue(
+                200,
+                "{\"tableDetails\":[" + tableResponse(database, "physical-experiment", 2) + "]}");
+        GetTableResponse details = api.listTableDetails(database).get(0);
+        assertThat(details.getName()).isEqualTo("features");
+        assertThat(details.getDatabase()).isEqualTo(database);
         takeRequest("GET", scope + "/table-details");
 
         enqueue(200, "{\"snapshot\":" + SNAPSHOT_JSON + "}");
-        assertThat(scoped.loadSnapshot(TABLE, "LATEST").id()).isEqualTo(7);
+        assertThat(api.loadSnapshot(selected, "LATEST").id()).isEqualTo(7);
         takeRequest("GET", tablePath + "/snapshots/LATEST");
         enqueue(200, "{\"snapshots\":[" + SNAPSHOT_JSON + "]}");
-        assertThat(scoped.listSnapshotsPaged(TABLE, 10, null).getElements().get(0).id())
+        assertThat(api.listSnapshotsPaged(selected, 10, null).getElements().get(0).id())
                 .isEqualTo(7);
         takeRequest("GET", tablePath + "/snapshots");
 
         TableSchema schema = TableSchema.create(2, schema("physical-experiment"));
         enqueue(200, "{\"schemas\":[" + RESTApi.toJson(schema) + "]}");
-        assertThat(scoped.listSchemasPaged(TABLE, 10, null).getElements()).containsExactly(schema);
+        assertThat(api.listSchemasPaged(selected, 10, null).getElements()).containsExactly(schema);
         takeRequest("GET", tablePath + "/schemas");
 
         enqueue(200, "{\"token\":{\"key\":\"value\"},\"expiresAtMillis\":1234}");
-        assertThat(scoped.loadTableToken(TABLE).getToken()).containsEntry("key", "value");
+        assertThat(api.loadTableToken(selected).getToken()).containsEntry("key", "value");
         takeRequest("GET", tablePath + "/token");
         enqueue(200, "{\"filter\":[],\"columnMasking\":{}}");
-        scoped.authTableQuery(TABLE, singletonList("id"));
+        api.authTableQuery(selected, singletonList("id"));
         assertThat(takeRequest("POST", tablePath + "/auth").getBody().readUtf8())
                 .isEqualTo("{\"select\":[\"id\"]}");
     }
 
     @Test
     void testTableMutationsReuseRequestBodies() throws Exception {
-        RESTApi scoped = catalog.api().withReference(DATABASE, "experiment");
-        for (RESTApi api : new RESTApi[] {catalog.api(), scoped}) {
+        Identifier selected = Identifier.create(DATABASE + "$branch_experiment", "features");
+        RESTApi api = catalog.api();
+        for (Identifier identifier : new Identifier[] {TABLE, selected}) {
             enqueue(200, "{}");
-            api.createTable(TABLE, schema("main"));
+            api.createTable(identifier, schema("main"));
             enqueue(200, "{}");
-            api.alterTable(TABLE, singletonList(SchemaChange.setOption("key", "value")));
+            api.alterTable(identifier, singletonList(SchemaChange.setOption("key", "value")));
             enqueue(200, "{}");
-            api.dropTable(TABLE);
+            api.dropTable(identifier);
         }
         RecordedRequest[] original = {
             takeRequest("POST", DATABASE_PATH + "/tables"),
             takeRequest("POST", DATABASE_PATH + "/tables/features"),
             takeRequest("DELETE", DATABASE_PATH + "/tables/features")
         };
-        String scope = DATABASE_PATH + "/trees/experiment";
+        String scope = DATABASE_PATH + "%24branch_experiment";
         RecordedRequest[] referenced = {
             takeRequest("POST", scope + "/tables"),
             takeRequest("POST", scope + "/tables/features"),
             takeRequest("DELETE", scope + "/tables/features")
         };
-        for (int i = 0; i < original.length; i++) {
+        CreateTableRequest plain =
+                RESTApi.fromJson(original[0].getBody().readUtf8(), CreateTableRequest.class);
+        CreateTableRequest branch =
+                RESTApi.fromJson(referenced[0].getBody().readUtf8(), CreateTableRequest.class);
+        assertThat(plain.getIdentifier()).isEqualTo(TABLE);
+        assertThat(branch.getIdentifier()).isEqualTo(selected);
+        assertThat(branch.getSchema()).isEqualTo(plain.getSchema());
+        for (int i = 1; i < original.length; i++) {
             assertThat(referenced[i].getBody().readUtf8())
                     .isEqualTo(original[i].getBody().readUtf8());
         }
@@ -254,48 +270,75 @@ class RESTCatalogReferenceTest {
 
     @Test
     void testErrorsDoNotFallBackToDefaultBranch() throws Exception {
-        RESTCatalog scoped = catalog.withReference(DATABASE, "train_v1");
+        Identifier selected = Identifier.create(DATABASE + "$tag_train_v1", "features");
         enqueue(404, "{\"message\":\"reference missing\",\"code\":404}");
-        assertThatThrownBy(() -> scoped.getTable(TABLE))
+        assertThatThrownBy(() -> catalog.getTable(selected))
                 .isInstanceOf(Catalog.TableNotExistException.class);
-        takeRequest("GET", DATABASE_PATH + "/trees/train_v1/tables/features");
+        takeRequest("GET", DATABASE_PATH + "%24tag_train_v1/tables/features");
         enqueue(409, "{\"message\":\"tag is immutable\",\"code\":409}");
         assertThatThrownBy(
                         () ->
-                                scoped.commitSnapshot(
-                                        TABLE,
+                                catalog.commitSnapshot(
+                                        selected,
                                         "table-id",
                                         null,
                                         Snapshot.fromJson(SNAPSHOT_JSON),
                                         emptyList()))
                 .isInstanceOf(AlreadyExistsException.class)
                 .hasMessageContaining("tag is immutable");
-        takeRequest("POST", DATABASE_PATH + "/trees/train_v1/tables/features/commit");
+        takeRequest("POST", DATABASE_PATH + "%24tag_train_v1/tables/features/commit");
         assertThat(server.getRequestCount()).isEqualTo(3);
     }
 
     @Test
-    void testUnsupportedSelectorsNeverSendAnUnscopedRequest() {
-        RESTApi scoped = catalog.api().withReference(DATABASE, "experiment");
-        assertThatThrownBy(() -> catalog.withReference(DATABASE, null))
+    void testUnsupportedDatabaseOperationsAndMixedSelectorsDoNotSendRequests() {
+        RESTApi api = catalog.api();
+        String database = DATABASE + "$branch_experiment";
+        Identifier selected = Identifier.create(database, "features");
+        Identifier mixed = new Identifier(database, "features", "other");
+        assertThatThrownBy(() -> api.getTable(mixed)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> api.createTable(mixed, schema("main")))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> scoped.withReference(DATABASE, "../main"))
+        assertThatThrownBy(() -> api.listTables(DATABASE + "$tag_"))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> scoped.listTables("other"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(DATABASE);
-        assertThatThrownBy(() -> scoped.getTable(new Identifier(DATABASE, "features", "other")))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("branch suffixes");
-        assertThatThrownBy(() -> scoped.getTableById("table-id"))
+        assertThatThrownBy(() -> api.renameTable(selected, TABLE))
                 .isInstanceOf(UnsupportedOperationException.class);
-        assertThatThrownBy(() -> scoped.listTablesPagedGlobally(null, null, null, null))
+        assertThatThrownBy(() -> api.renameTable(TABLE, selected))
                 .isInstanceOf(UnsupportedOperationException.class);
-        assertThatThrownBy(() -> scoped.renameTable(TABLE, Identifier.create(DATABASE, "renamed")))
+        assertThatThrownBy(() -> api.createBranch(selected, "nested", null))
                 .isInstanceOf(UnsupportedOperationException.class);
-        assertThatThrownBy(() -> scoped.createBranch(TABLE, "nested", null))
+        assertThatThrownBy(() -> api.createDatabase(database, java.util.Collections.emptyMap()))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(
+                        () ->
+                                api.alterDatabase(
+                                        database, emptyList(), java.util.Collections.emptyMap()))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> api.dropDatabase(database))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> catalog.dropDatabase(database, true, false))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> catalog.dropDatabase(database, true, true))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> catalog.treeManagement().getReference(database, "main"))
                 .isInstanceOf(UnsupportedOperationException.class);
         assertThat(server.getRequestCount()).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"$branch_experiment", "$tag_train_v1"})
+    void testDatabaseLookupPreservesVirtualName(String suffix) throws Exception {
+        String database = DATABASE + suffix;
+        enqueue(
+                200,
+                "{\"name\":\"" + database + "\",\"location\":\"file:///training\",\"options\":{}}");
+        assertThat(catalog.getDatabase(database).name()).isEqualTo(database);
+        takeRequest("GET", DATABASE_PATH + suffix.replace("$", "%24"));
+        enqueue(404, "{\"code\":404,\"message\":\"reference missing\"}");
+        assertThatThrownBy(() -> catalog.getDatabase(database))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
+        takeRequest("GET", DATABASE_PATH + suffix.replace("$", "%24"));
+        assertThat(server.getRequestCount()).isEqualTo(3);
     }
 
     @Test
@@ -315,13 +358,22 @@ class RESTCatalogReferenceTest {
                     public MockResponse dispatch(RecordedRequest request) {
                         try {
                             String route = request.getRequestUrl().encodedPath();
-                            String prefix = DATABASE_PATH + "/trees/";
+                            String prefix = "/v1/catalog%2Fid/databases/";
                             if (!route.startsWith(prefix)) {
                                 unexpected.add(route);
                                 return response(500, "{}");
                             }
                             String[] parts = route.substring(prefix.length()).split("/");
-                            String reference = parts[0];
+                            DatabaseIdentifier database =
+                                    DatabaseIdentifier.parse(RESTUtil.decodeString(parts[0]));
+                            if (!database.getDatabaseName().equals(DATABASE)) {
+                                unexpected.add(route);
+                                return response(500, "{}");
+                            }
+                            String reference =
+                                    database.getReference() == null
+                                            ? "main"
+                                            : database.getReference().getName();
                             if (parts.length < 3
                                     || !parts[1].equals("tables")
                                     || !parts[2].equals("features")) {
@@ -331,7 +383,9 @@ class RESTCatalogReferenceTest {
                             String branch =
                                     reference.equals("main") ? "main" : "physical-experiment";
                             if (request.getMethod().equals("GET") && parts.length == 3) {
-                                return response(200, tableResponse(branch, 0));
+                                return response(
+                                        200,
+                                        tableResponse(RESTUtil.decodeString(parts[0]), branch, 0));
                             }
                             if (request.getMethod().equals("GET")
                                     && parts.length == 4
@@ -375,12 +429,12 @@ class RESTCatalogReferenceTest {
                     }
                 });
 
-        RESTCatalog main = catalog.withReference(DATABASE, "main");
-        RESTCatalog experiment = catalog.withReference(DATABASE, "experiment");
+        Identifier main = Identifier.create(DATABASE + "$branch_main", "features");
+        Identifier experiment = Identifier.create(DATABASE + "$branch_experiment", "features");
         writeRows(main, 10);
         writeRows(experiment, 20);
         snapshots.put("train_v1", snapshots.get("experiment"));
-        RESTCatalog tag = catalog.withReference(DATABASE, "train_v1");
+        Identifier tag = Identifier.create(DATABASE + "$tag_train_v1", "features");
         assertThat(readRows(tag)).containsExactly(20);
 
         writeRows(experiment, 30);
@@ -395,8 +449,8 @@ class RESTCatalogReferenceTest {
         assertThat(unexpected).isEmpty();
     }
 
-    private void writeRows(RESTCatalog scoped, int value) throws Exception {
-        FileStoreTable table = InstantiationUtil.clone((FileStoreTable) scoped.getTable(TABLE));
+    private void writeRows(Identifier selected, int value) throws Exception {
+        FileStoreTable table = InstantiationUtil.clone((FileStoreTable) catalog.getTable(selected));
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = builder.newWrite();
                 BatchTableCommit commit = builder.newCommit()) {
@@ -405,8 +459,8 @@ class RESTCatalogReferenceTest {
         }
     }
 
-    private List<Integer> readRows(RESTCatalog scoped) throws Exception {
-        FileStoreTable table = InstantiationUtil.clone((FileStoreTable) scoped.getTable(TABLE));
+    private List<Integer> readRows(Identifier selected) throws Exception {
+        FileStoreTable table = InstantiationUtil.clone((FileStoreTable) catalog.getTable(selected));
         ReadBuilder builder = table.newReadBuilder();
         List<Integer> rows = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
@@ -420,19 +474,20 @@ class RESTCatalogReferenceTest {
         return Schema.newBuilder()
                 .column("id", DataTypes.INT())
                 .option("bucket", "-1")
+                .option("commit.max-retries", "0")
                 .option(BRANCH.key(), branch)
                 .build();
     }
 
     private String tableResponse(String branch) throws Exception {
-        return tableResponse(branch, 2);
+        return tableResponse(DATABASE, branch, 2);
     }
 
-    private String tableResponse(String branch, long schemaId) throws Exception {
+    private String tableResponse(String database, String branch, long schemaId) throws Exception {
         return RESTApi.toJson(
                 new GetTableResponse(
                         "table-id",
-                        DATABASE,
+                        database,
                         "features",
                         tempDir.resolve("features").toUri().toString(),
                         false,
