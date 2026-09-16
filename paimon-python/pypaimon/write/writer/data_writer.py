@@ -343,9 +343,9 @@ class DataWriter(ABC):
             min_seq = self.sequence_generator.start
             max_seq = self.sequence_generator.current
             creation_time = Timestamp.now()
-            data_meta = DataFileMeta.create(
+            data_meta = self._create_data_file_meta(
                 file_name=file_name,
-                file_size=self.file_io.get_file_size(file_path),
+                file_path=file_path,
                 row_count=data.num_rows,
                 min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
                 max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
@@ -353,17 +353,8 @@ class DataWriter(ABC):
                 value_stats=value_stats,
                 min_sequence_number=min_seq,
                 max_sequence_number=max_seq,
-                schema_id=self.table.table_schema.id,
-                level=0,
                 extra_files=extra_files,
                 creation_time=creation_time,
-                delete_row_count=0,
-                file_source=0,
-                value_stats_cols=None if value_stats_enabled else [],
-                external_path=external_path_str,
-                first_row_id=None,
-                write_cols=self.write_cols,
-                file_path=file_path,
             )
 
             if self.changelog_producer == ChangelogProducer.INPUT:
@@ -378,8 +369,14 @@ class DataWriter(ABC):
                 self.file_io.delete_quietly(row_sidecar_path)
             raise
 
+        self._finish_data_file(data_meta, changelog_meta, shared_shredding_stats)
+
+    def _finish_data_file(self, data_meta, changelog_meta=None,
+                          shared_shredding_stats=None):
+        """Record a fully written data file and its optional changelog."""
         self.sequence_generator.start = self.sequence_generator.current
-        self._map_shared_shredding.file_completed(shared_shredding_stats)
+        if shared_shredding_stats is not None:
+            self._map_shared_shredding.file_completed(shared_shredding_stats)
         self.committed_files.append(data_meta)
         if changelog_meta is not None:
             self.committed_changelog_files.append(changelog_meta)
@@ -390,6 +387,28 @@ class DataWriter(ABC):
                 self.file_io, path, data, self.compression, self.zstd_level)
         self.file_io.write_parquet(path, data, compression=self.compression, zstd_level=self.zstd_level)
         return {}
+
+    def _create_data_file_meta(self, file_name, file_path, row_count,
+                               min_key, max_key, key_stats, value_stats,
+                               min_sequence_number, max_sequence_number,
+                               extra_files=None, creation_time=None):
+        """Common metadata finalization for buffered and incremental files."""
+        return DataFileMeta.create(
+            file_name=file_name,
+            file_size=self.file_io.get_file_size(file_path),
+            row_count=row_count,
+            min_key=min_key, max_key=max_key,
+            key_stats=key_stats, value_stats=value_stats,
+            min_sequence_number=min_sequence_number,
+            max_sequence_number=max_sequence_number,
+            schema_id=self.table.table_schema.id, level=0,
+            extra_files=extra_files if extra_files is not None else [],
+            creation_time=creation_time if creation_time is not None else Timestamp.now(),
+            delete_row_count=0, file_source=0,
+            value_stats_cols=None if self.options.metadata_stats_enabled() else [],
+            external_path=file_path if self.external_path_provider is not None else None,
+            first_row_id=None, write_cols=self.write_cols, file_path=file_path,
+        )
 
     def _apply_variant_shredding(self, data: pa.Table) -> pa.Table:
         """Transform VARIANT columns into shredded Parquet format.

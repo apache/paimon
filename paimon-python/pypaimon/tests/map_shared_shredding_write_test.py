@@ -92,6 +92,50 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
             result.column("metrics_overflow").to_pylist(),
         )
 
+    def test_row_id_update_preserves_shared_shredding(self):
+        table = self._create_table('parquet', 2, {
+            'data-evolution.enabled': 'true',
+            'row-tracking.enabled': 'true',
+        })
+        self._write(table, pa.Table.from_pydict({
+            'id': [1, 2],
+            'metrics': [[('hot', 1)], [('warm', 2)]],
+        }, schema=self.arrow_schema))
+
+        read_builder = table.new_read_builder().with_projection(['id', '_ROW_ID'])
+        rows = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        row_ids = dict(zip(rows.column('id').to_pylist(),
+                           rows.column('_ROW_ID').to_pylist()))
+        row_id = row_ids[2]
+        update = pa.Table.from_pydict({
+            '_ROW_ID': [row_id],
+            'metrics': [[('hot', 99), ('new', 7)]],
+        }, schema=pa.schema([
+            ('_ROW_ID', pa.int64()),
+            self.arrow_schema.field('metrics'),
+        ]))
+
+        builder = table.new_batch_write_builder()
+        messages = builder.new_update().with_update_type(
+            ['metrics']).update_by_arrow_with_row_id(update)
+        self.assertEqual(1, len(messages[0].new_files))
+        overlay = messages[0].new_files[0]
+        self.assertTrue(is_shared_shredding(
+            pq.read_schema(overlay.file_path).field('metrics')))
+        commit = builder.new_commit()
+        commit.commit(messages)
+        commit.close()
+
+        read_builder = table.new_read_builder().with_projection(['id', 'metrics'])
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual(
+            {1: [('hot', 1)], 2: [('hot', 99), ('new', 7)]},
+            dict(zip(result.column('id').to_pylist(),
+                     result.column('metrics').to_pylist())),
+        )
+
     def test_reject_orc(self):
         with self.assertRaisesRegex(
                 ValueError,
