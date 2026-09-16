@@ -217,6 +217,14 @@ public class PredicateBuilder {
         return leaf(optimized.getKey(), transform, optimized.getValue());
     }
 
+    public Predicate notLike(int idx, Object patternLiteral) {
+        return leaf(NotLike.INSTANCE, idx, patternLiteral);
+    }
+
+    public Predicate notLike(Transform transform, Object patternLiteral) {
+        return leaf(NotLike.INSTANCE, transform, patternLiteral);
+    }
+
     private Predicate leaf(LeafFunction function, int idx, Object literal) {
         DataField field = rowType.getFields().get(idx);
         return new LeafPredicate(function, field.type(), idx, field.name(), singletonList(literal));

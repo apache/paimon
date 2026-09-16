@@ -105,6 +105,13 @@ public class OrcPredicateFunctionVisitor
     }
 
     @Override
+    public Optional<OrcFilters.Predicate> visitNotLike(FieldRef fieldRef, Object literal) {
+        // ORC SearchArgument has no not-like leaf, so skip push-down and let the engine
+        // evaluate the filter (consistent with the Parquet path).
+        return Optional.empty();
+    }
+
+    @Override
     public Optional<OrcFilters.Predicate> visitLessThan(FieldRef fieldRef, Object literal) {
         return convertBinary(fieldRef, literal, OrcFilters.LessThan::new);
     }

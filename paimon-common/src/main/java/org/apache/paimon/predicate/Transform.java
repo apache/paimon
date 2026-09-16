@@ -37,10 +37,17 @@ import java.util.List;
     @JsonSubTypes.Type(value = CastTransform.class, name = CastTransform.NAME),
     @JsonSubTypes.Type(value = ConcatTransform.class, name = ConcatTransform.NAME),
     @JsonSubTypes.Type(value = ConcatWsTransform.class, name = ConcatWsTransform.NAME),
+    @JsonSubTypes.Type(value = YearTransform.class, name = YearTransform.NAME),
+    @JsonSubTypes.Type(value = MonthTransform.class, name = MonthTransform.NAME),
+    @JsonSubTypes.Type(value = DayTransform.class, name = DayTransform.NAME),
+    @JsonSubTypes.Type(value = HourTransform.class, name = HourTransform.NAME),
+    @JsonSubTypes.Type(value = MinuteTransform.class, name = MinuteTransform.NAME),
+    @JsonSubTypes.Type(value = SecondTransform.class, name = SecondTransform.NAME),
     @JsonSubTypes.Type(value = UpperTransform.class, name = UpperTransform.NAME),
     @JsonSubTypes.Type(value = LowerTransform.class, name = LowerTransform.NAME),
     @JsonSubTypes.Type(value = SubstringTransform.class, name = SubstringTransform.NAME),
     @JsonSubTypes.Type(value = TrimTransform.class, name = TrimTransform.NAME),
+    @JsonSubTypes.Type(value = LengthTransform.class, name = LengthTransform.NAME),
     @JsonSubTypes.Type(value = NullTransform.class, name = NullTransform.NAME)
 })
 public interface Transform extends Serializable {

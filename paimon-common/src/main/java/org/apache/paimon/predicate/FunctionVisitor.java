@@ -80,6 +80,10 @@ public interface FunctionVisitor<T> extends PredicateVisitor<T> {
 
     T visitLike(FieldRef fieldRef, Object literal);
 
+    default T visitNotLike(FieldRef fieldRef, Object literal) {
+        throw new UnsupportedOperationException();
+    }
+
     T visitLessThan(FieldRef fieldRef, Object literal);
 
     T visitGreaterOrEqual(FieldRef fieldRef, Object literal);

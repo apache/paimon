@@ -158,10 +158,21 @@ class PredicateJsonSerdeTest {
                         .expectJson(
                                 "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"CONCAT_WS\",\"inputs\":[\"|\",{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"},\"X\",null,{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]},\"function\":\"ENDS_WITH\",\"literals\":[\"z\"]}"),
 
-                // LeafPredicate - Like (non-negatable)
+                // LeafPredicate - Like
                 TestSpec.forPredicate(builder.like(2, BinaryString.fromString("%a%b%")))
                         .expectJson(
                                 "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"LIKE\",\"literals\":[\"%a%b%\"]}"),
+
+                // LeafPredicate - NotLike
+                TestSpec.forPredicate(builder.notLike(2, BinaryString.fromString("%a%b%")))
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"NOT_LIKE\",\"literals\":[\"%a%b%\"]}"),
+
+                // LeafPredicate - NotLike (negate of Like)
+                TestSpec.forPredicate(
+                                builder.like(2, BinaryString.fromString("%a%b%")).negate().get())
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"NOT_LIKE\",\"literals\":[\"%a%b%\"]}"),
 
                 // LeafPredicate - StartsWith (field index)
                 TestSpec.forPredicate(builder.startsWith(2, BinaryString.fromString("hello")))

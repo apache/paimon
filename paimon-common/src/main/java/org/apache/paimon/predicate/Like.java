@@ -148,7 +148,7 @@ public class Like extends LeafBinaryFunction {
 
     @Override
     public Optional<LeafFunction> negate() {
-        return Optional.empty();
+        return Optional.of(NotLike.INSTANCE);
     }
 
     @Override

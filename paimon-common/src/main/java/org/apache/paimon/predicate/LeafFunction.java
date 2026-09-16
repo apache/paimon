@@ -67,6 +67,7 @@ public abstract class LeafFunction implements Serializable {
             registry.put(ArraysOverlap.NAME, ArraysOverlap.INSTANCE);
             registry.put(ArrayContainsAll.NAME, ArrayContainsAll.INSTANCE);
             registry.put(Like.NAME, Like.INSTANCE);
+            registry.put(NotLike.NAME, NotLike.INSTANCE);
             registry.put(In.NAME, In.INSTANCE);
             registry.put(NotIn.NAME, NotIn.INSTANCE);
             registry.put(Between.NAME, Between.INSTANCE);

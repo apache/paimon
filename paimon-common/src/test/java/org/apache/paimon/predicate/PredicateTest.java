@@ -622,6 +622,34 @@ public class PredicateTest {
                 .isTrue();
     }
 
+    @Test
+    public void testNotLike() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new VarCharType()));
+        Predicate predicate = builder.notLike(0, fromString("h%"));
+
+        assertThat(predicate.test(GenericRow.of(fromString("hello")))).isEqualTo(false);
+        assertThat(predicate.test(GenericRow.of(fromString("world")))).isEqualTo(true);
+        assertThat(predicate.test(GenericRow.of((Object) null))).isEqualTo(false);
+
+        // unknown stats cannot prune
+        assertThat(test(predicate, 3, new SimpleColStats[] {new SimpleColStats(null, null, 1L)}))
+                .isEqualTo(true);
+        assertThat(
+                        test(
+                                predicate,
+                                3,
+                                new SimpleColStats[] {
+                                    new SimpleColStats(fromString("a"), fromString("z"), 0L)
+                                }))
+                .isEqualTo(true);
+
+        // like and not like negate each other, 'a_c' cannot be optimized to starts/ends/contains
+        assertThat(builder.like(0, fromString("a_c")).negate().orElse(null))
+                .isEqualTo(builder.notLike(0, fromString("a_c")));
+        assertThat(builder.notLike(0, fromString("a_c")).negate().orElse(null))
+                .isEqualTo(builder.like(0, fromString("a_c")));
+    }
+
     private boolean executeLike(String s, String pattern) {
         ThreadLocalRandom rnd = ThreadLocalRandom.current();
         if (rnd.nextBoolean()) {
