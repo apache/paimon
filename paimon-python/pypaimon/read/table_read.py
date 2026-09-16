@@ -196,6 +196,12 @@ class TableRead:
             self,
             splits: List[Split],
             blob_parallelism: Optional[int] = None):
+        """Return a closeable batch reader supporting context management.
+
+        Newer PyArrow versions use ``RecordBatchReader.from_stream``. Older
+        versions fall back to ``_ClosableArrowBatchReader``, which closes both
+        the batch iterator and its underlying reader.
+        """
         reader, batch_iterator = self._new_arrow_batch_reader(
             splits, blob_parallelism)
         if (_RECORD_BATCH_READER_FROM_STREAM is not None
