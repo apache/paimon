@@ -31,6 +31,18 @@ class OssOptions:
     OSS_ENDPOINT = ConfigOptions.key("fs.oss.endpoint").string_type().no_default_value().with_description(
         "OSS endpoint")
     OSS_REGION = ConfigOptions.key("fs.oss.region").string_type().no_default_value().with_description("OSS region")
+    OSS_SSE_METHOD = ConfigOptions.key(
+        "fs.oss.server-side-encryption").string_type().no_default_value().with_description(
+        "OSS atomic metadata encryption method: AES256, KMS or SM4")
+    OSS_SSE_KMS_KEY_ID = ConfigOptions.key(
+        "fs.oss.server-side-encryption-key-id").string_type().no_default_value().with_description(
+        "KMS key ID for OSS atomic metadata encryption")
+    OSS_SSE_DATA_ENCRYPTION = ConfigOptions.key(
+        "fs.oss.server-side-data-encryption").string_type().no_default_value().with_description(
+        "Data encryption algorithm for OSS atomic metadata encryption: SM4, with KMS only")
+    OSS_SSE_ALGORITHM = ConfigOptions.key(
+        "fs.oss.server-side-encryption-algorithm").string_type().no_default_value().with_description(
+        "Legacy OSS atomic metadata encryption method; used when the other SSE options are unset")
 
 
 class S3Options:

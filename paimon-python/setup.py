@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+
 from setuptools import find_packages, setup
 from setuptools.command.build_py import build_py
 from setuptools.command.sdist import sdist
@@ -270,10 +271,12 @@ setup(
             'daft>=0.7.6; python_version>="3.10"',
         ],
         'oss': [
+            'oss2>=2.18,<3',
             'ossfs>=2021.8; python_version<"3.8"',
             'ossfs>=2023; python_version>="3.8"'
         ],
         'jindo': [
+            'oss2>=2.18,<3',
             'pyjindosdk>=6.10.4',
         ],
         'lance': [
