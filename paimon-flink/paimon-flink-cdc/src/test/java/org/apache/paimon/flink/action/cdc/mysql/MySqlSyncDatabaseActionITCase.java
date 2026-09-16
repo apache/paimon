@@ -92,14 +92,16 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", "paimon_sync_database");
         try (Statement statement = getStatement()) {
             statement.execute("USE paimon_sync_database");
-            statement.executeUpdate("CREATE TABLE config_default (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
+            statement.executeUpdate(
+                    "CREATE TABLE config_default (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
         }
-        MySqlSyncDatabaseAction action = syncDatabaseActionBuilder(mySqlConfig)
-                .withMode(COMBINED.configString())
-                .includingTables("t1|t2|config_default")
-                .withTableConfig(Collections.singletonMap("bucket", "3"))
-                .withTableConfigByTable("t1:bucket=2", "t2:bucket=4")
-                .build();
+        MySqlSyncDatabaseAction action =
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withMode(COMBINED.configString())
+                        .includingTables("t1|t2|config_default")
+                        .withTableConfig(Collections.singletonMap("bucket", "3"))
+                        .withTableConfigByTable("t1:bucket=2", "t2:bucket=4")
+                        .build();
         runActionWithDefaultEnv(action);
         assertThat(getFileStoreTable("t1").options()).containsEntry("bucket", "2");
         assertThat(getFileStoreTable("t2").options()).containsEntry("bucket", "4");
