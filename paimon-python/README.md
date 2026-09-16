@@ -149,6 +149,9 @@ connection = pmm.connect(options={
 })
 ```
 
+`max-block` constrains coalescing, but does not split an individual BLOB range.
+A single read can therefore exceed this value.
+
 # Load LeRobot Dataset v3
 
 Install the optional dependency, then import a local directory, FileIO URI, or

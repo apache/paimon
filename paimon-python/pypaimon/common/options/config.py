@@ -147,7 +147,10 @@ class FileIOOptions:
         ConfigOptions.key("file-io.read-coalesce.max-block")
         .memory_type()
         .default_value(MemorySize.of_mebi_bytes(8))
-        .with_description("Maximum size of a merged same-file read range.")
+        .with_description(
+            "Maximum span for coalescing same-file ranges, except when an "
+            "individual range is larger. Individual ranges are not split."
+        )
     )
 
 
