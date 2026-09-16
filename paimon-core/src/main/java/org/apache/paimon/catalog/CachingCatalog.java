@@ -110,7 +110,9 @@ public class CachingCatalog extends DelegateCatalog {
                         expireAfterAccess,
                         manifestCacheSoftValues);
 
-        MemorySize sidecarMaxMemory = options.get(CACHE_MANIFEST_SIDECAR_MAX_MEMORY);
+        MemorySize sidecarMaxMemory =
+                options.getOptional(CACHE_MANIFEST_SIDECAR_MAX_MEMORY)
+                        .orElse(MemorySize.ofBytes(0));
         this.manifestSidecarCache =
                 sidecarMaxMemory.getBytes() == 0
                         ? manifestCache
