@@ -30,6 +30,7 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateRemapper;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -62,6 +63,7 @@ import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
+import org.apache.paimon.utils.TypeUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -167,7 +169,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
             // Remap field-id FieldRefs to positional indices by name (as doAuth does on read), so
             // pruning stays correct across schema evolution.
             Predicate remappedAuth =
-                    TableQueryAuthResult.remapPredicate(authPredicate, schema.logicalRowType());
+                    PredicateRemapper.remap(authPredicate, schema.logicalRowType());
             if (remappedAuth != null) {
                 Pair<Optional<PartitionPredicate>, List<Predicate>> split =
                         PartitionPredicate.splitPartitionPredicatesAndDataPredicates(
@@ -390,37 +392,17 @@ abstract class AbstractDataTableScan implements DataTableScan {
         if (readType == null) {
             return;
         }
-        RowType desired = readType;
-        if (userFilter != null) {
-            RowType widened =
-                    TableQueryAuthResult.appendMissingFields(
-                            schema.logicalRowType(),
-                            desired,
-                            PredicateVisitor.collectFieldNames(userFilter));
-            if (widened != null) {
-                desired = widened;
-            }
-        }
-        if (queryAuthResult != null && queryAuthResult.hasRules()) {
-            // post-mask conjuncts are evaluated at read time; their columns must survive planning
-            RowType widened =
-                    TableQueryAuthResult.appendMissingFields(
-                            schema.logicalRowType(),
-                            desired,
-                            queryAuthResult.authFields(desired.getFieldNames(), userFilter));
-            if (widened != null) {
-                desired = widened;
-            }
-        }
-        // never narrow within this scan's lifetime: readers fix their schema on first use
-        RowType widenedToApplied =
-                TableQueryAuthResult.appendMissingFields(
+        RowType desired =
+                TypeUtils.withMissingFields(
+                        schema.logicalRowType(),
+                        readType,
+                        ReadTransform.requiredFields(readType, userFilter, queryAuthResult));
+        // Never narrow within this scan's lifetime: readers may retain their physical schema.
+        desired =
+                TypeUtils.withMissingFields(
                         appliedScanReadType,
                         desired,
                         new HashSet<>(appliedScanReadType.getFieldNames()));
-        if (widenedToApplied != null) {
-            desired = widenedToApplied;
-        }
         if (!desired.equals(appliedScanReadType)) {
             snapshotReader.withReadType(desired);
             appliedScanReadType = desired;

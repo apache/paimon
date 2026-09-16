@@ -26,14 +26,15 @@ import org.apache.paimon.reader.LimitRecordReader;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.source.ReadTransform;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.table.source.TableReadFilter;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
 
 /** A {@link TableRead} implementation for {@link FormatTable}. */
 public class FormatTableRead implements TableRead {
@@ -88,15 +89,16 @@ public class FormatTableRead implements TableRead {
         // Capture the binding per TableRead so lazy file suppliers cannot observe another read's
         // sizer.
         ReadBatchSizer sizer = this.readBatchSizer;
-        RowType physicalReadType = readType;
-        if (executeFilter && predicate != null) {
-            physicalReadType = TableReadFilter.readType(tableRowType, readType, predicate);
-        }
-        RecordReader<InternalRow> reader = read.createReader(dataSplit, sizer, physicalReadType);
-        if (executeFilter && predicate != null) {
-            reader = TableReadFilter.filter(reader, physicalReadType, predicate);
-            reader = TableReadFilter.project(reader, physicalReadType, readType);
-        }
+        ReadTransform transform =
+                ReadTransform.create(
+                        tableRowType,
+                        readType,
+                        predicate,
+                        executeFilter,
+                        null,
+                        Collections.emptySet());
+        RecordReader<InternalRow> reader =
+                transform.apply(read.createReader(dataSplit, sizer, transform.readType()));
         return LimitRecordReader.limit(reader, limit);
     }
 }
