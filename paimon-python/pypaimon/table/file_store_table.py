@@ -64,12 +64,13 @@ class FileStoreTable(Table):
             file_io, table_path, branch=self.current_branch())
 
     @classmethod
-    def from_path(cls, table_path: str) -> 'FileStoreTable':
+    def from_path(cls, table_path: str, file_io_options: Optional[dict] = None) -> 'FileStoreTable':
         """
         Create a FileStoreTable from a table path.
         This is useful for reading tables created by Java without going through a catalog.
+        ``file_io_options`` configures storage access; use ``copy`` for table read options.
         """
-        file_io = FileIO(table_path, Options({}))
+        file_io = FileIO.get(table_path, Options(file_io_options or {}))
         schema_manager = SchemaManager(file_io, table_path)
         table_schema = schema_manager.latest()
 

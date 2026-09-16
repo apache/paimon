@@ -65,6 +65,27 @@ class ResolvingFileIOTest(unittest.TestCase):
         self.assertIsInstance(fio_local, LocalFileIO)
         self.assertIsInstance(fio_file, LocalFileIO)
 
+    def test_pyarrow_reader_resolves_each_file_path(self):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+        from pathlib import Path
+        from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
+        from pypaimon.schema.data_types import AtomicType, DataField
+
+        with tempfile.TemporaryDirectory() as directory:
+            resolving = ResolvingFileIO(Options({}))
+            for value, uri in ((1, False), (2, True)):
+                path = Path(directory) / ('data-%s.parquet' % value)
+                pq.write_table(pa.table({'id': [value]}), str(path))
+                reader = FormatPyArrowReader(
+                    resolving, 'parquet', path.as_uri() if uri else str(path),
+                    [DataField(0, 'id', AtomicType('BIGINT'))], None)
+                try:
+                    self.assertEqual(reader.read_arrow_batch().to_pylist(), [{'id': value}])
+                    self.assertIsNone(reader.read_arrow_batch())
+                finally:
+                    reader.close()
+
     def test_is_object_store_with_oss_warehouse(self):
         opts = Options({CatalogOptions.WAREHOUSE.key(): 'oss://bucket/warehouse'})
         resolving = ResolvingFileIO(opts)

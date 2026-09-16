@@ -148,6 +148,8 @@ class JSON:
                     kwargs[field_name] = (
                         None if value is None else decoder_mapping[json_name](value)
                     )
+                elif value is None:
+                    kwargs[field_name] = None
                 elif json_name in type_mapping:
                     tp = getattr(type_mapping[json_name], '__origin__', None)
                     if tp in (list, List):
