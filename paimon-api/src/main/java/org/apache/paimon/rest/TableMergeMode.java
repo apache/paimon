@@ -16,11 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.requests;
+package org.apache.paimon.rest;
 
 import org.apache.paimon.annotation.Experimental;
-import org.apache.paimon.rest.DatabaseReference;
-import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
@@ -29,23 +27,33 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import java.beans.ConstructorProperties;
 
-/** Request for fast-forwarding a database branch to another branch or immutable tag. */
+/** Overrides the default merge mode for one table name within the database being merged. */
 @Experimental
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class FastForwardDatabaseBranchRequest implements RESTRequest {
+public class TableMergeMode {
 
-    private static final String FIELD_SOURCE = "source";
+    private static final String FIELD_TABLE = "table";
+    private static final String FIELD_MERGE_MODE = "mergeMode";
 
-    private final DatabaseReference source;
+    private final String table;
+    private final MergeMode mergeMode;
 
     @JsonCreator
-    @ConstructorProperties({FIELD_SOURCE})
-    public FastForwardDatabaseBranchRequest(@JsonProperty(FIELD_SOURCE) DatabaseReference source) {
-        this.source = source;
+    @ConstructorProperties({FIELD_TABLE, FIELD_MERGE_MODE})
+    public TableMergeMode(
+            @JsonProperty(FIELD_TABLE) String table,
+            @JsonProperty(FIELD_MERGE_MODE) MergeMode mergeMode) {
+        this.table = table;
+        this.mergeMode = mergeMode;
     }
 
-    @JsonGetter(FIELD_SOURCE)
-    public DatabaseReference getSource() {
-        return source;
+    @JsonGetter(FIELD_TABLE)
+    public String getTable() {
+        return table;
+    }
+
+    @JsonGetter(FIELD_MERGE_MODE)
+    public MergeMode getMergeMode() {
+        return mergeMode;
     }
 }

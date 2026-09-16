@@ -39,6 +39,7 @@ import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
+import org.apache.paimon.rest.exceptions.MergeConflictException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
@@ -57,7 +58,6 @@ import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DeleteDatabaseReferenceRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.DropPolicyRequest;
-import org.apache.paimon.rest.requests.FastForwardDatabaseBranchRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.GrantPermissionRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
@@ -417,30 +417,35 @@ public class RESTApi {
         return checkNotNull(response.getReference(), "Reference response must contain reference");
     }
 
-    /** Fast-forward a database-level branch to another branch or immutable tag. */
-    @Experimental
-    public DatabaseReference fastForwardDatabaseBranch(
-            String databaseName, String targetBranch, DatabaseReference source) {
-        DatabaseReferenceResponse response =
-                client.post(
-                        resourcePaths.forwardDatabaseBranch(databaseName, targetBranch),
-                        new FastForwardDatabaseBranchRequest(source),
-                        DatabaseReferenceResponse.class,
-                        restAuthFunction);
-        return checkNotNull(response.getReference(), "Reference response must contain reference");
-    }
-
     /** Merge a branch or immutable tag into a database-level branch, failing on conflicts. */
     @Experimental
     public DatabaseReference mergeDatabaseBranch(
             String databaseName, String targetBranch, DatabaseReference source) {
-        DatabaseReferenceResponse response =
-                client.post(
-                        resourcePaths.mergeDatabaseBranch(databaseName, targetBranch),
-                        new MergeDatabaseBranchRequest(source),
-                        DatabaseReferenceResponse.class,
-                        restAuthFunction);
-        return checkNotNull(response.getReference(), "Reference response must contain reference");
+        return mergeDatabaseBranch(databaseName, targetBranch, source, null, null);
+    }
+
+    /** Merge a branch or immutable tag using default and per-table merge modes. */
+    @Experimental
+    public DatabaseReference mergeDatabaseBranch(
+            String databaseName,
+            String targetBranch,
+            DatabaseReference source,
+            @Nullable MergeMode defaultMergeMode,
+            @Nullable List<TableMergeMode> tableMergeModes) {
+        try {
+            DatabaseReferenceResponse response =
+                    client.post(
+                            resourcePaths.mergeDatabaseBranch(databaseName, targetBranch),
+                            new MergeDatabaseBranchRequest(
+                                    source, defaultMergeMode, tableMergeModes),
+                            DatabaseReferenceResponse.class,
+                            restAuthFunction);
+            return checkNotNull(
+                    response.getReference(), "Reference response must contain reference");
+        } catch (AlreadyExistsException e) {
+            throw new MergeConflictException(
+                    e, e.resourceType(), e.resourceName(), "%s", e.getMessage());
+        }
     }
 
     /** Delete one database-level branch or immutable tag. */

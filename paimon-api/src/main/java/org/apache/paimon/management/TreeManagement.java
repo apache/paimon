@@ -22,8 +22,12 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.rest.DatabaseReference;
 import org.apache.paimon.rest.DatabaseReferenceType;
+import org.apache.paimon.rest.MergeMode;
+import org.apache.paimon.rest.TableMergeMode;
 
 import javax.annotation.Nullable;
+
+import java.util.List;
 
 /** Control-plane contract for database-level writable branches and immutable tags. */
 @Experimental
@@ -52,19 +56,36 @@ public interface TreeManagement {
             DatabaseReferenceType type,
             DatabaseReference source);
 
-    /** Fast-forwards a branch to another branch or immutable tag in the same database. */
-    DatabaseReference fastForwardBranch(
-            String databaseName, String targetBranch, DatabaseReference source);
-
     /**
      * Merges a branch or immutable tag into a target branch in the same database.
      *
      * <p>Table entries are merged relative to a common ancestor. Conflicting changes fail the merge
      * without modifying the target; the source reference is never modified. A merge with no changes
-     * succeeds.
+     * succeeds. The server automatically fast-forwards when possible.
+     */
+    default DatabaseReference mergeBranch(
+            String databaseName, String targetBranch, DatabaseReference source) {
+        return mergeBranch(databaseName, targetBranch, source, null, null);
+    }
+
+    /**
+     * Merges a branch or immutable tag using default and per-table merge modes.
+     *
+     * <p>Modes apply to source-side changes to complete table versions, including creation and
+     * deletion; table row data is not merged. Per-table modes override the default. Unresolved
+     * conflicts leave the target unchanged, and the source is never modified. A successful merge
+     * records the source as merged, including changes skipped by {@link MergeMode#DROP}.
+     *
+     * @param defaultMergeMode mode for tables without an override; null means {@link
+     *     MergeMode#NORMAL}
+     * @param tableMergeModes per-table overrides; null or empty uses the default for every table
      */
     DatabaseReference mergeBranch(
-            String databaseName, String targetBranch, DatabaseReference source);
+            String databaseName,
+            String targetBranch,
+            DatabaseReference source,
+            @Nullable MergeMode defaultMergeMode,
+            @Nullable List<TableMergeMode> tableMergeModes);
 
     /**
      * Deletes and returns a named reference. A missing reference is an error.

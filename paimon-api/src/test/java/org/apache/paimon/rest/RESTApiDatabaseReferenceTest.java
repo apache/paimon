@@ -36,6 +36,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -154,9 +155,9 @@ class RESTApiDatabaseReferenceTest {
 
         enqueue(200, "{\"reference\":{\"type\":\"BRANCH\",\"name\":\"main\"}}");
         DatabaseReference source = sourceType == DatabaseReferenceType.BRANCH ? branch : tag;
-        assertThat(api.fastForwardDatabaseBranch("training db", "main", source))
+        assertThat(api.mergeDatabaseBranch("training db", "main", source))
                 .isEqualTo(new DatabaseReference(DatabaseReferenceType.BRANCH, "main"));
-        assertRequest(4, "POST", TREES_PATH + "/main/forward");
+        assertRequest(4, "POST", TREES_PATH + "/main/merge");
         assertBody(
                 requests.get(4),
                 sourceType == DatabaseReferenceType.BRANCH
@@ -216,6 +217,38 @@ class RESTApiDatabaseReferenceTest {
                 sourceType == DatabaseReferenceType.BRANCH
                         ? "{\"source\":{\"type\":\"BRANCH\",\"name\":\"experiment\"}}"
                         : "{\"source\":{\"type\":\"TAG\",\"name\":\"experiment\"}}");
+        assertThat(requests).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @EnumSource(MergeMode.class)
+    void testMergeModesAreSentInBody(MergeMode defaultMergeMode) throws Exception {
+        enqueue(200, "{\"reference\":{\"type\":\"BRANCH\",\"name\":\"main\"}}");
+        DatabaseReference source =
+                new DatabaseReference(DatabaseReferenceType.BRANCH, "experiment");
+
+        assertThat(
+                        api.mergeDatabaseBranch(
+                                "training db",
+                                "main",
+                                source,
+                                defaultMergeMode,
+                                Arrays.asList(
+                                        new TableMergeMode("features.v2", MergeMode.FORCE),
+                                        new TableMergeMode("scratch", MergeMode.DROP),
+                                        new TableMergeMode("labels", MergeMode.NORMAL))))
+                .isEqualTo(new DatabaseReference(DatabaseReferenceType.BRANCH, "main"));
+
+        assertRequest(0, "POST", TREES_PATH + "/main/merge");
+        assertBody(
+                requests.get(0),
+                "{\"source\":{\"type\":\"BRANCH\",\"name\":\"experiment\"},"
+                        + "\"defaultMergeMode\":\""
+                        + defaultMergeMode.name()
+                        + "\","
+                        + "\"tableMergeModes\":[{\"table\":\"features.v2\",\"mergeMode\":\"FORCE\"},"
+                        + "{\"table\":\"scratch\",\"mergeMode\":\"DROP\"},"
+                        + "{\"table\":\"labels\",\"mergeMode\":\"NORMAL\"}]}");
         assertThat(requests).hasSize(1);
     }
 

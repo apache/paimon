@@ -380,61 +380,6 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
-  /v1/{prefix}/databases/{database}/trees/{name}/forward:
-    post:
-      tags:
-        - database-reference
-      summary: Fast-forward database branch from a branch or tag
-      description: >-
-        The target must be a branch. The source branch or tag is resolved in the same database
-        when the request is processed. Fast-forward succeeds only if the target is an ancestor
-        of the source; divergent histories return a conflict.
-      operationId: fastForwardDatabaseBranch
-      parameters:
-        - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/FastForwardDatabaseBranchRequest'
-      responses:
-        "200":
-          description: Updated target branch.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DatabaseReferenceResponse'
-        "401":
-          $ref: '#/components/responses/UnauthorizedErrorResponse'
-        "404":
-          description: Database, target branch, or source reference does not exist.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "409":
-          description: Target is not a branch or is not an ancestor of the source reference.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/trees/{name}/merge:
     post:
       tags:
@@ -442,13 +387,23 @@ paths:
       summary: Merge a branch or tag into a database branch
       description: >-
         The target must be a branch. The source branch or tag is resolved in the same database
-        when the request is processed. Merge compares table entries with their common ancestor,
-        including table creation and deletion. Changes made only on one side are preserved;
-        identical changes on both sides are accepted. Different changes to the same table entry
-        conflict; table row data is not merged. The server checks for conflicts before publishing
-        the result. A conflict leaves the target unchanged, and the source reference is never
-        modified. Fast-forward and no-op merges succeed. The server must retain ancestry and
-        merge relationships to resolve subsequent merges.
+        when the request is processed. Merge compares complete table versions with their merge
+        base, including schemas, properties, snapshots, and table creation or deletion; table row
+        data is not merged. Changes made only on the target are preserved. Source-side changes
+        use defaultMergeMode (NORMAL when omitted), overridden by tableMergeModes for individual
+        table names. NORMAL accepts one-sided or identical changes and rejects different changes
+        to the same table. FORCE accepts the source-side change even on conflict, including a
+        deletion. DROP skips all source-side changes to that table, even without a conflict, and
+        preserves its target state. Modes do not replace target-only changes with unchanged source
+        versions. The server checks for unresolved conflicts before publishing the result; a
+        conflict leaves the target unchanged, and the source reference is never modified.
+        Identical references or an already-merged source succeed without modifying the target.
+        When the target is an ancestor of the source, the server may fast-forward only if the
+        selected modes produce exactly the source state. Divergent histories use three-way merge;
+        no available merge base is a conflict. A successful merge must record the source as merged,
+        including changes skipped by DROP, even when the table contents remain unchanged. Repeating
+        a merge of the same source state does not reapply skipped changes. The server retains
+        ancestry and merge relationships to resolve subsequent merges.
       operationId: mergeDatabaseBranch
       parameters:
         - name: prefix
@@ -479,6 +434,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DatabaseReferenceResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
@@ -488,7 +445,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
-          description: Target is not a branch, no common ancestor is available, or table entries conflict.
+          description: Target is not a branch, no merge base is available, or table conflicts remain unresolved.
           content:
             application/json:
               schema:
@@ -4072,13 +4029,24 @@ components:
           enum: [ "BRANCH", "TAG" ]
         source:
           $ref: '#/components/schemas/DatabaseReference'
-    FastForwardDatabaseBranchRequest:
+    MergeMode:
+      type: string
+      enum: [ "NORMAL", "FORCE", "DROP" ]
+      description: >-
+        NORMAL performs three-way conflict detection. FORCE accepts source-side table changes
+        even on conflict. DROP skips all source-side changes to the table and preserves its
+        target state. Each mode operates on complete table versions, not individual rows.
+    TableMergeMode:
       type: object
       required:
-        - source
+        - table
+        - mergeMode
       properties:
-        source:
-          $ref: '#/components/schemas/DatabaseReference'
+        table:
+          type: string
+          description: Exact table name within the database being merged.
+        mergeMode:
+          $ref: '#/components/schemas/MergeMode'
     MergeDatabaseBranchRequest:
       type: object
       required:
@@ -4086,6 +4054,19 @@ components:
       properties:
         source:
           $ref: '#/components/schemas/DatabaseReference'
+        defaultMergeMode:
+          description: Mode for tables without a per-table override. Defaults to NORMAL.
+          default: NORMAL
+          allOf:
+            - $ref: '#/components/schemas/MergeMode'
+        tableMergeModes:
+          type: array
+          description: >-
+            Per-table modes override defaultMergeMode. Omit or use an empty array to apply the
+            default to every table. Each table name may appear at most once; duplicates are a
+            bad request. Names without source-side changes have no effect.
+          items:
+            $ref: '#/components/schemas/TableMergeMode'
     DeleteDatabaseReferenceRequest:
       type: object
       properties:

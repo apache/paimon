@@ -24,6 +24,8 @@ import org.apache.paimon.management.TreeManagement;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
+
 /** REST implementation of tree management, bound to the configured REST catalog prefix. */
 @Experimental
 public class RESTTreeManagement implements TreeManagement {
@@ -58,15 +60,14 @@ public class RESTTreeManagement implements TreeManagement {
     }
 
     @Override
-    public DatabaseReference fastForwardBranch(
-            String databaseName, String targetBranch, DatabaseReference source) {
-        return api.fastForwardDatabaseBranch(databaseName, targetBranch, source);
-    }
-
-    @Override
     public DatabaseReference mergeBranch(
-            String databaseName, String targetBranch, DatabaseReference source) {
-        return api.mergeDatabaseBranch(databaseName, targetBranch, source);
+            String databaseName,
+            String targetBranch,
+            DatabaseReference source,
+            @Nullable MergeMode defaultMergeMode,
+            @Nullable List<TableMergeMode> tableMergeModes) {
+        return api.mergeDatabaseBranch(
+                databaseName, targetBranch, source, defaultMergeMode, tableMergeModes);
     }
 
     @Override

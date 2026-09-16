@@ -23,6 +23,8 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.management.TreeManagement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
+import org.apache.paimon.rest.exceptions.BadRequestException;
+import org.apache.paimon.rest.exceptions.MergeConflictException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 
@@ -35,6 +37,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -122,11 +125,9 @@ class RESTCatalogTreeManagementTest {
 
         enqueue(200, "{\"reference\":" + MAIN_JSON + "}");
         DatabaseReference source = sourceType == BRANCH ? branch : tag;
-        assertThat(trees.fastForwardBranch(DATABASE, "main", source)).isEqualTo(main);
-        RecordedRequest fastForward = takeRequest("POST", TREES_PATH + "/main/forward");
-        assertBody(
-                fastForward,
-                "{\"source\":" + (sourceType == BRANCH ? BRANCH_JSON : TAG_JSON) + "}");
+        assertThat(trees.mergeBranch(DATABASE, "main", source)).isEqualTo(main);
+        RecordedRequest merge = takeRequest("POST", TREES_PATH + "/main/merge");
+        assertBody(merge, "{\"source\":" + (sourceType == BRANCH ? BRANCH_JSON : TAG_JSON) + "}");
 
         enqueue(200, "{\"reference\":" + BRANCH_JSON + "}");
         assertThat(trees.deleteReference(DATABASE, "exp-1", BRANCH)).isEqualTo(branch);
@@ -189,21 +190,76 @@ class RESTCatalogTreeManagementTest {
         assertThat(server.getRequestCount()).isEqualTo(2);
     }
 
+    @ParameterizedTest
+    @EnumSource(DatabaseReferenceType.class)
+    void testMergeModesUseCatalogConfiguration(DatabaseReferenceType sourceType) throws Exception {
+        enqueue(200, "{\"reference\":" + MAIN_JSON + "}");
+        DatabaseReference source = new DatabaseReference(sourceType, "experiment");
+
+        assertThat(
+                        trees.mergeBranch(
+                                DATABASE,
+                                "main",
+                                source,
+                                MergeMode.NORMAL,
+                                Arrays.asList(
+                                        new TableMergeMode("features", MergeMode.FORCE),
+                                        new TableMergeMode("scratch", MergeMode.DROP))))
+                .isEqualTo(new DatabaseReference(BRANCH, "main"));
+
+        assertBody(
+                takeRequest("POST", TREES_PATH + "/main/merge"),
+                "{\"source\":{\"type\":\""
+                        + sourceType.name()
+                        + "\",\"name\":\"experiment\"},"
+                        + "\"defaultMergeMode\":\"NORMAL\",\"tableMergeModes\":["
+                        + "{\"table\":\"features\",\"mergeMode\":\"FORCE\"},"
+                        + "{\"table\":\"scratch\",\"mergeMode\":\"DROP\"}]}");
+        assertThat(server.getRequestCount()).isEqualTo(2);
+    }
+
     @Test
     void testMergeErrorsPreserveDetails() throws Exception {
         DatabaseReference source = new DatabaseReference(BRANCH, "experiment");
-        enqueue(
-                409,
-                "{\"code\":409,\"message\":\"Conflicting changes to table features\","
-                        + "\"resourceType\":\"TABLE\",\"resourceName\":\"training db.features\"}");
+        server.enqueue(
+                new MockResponse()
+                        .setResponseCode(409)
+                        .setHeader("Content-Type", "application/json")
+                        .setHeader("x-request-id", "merge-request")
+                        .setBody(
+                                "{\"message\":\"Conflicting changes to table features (100%)\","
+                                        + "\"resourceType\":\"TABLE\",\"resourceName\":\"training db.features\"}"));
         assertThatThrownBy(() -> trees.mergeBranch(DATABASE, "main", source))
                 .isInstanceOfSatisfying(
-                        AlreadyExistsException.class,
+                        MergeConflictException.class,
                         conflict -> {
                             assertThat(conflict.resourceType()).isEqualTo("TABLE");
                             assertThat(conflict.resourceName()).isEqualTo("training db.features");
+                            assertThat(conflict.getCause())
+                                    .isInstanceOf(AlreadyExistsException.class)
+                                    .hasMessage(conflict.getMessage());
                         })
-                .hasMessageContaining("Conflicting changes to table features");
+                .hasMessage("Conflicting changes to table features (100%) requestId:merge-request");
+        takeRequest("POST", TREES_PATH + "/main/merge");
+
+        enqueue(409, "{\"code\":409,\"message\":\"reference already exists\"}");
+        assertThatThrownBy(() -> trees.createReference(DATABASE, "existing", BRANCH, source))
+                .isExactlyInstanceOf(AlreadyExistsException.class);
+        takeRequest("POST", TREES_PATH);
+
+        enqueue(400, "{\"code\":400,\"message\":\"duplicate table merge mode\"}");
+        assertThatThrownBy(
+                        () ->
+                                trees.mergeBranch(
+                                        DATABASE,
+                                        "main",
+                                        source,
+                                        MergeMode.NORMAL,
+                                        Arrays.asList(
+                                                new TableMergeMode("features", MergeMode.FORCE),
+                                                new TableMergeMode("features", MergeMode.DROP))))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("duplicate table merge mode");
         takeRequest("POST", TREES_PATH + "/main/merge");
 
         enqueue(404, "{\"code\":404,\"message\":\"source reference missing\"}");
@@ -217,7 +273,7 @@ class RESTCatalogTreeManagementTest {
                 .isInstanceOf(NotImplementedException.class)
                 .hasMessageContaining("merge unsupported");
         takeRequest("POST", TREES_PATH + "/main/merge");
-        assertThat(server.getRequestCount()).isEqualTo(4);
+        assertThat(server.getRequestCount()).isEqualTo(6);
     }
 
     @Test
