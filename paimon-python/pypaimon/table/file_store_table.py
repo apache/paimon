@@ -69,7 +69,7 @@ class FileStoreTable(Table):
         Create a FileStoreTable from a table path.
         This is useful for reading tables created by Java without going through a catalog.
         """
-        file_io = FileIO(table_path, Options({}))
+        file_io = FileIO.get(table_path, Options({}))
         schema_manager = SchemaManager(file_io, table_path)
         table_schema = schema_manager.latest()
 

@@ -112,15 +112,22 @@ class NativePlanIntegrationTest(unittest.TestCase):
             rb = native_table.new_read_builder()
             rb.new_read().to_arrow(rb.new_scan().plan().splits())
 
-    def test_copy_removed_persisted_scan_option_falls_back(self):
-        # copy() removes a persisted scan.snapshot-id that Rust would still reload -> fall back.
+    def test_copy_removed_persisted_scan_option_uses_native(self):
+        # The resolved schema must replace, rather than merge, persisted options.
         self.cat.create_table('default.snapopt_t', Schema.from_pyarrow_schema(
             self.schema, options={'scan.snapshot-id': '1'}), False)
         self._write('snapopt_t', [{'k': 1, 'v': 'a'}])   # snapshot 1
         self._write('snapopt_t', [{'k': 2, 'v': 'b'}])   # snapshot 2
         native = self.cat.get_table('default.snapopt_t').copy(
             {'scan.snapshot-id': None, 'scan.native-plan.enabled': 'true'})
-        self.assertFalse(native.new_read_builder().explain().native_planned)
+        builder = native.new_read_builder()
+        scan = builder.new_scan()
+        with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+            plan = scan.plan()
+        self.assertEqual(plan.snapshot_id, 2)
+        self.assertEqual(sorted(builder.new_read().to_arrow(plan.splits()).to_pylist(),
+                                key=lambda row: row['k']),
+                         [{'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}])
 
     def test_first_row_batch_scan_uses_native_plan(self):
         self.cat.create_table('default.fr_t', Schema.from_pyarrow_schema(

@@ -583,7 +583,11 @@ class SplitRead(ABC):
                 read_field for read_field in read_fields
                 if _is_reachable(read_field)
             ]
-            read_predicate = trim_predicate_by_fields(self.push_down_predicate, read_file_fields)
+            # File readers filter physical column names before field-id schema
+            # normalization. A renamed or re-added name can identify a different
+            # column, so cross-schema filtering must run after normalization.
+            read_predicate = (trim_predicate_by_fields(self.push_down_predicate, read_file_fields)
+                              if schema_id == self.table.table_schema.id else None)
             read_arrow_predicate = (
                 read_predicate.to_arrow()
                 if read_predicate and self._arrow_filter_pushdown_enabled
@@ -899,7 +903,9 @@ class RawFileSplitRead(SplitRead):
         reader = concat_reader
         if (self.predicate_for_reader
                 and (self.table.is_primary_key_table
-                     or not self._arrow_filter_pushdown_enabled)):
+                     or not self._arrow_filter_pushdown_enabled
+                     or any(file.schema_id != self.table.table_schema.id
+                            for file in self.split.files))):
             reader = FilterRecordBatchReader(
                 reader,
                 self.predicate_for_reader,

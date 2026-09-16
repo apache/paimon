@@ -169,6 +169,41 @@ def _read_options(table) -> dict:
     return options
 
 
+def _resolved_schema_file_io_options(table) -> Optional[dict]:
+    """FileIO properties for tables whose metadata needs no catalog resolution."""
+    if not native_method_available('Table', 'from_resolved_schema'):
+        return None
+    environment = table.catalog_environment
+    loader = environment.catalog_loader
+    if loader is None:
+        from pypaimon.catalog.catalog_environment import CatalogEnvironment
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+        # A custom environment or FileIO can supply metadata outside the path.
+        if type(environment) is not CatalogEnvironment or type(table.file_io) is not LocalFileIO:
+            return None
+        return {str(key): _option_value_to_string(value)
+                for key, value in table.file_io.properties.to_map().items()
+                if value is not None}
+    if _catalog_metastore(loader) != 'filesystem':
+        # REST tables must retain catalog snapshot loading and token refresh.
+        return None
+    context = loader.context()
+    if context.options is None or any(getattr(context, attr, None) is not None for attr in (
+            'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader')):
+        return None
+    return _catalog_options(table)
+
+
+def _resolved_schema_json(table) -> str:
+    from pypaimon.common.json_util import JSON
+    options = {str(key): _option_value_to_string(value)
+               for key, value in table.table_schema.options.items() if value is not None}
+    options.update(_read_options(table))
+    # The timestamp string has already been converted to epoch millis.
+    options.pop(CoreOptions.SCAN_TIMESTAMP.key(), None)
+    return JSON.to_json(table.table_schema.copy(new_options=options))
+
+
 def _predicate_to_native(predicate: Predicate) -> dict:
     """Convert PyPaimon's predicate tree to pypaimon-rust's dict API."""
     if predicate.method in ('and', 'or'):
@@ -231,14 +266,23 @@ def native_plan(
     if not native_runtime_available():
         raise RuntimeError(
             "scan.native-plan.enabled needs pypaimon-rust>=0.3.0 (split planning API)")
-    from pypaimon_rust.datafusion import PaimonCatalog
-
-    rt = PaimonCatalog(_catalog_options(table)).get_table(table.identifier.get_full_name())
+    file_io_options = _resolved_schema_file_io_options(table)
+    if file_io_options is not None:
+        from pypaimon_rust.datafusion import Table
+        rt = Table.from_resolved_schema(
+            table.table_path, _resolved_schema_json(table),
+            database=table.identifier.get_database_name(),
+            table=table.identifier.get_table_name(),
+            branch=table.current_branch(), options=file_io_options)
+        builder = rt.new_read_builder()
+    else:
+        from pypaimon_rust.datafusion import PaimonCatalog
+        rt = PaimonCatalog(_catalog_options(table)).get_table(table.identifier.get_full_name())
+        builder = rt.new_read_builder(_read_options(table))
     if table.current_branch() != 'main':
         branch = getattr(rt, 'branch', None)
         if not callable(branch) or branch() != table.current_branch():
             raise RuntimeError("Native table did not resolve the requested branch")
-    builder = rt.new_read_builder(_read_options(table))
     if projection is not None:
         builder = builder.with_projection(projection)
     if predicate is not None:

@@ -230,12 +230,13 @@ class ChunkShuffleSplitGeneratorBase(AbstractSplitGenerator):
                 if f.file_name in seen_paths:
                     continue
                 seen_paths.add(f.file_name)
-                f.set_file_path(
-                    self.table.table_path,
-                    partition_row,
-                    bucket,
-                    self.default_part_value,
-                )
+                if not f.file_path:
+                    f.set_file_path(
+                        self.table.table_path,
+                        partition_row,
+                        bucket,
+                        self.default_part_value,
+                    )
             for segments in self._slice_group_into_chunks(entries_in_group):
                 all_chunks.append(_Chunk(partition_row, bucket, segments))
 

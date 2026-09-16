@@ -50,6 +50,14 @@ Python planner for unsupported scans. New bindings preserve `plan.snapshot_id`
 even when pruning removes every split. Native explain output includes snapshot
 and split metadata; native pruning counters are not exposed.
 
+With Rust main's `Table.from_resolved_schema()` binding, filesystem catalog
+tables preserve the Python table's resolved schema and complete effective
+options. Stale table objects, historical schemas, and `copy()` overrides or
+option removals no longer require catalog reloading or Python planning.
+Local tables opened with `FileStoreTable.from_path()` use the same path.
+REST tables retain catalog loading for credentials and snapshot resolution;
+custom catalog/FileIO contexts still fall back when they cannot be reproduced.
+
 Explicit row ranges on data-evolution tables require `ReadBuilder.with_row_ranges()`.
 Watermark time travel requires Rust 0.4 or newer. Branch reads require the
 branch-aware binding exposing `Table.branch()`, and the resolved branch is
@@ -90,14 +98,25 @@ bucket sharding. Cross-partition key migration is maintained by the writer's ind
 Batch first-row scans follow Java and exclude un-compacted level-0 files; they can
 use native planning. With deletion vectors, batch scans exclude level 0 unless
 `deletion-vectors.merge-on-read=true`, in which case overlapping key ranges stay
-together for reader-side merging. Write scans and incremental scans retain level 0.
+together when they include L0 and require reader-side merging. Fully materialized
+DV files across levels use raw splits, including first-row clustering tables.
+First-row plans that actually include L0 still fall back to Python.
+Write scans and incremental scans retain level 0.
+
+Append and data-evolution chunk shuffle use Rust file and deletion-vector planning.
+Python retains live-row chunk sizing, seeded shuffle order and balanced worker
+assignment, so the same seed selects the same chunks with either planner.
+Projection does not remove aligned column files before chunk construction.
+Chunk shuffle supports partition predicates, deletion vectors and timestamp
+incremental scans; its existing restrictions on limits, slices, row ranges and
+global-index results still apply.
 
 Scored global-index results on data-evolution append tables use native row-range
 planning; Python attaches scores to the selected ranges and reads the data.
 Primary-key sorted indexes refine native batch splits through Python's existing
 index reader, preserving merge-required splits and the selected snapshot.
 
-Chunk shuffle, query authorization, batch first-row scans explicitly including L0,
+Query authorization, batch first-row plans containing L0,
 and precomputed primary-key global-index results still use the Python planner.
 Continuous streaming and write planning also retain their Python entrypoints.
 Native planning remains optional and is disabled by default.
