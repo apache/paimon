@@ -30,6 +30,24 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class CoreOptionsTest {
 
     @Test
+    void testManifestSidecarDefaultsToManifestSort() {
+        assertThat(CoreOptions.MANIFEST_SIDECAR_ENABLED.defaultValue()).isNull();
+        for (Boolean sort : new Boolean[] {null, false, true}) {
+            for (Boolean configured : new Boolean[] {null, false, true}) {
+                Options options = new Options();
+                if (sort != null) {
+                    options.set(CoreOptions.MANIFEST_SORT_ENABLED, sort);
+                }
+                if (configured != null) {
+                    options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, configured);
+                }
+                assertThat(new CoreOptions(options).manifestSidecarEnabled())
+                        .isEqualTo(configured == null ? Boolean.TRUE.equals(sort) : configured);
+            }
+        }
+    }
+
+    @Test
     public void testDefaultStartupMode() {
         Options conf = new Options();
         assertThat(conf.get(CoreOptions.SCAN_MODE)).isEqualTo(CoreOptions.StartupMode.DEFAULT);

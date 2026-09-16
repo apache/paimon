@@ -18,6 +18,7 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
@@ -276,7 +277,8 @@ class ManifestSidecarTest {
                 new ManifestEntrySerializer(),
                 "zstd",
                 paths,
-                Long.MAX_VALUE);
+                Long.MAX_VALUE,
+                new CoreOptions(new Options()));
     }
 
     @Test

@@ -71,11 +71,14 @@ using independent partition, row-ID and bucket coverage. A sidecar uses the
 `.avro.sidecar` reference in the manifest metadata's `_EXTRA_FILES`, without probing a
 derived file name. The Avro schemas and `_VERSION` identifiers remain unchanged.
 
-The utility includes construction, validation, block selection and optional caching. Table
-writers and scans do not yet invoke it automatically. Callers are responsible for publishing
-sidecar references, managing file ownership, applying entry filters and reconciling ADD/DELETE
-entries after block selection. `build` reads the completed physical manifest and returns
-sidecar bytes; it does not write or publish another file.
+The utility includes construction, validation, block selection and optional caching. Java table
+writers generate sidecars when `manifest.sidecar.enabled` is true; when unset, it inherits
+`manifest-sort.enabled`. Both ordinary writes and raw manifest rewrites build the sidecar from
+the completed output manifest and publish its `_EXTRA_FILES` reference only after both files
+close successfully. Failed writes and aborted writers clean up their own manifest/sidecar pairs.
+Scans do not yet invoke sidecar pruning automatically. Callers remain responsible for applying
+entry filters and reconciling ADD/DELETE entries after block selection. The low-level `build`
+method returns sidecar bytes without writing or publishing another file.
 
 Callers decide whether to invoke `build` and `read`; these utilities have no read/write switches.
 `build` and `Builder` accept `rowIdEnabled` and `bucketEnabled` arguments for independent
