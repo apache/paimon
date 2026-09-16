@@ -702,7 +702,7 @@ class _PaimonLeRobotMetadata:
 
     def __init__(
             self, repo_id, tag_name, info, stats, episodes, tasks,
-            subtasks):
+            subtasks, *, compact_episodes=False):
         self.repo_id = repo_id
         self.revision = tag_name
         self.info = info
@@ -710,6 +710,41 @@ class _PaimonLeRobotMetadata:
         self.episodes = episodes
         self.tasks = tasks
         self.subtasks = subtasks
+        self._compact_episodes = compact_episodes
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        if not self._compact_episodes:
+            return state
+        try:
+            from datasets import Dataset
+        except ImportError:
+            return state
+        episodes = self.episodes
+        if type(episodes) is not Dataset:
+            return state
+        default_format = {
+            "type": None, "format_kwargs": {},
+            "columns": episodes.column_names, "output_all_columns": False,
+        }
+        if (not episodes.cache_files
+                and episodes._indices is None
+                and not episodes._indexes
+                and episodes.format == default_format):
+            # Rebuild Dataset's derived batch index in the worker.
+            state["episodes"] = (
+                episodes.data.table, episodes.info, episodes.split,
+                episodes._fingerprint)
+            state["_episodes_as_arrow"] = True
+        return state
+
+    def __setstate__(self, state):
+        if state.pop("_episodes_as_arrow", False):
+            from datasets import Dataset
+            table, info, split, fingerprint = state["episodes"]
+            state["episodes"] = Dataset(
+                table, info=info, split=split, fingerprint=fingerprint)
+        self.__dict__.update(state)
 
     def __getattr__(self, name):
         info = self.__dict__.get("info", {})
@@ -822,7 +857,7 @@ def _load_dataset(table, tag_name):
             "stats"))
     metadata = _PaimonLeRobotMetadata(
         str(table.identifier), tag_name, info, stats, episodes, tasks,
-        subtasks)
+        subtasks, compact_episodes=True)
     return frames, metadata
 
 
