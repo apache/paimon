@@ -230,7 +230,7 @@ class FileIO(ABC):
                        .get_bytes() if isinstance(properties, Options)
                        else _COALESCE_GAP)
         if max_span is None:
-            max_span = (properties.get(FileIOOptions.READ_COALESCE_MAX_SPAN)
+            max_span = (properties.get(FileIOOptions.READ_COALESCE_MAX_BLOCK)
                         .get_bytes() if isinstance(properties, Options)
                         else _COALESCE_SPAN)
         return max_gap, max_span

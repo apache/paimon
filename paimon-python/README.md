@@ -136,7 +136,7 @@ Native planning remains optional and is disabled by default.
 # Coalesced BLOB reads
 
 FileIO merges nearby BLOB ranges before reading. Set
-`file-io.read-coalesce.max-gap` and `file-io.read-coalesce.max-span` in the
+`file-io.read-coalesce.max-gap` and `file-io.read-coalesce.max-block` in the
 catalog or connection options to tune the 1 MiB and 8 MiB defaults:
 
 ```python
@@ -145,7 +145,7 @@ import pypaimon.multimodal as pmm
 connection = pmm.connect(options={
     "warehouse": "/tmp/warehouse",
     "file-io.read-coalesce.max-gap": "64 kb",
-    "file-io.read-coalesce.max-span": "16 mb",
+    "file-io.read-coalesce.max-block": "16 mb",
 })
 ```
 

@@ -143,11 +143,11 @@ class FileIOOptions:
             "Maximum gap between same-file ranges merged into one read."
         )
     )
-    READ_COALESCE_MAX_SPAN = (
-        ConfigOptions.key("file-io.read-coalesce.max-span")
+    READ_COALESCE_MAX_BLOCK = (
+        ConfigOptions.key("file-io.read-coalesce.max-block")
         .memory_type()
         .default_value(MemorySize.of_mebi_bytes(8))
-        .with_description("Maximum span for merging same-file ranges.")
+        .with_description("Maximum size of a merged same-file read range.")
     )
 
 

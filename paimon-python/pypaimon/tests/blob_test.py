@@ -4140,7 +4140,7 @@ class CoalesceRangesTest(unittest.TestCase):
         self.assertEqual(1 << 20, Options({}).get(
             FileIOOptions.READ_COALESCE_MAX_GAP).get_bytes())
         self.assertEqual(8 << 20, Options({}).get(
-            FileIOOptions.READ_COALESCE_MAX_SPAN).get_bytes())
+            FileIOOptions.READ_COALESCE_MAX_BLOCK).get_bytes())
         data = bytes(range(256))
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = os.path.join(tmp_dir, "f.bin")
@@ -4150,7 +4150,7 @@ class CoalesceRangesTest(unittest.TestCase):
                 "file://" + tmp_dir,
                 Options({
                     "file-io.read-coalesce.max-gap": "64 b",
-                    "file-io.read-coalesce.max-span": "100 b",
+                    "file-io.read-coalesce.max-block": "100 b",
                 }),
             )
             reads = []
