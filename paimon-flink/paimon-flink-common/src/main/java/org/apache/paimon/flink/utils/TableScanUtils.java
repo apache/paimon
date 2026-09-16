@@ -20,9 +20,13 @@ package org.apache.paimon.flink.utils;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
+import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.LazyIndexedSplit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 
 import java.util.HashMap;
@@ -71,6 +75,20 @@ public class TableScanUtils {
             return Optional.of(((DataSplit) split.split()).snapshotId());
         }
         return Optional.empty();
+    }
+
+    /** Access data metadata without evaluating an index or dropping authorization on the split. */
+    public static Optional<DataSplit> dataSplit(Split split) {
+        if (split instanceof QueryAuthSplit) {
+            return dataSplit(((QueryAuthSplit) split).split());
+        }
+        if (split instanceof LazyIndexedSplit) {
+            return Optional.of(((LazyIndexedSplit) split).dataSplit());
+        }
+        if (split instanceof IndexedSplit) {
+            return Optional.of(((IndexedSplit) split).dataSplit());
+        }
+        return split instanceof DataSplit ? Optional.of((DataSplit) split) : Optional.empty();
     }
 
     /**

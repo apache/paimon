@@ -21,6 +21,10 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.LazyIndexedSplit;
+import org.apache.paimon.reader.EmptyRecordReader;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
@@ -40,6 +44,7 @@ public class DataEvolutionTableRead extends AppendTableRead {
     private final CoreOptions options;
     @Nullable private final CatalogContext catalogContext;
     @Nullable private final Supplier<InnerTableRead> readFactory;
+    @Nullable private final FileIO fileIO;
 
     public DataEvolutionTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
@@ -47,15 +52,40 @@ public class DataEvolutionTableRead extends AppendTableRead {
             CoreOptions options,
             @Nullable CatalogContext catalogContext,
             @Nullable Supplier<InnerTableRead> readFactory) {
+        this(providerFactories, schema, options, catalogContext, readFactory, null);
+    }
+
+    public DataEvolutionTableRead(
+            List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
+            TableSchema schema,
+            CoreOptions options,
+            @Nullable CatalogContext catalogContext,
+            @Nullable Supplier<InnerTableRead> readFactory,
+            @Nullable FileIO fileIO) {
         super(providerFactories, schema);
         this.options = options;
         this.catalogContext = catalogContext;
         this.readFactory = readFactory;
+        this.fileIO = fileIO;
     }
 
     @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
         QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
+        final Split dataSplit;
+        if (queryAuthContext.split() instanceof LazyIndexedSplit) {
+            if (fileIO == null) {
+                throw new IllegalStateException("FileIO is required for lazy index evaluation.");
+            }
+            IndexedSplit indexedSplit =
+                    ((LazyIndexedSplit) queryAuthContext.split()).evaluate(fileIO);
+            if (indexedSplit.rowRanges().isEmpty()) {
+                return new EmptyRecordReader<>();
+            }
+            dataSplit = indexedSplit;
+        } else {
+            dataSplit = queryAuthContext.split();
+        }
         int[] blobViewFields =
                 BlobViewTableReadSupport.blobViewFieldIndexes(currentReadType(), options);
         ReadBatchSizer sizer = readBatchSizer();
@@ -66,7 +96,7 @@ public class DataEvolutionTableRead extends AppendTableRead {
             }
             return BlobViewTableReadSupport.createBlobViewReader(
                     catalogContext,
-                    queryAuthContext.split(),
+                    dataSplit,
                     queryAuthContext.authResult(),
                     blobViewFields,
                     currentReadType(),
@@ -74,7 +104,7 @@ public class DataEvolutionTableRead extends AppendTableRead {
                     topN,
                     limit,
                     executeFilter,
-                    () -> createDataReader(queryAuthContext.split(), queryAuthContext.authResult()),
+                    () -> createDataReader(dataSplit, queryAuthContext.authResult()),
                     () -> {
                         InnerTableRead prescanRead = readFactory.get();
                         if (sizer != null) {
@@ -87,6 +117,6 @@ public class DataEvolutionTableRead extends AppendTableRead {
                         return prescanRead;
                     });
         }
-        return createDataReader(queryAuthContext.split(), queryAuthContext.authResult());
+        return createDataReader(dataSplit, queryAuthContext.authResult());
     }
 }

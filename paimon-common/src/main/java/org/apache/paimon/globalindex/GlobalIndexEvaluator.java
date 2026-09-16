@@ -180,8 +180,7 @@ public class GlobalIndexEvaluator implements Closeable {
 
     private CompletableFuture<Optional<Evaluation>> visitCompoundAsync(
             CompoundPredicate predicate) {
-        List<Predicate> children =
-                pruneRedundantIsNotNullForAnd(flattenChildren(predicate), predicate);
+        List<Predicate> children = normalizedChildren(predicate);
         CompletableFuture<Optional<Evaluation>> refined =
                 containsRefinementEvaluator.evaluate(children, predicate);
         if (refined != null) {
@@ -260,7 +259,12 @@ public class GlobalIndexEvaluator implements Closeable {
         }
     }
 
-    private List<Predicate> flattenChildren(CompoundPredicate predicate) {
+    /** Shared normalization for eager evaluation and metadata-only index planning. */
+    static List<Predicate> normalizedChildren(CompoundPredicate predicate) {
+        return pruneRedundantIsNotNullForAnd(flattenChildren(predicate), predicate);
+    }
+
+    private static List<Predicate> flattenChildren(CompoundPredicate predicate) {
         List<Predicate> result = new ArrayList<>();
         Deque<Predicate> stack = new ArrayDeque<>(predicate.children());
         while (!stack.isEmpty()) {
@@ -280,7 +284,7 @@ public class GlobalIndexEvaluator implements Closeable {
         return result;
     }
 
-    private List<Predicate> pruneRedundantIsNotNullForAnd(
+    private static List<Predicate> pruneRedundantIsNotNullForAnd(
             List<Predicate> children, CompoundPredicate predicate) {
         if (predicate.function() instanceof Or) {
             return children;
@@ -315,7 +319,7 @@ public class GlobalIndexEvaluator implements Closeable {
         return pruned;
     }
 
-    private boolean isIsNotNull(Predicate predicate) {
+    private static boolean isIsNotNull(Predicate predicate) {
         return predicate instanceof LeafPredicate
                 && ((LeafPredicate) predicate).function() instanceof IsNotNull;
     }
@@ -327,7 +331,7 @@ public class GlobalIndexEvaluator implements Closeable {
      * predicate we are deciding whether to prune). We whitelist by arity base class so future
      * comparison functions are covered automatically without re-introducing the IS NULL hazard.
      */
-    private boolean isNullRejecting(Predicate predicate) {
+    private static boolean isNullRejecting(Predicate predicate) {
         if (!(predicate instanceof LeafPredicate)) {
             return false;
         }

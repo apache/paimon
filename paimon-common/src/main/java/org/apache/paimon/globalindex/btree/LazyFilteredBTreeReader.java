@@ -26,7 +26,10 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
@@ -44,6 +47,7 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     private final KeySerializer keySerializer;
     private final CacheManager cacheManager;
     private final GlobalIndexFileReader fileReader;
+    @Nullable private final RoaringNavigableMap64 rowIdFilter;
 
     public LazyFilteredBTreeReader(
             List<GlobalIndexIOMeta> files,
@@ -53,10 +57,32 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
             long fallbackScanMaxSize,
             long totalRowCount,
             ExecutorService executor) {
+        this(
+                files,
+                keySerializer,
+                fileReader,
+                cacheManager,
+                fallbackScanMaxSize,
+                totalRowCount,
+                null,
+                executor);
+    }
+
+    public LazyFilteredBTreeReader(
+            List<GlobalIndexIOMeta> files,
+            KeySerializer keySerializer,
+            GlobalIndexFileReader fileReader,
+            CacheManager cacheManager,
+            long fallbackScanMaxSize,
+            long totalRowCount,
+            @Nullable List<Range> rowRanges,
+            ExecutorService executor) {
         super(files, keySerializer, fallbackScanMaxSize, totalRowCount, executor);
         this.cacheManager = cacheManager;
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
+        this.rowIdFilter =
+                rowRanges == null ? null : GlobalIndexResult.fromRanges(rowRanges).results();
     }
 
     @Override
@@ -142,7 +168,7 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     @Override
     protected BTreeIndexReader openReader(GlobalIndexIOMeta meta) {
         try {
-            return new BTreeIndexReader(keySerializer, fileReader, meta, cacheManager);
+            return new BTreeIndexReader(keySerializer, fileReader, meta, cacheManager, rowIdFilter);
         } catch (IOException e) {
             throw new RuntimeException("Can't create BTree index reader for " + meta.filePath(), e);
         }

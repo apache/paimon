@@ -161,6 +161,14 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
         return startingScanner.scanPartitions(snapshotReader);
     }
 
+    /** The scanner used for snapshot selection, also shared with deferred index planning. */
+    public StartingScanner getStartingScanner() {
+        if (startingScanner == null) {
+            startingScanner = createStartingScanner(false);
+        }
+        return startingScanner;
+    }
+
     private Optional<StartingScanner.Result> applyPushDownLimit() {
         // A read-time filter (WHERE or auth) drops rows after scanning, so only push the limit down
         // when neither is present.

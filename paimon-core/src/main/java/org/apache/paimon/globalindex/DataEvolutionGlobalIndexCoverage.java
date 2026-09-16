@@ -86,6 +86,11 @@ public class DataEvolutionGlobalIndexCoverage {
     }
 
     public List<Range> unindexedRanges(Collection<Integer> fieldIds) {
+        return unindexedRanges(fieldIds, null);
+    }
+
+    public List<Range> unindexedRanges(
+            Collection<Integer> fieldIds, @Nullable List<Range> plannedDataRanges) {
         if (searchMode == GlobalIndexSearchMode.FAST) {
             return Collections.emptyList();
         }
@@ -95,7 +100,7 @@ public class DataEvolutionGlobalIndexCoverage {
 
         List<Range> dataRanges;
         if (searchMode == GlobalIndexSearchMode.DETAIL) {
-            dataRanges = dataRangesByDataFiles();
+            dataRanges = plannedDataRanges == null ? dataRangesByDataFiles() : plannedDataRanges;
         } else {
             dataRanges = Collections.singletonList(new Range(0, snapshot.nextRowId() - 1));
         }

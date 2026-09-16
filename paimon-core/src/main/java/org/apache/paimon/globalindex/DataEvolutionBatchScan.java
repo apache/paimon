@@ -19,9 +19,12 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -37,9 +40,18 @@ import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.snapshot.FullCompactedStartingScanner;
+import org.apache.paimon.table.source.snapshot.FullStartingScanner;
+import org.apache.paimon.table.source.snapshot.StartingScanner;
+import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
+import org.apache.paimon.table.source.snapshot.StaticFromTagStartingScanner;
+import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
+import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
 
@@ -48,6 +60,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -55,6 +68,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.SpecialFields.ROW_ID;
 import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
@@ -272,6 +286,14 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     @Override
     public Plan plan() {
+        return table.coreOptions()
+                        .toConfiguration()
+                        .get(CoreOptions.SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED)
+                ? planWithLazyIndex()
+                : planEager();
+    }
+
+    private Plan planEager() {
         RowRangeIndex rowRangeIndex = this.pushedRowRangeIndex;
         ScoreGetter scoreGetter = null;
         boolean globalIndexTopNCandidatesFound = false;
@@ -309,6 +331,170 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
         List<Split> splits = batchScan.withRowRangeIndex(rowRangeIndex).plan().splits();
         return wrapToIndexSplits(splits, rowRangeIndex, scoreGetter);
+    }
+
+    /** Plan complete data splits while deferring supported scalar index evaluation to readers. */
+    private Plan planWithLazyIndex() {
+        if (queryAuthEnabled()
+                || filter == null
+                // Partition-only scans may apply LIMIT/TopN before deferred index filtering.
+                || !batchScan.snapshotReader().hasNonPartitionFilter()
+                || pushedRowRangeIndex != null
+                || globalIndexResult != null
+                || !table.coreOptions().globalIndexEnabled()
+                || !isFullSnapshotScanner(batchScan.getStartingScanner())) {
+            return planEager();
+        }
+        Predicate indexFilter = rowIdSafeResidualFilter(filter);
+        if (indexFilter == null) {
+            return planEager();
+        }
+
+        // Plan once through the normal lifecycle: auth, snapshot selection and read protection tag.
+        Plan dataPlan = batchScan.plan();
+        List<Split> splits = dataPlan.splits();
+        if (splits.isEmpty()) {
+            return dataPlan;
+        }
+        // Auth wrapping may replace the plan, but preserves the snapshot ID in each data split.
+        long snapshotId = dataSplit(splits.get(0)).snapshotId();
+        Snapshot snapshot = snapshotForLazyIndex(snapshotId);
+        PartitionPredicate partitionFilter =
+                batchScan.snapshotReader().manifestsReader().partitionFilter();
+        List<IndexFileMeta> indexFiles =
+                table.store().newIndexFileHandler()
+                        .scan(
+                                snapshot,
+                                DataEvolutionGlobalIndexScanner.indexFileFilter(
+                                        table, partitionFilter, indexFilter))
+                        .stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .collect(Collectors.toList());
+        if (indexFiles.isEmpty()) {
+            return dataPlan;
+        }
+        if (!GlobalIndexScanPlan.supports(indexFiles)) {
+            return planEagerIndex(dataPlan, snapshot, partitionFilter, indexFiles, indexFilter);
+        }
+        GlobalIndexScanPlan indexPlan =
+                GlobalIndexScanPlan.create(
+                        table.rowType(),
+                        indexFilter,
+                        indexFiles,
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions().toConfiguration());
+        if (indexPlan == null) {
+            return dataPlan;
+        }
+        List<Range> unindexed =
+                new DataEvolutionGlobalIndexCoverage(
+                                table,
+                                snapshot,
+                                partitionFilter,
+                                indexFiles,
+                                table.coreOptions().scalarIndexSearchMode())
+                        .unindexedRanges(
+                                indexPlan.contributingFieldIds(table.rowType()),
+                                table.coreOptions().scalarIndexSearchMode()
+                                                == CoreOptions.GlobalIndexSearchMode.DETAIL
+                                        ? GlobalIndexBuilderUtils.calcRowRanges(
+                                                splits.stream()
+                                                        .map(DataEvolutionBatchScan::dataSplit)
+                                                        .collect(Collectors.toList()))
+                                        : Collections.emptyList());
+        List<Split> lazySplits = new ArrayList<>();
+        for (Split split : splits) {
+            DataSplit dataSplit = dataSplit(split);
+            List<Range> ranges =
+                    GlobalIndexBuilderUtils.calcRowRanges(Collections.singletonList(dataSplit));
+            GlobalIndexScanPlan splitPlan = indexPlan.forRanges(ranges);
+            List<Range> splitUnindexed = Range.and(unindexed, ranges);
+            if (splitPlan.isEmpty() && splitUnindexed.isEmpty()) {
+                continue;
+            }
+            Split lazySplit =
+                    new LazyIndexedSplit(dataSplit, splitPlan, table.options(), splitUnindexed);
+            lazySplits.add(withAuth(split, lazySplit));
+        }
+        return () -> lazySplits;
+    }
+
+    private Snapshot snapshotForLazyIndex(long snapshotId) {
+        try {
+            return table.snapshotManager().tryGetSnapshot(snapshotId);
+        } catch (FileNotFoundException e) {
+            StartingScanner scanner = batchScan.getStartingScanner();
+            if (scanner instanceof StaticFromTagStartingScanner) {
+                Snapshot snapshot = ((StaticFromTagStartingScanner) scanner).getSnapshot();
+                Preconditions.checkState(
+                        snapshot.id() == snapshotId,
+                        "Tag changed after data planning: expected snapshot %s, found %s",
+                        snapshotId,
+                        snapshot.id());
+                return snapshot;
+            }
+            throw new RuntimeException("Snapshot " + snapshotId + " is no longer available", e);
+        }
+    }
+
+    private static boolean isFullSnapshotScanner(StartingScanner scanner) {
+        return scanner instanceof FullCompactedStartingScanner
+                || scanner instanceof FullStartingScanner
+                || scanner instanceof StaticFromSnapshotStartingScanner
+                || scanner instanceof StaticFromTagStartingScanner
+                || scanner instanceof StaticFromTimestampStartingScanner
+                || scanner instanceof StaticFromWatermarkStartingScanner;
+    }
+
+    private Plan planEagerIndex(
+            Plan dataPlan,
+            Snapshot snapshot,
+            PartitionPredicate partitionFilter,
+            List<IndexFileMeta> indexFiles,
+            Predicate indexFilter) {
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.create(table, snapshot, partitionFilter, indexFiles)
+                        .get()) {
+            Optional<GlobalIndexEvaluator.Evaluation> result =
+                    scanner.scanWithCoverage(indexFilter);
+            if (!result.isPresent()) {
+                return dataPlan;
+            }
+            GlobalIndexResult candidates =
+                    result.get()
+                            .result()
+                            .or(
+                                    scanner.unindexedRowsForContributingFields(
+                                            result.get().contributingFieldIds()));
+            RowRangeIndex rowRangeIndex = RowRangeIndex.create(candidates.results().toRangeList());
+            ScoreGetter scores =
+                    candidates instanceof ScoredGlobalIndexResult
+                            ? ((ScoredGlobalIndexResult) candidates).scoreGetter()
+                            : null;
+            List<Split> indexed = new ArrayList<>();
+            for (Split split : dataPlan.splits()) {
+                DataSplit dataSplit = dataSplit(split);
+                if (dataSplit.dataFiles().stream()
+                        .map(DataFileMeta::nonNullRowIdRange)
+                        .anyMatch(range -> rowRangeIndex.intersects(range.from, range.to))) {
+                    indexed.add(withAuth(split, wrap(dataSplit, rowRangeIndex, scores)));
+                }
+            }
+            return () -> indexed;
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static DataSplit dataSplit(Split split) {
+        return (DataSplit)
+                (split instanceof QueryAuthSplit ? ((QueryAuthSplit) split).split() : split);
+    }
+
+    private static Split withAuth(Split original, Split replacement) {
+        return original instanceof QueryAuthSplit
+                ? new QueryAuthSplit(replacement, ((QueryAuthSplit) original).authResult())
+                : replacement;
     }
 
     private boolean queryAuthEnabled() {

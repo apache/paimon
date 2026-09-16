@@ -22,6 +22,7 @@ import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
+import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.utils.BinPacking;
 import org.apache.paimon.utils.SerializableFunction;
@@ -293,7 +294,12 @@ public class PreAssignSplitAssigner implements SplitAssigner {
             Projection partitionRowProjection,
             DynamicFilteringData dynamicFilteringData,
             FileStoreSourceSplit sourceSplit) {
-        DataSplit dataSplit = (DataSplit) sourceSplit.split();
+        DataSplit dataSplit =
+                TableScanUtils.dataSplit(sourceSplit.split())
+                        .orElseThrow(
+                                () ->
+                                        new IllegalArgumentException(
+                                                "Expected a data split: " + sourceSplit));
         BinaryRow partition = dataSplit.partition();
         FlinkRowData projected = new FlinkRowData(partitionRowProjection.apply(partition));
         return dynamicFilteringData.contains(projected);
