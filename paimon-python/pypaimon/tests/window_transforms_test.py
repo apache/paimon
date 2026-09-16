@@ -21,8 +21,10 @@ from functools import partial
 from unittest.mock import patch
 
 import numpy as np
-import torch
-from PIL import Image
+import pytest
+
+torch = pytest.importorskip("torch")
+Image = pytest.importorskip("PIL.Image")
 
 from pypaimon.multimodal.window_transforms import images_to_tensor, to_tensor
 
