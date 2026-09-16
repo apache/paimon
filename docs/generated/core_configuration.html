@@ -1114,6 +1114,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Whether to skip automatic manifest merging during commit when write-only is true. This also skips automatic manifest sort rewrite. Explicit manifest compaction is not affected.</td>
         </tr>
         <tr>
+            <td><h5>manifest.sidecar.enabled</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Boolean</td>
+            <td>Whether to enable manifest sidecars with independent partition, row-id and bucket coverage. Defaults to manifest-sort.enabled when unset.</td>
+        </tr>
+        <tr>
             <td><h5>manifest.target-file-size</h5></td>
             <td style="word-wrap: break-word;">8 mb</td>
             <td>MemorySize</td>

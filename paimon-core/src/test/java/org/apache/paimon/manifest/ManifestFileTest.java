@@ -1442,7 +1442,8 @@ public class ManifestFileTest {
                         "zstd",
                         pathFactory,
                         suggestedFileSize,
-                        cache)
+                        cache,
+                        new CoreOptions(new Options()))
                 .create();
     }
 

@@ -211,7 +211,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestCompression(),
                 pathFactory(),
                 options.manifestTargetSize().getBytes(),
-                readManifestCache);
+                readManifestCache,
+                options);
     }
 
     @Override
