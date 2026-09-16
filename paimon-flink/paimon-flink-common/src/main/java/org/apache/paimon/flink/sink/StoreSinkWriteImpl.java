@@ -24,6 +24,7 @@ import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.metrics.Counter;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.table.FileStoreTable;
@@ -49,6 +50,11 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     private static final Logger LOG = LoggerFactory.getLogger(StoreSinkWriteImpl.class);
 
+    /** Per-(table, subtask) write throughput, unlike the commit-gated CommitMetrics counters. */
+    private static final String WRITER_METRIC_GROUP = "writer";
+
+    private static final String ROWS_WRITTEN_METRIC = "rowsWritten";
+
     protected final String commitUser;
     protected final StoreSinkWriteState state;
     private final IOManagerImpl paimonIOManager;
@@ -58,6 +64,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     private final MemoryPoolFactory memoryPoolFactory;
     @Nullable private final MetricGroup metricGroup;
     private final TableWriteFactory tableWriteFactory;
+    @Nullable private final Counter rowsWritten;
 
     @Nullable private UriReaderFactory blobDescriptorReaderFactory;
 
@@ -106,6 +113,14 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         this.memoryPoolFactory = memoryPoolFactory;
         this.metricGroup = metricGroup;
         this.tableWriteFactory = tableWriteFactory;
+        // Not derived from newTableWrite: replace() rebuilds the write on schema evolution,
+        // and the counter must survive that, not reset.
+        this.rowsWritten =
+                metricGroup == null
+                        ? null
+                        : new FlinkMetricRegistry(metricGroup)
+                                .createTableMetricGroup(WRITER_METRIC_GROUP, table.name())
+                                .counter(ROWS_WRITTEN_METRIC);
         this.write = newTableWrite(table);
     }
 
@@ -140,25 +155,41 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     @Override
     @Nullable
     public SinkRecord write(InternalRow rowData) throws Exception {
-        return write.writeAndReturn(withBlobDescriptorReader(rowData));
+        return countRow(write.writeAndReturn(withBlobDescriptorReader(rowData)));
     }
 
     @Override
     @Nullable
     public SinkRecord write(InternalRow rowData, int bucket) throws Exception {
-        return write.writeAndReturn(withBlobDescriptorReader(rowData), bucket);
+        return countRow(write.writeAndReturn(withBlobDescriptorReader(rowData), bucket));
     }
 
     @Override
     @Nullable
     public SinkRecord write(InternalRow rowData, int bucket, int totalBuckets) throws Exception {
-        return write.writeAndReturn(withBlobDescriptorReader(rowData), bucket, totalBuckets);
+        return countRow(
+                write.writeAndReturn(withBlobDescriptorReader(rowData), bucket, totalBuckets));
     }
 
     private InternalRow withBlobDescriptorReader(InternalRow rowData) {
         return blobDescriptorReaderFactory == null
                 ? rowData
                 : new BlobDescriptorResolvingRow(rowData, blobDescriptorReaderFactory);
+    }
+
+    /**
+     * Counts accepted rows. On the result, not on entry: writeAndReturn returns null for rows the
+     * row-kind filter drops. In all three overloads because they do not delegate to each other.
+     *
+     * <p>Rows entering the write buffer, so an upper bound on LAST_DELTA_RECORDS_APPENDED --
+     * MergeTreeWriter merges same-key rows on flush.
+     */
+    @Nullable
+    private SinkRecord countRow(@Nullable SinkRecord record) {
+        if (rowsWritten != null && record != null) {
+            rowsWritten.inc();
+        }
+        return record;
     }
 
     @Override
