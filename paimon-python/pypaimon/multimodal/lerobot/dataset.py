@@ -424,7 +424,8 @@ class PaimonDatasetReader(ABC):
                 self.return_uint8,
             )
 
-        video_windows = _decode_video_windows(
+        # Transforms may shrink frames; assemble those windows one sample at a time.
+        video_windows = {} if self.image_transforms is not None else _decode_video_windows(
             plans, rows, getattr(self, "_video_collators", ()),
             self._features, self.return_uint8)
         for group in row_groups:
@@ -448,7 +449,7 @@ class PaimonDatasetReader(ABC):
         visual_windows = _stack_visual_windows(
             plans, converted, [key for key in self._visual_keys
                                if key not in video_windows]
-        ) if plans[0]["windows"] else {}
+        ) if self.image_transforms is None and plans[0]["windows"] else {}
         visual_windows.update(video_windows)
         duplicates = _duplicate_indices(plans)
         result = []

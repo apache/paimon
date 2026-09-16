@@ -26,6 +26,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -950,6 +951,78 @@ class LeRobotValidationTest(unittest.TestCase):
         self.assertEqual(torch.uint8, sample["observation.image"].dtype)
         self.assertEqual([3, 4, 5], list(
             sample["observation.image"].shape))
+
+    def test_transformed_windows_are_assembled_per_sample(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+
+        keys = ["left", "right"]
+        original_stack = torch.stack
+        for kind in ("image", "video"):
+            with self.subTest(kind=kind):
+                reader = object.__new__(_ManualDatasetReader)
+                reader._total_frames = 33
+                reader.episodes = None
+                reader._selected_ranges = None
+                reader._features = {
+                    key: {"dtype": kind, "shape": [4, 5, 3]}
+                    for key in keys
+                }
+                reader._projection = keys
+                reader._delta_projection = keys
+                reader._image_keys = []
+                reader._visual_keys = keys
+                reader._video_collators = []
+                reader._file_io = None
+                reader._task_names = ["task"]
+                reader._subtask_names = None
+                reader.return_uint8 = True
+                reader._plan = lambda i: {
+                    "index": i, "windows": {key: [i, i, i + 1] for key in keys},
+                    "padding": {},
+                }
+                reader._read_rows = lambda indices, projection: {
+                    i: dict(task_index=0, **{
+                        key: torch.full((3, 4, 5), i, dtype=torch.uint8)
+                        for key in keys
+                    }) for i in indices
+                }
+                windows = []
+                peak = []
+
+                def stack(*args, **kwargs):
+                    value = original_stack(*args, **kwargs)
+                    windows.append(weakref.ref(value))
+                    peak.append(sum(ref() is not None for ref in windows))
+                    return value
+
+                def resize(value):
+                    return torch.nn.functional.interpolate(
+                        value.float(), size=(2, 2), mode="nearest")
+
+                reader.image_transforms = resize
+                module = "pypaimon.multimodal.lerobot.dataset."
+                with patch("torch.get_num_threads", return_value=1), \
+                        patch("torch.stack", side_effect=stack), \
+                        patch(module + "_decode_video_windows",
+                              wraps=_decode_video_windows) as decode, \
+                        patch(module + "_stack_visual_windows",
+                              wraps=_stack_visual_windows) as assemble:
+                    result = reader.get_items(list(range(32)))
+                self.assertEqual(64, len(windows))
+                self.assertLessEqual(max(peak), len(keys))
+                decode.assert_not_called()
+                assemble.assert_not_called()
+                self.assertTrue(all(ref() is None for ref in windows))
+                for i, item in enumerate(result):
+                    for key in keys:
+                        expected = torch.tensor([i, i, i + 1]).reshape(3, 1, 1, 1)
+                        self.assertTrue(torch.equal(
+                            item[key], expected.expand(3, 3, 2, 2).float()))
+                result[0][keys[0]].zero_()
+                self.assertEqual(1, result[0][keys[1]][-1, 0, 0, 0].item())
 
     def test_video_windows_decode_directly_and_fall_back(self):
         try:
