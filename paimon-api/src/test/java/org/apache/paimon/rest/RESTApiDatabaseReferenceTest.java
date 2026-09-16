@@ -26,6 +26,8 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -95,8 +97,9 @@ class RESTApiDatabaseReferenceTest {
         }
     }
 
-    @Test
-    void testBranchAndImmutableTagHappyPath() throws Exception {
+    @ParameterizedTest
+    @EnumSource(DatabaseReferenceType.class)
+    void testBranchAndImmutableTagHappyPath(DatabaseReferenceType sourceType) throws Exception {
         enqueue(
                 200,
                 "{\"references\":[{\"type\":\"BRANCH\",\"name\":\"main\"},"
@@ -150,10 +153,15 @@ class RESTApiDatabaseReferenceTest {
                         + "\"source\":{\"type\":\"BRANCH\",\"name\":\"exp-1\"}}");
 
         enqueue(200, "{\"reference\":{\"type\":\"BRANCH\",\"name\":\"main\"}}");
-        assertThat(api.fastForwardDatabaseBranch("training db", "main", "train-v1"))
+        DatabaseReference source = sourceType == DatabaseReferenceType.BRANCH ? branch : tag;
+        assertThat(api.fastForwardDatabaseBranch("training db", "main", source))
                 .isEqualTo(new DatabaseReference(DatabaseReferenceType.BRANCH, "main"));
         assertRequest(4, "POST", TREES_PATH + "/main/forward");
-        assertBody(requests.get(4), "{\"sourceTag\":\"train-v1\"}");
+        assertBody(
+                requests.get(4),
+                sourceType == DatabaseReferenceType.BRANCH
+                        ? "{\"source\":{\"type\":\"BRANCH\",\"name\":\"exp-1\"}}"
+                        : "{\"source\":{\"type\":\"TAG\",\"name\":\"train-v1\"}}");
 
         enqueue(200, "{\"reference\":{\"type\":\"BRANCH\",\"name\":\"exp-1\"}}");
         assertThat(

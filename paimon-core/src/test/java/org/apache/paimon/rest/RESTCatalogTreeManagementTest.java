@@ -32,6 +32,8 @@ import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -92,8 +94,10 @@ class RESTCatalogTreeManagementTest {
         }
     }
 
-    @Test
-    void testBranchAndTagOperationsUseCatalogConfiguration() throws Exception {
+    @ParameterizedTest
+    @EnumSource(DatabaseReferenceType.class)
+    void testBranchAndTagOperationsUseCatalogConfiguration(DatabaseReferenceType sourceType)
+            throws Exception {
         DatabaseReference main = new DatabaseReference(BRANCH, "main");
         DatabaseReference branch = new DatabaseReference(BRANCH, "exp-1");
         DatabaseReference tag = new DatabaseReference(TAG, "train-v1");
@@ -117,9 +121,12 @@ class RESTCatalogTreeManagementTest {
                 "{\"name\":\"train-v1\",\"type\":\"TAG\",\"source\":" + BRANCH_JSON + "}");
 
         enqueue(200, "{\"reference\":" + MAIN_JSON + "}");
-        assertThat(trees.fastForwardBranch(DATABASE, "main", "train-v1")).isEqualTo(main);
+        DatabaseReference source = sourceType == BRANCH ? branch : tag;
+        assertThat(trees.fastForwardBranch(DATABASE, "main", source)).isEqualTo(main);
         RecordedRequest fastForward = takeRequest("POST", TREES_PATH + "/main/forward");
-        assertBody(fastForward, "{\"sourceTag\":\"train-v1\"}");
+        assertBody(
+                fastForward,
+                "{\"source\":" + (sourceType == BRANCH ? BRANCH_JSON : TAG_JSON) + "}");
 
         enqueue(200, "{\"reference\":" + BRANCH_JSON + "}");
         assertThat(trees.deleteReference(DATABASE, "exp-1", BRANCH)).isEqualTo(branch);

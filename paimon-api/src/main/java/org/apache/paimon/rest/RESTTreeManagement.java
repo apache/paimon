@@ -59,8 +59,8 @@ public class RESTTreeManagement implements TreeManagement {
 
     @Override
     public DatabaseReference fastForwardBranch(
-            String databaseName, String targetBranch, String sourceTag) {
-        return api.fastForwardDatabaseBranch(databaseName, targetBranch, sourceTag);
+            String databaseName, String targetBranch, DatabaseReference source) {
+        return api.fastForwardDatabaseBranch(databaseName, targetBranch, source);
     }
 
     @Override

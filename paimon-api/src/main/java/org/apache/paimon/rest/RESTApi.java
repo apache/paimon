@@ -416,14 +416,14 @@ public class RESTApi {
         return checkNotNull(response.getReference(), "Reference response must contain reference");
     }
 
-    /** Fast-forward a database-level branch to an immutable tag. */
+    /** Fast-forward a database-level branch to another branch or immutable tag. */
     @Experimental
     public DatabaseReference fastForwardDatabaseBranch(
-            String databaseName, String targetBranch, String sourceTag) {
+            String databaseName, String targetBranch, DatabaseReference source) {
         DatabaseReferenceResponse response =
                 client.post(
                         resourcePaths.forwardDatabaseBranch(databaseName, targetBranch),
-                        new FastForwardDatabaseBranchRequest(sourceTag),
+                        new FastForwardDatabaseBranchRequest(source),
                         DatabaseReferenceResponse.class,
                         restAuthFunction);
         return checkNotNull(response.getReference(), "Reference response must contain reference");

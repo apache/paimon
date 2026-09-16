@@ -27,6 +27,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.beans.ConstructorProperties;
@@ -116,11 +117,6 @@ public class RequestJacksonCompatibilityTest {
                             "partitionSpecs",
                             "ignoreIfNotExists"),
                     requestCase(
-                            FastForwardDatabaseBranchRequest.class,
-                            "{\"sourceTag\":\"train-v1\"}",
-                            request -> assertThat(request.getSourceTag()).isEqualTo("train-v1"),
-                            "sourceTag"),
-                    requestCase(
                             ListPartitionsByFilterRequest.class,
                             "{\"filter\":\"dt = '2026-08-24'\","
                                     + "\"partitionNamePattern\":\"dt=*\","
@@ -185,6 +181,7 @@ public class RequestJacksonCompatibilityTest {
                             CreateViewRequest.class,
                             DeleteDatabaseReferenceRequest.class,
                             DropPolicyRequest.class,
+                            FastForwardDatabaseBranchRequest.class,
                             GrantPermissionRequest.class,
                             PolicyRequest.class,
                             RegisterTableRequest.class,
@@ -251,6 +248,18 @@ public class RequestJacksonCompatibilityTest {
                 EXTERNAL_MAPPER.readValue("{}", DeleteDatabaseReferenceRequest.class);
         assertThat(RESTApi.toJson(withoutType)).isEqualTo("{}");
         assertThat(RESTApi.fromJson("{}", DeleteDatabaseReferenceRequest.class).getType()).isNull();
+    }
+
+    @ParameterizedTest
+    @EnumSource(DatabaseReferenceType.class)
+    void testFastForwardDatabaseBranchRequestRoundTrips(DatabaseReferenceType sourceType)
+            throws Exception {
+        String json = "{\"source\":{\"type\":\"" + sourceType.name() + "\",\"name\":\"training\"}}";
+        FastForwardDatabaseBranchRequest request =
+                EXTERNAL_MAPPER.readValue(json, FastForwardDatabaseBranchRequest.class);
+        FastForwardDatabaseBranchRequest roundTrip =
+                RESTApi.fromJson(RESTApi.toJson(request), FastForwardDatabaseBranchRequest.class);
+        assertThat(roundTrip.getSource()).isEqualTo(new DatabaseReference(sourceType, "training"));
     }
 
     @Test

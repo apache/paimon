@@ -52,8 +52,9 @@ public interface TreeManagement {
             DatabaseReferenceType type,
             DatabaseReference source);
 
-    /** Fast-forwards a branch to an immutable tag in the same database. */
-    DatabaseReference fastForwardBranch(String databaseName, String targetBranch, String sourceTag);
+    /** Fast-forwards a branch to another branch or immutable tag in the same database. */
+    DatabaseReference fastForwardBranch(
+            String databaseName, String targetBranch, DatabaseReference source);
 
     /**
      * Deletes and returns a named reference. A missing reference is an error.

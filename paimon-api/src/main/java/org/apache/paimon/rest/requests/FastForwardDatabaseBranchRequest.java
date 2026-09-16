@@ -19,6 +19,7 @@
 package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.rest.DatabaseReference;
 import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -28,23 +29,23 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import java.beans.ConstructorProperties;
 
-/** Request for fast-forwarding a database branch to an immutable tag. */
+/** Request for fast-forwarding a database branch to another branch or immutable tag. */
 @Experimental
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class FastForwardDatabaseBranchRequest implements RESTRequest {
 
-    private static final String FIELD_SOURCE_TAG = "sourceTag";
+    private static final String FIELD_SOURCE = "source";
 
-    private final String sourceTag;
+    private final DatabaseReference source;
 
     @JsonCreator
-    @ConstructorProperties({FIELD_SOURCE_TAG})
-    public FastForwardDatabaseBranchRequest(@JsonProperty(FIELD_SOURCE_TAG) String sourceTag) {
-        this.sourceTag = sourceTag;
+    @ConstructorProperties({FIELD_SOURCE})
+    public FastForwardDatabaseBranchRequest(@JsonProperty(FIELD_SOURCE) DatabaseReference source) {
+        this.source = source;
     }
 
-    @JsonGetter(FIELD_SOURCE_TAG)
-    public String getSourceTag() {
-        return sourceTag;
+    @JsonGetter(FIELD_SOURCE)
+    public DatabaseReference getSource() {
+        return source;
     }
 }
