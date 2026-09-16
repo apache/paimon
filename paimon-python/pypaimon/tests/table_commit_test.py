@@ -16,6 +16,7 @@
 # under the License.
 
 import unittest
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock
 
 from parameterized import parameterized
@@ -26,6 +27,52 @@ from pypaimon.write.table_commit import BatchTableCommit, StreamTableCommit
 
 
 class TestTableCommit(unittest.TestCase):
+
+    def test_empty_append_snapshot_is_opt_in_and_can_be_tagged(self):
+        import pyarrow as pa
+        import pypaimon.multimodal as pmm
+
+        with TemporaryDirectory(prefix="paimon-empty-commit-") as warehouse:
+            connection = pmm.connect(options={"warehouse": warehouse})
+            schema = pa.schema([pa.field("feature", pa.string(), False)])
+            table = connection.create_table("stat", schema=schema)
+            empty = pa.Table.from_pylist([], schema=schema)
+            table.add(empty)
+            snapshots = table.raw_table.snapshot_manager()
+            self.assertIsNone(snapshots.get_latest_snapshot())
+
+            def commit_empty():
+                writable = table.raw_table.copy({
+                    "snapshot.ignore-empty-commit": "false",
+                })
+                commit = writable.new_batch_write_builder().new_commit()
+                try:
+                    commit.commit([], snapshot_properties={"source": "empty-stat"})
+                finally:
+                    commit.close()
+
+            commit_empty()
+            snapshot = snapshots.get_latest_snapshot()
+            self.assertIsNotNone(snapshot)
+            self.assertEqual((1, 0, 0), (
+                snapshot.id, snapshot.total_record_count,
+                snapshot.delta_record_count))
+            self.assertEqual({"source": "empty-stat"}, snapshot.properties)
+            table.raw_table.create_tag("empty")
+            tagged = table.scan(tag_name="empty").to_arrow()
+            self.assertEqual(0, tagged.num_rows)
+            self.assertEqual(schema, tagged.schema)
+
+            table.add([{"feature": "state_imu_body"}])
+            table.add(empty)
+            self.assertEqual(2, snapshots.get_latest_snapshot().id)
+            commit_empty()
+            snapshot = snapshots.get_latest_snapshot()
+            self.assertEqual((3, 1, 0), (
+                snapshot.id, snapshot.total_record_count,
+                snapshot.delta_record_count))
+            self.assertEqual([{"feature": "state_imu_body"}], table.scan().to_list())
+            self.assertEqual([], table.scan(tag_name="empty").to_list())
 
     def _create_commit(self, cls, overwrite_partition=None):
         commit = cls.__new__(cls)
