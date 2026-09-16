@@ -72,7 +72,7 @@ using independent partition, row-ID and bucket coverage. A sidecar uses the
 derived file name. The Avro schemas and `_VERSION` identifiers remain unchanged.
 
 The utility includes construction, validation, block selection and optional caching. Java table
-writers generate sidecars when `manifest.sidecar.write` is enabled; when unset, it inherits
+writers generate sidecars when `manifest.sidecar.enabled` is true; when unset, it inherits
 `manifest-sort.enabled`. Both ordinary writes and raw manifest rewrites build the sidecar from
 the completed output manifest and publish its `_EXTRA_FILES` reference only after both files
 close successfully. Failed writes and aborted writers clean up their own manifest/sidecar pairs.

@@ -738,7 +738,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
         }
 
         private void writeSidecar() throws IOException {
-            if (!options.manifestSidecarWriteEnabled()) {
+            if (!options.manifestSidecarEnabled()) {
                 return;
             }
             byte[] bytes =

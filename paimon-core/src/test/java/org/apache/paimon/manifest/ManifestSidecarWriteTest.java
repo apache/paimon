@@ -64,15 +64,15 @@ class ManifestSidecarWriteTest {
     private final ManifestTestDataGenerator gen = ManifestTestDataGenerator.builder().build();
 
     @Test
-    void writeOptionControlsSidecarIO() {
+    void sidecarOptionControlsWriteIO() {
         for (Boolean sort : new Boolean[] {null, false, true}) {
-            for (Boolean write : new Boolean[] {null, false, true}) {
+            for (Boolean configured : new Boolean[] {null, false, true}) {
                 Options options = new Options();
                 if (sort != null) {
                     options.set(CoreOptions.MANIFEST_SORT_ENABLED, sort);
                 }
-                if (write != null) {
-                    options.set(CoreOptions.MANIFEST_SIDECAR_WRITE, write);
+                if (configured != null) {
+                    options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, configured);
                 }
                 AtomicInteger reads = new AtomicInteger();
                 FileIO io =
@@ -85,12 +85,12 @@ class ManifestSidecarWriteTest {
                                 return super.newInputStream(path);
                             }
                         };
-                Path root = root(sort + "-" + write);
+                Path root = root(sort + "-" + configured);
                 ManifestFile manifests =
                         manifests(root, io, DEFAULT_PART_TYPE, Long.MAX_VALUE, options);
                 ManifestFileMeta meta =
                         manifests.write(Collections.singletonList(gen.next())).get(0);
-                boolean enabled = write == null ? Boolean.TRUE.equals(sort) : write;
+                boolean enabled = configured == null ? Boolean.TRUE.equals(sort) : configured;
                 assertThat(reads.get()).isEqualTo(enabled ? 1 : 0);
                 assertThat(ManifestSidecar.fileName(meta) != null).isEqualTo(enabled);
             }
@@ -260,7 +260,7 @@ class ManifestSidecarWriteTest {
 
     private Options enabledOptions() {
         Options options = new Options();
-        options.set(CoreOptions.MANIFEST_SIDECAR_WRITE, true);
+        options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, true);
         options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
         return options;
     }

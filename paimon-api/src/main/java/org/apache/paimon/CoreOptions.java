@@ -522,12 +522,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.ofMebiBytes(8))
                     .withDescription("Suggested file size of a manifest file.");
 
-    public static final ConfigOption<Boolean> MANIFEST_SIDECAR_WRITE =
-            key("manifest.sidecar.write")
+    public static final ConfigOption<Boolean> MANIFEST_SIDECAR_ENABLED =
+            key("manifest.sidecar.enabled")
                     .booleanType()
                     .noDefaultValue()
                     .withDescription(
-                            "Write sidecars with independent partition, row-id and bucket coverage for newly created manifests. Defaults to manifest-sort.enabled when unset.");
+                            "Whether to enable manifest sidecars with independent partition, row-id and bucket coverage. Defaults to manifest-sort.enabled when unset.");
 
     public static final ConfigOption<MemorySize> MANIFEST_FULL_COMPACTION_FILE_SIZE =
             key("manifest.full-compaction-threshold-size")
@@ -3224,8 +3224,8 @@ public class CoreOptions implements Serializable {
         return options.get(MANIFEST_TARGET_FILE_SIZE);
     }
 
-    public boolean manifestSidecarWriteEnabled() {
-        return options.getOptional(MANIFEST_SIDECAR_WRITE).orElseGet(this::manifestSortEnabled);
+    public boolean manifestSidecarEnabled() {
+        return options.getOptional(MANIFEST_SIDECAR_ENABLED).orElseGet(this::manifestSortEnabled);
     }
 
     public MemorySize manifestFullCompactionThresholdSize() {
