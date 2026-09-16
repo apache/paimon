@@ -34,6 +34,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataTypes;
@@ -54,6 +55,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link CsvFileFormat}. */
@@ -905,6 +907,30 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                 new CsvFileFormatFactory().create(new FormatContext(options, 1024, 1024));
         Path testFile = write(format, fullRowType, testData, testPrefix);
         return read(format, fullRowType, rowType, testFile);
+    }
+
+    @Test
+    public void testSingleCharacterOptionsAreEnforced() {
+        // The writer emits the whole option string while CsvParser keeps only charAt(0), so a
+        // multi-character value silently wrote one delimiter and read back another.
+        for (ConfigOption<String> option :
+                Arrays.asList(
+                        CsvOptions.FIELD_DELIMITER,
+                        CsvOptions.QUOTE_CHARACTER,
+                        CsvOptions.ESCAPE_CHARACTER)) {
+            for (String bad : Arrays.asList("ab", "")) {
+                Options options = new Options();
+                options.set(option, bad);
+                assertThatThrownBy(() -> new CsvOptions(options))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining(option.key());
+            }
+        }
+
+        // A multi-character line delimiter stays supported; CustomLineReader matches all of it.
+        Options multiCharLine = new Options();
+        multiCharLine.set(CsvOptions.LINE_DELIMITER, "|||");
+        assertThatCode(() -> new CsvOptions(multiCharLine)).doesNotThrowAnyException();
     }
 
     /** Writes the given data to a new CSV file and returns its path. */
