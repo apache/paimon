@@ -305,7 +305,7 @@ class CoreOptions:
         ConfigOptions.key("manifest.sidecar.enabled")
         .boolean_type()
         .no_default_value()
-        .with_description("Enable sidecar pruning on reads. Defaults to manifest-sort.enabled when unset.")
+        .with_description("Enable manifest sidecar reads and writes. Defaults to manifest-sort.enabled when unset.")
     )
 
     MANIFEST_SORT_ENABLED: ConfigOption[bool] = (
