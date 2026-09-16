@@ -164,9 +164,12 @@ class MapSharedShreddingWriter:
         try:
             with file_io.new_output_stream(path) as stream:
                 with pq.ParquetWriter(stream, schema, **kwargs) as writer:
-                    for batch in data.to_batches(max_chunksize=batch_rows):
-                        for bounded in _bounded_batches(batch):
-                            columns = list(bounded.columns)
+                    for offset in range(0, data.num_rows, batch_rows):
+                        for bounded in _bounded_batches(data.slice(offset, batch_rows)):
+                            # Coalesce only this bounded logical window, not the
+                            # file. Input calls must not define row groups.
+                            batch = bounded.combine_chunks().to_batches()[0]
+                            columns = list(batch.columns)
                             for index, converter in converters.items():
                                 columns[index] = converter.convert(columns[index])
                             physical = pa.Table.from_arrays(columns, schema=schema)

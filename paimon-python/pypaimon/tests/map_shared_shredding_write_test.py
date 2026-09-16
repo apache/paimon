@@ -282,6 +282,38 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
         self.assertEqual(2, len(calls))
         self.assertFalse(table.file_io.exists(path))
 
+    def test_row_groups_do_not_follow_input_calls(self):
+        from pypaimon.table.row.generic_row import GenericRow
+
+        for count in (1000, 2500):
+            layouts = []
+            for by_row in (False, True):
+                table = self._create_table('parquet', 256)
+                builder = table.new_batch_write_builder()
+                writer = builder.new_write()
+                if by_row:
+                    for i in range(count):
+                        writer.write_row(GenericRow([i, [('a', i)]], table.fields))
+                else:
+                    writer.write_arrow(pa.Table.from_pydict({
+                        'id': list(range(count)),
+                        'metrics': [[('a', i)] for i in range(count)],
+                    }, schema=self.arrow_schema))
+                messages = writer.prepare_commit()
+                builder.new_commit().commit(messages)
+                writer.close()
+                files = [f for m in messages for f in m.new_files]
+                self.assertEqual(1, len(files))
+                metadata = pq.read_metadata(files[0].file_path)
+                layouts.append([metadata.row_group(i).num_rows
+                                for i in range(metadata.num_row_groups)])
+                self.assertEqual((count + 1023) // 1024, metadata.num_row_groups)
+                reader = table.new_read_builder().with_projection(['id', "metrics['a']"])
+                result = reader.new_read().to_arrow(reader.new_scan().plan().splits())
+                self.assertEqual(list(range(count)), result.column('id').to_pylist())
+                self.assertEqual(list(range(count)), result.column('metrics_a').to_pylist())
+            self.assertEqual(layouts[0], layouts[1])
+
     def test_reject_postpone_with_fixed_output_bucket(self):
         from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
