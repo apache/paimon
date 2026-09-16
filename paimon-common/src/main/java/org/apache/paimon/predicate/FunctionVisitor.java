@@ -62,9 +62,21 @@ public interface FunctionVisitor<T> extends PredicateVisitor<T> {
 
     T visitStartsWith(FieldRef fieldRef, Object literal);
 
+    default T visitNotStartsWith(FieldRef fieldRef, Object literal) {
+        throw new UnsupportedOperationException();
+    }
+
     T visitEndsWith(FieldRef fieldRef, Object literal);
 
+    default T visitNotEndsWith(FieldRef fieldRef, Object literal) {
+        throw new UnsupportedOperationException();
+    }
+
     T visitContains(FieldRef fieldRef, Object literal);
+
+    default T visitNotContains(FieldRef fieldRef, Object literal) {
+        throw new UnsupportedOperationException();
+    }
 
     default T visitArrayContains(FieldRef fieldRef, Object literal) {
         throw new UnsupportedOperationException();

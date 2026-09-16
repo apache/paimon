@@ -18,7 +18,6 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.types.DataType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -26,20 +25,21 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import java.util.List;
 import java.util.Optional;
 
-/** A {@link LeafBinaryFunction} to evaluate {@code filter like '%abc' or filter like '_abc'}. */
-public class EndsWith extends LeafBinaryFunction {
+/** A {@link LeafBinaryFunction} to evaluate {@code NOT ENDS_WITH(field, literal)}. */
+public class NotEndsWith extends LeafBinaryFunction {
 
-    public static final String NAME = "ENDS_WITH";
+    private static final long serialVersionUID = 1L;
 
-    public static final EndsWith INSTANCE = new EndsWith();
+    public static final String NAME = "NOT_ENDS_WITH";
+
+    public static final NotEndsWith INSTANCE = new NotEndsWith();
 
     @JsonCreator
-    private EndsWith() {}
+    private NotEndsWith() {}
 
     @Override
     public boolean test(DataType type, Object field, Object patternLiteral) {
-        BinaryString fieldString = (BinaryString) field;
-        return fieldString.endsWith((BinaryString) patternLiteral);
+        return !EndsWith.INSTANCE.test(type, field, patternLiteral);
     }
 
     @Override
@@ -55,12 +55,12 @@ public class EndsWith extends LeafBinaryFunction {
 
     @Override
     public Optional<LeafFunction> negate() {
-        return Optional.of(NotEndsWith.INSTANCE);
+        return Optional.of(EndsWith.INSTANCE);
     }
 
     @Override
     public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
-        return visitor.visitEndsWith(fieldRef, literals.get(0));
+        return visitor.visitNotEndsWith(fieldRef, literals.get(0));
     }
 
     @Override

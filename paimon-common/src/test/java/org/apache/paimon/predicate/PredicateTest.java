@@ -450,6 +450,38 @@ public class PredicateTest {
     }
 
     @Test
+    public void testNegatedStringPredicates() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new VarCharType()));
+        List<Predicate> positives =
+                Arrays.asList(
+                        builder.startsWith(0, fromString("he")),
+                        builder.endsWith(0, fromString("lo")),
+                        builder.contains(0, fromString("ell")));
+
+        for (Predicate positive : positives) {
+            Predicate negative = positive.negate().get();
+            assertThat(negative.test(GenericRow.of(fromString("hello")))).isFalse();
+            assertThat(negative.test(GenericRow.of(fromString("world")))).isTrue();
+            assertThat(negative.test(GenericRow.of((Object) null))).isFalse();
+            assertThat(negative.negate()).contains(positive);
+
+            // Negative string predicates cannot use min/max statistics, but an all-null column
+            // still cannot contain a matching row.
+            assertThat(
+                            test(
+                                    negative,
+                                    3,
+                                    new SimpleColStats[] {
+                                        new SimpleColStats(
+                                                fromString("hello"), fromString("world"), 0L)
+                                    }))
+                    .isTrue();
+            assertThat(test(negative, 1, new SimpleColStats[] {new SimpleColStats(null, null, 1L)}))
+                    .isFalse();
+        }
+    }
+
+    @Test
     public void testLargeIn() {
         PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
         List<Object> literals = new ArrayList<>();

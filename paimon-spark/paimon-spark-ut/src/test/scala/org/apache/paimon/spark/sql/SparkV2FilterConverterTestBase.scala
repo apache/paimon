@@ -512,6 +512,29 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
     assert(scanFilesCount(filter) == 4)
   }
 
+  test("V2Filter: Not string predicates") {
+    Seq(
+      (
+        "string_col NOT LIKE 'h%'",
+        builder.startsWith(0, BinaryString.fromString("h")).negate().get(),
+        Seq(Row("paimon"), Row("world"))),
+      (
+        "string_col NOT LIKE '%d'",
+        builder.endsWith(0, BinaryString.fromString("d")).negate().get(),
+        Seq(Row("hello"), Row("hi"), Row("paimon"))),
+      (
+        "string_col NOT LIKE '%orl%'",
+        builder.contains(0, BinaryString.fromString("orl")).negate().get(),
+        Seq(Row("hello"), Row("hi"), Row("paimon")))
+    ).foreach {
+      case (filter, expectedPredicate, expectedRows) =>
+        assert(converter.convert(v2Filter(filter)).contains(expectedPredicate))
+        checkAnswer(
+          sql(s"SELECT string_col from test_tbl WHERE $filter ORDER BY string_col"),
+          expectedRows)
+    }
+  }
+
   private def paimonAlwaysTrue: org.apache.paimon.predicate.Predicate =
     PredicateBuilder.alwaysTrue()
 
