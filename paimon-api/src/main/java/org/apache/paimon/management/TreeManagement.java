@@ -57,6 +57,16 @@ public interface TreeManagement {
             String databaseName, String targetBranch, DatabaseReference source);
 
     /**
+     * Merges a branch or immutable tag into a target branch in the same database.
+     *
+     * <p>Table entries are merged relative to a common ancestor. Conflicting changes fail the merge
+     * without modifying the target; the source reference is never modified. A merge with no changes
+     * succeeds.
+     */
+    DatabaseReference mergeBranch(
+            String databaseName, String targetBranch, DatabaseReference source);
+
+    /**
      * Deletes and returns a named reference. A missing reference is an error.
      *
      * @param expectedType required type of the reference to delete; null omits the type check

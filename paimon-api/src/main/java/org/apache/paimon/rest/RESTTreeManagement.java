@@ -64,6 +64,12 @@ public class RESTTreeManagement implements TreeManagement {
     }
 
     @Override
+    public DatabaseReference mergeBranch(
+            String databaseName, String targetBranch, DatabaseReference source) {
+        return api.mergeDatabaseBranch(databaseName, targetBranch, source);
+    }
+
+    @Override
     public DatabaseReference deleteReference(
             String databaseName,
             String referenceName,

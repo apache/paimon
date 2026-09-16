@@ -171,6 +171,55 @@ class RESTCatalogTreeManagementTest {
         assertThat(second.getRequestUrl().queryParameter("maxResults")).isNull();
     }
 
+    @ParameterizedTest
+    @EnumSource(DatabaseReferenceType.class)
+    void testMergeUsesCatalogConfiguration(DatabaseReferenceType sourceType) throws Exception {
+        enqueue(200, "{\"reference\":" + MAIN_JSON + "}");
+        DatabaseReference source = new DatabaseReference(sourceType, "experiment");
+
+        assertThat(trees.mergeBranch(DATABASE, "main", source))
+                .isEqualTo(new DatabaseReference(BRANCH, "main"));
+
+        RecordedRequest merge = takeRequest("POST", TREES_PATH + "/main/merge");
+        assertBody(
+                merge,
+                sourceType == BRANCH
+                        ? "{\"source\":{\"type\":\"BRANCH\",\"name\":\"experiment\"}}"
+                        : "{\"source\":{\"type\":\"TAG\",\"name\":\"experiment\"}}");
+        assertThat(server.getRequestCount()).isEqualTo(2);
+    }
+
+    @Test
+    void testMergeErrorsPreserveDetails() throws Exception {
+        DatabaseReference source = new DatabaseReference(BRANCH, "experiment");
+        enqueue(
+                409,
+                "{\"code\":409,\"message\":\"Conflicting changes to table features\","
+                        + "\"resourceType\":\"TABLE\",\"resourceName\":\"training db.features\"}");
+        assertThatThrownBy(() -> trees.mergeBranch(DATABASE, "main", source))
+                .isInstanceOfSatisfying(
+                        AlreadyExistsException.class,
+                        conflict -> {
+                            assertThat(conflict.resourceType()).isEqualTo("TABLE");
+                            assertThat(conflict.resourceName()).isEqualTo("training db.features");
+                        })
+                .hasMessageContaining("Conflicting changes to table features");
+        takeRequest("POST", TREES_PATH + "/main/merge");
+
+        enqueue(404, "{\"code\":404,\"message\":\"source reference missing\"}");
+        assertThatThrownBy(() -> trees.mergeBranch(DATABASE, "main", source))
+                .isInstanceOf(NoSuchResourceException.class)
+                .hasMessageContaining("source reference missing");
+        takeRequest("POST", TREES_PATH + "/main/merge");
+
+        enqueue(501, "{\"code\":501,\"message\":\"merge unsupported\"}");
+        assertThatThrownBy(() -> trees.mergeBranch(DATABASE, "main", source))
+                .isInstanceOf(NotImplementedException.class)
+                .hasMessageContaining("merge unsupported");
+        takeRequest("POST", TREES_PATH + "/main/merge");
+        assertThat(server.getRequestCount()).isEqualTo(4);
+    }
+
     @Test
     void testListAllTypesAndEmptyReferences() throws Exception {
         enqueue(200, "{\"references\":[" + MAIN_JSON + "," + TAG_JSON + "]}");

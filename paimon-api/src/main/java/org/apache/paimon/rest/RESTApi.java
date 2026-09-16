@@ -63,6 +63,7 @@ import org.apache.paimon.rest.requests.GrantPermissionRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
+import org.apache.paimon.rest.requests.MergeDatabaseBranchRequest;
 import org.apache.paimon.rest.requests.PolicyRequest;
 import org.apache.paimon.rest.requests.RegisterTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -424,6 +425,19 @@ public class RESTApi {
                 client.post(
                         resourcePaths.forwardDatabaseBranch(databaseName, targetBranch),
                         new FastForwardDatabaseBranchRequest(source),
+                        DatabaseReferenceResponse.class,
+                        restAuthFunction);
+        return checkNotNull(response.getReference(), "Reference response must contain reference");
+    }
+
+    /** Merge a branch or immutable tag into a database-level branch, failing on conflicts. */
+    @Experimental
+    public DatabaseReference mergeDatabaseBranch(
+            String databaseName, String targetBranch, DatabaseReference source) {
+        DatabaseReferenceResponse response =
+                client.post(
+                        resourcePaths.mergeDatabaseBranch(databaseName, targetBranch),
+                        new MergeDatabaseBranchRequest(source),
                         DatabaseReferenceResponse.class,
                         restAuthFunction);
         return checkNotNull(response.getReference(), "Reference response must contain reference");

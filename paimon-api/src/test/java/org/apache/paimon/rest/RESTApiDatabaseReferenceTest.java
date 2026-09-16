@@ -201,6 +201,24 @@ class RESTApiDatabaseReferenceTest {
                 .containsEntry("pageToken", "p2");
     }
 
+    @ParameterizedTest
+    @EnumSource(DatabaseReferenceType.class)
+    void testMergeBranchOrTag(DatabaseReferenceType sourceType) throws Exception {
+        enqueue(200, "{\"reference\":{\"type\":\"BRANCH\",\"name\":\"main\"}}");
+        DatabaseReference source = new DatabaseReference(sourceType, "experiment");
+
+        assertThat(api.mergeDatabaseBranch("training db", "main", source))
+                .isEqualTo(new DatabaseReference(DatabaseReferenceType.BRANCH, "main"));
+
+        assertRequest(0, "POST", TREES_PATH + "/main/merge");
+        assertBody(
+                requests.get(0),
+                sourceType == DatabaseReferenceType.BRANCH
+                        ? "{\"source\":{\"type\":\"BRANCH\",\"name\":\"experiment\"}}"
+                        : "{\"source\":{\"type\":\"TAG\",\"name\":\"experiment\"}}");
+        assertThat(requests).hasSize(1);
+    }
+
     @Test
     void testDeleteReferenceWithoutType() throws Exception {
         enqueue(200, "{\"reference\":{\"type\":\"TAG\",\"name\":\"train-v1\"}}");

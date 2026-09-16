@@ -435,6 +435,66 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/trees/{name}/merge:
+    post:
+      tags:
+        - database-reference
+      summary: Merge a branch or tag into a database branch
+      description: >-
+        The target must be a branch. The source branch or tag is resolved in the same database
+        when the request is processed. Merge compares table entries with their common ancestor,
+        including table creation and deletion. Changes made only on one side are preserved;
+        identical changes on both sides are accepted. Different changes to the same table entry
+        conflict; table row data is not merged. The server checks for conflicts before publishing
+        the result. A conflict leaves the target unchanged, and the source reference is never
+        modified. Fast-forward and no-op merges succeed. The server must retain ancestry and
+        merge relationships to resolve subsequent merges.
+      operationId: mergeDatabaseBranch
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MergeDatabaseBranchRequest'
+      responses:
+        "200":
+          description: Target branch after the merge, including when no changes were needed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabaseReferenceResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          description: Database, target branch, or source reference does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Target is not a branch, no common ancestor is available, or table entries conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/register:
     post:
       tags:
@@ -4013,6 +4073,13 @@ components:
         source:
           $ref: '#/components/schemas/DatabaseReference'
     FastForwardDatabaseBranchRequest:
+      type: object
+      required:
+        - source
+      properties:
+        source:
+          $ref: '#/components/schemas/DatabaseReference'
+    MergeDatabaseBranchRequest:
       type: object
       required:
         - source

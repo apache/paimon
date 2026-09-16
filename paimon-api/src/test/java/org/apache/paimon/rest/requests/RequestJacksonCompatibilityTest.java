@@ -183,6 +183,7 @@ public class RequestJacksonCompatibilityTest {
                             DropPolicyRequest.class,
                             FastForwardDatabaseBranchRequest.class,
                             GrantPermissionRequest.class,
+                            MergeDatabaseBranchRequest.class,
                             PolicyRequest.class,
                             RegisterTableRequest.class,
                             RenameTableRequest.class,
@@ -260,6 +261,20 @@ public class RequestJacksonCompatibilityTest {
         FastForwardDatabaseBranchRequest roundTrip =
                 RESTApi.fromJson(RESTApi.toJson(request), FastForwardDatabaseBranchRequest.class);
         assertThat(roundTrip.getSource()).isEqualTo(new DatabaseReference(sourceType, "training"));
+    }
+
+    @ParameterizedTest
+    @EnumSource(DatabaseReferenceType.class)
+    void testMergeDatabaseBranchRequestRoundTrips(DatabaseReferenceType sourceType)
+            throws Exception {
+        String json =
+                "{\"source\":{\"type\":\"" + sourceType.name() + "\",\"name\":\"experiment\"}}";
+        MergeDatabaseBranchRequest request =
+                EXTERNAL_MAPPER.readValue(json, MergeDatabaseBranchRequest.class);
+        MergeDatabaseBranchRequest roundTrip =
+                RESTApi.fromJson(RESTApi.toJson(request), MergeDatabaseBranchRequest.class);
+        assertThat(roundTrip.getSource())
+                .isEqualTo(new DatabaseReference(sourceType, "experiment"));
     }
 
     @Test

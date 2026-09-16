@@ -163,6 +163,12 @@ public class ResourcePaths {
         return SLASH.join(databaseTree(databaseName, branch), "forward");
     }
 
+    /** Action endpoint for merging a branch or tag into a database-level branch. */
+    @Experimental
+    public String mergeDatabaseBranch(String databaseName, String branch) {
+        return SLASH.join(databaseTree(databaseName, branch), "merge");
+    }
+
     public String tables(String databaseName) {
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLES);
     }
