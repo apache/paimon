@@ -298,7 +298,7 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
     }
   }
 
-  test(s"Paimon push down: apply CAST") {
+  test(s"Paimon push down: do not apply CAST") {
     if (gteqSpark3_4) {
       withSparkSQLConf("spark.sql.ansi.enabled" -> "true") {
         withTable("t") {
@@ -314,7 +314,7 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
                 |""".stripMargin)
 
           val q = "SELECT * FROM t WHERE dt = 1"
-          assert(!checkFilterExists(q))
+          assert(checkFilterExists(q))
           checkAnswer(sql(q), Seq(Row(1, 100, "1")))
         }
       }
