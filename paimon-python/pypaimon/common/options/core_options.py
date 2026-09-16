@@ -158,6 +158,10 @@ class CoreOptions:
     NESTED_SEQUENCE_FIELD = "nested-sequence-field"
     COUNT_LIMIT = "count-limit"
     MERGE_MAP_TS_FIELD = "ts-field"
+    MAP_STORAGE_LAYOUT = "map.storage-layout"
+    MAP_SHARED_SHREDDING_MAX_COLUMNS = "map.shared-shredding.max-columns"
+    MAP_SHARED_SHREDDING_COLUMN_PLACEMENT_POLICY = \
+        "map.shared-shredding.column-placement-policy"
 
     # Basic options
     AUTO_CREATE: ConfigOption[bool] = (
@@ -1893,6 +1897,46 @@ class CoreOptions:
             .string_type()
             .no_default_value()
         )
+
+    def map_storage_layout(self, field_name: str) -> str:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.MAP_STORAGE_LAYOUT}'
+            )
+            .string_type()
+            .default_value('default')
+        ).lower()
+
+    def map_shared_shredding_max_columns(self, field_name: str) -> int:
+        value = self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.'
+                f'{CoreOptions.MAP_SHARED_SHREDDING_MAX_COLUMNS}'
+            )
+            .int_type()
+            .default_value(256)
+        )
+        if value <= 0:
+            raise ValueError(
+                '{} must be greater than 0'.format(
+                    CoreOptions.MAP_SHARED_SHREDDING_MAX_COLUMNS))
+        return value
+
+    def map_shared_shredding_column_placement_policy(
+            self, field_name: str) -> str:
+        value = self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.'
+                f'{CoreOptions.MAP_SHARED_SHREDDING_COLUMN_PLACEMENT_POLICY}'
+            )
+            .string_type()
+            .default_value('lru')
+        ).lower()
+        if value not in ('plain', 'sequential', 'lru'):
+            raise ValueError(
+                "Unsupported shared-shredding column placement policy: {}".format(
+                    value))
+        return value
 
     @property
     def query_auth_enabled(self) -> bool:
