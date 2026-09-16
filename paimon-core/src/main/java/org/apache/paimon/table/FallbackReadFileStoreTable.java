@@ -149,6 +149,12 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         other.setManifestCache(manifestCache);
     }
 
+    @Override
+    public void setManifestSidecarCache(SegmentsCache<Path> manifestSidecarCache) {
+        super.setManifestSidecarCache(manifestSidecarCache);
+        other.setManifestSidecarCache(manifestSidecarCache);
+    }
+
     protected FileStoreTable switchWrappedToBranch(String branchName) {
         Optional<TableSchema> optionalSchema =
                 wrapped.schemaManager().copyWithBranch(branchName).latest();

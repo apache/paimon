@@ -79,16 +79,21 @@ close successfully. Failed writes and aborted writers clean up their own manifes
 Scans with partition, row-ID or bucket filters select blocks before reading manifest entries.
 Normal entry filtering and ADD/DELETE reconciliation still apply. Missing or unusable sidecars
 fall back to normal manifest reads; disabled sidecars and scans without these filters do not
-perform sidecar I/O. Selected block bytes share the manifest cache without populating the
-whole-manifest entry cache with partial results. The low-level `build` method returns sidecar
-bytes without writing or publishing another file.
+perform sidecar I/O. Sidecar caching is controlled by the catalog option
+`cache.manifest-sidecar.max-memory` (0 by default). A positive value supplies an
+additional budget independent of the manifest content cache; 0 reuses the manifest content
+cache, or leaves sidecars uncached if that cache is disabled. Sidecar caching uses the catalog's
+`cache.expire-after-access` and `cache.manifest.soft-values` policies. Selected block bytes
+still share the manifest content cache without populating the whole-manifest entry cache
+with partial results. The low-level `build` method returns sidecar bytes without writing
+or publishing another file.
 
 Callers decide whether to invoke `build` and `read`; these utilities have no read/write switches.
 `build` and `Builder` accept `rowIdEnabled` and `bucketEnabled` arguments for independent
 payload generation. Partition generation is always enabled,
 including the empty partition tuple for unpartitioned tables. Missing or invalid
-metadata makes only the affected block's dimension unavailable. There is no sidecar byte budget:
-construction keeps complete coverage and `read` consumes the entire file once it is opened.
+metadata makes only the affected block's dimension unavailable. Cache limits do not truncate
+sidecars: construction keeps complete coverage and `read` consumes the entire file once it is opened.
 
 `read` returns null for an absent sidecar reference or an `IOException`, allowing the caller
 to fall back to the manifest. If the thread is interrupted, the I/O failure is propagated as

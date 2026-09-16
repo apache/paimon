@@ -62,6 +62,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     private final AvroFileFormat avroFileFormat;
     private final long suggestedFileSize;
     private final CoreOptions options;
+    @Nullable private final SegmentsCache<Path> sidecarCache;
 
     private ManifestFile(
             FileIO fileIO,
@@ -73,6 +74,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             PathFactory pathFactory,
             long suggestedFileSize,
             @Nullable SegmentsCache<Path> cache,
+            @Nullable SegmentsCache<Path> sidecarCache,
             CoreOptions options) {
         super(
                 fileIO,
@@ -90,6 +92,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         this.avroFileFormat = avroFileFormat;
         this.suggestedFileSize = suggestedFileSize;
         this.options = options;
+        this.sidecarCache = sidecarCache == null ? cache : sidecarCache;
     }
 
     @Override
@@ -410,7 +413,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                         partitionFilter,
                         partitionType,
                         bucketFilter == null ? null : bucketFilter::mayContain,
-                        cache == null ? null : cache.segmentsCache());
+                        sidecarCache);
     }
 
     /** Deletes an unreferenced manifest and its explicitly referenced extra files. */
@@ -433,6 +436,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         private final long suggestedFileSize;
         private final CoreOptions options;
         @Nullable private final SegmentsCache<Path> cache;
+        @Nullable private final SegmentsCache<Path> sidecarCache;
 
         public Factory(
                 FileIO fileIO,
@@ -443,6 +447,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 FileStorePathFactory pathFactory,
                 long suggestedFileSize,
                 @Nullable SegmentsCache<Path> cache,
+                @Nullable SegmentsCache<Path> sidecarCache,
                 CoreOptions options) {
             this.fileIO = fileIO;
             this.schemaManager = schemaManager;
@@ -452,11 +457,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             this.pathFactory = pathFactory;
             this.suggestedFileSize = suggestedFileSize;
             this.cache = cache;
+            this.sidecarCache = sidecarCache;
             this.options = options;
-        }
-
-        public boolean isCacheEnabled() {
-            return cache != null;
         }
 
         public ManifestFile create() {
@@ -470,6 +472,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     pathFactory.manifestFileFactory(),
                     suggestedFileSize,
                     cache,
+                    sidecarCache,
                     options);
         }
     }

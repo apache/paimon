@@ -1419,15 +1419,18 @@ public class ManifestFileTest {
     }
 
     @Test
-    void testSidecarCacheUsesExplicitPathsAndSharesTheManifestCache() throws Exception {
+    void testSidecarCacheUsesExplicitPathsAndIsSeparateFromManifestCache() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
         options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, true);
         RecordingFileIO io = new RecordingFileIO();
         SegmentsCache<Path> cache =
                 new SegmentsCache<>(1024, MemorySize.ofMebiBytes(1), Long.MAX_VALUE, null, false);
+        SegmentsCache<Path> sidecarCache =
+                new SegmentsCache<>(1024, MemorySize.ofMebiBytes(1), Long.MAX_VALUE, null, false);
         ManifestFile.Factory factory =
-                createManifestFileFactory(tempDir.toString(), Long.MAX_VALUE, options, io, cache);
+                createManifestFileFactory(
+                        tempDir.toString(), Long.MAX_VALUE, options, io, cache, sidecarCache);
         List<ManifestEntry> entries = new ArrayList<>();
         for (int i = 0; i < 2; i++) {
             ManifestEntry entry = gen.next();
@@ -1458,8 +1461,9 @@ public class ManifestFileTest {
                                 .blocks())
                 .isEmpty();
         assertThat(io.opened).containsExactly(sidecarPath);
-        assertThat(cache.getIfPresents(sidecarPath).totalMemorySize())
+        assertThat(sidecarCache.getIfPresents(sidecarPath).totalMemorySize())
                 .isEqualTo(java.nio.file.Files.size(sidecar));
+        assertThat(cache.estimatedSize()).isZero();
 
         io.reset();
         RowRangeIndex hit = RowRangeIndex.create(Collections.singletonList(new Range(0, 0)));
@@ -1467,13 +1471,97 @@ public class ManifestFileTest {
         assertThat(io.opened).isEmpty();
         assertThat(factory.create().read(meta.fileName()))
                 .containsExactlyInAnyOrderElementsOf(entries);
-        assertThat(cache.estimatedSize()).isEqualTo(2);
+        assertThat(cache.estimatedSize()).isEqualTo(1);
+        assertThat(sidecarCache.estimatedSize()).isEqualTo(1);
+        assertThat(cache.getIfPresents(sidecarPath)).isNull();
+        assertThat(
+                        sidecarCache.getIfPresents(
+                                new Path(tempDir.toString(), "manifest/" + meta.fileName())))
+                .isNull();
 
         io.reset();
         assertThat(factory.create().selectBlocks(meta, hit).blocks()).isNotEmpty();
         assertThat(factory.create().read(meta.fileName()))
                 .containsExactlyInAnyOrderElementsOf(entries);
         assertThat(io.opened).isEmpty();
+    }
+
+    @Test
+    void testDedicatedSidecarCacheAndManifestCacheFallback() {
+        Options options = new Options();
+        options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
+        options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, true);
+        for (boolean cacheManifest : new boolean[] {false, true}) {
+            for (boolean cacheSidecar : new boolean[] {false, true}) {
+                RecordingFileIO io = new RecordingFileIO();
+                SegmentsCache<Path> manifestCache =
+                        cacheManifest
+                                ? new SegmentsCache<>(
+                                        1024,
+                                        MemorySize.ofMebiBytes(1),
+                                        Long.MAX_VALUE,
+                                        null,
+                                        false)
+                                : null;
+                SegmentsCache<Path> sidecarCache =
+                        cacheSidecar
+                                ? new SegmentsCache<>(
+                                        1024,
+                                        MemorySize.ofMebiBytes(1),
+                                        Long.MAX_VALUE,
+                                        null,
+                                        false)
+                                : null;
+                ManifestFile.Factory factory =
+                        createManifestFileFactory(
+                                tempDir.resolve(cacheManifest + "-" + cacheSidecar).toString(),
+                                Long.MAX_VALUE,
+                                options,
+                                io,
+                                manifestCache,
+                                sidecarCache);
+                ManifestEntry entry = gen.next();
+                ManifestEntry added =
+                        ManifestEntry.create(
+                                FileKind.ADD,
+                                entry.partition(),
+                                entry.bucket(),
+                                entry.totalBuckets(),
+                                entry.file().newFirstRowId(0L));
+                ManifestFileMeta meta =
+                        factory.create().write(Collections.singletonList(added)).get(0);
+                RowRangeIndex query =
+                        RowRangeIndex.create(Collections.singletonList(new Range(0, 0)));
+
+                for (int round = 0; round < 2; round++) {
+                    io.reset();
+                    ManifestFile manifest = factory.create();
+                    ManifestSidecar.Selection selected = manifest.selectBlocks(meta, query);
+                    assertThat(readSelectedEntries(manifest, meta, selected))
+                            .containsExactly(added);
+                    assertThat(
+                                    io.opened.stream()
+                                            .filter(
+                                                    path ->
+                                                            path.getName()
+                                                                    .endsWith(
+                                                                            ManifestSidecar
+                                                                                    .SUFFIX)))
+                            .hasSize(round == 0 || (!cacheSidecar && !cacheManifest) ? 1 : 0);
+                    assertThat(
+                                    io.opened.stream()
+                                            .filter(path -> path.getName().equals(meta.fileName())))
+                            .hasSize(round == 0 || !cacheManifest ? 1 : 0);
+                }
+                if (manifestCache != null) {
+                    // Blocks stay in the manifest cache; sidecar bytes only join them on fallback.
+                    assertThat(manifestCache.estimatedSize()).isEqualTo(cacheSidecar ? 1 : 2);
+                }
+                if (sidecarCache != null) {
+                    assertThat(sidecarCache.estimatedSize()).isEqualTo(1);
+                }
+            }
+        }
     }
 
     @Test
@@ -1960,8 +2048,7 @@ public class ManifestFileTest {
             Options options,
             FileIO fileIO,
             @Nullable SegmentsCache<Path> cache) {
-        return createManifestFileFactory(
-                pathStr, suggestedFileSize, options, fileIO, cache, DEFAULT_PART_TYPE);
+        return createManifestFileFactory(pathStr, suggestedFileSize, options, fileIO, cache, null);
     }
 
     private ManifestFile.Factory createManifestFileFactory(
@@ -1970,12 +2057,12 @@ public class ManifestFileTest {
             Options options,
             FileIO fileIO,
             @Nullable SegmentsCache<Path> cache,
-            RowType partitionType) {
+            @Nullable SegmentsCache<Path> sidecarCache) {
         Path path = new Path(pathStr);
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
                         path,
-                        partitionType,
+                        DEFAULT_PART_TYPE,
                         "default",
                         CoreOptions.FILE_FORMAT.defaultValue().toString(),
                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),
@@ -1993,12 +2080,13 @@ public class ManifestFileTest {
         return new ManifestFile.Factory(
                 fileIO,
                 new FileSystemSchemaManager(fileIO, path),
-                partitionType,
+                DEFAULT_PART_TYPE,
                 avro,
                 "zstd",
                 pathFactory,
                 suggestedFileSize,
                 cache,
+                sidecarCache,
                 coreOptions);
     }
 
