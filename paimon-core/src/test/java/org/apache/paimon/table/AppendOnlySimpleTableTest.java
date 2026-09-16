@@ -614,7 +614,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         assertThat(getResult(read, splits, binaryRow(2), 0, toString))
                 .hasSameElementsAs(Arrays.asList("201|binary", "201|binary"));
 
-        // projection contains unknown index or
+        // OR includes a field outside the output projection.
         read =
                 table.newRead()
                         .withFilter(
@@ -622,10 +622,9 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                         .withProjection(new int[] {3, 2})
                         .executeFilter();
         assertThat(getResult(read, splits, binaryRow(2), 0, toString))
-                .hasSameElementsAs(
-                        Arrays.asList("200|binary", "201|binary", "202|binary", "201|binary"));
+                .hasSameElementsAs(Arrays.asList("201|binary", "201|binary"));
 
-        // projection contains unknown index and
+        // AND must evaluate the unprojected partition field too.
         read =
                 table.newRead()
                         .withFilter(
@@ -633,8 +632,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                         .withProjection(new int[] {3, 2})
                         .executeFilter();
         assertThat(getResult(read, splits, binaryRow(1), 0, toString)).isEmpty();
-        assertThat(getResult(read, splits, binaryRow(2), 0, toString))
-                .hasSameElementsAs(Arrays.asList("201|binary", "201|binary"));
+        assertThat(getResult(read, splits, binaryRow(2), 0, toString)).isEmpty();
     }
 
     @Test
