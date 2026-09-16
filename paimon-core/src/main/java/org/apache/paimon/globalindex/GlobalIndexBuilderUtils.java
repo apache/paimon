@@ -72,7 +72,8 @@ public class GlobalIndexBuilderUtils {
             Range range,
             int indexFieldId,
             String indexType,
-            List<ResultEntry> entries)
+            List<ResultEntry> entries,
+            long schemaId)
             throws IOException {
         return toIndexFileMetas(
                 fileIO,
@@ -83,7 +84,8 @@ public class GlobalIndexBuilderUtils {
                 null,
                 indexType,
                 entries,
-                null);
+                null,
+                schemaId);
     }
 
     /**
@@ -100,7 +102,8 @@ public class GlobalIndexBuilderUtils {
             List<DataField> fields,
             String indexType,
             List<ResultEntry> entries,
-            @Nullable byte[] sourceMeta)
+            @Nullable byte[] sourceMeta,
+            long schemaId)
             throws IOException {
         return toIndexFileMetas(
                 fileIO,
@@ -111,7 +114,8 @@ public class GlobalIndexBuilderUtils {
                 extraFieldIds(fields),
                 indexType,
                 entries,
-                sourceMeta);
+                sourceMeta,
+                schemaId);
     }
 
     public static List<Range> unindexedRowRanges(
@@ -572,7 +576,8 @@ public class GlobalIndexBuilderUtils {
             @Nullable int[] extraFieldIds,
             String indexType,
             List<ResultEntry> entries,
-            @Nullable byte[] sourceMeta)
+            @Nullable byte[] sourceMeta,
+            long schemaId)
             throws IOException {
         List<IndexFileMeta> results = new ArrayList<>();
         for (ResultEntry entry : entries) {
@@ -599,8 +604,10 @@ public class GlobalIndexBuilderUtils {
                             fileName,
                             fileSize,
                             entry.rowCount(),
+                            null,
+                            externalPathString,
                             globalIndexMeta,
-                            externalPathString);
+                            schemaId);
             results.add(indexFileMeta);
         }
         return results;

@@ -45,7 +45,7 @@ public class BucketVectorSearchSplit extends VectorSearchSplit {
     private static final long serialVersionUID = 1L;
 
     private static final long MAGIC = 0x504B5653504C4954L;
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
 
     private DataSplit dataSplit;
     private List<IndexFileMeta> payloadFiles;

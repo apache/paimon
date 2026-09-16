@@ -260,7 +260,8 @@ public class BitmapGlobalIndexTableTest extends DataEvolutionTestBase {
                         rowRange,
                         indexField.id(),
                         INDEX_TYPE,
-                        resultEntries);
+                        resultEntries,
+                        table.schema().id());
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFileMetas);
         return new CommitMessageImpl(
                 partition(split), 0, null, dataIncrement, CompactIncrement.emptyIncrement());

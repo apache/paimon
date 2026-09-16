@@ -225,7 +225,8 @@ public class JavaPyNativeFullTextE2ETest {
                         rowRange,
                         contentField.id(),
                         NativeFullTextGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        entries,
+                        table.schema().id());
 
         // Commit the index
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);

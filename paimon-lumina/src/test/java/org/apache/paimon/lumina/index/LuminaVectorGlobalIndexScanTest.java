@@ -232,8 +232,10 @@ public class LuminaVectorGlobalIndexScanTest {
                             entry.fileName(),
                             fileSize,
                             entry.rowCount(),
+                            null,
+                            null,
                             globalMeta,
-                            (String) null));
+                            ipTable.schema().id()));
         }
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(metas);
@@ -323,8 +325,10 @@ public class LuminaVectorGlobalIndexScanTest {
                             entry.fileName(),
                             fileSize,
                             entry.rowCount(),
+                            null,
+                            null,
                             globalMeta,
-                            (String) null));
+                            table.schema().id()));
         }
         return metas;
     }
