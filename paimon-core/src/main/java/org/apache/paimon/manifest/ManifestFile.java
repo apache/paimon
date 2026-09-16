@@ -339,6 +339,14 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         };
     }
 
+    /** Deletes an unreferenced manifest and its explicitly referenced extra files. */
+    public void delete(ManifestFileMeta manifest) {
+        delete(manifest.fileName());
+        if (manifest.extraFiles() != null) {
+            manifest.extraFiles().forEach(this::delete);
+        }
+    }
+
     /** Creator of {@link ManifestFile}. */
     public static class Factory {
 

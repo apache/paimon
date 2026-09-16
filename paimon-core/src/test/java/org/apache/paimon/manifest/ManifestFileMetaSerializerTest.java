@@ -53,7 +53,8 @@ public class ManifestFileMetaSerializerTest extends ObjectSerializerTestBase<Man
                 Arrays.asList(
                         null,
                         Collections.<String>emptyList(),
-                        Arrays.asList("extra-1", "extra-2"))) {
+                        Arrays.asList("extra-1", "extra-2"),
+                        Arrays.asList("partition-index", "manifest" + ManifestSidecar.SUFFIX))) {
             ManifestFileMeta meta =
                     new ManifestFileMeta(
                             original.fileName(),
