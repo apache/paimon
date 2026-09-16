@@ -167,42 +167,58 @@ class ScanQuery:
     def to_contiguous_window_dataset(
             self,
             *,
-            window_size,
+            window_size=None,
             columns=None,
             anchor_columns=None,
             group_key="episode_index",
             order_key="frame_index",
             stride=1,
-            tail="drop",
+            tail=None,
             column_transforms=None,
             pad_values=None,
             adapter=None,
-            blob_parallelism=64):
-        """Build a snapshot-pinned, map-style Dataset of contiguous rows.
+            blob_parallelism=64,
+            frame_offsets=None,
+            delta_timestamps=None,
+            fps=None,
+            tolerance_s=None,
+            boundary=None):
+        """Build snapshot-pinned training windows from this single-table scan.
 
         The Dataset indexes only ``group_key``, ``order_key``, and Paimon row
-        IDs, then reads projected values on demand. Columns listed in
-        ``anchor_columns`` are provided to ``column_transforms`` as one-element
-        lists read from the first row of each window; ``adapter`` receives the
-        transformed values. ``order_key`` must contain non-null integers that
+        IDs, then reads projected values on demand. Each column has its own
+        relative frame offsets; unspecified columns use ``[0]``. Transforms
+        receive padded lists, including singleton windows, before ``adapter``
+        receives the sample. ``order_key`` must contain non-null integers that
         increase by exactly one within each group. The Dataset sorts rows within
         each group and never creates a window across groups.
 
         Args:
-            window_size: Number of rows in a complete window.
+            window_size: Legacy forward window size. Mutually exclusive with
+                frame_offsets and delta_timestamps. Retains a single is_pad
+                mask instead of the new per-column masks.
             columns: Value columns to return, excluding the group and order
                 keys. The scan projection is used when omitted.
-            anchor_columns: Subset of ``columns`` read only from the window's
-                first row.
+            anchor_columns: With window_size, columns using only the anchor.
             group_key: Column identifying an independent row sequence.
             order_key: Integer position column within each group.
-            stride: Distance between scheduled window starts.
-            tail: Handling for incomplete final windows: ``drop``, ``pad``, or
-                ``error``.
+            stride: Distance between anchors, starting at each group's first row.
+            tail: Legacy boundary alias requiring window_size; cannot be used
+                together with boundary.
             column_transforms: Per-column callables applied to value lists.
-            pad_values: Optional replacement values used by ``tail='pad'``.
+            pad_values: Per-column raw padding values; otherwise repeat the
+                nearest endpoint. Padding happens before column transforms.
             adapter: Callable that converts the complete sample mapping.
             blob_parallelism: Maximum concurrent BLOB body reads per fetch.
+            frame_offsets: Mapping of columns to nonempty integer offset
+                sequences. Supports history, future, sparse and repeated frames.
+            delta_timestamps: Alternative per-column offsets in seconds, aligned
+                to the regular frame grid defined by fps within tolerance_s.
+            fps: Finite positive frame rate, required with delta_timestamps.
+            tolerance_s: Finite nonnegative seconds-conversion tolerance,
+                defaulting to 1e-4. Only valid with delta_timestamps.
+            boundary: Handling at both group ends: drop (default), pad, or error.
+                Drop retains only anchors valid for every requested offset.
 
         Returns:
             A snapshot-pinned ``ContiguousWindowDataset``. See that class for
@@ -222,6 +238,11 @@ class ScanQuery:
             pad_values=pad_values,
             adapter=adapter,
             blob_parallelism=blob_parallelism,
+            frame_offsets=frame_offsets,
+            delta_timestamps=delta_timestamps,
+            fps=fps,
+            tolerance_s=tolerance_s,
+            boundary=boundary,
         )
 
     def to_ray(

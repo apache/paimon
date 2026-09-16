@@ -418,7 +418,16 @@ def test_backends_match_the_golden_act_window_contract(benchmark_input):
     )
 
     expected = hdf5[1]
-    actual = paimon[1]
+    with patch.object(paimon, "adapter", wraps=paimon.adapter) as adapt:
+        actual = paimon[1]
+    generic_sample = adapt.call_args.args[0]
+    assert "is_pad" not in generic_sample
+    assert len(generic_sample["action"]) == 3
+    assert generic_sample["action_is_pad"].tolist() == [False] * 3
+    for name in QPOS_COLUMNS + IMAGE_COLUMNS:
+        assert len(generic_sample[name]) == 1
+        assert generic_sample[name + "_is_pad"].tolist() == [False]
+    assert actual["is_pad"] is generic_sample["action_is_pad"]
 
     assert set(expected) == {
         "sample_id", "episode_id", "frame_index", "qpos", "action",
@@ -605,11 +614,10 @@ def test_paimon_windows_are_lazy_snapshot_pinned_and_vortex_independent(
         with patch.object(
                 train, "_read_rows", wraps=train._read_rows) as read_rows:
             sample_before_append = train[0]
-        assert [call.args[1] for call in read_rows.call_args_list] == [
-            list(ACTION_COLUMNS),
-            list(QPOS_COLUMNS + IMAGE_COLUMNS),
-        ]
-        assert [len(call.args[0]) for call in read_rows.call_args_list] == [3, 1]
+        assert {
+            tuple(call.args[1]): len(call.args[0])
+            for call in read_rows.call_args_list
+        } == {ACTION_COLUMNS: 3, QPOS_COLUMNS + IMAGE_COLUMNS: 1}
         assert fetch.call_count == 1
         assert {
             name: len(fetch.call_args.args[1][name])
