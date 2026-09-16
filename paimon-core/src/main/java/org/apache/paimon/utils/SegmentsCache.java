@@ -27,7 +27,6 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caff
 import javax.annotation.Nullable;
 
 import java.time.Duration;
-import java.util.Objects;
 
 import static org.apache.paimon.CoreOptions.PAGE_SIZE;
 
@@ -37,7 +36,7 @@ public class SegmentsCache<T> {
     private static final int OBJECT_MEMORY_SIZE = 1000;
 
     private final int pageSize;
-    private final Cache<Object, Segments> cache;
+    private final Cache<T, Segments> cache;
     private final MemorySize maxMemorySize;
     private final long maxElementSize;
     @Nullable private final Duration expireAfterAccess;
@@ -54,7 +53,7 @@ public class SegmentsCache<T> {
             @Nullable Duration expireAfterAccess,
             boolean softValues) {
         this.pageSize = pageSize;
-        Caffeine<Object, Segments> builder =
+        Caffeine<T, Segments> builder =
                 Caffeine.newBuilder()
                         .weigher(this::weigh)
                         .maximumWeight(maxMemorySize.getBytes())
@@ -107,44 +106,8 @@ public class SegmentsCache<T> {
         cache.put(key, segments);
     }
 
-    @Nullable
-    public Segments getIfPresents(T key, long offset, long length) {
-        return cache.getIfPresent(new RangeKey<>(key, offset, length));
-    }
-
-    public void put(T key, long offset, long length, Segments segments) {
-        cache.put(new RangeKey<>(key, offset, length), segments);
-    }
-
-    private int weigh(Object cacheKey, Segments segments) {
+    private int weigh(T cacheKey, Segments segments) {
         return (int) (OBJECT_MEMORY_SIZE + segments.totalMemorySize());
-    }
-
-    /** Separates byte ranges from whole-object keys in the same cache. */
-    private static final class RangeKey<T> {
-        private final T key;
-        private final long offset;
-        private final long length;
-
-        private RangeKey(T key, long offset, long length) {
-            this.key = Objects.requireNonNull(key);
-            this.offset = offset;
-            this.length = length;
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            if (!(other instanceof RangeKey)) {
-                return false;
-            }
-            RangeKey<?> that = (RangeKey<?>) other;
-            return key.equals(that.key) && offset == that.offset && length == that.length;
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(key, offset, length);
-        }
     }
 
     @Nullable

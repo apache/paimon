@@ -90,12 +90,10 @@ Selected block bytes still share the manifest content cache without populating t
 whole-manifest entry cache with partial results. The low-level `build` method returns
 sidecar bytes without writing or publishing another file.
 
-PyPaimon can read these sidecars and prune manifest blocks using partition, row-ID and bucket
-filters. Its `manifest.sidecar.enabled` option inherits `manifest-sort.enabled` when unset.
-Entry filters and ADD/DELETE reconciliation still apply after block selection. Missing or
-unusable sidecars fall back to full manifest reads; scans without pruning filters and
-explain/statistics scans do not perform sidecar I/O. The standalone codec can build sidecar
-bytes, but automatic Python writer publication and cleanup are not integrated yet.
+PyPaimon also generates sidecars for newly written manifests and uses their block coverage
+during scans. Its `manifest.sidecar.enabled` table option inherits `manifest-sort.enabled`
+when unset. Sidecar references are published only after writing succeeds, and cleanup follows
+the owning manifest.
 
 Callers decide whether to invoke `build` and `read`; these utilities have no read/write switches.
 `build` and `Builder` accept `rowIdEnabled` and `bucketEnabled` arguments for independent
