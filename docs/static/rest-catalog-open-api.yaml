@@ -208,7 +208,7 @@ paths:
       tags:
         - database-reference
       summary: List database references
-      operationId: listDatabaseReferences
+      operationId: listDatabaseReferencesPaged
       parameters:
         - name: prefix
           in: path
@@ -266,30 +266,19 @@ paths:
           required: true
           schema:
             type: string
-        - name: name
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: type
-          in: query
-          required: true
-          schema:
-            type: string
-            enum: [ "branch", "tag" ]
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DatabaseReference'
+              $ref: '#/components/schemas/CreateDatabaseReferenceRequest'
       responses:
         "200":
           description: Created branch or immutable tag.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SingleDatabaseReferenceResponse'
+                $ref: '#/components/schemas/DatabaseReferenceResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
@@ -330,7 +319,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SingleDatabaseReferenceResponse'
+                $ref: '#/components/schemas/DatabaseReferenceResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
@@ -362,31 +351,19 @@ paths:
           required: true
           schema:
             type: string
-        - name: mode
-          in: query
-          required: true
-          schema:
-            type: string
-            const: "FAST_FORWARD"
-        - name: type
-          in: query
-          required: false
-          schema:
-            type: string
-            const: "branch"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DatabaseReference'
+              $ref: '#/components/schemas/FastForwardDatabaseBranchRequest'
       responses:
         "200":
           description: Updated target branch.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SingleDatabaseReferenceResponse'
+                $ref: '#/components/schemas/DatabaseReferenceResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
@@ -424,19 +401,19 @@ paths:
           required: true
           schema:
             type: string
-        - name: type
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: [ "branch", "tag" ]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteDatabaseReferenceRequest'
       responses:
         "200":
           description: Deleted branch or immutable tag.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SingleDatabaseReferenceResponse'
+                $ref: '#/components/schemas/DatabaseReferenceResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
@@ -519,7 +496,6 @@ paths:
           in: query
           schema:
             type: string
-        - $ref: '#/components/parameters/DatabaseReferenceHeader'
       responses:
         "200":
           description: OK
@@ -712,7 +688,6 @@ paths:
           required: true
           schema:
             type: string
-        - $ref: '#/components/parameters/DatabaseReferenceHeader'
       responses:
         "200":
           description: OK
@@ -847,7 +822,6 @@ paths:
           required: true
           schema:
             type: string
-        - $ref: '#/components/parameters/DatabaseReferenceHeader'
       requestBody:
         content:
           application/json:
@@ -1063,7 +1037,6 @@ paths:
           required: true
           schema:
             type: string
-        - $ref: '#/components/parameters/DatabaseReferenceHeader'
       responses:
         "200":
           description: OK
@@ -2660,15 +2633,6 @@ paths:
           $ref: '#/components/responses/SemanticViewNotImplementedErrorResponse'
 
 components:
-  parameters:
-    DatabaseReferenceHeader:
-      name: Paimon-Reference
-      in: header
-      required: false
-      description: Database-level branch or immutable tag. Required for a versioned database.
-      schema:
-        type: string
-        pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
   #############################
   # Reusable Response Objects #
   #############################
@@ -4028,7 +3992,38 @@ components:
         name:
           type: string
           pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-    SingleDatabaseReferenceResponse:
+    CreateDatabaseReferenceRequest:
+      type: object
+      required:
+        - name
+        - type
+        - source
+      properties:
+        name:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+        type:
+          type: string
+          enum: [ "BRANCH", "TAG" ]
+        source:
+          $ref: '#/components/schemas/DatabaseReference'
+    FastForwardDatabaseBranchRequest:
+      type: object
+      required:
+        - sourceTag
+      properties:
+        sourceTag:
+          type: string
+          description: Immutable tag in the same database to fast-forward the target branch to.
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    DeleteDatabaseReferenceRequest:
+      type: object
+      properties:
+        type:
+          type: string
+          description: Expected reference type. Omit to delete without checking the type.
+          enum: [ "BRANCH", "TAG" ]
+    DatabaseReferenceResponse:
       type: object
       required:
         - reference

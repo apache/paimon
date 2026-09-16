@@ -16,36 +16,42 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.responses;
+package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.annotation.Experimental;
-import org.apache.paimon.rest.DatabaseReference;
-import org.apache.paimon.rest.RESTResponse;
+import org.apache.paimon.rest.DatabaseReferenceType;
+import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
+import javax.annotation.Nullable;
 
 import java.beans.ConstructorProperties;
 
-/** Response containing one database-level reference. */
+/** Request for deleting a database reference, optionally checking its type. */
 @Experimental
-public class SingleDatabaseReferenceResponse implements RESTResponse {
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class DeleteDatabaseReferenceRequest implements RESTRequest {
 
-    private static final String FIELD_REFERENCE = "reference";
+    private static final String FIELD_TYPE = "type";
 
-    @JsonProperty(FIELD_REFERENCE)
-    private final DatabaseReference reference;
+    @Nullable private final DatabaseReferenceType type;
 
     @JsonCreator
-    @ConstructorProperties({FIELD_REFERENCE})
-    public SingleDatabaseReferenceResponse(
-            @JsonProperty(FIELD_REFERENCE) DatabaseReference reference) {
-        this.reference = reference;
+    @ConstructorProperties({FIELD_TYPE})
+    public DeleteDatabaseReferenceRequest(
+            @Nullable @JsonProperty(FIELD_TYPE) DatabaseReferenceType type) {
+        this.type = type;
     }
 
-    @JsonGetter(FIELD_REFERENCE)
-    public DatabaseReference getReference() {
-        return reference;
+    @Nullable
+    @JsonGetter(FIELD_TYPE)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public DatabaseReferenceType getType() {
+        return type;
     }
 }

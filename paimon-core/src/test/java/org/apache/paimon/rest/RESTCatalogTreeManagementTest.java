@@ -105,39 +105,35 @@ class RESTCatalogTreeManagementTest {
         enqueue(200, "{\"reference\":" + BRANCH_JSON + "}");
         assertThat(trees.createReference(DATABASE, "exp-1", BRANCH, main)).isEqualTo(branch);
         RecordedRequest createBranch = takeRequest("POST", TREES_PATH);
-        assertThat(createBranch.getRequestUrl().queryParameter("name")).isEqualTo("exp-1");
-        assertThat(createBranch.getRequestUrl().queryParameter("type")).isEqualTo("branch");
-        assertReferenceBody(createBranch, "BRANCH", "main");
+        assertBody(
+                createBranch,
+                "{\"name\":\"exp-1\",\"type\":\"BRANCH\",\"source\":" + MAIN_JSON + "}");
 
         enqueue(200, "{\"reference\":" + TAG_JSON + "}");
         assertThat(trees.createReference(DATABASE, "train-v1", TAG, branch)).isEqualTo(tag);
         RecordedRequest createTag = takeRequest("POST", TREES_PATH);
-        assertThat(createTag.getRequestUrl().queryParameter("name")).isEqualTo("train-v1");
-        assertThat(createTag.getRequestUrl().queryParameter("type")).isEqualTo("tag");
-        assertReferenceBody(createTag, "BRANCH", "exp-1");
+        assertBody(
+                createTag,
+                "{\"name\":\"train-v1\",\"type\":\"TAG\",\"source\":" + BRANCH_JSON + "}");
 
         enqueue(200, "{\"reference\":" + MAIN_JSON + "}");
         assertThat(trees.fastForwardBranch(DATABASE, "main", "train-v1")).isEqualTo(main);
         RecordedRequest fastForward = takeRequest("PUT", TREES_PATH + "/main");
-        assertThat(fastForward.getRequestUrl().queryParameter("type")).isEqualTo("branch");
-        assertThat(fastForward.getRequestUrl().queryParameter("mode")).isEqualTo("FAST_FORWARD");
-        assertReferenceBody(fastForward, "TAG", "train-v1");
+        assertBody(fastForward, "{\"sourceTag\":\"train-v1\"}");
 
         enqueue(200, "{\"reference\":" + BRANCH_JSON + "}");
         assertThat(trees.deleteReference(DATABASE, "exp-1", BRANCH)).isEqualTo(branch);
         RecordedRequest deleteBranch = takeRequest("DELETE", TREES_PATH + "/exp-1");
-        assertThat(deleteBranch.getRequestUrl().queryParameter("type")).isEqualTo("branch");
-        assertThat(deleteBranch.getBodySize()).isZero();
+        assertBody(deleteBranch, "{\"type\":\"BRANCH\"}");
 
         enqueue(200, "{\"reference\":" + TAG_JSON + "}");
         assertThat(trees.deleteReference(DATABASE, "train-v1", null)).isEqualTo(tag);
-        assertThat(takeRequest("DELETE", TREES_PATH + "/train-v1").getRequestUrl().query())
-                .isNull();
+        assertBody(takeRequest("DELETE", TREES_PATH + "/train-v1"), "{}");
         assertThat(server.getRequestCount()).isEqualTo(7);
     }
 
     @Test
-    void testListPageAndListAllPreserveFilterAndTokens() throws Exception {
+    void testListPagesPreserveFilterAndTokens() throws Exception {
         enqueue(200, "{\"references\":[" + TAG_JSON + "],\"nextPageToken\":\"next +/%?&\"}");
         PagedList<DatabaseReference> page =
                 trees.listReferencesPaged(DATABASE, TAG, 10, "start +/%");
@@ -150,13 +146,18 @@ class RESTCatalogTreeManagementTest {
 
         enqueue(200, "{\"references\":[" + MAIN_JSON + "],\"nextPageToken\":\"next +/%?&\"}");
         enqueue(200, "{\"references\":[" + BRANCH_JSON + "]}");
-        assertThat(trees.listReferences(DATABASE, BRANCH))
-                .containsExactly(
-                        new DatabaseReference(BRANCH, "main"),
-                        new DatabaseReference(BRANCH, "exp-1"));
+        PagedList<DatabaseReference> firstPage =
+                trees.listReferencesPaged(DATABASE, BRANCH, null, null);
+        assertThat(firstPage.getElements()).containsExactly(new DatabaseReference(BRANCH, "main"));
+        assertThat(firstPage.getNextPageToken()).isEqualTo("next +/%?&");
         RecordedRequest first = takeRequest("GET", TREES_PATH);
         assertThat(first.getRequestUrl().queryParameter("type")).isEqualTo("branch");
         assertThat(first.getRequestUrl().queryParameter("pageToken")).isNull();
+        PagedList<DatabaseReference> secondPage =
+                trees.listReferencesPaged(DATABASE, BRANCH, null, firstPage.getNextPageToken());
+        assertThat(secondPage.getElements())
+                .containsExactly(new DatabaseReference(BRANCH, "exp-1"));
+        assertThat(secondPage.getNextPageToken()).isNull();
         RecordedRequest second = takeRequest("GET", TREES_PATH);
         assertThat(second.getRequestUrl().queryParameter("type")).isEqualTo("branch");
         assertThat(second.getRequestUrl().queryParameter("pageToken")).isEqualTo("next +/%?&");
@@ -166,14 +167,17 @@ class RESTCatalogTreeManagementTest {
     @Test
     void testListAllTypesAndEmptyReferences() throws Exception {
         enqueue(200, "{\"references\":[" + MAIN_JSON + "," + TAG_JSON + "]}");
-        assertThat(trees.listReferences(DATABASE, null))
+        assertThat(trees.listReferencesPaged(DATABASE, null, null, null).getElements())
                 .containsExactly(
                         new DatabaseReference(BRANCH, "main"),
                         new DatabaseReference(TAG, "train-v1"));
         assertThat(takeRequest("GET", TREES_PATH).getRequestUrl().query()).isNull();
 
         enqueue(200, "{\"references\":[]}");
-        assertThat(trees.listReferences(DATABASE, null)).isEmpty();
+        PagedList<DatabaseReference> emptyPage =
+                trees.listReferencesPaged(DATABASE, null, null, null);
+        assertThat(emptyPage.getElements()).isEmpty();
+        assertThat(emptyPage.getNextPageToken()).isNull();
         takeRequest("GET", TREES_PATH);
         assertThat(server.getRequestCount()).isEqualTo(3);
     }
@@ -197,7 +201,7 @@ class RESTCatalogTreeManagementTest {
                 .hasMessageContaining("reference already exists");
 
         enqueue(501, "{\"code\":501,\"message\":\"trees unsupported\"}");
-        assertThatThrownBy(() -> trees.listReferences(DATABASE, null))
+        assertThatThrownBy(() -> trees.listReferencesPaged(DATABASE, null, null, null))
                 .isInstanceOf(NotImplementedException.class)
                 .hasMessageContaining("trees unsupported");
         assertThat(server.getRequestCount()).isEqualTo(4);
@@ -221,11 +225,9 @@ class RESTCatalogTreeManagementTest {
         return request;
     }
 
-    private static void assertReferenceBody(RecordedRequest request, String type, String name)
-            throws Exception {
+    private static void assertBody(RecordedRequest request, String expectedJson) throws Exception {
+        assertThat(request.getRequestUrl().query()).isNull();
         assertThat(RESTApi.fromJson(request.getBody().readUtf8(), Map.class))
-                .containsEntry("type", type)
-                .containsEntry("name", name)
-                .hasSize(2);
+                .isEqualTo(RESTApi.fromJson(expectedJson, Map.class));
     }
 }

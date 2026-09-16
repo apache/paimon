@@ -18,6 +18,8 @@
 
 package org.apache.paimon.rest.requests;
 
+import org.apache.paimon.rest.DatabaseReference;
+import org.apache.paimon.rest.DatabaseReferenceType;
 import org.apache.paimon.rest.RESTApi;
 import org.apache.paimon.rest.RESTRequest;
 
@@ -114,6 +116,11 @@ public class RequestJacksonCompatibilityTest {
                             "partitionSpecs",
                             "ignoreIfNotExists"),
                     requestCase(
+                            FastForwardDatabaseBranchRequest.class,
+                            "{\"sourceTag\":\"train-v1\"}",
+                            request -> assertThat(request.getSourceTag()).isEqualTo("train-v1"),
+                            "sourceTag"),
+                    requestCase(
                             ListPartitionsByFilterRequest.class,
                             "{\"filter\":\"dt = '2026-08-24'\","
                                     + "\"partitionNamePattern\":\"dt=*\","
@@ -171,10 +178,12 @@ public class RequestJacksonCompatibilityTest {
                             AlterTableRequest.class,
                             AlterViewRequest.class,
                             CommitTableRequest.class,
+                            CreateDatabaseReferenceRequest.class,
                             CreateFunctionRequest.class,
                             CreatePartitionsRequest.class,
                             CreateTableRequest.class,
                             CreateViewRequest.class,
+                            DeleteDatabaseReferenceRequest.class,
                             DropPolicyRequest.class,
                             GrantPermissionRequest.class,
                             PolicyRequest.class,
@@ -209,6 +218,39 @@ public class RequestJacksonCompatibilityTest {
                 .isNotNull()
                 .extracting(ConstructorProperties::value)
                 .isEqualTo(requestCase.propertyNames);
+    }
+
+    @Test
+    void testCreateDatabaseReferenceRequestRoundTrips() throws Exception {
+        String json =
+                "{\"name\":\"exp-1\",\"type\":\"BRANCH\","
+                        + "\"source\":{\"type\":\"TAG\",\"name\":\"train-v1\"}}";
+        CreateDatabaseReferenceRequest request =
+                EXTERNAL_MAPPER.readValue(json, CreateDatabaseReferenceRequest.class);
+        CreateDatabaseReferenceRequest roundTrip =
+                RESTApi.fromJson(RESTApi.toJson(request), CreateDatabaseReferenceRequest.class);
+        assertThat(roundTrip.getName()).isEqualTo("exp-1");
+        assertThat(roundTrip.getType()).isEqualTo(DatabaseReferenceType.BRANCH);
+        assertThat(roundTrip.getSource())
+                .isEqualTo(new DatabaseReference(DatabaseReferenceType.TAG, "train-v1"));
+    }
+
+    @Test
+    void testDeleteDatabaseReferenceRequestRoundTrips() throws Exception {
+        DeleteDatabaseReferenceRequest request =
+                EXTERNAL_MAPPER.readValue(
+                        "{\"type\":\"TAG\"}", DeleteDatabaseReferenceRequest.class);
+        assertThat(
+                        RESTApi.fromJson(
+                                        RESTApi.toJson(request),
+                                        DeleteDatabaseReferenceRequest.class)
+                                .getType())
+                .isEqualTo(DatabaseReferenceType.TAG);
+
+        DeleteDatabaseReferenceRequest withoutType =
+                EXTERNAL_MAPPER.readValue("{}", DeleteDatabaseReferenceRequest.class);
+        assertThat(RESTApi.toJson(withoutType)).isEqualTo("{}");
+        assertThat(RESTApi.fromJson("{}", DeleteDatabaseReferenceRequest.class).getType()).isNull();
     }
 
     @Test

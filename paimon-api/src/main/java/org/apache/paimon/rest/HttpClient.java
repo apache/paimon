@@ -98,21 +98,12 @@ public class HttpClient implements RESTClient {
             RESTRequest body,
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
-        return post(path, Collections.emptyMap(), body, responseType, restAuthFunction);
-    }
-
-    public <T extends RESTResponse> T post(
-            String path,
-            Map<String, String> queryParams,
-            RESTRequest body,
-            Class<T> responseType,
-            RESTAuthFunction restAuthFunction) {
-        HttpPost httpPost = HttpClientUtils.newHttpPost(getRequestUrl(path, queryParams));
+        HttpPost httpPost = HttpClientUtils.newHttpPost(getRequestUrl(path, null));
         String encodedBody = RESTUtil.encodedBody(body);
         if (encodedBody != null) {
             httpPost.setEntity(new StringEntity(encodedBody, ContentType.APPLICATION_JSON));
         }
-        Header[] authHeaders = getHeaders(path, queryParams, "POST", encodedBody, restAuthFunction);
+        Header[] authHeaders = getHeaders(path, "POST", encodedBody, restAuthFunction);
         httpPost.setHeaders(authHeaders);
         // A POST the server cannot absorb twice is sent exactly once, whatever the status says.
         return exec(
@@ -125,16 +116,15 @@ public class HttpClient implements RESTClient {
 
     public <T extends RESTResponse> T put(
             String path,
-            Map<String, String> queryParams,
             RESTRequest body,
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
-        HttpPut httpPut = HttpClientUtils.newHttpPut(getRequestUrl(path, queryParams));
+        HttpPut httpPut = HttpClientUtils.newHttpPut(getRequestUrl(path, null));
         String encodedBody = RESTUtil.encodedBody(body);
         if (encodedBody != null) {
             httpPut.setEntity(new StringEntity(encodedBody, ContentType.APPLICATION_JSON));
         }
-        Header[] authHeaders = getHeaders(path, queryParams, "PUT", encodedBody, restAuthFunction);
+        Header[] authHeaders = getHeaders(path, "PUT", encodedBody, restAuthFunction);
         httpPut.setHeaders(authHeaders);
         return exec(
                 httpPut,
@@ -146,28 +136,26 @@ public class HttpClient implements RESTClient {
 
     @Override
     public <T extends RESTResponse> T delete(String path, RESTAuthFunction restAuthFunction) {
-        return delete(path, Collections.emptyMap(), null, null, restAuthFunction);
+        return delete(path, null, null, restAuthFunction);
     }
 
     @Override
     public <T extends RESTResponse> T delete(
             String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
-        return delete(path, Collections.emptyMap(), body, null, restAuthFunction);
+        return delete(path, body, null, restAuthFunction);
     }
 
     public <T extends RESTResponse> T delete(
             String path,
-            Map<String, String> queryParams,
             RESTRequest body,
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
-        HttpDelete httpDelete = HttpClientUtils.newHttpDelete(getRequestUrl(path, queryParams));
+        HttpDelete httpDelete = HttpClientUtils.newHttpDelete(getRequestUrl(path, null));
         String encodedBody = RESTUtil.encodedBody(body);
         if (encodedBody != null) {
             httpDelete.setEntity(new StringEntity(encodedBody, ContentType.APPLICATION_JSON));
         }
-        Header[] authHeaders =
-                getHeaders(path, queryParams, "DELETE", encodedBody, restAuthFunction);
+        Header[] authHeaders = getHeaders(path, "DELETE", encodedBody, restAuthFunction);
         httpDelete.setHeaders(authHeaders);
         return exec(httpDelete, responseType);
     }

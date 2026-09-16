@@ -25,18 +25,9 @@ import org.apache.paimon.rest.DatabaseReferenceType;
 
 import javax.annotation.Nullable;
 
-import java.util.List;
-
 /** Control-plane contract for database-level writable branches and immutable tags. */
 @Experimental
 public interface TreeManagement {
-
-    /** Lists all references, following pagination. A null type includes branches and tags. */
-    default List<DatabaseReference> listReferences(
-            String databaseName, @Nullable DatabaseReferenceType type) {
-        return PagedList.listAllFromPagedApi(
-                pageToken -> listReferencesPaged(databaseName, type, null, pageToken));
-    }
 
     /**
      * Lists one page of references.

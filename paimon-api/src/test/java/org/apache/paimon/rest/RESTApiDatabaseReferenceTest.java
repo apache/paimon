@@ -42,7 +42,6 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.apache.paimon.rest.RESTCatalogInternalOptions.PREFIX;
-import static org.apache.paimon.rest.RESTCatalogOptions.DATABASE_REFERENCE;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER;
 import static org.apache.paimon.rest.RESTCatalogOptions.URI;
@@ -131,10 +130,10 @@ class RESTApiDatabaseReferenceTest {
                         new DatabaseReference(DatabaseReferenceType.BRANCH, "main"));
         assertThat(branch).isEqualTo(new DatabaseReference(DatabaseReferenceType.BRANCH, "exp-1"));
         assertRequest(2, "POST", TREES_PATH);
-        assertThat(queryParameters(requests.get(2).query))
-                .containsEntry("name", "exp-1")
-                .containsEntry("type", "branch");
-        assertReferenceBody(requests.get(2), "BRANCH", "main");
+        assertBody(
+                requests.get(2),
+                "{\"name\":\"exp-1\",\"type\":\"BRANCH\","
+                        + "\"source\":{\"type\":\"BRANCH\",\"name\":\"main\"}}");
 
         enqueue(200, "{\"reference\":{\"type\":\"TAG\",\"name\":\"train-v1\"}}");
         DatabaseReference tag =
@@ -145,19 +144,16 @@ class RESTApiDatabaseReferenceTest {
                         new DatabaseReference(DatabaseReferenceType.BRANCH, "exp-1"));
         assertThat(tag).isEqualTo(new DatabaseReference(DatabaseReferenceType.TAG, "train-v1"));
         assertRequest(3, "POST", TREES_PATH);
-        assertThat(queryParameters(requests.get(3).query))
-                .containsEntry("name", "train-v1")
-                .containsEntry("type", "tag");
-        assertReferenceBody(requests.get(3), "BRANCH", "exp-1");
+        assertBody(
+                requests.get(3),
+                "{\"name\":\"train-v1\",\"type\":\"TAG\","
+                        + "\"source\":{\"type\":\"BRANCH\",\"name\":\"exp-1\"}}");
 
         enqueue(200, "{\"reference\":{\"type\":\"BRANCH\",\"name\":\"main\"}}");
         assertThat(api.fastForwardDatabaseBranch("training db", "main", "train-v1"))
                 .isEqualTo(new DatabaseReference(DatabaseReferenceType.BRANCH, "main"));
         assertRequest(4, "PUT", TREES_PATH + "/main");
-        assertThat(queryParameters(requests.get(4).query))
-                .containsEntry("mode", "FAST_FORWARD")
-                .containsEntry("type", "branch");
-        assertReferenceBody(requests.get(4), "TAG", "train-v1");
+        assertBody(requests.get(4), "{\"sourceTag\":\"train-v1\"}");
 
         enqueue(200, "{\"reference\":{\"type\":\"BRANCH\",\"name\":\"exp-1\"}}");
         assertThat(
@@ -165,21 +161,31 @@ class RESTApiDatabaseReferenceTest {
                                 "training db", "exp-1", DatabaseReferenceType.BRANCH))
                 .isEqualTo(new DatabaseReference(DatabaseReferenceType.BRANCH, "exp-1"));
         assertRequest(5, "DELETE", TREES_PATH + "/exp-1");
-        assertThat(queryParameters(requests.get(5).query)).containsEntry("type", "branch");
-        assertThat(requests.get(5).body).isEmpty();
+        assertBody(requests.get(5), "{\"type\":\"BRANCH\"}");
     }
 
     @Test
-    void testListAllReferencesFollowsPages() {
+    void testListReferencesPaged() {
         enqueue(
                 200,
                 "{\"references\":[{\"type\":\"BRANCH\",\"name\":\"main\"}],"
                         + "\"nextPageToken\":\"p2\"}");
         enqueue(200, "{\"references\":[{\"type\":\"BRANCH\",\"name\":\"exp-1\"}]}");
 
-        assertThat(api.listDatabaseReferences("training db", DatabaseReferenceType.BRANCH))
-                .extracting(DatabaseReference::getName)
-                .containsExactly("main", "exp-1");
+        PagedList<DatabaseReference> first =
+                api.listDatabaseReferencesPaged(
+                        "training db", DatabaseReferenceType.BRANCH, 1, null);
+        assertThat(first.getElements())
+                .containsExactly(new DatabaseReference(DatabaseReferenceType.BRANCH, "main"));
+        assertThat(first.getNextPageToken()).isEqualTo("p2");
+        assertThat(requests).hasSize(1);
+
+        PagedList<DatabaseReference> second =
+                api.listDatabaseReferencesPaged(
+                        "training db", DatabaseReferenceType.BRANCH, 1, first.getNextPageToken());
+        assertThat(second.getElements())
+                .containsExactly(new DatabaseReference(DatabaseReferenceType.BRANCH, "exp-1"));
+        assertThat(second.getNextPageToken()).isNull();
         assertThat(requests).hasSize(2);
         assertThat(queryParameters(requests.get(0).query)).containsEntry("type", "branch");
         assertThat(queryParameters(requests.get(1).query))
@@ -188,19 +194,12 @@ class RESTApiDatabaseReferenceTest {
     }
 
     @Test
-    void testReferenceOptionIsSentToTableApis() {
-        enqueue(200, "{\"tables\":[]}");
-        Options options = new Options();
-        options.set(URI, "http://127.0.0.1:" + server.getAddress().getPort());
-        options.set(PREFIX, "catalog/id");
-        options.set(TOKEN_PROVIDER, "bear");
-        options.set(TOKEN, "test-token");
-        options.set(DATABASE_REFERENCE, "train-v1");
-
-        new RESTApi(options, false).listTables("training db");
-
-        assertRequest(0, "GET", "/v1/catalog%2Fid/databases/training+db/tables");
-        assertThat(requests.get(0).reference).isEqualTo("train-v1");
+    void testDeleteReferenceWithoutType() throws Exception {
+        enqueue(200, "{\"reference\":{\"type\":\"TAG\",\"name\":\"train-v1\"}}");
+        assertThat(api.deleteDatabaseReference("training db", "train-v1", null))
+                .isEqualTo(new DatabaseReference(DatabaseReferenceType.TAG, "train-v1"));
+        assertRequest(0, "DELETE", TREES_PATH + "/train-v1");
+        assertBody(requests.get(0), "{}");
     }
 
     private void enqueue(int code, String body) {
@@ -214,12 +213,10 @@ class RESTApiDatabaseReferenceTest {
         assertThat(request.authorization).isEqualTo("Bearer test-token");
     }
 
-    private static void assertReferenceBody(Request request, String type, String name)
-            throws Exception {
+    private static void assertBody(Request request, String expectedJson) throws Exception {
+        assertThat(request.query).isNull();
         assertThat(RESTApi.fromJson(request.body, Map.class))
-                .containsEntry("type", type)
-                .containsEntry("name", name)
-                .hasSize(2);
+                .isEqualTo(RESTApi.fromJson(expectedJson, Map.class));
     }
 
     private static Map<String, String> queryParameters(String query) {
@@ -258,7 +255,6 @@ class RESTApiDatabaseReferenceTest {
         private final String query;
         private final String body;
         private final String authorization;
-        private final String reference;
 
         private Request(HttpExchange exchange) throws IOException {
             method = exchange.getRequestMethod();
@@ -266,7 +262,6 @@ class RESTApiDatabaseReferenceTest {
             query = exchange.getRequestURI().getRawQuery();
             body = read(exchange.getRequestBody());
             authorization = exchange.getRequestHeaders().getFirst("Authorization");
-            reference = exchange.getRequestHeaders().getFirst("Paimon-Reference");
         }
 
         private static String read(InputStream input) throws IOException {

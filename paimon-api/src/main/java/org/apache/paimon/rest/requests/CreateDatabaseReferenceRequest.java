@@ -16,48 +16,42 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest;
+package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.rest.DatabaseReference;
+import org.apache.paimon.rest.DatabaseReferenceType;
+import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.beans.ConstructorProperties;
-import java.util.Objects;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
-/** A named database-level branch or immutable tag. */
+/** Request for creating a database branch or immutable tag from an existing reference. */
 @Experimental
-public class DatabaseReference {
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class CreateDatabaseReferenceRequest implements RESTRequest {
 
-    private static final String FIELD_TYPE = "type";
     private static final String FIELD_NAME = "name";
-    private static final String NAME_PATTERN = "[A-Za-z0-9][A-Za-z0-9._-]{0,127}";
+    private static final String FIELD_TYPE = "type";
+    private static final String FIELD_SOURCE = "source";
 
-    @JsonProperty(FIELD_TYPE)
-    private final DatabaseReferenceType type;
-
-    @JsonProperty(FIELD_NAME)
     private final String name;
+    private final DatabaseReferenceType type;
+    private final DatabaseReference source;
 
     @JsonCreator
-    @ConstructorProperties({FIELD_TYPE, FIELD_NAME})
-    public DatabaseReference(
+    @ConstructorProperties({FIELD_NAME, FIELD_TYPE, FIELD_SOURCE})
+    public CreateDatabaseReferenceRequest(
+            @JsonProperty(FIELD_NAME) String name,
             @JsonProperty(FIELD_TYPE) DatabaseReferenceType type,
-            @JsonProperty(FIELD_NAME) String name) {
-        checkArgument(type != null, "Reference type must not be null");
-        checkArgument(
-                name != null && name.matches(NAME_PATTERN), "Invalid reference name: %s", name);
-        this.type = type;
+            @JsonProperty(FIELD_SOURCE) DatabaseReference source) {
         this.name = name;
-    }
-
-    @JsonGetter(FIELD_TYPE)
-    public DatabaseReferenceType getType() {
-        return type;
+        this.type = type;
+        this.source = source;
     }
 
     @JsonGetter(FIELD_NAME)
@@ -65,25 +59,13 @@ public class DatabaseReference {
         return name;
     }
 
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (!(o instanceof DatabaseReference)) {
-            return false;
-        }
-        DatabaseReference that = (DatabaseReference) o;
-        return type == that.type && name.equals(that.name);
+    @JsonGetter(FIELD_TYPE)
+    public DatabaseReferenceType getType() {
+        return type;
     }
 
-    @Override
-    public int hashCode() {
-        return Objects.hash(type, name);
-    }
-
-    @Override
-    public String toString() {
-        return type + ":" + name;
+    @JsonGetter(FIELD_SOURCE)
+    public DatabaseReference getSource() {
+        return source;
     }
 }

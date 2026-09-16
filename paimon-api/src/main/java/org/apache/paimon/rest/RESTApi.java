@@ -47,14 +47,17 @@ import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.AuthTableQueryRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
+import org.apache.paimon.rest.requests.CreateDatabaseReferenceRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
+import org.apache.paimon.rest.requests.DeleteDatabaseReferenceRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.DropPolicyRequest;
+import org.apache.paimon.rest.requests.FastForwardDatabaseBranchRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.GrantPermissionRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
@@ -75,6 +78,7 @@ import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreatePartitionsResponse;
+import org.apache.paimon.rest.responses.DatabaseReferenceResponse;
 import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -110,7 +114,6 @@ import org.apache.paimon.rest.responses.ListViewDetailsResponse;
 import org.apache.paimon.rest.responses.ListViewsGloballyResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.rest.responses.PagedResponse;
-import org.apache.paimon.rest.responses.SingleDatabaseReferenceResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -196,10 +199,7 @@ public class RESTApi {
     public static final String PARTITION_NAME_PATTERN = "partitionNamePattern";
     public static final String TAG_NAME_PREFIX = "tagNamePrefix";
 
-    private static final String REFERENCE_NAME = "name";
     private static final String REFERENCE_TYPE = "type";
-    private static final String REFERENCE_UPDATE_MODE = "mode";
-    private static final String FAST_FORWARD = "FAST_FORWARD";
 
     public static final long TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000L;
 
@@ -367,23 +367,6 @@ public class RESTApi {
                 restAuthFunction);
     }
 
-    /** List all database-level branches and immutable tags. */
-    @Experimental
-    public List<DatabaseReference> listDatabaseReferences(
-            String databaseName, @Nullable DatabaseReferenceType type) {
-        return listDataFromPageApi(
-                queryParams -> {
-                    if (type != null) {
-                        queryParams.put(REFERENCE_TYPE, type.queryValue());
-                    }
-                    return client.get(
-                            resourcePaths.databaseTrees(databaseName),
-                            queryParams,
-                            ListDatabaseReferencesResponse.class,
-                            restAuthFunction);
-                });
-    }
-
     /** List one page of database-level branches and immutable tags. */
     @Experimental
     public PagedList<DatabaseReference> listDatabaseReferencesPaged(
@@ -409,10 +392,10 @@ public class RESTApi {
     /** Get one database-level branch or immutable tag. */
     @Experimental
     public DatabaseReference getDatabaseReference(String databaseName, String referenceName) {
-        SingleDatabaseReferenceResponse response =
+        DatabaseReferenceResponse response =
                 client.get(
                         resourcePaths.databaseTree(databaseName, referenceName),
-                        SingleDatabaseReferenceResponse.class,
+                        DatabaseReferenceResponse.class,
                         restAuthFunction);
         return checkNotNull(response.getReference(), "Reference response must contain reference");
     }
@@ -424,15 +407,11 @@ public class RESTApi {
             String referenceName,
             DatabaseReferenceType type,
             DatabaseReference source) {
-        Map<String, String> queryParams = Maps.newHashMap();
-        queryParams.put(REFERENCE_NAME, referenceName);
-        queryParams.put(REFERENCE_TYPE, type.queryValue());
-        SingleDatabaseReferenceResponse response =
+        DatabaseReferenceResponse response =
                 client.post(
                         resourcePaths.databaseTrees(databaseName),
-                        queryParams,
-                        source,
-                        SingleDatabaseReferenceResponse.class,
+                        new CreateDatabaseReferenceRequest(referenceName, type, source),
+                        DatabaseReferenceResponse.class,
                         restAuthFunction);
         return checkNotNull(response.getReference(), "Reference response must contain reference");
     }
@@ -441,15 +420,11 @@ public class RESTApi {
     @Experimental
     public DatabaseReference fastForwardDatabaseBranch(
             String databaseName, String targetBranch, String sourceTag) {
-        Map<String, String> queryParams = Maps.newHashMap();
-        queryParams.put(REFERENCE_UPDATE_MODE, FAST_FORWARD);
-        queryParams.put(REFERENCE_TYPE, DatabaseReferenceType.BRANCH.queryValue());
-        SingleDatabaseReferenceResponse response =
+        DatabaseReferenceResponse response =
                 client.put(
                         resourcePaths.databaseTree(databaseName, targetBranch),
-                        queryParams,
-                        new DatabaseReference(DatabaseReferenceType.TAG, sourceTag),
-                        SingleDatabaseReferenceResponse.class,
+                        new FastForwardDatabaseBranchRequest(sourceTag),
+                        DatabaseReferenceResponse.class,
                         restAuthFunction);
         return checkNotNull(response.getReference(), "Reference response must contain reference");
     }
@@ -460,16 +435,11 @@ public class RESTApi {
             String databaseName,
             String referenceName,
             @Nullable DatabaseReferenceType expectedType) {
-        Map<String, String> queryParams = Maps.newHashMap();
-        if (expectedType != null) {
-            queryParams.put(REFERENCE_TYPE, expectedType.queryValue());
-        }
-        SingleDatabaseReferenceResponse response =
+        DatabaseReferenceResponse response =
                 client.delete(
                         resourcePaths.databaseTree(databaseName, referenceName),
-                        queryParams,
-                        null,
-                        SingleDatabaseReferenceResponse.class,
+                        new DeleteDatabaseReferenceRequest(expectedType),
+                        DatabaseReferenceResponse.class,
                         restAuthFunction);
         return checkNotNull(response.getReference(), "Reference response must contain reference");
     }
