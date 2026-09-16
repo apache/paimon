@@ -189,7 +189,7 @@ represented by its entries:
 
 ```text
 partitionPayload
-  intsDeltaPayload
+  intsDeltaPayload                    // dictionary IDs, base = 0
 ```
 
 An ID is the zero-based position of a complete tuple in the sidecar's shared dictionary.
