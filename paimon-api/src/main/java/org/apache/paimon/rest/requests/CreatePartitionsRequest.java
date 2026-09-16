@@ -32,6 +32,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -106,7 +107,7 @@ public class CreatePartitionsRequest implements RESTRequest {
                                 && partitionOptions.size() == partitionSpecs.size()),
                 "partitionOptions must be null or have the same size as partitionSpecs.");
         checkArgument(
-                partitionOptions == null || !partitionOptions.contains(null),
+                partitionOptions == null || partitionOptions.stream().noneMatch(Objects::isNull),
                 "partitionOptions must not contain null maps.");
         checkArgument(
                 partitionOptions == null

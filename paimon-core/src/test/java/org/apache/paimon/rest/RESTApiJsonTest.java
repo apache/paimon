@@ -65,6 +65,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessin
 
 import org.junit.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -528,6 +529,29 @@ public class RESTApiJsonTest {
                         .get(0);
         assertFalse(PartitionStatistics.isKnown(parsedUnknown.recordCount()));
         assertFalse(PartitionStatistics.isKnown(parsedUnknown.fileCount()));
+    }
+
+    @Test
+    public void createPartitionsRequestAcceptsImmutablePartitionOptionsTest() {
+        Map<String, String> spec = Collections.singletonMap("dt", "20260916");
+        Map<String, String> options =
+                Collections.singletonMap("path", "oss://bucket/archive/dt=20260916");
+
+        // List.of answers contains(null) with a NullPointerException rather than false, so a
+        // caller handing over a valid immutable list must not be asked that question.
+        CreatePartitionsRequest request =
+                new CreatePartitionsRequest(List.of(spec), true, null, null, List.of(options));
+        assertEquals(List.of(options), request.getPartitionOptions());
+
+        List<Map<String, String>> withNullEntry = new ArrayList<>();
+        withNullEntry.add(null);
+        IllegalArgumentException failure =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () ->
+                                new CreatePartitionsRequest(
+                                        List.of(spec), true, null, null, withNullEntry));
+        assertTrue(failure.getMessage().contains("partitionOptions must not contain null maps"));
     }
 
     @Test
