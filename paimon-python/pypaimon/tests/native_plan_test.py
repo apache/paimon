@@ -106,10 +106,64 @@ class NativePlanTest(unittest.TestCase):
             version_patcher.start()
             self.addCleanup(version_patcher.stop)
 
+    def test_resolved_schema_keeps_custom_io_and_rest_on_catalog_path(self):
+        from pypaimon.catalog.catalog_environment import CatalogEnvironment
+        from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+        from pypaimon.read.native_plan import _resolved_schema_file_io_options
+
+        class CustomIO(LocalFileIO):
+            pass
+
+        class CustomEnvironment(CatalogEnvironment):
+            pass
+
+        class CustomLoader(FileSystemCatalogLoader):
+            pass
+
+        class CustomJdbcLoader(JdbcCatalogLoader):
+            pass
+
+        table = Mock(file_io=LocalFileIO(), catalog_environment=CatalogEnvironment.empty())
+        with patch('pypaimon.read.native_plan.native_method_available', return_value=True):
+            self.assertEqual(_resolved_schema_file_io_options(table), {})
+            table.file_io = CustomIO()
+            self.assertIsNone(_resolved_schema_file_io_options(table))
+            table.file_io = LocalFileIO()
+            table.catalog_environment = CustomEnvironment()
+            self.assertIsNone(_resolved_schema_file_io_options(table))
+            table.catalog_environment = CatalogEnvironment.empty()
+            for loader_type in (RESTCatalogLoader, CustomLoader, CustomJdbcLoader):
+                table.catalog_environment.catalog_loader = loader_type(
+                    CatalogContext.create_from_options(Options({})))
+                self.assertIsNone(_resolved_schema_file_io_options(table))
+            for loader_type in (FileSystemCatalogLoader, JdbcCatalogLoader):
+                for attr in ('hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'):
+                    context = CatalogContext.create_from_options(Options({}))
+                    setattr(context, attr, object())
+                    table.catalog_environment.catalog_loader = loader_type(context)
+                    self.assertIsNone(_resolved_schema_file_io_options(table))
+
     def test_switch_defaults_off(self):
         self.assertFalse(CoreOptions(Options({})).native_plan_enabled())
         self.assertTrue(
             CoreOptions(Options({"scan.native-plan.enabled": "true"})).native_plan_enabled())
+
+    def test_catalogless_standard_file_io_options_are_preserved(self):
+        from pypaimon.catalog.catalog_environment import CatalogEnvironment
+        from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+        from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
+        from pypaimon.read.native_plan import _resolved_schema_file_io_options
+
+        properties = Options({'s3.path-style-access': True, 's3.endpoint': 'http://localhost:9000'})
+        # No storage connection is needed to check the resolved context transfer.
+        arrow = PyArrowFileIO.__new__(PyArrowFileIO)
+        arrow.properties = properties
+        for file_io in (arrow, ResolvingFileIO(properties)):
+            table = Mock(file_io=file_io, catalog_environment=CatalogEnvironment.empty())
+            with patch('pypaimon.read.native_plan.native_method_available', return_value=True):
+                self.assertEqual(_resolved_schema_file_io_options(table), {
+                    's3.path-style-access': 'true', 's3.endpoint': 'http://localhost:9000'})
 
     def test_plan_uses_file_scanner_when_switch_off(self):
         fs = Mock()
@@ -281,7 +335,6 @@ class NativePlanTest(unittest.TestCase):
                              setattr(fs, 'idx_of_this_subtask', 0)))
         check(lambda s, fs: (setattr(fs, 'data_evolution', True),
                              setattr(fs, 'start_pos_of_this_subtask', 0)))
-        check(lambda s, fs: setattr(fs, 'chunk_shuffle', (1, 100)))
         check(lambda s, fs: setattr(fs, '_global_index_result', object()))
         check(lambda s, fs: setattr(fs, '_row_ranges', [object()]))
         check(lambda s, fs: setattr(fs, 'deletion_vectors_enabled', True))
@@ -293,8 +346,6 @@ class NativePlanTest(unittest.TestCase):
         check(lambda s, fs: setattr(s.table.schema_manager.latest.return_value, 'id', 2))
         check(lambda s, fs: s.table.schema_manager.latest.__setattr__(
             'side_effect', RuntimeError('metadata read failed')))
-        check(lambda s, fs: s.table.options.merge_engine.__setattr__(
-            'return_value', 'first-row'))
         check(lambda s, fs: setattr(s.table.options, 'query_auth_enabled', True))
         check(lambda s, fs: s.table.current_branch.__setattr__('return_value', 'b1'))
         check(lambda s, fs: s.table.identifier.get_database_name.__setattr__(

@@ -240,6 +240,13 @@ class SplitRead(ABC):
             read_arrow_predicate,
             read_paimon_predicate,
         ) = self._get_fields_and_predicate(file.schema_id, read_fields)
+        if (file.file_name in self.deletion_file_readers
+                or (for_merge_read and self.row_ranges is not None)):
+            # DVs and indexed PK ranges refer to physical file positions.
+            # Filtering or skipping row groups here would renumber those rows.
+            # Apply the residual predicate after position selection and merging.
+            read_arrow_predicate = None
+            read_paimon_predicate = None
 
         # Use external_path if available, otherwise use file_path
         file_path = file.external_path if file.external_path else file.file_path
@@ -583,7 +590,11 @@ class SplitRead(ABC):
                 read_field for read_field in read_fields
                 if _is_reachable(read_field)
             ]
-            read_predicate = trim_predicate_by_fields(self.push_down_predicate, read_file_fields)
+            # File readers filter physical column names before field-id schema
+            # normalization. A renamed or re-added name can identify a different
+            # column, so cross-schema filtering must run after normalization.
+            read_predicate = (trim_predicate_by_fields(self.push_down_predicate, read_file_fields)
+                              if schema_id == self.table.table_schema.id else None)
             read_arrow_predicate = (
                 read_predicate.to_arrow()
                 if read_predicate and self._arrow_filter_pushdown_enabled
@@ -899,7 +910,10 @@ class RawFileSplitRead(SplitRead):
         reader = concat_reader
         if (self.predicate_for_reader
                 and (self.table.is_primary_key_table
-                     or not self._arrow_filter_pushdown_enabled)):
+                     or not self._arrow_filter_pushdown_enabled
+                     or self.deletion_file_readers
+                     or any(file.schema_id != self.table.table_schema.id
+                            for file in self.split.files))):
             reader = FilterRecordBatchReader(
                 reader,
                 self.predicate_for_reader,

@@ -341,6 +341,9 @@ class FormatPyArrowReader(RecordBatchReader):
                  row_indices: Optional[List[int]] = None,
                  row_ranges: Optional[List[Tuple[int, int]]] = None,
                  row_group_cache: Optional[_DecodedRowGroupCache] = None):
+        from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
+        if isinstance(file_io, ResolvingFileIO):
+            file_io = file_io._get_fileio(file_path)
         self._predicate_field_names = predicate_field_names or set()
         file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
         self._row_group_cache = row_group_cache

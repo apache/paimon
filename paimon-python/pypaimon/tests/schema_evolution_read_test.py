@@ -519,11 +519,9 @@ class SchemaEvolutionReadTest(unittest.TestCase):
 
         table_read = read_builder.new_read()
         actual = table_read.to_arrow(splits)
+        # Old files supply NULL for behavior; NULL = 'g' cannot pass AND.
         expected = pa.Table.from_pydict({
-            'user_id': [1, 2, 4, 3, 7],
-            'item_id': [1001, 1002, 1004, 1003, 1007],
-            'dt': ["p1", "p1", "p1", "p2", "p2"],
-            'behavior': [None, None, None, None, "g"],
+            'user_id': [7], 'item_id': [1007], 'dt': ["p2"], 'behavior': ["g"],
         }, schema=pa_schema)
         self.assertEqual(expected, actual)
 
@@ -873,3 +871,50 @@ class SchemaEvolutionReadTest(unittest.TestCase):
     def _scan_table(self, read_builder):
         splits = read_builder.new_scan().plan().splits()
         return splits
+
+
+@pytest.mark.parametrize('file_format', ['parquet', 'avro'])
+@pytest.mark.parametrize('evolution', ['rename', 'readd'])
+def test_cross_schema_filter_runs_after_field_id_mapping(tmp_path, file_format, evolution):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('k', pa.int64()), ('v', pa.string())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(
+        schema, options={'file.format': file_format}), False)
+
+    def write(table, values):
+        builder = table.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        try:
+            writer.write_arrow(pa.Table.from_pylist(values))
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+
+    write(catalog.get_table('default.t'), [{'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}])
+    if evolution == 'rename':
+        catalog.alter_table('default.t', [SchemaChange.rename_column('v', 'renamed')], False)
+        latest_rows = [{'k': 3, 'renamed': 'c'}, {'k': 4, 'renamed': 'b'}]
+    else:
+        catalog.alter_table('default.t', [SchemaChange.drop_column('v')], False)
+        catalog.alter_table('default.t', [SchemaChange.add_column('v', AtomicType('STRING'))], False)
+        latest_rows = [{'k': 3, 'v': 'b'}, {'k': 4, 'v': None}]
+    table = catalog.get_table('default.t').copy({'scan.native-plan.enabled': 'false'})
+    write(table, latest_rows)
+    # Read an unfiltered plan so manifest statistics cannot hide a reader bug.
+    splits = table.new_read_builder().new_scan().plan().splits()
+    pb = table.new_read_builder().new_predicate_builder()
+    cases = ([(pb.equal('renamed', 'b'), [2, 4]), (pb.equal('renamed', 'missing'), [])]
+             if evolution == 'rename' else [(pb.is_null('v'), [1, 2, 4]), (pb.equal('v', 'b'), [3])])
+    for predicate, expected in cases:
+        for limit in (None, 1):
+            builder = table.new_read_builder().with_filter(predicate).with_projection(['k'])
+            if limit is not None:
+                builder.with_limit(limit)
+            actual = builder.new_read().to_arrow(splits, parallelism=1).column('k').to_pylist()
+            if limit is None:
+                assert sorted(actual) == expected
+            else:
+                assert len(actual) == min(1, len(expected))
+                assert all(key in expected for key in actual)
