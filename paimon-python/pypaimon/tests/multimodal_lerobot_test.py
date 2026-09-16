@@ -48,6 +48,7 @@ from pypaimon.multimodal.lerobot.dataset import (
     _PyAVVideoDecoder,
     _arrow_rows,
     _decode_video_frames,
+    _decode_video_rows,
     _image_tensor,
     _index_names,
     _open_video_decoder,
@@ -144,6 +145,61 @@ def _catalog_metadata(connection, name):
 
 
 class LeRobotValidationTest(unittest.TestCase):
+
+    def test_video_columns_decode_in_parallel(self):
+        barrier = threading.Barrier(2)
+
+        class Collator:
+
+            def __init__(self, video_column):
+                self.video_column = video_column
+                self.output_column = video_column + "_decoded"
+
+            def __call__(self, rows):
+                barrier.wait(timeout=5)
+                return [dict(
+                    row,
+                    **{self.output_column: row[self.video_column] + 10},
+                ) for row in rows]
+
+        rows = {
+            0: {"camera_a": 1, "camera_b": 2},
+            1: {"camera_a": 3, "camera_b": 4},
+        }
+        _decode_video_rows(
+            [rows], [Collator("camera_a"), Collator("camera_b")])
+
+        self.assertEqual(11, rows[0]["camera_a_decoded"])
+        self.assertEqual(12, rows[0]["camera_b_decoded"])
+        self.assertEqual(13, rows[1]["camera_a_decoded"])
+        self.assertEqual(14, rows[1]["camera_b_decoded"])
+
+    def test_video_column_decode_parallelism_is_bounded(self):
+        worker_counts = []
+
+        def executor(*args, **kwargs):
+            worker_counts.append(kwargs["max_workers"])
+            return ThreadPoolExecutor(*args, **kwargs)
+
+        class Collator:
+
+            def __init__(self, index):
+                self.video_column = "camera_%d" % index
+                self.output_column = self.video_column
+
+            def __call__(self, rows):
+                return rows
+
+        rows = {
+            0: {"camera_%d" % index: index for index in range(9)},
+        }
+        with patch(
+                "pypaimon.multimodal.lerobot.dataset.ThreadPoolExecutor",
+                side_effect=executor):
+            _decode_video_rows(
+                [rows], [Collator(index) for index in range(9)])
+
+        self.assertEqual([8], worker_counts)
 
     @unittest.skipUnless(
         av is not None and importlib.util.find_spec("torch") is not None,

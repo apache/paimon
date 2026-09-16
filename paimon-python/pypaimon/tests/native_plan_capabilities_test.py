@@ -314,6 +314,42 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
         self.assertEqual(plan.splits()[0].data_deletion_files[0].cardinality, 2)
         self._assert_parity(table.copy({'scan.snapshot-id': '1'}), rows, 1)
 
+    def test_first_row_compacted_runs_with_overlapping_key_ranges(self):
+        for bucket in ('1', '-1'):
+            with self.subTest(bucket=bucket):
+                table = self._create('first_row_' + bucket, {
+                    'bucket': bucket, 'merge-engine': 'first-row',
+                    'source.split.target-size': '1b',
+                    'source.split.open-file-cost': '1b',
+                }, primary_keys=['k'])
+                expected = [{'k': k, 'v': 'v%d' % k} for k in range(1, 5)]
+                for level, keys in ((1, (1, 3)), (2, (2, 4))):
+                    builder = table.new_batch_write_builder()
+                    writer, commit = builder.new_write(), builder.new_commit()
+                    try:
+                        writer.write_arrow(pa.Table.from_pylist(
+                            [expected[key - 1] for key in keys], schema=self.schema))
+                        messages = writer.prepare_commit()
+                        # Each run already contains unique first rows. Their
+                        # ranges overlap, but their actual keys are disjoint.
+                        for message in messages:
+                            message.new_files = [replace(file, level=level)
+                                                 for file in message.new_files]
+                        commit.commit(messages)
+                    finally:
+                        writer.close()
+                        commit.close()
+                self._write(table, [{'k': 1, 'v': 'later'}, {'k': 5, 'v': 'pending'}])
+                plan = self._assert_parity(table, expected, 3)
+                self.assertTrue(all(split.raw_convertible for split in plan.splits()))
+                self.assertEqual({file.level for split in plan.splits()
+                                  for file in split.files}, {1, 2})
+                pb = table.new_read_builder().new_predicate_builder()
+                self._assert_parity(table, [expected[1]], 3, predicate=pb.equal('v', 'v2'))
+                self._assert_parity(table, [], 3, predicate=pb.equal('v', 'later'))
+                self._assert_parity(table.copy({'scan.snapshot-id': '1'}),
+                                    [expected[0], expected[2]], 1)
+
     @unittest.skipUnless(native_version_at_least(0, 4, 0),
                          'pypaimon-rust>=0.4.0 required for native DV scans')
     def test_external_deletion_vector_path_is_preserved(self):

@@ -26,6 +26,7 @@ from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.tag.tag_manager import TagManager
 
 SCAN_KEYS = [
+    CoreOptions.SCAN_VERSION.key(),
     CoreOptions.SCAN_SNAPSHOT_ID.key(),
     CoreOptions.SCAN_TAG_NAME.key(),
     CoreOptions.SCAN_WATERMARK.key(),
@@ -75,6 +76,7 @@ class TimeTravelUtil:
         Try to travel to a snapshot based on the options.
 
         Supports the following time travel options:
+        - scan.version: Resolve an existing tag, watermark prefix, or snapshot id
         - scan.tag-name: Travel to a specific tag
         - scan.snapshot-id: Travel to a specific snapshot id
         - scan.timestamp-millis: Travel to the latest snapshot <= the given timestamp (ms)
@@ -94,6 +96,23 @@ class TimeTravelUtil:
             ValueError: If more than one time travel option is set, or if the
                 required manager is not provided
         """
+
+        # Java adaptScanVersion resolves tags before watermark prefixes and ids.
+        # Work on a copy so table.copy() retains its original effective options.
+        if options.contains_key(CoreOptions.SCAN_VERSION.key()):
+            values = dict(options.to_map())
+            version = options.get(CoreOptions.SCAN_VERSION)
+            values.pop(CoreOptions.SCAN_VERSION.key())
+            tag = tag_manager.get(version)
+            if tag is not None:
+                values[CoreOptions.SCAN_TAG_NAME.key()] = version
+            elif version.startswith('watermark-'):
+                values[CoreOptions.SCAN_WATERMARK.key()] = int(version[len('watermark-'):])
+            elif version and all('0' <= char <= '9' for char in version):
+                values[CoreOptions.SCAN_SNAPSHOT_ID.key()] = version
+            else:
+                raise ValueError("Cannot find a time travel version for %s" % version)
+            options = Options(values)
 
         scan_handle_keys = [key for key in SCAN_KEYS if options.contains_key(key)]
 

@@ -19,8 +19,9 @@
 """End-to-end tests for the ``first-row`` merge engine.
 
 Each test creates a PK table with ``merge-engine`` set to ``first-row``,
-writes one or more batches, and reads back. The first-row engine keeps
-only the earliest row per primary key.
+writes one or more batches, and verifies the un-compacted files explicitly.
+Java batch scans hide first-row L0; the internal write scan exposes them for
+checking write-buffer folding and the first-row merge function.
 """
 
 import os
@@ -81,7 +82,9 @@ class FirstRowMergeEngineE2ETest(unittest.TestCase):
 
     def _read(self, table):
         rb = table.new_read_builder()
-        splits = rb.new_scan().plan().splits()
+        scan = rb.new_scan()
+        self.assertEqual(scan.plan().splits(), [])
+        splits = scan.plan_for_write().splits()
         if not splits:
             return []
         return sorted(

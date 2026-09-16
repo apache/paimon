@@ -46,6 +46,8 @@ _NATIVE_FORWARDED_OPTIONS = frozenset({
     CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(),
     CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(),
     CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(),
+    CoreOptions.DELETION_VECTORS_MERGE_ON_READ.key(),
+    CoreOptions.SCAN_VERSION.key(),
     CoreOptions.SCAN_SNAPSHOT_ID.key(),
     CoreOptions.SCAN_TAG_NAME.key(),
     CoreOptions.SCAN_TIMESTAMP.key(),
@@ -59,6 +61,7 @@ _NATIVE_PLAN_INDEPENDENT_OPTIONS = frozenset({
     CoreOptions.READ_PARALLELISM.key(),
 })
 _NATIVE_TIME_TRAVEL_OPTIONS = frozenset({
+    CoreOptions.SCAN_VERSION.key(),
     CoreOptions.SCAN_SNAPSHOT_ID.key(),
     CoreOptions.SCAN_TAG_NAME.key(),
     CoreOptions.SCAN_TIMESTAMP.key(),
@@ -112,12 +115,9 @@ class TableScan:
 
     def _native_plan_supported_impl(self) -> bool:
         """Fall back to the Python scanner for scans native can't carry:
-        chunk-shuffle, scored or primary-key
-        global-index results, first-row merge-engine (Rust drops L0), deletion
-        vector merge-on-read, postpone bucket,
+        chunk-shuffle, primary-key global-index results, first-row scans which include L0,
         a primary-key table whose trimmed PK is empty (PK equals the partition
-        key; Rust rejects this schema), dynamic
-        bucket / cross-partition PK tables (unconfirmed Rust parity), a stale
+        key; Rust rejects this schema), a stale
         schema without time travel, removed copy() options which Rust cannot
         represent, unsupported time travel selectors,
         query auth, a missing/old
@@ -129,9 +129,10 @@ class TableScan:
         if not native_runtime_available():
             return False
         fs = self.file_scanner
+        if fs.is_streaming and not native_method_available('Split', 'is_streaming'):
+            return False
         if (getattr(fs, 'chunk_shuffle', None) is not None
-                or not self._native_global_index_result_supported()
-                or getattr(fs, 'only_read_real_buckets', False)):
+                or not self._native_global_index_result_supported()):
             return False
         # Positional append distribution needs the stable partition/file order
         # introduced in 0.4. Older bindings can assign different rows per call.
@@ -142,13 +143,6 @@ class TableScan:
         if getattr(fs, 'deletion_vectors_enabled', False):
             # 0.4.0 includes Python-written DV decoding and legacy bucket paths.
             if not native_version_at_least(0, 4, 0):
-                return False
-            # Python DV scans skip L0; Rust can include L0 when this option is
-            # enabled. Keep that mode on the Python planner until aligned.
-            table_options = self.table.options.options.to_map()
-            merge_on_read = table_options.get(
-                'deletion-vectors.merge-on-read', False)
-            if str(merge_on_read).lower() == 'true':
                 return False
         if getattr(fs, 'data_evolution', False):
             if (getattr(fs, 'idx_of_this_subtask', None) is not None
@@ -184,16 +178,17 @@ class TableScan:
         database_name = self.table.identifier.get_database_name()
         if not database_name or database_name == UNKNOWN_DATABASE or '.' in database_name:
             return False
-        if self.table.options.query_auth_enabled \
-                or self.table.options.merge_engine() == 'first-row':
+        if self.table.options.query_auth_enabled:
+            return False
+        # Ordinary Java first-row batch scans skip L0. The clustering override
+        # can combine first-row with DV merge-on-read, but its files need a
+        # separate audit because they may be sorted by non-primary-key columns.
+        if (self.table.options.merge_engine() == 'first-row'
+                and not fs.skip_level0 and not fs.is_streaming):
             return False
         # Rust rejects schemas whose primary keys are all partition keys.
         if getattr(self.table, 'is_primary_key_table', False) \
                 and not self.table.trimmed_primary_keys:
-            return False
-        # Dynamic-bucket / cross-partition PK: Rust parity unconfirmed -> fall back.
-        from pypaimon.table.bucket_mode import BucketMode
-        if self.table.bucket_mode() in (BucketMode.HASH_DYNAMIC, BucketMode.CROSS_PARTITION):
             return False
         options = self.table.options.options
         if (options.contains_key(CoreOptions.SCAN_WATERMARK.key())
@@ -223,8 +218,7 @@ class TableScan:
             return False
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
         unsupported_scan_keys = set(SCAN_KEYS) - _NATIVE_TIME_TRAVEL_OPTIONS
-        if any(options.contains_key(k) for k in unsupported_scan_keys) \
-                or options.contains_key('scan.version'):
+        if any(options.contains_key(k) for k in unsupported_scan_keys):
             return False
         return (not options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
                 or native_method_available('ReadBuilder', 'new_incremental_scan'))
@@ -237,9 +231,7 @@ class TableScan:
                 or not self.file_scanner.data_evolution):
             return False
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
-        from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
-        return (isinstance(result, GlobalIndexResult)
-                and not isinstance(result, ScoredGlobalIndexResult))
+        return isinstance(result, GlobalIndexResult)
 
     def _native_row_ranges(self) -> Optional[List[Tuple[int, int]]]:
         row_ranges = getattr(self.file_scanner, '_row_ranges', None)
@@ -301,6 +293,11 @@ class TableScan:
                 splits = [s for s in splits
                           if getattr(s, 'partition', None) is None
                           or partition_predicate.test(s.partition)]
+            if (self.table.is_primary_key_table and not fs.is_streaming and self.predicate is not None
+                    and self.table.options.global_index_enabled()
+                    and plan.snapshot_id is not None):
+                snapshot = self.table.snapshot_manager().get_snapshot_by_id(plan.snapshot_id)
+                splits = fs._apply_primary_key_sorted_indexes(splits, snapshot)
             if has_distribution:
                 if self.table.is_primary_key_table:
                     splits = [s for s in splits
@@ -315,6 +312,15 @@ class TableScan:
                         start, end = fs.start_pos_of_this_subtask, fs.end_pos_of_this_subtask
                     splits = slice_append_splits(splits, start, end)
                 splits = fs._apply_push_down_limit(splits)
+            # Attach scores to the row ranges retained by native planning.
+            from pypaimon.globalindex.indexed_split import IndexedSplit, scores_for_ranges
+            from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
+            result = fs._global_index_result
+            if fs._row_ranges is None and isinstance(result, ScoredGlobalIndexResult):
+                splits = [IndexedSplit(
+                    split.data_split(), split.row_ranges(),
+                    scores_for_ranges(result.score_getter(), split.row_ranges()),
+                ) for split in splits]
             return Plan(splits, snapshot_id=plan.snapshot_id)
         except Exception as e:
             # Any native construction/planning/pruning failure -> fall back.
@@ -325,7 +331,13 @@ class TableScan:
     def plan_for_write(self) -> Plan:
         if self.__auth_query() is not None:
             raise TableNoPermissionException(self.table.identifier)
-        return self.file_scanner.scan()
+        # Writer restore/overwrite must see L0 even when batch reads hide it.
+        skip_level0 = self.file_scanner.skip_level0
+        try:
+            self.file_scanner.skip_level0 = False
+            return self.file_scanner.scan()
+        finally:
+            self.file_scanner.skip_level0 = skip_level0
 
     def __auth_query(self):
         return resolve_auth_result(self._query_auth_fn, self._read_type)
@@ -430,6 +442,8 @@ class TableScan:
                 self.predicate,
                 self.limit,
                 partition_predicate=self.partition_predicate,
+                skip_level0=False,
+                is_streaming=True,
             )
 
         if has_time_travel:
@@ -449,6 +463,7 @@ class TableScan:
                 self.predicate,
                 self.limit,
                 partition_predicate=self.partition_predicate,
+                skip_level0=self.table.options.batch_scan_skip_level0(),
             )
 
         def all_manifests():
@@ -461,6 +476,7 @@ class TableScan:
             self.predicate,
             self.limit,
             partition_predicate=self.partition_predicate,
+            skip_level0=self.table.options.batch_scan_skip_level0(),
         )
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
@@ -498,6 +514,7 @@ class TableScan:
 
         has_snapshot_id = options.contains(CoreOptions.SCAN_SNAPSHOT_ID)
         has_tag_name = options.contains(CoreOptions.SCAN_TAG_NAME)
+        has_version = options.contains(CoreOptions.SCAN_VERSION)
         has_watermark = options.contains(CoreOptions.SCAN_WATERMARK)
         has_timestamp_millis = options.contains(CoreOptions.SCAN_TIMESTAMP_MILLIS)
         has_timestamp = options.contains(CoreOptions.SCAN_TIMESTAMP)
@@ -506,6 +523,8 @@ class TableScan:
         has_creation_time = options.contains(CoreOptions.SCAN_CREATION_TIME_MILLIS)
 
         present_keys = []
+        if has_version:
+            present_keys.append(CoreOptions.SCAN_VERSION.key())
         if has_snapshot_id:
             present_keys.append(CoreOptions.SCAN_SNAPSHOT_ID.key())
         if has_tag_name:
@@ -551,11 +570,12 @@ class TableScan:
                 CoreOptions.SCAN_SNAPSHOT_ID.key(),
                 CoreOptions.SCAN_TAG_NAME.key(),
                 CoreOptions.SCAN_WATERMARK.key(),
+                CoreOptions.SCAN_VERSION.key(),
             }
-            if not (has_snapshot_id or has_tag_name or has_watermark):
+            if not (has_snapshot_id or has_tag_name or has_watermark or has_version):
                 raise ValueError(
                     "scan.mode is 'from-snapshot' but none of "
-                    "scan.snapshot-id, scan.tag-name, or scan.watermark is set."
+                    "scan.version, scan.snapshot-id, scan.tag-name, or scan.watermark is set."
                 )
         elif mode == StartupMode.INCREMENTAL:
             allowed = {CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key()}

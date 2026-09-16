@@ -388,6 +388,24 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
         self.assertEqual([entry.file.file_name for entry in actual],
                          ['selected.parquet', 'partition-pruned.parquet'])
 
+    def test_union_manifest_schema_uses_compatible_reader(self):
+        table, manager, entries = self._partitioned_manifest()
+        buffer = BytesIO()
+        # Rust Avro manifests wrap the record schema in a top-level union.
+        fastavro.writer(buffer, [MANIFEST_ENTRY_SCHEMA], manager._to_avro_records(entries))
+        name = 'union-manifest.avro'
+        with table.file_io.new_output_stream('{}/{}'.format(manager.manifest_path, name)) as output:
+            output.write(buffer.getvalue())
+
+        class KeepPartition:
+            @staticmethod
+            def test(row):
+                return row.get_field(0) == 'keep'
+
+        actual = manager.read(name, early_entry_filter=lambda bucket, _: bucket == 1,
+                              partition_filter=KeepPartition())
+        self.assertEqual([entry.file.file_name for entry in actual], ['selected.parquet'])
+
     def test_manifest_bucket_and_level_stats(self):
         manager = self._make_manager()
         entries = [self._create_manifest_entry('a', bucket=2),

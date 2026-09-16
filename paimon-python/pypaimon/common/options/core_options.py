@@ -557,6 +557,13 @@ class CoreOptions:
         .with_description("Optional tag name used in case of 'from-snapshot' scan mode.")
     )
 
+    SCAN_VERSION: ConfigOption[str] = (
+        ConfigOptions.key("scan.version")
+        .string_type()
+        .no_default_value()
+        .with_description("Time-travel version: tag name, watermark-<value>, or snapshot id; tags take precedence.")
+    )
+
     SCAN_SNAPSHOT_ID: ConfigOption[int] = (
         ConfigOptions.key("scan.snapshot-id")
         .long_type()
@@ -636,6 +643,13 @@ class CoreOptions:
         .boolean_type()
         .default_value(False)
         .with_description("Whether to enable deletion vectors.")
+    )
+
+    DELETION_VECTORS_MERGE_ON_READ: ConfigOption[bool] = (
+        ConfigOptions.key("deletion-vectors.merge-on-read")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Whether batch reads merge level-0 files when deletion vectors are enabled.")
     )
 
     INDEX_FILE_IN_DATA_FILE_DIR: ConfigOption[bool] = (
@@ -1402,7 +1416,8 @@ class CoreOptions:
                 return StartupMode.FROM_TIMESTAMP
             elif (self.options.contains(CoreOptions.SCAN_SNAPSHOT_ID)
                   or self.options.contains(CoreOptions.SCAN_TAG_NAME)
-                  or self.options.contains(CoreOptions.SCAN_WATERMARK)):
+                  or self.options.contains(CoreOptions.SCAN_WATERMARK)
+                  or self.options.contains(CoreOptions.SCAN_VERSION)):
                 return StartupMode.FROM_SNAPSHOT
             elif self.options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
                 return StartupMode.INCREMENTAL
@@ -1499,6 +1514,12 @@ class CoreOptions:
 
     def deletion_vectors_enabled(self, default=None):
         return self.options.get(CoreOptions.DELETION_VECTORS_ENABLED, default)
+
+    def batch_scan_skip_level0(self):
+        """Match Java CoreOptions.batchScanSkipLevel0."""
+        if self.deletion_vectors_enabled():
+            return not self.options.get(CoreOptions.DELETION_VECTORS_MERGE_ON_READ)
+        return self.merge_engine() == MergeEngine.FIRST_ROW
 
     def index_file_in_data_file_dir(self, default=None):
         return self.options.get(CoreOptions.INDEX_FILE_IN_DATA_FILE_DIR, default)

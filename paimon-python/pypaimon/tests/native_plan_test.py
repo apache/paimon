@@ -72,6 +72,8 @@ def _scan(native_enabled, file_scanner):
     file_scanner._row_ranges = None                # no explicit row ranges
     file_scanner.deletion_vectors_enabled = False  # no deletion vectors
     file_scanner.data_evolution = False            # no data evolution
+    file_scanner.is_streaming = False
+    file_scanner.skip_level0 = False
     file_scanner.only_read_real_buckets = False    # not postpone bucket
     scan.file_scanner = file_scanner
     scan.predicate = None
@@ -225,21 +227,22 @@ class NativePlanTest(unittest.TestCase):
         fs.scan.assert_not_called()
         self.assertEqual(plan.splits(), [])
 
-    def test_scored_global_index_result_falls_back(self):
+    def test_scored_global_index_result_uses_native_ranges(self):
+        from pypaimon.globalindex.indexed_split import IndexedSplit
+        from pypaimon.read.split import DataSplit
+
         fs = Mock(partition_key_predicate=None)
-        sentinel = object()
-        fs.scan.return_value = sentinel
         scan = _scan(native_enabled=True, file_scanner=fs)
         fs.data_evolution = True
         bitmap = GlobalIndexResult.from_range(Range(1, 1)).results()
-        fs._global_index_result = ScoredGlobalIndexResult.create(
-            bitmap, lambda _: 1.0)
-
-        with patch('pypaimon.read.native_plan.native_plan') as np:
-            self.assertIs(scan.plan(), sentinel)
-
-        np.assert_not_called()
-        fs.scan.assert_called_once_with()
+        fs._global_index_result = ScoredGlobalIndexResult.create(bitmap, lambda _: 0.75)
+        split = IndexedSplit(DataSplit([], None, 0), [Range(1, 1)])
+        with patch('pypaimon.read.native_plan.native_plan', return_value=Plan([split], 9)) as np:
+            plan = scan.plan()
+        self.assertEqual(np.call_args[1]['row_ranges'], [(1, 1)])
+        self.assertEqual(plan.splits()[0].scores(), [0.75])
+        self.assertEqual(plan.snapshot_id, 9)
+        fs.scan.assert_not_called()
 
     def test_global_index_row_ranges_require_data_evolution_append_table(self):
         result = GlobalIndexResult.from_range(Range(1, 1))
@@ -282,20 +285,14 @@ class NativePlanTest(unittest.TestCase):
         check(lambda s, fs: setattr(fs, '_global_index_result', object()))
         check(lambda s, fs: setattr(fs, '_row_ranges', [object()]))
         check(lambda s, fs: setattr(fs, 'deletion_vectors_enabled', True))
-        check(lambda s, fs: setattr(fs, 'only_read_real_buckets', True))
+        check(lambda s, fs: setattr(fs, 'is_streaming', True))
         check(lambda s, fs: (setattr(s.table, 'is_primary_key_table', True),
                              setattr(s.table, 'trimmed_primary_keys', [])))
-        check(lambda s, fs: s.table.bucket_mode.__setattr__(
-            'return_value', BucketMode.HASH_DYNAMIC))
-        check(lambda s, fs: s.table.bucket_mode.__setattr__(
-            'return_value', BucketMode.CROSS_PARTITION))
         check(lambda s, fs: setattr(
             s.table, '_applied_dynamic_options', {'scan.snapshot-id': None}))
         check(lambda s, fs: setattr(s.table.schema_manager.latest.return_value, 'id', 2))
         check(lambda s, fs: s.table.schema_manager.latest.__setattr__(
             'side_effect', RuntimeError('metadata read failed')))
-        check(lambda s, fs: s.table.options.options.contains_key.__setattr__(
-            'side_effect', lambda k: k == 'scan.version'))
         check(lambda s, fs: s.table.options.merge_engine.__setattr__(
             'return_value', 'first-row'))
         check(lambda s, fs: setattr(s.table.options, 'query_auth_enabled', True))
@@ -581,6 +578,7 @@ class NativePlanTest(unittest.TestCase):
         self.assertEqual(_read_options(table), {
             'source.split.target-size': '1024',
             'source.split.open-file-cost': '128',
+            'deletion-vectors.merge-on-read': 'false',
             'scan.snapshot-id': '9',
             'global-index.search-mode': 'detail',
             'scalar-index.search-mode': 'full',
@@ -692,7 +690,7 @@ class NativePlanTest(unittest.TestCase):
         table.partition_keys = []
         table.options.source_split_target_size.return_value = 1024
         table.options.source_split_open_file_cost.return_value = 128
-        table.options.options.contains_key.return_value = False
+        table.options.options = Options({})
         table._applied_dynamic_options = {}
         split = Mock()
         split.serialize.return_value = b'bytes'
@@ -722,6 +720,7 @@ class NativePlanTest(unittest.TestCase):
         rt.new_read_builder.assert_called_once_with({
             CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(): '1024',
             CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(): '128',
+            CoreOptions.DELETION_VECTORS_MERGE_ON_READ.key(): 'false',
         })
         builder.with_row_ranges.assert_called_once_with([(1, 2)])
         des.assert_called_once_with(b'bytes', [], kfields)
@@ -846,7 +845,7 @@ class NativePlanTest(unittest.TestCase):
                                 'pypaimon.read.native_plan.native_plan',
                                 return_value=Plan([], 1)) as native:
                             result = scan.plan()
-                        if version in ('0.4.0', '0.4.1') and not merge_on_read:
+                        if version in ('0.4.0', '0.4.1'):
                             self.assertEqual(result.snapshot_id, 1)
                             fs.scan.assert_not_called()
                         else:

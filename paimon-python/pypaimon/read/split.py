@@ -79,7 +79,8 @@ class DataSplit(Split):
         bucket: int,
         raw_convertible: bool = False,
         data_deletion_files: Optional[List[DeletionFile]] = None,
-        snapshot_id: Optional[int] = None
+        snapshot_id: Optional[int] = None,
+        is_streaming: bool = False,
     ):
         self._files = files
         self._partition = partition
@@ -88,6 +89,7 @@ class DataSplit(Split):
         self.data_deletion_files = data_deletion_files
         # Scanned snapshot; None unless populated (e.g. by the native planner).
         self.snapshot_id = snapshot_id
+        self.is_streaming = is_streaming
 
     @property
     def files(self) -> List[DataFileMeta]:
@@ -125,7 +127,8 @@ class DataSplit(Split):
             bucket=self._bucket,
             raw_convertible=self.raw_convertible,
             data_deletion_files=filtered_data_deletion_files,
-            snapshot_id=self.snapshot_id
+            snapshot_id=self.snapshot_id,
+            is_streaming=self.is_streaming,
         )
 
     @property
