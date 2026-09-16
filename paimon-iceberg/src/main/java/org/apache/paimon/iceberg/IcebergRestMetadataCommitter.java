@@ -57,6 +57,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -90,12 +91,25 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     private final String icebergDatabaseName;
     private final TableIdentifier icebergTableIdentifier;
     private final IcebergOptions icebergOptions;
+    private final int unknownHostMaxRetries;
+    private final long unknownHostInitialRetryDelayMillis;
 
     private Table icebergTable;
 
     public IcebergRestMetadataCommitter(FileStoreTable table) {
         Options options = new Options(table.options());
         icebergOptions = new IcebergOptions(options);
+        unknownHostMaxRetries = options.get(IcebergOptions.UNKNOWN_HOST_RETRY_MAX_RETRIES);
+        unknownHostInitialRetryDelayMillis =
+                options.get(IcebergOptions.UNKNOWN_HOST_RETRY_INITIAL_DELAY_MILLIS);
+        Preconditions.checkArgument(
+                unknownHostMaxRetries >= 0,
+                "%s must be non-negative",
+                IcebergOptions.UNKNOWN_HOST_RETRY_MAX_RETRIES.key());
+        Preconditions.checkArgument(
+                unknownHostInitialRetryDelayMillis >= 0,
+                "%s must be non-negative",
+                IcebergOptions.UNKNOWN_HOST_RETRY_INITIAL_DELAY_MILLIS.key());
         this.fileIO = table.fileIO();
         this.metadataDirectory = IcebergCommitCallback.catalogTableMetadataPath(table);
 
@@ -140,15 +154,56 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     @Override
     public void commitMetadata(
             IcebergMetadata newIcebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata) {
-        try {
-            commitMetadataImpl(newIcebergMetadata, baseIcebergMetadata);
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Fail to commit iceberg metadata for table: " + icebergTableIdentifier, e);
+        long delayMillis = unknownHostInitialRetryDelayMillis;
+        for (int retry = 0; ; retry++) {
+            try {
+                commitMetadataImpl(newIcebergMetadata, baseIcebergMetadata);
+                return;
+            } catch (Exception e) {
+                if (!hasUnknownHostCause(e) || retry == unknownHostMaxRetries) {
+                    throw commitFailure(e);
+                }
+
+                LOG.warn(
+                        "Iceberg REST catalog DNS lookup failed for table {}; retrying in {} ms "
+                                + "({}/{}).",
+                        icebergTableIdentifier,
+                        delayMillis,
+                        retry + 1,
+                        unknownHostMaxRetries,
+                        e);
+                try {
+                    sleepBeforeUnknownHostRetry(delayMillis);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw commitFailure(interrupted);
+                }
+                delayMillis = delayMillis > Long.MAX_VALUE / 2 ? Long.MAX_VALUE : delayMillis * 2;
+            }
         }
     }
 
-    private void commitMetadataImpl(
+    private RuntimeException commitFailure(Exception cause) {
+        return new RuntimeException(
+                "Fail to commit iceberg metadata for table: " + icebergTableIdentifier, cause);
+    }
+
+    @VisibleForTesting
+    protected void sleepBeforeUnknownHostRetry(long delayMillis) throws InterruptedException {
+        Thread.sleep(delayMillis);
+    }
+
+    private static boolean hasUnknownHostCause(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof UnknownHostException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @VisibleForTesting
+    protected void commitMetadataImpl(
             IcebergMetadata newIcebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata) {
 
         newIcebergMetadata = adjustMetadataForRest(newIcebergMetadata);
