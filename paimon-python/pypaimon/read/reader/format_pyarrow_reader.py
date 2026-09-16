@@ -25,6 +25,7 @@ from concurrent.futures import Future
 from typing import Any, Callable, Deque, Dict, Iterator, List, Optional, Set, Tuple
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.dataset as ds
 from pyarrow import RecordBatch
 
@@ -1125,11 +1126,10 @@ def _normalized_offsets(column):
             [None, column.buffers()[1]],
             offset=column.offset,
         )
-    raw_offsets = offsets_array.to_pylist()
-    start = raw_offsets[0]
-    end = raw_offsets[-1]
-    offsets = [value - start for value in raw_offsets]
-    for index, is_null in enumerate(column.is_null().to_pylist()):
-        if is_null:
-            offsets[index] = None
-    return pa.array(offsets, type=offsets_array.type), start, end
+    start = offsets_array[0].as_py()
+    end = offsets_array[-1].as_py()
+    offsets = pc.subtract(offsets_array, pa.scalar(start, type=offsets_array.type))
+    if column.null_count:
+        mask = pa.concat_arrays([column.is_null(), pa.array([False])])
+        offsets = pc.if_else(mask, pa.scalar(None, type=offsets_array.type), offsets)
+    return offsets, start, end
