@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.stream.LongStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -28,24 +29,42 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RowRangeIndexTest {
 
     @Test
-    void testFromBitmap() {
-        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(2, 3, 4, 8, 9, 10);
-        RowRangeIndex index = RowRangeIndex.fromBitmap(bitmap);
-
-        assertThat(index.ranges()).containsExactly(new Range(2, 4), new Range(8, 10));
-        assertThat(index.intersectedRanges(3, 9)).containsExactly(new Range(3, 4), new Range(8, 9));
-
-        bitmap.add(20);
-        assertThat(index.intersects(20, 20)).isFalse();
-
-        assertThat(
-                        RowRangeIndex.fromBitmap(
-                                        RoaringNavigableMap64.bitmapOf(
-                                                Long.MAX_VALUE, Long.MIN_VALUE))
-                                .ranges())
-                .containsExactly(
-                        new Range(Long.MIN_VALUE, Long.MIN_VALUE),
-                        new Range(Long.MAX_VALUE, Long.MAX_VALUE));
+    void testFromBitmapPreservesRangeQueriesAndOwnership() {
+        for (long[] values :
+                new long[][] {
+                    {},
+                    {0},
+                    {0, 1, 2, 9, 11, 12},
+                    {Integer.MAX_VALUE, (1L << 32) - 1, 1L << 32, Long.MAX_VALUE},
+                    {-2, -1, 0, 1, Long.MAX_VALUE},
+                    {Long.MIN_VALUE, -2, -1},
+                    LongStream.range(0, 10000).toArray()
+                }) {
+            RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(values);
+            RowRangeIndex expected = RowRangeIndex.create(bitmap.toRangeList());
+            RowRangeIndex actual = RowRangeIndex.fromBitmap(bitmap);
+            assertThat(actual.ranges()).isEqualTo(expected.ranges());
+            long[] bounds = {
+                Long.MIN_VALUE, -2, -1, 0, 1, 3, 8, 9, 10, 11, 13, 9999, 1L << 32, Long.MAX_VALUE
+            };
+            for (long start : bounds) {
+                for (long end : bounds) {
+                    if (start <= end) {
+                        Range range = new Range(start, end);
+                        assertThat(actual.intersects(start, end))
+                                .isEqualTo(expected.intersects(start, end));
+                        assertThat(actual.intersectedRanges(start, end))
+                                .isEqualTo(expected.intersectedRanges(start, end));
+                        assertThat(actual.contains(range)).isEqualTo(expected.contains(range));
+                        assertThat(actual.containsExactly(range))
+                                .isEqualTo(expected.containsExactly(range));
+                    }
+                }
+            }
+            bitmap.add(20000);
+            assertThat(actual.ranges()).isEqualTo(expected.ranges());
+            assertThat(actual.intersects(20000, 20000)).isFalse();
+        }
     }
 
     @Test
