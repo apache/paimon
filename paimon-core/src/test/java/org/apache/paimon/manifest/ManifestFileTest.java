@@ -101,6 +101,28 @@ public class ManifestFileTest {
     }
 
     @Test
+    void testDeleteManifestAndOnlyReferencedExtraFiles() throws Exception {
+        ManifestFile manifests = createManifestFile(tempDir.toString());
+        ManifestFileMeta meta = manifests.write(Collections.singletonList(gen.next())).get(0);
+        java.nio.file.Path manifestDir = tempDir.resolve("manifest");
+        String sidecar = "custom-index" + ManifestSidecar.SUFFIX;
+        String extra = "other-extra";
+        String unreferenced = meta.fileName() + ManifestSidecar.SUFFIX;
+        for (String name : Arrays.asList(sidecar, extra, unreferenced)) {
+            Files.createFile(manifestDir.resolve(name));
+        }
+        manifests.delete(
+                ManifestIndexTestUtils.withExtraFiles(meta, Arrays.asList(sidecar, extra)));
+        assertThat(Files.exists(manifestDir.resolve(meta.fileName()))).isFalse();
+        assertThat(Files.exists(manifestDir.resolve(sidecar))).isFalse();
+        assertThat(Files.exists(manifestDir.resolve(extra))).isFalse();
+        assertThat(Files.exists(manifestDir.resolve(unreferenced))).isTrue();
+        // Deleting already removed files is harmless.
+        manifests.delete(
+                ManifestIndexTestUtils.withExtraFiles(meta, Arrays.asList(sidecar, extra)));
+    }
+
+    @Test
     void testWriteManifestFileToExplicitPath() throws Exception {
         List<ManifestEntry> entries = generateData();
         ManifestFile manifestFile = createManifestFile(tempDir.toString());
