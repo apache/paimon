@@ -3291,7 +3291,7 @@ public class CoreOptions implements Serializable {
     }
 
     public static String normalizeFileFormat(String fileFormat) {
-        return StringUtils.isEmpty(fileFormat) ? fileFormat : fileFormat.toLowerCase();
+        return StringUtils.isEmpty(fileFormat) ? fileFormat : fileFormat.toLowerCase(Locale.ROOT);
     }
 
     public String dataFilePrefix() {
@@ -4256,7 +4256,10 @@ public class CoreOptions implements Serializable {
 
     public Set<PartitionMarkDoneAction> partitionMarkDoneActions() {
         return Arrays.stream(options.get(PARTITION_MARK_DONE_ACTION).split(","))
-                .map(x -> PartitionMarkDoneAction.valueOf(x.replace('-', '_').toUpperCase()))
+                .map(
+                        x ->
+                                PartitionMarkDoneAction.valueOf(
+                                        x.replace('-', '_').toUpperCase(Locale.ROOT)))
                 .collect(Collectors.toCollection(HashSet::new));
     }
 

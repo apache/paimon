@@ -25,6 +25,7 @@ import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.PathFactory;
 
 import java.io.IOException;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -65,7 +66,8 @@ public class IcebergPathFactory {
     }
 
     public Path toMetadataPath(long snapshotId) {
-        return new Path(metadataDirectory(), String.format("v%d.metadata.json", snapshotId));
+        return new Path(
+                metadataDirectory(), String.format(Locale.ROOT, "v%d.metadata.json", snapshotId));
     }
 
     public Path toMetadataPath(String metadataName) {

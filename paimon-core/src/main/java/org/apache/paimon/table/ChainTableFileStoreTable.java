@@ -35,6 +35,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -106,7 +107,7 @@ public class ChainTableFileStoreTable extends FallbackReadFileStoreTable {
                 }
                 return "from-timestamp";
             default:
-                return effectiveMode.name().toLowerCase().replace('_', '-');
+                return effectiveMode.name().toLowerCase(Locale.ROOT).replace('_', '-');
         }
     }
 
