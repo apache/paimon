@@ -19,8 +19,6 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.BinaryRowWriter;
-import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataTypes;
@@ -36,16 +34,18 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
-import java.util.Properties;
 import java.util.function.BiPredicate;
+import java.util.zip.CRC32;
 
+import static org.apache.paimon.manifest.ManifestSidecarTest.header;
 import static org.apache.paimon.manifest.ManifestSidecarTest.meta;
+import static org.apache.paimon.manifest.ManifestSidecarTest.partition;
+import static org.apache.paimon.manifest.ManifestSidecarTest.testSidecar;
+import static org.apache.paimon.manifest.ManifestSidecarTest.verifyGoldenFile;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -60,27 +60,6 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 class ManifestBlockIndexTest {
 
     private final RowType type = RowType.of(DataTypes.INT(), DataTypes.STRING());
-
-    private byte[] fixture(String field) throws IOException {
-        Properties p = new Properties();
-        try (java.io.InputStream in = getClass().getResourceAsStream("/manifest-sidecar.txt")) {
-            p.load(in);
-        }
-        return Base64.getDecoder().decode(p.getProperty(field));
-    }
-
-    private byte[] partition(int p, String q) {
-        BinaryRow row = new BinaryRow(2);
-        BinaryRowWriter writer = new BinaryRowWriter(row);
-        writer.writeInt(0, p);
-        if (q == null) {
-            writer.setNullAt(1);
-        } else {
-            writer.writeString(1, BinaryString.fromString(q));
-        }
-        writer.complete();
-        return SerializationUtils.serializeBinaryRow(row);
-    }
 
     private RowRangeIndex query(long point) {
         return RowRangeIndex.create(Collections.singletonList(new Range(point, point)));
@@ -100,8 +79,73 @@ class ManifestBlockIndexTest {
     }
 
     @Test
+    void testV1GoldenFile() throws Exception {
+        int blockCount = 10;
+        int entriesPerBlock = 16;
+        int blockLength = 1024 * 1024 + 17;
+        byte[] header = header();
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
+        for (int block = 0; block < blockCount; block++) {
+            builder.beginBlock(
+                    header.length + (long) block * blockLength, blockLength, entriesPerBlock);
+            long rowBase = (long) block << 40;
+            int step = block % 4 == 0 ? 16400 : 16;
+            for (int entry = 0; entry < entriesPerBlock; entry++) {
+                int p = (block * 7 + entry * 3) % 16;
+                builder.add(
+                        rowBase + (long) entry * step,
+                        3,
+                        partition(p, p % 7 == 0 ? null : "partition-" + p),
+                        block + entry * 13,
+                        entry % 2 == 0 ? 512 : 1024);
+            }
+            builder.endBlock();
+        }
+        long fileSize = header.length + (long) blockCount * blockLength;
+        long entryCount = (long) blockCount * entriesPerBlock;
+        byte[] current = builder.serialize(fileSize, entryCount);
+        assertThat(current.length).isBetween(2 * 1024, 2 * 1024 + 256);
+        byte[] data = verifyGoldenFile(current);
+        ManifestFileMeta meta = meta("manifest-golden-v1", fileSize, entryCount);
+        assertThat(partitionCount(data)).isEqualTo(16);
+        List<ManifestSidecar.Block> blocks = ManifestSidecar.select(data, meta, null).blocks();
+        assertThat(blocks).hasSize(blockCount);
+        for (int block = 0; block < blockCount; block++) {
+            ManifestSidecar.Block expected = blocks.get(block);
+            assertThat(expected.offset).isEqualTo(header.length + (long) block * blockLength);
+            assertThat(expected.length).isEqualTo(blockLength);
+            assertThat(expected.firstRecord).isEqualTo((long) block * entriesPerBlock);
+            assertThat(expected.recordCount).isEqualTo(entriesPerBlock);
+            int step = block % 4 == 0 ? 16400 : 16;
+            for (int entry = 0; entry < entriesPerBlock; entry++) {
+                long rowId = ((long) block << 40) + (long) entry * step;
+                int p = (block * 7 + entry * 3) % 16;
+                int bucket = block + entry * 13;
+                int total = entry % 2 == 0 ? 512 : 1024;
+                assertThat(
+                                ManifestSidecar.select(
+                                                data,
+                                                meta,
+                                                query(rowId),
+                                                part(p),
+                                                type,
+                                                (b, t) -> b == bucket && t == total)
+                                        .blocks())
+                        .extracting(b -> b.firstRecord)
+                        .containsExactly((long) block * entriesPerBlock);
+                assertThat(ManifestSidecar.select(data, meta, query(rowId + 3)).blocks()).isEmpty();
+            }
+        }
+        assertThat(ManifestSidecar.select(data, meta, null, part(99), type).blocks()).isEmpty();
+        assertThat(
+                        ManifestSidecar.select(data, meta, null, null, type, (b, t) -> t == 4096)
+                                .blocks())
+                .isEmpty();
+    }
+
+    @Test
     void partitionCoverageIsAlwaysGenerated() throws Exception {
-        byte[] header = fixture("avroHeader");
+        byte[] header = header();
         for (int mask = 0; mask < 4; mask++) {
             boolean rowIdEnabled = (mask & 1) != 0;
             boolean bucketEnabled = (mask & 2) != 0;
@@ -128,7 +172,7 @@ class ManifestBlockIndexTest {
                     .hasSize(bucketEnabled ? 0 : 2);
 
             // Generation settings do not disable payloads already stored in a sidecar.
-            byte[] existing = fixture("indexWithBuckets");
+            byte[] existing = testSidecar();
             ManifestFileMeta existingMeta = meta("manifest-golden", header.length + 400, 7);
             assertThat(ManifestSidecar.select(existing, existingMeta, query(999)).blocks())
                     .isEmpty();
@@ -144,14 +188,11 @@ class ManifestBlockIndexTest {
         }
     }
 
-    @Test
-    void jointGoldenPreservesTuplesNullsAndDerivedOrdinals() throws Exception {
-        byte[] a = partition(7, "left");
-        byte[] b = partition(9, null);
-        assertThat(a).isEqualTo(fixture("partitionA"));
-        assertThat(b).isEqualTo(fixture("partitionB"));
-        byte[] header = fixture("avroHeader");
-        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
+    private byte[] sidecarWithoutBuckets(boolean partitioned) throws IOException {
+        byte[] a = partitioned ? partition(7, "left") : null;
+        byte[] b = partitioned ? partition(9, null) : null;
+        byte[] header = header();
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, false);
         builder.beginBlock(header.length, 100, 3);
         builder.add(0L, 10, a);
         builder.add(5L, 5, a);
@@ -165,9 +206,13 @@ class ManifestBlockIndexTest {
         builder.add(20L, 5, a);
         builder.add(Long.MAX_VALUE, 1, b);
         builder.endBlock();
-        byte[] data = builder.serialize(header.length + 400, 7);
-        assertThat(data).isEqualTo(fixture("indexWithPartitions"));
-        ManifestFileMeta meta = meta("manifest-golden", header.length + 400, 7);
+        return builder.serialize(header.length + 400, 7);
+    }
+
+    @Test
+    void partitionTuplesNullsAndDerivedOrdinals() throws Exception {
+        byte[] data = testSidecar();
+        ManifestFileMeta meta = testMeta();
         PartitionPredicate filter = spy(part(7));
         assertThat(ManifestSidecar.select(data, meta, query(20), filter, type).blocks())
                 .extracting(block -> block.firstRecord)
@@ -178,13 +223,16 @@ class ManifestBlockIndexTest {
         assertThat(ManifestSidecar.select(data, meta, null, nullFilter, type).blocks()).hasSize(3);
         assertThat(ManifestSidecar.select(data, meta, null, part(99), type).blocks()).isEmpty();
         // Missing partition payloads cannot be pruned by dictionary misses.
-        assertThat(ManifestSidecar.select(fixture("index"), meta, null, part(99), type).blocks())
+        assertThat(
+                        ManifestSidecar.select(
+                                        sidecarWithoutBuckets(false), meta, null, part(99), type)
+                                .blocks())
                 .hasSize(3);
     }
 
     @Test
     void unavailableDimensionsAreIndependentAndDoNotPoisonLaterBlocks() throws Exception {
-        byte[] header = fixture("avroHeader");
+        byte[] header = header();
         ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         builder.beginBlock(header.length, 100, 1);
         builder.add(null, 10, partition(7, "left"));
@@ -252,17 +300,18 @@ class ManifestBlockIndexTest {
         return position;
     }
 
-    private byte[] checksum(byte[] data) throws Exception {
-        byte[] hash =
-                MessageDigest.getInstance("SHA-256").digest(Arrays.copyOf(data, data.length - 32));
-        System.arraycopy(hash, 0, data, data.length - 32, 32);
+    private byte[] checksum(byte[] data) {
+        int limit = data.length - Integer.BYTES;
+        CRC32 crc = new CRC32();
+        crc.update(data, 0, limit);
+        ByteBuffer.wrap(data, limit, Integer.BYTES).putInt((int) crc.getValue());
         return data;
     }
 
     @Test
     void absentRowOrBucketFiltersKeepRemainingDimensions() throws Exception {
-        byte[] data = fixture("indexWithBuckets");
-        ManifestFileMeta meta = meta("manifest-golden", fixture("avroHeader").length + 400, 7);
+        byte[] data = testSidecar();
+        ManifestFileMeta meta = meta("manifest-golden", header().length + 400, 7);
         assertThat(
                         ManifestSidecar.select(data, meta, null, part(7), type, bucketFilter(1))
                                 .blocks())
@@ -277,26 +326,9 @@ class ManifestBlockIndexTest {
     }
 
     @Test
-    void bucketPayloadGoldenAndTotalBucketsArePreserved() throws Exception {
-        byte[] header = fixture("avroHeader");
-        byte[] a = partition(7, "left");
-        byte[] b = partition(9, null);
-        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
-        builder.beginBlock(header.length, 100, 3);
-        builder.add(0L, 10, a, 1, 4);
-        builder.add(5L, 5, a, 1, 4);
-        builder.add(20L, 5, b, 1, 8);
-        builder.endBlock();
-        builder.beginBlock(header.length + 100, 200, 2);
-        builder.add((1L << 32) - 2, 5, b, 2, 4);
-        builder.add(8254058425445L, 1, a, 2, 8);
-        builder.endBlock();
-        builder.beginBlock(header.length + 300, 100, 2);
-        builder.add(20L, 5, a, 0, 1);
-        builder.add(Long.MAX_VALUE, 1, b, 3, 4);
-        builder.endBlock();
-        byte[] data = builder.serialize(header.length + 400, 7);
-        assertThat(data).isEqualTo(fixture("indexWithBuckets"));
+    void bucketPayloadAndTotalBucketsArePreserved() throws Exception {
+        byte[] header = header();
+        byte[] data = testSidecar();
         ManifestFileMeta meta = meta("manifest-golden", header.length + 400, 7);
         BiPredicate<Integer, Integer> bucket = bucketFilter(1);
         assertThat(ManifestSidecar.select(data, meta, null, null, type, bucket).blocks())
@@ -313,10 +345,10 @@ class ManifestBlockIndexTest {
                 .containsExactly(3L);
         // The caller can omit a bucket filter which requires an actual entry partition.
         assertThat(ManifestSidecar.select(data, meta, null, null, type, null).blocks()).hasSize(3);
-        for (String unavailable : new String[] {"index", "indexWithPartitions"}) {
+        for (boolean partitioned : new boolean[] {false, true}) {
             assertThat(
                             ManifestSidecar.select(
-                                            fixture(unavailable),
+                                            sidecarWithoutBuckets(partitioned),
                                             meta,
                                             null,
                                             null,
@@ -329,7 +361,7 @@ class ManifestBlockIndexTest {
 
     @Test
     void splitBucketArraysPreserveDecreasingTotalsAndRescaling() throws Exception {
-        byte[] header = fixture("avroHeader");
+        byte[] header = header();
         ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, false, true);
         builder.beginBlock(header.length, 100, 5);
         for (int[] pair : new int[][] {{3, 4}, {2, 8}, {0, Integer.MAX_VALUE}, {2, 4}, {2, 4}}) {
@@ -382,18 +414,18 @@ class ManifestBlockIndexTest {
                         new byte[] {2, 1, 0, 1, 8, 8}, // Two buckets, one total, extra bytes.
                         bucketPayload(2, new long[] {1, 0}, 1, 0), // ZigZag -1 from zero.
                         bucketPayload(2, new long[] {1, 0}, 8, 0))) { // Repeated pair.
-            byte[] data = replacePayload(fixture("indexWithBuckets"), 0, 3, payload);
+            byte[] data = replacePayload(testSidecar(), 0, 3, payload);
             assertThatThrownBy(
                             () ->
                                     ManifestSidecar.select(
-                                            data, goldenMeta(), null, null, type, bucketFilter(99)))
+                                            data, testMeta(), null, null, type, bucketFilter(99)))
                     .isInstanceOf(IOException.class);
         }
     }
 
     @Test
     void unknownOrInvalidBucketPayloadIsUnavailable() throws Exception {
-        byte[] header = fixture("avroHeader");
+        byte[] header = header();
         for (Integer[] pair :
                 Arrays.asList(
                         new Integer[] {null, null},
@@ -428,7 +460,7 @@ class ManifestBlockIndexTest {
 
     @Test
     void largePayloadsKeepExactCoverage() throws Exception {
-        byte[] header = fixture("avroHeader");
+        byte[] header = header();
         ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         int blocks = 33;
         int entriesPerBlock = 4097;
@@ -462,7 +494,7 @@ class ManifestBlockIndexTest {
 
     @Test
     void absentPayloadsOmitLengthFieldsForEveryDimensionCombination() throws Exception {
-        byte[] header = fixture("avroHeader");
+        byte[] header = header();
         ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         for (int mask = 0; mask < 8; mask++) {
             builder.beginBlock(header.length + mask * 100L, 100, 1);
@@ -483,7 +515,9 @@ class ManifestBlockIndexTest {
                 int end =
                         dimension < 2
                                 ? positions.get(mask)[dimension + 2]
-                                : mask < 7 ? positions.get(mask + 1)[0] : data.length - 32;
+                                : mask < 7
+                                        ? positions.get(mask + 1)[0]
+                                        : data.length - Integer.BYTES;
                 boolean present = (mask & (1 << dimension)) != 0;
                 assertThat(data[start]).isEqualTo((byte) (present ? 1 : 0));
                 assertThat(end - start).isEqualTo(present ? presentSizes[dimension] : 1);
@@ -507,7 +541,7 @@ class ManifestBlockIndexTest {
 
     @Test
     void deltaVarintsCompressSortedPayloadsWithoutCoarseningRowIds() throws Exception {
-        byte[] header = fixture("avroHeader");
+        byte[] header = header();
         ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         int count = 10000;
         builder.beginBlock(header.length, 100, count);
@@ -531,7 +565,7 @@ class ManifestBlockIndexTest {
 
     @Test
     void unpartitionedTablesStillRecordTheEmptyPartition() throws Exception {
-        byte[] header = fixture("avroHeader");
+        byte[] header = header();
         ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, false, false);
         builder.beginBlock(header.length, 100, 1);
         builder.add(null, 0, SerializationUtils.serializeBinaryRow(BinaryRow.EMPTY_ROW));
@@ -555,13 +589,11 @@ class ManifestBlockIndexTest {
 
     @Test
     void rowMissSkipsPartitionAndBucketDecoding() throws Exception {
-        byte[] data =
-                replacePayload(fixture("indexWithBuckets"), 0, 1, compressedPayload(2, 999, 1));
+        byte[] data = replacePayload(testSidecar(), 0, 1, compressedPayload(2, 999, 1));
         data = replacePayload(data, 0, 3, bucketPayload(2, new long[] {0, 0}, 0, 0));
         BiPredicate<Integer, Integer> buckets = mock(BiPredicate.class);
         assertThat(
-                        ManifestSidecar.select(
-                                        data, goldenMeta(), query(15), part(7), type, buckets)
+                        ManifestSidecar.select(data, testMeta(), query(15), part(7), type, buckets)
                                 .blocks())
                 .isEmpty();
         verifyNoInteractions(buckets);
@@ -570,16 +602,11 @@ class ManifestBlockIndexTest {
     @Test
     void partitionMissSkipsBucketDecodingWithOrWithoutRowQuery() throws Exception {
         byte[] data =
-                replacePayload(
-                        fixture("indexWithBuckets"),
-                        0,
-                        3,
-                        bucketPayload(2, new long[] {0, 0}, 0, 0));
+                replacePayload(testSidecar(), 0, 3, bucketPayload(2, new long[] {0, 0}, 0, 0));
         for (RowRangeIndex rows : Arrays.asList(null, query(0))) {
             BiPredicate<Integer, Integer> buckets = mock(BiPredicate.class);
             assertThat(
-                            ManifestSidecar.select(
-                                            data, goldenMeta(), rows, part(99), type, buckets)
+                            ManifestSidecar.select(data, testMeta(), rows, part(99), type, buckets)
                                     .blocks())
                     .isEmpty();
             verifyNoInteractions(buckets);
@@ -588,11 +615,10 @@ class ManifestBlockIndexTest {
 
     @Test
     void absentPartitionFilterDoesNotDecodePartitionIds() throws Exception {
-        byte[] data =
-                replacePayload(fixture("indexWithBuckets"), 0, 1, compressedPayload(2, 999, 1));
+        byte[] data = replacePayload(testSidecar(), 0, 1, compressedPayload(2, 999, 1));
         BiPredicate<Integer, Integer> buckets = spy(bucketFilter(1));
         assertThat(
-                        ManifestSidecar.select(data, goldenMeta(), query(20), null, type, buckets)
+                        ManifestSidecar.select(data, testMeta(), query(20), null, type, buckets)
                                 .blocks())
                 .extracting(block -> block.firstRecord)
                 .containsExactly(0L);
@@ -604,45 +630,37 @@ class ManifestBlockIndexTest {
 
     @Test
     void matchesSkipUnusedDeltas() throws Exception {
-        byte[] partitions =
-                replacePayload(fixture("indexWithBuckets"), 0, 1, compressedPayload(2, 0, 999));
-        assertThat(
-                        ManifestSidecar.select(partitions, goldenMeta(), query(0), part(7), type)
-                                .blocks())
+        byte[] partitions = replacePayload(testSidecar(), 0, 1, compressedPayload(2, 0, 999));
+        assertThat(ManifestSidecar.select(partitions, testMeta(), query(0), part(7), type).blocks())
                 .hasSize(1);
         assertThatThrownBy(
                         () ->
                                 ManifestSidecar.select(
-                                        partitions, goldenMeta(), query(0), part(99), type))
+                                        partitions, testMeta(), query(0), part(99), type))
                 .isInstanceOf(IOException.class);
         byte[] buckets =
                 replacePayload(
-                        fixture("indexWithBuckets"),
+                        testSidecar(),
                         0,
                         3,
                         bucketPayload(2, new long[] {1, 0}, 8, Long.MAX_VALUE));
         assertThat(
                         ManifestSidecar.select(
-                                        buckets,
-                                        goldenMeta(),
-                                        query(0),
-                                        null,
-                                        type,
-                                        bucketFilter(1))
+                                        buckets, testMeta(), query(0), null, type, bucketFilter(1))
                                 .blocks())
                 .hasSize(1);
         assertThatThrownBy(
                         () ->
                                 ManifestSidecar.select(
                                         buckets,
-                                        goldenMeta(),
+                                        testMeta(),
                                         query(0),
                                         null,
                                         type,
                                         bucketFilter(99)))
                 .isInstanceOf(IOException.class);
 
-        byte[] header = fixture("avroHeader");
+        byte[] header = header();
         ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
         builder.beginBlock(header.length, 100, 3);
         for (long first : new long[] {0, 20, 40}) {
@@ -677,17 +695,17 @@ class ManifestBlockIndexTest {
                         Arrays.copyOf(rowPayload(1, 0, 24), 16), // Missing endpoint count.
                         rowPayload(1, 0, 24, 0)); // Unexpected value for a single interval.
         for (byte[] payload : badRows) {
-            byte[] data = replacePayload(fixture("indexWithBuckets"), 0, 2, payload);
-            assertThatThrownBy(() -> ManifestSidecar.select(data, goldenMeta(), query(15)))
+            byte[] data = replacePayload(testSidecar(), 0, 2, payload);
+            assertThatThrownBy(() -> ManifestSidecar.select(data, testMeta(), query(15)))
                     .isInstanceOf(IOException.class);
         }
         for (byte[] payload :
                 Arrays.asList(compressedPayload(2, 999, 0), compressedPayload(2, 0, 0))) {
-            byte[] data = replacePayload(fixture("indexWithBuckets"), 0, 1, payload);
+            byte[] data = replacePayload(testSidecar(), 0, 1, payload);
             assertThatThrownBy(
                             () ->
                                     ManifestSidecar.select(
-                                            data, goldenMeta(), query(0), part(99), type))
+                                            data, testMeta(), query(0), part(99), type))
                     .isInstanceOf(IOException.class);
         }
         for (byte[] payload :
@@ -695,12 +713,12 @@ class ManifestBlockIndexTest {
                         bucketPayload(2, new long[] {0, 4}, 2, 0),
                         bucketPayload(2, new long[] {1L << 31, 4}, 8, 0),
                         bucketPayload(2, new long[] {0, 0}, 2, 0))) {
-            byte[] data = replacePayload(fixture("indexWithBuckets"), 0, 3, payload);
+            byte[] data = replacePayload(testSidecar(), 0, 3, payload);
             assertThatThrownBy(
                             () ->
                                     ManifestSidecar.select(
                                             data,
-                                            goldenMeta(),
+                                            testMeta(),
                                             query(0),
                                             null,
                                             type,
@@ -728,15 +746,13 @@ class ManifestBlockIndexTest {
                                         ? bucketPayload(2, new long[] {1, 0})
                                         : compressedPayload(2));
                 payload.write(deltas);
-                byte[] data =
-                        replacePayload(
-                                fixture("indexWithBuckets"), 0, dimension, payload.toByteArray());
+                byte[] data = replacePayload(testSidecar(), 0, dimension, payload.toByteArray());
                 int dim = dimension;
                 assertThatThrownBy(
                                 () ->
                                         ManifestSidecar.select(
                                                 data,
-                                                goldenMeta(),
+                                                testMeta(),
                                                 query(0),
                                                 dim == 1 ? part(99) : null,
                                                 type,
@@ -760,23 +776,22 @@ class ManifestBlockIndexTest {
                         compressedPayload(2, 1));
         for (int dimension = 1; dimension <= 3; dimension++) {
             for (byte[] payload : bad) {
-                byte[] data = replacePayload(fixture("indexWithBuckets"), 0, dimension, payload);
-                assertThatThrownBy(() -> ManifestSidecar.select(data, goldenMeta(), query(999)))
+                byte[] data = replacePayload(testSidecar(), 0, dimension, payload);
+                assertThatThrownBy(() -> ManifestSidecar.select(data, testMeta(), query(999)))
                         .isInstanceOf(IOException.class);
             }
-            byte[] data = fixture("indexWithBuckets");
+            byte[] data = testSidecar();
             int position = positions(data).get(0)[dimension];
             Arrays.fill(data, position + 1, position + 6, (byte) 0xff);
             checksum(data);
-            assertThatThrownBy(() -> ManifestSidecar.select(data, goldenMeta(), query(999)))
+            assertThatThrownBy(() -> ManifestSidecar.select(data, testMeta(), query(999)))
                     .isInstanceOf(IOException.class);
         }
         byte[] missingEnvelope =
-                replacePayload(
-                        fixture("indexWithBuckets"), 0, 2, Arrays.copyOf(rowPayload(1, 0, 24), 16));
-        assertThatThrownBy(() -> ManifestSidecar.select(missingEnvelope, goldenMeta(), null))
+                replacePayload(testSidecar(), 0, 2, Arrays.copyOf(rowPayload(1, 0, 24), 16));
+        assertThatThrownBy(() -> ManifestSidecar.select(missingEnvelope, testMeta(), null))
                 .isInstanceOf(IOException.class);
-        byte[] data = fixture("indexWithBuckets");
+        byte[] data = testSidecar();
         int block = positions(data).get(0)[0];
         ByteBuffer directory = ByteBuffer.wrap(data);
         directory.position(block);
@@ -784,22 +799,20 @@ class ManifestBlockIndexTest {
         VarLengthIntUtils.decodeLong(directory);
         data[directory.position()] = 2;
         checksum(data);
-        assertThatThrownBy(() -> ManifestSidecar.select(data, goldenMeta(), query(999)))
+        assertThatThrownBy(() -> ManifestSidecar.select(data, testMeta(), query(999)))
                 .isInstanceOf(IOException.class);
     }
 
     @Test
     void unknownEncodingsRemainIndependent() throws Exception {
         for (int dimension = 1; dimension <= 3; dimension++) {
-            byte[] data =
-                    replacePayload(
-                            fixture("indexWithBuckets"), 0, dimension, new byte[] {(byte) 0x80});
+            byte[] data = replacePayload(testSidecar(), 0, dimension, new byte[] {(byte) 0x80});
             data[positions(data).get(0)[dimension]] = (byte) 202;
             checksum(data);
             assertThat(
                             ManifestSidecar.select(
                                             data,
-                                            goldenMeta(),
+                                            testMeta(),
                                             query(dimension == 2 ? 999 : 0),
                                             part(dimension == 1 ? 99 : 7),
                                             type,
@@ -810,8 +823,8 @@ class ManifestBlockIndexTest {
         }
     }
 
-    private ManifestFileMeta goldenMeta() throws Exception {
-        return meta("manifest-golden", fixture("avroHeader").length + 400, 7);
+    private ManifestFileMeta testMeta() throws Exception {
+        return meta("manifest-golden", header().length + 400, 7);
     }
 
     private byte[] replacePayload(byte[] data, int block, int dimension, byte[] payload)

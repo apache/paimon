@@ -178,6 +178,15 @@ public final class VarLengthIntUtils {
         throw new Error("Malformed integer.");
     }
 
+    /** Decodes a canonical nonnegative int from the buffer and advances its position. */
+    public static int decodeInt(ByteBuffer in) throws IOException {
+        long value = decodeLong(in);
+        if (value > Integer.MAX_VALUE) {
+            throw new IOException("Variable-length integer exceeds Integer.MAX_VALUE");
+        }
+        return (int) value;
+    }
+
     public static int decodeInt(InputStream is) throws IOException {
         for (int offset = 0, result = 0; offset < 32; offset += 7) {
             int b = is.read();

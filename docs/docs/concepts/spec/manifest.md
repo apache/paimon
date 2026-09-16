@@ -121,7 +121,7 @@ blocks[]                               // original physical order
   if bucketEncoding != 0:
     bucketPayloadLength : varint
     bucketPayload : bytes
-checksum : 32 bytes                     // SHA-256 of all preceding bytes
+checksum : 4 bytes                      // big-endian CRC32 of all preceding bytes
 ```
 
 The block ID is its position. Its first entry ordinal is the sum of preceding record counts
@@ -189,7 +189,7 @@ represented by its entries:
 
 ```text
 partitionPayload
-  intsDeltaPayload                    // N > 0 dictionary IDs, base = 0
+  intsDeltaPayload
 ```
 
 An ID is the zero-based position of a complete tuple in the sidecar's shared dictionary.
@@ -213,7 +213,7 @@ sorted and disjoint; they are never expanded into individual row IDs or coarsene
 rowIdPayload
   minRowId : long                      // first interval's start
   maxRowId : long                      // last interval's inclusive end
-  intsDeltaPayload                    // 2 * (N - 1) sorted interior endpoints, base = minRowId
+  intsDeltaPayload                    // stores longs: 2 * (N - 1) sorted interior endpoints, base = minRowId
 ```
 
 The envelope satisfies `0 <= minRowId <= maxRowId <= Long.MAX_VALUE`. Flatten the intervals

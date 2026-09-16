@@ -45,8 +45,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -58,7 +56,9 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.function.BiPredicate;
+import java.util.zip.CRC32;
 
+import static org.apache.paimon.utils.VarLengthIntUtils.decodeInt;
 import static org.apache.paimon.utils.VarLengthIntUtils.encodeLong;
 
 /** Independently usable partition, row-id and bucket coverage for each manifest block. */
@@ -71,7 +71,7 @@ public final class ManifestSidecar {
     private static final int MIN_HEADER_BYTES = 29;
     private static final int MIN_BLOCK_BYTES = 6;
     private static final byte[] EMPTY = new byte[0];
-    private static final int DIGEST_BYTES = 32;
+    private static final int CHECKSUM_BYTES = Integer.BYTES;
     private static final int SIDECAR_READ_BUFFER_BYTES = 1024 * 1024;
     private static final int BLOCK_READ_BUFFER_BYTES = 4 * 1024 * 1024;
     private static final ProjectedManifestEntry.Projection BLOCK_INDEX_PROJECTION =
@@ -316,7 +316,9 @@ public final class ManifestSidecar {
                 writePayload(out, block.rowIds);
                 writePayload(out, block.buckets);
             }
-            out.write(digest(buffer.toByteArray()));
+            CRC32 crc = new CRC32();
+            crc.update(buffer.toByteArray());
+            out.writeInt((int) crc.getValue());
             return buffer.toByteArray();
         }
 
@@ -428,28 +430,28 @@ public final class ManifestSidecar {
             @Nullable RowType partitionType,
             @Nullable BiPredicate<Integer, Integer> bucketFilter)
             throws IOException {
-        require(data.length >= MIN_HEADER_BYTES + DIGEST_BYTES);
-        int limit = data.length - DIGEST_BYTES;
-        require(
-                MessageDigest.isEqual(
-                        digest(data, limit), Arrays.copyOfRange(data, limit, data.length)));
+        require(data.length >= MIN_HEADER_BYTES + CHECKSUM_BYTES);
+        int limit = data.length - CHECKSUM_BYTES;
+        CRC32 crc = new CRC32();
+        crc.update(data, 0, limit);
+        require((int) crc.getValue() == ByteBuffer.wrap(data, limit, CHECKSUM_BYTES).getInt());
         ByteBuffer in = ByteBuffer.wrap(data, 0, limit).slice();
         require(in.getInt() == MAGIC);
-        require(readInt(in) == FORMAT_VERSION);
+        require(decodeInt(in) == FORMAT_VERSION);
         long entries = Math.addExact(manifest.numAddedFiles(), manifest.numDeletedFiles());
         require(entries >= 0);
-        int headerLength = readInt(in);
+        int headerLength = decodeInt(in);
         require(headerLength >= 21 && headerLength <= in.remaining() - 2);
         require(headerLength <= manifest.fileSize());
         byte[] header = new byte[headerLength];
         in.get(header);
         require(header[0] == 'O' && header[1] == 'b' && header[2] == 'j' && header[3] == 1);
-        int partitions = readInt(in);
+        int partitions = decodeInt(in);
         require(partitions <= in.remaining() / 13);
         boolean[] matches = partitionFilter == null ? null : new boolean[partitions];
         Set<ByteBuffer> unique = new java.util.HashSet<>();
         for (int id = 0; id < partitions; id++) {
-            int length = readInt(in);
+            int length = decodeInt(in);
             require(length >= 12 && length <= in.remaining());
             ByteBuffer encoded = in.slice();
             encoded.limit(length);
@@ -465,7 +467,7 @@ public final class ManifestSidecar {
             }
             in.position(in.position() + length);
         }
-        int count = readInt(in);
+        int count = decodeInt(in);
         require(count <= in.remaining() / MIN_BLOCK_BYTES);
         long nextOffset = headerLength;
         long firstRecord = 0;
@@ -498,7 +500,7 @@ public final class ManifestSidecar {
             }
             if (bucketPayload != null) {
                 ByteBuffer prefix = bucketPayload.duplicate();
-                int pairs = readInt(prefix);
+                int pairs = decodeInt(prefix);
                 require(pairs > 0 && pairs <= records && 2L * pairs + 1 <= prefix.remaining());
             }
             long blockFirstRecord = firstRecord;
@@ -592,7 +594,7 @@ public final class ManifestSidecar {
         if (encoding == 0) {
             return null;
         }
-        int length = readInt(in);
+        int length = decodeInt(in);
         require(length <= in.remaining());
         ByteBuffer result = in.slice();
         result.limit(length);
@@ -601,12 +603,6 @@ public final class ManifestSidecar {
             return null;
         }
         return result;
-    }
-
-    private static int readInt(ByteBuffer in) throws IOException {
-        long value = VarLengthIntUtils.decodeLong(in);
-        require(value <= Integer.MAX_VALUE);
-        return (int) value;
     }
 
     /** Reads the complete sidecar. Null means read the original manifest. */
@@ -941,20 +937,6 @@ public final class ManifestSidecar {
     private static void require(boolean valid) throws IOException {
         if (!valid) {
             throw new IOException("Invalid, unsupported or mismatched manifest sidecar");
-        }
-    }
-
-    private static byte[] digest(byte[] bytes) {
-        return digest(bytes, bytes.length);
-    }
-
-    private static byte[] digest(byte[] bytes, int length) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            digest.update(bytes, 0, length);
-            return digest.digest();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
         }
     }
 }
