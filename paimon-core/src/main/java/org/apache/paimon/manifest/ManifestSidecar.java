@@ -60,6 +60,7 @@ import java.util.function.BiPredicate;
 
 /** Independently usable partition, row-id and bucket coverage for each manifest block. */
 public final class ManifestSidecar {
+
     public static final String SUFFIX = ".avro.sidecar";
     private static final Logger LOG = LoggerFactory.getLogger(ManifestSidecar.class);
     private static final int MAGIC = 0x504d5343;

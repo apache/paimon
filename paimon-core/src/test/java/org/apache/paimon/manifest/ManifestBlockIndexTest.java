@@ -57,6 +57,7 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 /** Complete sidecar payload format, compression and independent filtering. */
 class ManifestBlockIndexTest {
+
     private final RowType type = RowType.of(DataTypes.INT(), DataTypes.STRING());
     private final ManifestSidecar.Settings defaults =
             new ManifestSidecar.Settings(true, true, true, true);

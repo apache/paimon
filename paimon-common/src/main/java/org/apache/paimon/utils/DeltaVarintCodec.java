@@ -25,6 +25,7 @@ import java.util.Objects;
 
 /** Streaming unsigned delta/varint encoding for nondecreasing, nonnegative long values. */
 public final class DeltaVarintCodec {
+
     private DeltaVarintCodec() {}
 
     /** Writes each delta immediately. The caller owns the output and stores the value count. */

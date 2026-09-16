@@ -72,6 +72,7 @@ import static org.mockito.Mockito.when;
 
 /** Cross-language format, physical block positions, completeness and allocation bounds. */
 class ManifestSidecarTest {
+
     @TempDir java.nio.file.Path temp;
     private final ManifestSidecar.Settings settings =
             new ManifestSidecar.Settings(true, true, true, true);
