@@ -167,7 +167,9 @@ public class SparkTypeUtils {
 
         @Override
         public DataType visit(CharType charType) {
-            return new org.apache.spark.sql.types.CharType(charType.getLength());
+            // Spark 4.2 replaced the primary constructor with `(Int, Option[Int])` (and marked it
+            // private[sql]); the companion object's apply(int) exists on every supported version.
+            return org.apache.spark.sql.types.CharType$.MODULE$.apply(charType.getLength());
         }
 
         @Override
@@ -175,7 +177,8 @@ public class SparkTypeUtils {
             if (varCharType.getLength() == VarCharType.MAX_LENGTH) {
                 return DataTypes.StringType;
             } else {
-                return new org.apache.spark.sql.types.VarcharType(varCharType.getLength());
+                return org.apache.spark.sql.types.VarcharType$.MODULE$.apply(
+                        varCharType.getLength());
             }
         }
 
