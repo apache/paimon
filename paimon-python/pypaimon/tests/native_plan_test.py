@@ -144,6 +144,22 @@ class NativePlanTest(unittest.TestCase):
         self.assertTrue(
             CoreOptions(Options({"scan.native-plan.enabled": "true"})).native_plan_enabled())
 
+    def test_catalogless_standard_file_io_options_are_preserved(self):
+        from pypaimon.catalog.catalog_environment import CatalogEnvironment
+        from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+        from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
+        from pypaimon.read.native_plan import _resolved_schema_file_io_options
+
+        properties = Options({'s3.path-style-access': True, 's3.endpoint': 'http://localhost:9000'})
+        # No storage connection is needed to check the resolved context transfer.
+        arrow = PyArrowFileIO.__new__(PyArrowFileIO)
+        arrow.properties = properties
+        for file_io in (arrow, ResolvingFileIO(properties)):
+            table = Mock(file_io=file_io, catalog_environment=CatalogEnvironment.empty())
+            with patch('pypaimon.read.native_plan.native_method_available', return_value=True):
+                self.assertEqual(_resolved_schema_file_io_options(table), {
+                    's3.path-style-access': 'true', 's3.endpoint': 'http://localhost:9000'})
+
     def test_plan_uses_file_scanner_when_switch_off(self):
         fs = Mock()
         sentinel = object()

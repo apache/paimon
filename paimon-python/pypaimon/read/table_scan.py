@@ -196,7 +196,7 @@ class TableScan:
             from pypaimon.read.native_plan import native_family_search_modes_available
             if not native_family_search_modes_available():
                 return False
-        if not resolved_schema:
+        if not resolved_schema and not native_method_available('Table', 'copy_with_resolved_schema'):
             supported_time_travel = any(
                 options.contains_key(key) for key in _NATIVE_TIME_TRAVEL_OPTIONS)
             # Time travel intentionally carries a historical schema; other stale

@@ -54,9 +54,15 @@ With Rust main's `Table.from_resolved_schema()` binding, filesystem catalog
 tables preserve the Python table's resolved schema and complete effective
 options. Stale table objects, historical schemas, and `copy()` overrides or
 option removals no longer require catalog reloading or Python planning.
-Local tables opened with `FileStoreTable.from_path()` use the same path.
-REST tables retain catalog loading for credentials and snapshot resolution;
-custom catalog/FileIO contexts still fall back when they cannot be reproduced.
+Tables opened with `FileStoreTable.from_path(path, file_io_options=None)` use
+the same path with standard local, PyArrow or resolving FileIO. Storage options
+configure FileIO; use `copy()` for table read options.
+REST tables use `Table.copy_with_resolved_schema()` to preserve the same schema
+and option semantics, including branches whose schemas are catalog-managed.
+The native table retains REST credentials, token refresh and catalog snapshot
+resolution. REST snapshot results (including empty results) take precedence over
+filesystem snapshots. REST errors, including HTTP 501, are propagated as in Java.
+Custom catalog/FileIO contexts still fall back when they cannot be reproduced.
 
 Explicit row ranges on data-evolution tables require `ReadBuilder.with_row_ranges()`.
 Watermark time travel requires Rust 0.4 or newer. Branch reads require the

@@ -178,8 +178,11 @@ def _resolved_schema_file_io_options(table) -> Optional[dict]:
     if loader is None:
         from pypaimon.catalog.catalog_environment import CatalogEnvironment
         from pypaimon.filesystem.local_file_io import LocalFileIO
+        from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+        from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
         # A custom environment or FileIO can supply metadata outside the path.
-        if type(environment) is not CatalogEnvironment or type(table.file_io) is not LocalFileIO:
+        if (type(environment) is not CatalogEnvironment
+                or type(table.file_io) not in (LocalFileIO, PyArrowFileIO, ResolvingFileIO)):
             return None
         return {str(key): _option_value_to_string(value)
                 for key, value in table.file_io.properties.to_map().items()
@@ -277,8 +280,19 @@ def native_plan(
         builder = rt.new_read_builder()
     else:
         from pypaimon_rust.datafusion import PaimonCatalog
-        rt = PaimonCatalog(_catalog_options(table)).get_table(table.identifier.get_full_name())
-        builder = rt.new_read_builder(_read_options(table))
+        catalog = PaimonCatalog(_catalog_options(table))
+        if native_method_available('Table', 'copy_with_resolved_schema'):
+            # REST may keep branch schemas in the catalog only. Load the base
+            # environment, then attach the schema/branch already resolved here.
+            rt = catalog.get_table('%s.%s' % (
+                table.identifier.get_database_name(), table.identifier.get_table_name()))
+            if rt.location() != table.table_path:
+                raise RuntimeError('Native catalog resolved a different table location')
+            rt = rt.copy_with_resolved_schema(_resolved_schema_json(table), branch=table.current_branch())
+            builder = rt.new_read_builder()
+        else:
+            rt = catalog.get_table(table.identifier.get_full_name())
+            builder = rt.new_read_builder(_read_options(table))
     if table.current_branch() != 'main':
         branch = getattr(rt, 'branch', None)
         if not callable(branch) or branch() != table.current_branch():

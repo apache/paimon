@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from contextlib import ExitStack
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -26,24 +27,28 @@ from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.file_store_table import FileStoreTable
+from pypaimon.tests.native_plan_rest_test import rest_catalog  # noqa: F401
 
 
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
     not native_runtime_available(), reason='Rust planner required')]
 
 
-@pytest.fixture(params=['append', 'pk', 'de'])
+@pytest.fixture(params=[(mode, catalog) for mode in ('append', 'pk', 'de')
+                        for catalog in ('filesystem', 'rest')])
 def source(request, tmp_path):
-    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    mode, backend = request.param
+    catalog = (request.getfixturevalue('rest_catalog')[0] if backend == 'rest'
+               else CatalogFactory.create({'warehouse': str(tmp_path)}))
     catalog.create_database('default', True)
     schema = pa.schema([('id', pa.int64()), ('value', pa.string())])
     options = {'file.format': 'parquet'}
-    if request.param == 'de':
+    if mode == 'de':
         options.update({'data-evolution.enabled': 'true', 'row-tracking.enabled': 'true'})
-    if request.param == 'pk':
+    if mode == 'pk':
         options['bucket'] = '1'
     catalog.create_table('default.t', Schema.from_pyarrow_schema(
-        schema, options=options, primary_keys=['id'] if request.param == 'pk' else []), False)
+        schema, options=options, primary_keys=['id'] if mode == 'pk' else []), False)
     table = catalog.get_table('default.t')
     _write(table, [{'id': 1, 'value': 'old'}])
     return catalog, table
@@ -69,9 +74,15 @@ def _read(table, native, predicate=None, projection=None):
         builder.with_projection(projection)
     scan = builder.new_scan()
     if native:
-        with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')), \
-                patch.object(table.schema_manager, 'latest', side_effect=AssertionError('schema reload')), \
-                patch('pypaimon_rust.datafusion.PaimonCatalog', side_effect=AssertionError('catalog reload')):
+        from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(scan.file_scanner, 'scan',
+                                             side_effect=AssertionError('native fallback')))
+            stack.enter_context(patch.object(table.schema_manager, 'latest',
+                                             side_effect=AssertionError('schema reload')))
+            if type(table.catalog_environment.catalog_loader) is not RESTCatalogLoader:
+                stack.enter_context(patch('pypaimon_rust.datafusion.PaimonCatalog',
+                                          side_effect=AssertionError('catalog reload')))
             plan = scan.plan()
     else:
         plan = scan.plan()
@@ -111,11 +122,14 @@ def test_stale_schema_does_not_confuse_readded_column(source):
 
 
 @pytest.mark.parametrize('uri', [False, True], ids=['path', 'file-uri'])
-def test_catalogless_table_uses_resolved_schema(source, uri):
+@pytest.mark.parametrize('resolving', [False, True], ids=['local-io', 'resolving-io'])
+def test_catalogless_table_uses_resolved_schema(source, uri, resolving):
     from pathlib import Path
+    from urllib.parse import unquote, urlparse
     _, table = source
-    location = Path(table.table_path).as_uri() if uri else table.table_path
-    direct = FileStoreTable.from_path(location)
+    path = unquote(urlparse(table.table_path).path) if table.table_path.startswith('file:') else table.table_path
+    location = Path(path).as_uri() if uri else path
+    direct = FileStoreTable.from_path(location, {'resolving-file-io.enabled': str(resolving).lower()})
     assert direct.catalog_environment.catalog_loader is None
     _assert_parity(direct, [{'id': 1, 'value': 'old'}], 1)
 
