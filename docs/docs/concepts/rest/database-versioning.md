@@ -27,19 +27,20 @@ Database references group the versions of several tables under one branch or tag
 training workflow starts an experiment from `main`, writes derived data on the experiment branch,
 freezes the inputs under a tag, and merges accepted changes back into `main`.
 
-This page describes the experimental REST management contract and a proposed server MVP that
+This page describes the experimental REST reference and table contracts and a proposed server MVP that
 reuses Paimon's existing [table branches](../../maintenance/manage-branches) and
 [table tags](../../maintenance/manage-tags).
 
 :::info Implementation status
 
-The Java reference-management client and the `/trees` wire contract are implemented. Reference
-storage, table-level orchestration, and database merge execution must be implemented by the catalog
-server. The server implementation below is a design, not a claim that an existing service supports it.
+The Java reference-management client, reference-scoped table client, and their wire contracts are
+implemented. Reference storage, table-level orchestration, and database merge execution must be
+implemented by the catalog server. The server implementation below is a design, not a claim that
+an existing service supports it.
 
-The MVP uses explicit table-level branch and tag addressing. This page introduces no new reference
-header or catalog option. Selecting a complete database view for table listing and DDL remains
-additional work, described under [Beyond the fixed-table MVP](#beyond-the-fixed-table-mvp).
+Table operations select a database reference through `/trees/{reference}` in the resource path.
+Callers use logical table names without constructing table branch suffixes or remembering a tag's
+source branch. This requires no new reference header or catalog option.
 
 :::
 
@@ -69,7 +70,8 @@ row-level conflict resolution, or concurrent streaming publication.
 
 Branch-local table creation, deletion, and rename need reference-aware namespace handling. The
 merge contract covers table creation and deletion, but the first fixed-table server can defer those
-operations until the table APIs can address the corresponding database view. Format Tables,
+operations until reference-aware namespace storage is implemented. Their scoped REST routes already
+reuse the ordinary table request and response schemas; rename is deferred. Format Tables,
 Object Tables, external tables, views, functions, and catalog permissions are outside this initial
 versioned-table scope.
 
@@ -197,6 +199,108 @@ preserves the resource type/name, message, request ID, and cause. Resource creat
 `AlreadyExistsException`. See the [OpenAPI specification](/rest-catalog-open-api.yaml) for the
 individual operations and their documented responses.
 
+## Reference-scoped table API
+
+Let `S = /v1/{prefix}/databases/{database}/trees/{reference}`. The reference name selects either
+an existing branch or an immutable tag. It is resolved by the server; the client need not first
+fetch its type. These endpoints reuse the ordinary table request and response structures:
+
+| Method and path | Existing request / response | Scope |
+| --- | --- | --- |
+| `GET S/tables` | `ListTablesResponse`; existing paging/filter query parameters. | Table membership of the reference. |
+| `GET S/table-details` | `ListTableDetailsResponse`; existing paging/filter query parameters. | Table definitions within the reference. |
+| `GET S/tables/{table}` | `GetTableResponse`. | Selected schema, storage options and path. |
+| `POST S/tables` | `CreateTableRequest`. | Create a table in a branch. |
+| `POST S/tables/{table}` | `AlterTableRequest`. | Alter a table in a branch. |
+| `DELETE S/tables/{table}` | Existing drop-table response. | Remove a table from a branch. |
+| `GET S/tables/{table}/snapshot` | `GetTableSnapshotResponse`. | Current branch snapshot or pinned tag snapshot. |
+| `GET S/tables/{table}/snapshots/{version}` | `GetVersionSnapshotResponse`. | Resolve a version within this reference. |
+| `GET S/tables/{table}/snapshots` | `ListSnapshotsResponse`; existing pagination. | Snapshot history visible through this reference. |
+| `GET S/tables/{table}/schemas/{version}` | `GetSchemaResponse`. | Resolve a schema ID or `LATEST` within this reference. |
+| `GET S/tables/{table}/schemas` | `ListSchemasResponse`; existing pagination. | Schema history retained for this reference. |
+| `POST S/tables/{table}/commit` | `CommitTableRequest` / `CommitTableResponse`. | Commit a snapshot to the selected branch. |
+| `GET S/tables/{table}/token` | `GetTableTokenResponse`. | Credentials for the resolved table version. |
+| `POST S/tables/{table}/auth` | `AuthTableQueryRequest` / `AuthTableQueryResponse`. | Authorize a read of the resolved table. |
+
+For example, read the same logical table through a live experiment and a frozen training tag:
+
+```http
+GET /v1/catalog/databases/training/trees/experiment/tables/features
+GET /v1/catalog/databases/training/trees/train_v1/tables/features
+```
+
+The response name remains `features`. `GetTableResponse` carries the resolved schema, path and
+storage options; the server may supply an internal physical branch in the existing schema options.
+A commit keeps the existing `tableId`, `baseSnapshotUuid`, `snapshot`, and `statistics` fields.
+The reference path determines the target; identifiers and table IDs in the request must agree with
+the table resolved from that path. Caller-supplied table branch suffixes are not part of this contract.
+
+### Branch and tag behavior
+
+A branch resolves to its current membership and table versions. A tag resolves to the membership,
+schemas, options and snapshots captured when it was created, even after its source branch advances.
+Tag snapshot listing exposes only the pinned snapshot. `LATEST` and `EARLIEST` select that snapshot;
+other version selectors must resolve to it or return `404`. Schema reads may access the captured
+schema and older schemas retained for reading the captured data, but never later source schemas.
+An empty captured table is still returned by `GET table`; snapshot lookup returns `404` with
+`resourceType: SNAPSHOT`.
+
+The server rejects content changes through a tag with `409`. Read authorization remains allowed
+through `POST .../auth`; HTTP method alone does not determine whether an operation is a write.
+Tag credentials must permit reading without allowing mutation of retained metadata or data.
+
+Missing references and tables return `404`. Unsupported scoped operations return `501`, without
+falling back to the ordinary main-table path. Existing unscoped URLs retain their behavior.
+
+### Java table usage
+
+Bind a separate client instance to the desired database reference:
+
+```java
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.rest.RESTCatalog;
+import org.apache.paimon.table.Table;
+
+RESTCatalog experimentCatalog = restCatalog.withReference("training", "experiment");
+RESTCatalog trainingCatalog = restCatalog.withReference("training", "train_v1");
+
+Table experimentFeatures = experimentCatalog.getTable(Identifier.create("training", "features"));
+Table trainingFeatures = trainingCatalog.getTable(Identifier.create("training", "features"));
+
+// Use experimentFeatures with the ordinary Paimon batch write API.
+// Use trainingFeatures with the ordinary Paimon read API.
+```
+
+`withReference` leaves the original catalog unchanged and does not fetch catalog configuration
+again. Each returned catalog keeps its own binding and local caches. Its serialized
+`RESTCatalogLoader`, and loaders inside serialized table objects, retain the binding for later
+snapshot reads, commits, schema changes and token requests. Storage commits can supply a physical
+table branch internally; the bound catalog sends the logical table name and keeps the reference
+path authoritative.
+
+The lightweight client supports the same binding through
+`RESTApi.withReference("training", "experiment")`. Existing table methods and DTOs remain usable.
+Table operations must use the bound database. Binding is currently a Java API, not a SQL catalog
+option; engine configuration for selecting a reference is additional integration work.
+
+The scoped client does not yet support global table listing, lookup by table ID, rename, register,
+replace, rollback, partition/consumer endpoints, or nested table branch/tag management. Such calls
+fail locally instead of reaching an unscoped table route. Database and reference management,
+functions, views and catalog-level management retain their existing meaning; this binding versions
+only the supported table endpoints. Table policy endpoints are also outside the scoped MVP.
+
+### Server routing and reuse
+
+Resolve `(database, reference, logical table)` once into an internal request context containing
+reference type, table identity and backing table version. Pass that context into the existing table
+handlers. Validate authentication against the actual scoped request, and authorize access to the
+resolved table. A path rewrite alone is insufficient: listing must use the selected membership,
+tags need frozen metadata, and commits must update the selected branch's recorded table state.
+
+The additional routing and DTO work is small. Runtime work is a reference/table mapping lookup,
+which can be cached; adding the scope does not require proxying or copying table data. Reference
+creation, retention, namespace changes and merge still require the server orchestration below.
+
 ## Java management usage
 
 Obtain tree management from an already configured `RESTCatalog`. It shares that catalog's
@@ -263,7 +367,7 @@ training / train_v1 [TAG]
   labels   -> table identity B, experiment branch, pinned table tag train_v1
 ```
 
-For the explicit-addressing MVP, names such as `experiment` can also name the corresponding table
+Names such as `experiment` can also name the corresponding backing table
 branches, and `train_v1` can name each table tag in its source table branch. These names are owned
 by the service. Reject collisions with unrelated existing table references; do not adopt them just
 because the names match. Additional internal baseline tags can use private, service-generated names.
@@ -271,7 +375,7 @@ because the names match. Additional internal baseline tags can use private, serv
 The public database-reference name rules and native table-branch rules are not identical. For
 example, the database protocol permits a purely numeric name, while native table branch creation
 rejects it. A server supporting the full name contract needs an alias mapping to valid physical
-branch names and must resolve the logical table-branch address through that mapping. It must not
+branch names and must resolve the scoped logical table address through that mapping. It must not
 silently narrow the database API's name rules. The examples use names valid in both layers.
 
 ### Minimal metadata
@@ -384,9 +488,9 @@ checks the database result first and preserves retained references; looping over
 without that adapter is insufficient.
 
 Preparing fresh backing branches and publishing a new mapping is one possible server implementation.
-A server retaining the explicit table branch names must instead provide a safe way to install the
-prepared versions behind those names. The client-visible table address must continue to resolve
-correctly. In either case, source and target must remain independently writable: pointing both at
+The server can update the reference mapping to those prepared versions while retaining any
+physical branches needed by tags or merge baselines. The client-visible scoped table address must
+continue to resolve correctly. In either case, source and target must remain independently writable: pointing both at
 the same mutable table branch would make future source writes modify the target as well.
 
 ### Repeated merge
@@ -404,84 +508,63 @@ an HTTP success must mean that the planned result is installed.
 
 ## Exercise the fixed-table MVP
 
-The following workflow requires a server that implements the orchestration above. The current Java
-client tests alone do not provide that server.
+The following workflow requires a server that implements the orchestration above. The client tests
+exercise scoped HTTP routing and table loaders; they do not implement database reference storage
+or the database merge algorithm.
 
 1. Create database `training` and two populated managed tables, `features` and `labels`, on `main`.
-   Stop writes and create database branch `experiment` from `main` using `/trees`.
-2. Read and write the corresponding table branches through existing table addressing. For example,
-   Spark uses these table names:
-
-   ```sql
-   SELECT * FROM training.`features$branch_experiment`;
-   SELECT * FROM training.`labels$branch_experiment`;
-   ```
-
-   Batch writes use the same branch-qualified names. An unqualified table name still addresses its
-   ordinary main table; creating the database branch does not switch the current catalog.
-3. Stop experiment writes and create database tag `train_v1` from `experiment`. The server creates
-   and protects the corresponding table tags. In this explicit-addressing workflow, the training
-   job records both the source branch and tag name:
-
-   ```sql
-   SELECT * FROM training.`features$branch_experiment` VERSION AS OF 'train_v1';
-   SELECT * FROM training.`labels$branch_experiment` VERSION AS OF 'train_v1';
-   ```
-
-   These examples compose existing table branch and time-travel syntax. The server integration
-   must verify that both snapshot and schema lookups resolve the protected tag. The database tag
-   response itself does not return the source branch or a table mapping.
-4. Advance the experiment tables, then repeat the tagged reads. They must return the earlier data
-   and schemas. Keep the tag's backing table branches while these reads are needed.
+   Stop writes and create database branch `experiment` from `main` using tree management.
+2. Bind `restCatalog.withReference("training", "experiment")`. List and load `features` and `labels`
+   by their ordinary names, then write experiment data with the usual batch write API. Their
+   metadata reads and commits use `/trees/experiment/tables/...`.
+3. Stop experiment writes and create database tag `train_v1` from `experiment`. Bind a second
+   catalog with `restCatalog.withReference("training", "train_v1")`. Load the same logical table
+   names for training; the service resolves the pinned table versions without a source-branch hint.
+4. Advance the experiment tables, then reload and read them through the tag-bound catalog. The
+   tagged data and schemas must remain unchanged. Verify that writes through the tag are rejected.
 5. With main and experiment writers stopped, merge `train_v1` into `main`. This publishes the
    evaluated source version. Merging the live `experiment` branch would instead include its newer
-   state. If both sides changed a table, inspect the conflict and deliberately choose a per-table
-   mode when appropriate.
+   state. If both sides changed a table, choose a per-table merge mode when appropriate.
 6. Reload main tables and verify the published state. Resume writes separately on `main` and
    `experiment` and verify that neither changes the other. Merge the same source state again to
    check no-op behavior. Delete unused database references through tree management.
 
 ## Beyond the fixed-table MVP
 
-A complete database view needs a defined way for ordinary table APIs to identify the selected
-database branch or tag. Existing table branch suffixes identify one table branch; they do not scope
-`listTables`, create-table, drop-table, or rename operations to a database reference.
+The REST scope and client binding now identify the selected database view for table listing,
+reads, commits and the ordinary create/alter/drop endpoints. A complete server namespace still
+needs branch-local membership changes, stable identities across rename, and new identities for
+drop-and-recreate. The fixed-table server may return `501` for unsupported scoped DDL.
 
-The following work remains separate from the management API:
-
-- Address and return the selected reference's table membership, including tables absent on `main`.
-- Apply branch-local DDL to that membership, with stable table identities for rename and new
-  identities for drop-and-recreate.
-- Resolve a database tag to its table mappings without requiring the caller to remember its source
-  branch; expose the frozen schema and empty-table state as well as the snapshot.
-- Preserve the selected context through schema/snapshot access, catalog loaders, task serialization,
-  and caches. Table identifiers by ID and catalog-wide listings need equally explicit semantics.
-
-This document does not select a new header, query parameter, catalog option, or endpoint for those
-operations. Such an extension needs its own agreed wire contract and client integration. Database
-reference management can be implemented first, and a fixed-table training workflow can use explicit
-table addressing while that namespace design is settled.
+Global table IDs, global listings, rename and the other deferred endpoints need explicit scope
+semantics before they can be enabled on a bound client. SQL engine configuration also needs to
+preserve the same binding when constructing catalogs. These additions do not require callers to
+construct per-table branch names.
 
 ## Validation and implementation sequence
 
-The existing reference tests validate HTTP paths, request bodies, authentication/configuration,
-pagination, JSON compatibility, and exception propagation. Mocked success responses do not test
-server branch isolation, snapshot retention, or the merge algorithm.
+The reference tests validate HTTP paths, request bodies, authentication/configuration, pagination,
+JSON compatibility, exception propagation and reference preservation through serialized catalogs
+and tables. The OpenAPI validator checks that scoped endpoints reuse the corresponding ordinary
+request and success-response structures. A stateful test fixture also uses real Paimon data files
+to exercise batch writes on separate branches, frozen tag reads after source writes, and tag write
+rejection. This validates client integration with a resolving server; production reference
+lifecycle, snapshot retention and database merge still require server integration tests.
 
 Implement and verify in this order:
 
 1. **Reference records and bootstrap:** create `main`, list/get/create/delete references, and protect
    managed table-reference names.
 2. **Table orchestration:** clone populated and empty tables correctly; record baselines; route
-   explicit table branches through existing Paimon readers and writers.
+   scoped logical table names through existing Paimon readers and writers.
 3. **Frozen training inputs:** pin table tags and schemas, validate repeated reads after source
    writes, and retain dependencies after logical reference deletion. Add empty-table coverage when
    that case is enabled.
 4. **Merge:** verify automatic fast-forward, independent changes to different tables, same-table
    conflicts leaving the target unchanged, all three modes, repeated merge including `DROP`, and
    continued independent writes after merge.
-5. **Complete database views:** settle reference-aware listing and DDL, then add membership changes
-   and tag-only discovery to the integration tests.
+5. **Complete database views:** implement branch-local DDL storage and verify membership changes,
+   then extend the scoped protocol to the deferred operations as needed.
 
 A useful acceptance test uses real Paimon snapshots for two tables and exercises the workflow above
 against a stateful server. Passing that test establishes the fixed-table MVP; a full database-view

@@ -257,6 +257,26 @@ public class RESTApi {
         this.resourcePaths = ResourcePaths.forCatalogProperties(options);
     }
 
+    private RESTApi(RESTApi api, ResourcePaths resourcePaths) {
+        this.client = api.client;
+        this.restAuthFunction = api.restAuthFunction;
+        this.options = api.options;
+        this.resourcePaths = resourcePaths;
+    }
+
+    /**
+     * Returns a client whose table operations address one database branch or immutable tag.
+     *
+     * <p>The original client is unchanged. Table names remain logical names, without a table branch
+     * suffix. The server resolves the reference and enforces tag immutability. Operations without a
+     * reference-scoped table route are unsupported on this client; database and reference
+     * management retain their catalog-wide meaning.
+     */
+    @Experimental
+    public RESTApi withReference(String database, String reference) {
+        return new RESTApi(this, resourcePaths.withReference(database, reference));
+    }
+
     /** Get the configured options which has been merged from REST Server. */
     public Options options() {
         return options;

@@ -62,8 +62,9 @@ In this table, **table-scoped** means
 endpoints are described in the specification alongside their database-scoped counterparts.
 
 See [Database Branches and Tags](./database-versioning) for reference-management examples, merge
-modes, and the server MVP design. These management APIs do not switch ordinary table requests to
-a database reference automatically.
+modes, and the server MVP design. Supported table operations can select a reference through
+`/v1/{prefix}/databases/{database}/trees/{reference}/tables/{table}`, using the existing request and
+response structures. Java clients bind the scope with `withReference(database, reference)`.
 
 ## Partition Compatibility
 

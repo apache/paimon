@@ -225,6 +225,43 @@ function requireExactEnum(contract, schemaName, expectedValues) {
 
 function validateCatalogOpenApi() {
   const contract = validateCommon('rest-catalog-open-api.yaml');
+  const databasePath = '/v1/{prefix}/databases/{database}';
+  [
+    '/tables',
+    '/table-details',
+    '/tables/{table}',
+    '/tables/{table}/commit',
+    '/tables/{table}/token',
+    '/tables/{table}/auth',
+    '/tables/{table}/snapshot',
+    '/tables/{table}/snapshots',
+    '/tables/{table}/snapshots/{version}',
+    '/tables/{table}/schemas',
+    '/tables/{table}/schemas/{version}',
+  ].forEach((suffix) => {
+    const original = contract.spec.paths[databasePath + suffix];
+    const scopedPath = databasePath + '/trees/{reference}' + suffix;
+    const scoped = contract.spec.paths[scopedPath];
+    contract.checkSpec(scoped, `Missing reference-scoped table path: ${scopedPath}`);
+    Object.entries(original).forEach(([method, operation]) => {
+      if (!HTTP_METHODS.has(method)) {
+        return;
+      }
+      const counterpart = scoped[method];
+      contract.checkSpec(counterpart, `Missing ${method} on ${scopedPath}`);
+      ['requestBody', 'responses'].forEach((field) => {
+        const value = (op) => field === 'responses' ? op.responses['200'] : op[field];
+        contract.checkSpec(
+          JSON.stringify(value(operation)) === JSON.stringify(value(counterpart)),
+          `${scopedPath} must reuse the unscoped ${method} ${field} contract`,
+        );
+      });
+      contract.requireResponses(counterpart.operationId, ['404', '501']);
+      if (method !== 'get' && !suffix.endsWith('/auth')) {
+        contract.requireResponses(counterpart.operationId, ['409']);
+      }
+    });
+  });
   [
     'getConfig',
     'createDatabase',

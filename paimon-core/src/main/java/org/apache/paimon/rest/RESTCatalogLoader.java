@@ -21,15 +21,28 @@ package org.apache.paimon.rest;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLoader;
 
+import javax.annotation.Nullable;
+
 /** Loader to create {@link RESTCatalog}. */
 public class RESTCatalogLoader implements CatalogLoader {
 
     private static final long serialVersionUID = 1L;
 
     private final CatalogContext context;
+    @Nullable private final String referenceDatabase;
+    @Nullable private final String referenceName;
 
     public RESTCatalogLoader(CatalogContext context) {
+        this(context, null, null);
+    }
+
+    RESTCatalogLoader(
+            CatalogContext context,
+            @Nullable String referenceDatabase,
+            @Nullable String referenceName) {
         this.context = context;
+        this.referenceDatabase = referenceDatabase;
+        this.referenceName = referenceName;
     }
 
     public CatalogContext context() {
@@ -38,6 +51,6 @@ public class RESTCatalogLoader implements CatalogLoader {
 
     @Override
     public RESTCatalog load() {
-        return new RESTCatalog(context, false);
+        return new RESTCatalog(context, false, referenceDatabase, referenceName);
     }
 }

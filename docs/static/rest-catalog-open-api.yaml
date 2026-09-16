@@ -452,6 +452,569 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/trees/{reference}/tables:
+    description: >-
+      Table operations within an existing database branch or immutable tag. Uses the same request and
+      response schemas as the corresponding unscoped table endpoint.
+    parameters:
+      - $ref: "#/components/parameters/Prefix"
+      - $ref: "#/components/parameters/Database"
+      - $ref: "#/components/parameters/Reference"
+    get:
+      tags:
+        - database-reference
+      summary: List tables in a database reference
+      operationId: listTablesInReference
+      description: >-
+        Resolve membership and the table version through the reference. A tag returns frozen metadata
+        and never the latest state of its source branch.
+      parameters:
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+        - name: tableNamePattern
+          description: A sql LIKE pattern (%) for table names. Currently, only prefix matching is supported.
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListTablesResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestErrorResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedErrorResponse"
+        "403":
+          $ref: "#/components/responses/ForbiddenErrorResponse"
+        "404":
+          $ref: "#/components/responses/ReferenceTableNotExistErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerErrorResponse"
+        "501":
+          $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
+    post:
+      tags:
+        - database-reference
+      summary: Create table in a database reference
+      operationId: createTableInReference
+      description: >-
+        Apply this operation to a branch. A tag is immutable and returns 409. Identifiers and table
+        IDs in the body must agree with the logical table resolved from the path.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTableRequest"
+      responses:
+        "200":
+          description: Success, no content
+        "400":
+          $ref: "#/components/responses/BadRequestErrorResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedErrorResponse"
+        "403":
+          $ref: "#/components/responses/ForbiddenErrorResponse"
+        "404":
+          $ref: "#/components/responses/ReferenceTableNotExistErrorResponse"
+        "409":
+          $ref: "#/components/responses/ReferenceTableConflictErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerErrorResponse"
+        "501":
+          $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
+  /v1/{prefix}/databases/{database}/trees/{reference}/table-details:
+    description: >-
+      Table operations within an existing database branch or immutable tag. Uses the same request and
+      response schemas as the corresponding unscoped table endpoint.
+    parameters:
+      - $ref: "#/components/parameters/Prefix"
+      - $ref: "#/components/parameters/Database"
+      - $ref: "#/components/parameters/Reference"
+    get:
+      tags:
+        - database-reference
+      summary: List table details in a database reference
+      operationId: listTableDetailsInReference
+      description: >-
+        Resolve membership and the table version through the reference. A tag returns frozen metadata
+        and never the latest state of its source branch.
+      parameters:
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+        - name: tableNamePattern
+          description: A sql LIKE pattern (%) for table names. Currently, only prefix matching is supported.
+          in: query
+          schema:
+            type: string
+        - name: tableType
+          description: Filter tables by table type. All table types will be returned if not set or empty.
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListTableDetailsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestErrorResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedErrorResponse"
+        "403":
+          $ref: "#/components/responses/ForbiddenErrorResponse"
+        "404":
+          $ref: "#/components/responses/ReferenceTableNotExistErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerErrorResponse"
+        "501":
+          $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
+  /v1/{prefix}/databases/{database}/trees/{reference}/tables/{table}:
+    description: >-
+      Table operations within an existing database branch or immutable tag. Uses the same request and
+      response schemas as the corresponding unscoped table endpoint.
+    parameters:
+      - $ref: "#/components/parameters/Prefix"
+      - $ref: "#/components/parameters/Database"
+      - $ref: "#/components/parameters/Reference"
+      - $ref: "#/components/parameters/Table"
+    get:
+      tags:
+        - database-reference
+      summary: Get table in a database reference
+      operationId: getTableInReference
+      description: >-
+        Resolve membership and the table version through the reference. A tag returns frozen metadata
+        and never the latest state of its source branch. Return the logical table name and the
+        resolved schema, path and storage options. Internal branch aliases may be carried in schema
+        options.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetTableResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestErrorResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedErrorResponse"
+        "403":
+          $ref: "#/components/responses/ForbiddenErrorResponse"
+        "404":
+          $ref: "#/components/responses/ReferenceTableNotExistErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerErrorResponse"
+        "501":
+          $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
+    post:
+      tags:
+        - database-reference
+      summary: Alter table in a database reference
+      operationId: alterTableInReference
+      description: >-
+        Apply this operation to a branch. A tag is immutable and returns 409. Identifiers and table
+        IDs in the body must agree with the logical table resolved from the path.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AlterTableRequest"
+      responses:
+        "200":
+          description: Success, no content
+        "400":
+          $ref: "#/components/responses/BadRequestErrorResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedErrorResponse"
+        "403":
+          $ref: "#/components/responses/ForbiddenErrorResponse"
+        "404":
+          $ref: "#/components/responses/ReferenceTableNotExistErrorResponse"
+        "409":
+          $ref: "#/components/responses/ReferenceTableConflictErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerErrorResponse"
+        "501":
+          $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
+    delete:
+      tags:
+        - database-reference
+      summary: Drop table in a database reference
+      operationId: dropTableInReference
+      description: >-
+        Apply this operation to a branch. A tag is immutable and returns 409. Identifiers and table
+        IDs in the body must agree with the logical table resolved from the path.
+      responses:
+        "200":
+          description: Success, no content
+        "400":
+          $ref: "#/components/responses/BadRequestErrorResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedErrorResponse"
+        "403":
+          $ref: "#/components/responses/ForbiddenErrorResponse"
+        "404":
+          $ref: "#/components/responses/ReferenceTableNotExistErrorResponse"
+        "409":
+          $ref: "#/components/responses/ReferenceTableConflictErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerErrorResponse"
+        "501":
+          $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
+  /v1/{prefix}/databases/{database}/trees/{reference}/tables/{table}/commit:
+    description: >-
+      Table operations within an existing database branch or immutable tag. Uses the same request and
+      response schemas as the corresponding unscoped table endpoint.
+    parameters:
+      - $ref: "#/components/parameters/Prefix"
+      - $ref: "#/components/parameters/Database"
+      - $ref: "#/components/parameters/Reference"
+      - $ref: "#/components/parameters/Table"
+    post:
+      tags:
+        - database-reference
+      summary: Commit table in a database reference
+      operationId: commitTableInReference
+      description: >-
+        Apply this operation to a branch. A tag is immutable and returns 409. Identifiers and table
+        IDs in the body must agree with the logical table resolved from the path.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommitTableRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommitTableResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestErrorResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedErrorResponse"
+        "403":
+          $ref: "#/components/responses/ForbiddenErrorResponse"
+        "404":
+          $ref: "#/components/responses/ReferenceTableNotExistErrorResponse"
+        "409":
+          $ref: "#/components/responses/ReferenceTableConflictErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerErrorResponse"
+        "501":
+          $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
+  /v1/{prefix}/databases/{database}/trees/{reference}/tables/{table}/token:
+    description: >-
+      Table operations within an existing database branch or immutable tag. Uses the same request and
+      response schemas as the corresponding unscoped table endpoint.
+    parameters:
+      - $ref: "#/components/parameters/Prefix"
+      - $ref: "#/components/parameters/Database"
+      - $ref: "#/components/parameters/Reference"
+      - $ref: "#/components/parameters/Table"
+    get:
+      tags:
+        - database-reference
+      summary: Get table token in a database reference
+      operationId: getTableTokenInReference
+      description: >-
+        Resolve membership and the table version through the reference. A tag returns frozen metadata
+        and never the latest state of its source branch. Credentials for a tag must allow reading
+        without allowing mutation of retained metadata or data.
+      responses:
+        "200":
+          description: DataToken for visit data.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetTableDataTokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestErrorResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedErrorResponse"
+        "403":
+          $ref: "#/components/responses/ForbiddenErrorResponse"
+        "404":
+          $ref: "#/components/responses/ReferenceTableNotExistErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerErrorResponse"
+        "501":
+          $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
+  /v1/{prefix}/databases/{database}/trees/{reference}/tables/{table}/auth:
+    description: >-
+      Table operations within an existing database branch or immutable tag. Uses the same request and
+      response schemas as the corresponding unscoped table endpoint.
+    parameters:
+      - $ref: "#/components/parameters/Prefix"
+      - $ref: "#/components/parameters/Database"
+      - $ref: "#/components/parameters/Reference"
+      - $ref: "#/components/parameters/Table"
+    post:
+      tags:
+        - database-reference
+      summary: Auth table query in a database reference
+      operationId: authTableQueryInReference
+      description: >-
+        Resolve membership and the table version through the reference. A tag returns frozen metadata
+        and never the latest state of its source branch.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthTableQueryRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthTableQueryResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestErrorResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedErrorResponse"
+        "403":
+          $ref: "#/components/responses/ForbiddenErrorResponse"
+        "404":
+          $ref: "#/components/responses/ReferenceTableNotExistErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerErrorResponse"
+        "501":
+          $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
+  /v1/{prefix}/databases/{database}/trees/{reference}/tables/{table}/snapshot:
+    description: >-
+      Table operations within an existing database branch or immutable tag. Uses the same request and
+      response schemas as the corresponding unscoped table endpoint.
+    parameters:
+      - $ref: "#/components/parameters/Prefix"
+      - $ref: "#/components/parameters/Database"
+      - $ref: "#/components/parameters/Reference"
+      - $ref: "#/components/parameters/Table"
+    get:
+      tags:
+        - database-reference
+      summary: Get table snapshot in a database reference
+      operationId: getTableSnapshotInReference
+      description: >-
+        Resolve membership and the table version through the reference. A tag returns frozen metadata
+        and never the latest state of its source branch. An empty captured table returns 404 with
+        resourceType SNAPSHOT.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetTableSnapshotResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestErrorResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedErrorResponse"
+        "403":
+          $ref: "#/components/responses/ForbiddenErrorResponse"
+        "404":
+          $ref: "#/components/responses/ReferenceTableNotExistErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerErrorResponse"
+        "501":
+          $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
+  /v1/{prefix}/databases/{database}/trees/{reference}/tables/{table}/snapshots/{version}:
+    description: >-
+      Table operations within an existing database branch or immutable tag. Uses the same request and
+      response schemas as the corresponding unscoped table endpoint.
+    parameters:
+      - $ref: "#/components/parameters/Prefix"
+      - $ref: "#/components/parameters/Database"
+      - $ref: "#/components/parameters/Reference"
+      - $ref: "#/components/parameters/Table"
+      - name: version
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags:
+        - database-reference
+      summary: Get version snapshot in a database reference
+      operationId: getVersionSnapshotInReference
+      description: >-
+        Resolve membership and the table version through the reference. A tag returns frozen metadata
+        and never the latest state of its source branch. A tag exposes only its pinned snapshot:
+        LATEST and EARLIEST select it, and other versions must resolve to that snapshot or return 404.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetVersionSnapshotResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestErrorResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedErrorResponse"
+        "403":
+          $ref: "#/components/responses/ForbiddenErrorResponse"
+        "404":
+          $ref: "#/components/responses/ReferenceTableNotExistErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerErrorResponse"
+        "501":
+          $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
+  /v1/{prefix}/databases/{database}/trees/{reference}/tables/{table}/snapshots:
+    description: >-
+      Table operations within an existing database branch or immutable tag. Uses the same request and
+      response schemas as the corresponding unscoped table endpoint.
+    parameters:
+      - $ref: "#/components/parameters/Prefix"
+      - $ref: "#/components/parameters/Database"
+      - $ref: "#/components/parameters/Reference"
+      - $ref: "#/components/parameters/Table"
+    get:
+      tags:
+        - database-reference
+      summary: List snapshots in a database reference
+      operationId: listSnapshotsInReference
+      description: >-
+        Resolve membership and the table version through the reference. A tag returns frozen metadata
+        and never the latest state of its source branch. A tag exposes only its pinned snapshot:
+        LATEST and EARLIEST select it, and other versions must resolve to that snapshot or return 404.
+      parameters:
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListSnapshotsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestErrorResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedErrorResponse"
+        "403":
+          $ref: "#/components/responses/ForbiddenErrorResponse"
+        "404":
+          $ref: "#/components/responses/ReferenceTableNotExistErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerErrorResponse"
+        "501":
+          $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
+  /v1/{prefix}/databases/{database}/trees/{reference}/tables/{table}/schemas:
+    description: >-
+      Table operations within an existing database branch or immutable tag. Uses the same request and
+      response schemas as the corresponding unscoped table endpoint.
+    parameters:
+      - $ref: "#/components/parameters/Prefix"
+      - $ref: "#/components/parameters/Database"
+      - $ref: "#/components/parameters/Reference"
+      - $ref: "#/components/parameters/Table"
+    get:
+      tags:
+        - database-reference
+      summary: List table schemas in a database reference
+      operationId: listSchemasInReference
+      description: >-
+        Resolve membership and the table version through the reference. A tag returns frozen metadata
+        and never the latest state of its source branch. LATEST selects the captured schema. Schema
+        history is limited to schemas retained for the captured table version; later source schemas
+        are not visible.
+      parameters:
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListSchemasResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestErrorResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedErrorResponse"
+        "403":
+          $ref: "#/components/responses/ForbiddenErrorResponse"
+        "404":
+          $ref: "#/components/responses/ReferenceTableNotExistErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerErrorResponse"
+        "501":
+          $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
+  /v1/{prefix}/databases/{database}/trees/{reference}/tables/{table}/schemas/{version}:
+    description: >-
+      Table operations within an existing database branch or immutable tag. Uses the same request and
+      response schemas as the corresponding unscoped table endpoint.
+    parameters:
+      - $ref: "#/components/parameters/Prefix"
+      - $ref: "#/components/parameters/Database"
+      - $ref: "#/components/parameters/Reference"
+      - $ref: "#/components/parameters/Table"
+      - $ref: "#/components/parameters/Version"
+    get:
+      tags:
+        - database-reference
+      summary: Get table schema in a database reference
+      operationId: getSchemaInReference
+      description: >-
+        Resolve membership and the table version through the reference. A tag returns frozen metadata
+        and never the latest state of its source branch. LATEST selects the captured schema. Schema
+        history is limited to schemas retained for the captured table version; later source schemas
+        are not visible.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetSchemaResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestErrorResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedErrorResponse"
+        "403":
+          $ref: "#/components/responses/ForbiddenErrorResponse"
+        "404":
+          $ref: "#/components/responses/ReferenceTableNotExistErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerErrorResponse"
+        "501":
+          $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
+
   /v1/{prefix}/databases/{database}/register:
     post:
       tags:
@@ -1180,6 +1743,72 @@ paths:
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/schemas:
+    parameters:
+      - $ref: "#/components/parameters/Prefix"
+      - $ref: "#/components/parameters/Database"
+      - $ref: "#/components/parameters/Table"
+    get:
+      tags:
+        - table
+      summary: List table schemas
+      operationId: listSchemas
+      parameters:
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListSchemasResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedErrorResponse"
+        "404":
+          description: Table or schema does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerErrorResponse"
+  /v1/{prefix}/databases/{database}/tables/{table}/schemas/{version}:
+    parameters:
+      - $ref: "#/components/parameters/Prefix"
+      - $ref: "#/components/parameters/Database"
+      - $ref: "#/components/parameters/Table"
+      - $ref: "#/components/parameters/Version"
+    get:
+      tags:
+        - table
+      summary: Get table schema
+      operationId: getSchema
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetSchemaResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedErrorResponse"
+        "404":
+          description: Table or schema does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerErrorResponse"
+
   /v1/{prefix}/databases/{database}/tables/{table}/partitions:
     get:
       tags:
@@ -2655,10 +3284,70 @@ paths:
           $ref: '#/components/responses/SemanticViewNotImplementedErrorResponse'
 
 components:
+  parameters:
+    Prefix:
+      name: prefix
+      in: path
+      required: true
+      schema:
+        type: string
+    Database:
+      name: database
+      in: path
+      required: true
+      schema:
+        type: string
+    Reference:
+      name: reference
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$
+      description: An existing database branch or immutable tag. Never falls back to main.
+    Table:
+      name: table
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Logical table name. A database reference does not require a table branch suffix.
+    Version:
+      name: version
+      in: path
+      required: true
+      schema:
+        type: string
+      description: A schema ID or LATEST; resolved within the selected table version.
+
   #############################
   # Reusable Response Objects #
   #############################
   responses:
+    ReferenceTableNotExistErrorResponse:
+      description: >-
+        Database, reference, table, snapshot or schema does not exist within the selected reference.
+        Return resourceType SNAPSHOT for an existing table with no snapshot. Never fall back to main.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ReferenceTableConflictErrorResponse:
+      description: >-
+        The target is an immutable tag, the table already exists, or the operation conflicts with the
+        selected table state.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ReferenceTableNotImplementedErrorResponse:
+      description: >-
+        The server does not implement this reference-scoped table operation. No fallback to an unscoped
+        route is allowed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
     SemanticViewNotExistErrorResponse:
       description: Database or semantic view does not exist.
       content:
@@ -2914,6 +3603,37 @@ components:
             message: Internal Server Error
             code: 500
   schemas:
+    TableSchema:
+      allOf:
+        - $ref: "#/components/schemas/Schema"
+        - type: object
+          properties:
+            version:
+              type: integer
+            id:
+              type: integer
+              format: int64
+            highestFieldId:
+              type: integer
+            timeMillis:
+              type: integer
+              format: int64
+    GetSchemaResponse:
+      type: object
+      properties:
+        schema:
+          $ref: "#/components/schemas/TableSchema"
+    ListSchemasResponse:
+      type: object
+      properties:
+        schemas:
+          type: array
+          items:
+            $ref: "#/components/schemas/TableSchema"
+        nextPageToken:
+          type:
+            - string
+            - "null"
     SemanticViewDefinition:
       type: object
       required: [ format, content ]

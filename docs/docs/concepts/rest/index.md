@@ -74,7 +74,7 @@ Choose the authentication guide for your service:
 ## API References
 
 - [REST Catalog API](./rest-api): the OpenAPI contract for catalog operations.
-- [Database Branches and Tags](./database-versioning): experimental reference-management APIs and
+- [Database Branches and Tags](./database-versioning): experimental reference management, scoped table APIs, and
   the server MVP design using existing table branches and tags.
 - [REST Management API](./management-api): permissions, row filters, column masking, and the
   corresponding Spark SQL procedures.
