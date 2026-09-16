@@ -152,7 +152,7 @@ class RESTApiDatabaseReferenceTest {
         enqueue(200, "{\"reference\":{\"type\":\"BRANCH\",\"name\":\"main\"}}");
         assertThat(api.fastForwardDatabaseBranch("training db", "main", "train-v1"))
                 .isEqualTo(new DatabaseReference(DatabaseReferenceType.BRANCH, "main"));
-        assertRequest(4, "PUT", TREES_PATH + "/main");
+        assertRequest(4, "POST", TREES_PATH + "/main/forward");
         assertBody(requests.get(4), "{\"sourceTag\":\"train-v1\"}");
 
         enqueue(200, "{\"reference\":{\"type\":\"BRANCH\",\"name\":\"exp-1\"}}");

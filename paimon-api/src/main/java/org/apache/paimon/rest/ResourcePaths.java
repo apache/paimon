@@ -157,6 +157,12 @@ public class ResourcePaths {
         return SLASH.join(databaseTrees(databaseName), encodeString(referenceName));
     }
 
+    /** Action endpoint for fast-forwarding a database-level branch. */
+    @Experimental
+    public String forwardDatabaseBranch(String databaseName, String branch) {
+        return SLASH.join(databaseTree(databaseName, branch), "forward");
+    }
+
     public String tables(String databaseName) {
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLES);
     }

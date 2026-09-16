@@ -118,7 +118,7 @@ class RESTCatalogTreeManagementTest {
 
         enqueue(200, "{\"reference\":" + MAIN_JSON + "}");
         assertThat(trees.fastForwardBranch(DATABASE, "main", "train-v1")).isEqualTo(main);
-        RecordedRequest fastForward = takeRequest("PUT", TREES_PATH + "/main");
+        RecordedRequest fastForward = takeRequest("POST", TREES_PATH + "/main/forward");
         assertBody(fastForward, "{\"sourceTag\":\"train-v1\"}");
 
         enqueue(200, "{\"reference\":" + BRANCH_JSON + "}");

@@ -330,56 +330,6 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
-    put:
-      tags:
-        - database-reference
-      summary: Fast-forward database branch from immutable tag
-      operationId: fastForwardDatabaseBranch
-      parameters:
-        - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/FastForwardDatabaseBranchRequest'
-      responses:
-        "200":
-          description: Updated target branch.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DatabaseReferenceResponse'
-        "401":
-          $ref: '#/components/responses/UnauthorizedErrorResponse'
-        "404":
-          description: Database, target branch, or source tag does not exist.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "409":
-          description: Target is not an ancestor of the source tag.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          $ref: '#/components/responses/ServerErrorResponse'
     delete:
       tags:
         - database-reference
@@ -424,6 +374,57 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
           description: Reference type does not match or the default branch is protected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/trees/{name}/forward:
+    post:
+      tags:
+        - database-reference
+      summary: Fast-forward database branch from immutable tag
+      operationId: fastForwardDatabaseBranch
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FastForwardDatabaseBranchRequest'
+      responses:
+        "200":
+          description: Updated target branch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabaseReferenceResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          description: Database, target branch, or source tag does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Target is not an ancestor of the source tag.
           content:
             application/json:
               schema:

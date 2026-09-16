@@ -421,8 +421,8 @@ public class RESTApi {
     public DatabaseReference fastForwardDatabaseBranch(
             String databaseName, String targetBranch, String sourceTag) {
         DatabaseReferenceResponse response =
-                client.put(
-                        resourcePaths.databaseTree(databaseName, targetBranch),
+                client.post(
+                        resourcePaths.forwardDatabaseBranch(databaseName, targetBranch),
                         new FastForwardDatabaseBranchRequest(sourceTag),
                         DatabaseReferenceResponse.class,
                         restAuthFunction);
