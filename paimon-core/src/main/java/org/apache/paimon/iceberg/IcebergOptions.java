@@ -95,6 +95,22 @@ public class IcebergOptions {
                             "The number of old metadata files to keep after each table commit. "
                                     + "For rest-catalog, it will keep 1 old metadata at least.");
 
+    public static final ConfigOption<Boolean> SYNC_FULL_HISTORY =
+            key("metadata.iceberg.sync-full-history")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "When Iceberg metadata has to be created from scratch (for example, "
+                                    + "Iceberg compatibility is enabled on a table that already has "
+                                    + "snapshots, or the previous Iceberg metadata is unusable), "
+                                    + "rebuild it from all Paimon snapshots that are still retained "
+                                    + "instead of only the latest one, so Iceberg readers keep time "
+                                    + "travel and tags. The rebuild cost is proportional to the "
+                                    + "number of retained snapshots. Readers that resolve Iceberg "
+                                    + "metadata files (table-location, hadoop-catalog, "
+                                    + "hive-catalog) see the full replayed history; a rest-catalog "
+                                    + "only receives the final state.");
+
     public static final ConfigOption<String> URI =
             key("metadata.iceberg.uri")
                     .stringType()
