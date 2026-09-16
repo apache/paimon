@@ -42,6 +42,24 @@ public interface GlobalIndexReader
     }
 
     @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitNotStartsWith(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitNotEndsWith(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitNotContains(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
     default CompletableFuture<Optional<GlobalIndexResult>> visitArrayContains(
             FieldRef fieldRef, Object literal) {
         return CompletableFuture.completedFuture(Optional.empty());
@@ -56,6 +74,12 @@ public interface GlobalIndexReader
     @Override
     default CompletableFuture<Optional<GlobalIndexResult>> visitArrayContainsAll(
             FieldRef fieldRef, List<Object> literals) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitNotLike(
+            FieldRef fieldRef, Object literal) {
         return CompletableFuture.completedFuture(Optional.empty());
     }
 

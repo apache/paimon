@@ -26,7 +26,7 @@ import org.apache.paimon.types.{DecimalType, RowType}
 import org.apache.paimon.types.DataTypeRoot._
 
 import org.apache.spark.sql.catalyst.util.{ArrayData, DateTimeUtils}
-import org.apache.spark.sql.connector.expressions.{Cast, Expression, GeneralScalarExpression, Literal, NamedReference}
+import org.apache.spark.sql.connector.expressions.{Cast, Expression, Extract, GeneralScalarExpression, Literal, NamedReference}
 import org.apache.spark.sql.types.{ArrayType => SparkArrayType, DataType => SparkDataType}
 
 import scala.collection.JavaConverters._
@@ -40,9 +40,18 @@ object SparkExpressionConverter {
   private val UPPER = "UPPER"
   private val LOWER = "LOWER"
   private val SUBSTRING = "SUBSTRING"
+  private val CHAR_LENGTH = "CHAR_LENGTH"
   private val TRIM = "TRIM"
   private val LTRIM = "LTRIM"
   private val RTRIM = "RTRIM"
+
+  // Supported fields of the EXTRACT expression
+  private val EXTRACT_YEAR = "YEAR"
+  private val EXTRACT_MONTH = "MONTH"
+  private val EXTRACT_DAY = "DAY"
+  private val EXTRACT_HOUR = "HOUR"
+  private val EXTRACT_MINUTE = "MINUTE"
+  private val EXTRACT_SECOND = "SECOND"
 
   /** Convert Spark [[Expression]] to Paimon [[Transform]], return None if not supported. */
   def toPaimonTransform(exp: Expression, rowType: RowType): Option[Transform] = {
@@ -68,6 +77,7 @@ object SparkExpressionConverter {
           case UPPER => convertChildren(s.children()).map(i => new UpperTransform(i))
           case LOWER => convertChildren(s.children()).map(i => new LowerTransform(i))
           case SUBSTRING => convertChildren(s.children()).map(i => new SubstringTransform(i))
+          case CHAR_LENGTH => convertChildren(s.children()).map(i => new LengthTransform(i))
           case TRIM =>
             convertChildren(s.children()).map(i => new TrimTransform(i, TrimTransform.Flag.BOTH))
           case LTRIM =>
@@ -83,6 +93,37 @@ object SparkExpressionConverter {
             CastTransform.tryCreate(
               toPaimonFieldRef(n, rowType),
               SparkTypeUtils.toPaimonType(c.dataType()))
+          case _ => None
+        }
+      // The connector `Extract` expression was added in Spark 3.4 and does not exist on
+      // Spark 3.2/3.3 runtimes, so its type test must stay behind this version gate to avoid
+      // a NoClassDefFoundError when linking the class there.
+      case e if org.apache.spark.SPARK_VERSION >= "3.4" =>
+        e match {
+          case extract: Extract =>
+            extract.source() match {
+              case n: NamedReference =>
+                val fieldRef = toPaimonFieldRef(n, rowType)
+                if (
+                  fieldRef.`type`().getTypeRoot == TIMESTAMP_WITHOUT_TIME_ZONE &&
+                  treatPaimonTimestampTypeAsSparkTimestampType()
+                ) {
+                  // Legacy mapping exposes this Paimon type as Spark TIMESTAMP, whose extract
+                  // semantics depend on the Spark session time zone.
+                  None
+                } else {
+                  extract.field() match {
+                    case EXTRACT_YEAR => YearTransform.tryCreate(fieldRef)
+                    case EXTRACT_MONTH => MonthTransform.tryCreate(fieldRef)
+                    case EXTRACT_DAY => DayTransform.tryCreate(fieldRef)
+                    case EXTRACT_HOUR => HourTransform.tryCreate(fieldRef)
+                    case EXTRACT_MINUTE => MinuteTransform.tryCreate(fieldRef)
+                    case EXTRACT_SECOND => SecondTransform.tryCreate(fieldRef)
+                    case _ => None
+                  }
+                }
+              case _ => None
+            }
           case _ => None
         }
       case _ => None
