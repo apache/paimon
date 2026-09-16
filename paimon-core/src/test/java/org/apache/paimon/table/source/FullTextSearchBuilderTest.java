@@ -31,6 +31,7 @@ import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
+import org.apache.paimon.globalindex.testfulltext.TestFullTextGlobalIndexReader;
 import org.apache.paimon.globalindex.testfulltext.TestFullTextGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -1043,6 +1044,75 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         }
 
         assertThat(ids.size()).isLessThanOrEqualTo(5);
+    }
+
+    @Test
+    public void testFullTextSearchRequestsOnlyLimitCandidatesPerSplit() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeDocuments(table, RANKED_DOCUMENTS);
+        List<DataField> textFields =
+                Collections.singletonList(table.rowType().getField(TEXT_FIELD_NAME));
+        buildAndCommitIndexRange(table, Arrays.copyOfRange(RANKED_DOCUMENTS, 0, 3), textFields, 0);
+        buildAndCommitIndexRange(table, Arrays.copyOfRange(RANKED_DOCUMENTS, 3, 6), textFields, 3);
+
+        TestFullTextGlobalIndexReader.REQUESTED_LIMITS.clear();
+        GlobalIndexResult result =
+                table.newFullTextSearchBuilder()
+                        .withQuery(TEXT_FIELD_NAME, matchQuery("paimon"))
+                        .withLimit(2)
+                        .executeLocal();
+
+        // Each of the two splits (3 rows each) is asked for the user limit, not its row count.
+        assertThat(TestFullTextGlobalIndexReader.REQUESTED_LIMITS).containsExactly(2, 2);
+        assertThat(result.results()).hasSize(2);
+    }
+
+    @Test
+    public void testFullTextSearchMergesPerSplitTopKIntoGlobalTopK() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        // Split 1 (rows 0-2) holds only 0.5-scored matches; split 2 (rows 3-5) holds the two
+        // 1.0-scored matches plus one 0.5. A global top-2 must come entirely from split 2.
+        String[] documents = {
+            "paimon alpha", "paimon beta", "paimon gamma",
+            "paimon lake delta", "paimon lake epsilon", "paimon zeta"
+        };
+        writeDocuments(table, documents);
+        List<DataField> textFields =
+                Collections.singletonList(table.rowType().getField(TEXT_FIELD_NAME));
+        buildAndCommitIndexRange(table, Arrays.copyOfRange(documents, 0, 3), textFields, 0);
+        buildAndCommitIndexRange(table, Arrays.copyOfRange(documents, 3, 6), textFields, 3);
+
+        ScoredGlobalIndexResult top2 =
+                (ScoredGlobalIndexResult)
+                        table.newFullTextSearchBuilder()
+                                .withQuery(TEXT_FIELD_NAME, matchQuery("paimon lake"))
+                                .withLimit(2)
+                                .executeLocal();
+        assertThat(top2.results()).containsExactlyInAnyOrder(3L, 4L);
+
+        ScoredGlobalIndexResult top1 =
+                (ScoredGlobalIndexResult)
+                        table.newFullTextSearchBuilder()
+                                .withQuery(TEXT_FIELD_NAME, matchQuery("paimon lake"))
+                                .withLimit(1)
+                                .executeLocal();
+        assertThat(top1.results()).hasSize(1);
+        assertThat(top1.results()).isSubsetOf(3L, 4L);
+
+        // A larger limit still ranks the 1.0 rows first and fills up with 0.5 rows.
+        ScoredGlobalIndexResult top4 =
+                (ScoredGlobalIndexResult)
+                        table.newFullTextSearchBuilder()
+                                .withQuery(TEXT_FIELD_NAME, matchQuery("paimon lake"))
+                                .withLimit(4)
+                                .executeLocal();
+        assertThat(top4.results()).hasSize(4);
+        assertThat(top4.results()).contains(3L, 4L);
+        for (long rowId : top4.results()) {
+            assertThat(top4.scoreGetter().score(rowId)).isGreaterThanOrEqualTo(0.5f);
+        }
     }
 
     @Test

@@ -451,19 +451,14 @@ public class DataEvolutionFullTextRead implements FullTextRead {
                         indexIOMetaList,
                         rowRangeEnd - rowRangeStart + 1,
                         executor);
+        // Each split returns its own top-k; the union's top-k after merge equals the global
+        // top-k, and the native engine scores compound queries per document, so there is no
+        // need to request every candidate of the range.
         FullTextSearch fullTextSearch =
-                new FullTextSearch(
-                                textColumn.name(),
-                                query,
-                                candidateLimit(rowRangeStart, rowRangeEnd))
+                new FullTextSearch(textColumn.name(), query, limit)
                         .withIncludeRowIds(includeRowIds);
         return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
                 .visitFullTextSearch(fullTextSearch)
                 .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
-    }
-
-    private static int candidateLimit(long rowRangeStart, long rowRangeEnd) {
-        long size = rowRangeEnd - rowRangeStart + 1;
-        return size > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) size;
     }
 }
