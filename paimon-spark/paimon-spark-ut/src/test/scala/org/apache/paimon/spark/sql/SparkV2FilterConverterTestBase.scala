@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.data.{BinaryString, Decimal, Timestamp}
-import org.apache.paimon.predicate.PredicateBuilder
+import org.apache.paimon.predicate.{DayTransform, FieldRef, HourTransform, LengthTransform, MinuteTransform, MonthTransform, PredicateBuilder, SecondTransform, YearTransform}
 import org.apache.paimon.spark.{PaimonSparkTestBase, SparkV2FilterConverter}
 import org.apache.paimon.spark.util.shim.TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
 import org.apache.paimon.table.source.DataSplit
@@ -89,6 +89,34 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
   lazy val builder = new PredicateBuilder(rowType)
 
   lazy val converter: SparkV2FilterConverter = SparkV2FilterConverter(rowType)
+
+  test("V2Filter: legacy timestamp mapping does not push down extract") {
+    if (gteqSpark3_4) {
+      withTimeZone("UTC") {
+        withSparkSQLConf(
+          "spark.paimon.legacy-timestamp-mapping.enabled" -> "true",
+          "spark.sql.session.timeZone" -> "America/Los_Angeles") {
+          withTable("legacy_extract") {
+            sql("""
+                  |CREATE TABLE legacy_extract (id INT, ts TIMESTAMP)
+                  |USING paimon PARTITIONED BY (ts)
+                  |""".stripMargin)
+
+            val legacyRowType = loadTable("legacy_extract").rowType()
+            val legacyConverter = SparkV2FilterConverter(legacyRowType)
+            val filter = "hour(ts) = 1"
+            val condition =
+              sql(s"SELECT * FROM legacy_extract WHERE $filter").queryExecution.analyzed
+                .collectFirst { case f: Filter => f }
+                .get
+                .condition
+            val sparkPredicate = translateFilterV2(condition).get
+            assert(legacyConverter.convert(sparkPredicate).isEmpty)
+          }
+        }
+      }
+    }
+  }
 
   test("V2Filter: all types") {
     var filter = "string_col = 'hello'"
@@ -380,6 +408,106 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
     assert(scanFilesCount(filter) == 2)
   }
 
+  test("V2Filter: NotEqual") {
+    val filter = "int_col <> 1"
+    val actual = converter.convert(v2Filter(filter)).get
+    assert(actual.equals(builder.notEqual(3, 1)))
+    checkAnswer(
+      sql(s"SELECT int_col from test_tbl WHERE $filter ORDER BY int_col"),
+      Seq(Row(2), Row(3)))
+    assert(scanFilesCount(filter) == 2)
+  }
+
+  test("V2Filter: CharLength") {
+    if (gteqSpark3_4) {
+      val filter = "char_length(string_col) = 2"
+      val transform = new LengthTransform(
+        List[Object](new FieldRef(0, "string_col", rowType.getTypeAt(0))).asJava)
+      val actual = converter.convert(v2Filter(filter)).get
+      assert(actual.equals(builder.equal(transform, 2)))
+      checkAnswer(sql(s"SELECT string_col from test_tbl WHERE $filter"), Seq(Row("hi")))
+      // CHAR_LENGTH cannot prune files by column stats.
+      assert(scanFilesCount(filter) == 4)
+    }
+  }
+
+  test("V2Filter: Year, Month and Day") {
+    if (gteqSpark3_4) {
+      val dateFieldRef = new FieldRef(9, "date_col", rowType.getTypeAt(9))
+
+      var filter = "year(date_col) = 2025"
+      var actual = converter.convert(v2Filter(filter)).get
+      assert(actual.equals(builder.equal(new YearTransform(dateFieldRef), 2025)))
+      checkAnswer(
+        sql(s"SELECT date_col from test_tbl WHERE $filter"),
+        sql("SELECT date_col from test_tbl"))
+      // Extracted fields cannot prune files by column stats.
+      assert(scanFilesCount(filter) == 4)
+
+      filter = "month(date_col) = 1"
+      actual = converter.convert(v2Filter(filter)).get
+      assert(actual.equals(builder.equal(new MonthTransform(dateFieldRef), 1)))
+      checkAnswer(
+        sql(s"SELECT date_col from test_tbl WHERE $filter"),
+        sql("SELECT date_col from test_tbl"))
+      assert(scanFilesCount(filter) == 4)
+
+      filter = "day(date_col) = 15"
+      actual = converter.convert(v2Filter(filter)).get
+      assert(actual.equals(builder.equal(new DayTransform(dateFieldRef), 15)))
+      checkAnswer(
+        sql(s"SELECT date_col from test_tbl WHERE $filter"),
+        sql("SELECT date('2025-01-15')"))
+      assert(scanFilesCount(filter) == 4)
+    }
+  }
+
+  test("V2Filter: Hour, Minute and Second") {
+    if (gteqSpark3_4) {
+      withTable("extract_tbl", "extract_ltz_tbl") {
+        sql("CREATE TABLE extract_tbl (ts_col TIMESTAMP_NTZ) USING paimon")
+        sql("INSERT INTO extract_tbl VALUES (timestamp_ntz'2025-01-15 01:02:03')")
+        sql("INSERT INTO extract_tbl VALUES (timestamp_ntz'2025-01-16 04:05:06')")
+
+        val ntzRowType = loadTable("extract_tbl").rowType()
+        val ntzBuilder = new PredicateBuilder(ntzRowType)
+        val ntzConverter = SparkV2FilterConverter(ntzRowType)
+        val tsFieldRef = new FieldRef(0, "ts_col", ntzRowType.getTypeAt(0))
+
+        var filter = "hour(ts_col) = 1"
+        var actual = ntzConverter.convert(v2Filter(filter, "extract_tbl")).get
+        assert(actual.equals(ntzBuilder.equal(new HourTransform(tsFieldRef), 1)))
+        checkAnswer(
+          sql(s"SELECT ts_col from extract_tbl WHERE $filter"),
+          sql("SELECT timestamp_ntz'2025-01-15 01:02:03'"))
+        assert(scanFilesCount(filter, "extract_tbl") == 2)
+
+        filter = "minute(ts_col) = 2"
+        actual = ntzConverter.convert(v2Filter(filter, "extract_tbl")).get
+        assert(actual.equals(ntzBuilder.equal(new MinuteTransform(tsFieldRef), 2)))
+        checkAnswer(
+          sql(s"SELECT ts_col from extract_tbl WHERE $filter"),
+          sql("SELECT timestamp_ntz'2025-01-15 01:02:03'"))
+        assert(scanFilesCount(filter, "extract_tbl") == 2)
+
+        filter = "second(ts_col) = 3"
+        actual = ntzConverter.convert(v2Filter(filter, "extract_tbl")).get
+        assert(actual.equals(ntzBuilder.equal(new SecondTransform(tsFieldRef), 3)))
+        checkAnswer(
+          sql(s"SELECT ts_col from extract_tbl WHERE $filter"),
+          sql("SELECT timestamp_ntz'2025-01-15 01:02:03'"))
+        assert(scanFilesCount(filter, "extract_tbl") == 2)
+
+        // Spark TIMESTAMP maps to a Paimon local-time-zone timestamp by default, which the
+        // date/time extract transforms do not support, so the conversion degrades.
+        sql("CREATE TABLE extract_ltz_tbl (ts_col TIMESTAMP) USING paimon")
+        val ltzRowType = loadTable("extract_ltz_tbl").rowType()
+        val ltzConverter = SparkV2FilterConverter(ltzRowType)
+        assert(ltzConverter.convert(v2Filter("hour(ts_col) = 1", "extract_ltz_tbl")).isEmpty)
+      }
+    }
+  }
+
   test("V2Filter: StartWith") {
     val filter = "string_col LIKE 'h%'"
     val actual = converter.convert(v2Filter(filter)).get
@@ -410,6 +538,29 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
       Seq(Row("hello")))
     // Contains does not have file skipping effect now.
     assert(scanFilesCount(filter) == 4)
+  }
+
+  test("V2Filter: Not string predicates") {
+    Seq(
+      (
+        "string_col NOT LIKE 'h%'",
+        builder.startsWith(0, BinaryString.fromString("h")).negate().get(),
+        Seq(Row("paimon"), Row("world"))),
+      (
+        "string_col NOT LIKE '%d'",
+        builder.endsWith(0, BinaryString.fromString("d")).negate().get(),
+        Seq(Row("hello"), Row("hi"), Row("paimon"))),
+      (
+        "string_col NOT LIKE '%orl%'",
+        builder.contains(0, BinaryString.fromString("orl")).negate().get(),
+        Seq(Row("hello"), Row("hi"), Row("paimon")))
+    ).foreach {
+      case (filter, expectedPredicate, expectedRows) =>
+        assert(converter.convert(v2Filter(filter)).contains(expectedPredicate))
+        checkAnswer(
+          sql(s"SELECT string_col from test_tbl WHERE $filter ORDER BY string_col"),
+          expectedRows)
+    }
   }
 
   private def paimonAlwaysTrue: org.apache.paimon.predicate.Predicate =

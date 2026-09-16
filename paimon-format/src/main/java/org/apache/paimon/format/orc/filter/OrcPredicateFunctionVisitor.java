@@ -73,12 +73,27 @@ public class OrcPredicateFunctionVisitor
     }
 
     @Override
+    public Optional<OrcFilters.Predicate> visitNotStartsWith(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
+    }
+
+    @Override
     public Optional<OrcFilters.Predicate> visitEndsWith(FieldRef fieldRef, Object literal) {
         return Optional.empty();
     }
 
     @Override
+    public Optional<OrcFilters.Predicate> visitNotEndsWith(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
+    }
+
+    @Override
     public Optional<OrcFilters.Predicate> visitContains(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<OrcFilters.Predicate> visitNotContains(FieldRef fieldRef, Object literal) {
         return Optional.empty();
     }
 
@@ -101,6 +116,13 @@ public class OrcPredicateFunctionVisitor
 
     @Override
     public Optional<OrcFilters.Predicate> visitLike(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<OrcFilters.Predicate> visitNotLike(FieldRef fieldRef, Object literal) {
+        // ORC SearchArgument has no not-like leaf, so skip push-down and let the engine
+        // evaluate the filter (consistent with the Parquet path).
         return Optional.empty();
     }
 

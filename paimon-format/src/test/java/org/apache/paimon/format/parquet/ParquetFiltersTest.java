@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.parquet;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.predicate.Predicate;
@@ -69,6 +70,20 @@ import java.util.stream.LongStream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ParquetFiltersTest {
+
+    @Test
+    public void testNotLikeIsNotPushedDown() {
+        RowType rowType =
+                new RowType(
+                        Collections.singletonList(new DataField(0, "string1", new VarCharType())));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        Predicate predicate =
+                new PredicateBuilder(rowType).notLike(0, BinaryString.fromString("%unsupported%"));
+
+        FilterCompat.Filter filter =
+                ParquetFilters.convert(PredicateBuilder.splitAnd(predicate), schema, true);
+        assertThat(filter).isEqualTo(FilterCompat.NOOP);
+    }
 
     @Test
     public void testBoolean() {

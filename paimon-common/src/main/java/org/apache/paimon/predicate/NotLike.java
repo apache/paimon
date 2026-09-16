@@ -18,7 +18,6 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.types.DataType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -26,41 +25,37 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import java.util.List;
 import java.util.Optional;
 
-/** A {@link LeafBinaryFunction} to evaluate {@code filter like '%abc' or filter like '_abc'}. */
-public class EndsWith extends LeafBinaryFunction {
+/** A {@link LeafBinaryFunction} to evaluate {@code field not like pattern}. */
+public class NotLike extends LeafBinaryFunction {
 
-    public static final String NAME = "ENDS_WITH";
+    private static final long serialVersionUID = 1L;
 
-    public static final EndsWith INSTANCE = new EndsWith();
+    public static final String NAME = "NOT_LIKE";
+
+    public static final NotLike INSTANCE = new NotLike();
 
     @JsonCreator
-    private EndsWith() {}
+    private NotLike() {}
 
     @Override
     public boolean test(DataType type, Object field, Object patternLiteral) {
-        BinaryString fieldString = (BinaryString) field;
-        return fieldString.endsWith((BinaryString) patternLiteral);
+        return !Like.INSTANCE.test(type, field, patternLiteral);
     }
 
     @Override
     public boolean test(
-            DataType type,
-            long rowCount,
-            Object min,
-            Object max,
-            Long nullCount,
-            Object patternLiteral) {
+            DataType type, long rowCount, Object min, Object max, Long nullCount, Object literal) {
         return true;
     }
 
     @Override
     public Optional<LeafFunction> negate() {
-        return Optional.of(NotEndsWith.INSTANCE);
+        return Optional.of(Like.INSTANCE);
     }
 
     @Override
     public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
-        return visitor.visitEndsWith(fieldRef, literals.get(0));
+        return visitor.visitNotLike(fieldRef, literals.get(0));
     }
 
     @Override

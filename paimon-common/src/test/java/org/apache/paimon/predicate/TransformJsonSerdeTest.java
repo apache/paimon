@@ -122,6 +122,15 @@ class TransformJsonSerdeTest {
                                                 new FieldRef(2, "f2", DataTypes.STRING()))))
                         .expectJson(
                                 "{\"name\":\"CONCAT_WS\",\"inputs\":[\"|\",{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"},\"X\",null,{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]}"),
+
+                // DateExtractTransform - YEAR on DATE, MINUTE on TIMESTAMP
+                TestSpec.forTransform(new YearTransform(new FieldRef(0, "d0", DataTypes.DATE())))
+                        .expectJson(
+                                "{\"name\":\"YEAR\",\"fieldRef\":{\"index\":0,\"name\":\"d0\",\"type\":\"DATE\"}}"),
+                TestSpec.forTransform(
+                                new MinuteTransform(new FieldRef(1, "t1", DataTypes.TIMESTAMP(3))))
+                        .expectJson(
+                                "{\"name\":\"MINUTE\",\"fieldRef\":{\"index\":1,\"name\":\"t1\",\"type\":\"TIMESTAMP(3)\"}}"),
                 TestSpec.forTransform(
                                 new SubstringTransform(
                                         Arrays.asList(
@@ -171,6 +180,21 @@ class TransformJsonSerdeTest {
                         .expectJson(
                                 "{\"name\":\"TRIM\",\"inputs\":[{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"},\"x\"],\"trimFlag\":\"TRAILING\"}"),
 
+                // LengthTransform
+                TestSpec.forTransform(
+                                new LengthTransform(
+                                        Collections.singletonList(
+                                                new FieldRef(1, "f1", DataTypes.STRING()))))
+                        .expectJson(
+                                "{\"name\":\"LENGTH\",\"inputs\":[{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"}]}"),
+                TestSpec.forTransform(
+                                new LengthTransform(
+                                        Collections.singletonList(
+                                                BinaryString.fromString("hello"))))
+                        .expectJson("{\"name\":\"LENGTH\",\"inputs\":[\"hello\"]}"),
+                TestSpec.forTransform(new LengthTransform(Collections.singletonList(null)))
+                        .expectJson("{\"name\":\"LENGTH\",\"inputs\":[null]}"),
+
                 // error message testing
                 TestSpec.forJson("{\"name\":\"invalid\"}")
                         .expectErrorMessage("Could not resolve type id 'invalid'"),
@@ -184,7 +208,21 @@ class TransformJsonSerdeTest {
                         .expectErrorMessage("position must be an integer"),
                 TestSpec.forJson("{\"name\":\"SUBSTRING\",\"inputs\":[123,1,1]}")
                         .expectErrorMessage(
-                                "SUBSTRING source must be a string or a field reference"));
+                                "SUBSTRING source must be a string or a field reference"),
+                TestSpec.forJson(
+                                "{\"name\":\"YEAR\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"STRING\"}}")
+                        .expectErrorMessage(
+                                "YEAR requires a DATE or TIMESTAMP field, found STRING"),
+                TestSpec.forJson("{\"name\":\"LENGTH\",\"inputs\":[]}")
+                        .expectErrorMessage("LENGTH requires exactly one input"),
+                TestSpec.forJson(
+                                "{\"name\":\"LENGTH\",\"inputs\":[{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}]}")
+                        .expectErrorMessage("LENGTH input must be a string field"),
+                TestSpec.forJson(
+                                "{\"name\":\"LENGTH\",\"inputs\":[{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"},{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"}]}")
+                        .expectErrorMessage("LENGTH requires exactly one input"),
+                TestSpec.forJson("{\"name\":\"LENGTH\",\"inputs\":[5]}")
+                        .expectErrorMessage("Unsupported StringTransform input JSON"));
     }
 
     @ParameterizedTest(name = "{index}: {0}")
