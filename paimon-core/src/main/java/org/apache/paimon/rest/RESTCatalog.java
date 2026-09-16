@@ -44,6 +44,7 @@ import org.apache.paimon.management.LabelManagement;
 import org.apache.paimon.management.PermissionManagement;
 import org.apache.paimon.management.PolicyManagement;
 import org.apache.paimon.management.SemanticViewManagement;
+import org.apache.paimon.management.TreeManagement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -164,6 +165,11 @@ public class RESTCatalog implements Catalog {
     @Experimental
     public SemanticViewManagement semanticViewManagement() {
         return new RESTSemanticViewManagement(api);
+    }
+
+    @Experimental
+    public TreeManagement treeManagement() {
+        return new RESTTreeManagement(api);
     }
 
     @Override
