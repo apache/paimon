@@ -50,6 +50,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -121,6 +122,29 @@ public class AvroFileFormatTest {
             }
         }
         assertThat(records).isEqualTo(numRecords);
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {2147483648L, 4294968320L, Long.MAX_VALUE})
+    void testFileBlockSizeOverflow(long blockSize) throws IOException {
+        Options options = new Options();
+        options.setString("file.block-size", Long.toString(blockSize));
+        FileFormat format = FileFormat.fromIdentifier("avro", options);
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull()).notNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            assertThatThrownBy(
+                            () -> {
+                                try (FormatWriter writer =
+                                        format.createWriterFactory(rowType).create(out, "null")) {
+                                    writer.addElement(GenericRow.of(0));
+                                }
+                            })
+                    .isInstanceOf(ArithmeticException.class)
+                    .hasMessage("integer overflow");
+        }
     }
 
     @Test
