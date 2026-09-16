@@ -131,6 +131,11 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     }
 
     @Override
+    protected boolean requiresFullManifestEntryForPartitionScan() {
+        return keyFilter != null || isValueFilterEnabled();
+    }
+
+    @Override
     public FileStoreScan enableValueFilter() {
         this.valueFilterForceEnabled = true;
         return this;
