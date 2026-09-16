@@ -75,7 +75,7 @@ public class FieldAggregatorRetractNullTest {
 
     @Test
     public void testFieldSumAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(DataTypes.INT(), null, null);
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(DataTypes.INT());
         assertThat(fieldSumAgg.retract(1, 1)).isNotNull();
     }
 
