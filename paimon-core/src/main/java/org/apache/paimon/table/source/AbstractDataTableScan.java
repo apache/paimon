@@ -70,8 +70,10 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -281,6 +283,14 @@ abstract class AbstractDataTableScan implements DataTableScan {
             return null;
         }
         List<String> select = readType == null ? null : readType.getFieldNames();
+        if (select != null && (userFilter != null || !partitionFilterFields.isEmpty())) {
+            // Authorize query operands before pruning or reading their values. Dependencies of
+            // trusted row filters and masks are supplied by the catalog and are not user selects.
+            Set<String> fields = new LinkedHashSet<>(select);
+            fields.addAll(PredicateVisitor.collectFieldNames(userFilter));
+            fields.addAll(partitionFilterFields);
+            select = new ArrayList<>(fields);
+        }
         TableQueryAuthResult result = queryAuth.auth(select);
         if (result != null && result.hasRules()) {
             // re-validated every plan, so a schema change under a live scan fails closed
@@ -322,10 +332,22 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     /** The partition columns a predicate references, or all of them when it cannot be read. */
     private Set<String> partitionPredicateFields(PartitionPredicate partitionPredicate) {
+        if (partitionPredicate == PartitionPredicate.ALWAYS_TRUE
+                || partitionPredicate == PartitionPredicate.ALWAYS_FALSE) {
+            return Collections.emptySet();
+        }
         if (partitionPredicate instanceof PartitionPredicate.DefaultPartitionPredicate) {
             return PredicateVisitor.collectFieldNames(
                     ((PartitionPredicate.DefaultPartitionPredicate) partitionPredicate)
                             .predicate());
+        }
+        if (partitionPredicate instanceof PartitionPredicate.AndPartitionPredicate) {
+            Set<String> fields = new HashSet<>();
+            for (PartitionPredicate child :
+                    ((PartitionPredicate.AndPartitionPredicate) partitionPredicate).predicates()) {
+                fields.addAll(partitionPredicateFields(child));
+            }
+            return fields;
         }
         return new HashSet<>(schema.partitionKeys());
     }
