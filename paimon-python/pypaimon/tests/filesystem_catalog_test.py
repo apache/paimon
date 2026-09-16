@@ -28,6 +28,7 @@ from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
                                                 DatabaseNotExistException,
                                                 TableAlreadyExistException,
                                                 TableNotExistException)
+from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.file_store_table import FileStoreTable
@@ -59,6 +60,43 @@ class FileSystemCatalogTest(unittest.TestCase):
 
         database = catalog.get_database("test_db")
         self.assertEqual(database.name, "test_db")
+
+    def test_cascade_drop_does_not_delete_new_tables(self):
+        catalog = MagicMock(spec=FileSystemCatalog)
+        catalog.file_io = MagicMock()
+        catalog.get_database_path.return_value = "s3://bucket/wh/db.db"
+        catalog.list_tables.side_effect = [["old"], ["new"]]
+
+        with self.assertRaisesRegex(OSError, "changed during drop"):
+            FileSystemCatalog.drop_database(catalog, "db", cascade=True)
+
+        catalog.file_io.delete.assert_called_once_with(
+            "s3://bucket/wh/db.db/old", True)
+
+    def test_cascade_drop_only_removes_empty_database(self):
+        catalog = MagicMock(spec=FileSystemCatalog)
+        catalog.file_io = MagicMock()
+        catalog.get_database_path.return_value = "s3://bucket/wh/db.db"
+        catalog.list_tables.side_effect = [["old"], []]
+
+        FileSystemCatalog.drop_database(catalog, "db", cascade=True)
+
+        self.assertEqual([
+            (("s3://bucket/wh/db.db/old", True), {}),
+            (("s3://bucket/wh/db.db", False), {}),
+        ], [(call[0], call[1])
+            for call in catalog.file_io.delete.call_args_list])
+
+    def test_cascade_drop_removes_existing_tables(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("db", False)
+        catalog.create_table("db.old", Schema(fields=[
+            DataField.from_dict({"id": 0, "name": "value", "type": "INT"})
+        ]), False)
+
+        catalog.drop_database("db", cascade=True)
+
+        self.assertFalse(os.path.exists(self.warehouse + "/db.db"))
 
     def test_table(self):
         fields = [

@@ -218,8 +218,8 @@ def read_requirements():
 install_requires = read_requirements()
 
 LEROBOT_DEPENDENCIES = [
-    # datasets 4.1+ may select PyArrow 21+, while PyPaimon currently
-    # supports PyArrow <20. Pandas 2.2.2+ supports NumPy 2.x selected
+    # datasets 4.1+ is excluded to keep the LeRobot 0.4 dependency set
+    # stable. Pandas 2.2.2+ supports NumPy 2.x selected
     # by LeRobot's media dependencies.
     'datasets>=4,<4.1; python_version>="3.10"',
     'pandas>=2.2.2,<3; python_version>="3.10"',
