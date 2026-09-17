@@ -702,7 +702,7 @@ class _PaimonLeRobotMetadata:
 
     def __init__(
             self, repo_id, tag_name, info, stats, episodes, tasks,
-            subtasks, *, compact_episodes=False):
+            subtasks):
         self.repo_id = repo_id
         self.revision = tag_name
         self.info = info
@@ -710,12 +710,9 @@ class _PaimonLeRobotMetadata:
         self.episodes = episodes
         self.tasks = tasks
         self.subtasks = subtasks
-        self._compact_episodes = compact_episodes
 
     def __getstate__(self):
         state = self.__dict__.copy()
-        if not self._compact_episodes:
-            return state
         try:
             from datasets import Dataset
         except ImportError:
@@ -857,7 +854,7 @@ def _load_dataset(table, tag_name):
             "stats"))
     metadata = _PaimonLeRobotMetadata(
         str(table.identifier), tag_name, info, stats, episodes, tasks,
-        subtasks, compact_episodes=True)
+        subtasks)
     return frames, metadata
 
 

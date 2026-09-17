@@ -165,7 +165,7 @@ class LeRobotValidationTest(unittest.TestCase):
         episodes = Dataset(pa.Table.from_pylist(rows))
         metadata = _PaimonLeRobotMetadata(
             "robot", "tag", {"fps": 50}, None, episodes, ["pick", "place"],
-            None, compact_episodes=True)
+            None)
 
         payload = pickle.dumps(metadata)
         self.assertLess(len(payload), len(pickle.dumps(episodes)) * 3 // 4)
