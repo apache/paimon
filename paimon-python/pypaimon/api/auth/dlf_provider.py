@@ -57,8 +57,14 @@ class DLFAuthProvider(AuthProvider):
             return DLFOpenApiV4Signer(self.region)
         elif signing_algorithm == DLFOpenApiSigner.IDENTIFIER:
             return DLFOpenApiSigner()
-        else:
+        elif signing_algorithm == DLFDefaultSigner.IDENTIFIER:
             return DLFDefaultSigner(self.region)
+        # Falling back here would sign with another scheme, and the 403 that follows reads
+        # like a credential problem; the Java client rejects unknown values the same way
+        raise ValueError(
+            f"Unknown DLF signing algorithm: {signing_algorithm}. Supported: "
+            f"{DLFDefaultSigner.IDENTIFIER}, {DLFOpenApiSigner.IDENTIFIER}, "
+            f"{DLFOpenApiV4Signer.IDENTIFIER}")
 
     @staticmethod
     def extract_host(uri: str) -> str:

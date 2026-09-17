@@ -479,6 +479,16 @@ class DLFSignerTest(unittest.TestCase):
         self.assertEqual(
             hashlib.sha256(b"").hexdigest(), DLFOpenApiV4Signer.EMPTY_BODY_SHA256)
 
+    def test_unknown_signing_algorithm_is_rejected(self):
+        """Falling back to another scheme would surface as a 403 that reads like bad credentials."""
+        with self.assertRaises(ValueError) as context:
+            DLFAuthProvider(
+                uri="https://dlfnext.cn-hangzhou.aliyuncs.com",
+                region="cn-hangzhou",
+                signing_algorithm="openapiv4",
+                token=DLFToken("akId", "akSecret", None, None))
+        self.assertIn("Unknown DLF signing algorithm", str(context.exception))
+
 
 if __name__ == '__main__':
     unittest.main()
