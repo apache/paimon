@@ -41,6 +41,7 @@ import static org.apache.paimon.data.variant.PaimonShreddingUtils.buildVariantSc
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.castShredded;
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.variantShreddingSchema;
 import static org.apache.paimon.types.DataTypesTest.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test of {@link GenericVariant}. */
 public class GenericVariantTest {
@@ -306,6 +307,42 @@ public class GenericVariantTest {
                 .isEqualTo(BinaryString.fromString("100"));
         assertThat(variant.variantGet("$.round", DataTypes.DECIMAL(5, 1), castArgs))
                 .isEqualTo(Decimal.fromBigDecimal(new BigDecimal("100.0"), 5, 1));
+    }
+
+    @Test
+    public void testVariantGetIntegralOverflow() {
+        // The generic cast rules wrap or saturate a value that does not fit the target, which
+        // would turn an invalid cast into a wrong number; Spark's TRY cast rejects it instead.
+        Variant variant =
+                GenericVariant.fromJson(
+                        "{\"big\": 99999999999, \"huge\": 1e30, \"negHuge\": -1e30,"
+                                + " \"wide\": 12345678901234567890.5, \"nan\": 1.5,"
+                                + " \"fits\": 2147483647, \"neg\": -2147483648.5}");
+        VariantCastArgs tryCast = new VariantCastArgs(false, ZoneOffset.UTC);
+        VariantCastArgs strict = new VariantCastArgs(true, ZoneOffset.UTC);
+
+        assertThat(variant.variantGet("$.big", DataTypes.INT(), tryCast)).isNull();
+        assertThat(variant.variantGet("$.big", DataTypes.SMALLINT(), tryCast)).isNull();
+        assertThat(variant.variantGet("$.big", DataTypes.TINYINT(), tryCast)).isNull();
+        assertThat(variant.variantGet("$.huge", DataTypes.BIGINT(), tryCast)).isNull();
+        assertThat(variant.variantGet("$.huge", DataTypes.INT(), tryCast)).isNull();
+        assertThat(variant.variantGet("$.negHuge", DataTypes.INT(), tryCast)).isNull();
+        assertThat(variant.variantGet("$.wide", DataTypes.BIGINT(), tryCast)).isNull();
+        assertThatThrownBy(() -> variant.variantGet("$.big", DataTypes.INT(), strict))
+                .hasMessageContaining("Invalid cast 99999999999 to INT");
+        assertThatThrownBy(() -> variant.variantGet("$.huge", DataTypes.BIGINT(), strict))
+                .hasMessageContaining("Invalid cast 1.0E30 to BIGINT");
+
+        // in-range values still truncate the fractional part and widen as before
+        assertThat(variant.variantGet("$.big", DataTypes.BIGINT(), tryCast))
+                .isEqualTo(99999999999L);
+        assertThat(variant.variantGet("$.nan", DataTypes.INT(), tryCast)).isEqualTo(1);
+        assertThat(variant.variantGet("$.fits", DataTypes.INT(), tryCast))
+                .isEqualTo(Integer.MAX_VALUE);
+        assertThat(variant.variantGet("$.neg", DataTypes.INT(), tryCast))
+                .isEqualTo(Integer.MIN_VALUE);
+        assertThat(variant.variantGet("$.wide", DataTypes.DOUBLE(), tryCast))
+                .isEqualTo(1.2345678901234567E19);
     }
 
     @Test
