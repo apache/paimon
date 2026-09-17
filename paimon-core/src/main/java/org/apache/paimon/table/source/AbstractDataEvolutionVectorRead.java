@@ -140,18 +140,21 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     }
 
     /**
-     * Moves index splits aside when the scalar index cannot evaluate {@link #filter}: the index
-     * path answers with all-or-nothing bitmaps, so with an unevaluable filter it can neither honor
-     * the filter (an empty bitmap silently drops every covered row) nor ignore it (the top-K would
-     * be polluted by non-matching rows). Instead, suppress the index splits and route the ranges
-     * the raw splits do not already cover through the raw search, where the exact final-read filter
-     * decides; already-covered ranges would duplicate that work. Splits routed this way reuse the
-     * vector index type so raw scoring keeps its metric. Must run after {@link #splitSearchSplits}
-     * and before the index splits are read, on the single thread performing the read; the computed
-     * pre-filter is cached for {@link #preFilters} to reuse.
+     * Splits the search splits into index and raw splits, then moves the index splits aside when
+     * the scalar index cannot evaluate {@link #filter}: the index path answers with all-or-nothing
+     * bitmaps, so with an unevaluable filter it can neither honor the filter (an empty bitmap
+     * silently drops every covered row) nor ignore it (the top-K would be polluted by non-matching
+     * rows). Instead, suppress the index splits and route their ranges through the raw search,
+     * where the exact final-read filter decides; the raw read merges ranges, so overlap with an
+     * existing raw split is deduplicated. Splits routed this way reuse the vector index type so raw
+     * scoring keeps its metric. The computed scalar pre-filter is cached for {@link #preFilters} to
+     * reuse.
      */
-    protected void demoteUncoverableIndexSplits(
-            List<IndexVectorSearchSplit> indexSplits, List<RawVectorSearchSplit> rawSplits) {
+    protected void prepareSplits(
+            List<? extends VectorSearchSplit> splits,
+            List<IndexVectorSearchSplit> indexSplits,
+            List<RawVectorSearchSplit> rawSplits) {
+        splitSearchSplits(splits, indexSplits, rawSplits);
         scalarPreFilter = null;
         if (filter == null || indexSplits.isEmpty()) {
             return;
@@ -161,31 +164,15 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             scalarPreFilter = matchedRows;
             return;
         }
-        String indexType = vectorIndexType(indexSplits);
-        List<Range> uncovered = new ArrayList<>();
+        List<Range> ranges = new ArrayList<>();
         List<IndexFileMeta> scalarIndexFiles = new ArrayList<>();
         for (IndexVectorSearchSplit split : indexSplits) {
-            if (!coveredByRawSplits(split.rowRangeStart(), split.rowRangeEnd(), rawSplits)) {
-                uncovered.add(new Range(split.rowRangeStart(), split.rowRangeEnd()));
-                scalarIndexFiles.addAll(split.scalarIndexFiles());
-            }
+            ranges.add(new Range(split.rowRangeStart(), split.rowRangeEnd()));
+            scalarIndexFiles.addAll(split.scalarIndexFiles());
         }
-        if (!uncovered.isEmpty()) {
-            rawSplits.add(new RawVectorSearchSplit(uncovered, scalarIndexFiles, indexType));
-        }
+        rawSplits.add(
+                new RawVectorSearchSplit(ranges, scalarIndexFiles, vectorIndexType(indexSplits)));
         indexSplits.clear();
-    }
-
-    private static boolean coveredByRawSplits(
-            long start, long end, List<RawVectorSearchSplit> rawSplits) {
-        for (RawVectorSearchSplit raw : rawSplits) {
-            for (Range range : raw.rowRanges()) {
-                if (range.from <= start && end <= range.to) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     protected List<RoaringNavigableMap64> preFilters(List<IndexVectorSearchSplit> splits) {
@@ -694,7 +681,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         return table.copyWithoutTimeTravel(pinOptions);
     }
 
-    protected static void splitSearchSplits(
+    private static void splitSearchSplits(
             List<? extends VectorSearchSplit> splits,
             List<IndexVectorSearchSplit> indexSplits,
             List<RawVectorSearchSplit> rawSplits) {

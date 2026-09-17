@@ -74,8 +74,7 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
         this.planSnapshot = plan.snapshot();
         List<IndexVectorSearchSplit> indexSplits = new ArrayList<>();
         List<RawVectorSearchSplit> rawSplits = new ArrayList<>();
-        splitSearchSplits(plan.splits(), indexSplits, rawSplits);
-        demoteUncoverableIndexSplits(indexSplits, rawSplits);
+        prepareSplits(plan.splits(), indexSplits, rawSplits);
         if (indexSplits.isEmpty() && rawSplits.isEmpty()) {
             return GlobalIndexResult.createEmpty();
         }
