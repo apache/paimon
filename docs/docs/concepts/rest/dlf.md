@@ -143,6 +143,9 @@ The client selects a request signer from the configured endpoint unless
 | `https://cn-hangzhou-vpc.dlf.aliyuncs.com` | `default` |
 | `https://dlfnext.cn-hangzhou.aliyuncs.com` | `openapi` |
 
-URIs containing `dlfnext` select the OpenAPI signer; other URIs select the default signer. The
-client also infers the region from the URI. Set `dlf.region` explicitly if the endpoint does not
-contain a recognizable region, for example when using a custom hostname.
+URIs containing `dlfnext` select the OpenAPI signer; other URIs select the default signer. Set
+`dlf.signing-algorithm` to `openapi-v4` to sign with ACS4-HMAC-SHA256 instead, which hashes a
+canonical request and derives its key from the date, the region and the product. That signer is
+opt-in: no endpoint selects it on its own. The client also infers the region from the URI.
+Set `dlf.region` explicitly if the endpoint does not contain a recognizable region, for example when
+using a custom hostname.
