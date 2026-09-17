@@ -39,6 +39,7 @@ MAX_ROW_ID = (1 << 63) - 1
 MAX_INT = (1 << 31) - 1
 READ_BUFFER_BYTES = 1024 * 1024
 LONG = struct.Struct('>q')
+ROW_BOUNDS = struct.Struct('>qq')
 _PROPAGATED_ERRORS = (InterruptedError, CancelledError, ArrowCancelled, MemoryError, RecursionError)
 
 
@@ -110,41 +111,85 @@ def _deltas(values, base=0, signed=False):
 
 class _Buffer:
 
-    def __init__(self, data):
-        self.data = memoryview(data)
-        self.position = 0
+    """A bounded cursor over shared bytes; payloads need not allocate memoryview slices."""
+
+    __slots__ = ('data', 'position', 'limit')
+
+    def __init__(self, data, position=0, limit=None):
+        self.data = data if isinstance(data, memoryview) else memoryview(data)
+        self.position = position
+        self.limit = len(self.data) if limit is None else limit
 
     @property
     def remaining(self):
-        return len(self.data) - self.position
+        return self.limit - self.position
 
     def take(self, count):
-        _require(0 <= count <= self.remaining)
         start = self.position
-        self.position += count
-        return self.data[start:self.position]
+        end = start + count
+        if count < 0 or end > self.limit:
+            _require(False)
+        self.position = end
+        return self.data[start:end]
 
     def uint(self, maximum=MAX_ROW_ID):
-        value = 0
-        for shift in range(0, 63, 7):
-            byte = self.take(1)[0]
+        # Do not create a memoryview slice or call take() for every encoded byte.
+        data, position = self.data, self.position
+        limit = self.limit
+        if position >= limit:
+            _require(False)
+        byte = data[position]
+        position += 1
+        if byte < 128:
+            self.position = position
+            if byte > maximum:
+                _require(False)
+            return byte
+        value = byte & 127
+        for shift in (7, 14, 21, 28, 35, 42, 49, 56):
+            if position >= limit:
+                self.position = position
+                _require(False)
+            byte = data[position]
+            position += 1
             value |= (byte & 127) << shift
-            if not byte & 128:
-                _require((shift == 0 or byte != 0) and value <= maximum)
+            if byte < 128:
+                self.position = position
+                if byte == 0 or value > maximum:
+                    _require(False)
                 return value
+        self.position = position
         raise ValueError('Invalid variable-length integer')
 
     def long(self):
-        return LONG.unpack(self.take(8))[0]
+        position = self.position
+        if position + 8 > self.limit:
+            _require(False)
+        self.position = position + 8
+        return LONG.unpack_from(self.data, position)[0]
+
+
+def _delta_count(data):
+    count = data.uint(MAX_INT)
+    if count > data.limit - data.position:
+        _require(False)
+    return count
 
 
 class _Deltas:
 
-    def __init__(self, data, base=0, maximum=MAX_ROW_ID, signed=False):
+    __slots__ = ('data', 'value', 'maximum', 'signed', 'count', 'remaining')
+
+    def __init__(self, data, base=0, maximum=MAX_ROW_ID, signed=False, count=None):
         _require(0 <= base <= maximum and (not signed or maximum <= MAX_INT))
         self.data, self.value, self.maximum, self.signed = data, base, maximum, signed
-        self.count = data.uint(MAX_INT)
-        _require(self.count <= data.remaining)
+        # select() validates framing before filtering, but only needs a decoder
+        # for payloads whose enclosing block survives earlier filters.
+        if count is None:
+            count = _delta_count(data)
+        else:
+            _require(0 <= count <= MAX_INT and count <= data.remaining)
+        self.count = count
         self.remaining = self.count
 
     def next(self):
@@ -275,12 +320,24 @@ def build_from_entries(avro_bytes, entries, settings):
     return builder.serialize(len(avro_bytes), len(entries))
 
 
-def _payload(data):
-    encoding = data.take(1)[0]
+def _payload(data, payload):
+    position = data.position
+    if position >= data.limit:
+        _require(False)
+    encoding = data.data[position]
+    data.position = position + 1
     if encoding == 0:
         return None
-    payload = data.take(data.uint(MAX_INT))
-    return _Buffer(payload) if encoding == 1 else None
+    length = data.uint(MAX_INT)
+    start = data.position
+    end = start + length
+    if end > data.limit:
+        _require(False)
+    data.position = end
+    if encoding != 1:
+        return None
+    payload.position, payload.limit = start, end
+    return payload
 
 
 def select(data, manifest, query, partition_filter=None, partition_fields=None, bucket_filter=None):
@@ -318,41 +375,56 @@ def select(data, manifest, query, partition_filter=None, partition_fields=None, 
     _require(blocks <= stream.remaining // 6)
     next_offset, first_record = header_length, 0
     selected = []
+    # Payloads are consumed within their block. Reuse bounded cursors within
+    # this invocation, not across files or concurrent queries.
+    partition_cursor, row_cursor, bucket_cursor = (_Buffer(stream.data) for _ in range(3))
+    read_uint = stream.uint
+    intersects = None if query is None else query.intersects
     for _ in range(blocks):
-        _require(stream.remaining >= 6)
-        offset, length, count = stream.uint(), stream.uint(), stream.uint()
-        _require(offset == next_offset and 0 < length <= size - offset)
-        _require(0 < count <= entries - first_record)
-        partitions_data, row_data, bucket_data = _payload(stream), _payload(stream), _payload(stream)
-        ids = rows = None
+        if stream.limit - stream.position < 6:
+            _require(False)
+        offset, length, count = read_uint(), read_uint(), read_uint()
+        if not (offset == next_offset and 0 < length <= size - offset
+                and 0 < count <= entries - first_record):
+            _require(False)
+        partitions_data = _payload(stream, partition_cursor)
+        row_data = _payload(stream, row_cursor)
+        bucket_data = _payload(stream, bucket_cursor)
         if partitions_data is not None:
-            ids = _Deltas(partitions_data, maximum=partitions - 1)
-            _require(0 < ids.count <= min(count, partitions))
+            partition_count = _delta_count(partitions_data)
+            if not (0 < partition_count <= count and partition_count <= partitions):
+                _require(False)
         if row_data is not None:
-            _require(row_data.remaining >= 17)
-            minimum, maximum = row_data.long(), row_data.long()
-            rows = _Deltas(row_data, minimum, maximum)
-            _require(rows.count % 2 == 0 and rows.count // 2 < count)
-            _require(rows.count != 0 or row_data.remaining == 0)
+            if row_data.limit - row_data.position < 17:
+                _require(False)
+            minimum, maximum = ROW_BOUNDS.unpack_from(row_data.data, row_data.position)
+            row_data.position += ROW_BOUNDS.size
+            if not 0 <= minimum <= maximum:
+                _require(False)
+            endpoint_count = _delta_count(row_data)
+            if (endpoint_count % 2 != 0 or endpoint_count // 2 >= count
+                    or (endpoint_count == 0 and row_data.position != row_data.limit)):
+                _require(False)
         if bucket_data is not None:
-            prefix = _Buffer(bucket_data.data)
+            prefix = _Buffer(bucket_data.data, bucket_data.position, bucket_data.limit)
             pairs = prefix.uint(MAX_INT)
             _require(0 < pairs <= count and 2 * pairs + 1 <= prefix.remaining)
         block_first_record = first_record
         first_record += count
         next_offset = offset + length
 
-        if query is not None and rows is not None:
-            if not query.intersects(minimum, maximum):
+        if intersects is not None and row_data is not None:
+            if not intersects(minimum, maximum):
                 continue
-            ranges = rows.count // 2 + 1
+            ranges = endpoint_count // 2 + 1
             row_hit, start = ranges == 1, minimum
+            rows = None if row_hit else _Deltas(row_data, minimum, maximum, count=endpoint_count)
             for i in range(ranges):
                 if row_hit:
                     break
                 end = maximum if i + 1 == ranges else rows.next()
                 _require(end >= start)
-                row_hit = query.intersects(start, end)
+                row_hit = intersects(start, end)
                 if not row_hit and i + 1 < ranges:
                     start = rows.next()
                     _require(start > end)
@@ -360,7 +432,8 @@ def select(data, manifest, query, partition_filter=None, partition_fields=None, 
             if not row_hit:
                 continue
 
-        if partition_filter is not None and ids is not None:
+        if partition_filter is not None and partitions_data is not None:
+            ids = _Deltas(partitions_data, maximum=partitions - 1, count=partition_count)
             partition_hit, previous = False, -1
             while not partition_hit and ids.remaining:
                 id_ = ids.next()
@@ -372,12 +445,12 @@ def select(data, manifest, query, partition_filter=None, partition_fields=None, 
                 continue
 
         if bucket_filter is not None and bucket_data is not None:
-            directory_data = _Buffer(bucket_data.data)
+            directory_data = _Buffer(bucket_data.data, bucket_data.position, bucket_data.limit)
             directory = _Deltas(directory_data, maximum=MAX_INT)
             while directory.remaining:
                 directory.next()
-            buckets = _Deltas(_Buffer(bucket_data.data[:directory_data.position]), maximum=MAX_INT)
-            totals_data = _Buffer(bucket_data.data[directory_data.position:])
+            buckets = _Deltas(_Buffer(bucket_data.data, bucket_data.position, directory_data.position), maximum=MAX_INT)
+            totals_data = _Buffer(bucket_data.data, directory_data.position, bucket_data.limit)
             totals = _Deltas(totals_data, maximum=MAX_INT, signed=True)
             _require(totals.count == buckets.count)
             previous, bucket_hit = (-1, -1), False

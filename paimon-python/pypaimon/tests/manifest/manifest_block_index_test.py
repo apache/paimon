@@ -451,3 +451,92 @@ def test_malformed_bucket_payload_invalidates_the_container():
         data = replace_payload(fixture('indexWithBuckets'), 0, 3, payload)
         with pytest.raises(ValueError):
             select(data, golden_meta(), None, bucket_filter=lambda b, t: False)
+
+
+def test_varint_cursor_boundaries_and_single_byte_fast_path():
+    values = {0, 1, 127, 128, manifest_sidecar.MAX_INT, manifest_sidecar.MAX_ROW_ID}
+    for bits in range(7, 63, 7):
+        values.update((2 ** bits - 1, 2 ** bits, 2 ** bits + 1))
+    rng = random.Random(9908)
+    values.update(rng.getrandbits(63) for _ in range(1000))
+    for value in sorted(values):
+        encoded = vint(value)
+        for source in (b'\xff' + encoded + b'\x55', bytearray(b'\xff' + encoded + b'\x55')):
+            reader = manifest_sidecar._Buffer(source, 1, 1 + len(encoded))
+            assert reader.uint(value) == value
+            assert reader.position == reader.limit and reader.remaining == 0
+            with pytest.raises(ValueError):
+                reader.take(1)
+            with pytest.raises(ValueError):
+                reader.uint()
+        reader = manifest_sidecar._Buffer(memoryview(b'prefix' + encoded + b'\x55')[6:])
+        assert reader.uint() == value
+        assert bytes(reader.take(1)) == b'\x55'
+
+
+@pytest.mark.parametrize('encoded', [b'', b'\x80', b'\x80\x00', b'\x81\x00', b'\xff\x00',
+                                     b'\x80' * 8, b'\xff' * 9, b'\xff' * 9 + b'\x01',
+                                     b'\xff' * 8 + b'\x00'])
+def test_varint_rejects_truncation_noncanonical_and_overflow_without_reading_next_payload(encoded):
+    # The following byte could terminate a truncated varint, but belongs to a different payload.
+    reader = manifest_sidecar._Buffer(b'\x55' + encoded + b'\x01', 1, 1 + len(encoded))
+    with pytest.raises(ValueError):
+        reader.uint()
+    assert reader.position <= reader.limit
+
+
+@pytest.mark.parametrize('value,maximum', [
+    (1, 0), (127, 126), (128, 127),
+    (manifest_sidecar.MAX_INT + 1, manifest_sidecar.MAX_INT),
+    (manifest_sidecar.MAX_ROW_ID, manifest_sidecar.MAX_INT)])
+def test_varint_fast_path_and_multibyte_path_both_enforce_maximum(value, maximum):
+    with pytest.raises(ValueError):
+        manifest_sidecar._Buffer(vint(value)).uint(maximum)
+
+
+def test_fixed_long_and_take_respect_payload_window():
+    for value in (-(1 << 63), -1, 0, manifest_sidecar.MAX_ROW_ID):
+        encoded = b'prefix' + struct.pack('>q', value) + b'suffix'
+        reader = manifest_sidecar._Buffer(encoded, 6, 14)
+        assert reader.long() == value and reader.remaining == 0
+        assert bytes(reader.take(0)) == b''
+        for size in (-1, 1):
+            with pytest.raises(ValueError):
+                reader.take(size)
+        with pytest.raises(ValueError):
+            reader.long()
+        # Underlying bytes contain a full long, but this payload is truncated.
+        with pytest.raises(ValueError):
+            manifest_sidecar._Buffer(encoded, 6, 13).long()
+
+
+def test_delta_reader_is_not_created_for_rejected_or_single_interval_blocks():
+    header = avro_header()
+    builder = Builder(Settings(), header)
+    builder.begin_block(len(header), 100, 1)
+    builder.add(100, 10, partition(7, 'left'), 1, 4)
+    builder.end_block()
+    data = builder.serialize(len(header) + 100, 1)
+    metadata = meta('m', len(header) + 100, 1)
+    with patch.object(manifest_sidecar._Deltas, '__init__', side_effect=AssertionError('Unneeded decoder')):
+        assert not select(data, metadata, [Range(999, 999)], part(7), FIELDS).blocks
+        assert len(select(data, metadata, [Range(105, 105)]).blocks) == 1
+    # Even a guaranteed row miss must validate the other payloads' framing and counts.
+    for dimension in (1, 3):
+        with pytest.raises(ValueError):
+            select(replace_payload(data, 0, dimension, b'\0'), metadata, [Range(999, 999)])
+    with pytest.raises(ValueError):
+        select(replace_payload(data, 0, 2, row_payload(200, 100, [])), metadata, [Range(999, 999)])
+
+
+def test_payload_cursor_is_shared_but_cannot_cross_its_declared_limit():
+    stream = manifest_sidecar._Buffer(b'\1\1\x80\1\1\0\0')
+    cursor = manifest_sidecar._Buffer(stream.data)
+    first = manifest_sidecar._payload(stream, cursor)
+    assert first is cursor and first.data is stream.data
+    with pytest.raises(ValueError):
+        first.uint()
+    second = manifest_sidecar._payload(stream, cursor)
+    assert second is cursor and second.uint() == 0
+    assert manifest_sidecar._payload(stream, cursor) is None
+    assert stream.remaining == 0
