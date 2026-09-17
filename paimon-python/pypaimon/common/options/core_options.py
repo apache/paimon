@@ -952,6 +952,17 @@ class CoreOptions:
         .with_description("Row count per shard for global index.")
     )
 
+    GLOBAL_INDEX_BUILD_PARALLELISM: ConfigOption[int] = (
+        ConfigOptions.key("global-index.build.parallelism")
+        .int_type()
+        .default_value(1)
+        .with_description(
+            "Number of global index shards built concurrently by the local "
+            "Python builder. Each shard may also use native worker threads, "
+            "so increase this value conservatively."
+        )
+    )
+
     PK_VECTOR_INDEX_COLUMNS: ConfigOption[str] = (
         ConfigOptions.key("pk-vector.index.columns")
         .string_type()
@@ -1697,6 +1708,9 @@ class CoreOptions:
 
     def global_index_row_count_per_shard(self) -> int:
         return self.options.get(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
+
+    def global_index_build_parallelism(self) -> int:
+        return self.options.get(CoreOptions.GLOBAL_INDEX_BUILD_PARALLELISM)
 
     def primary_key_btree_index_columns(self) -> List[str]:
         return self._primary_key_index_columns(CoreOptions.PK_BTREE_INDEX_COLUMNS)
