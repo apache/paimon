@@ -46,7 +46,6 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -112,12 +111,17 @@ public final class ManifestSidecar {
 
     /** Selected blocks in original file order. Empty means the manifest can be excluded. */
     public static final class Selection {
+
         private final byte[] header;
         private final List<Block> blocks;
 
-        private Selection(byte[] header, List<Block> blocks) {
+        Selection(byte[] header, List<Block> blocks) {
             this.header = header;
-            this.blocks = Collections.unmodifiableList(blocks);
+            this.blocks = Collections.unmodifiableList(new ArrayList<>(blocks));
+        }
+
+        byte[] header() {
+            return header;
         }
 
         public List<Block> blocks() {
@@ -692,67 +696,17 @@ public final class ManifestSidecar {
 
     static InputStream openManifest(FileIO io, Path path, @Nullable Selection selected)
             throws IOException {
-        return openManifest(io, path, selected, null);
-    }
-
-    static InputStream openManifest(
-            FileIO io,
-            Path path,
-            @Nullable Selection selected,
-            @Nullable SegmentsCache<Object> cache)
-            throws IOException {
         return selected == null
                 ? io.newInputStream(path)
-                : new SelectedBlockInput(io, path, selected, cache);
-    }
-
-    /** Separates physical byte ranges from whole-file cache keys. */
-    static final class BlockCacheKey {
-        private final Path path;
-        private final long offset;
-        private final long length;
-
-        BlockCacheKey(Path path, long offset, long length) {
-            this.path = Objects.requireNonNull(path);
-            this.offset = offset;
-            this.length = length;
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            if (!(other instanceof BlockCacheKey)) {
-                return false;
-            }
-            BlockCacheKey that = (BlockCacheKey) other;
-            return path.equals(that.path) && offset == that.offset && length == that.length;
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(path, offset, length);
-        }
-    }
-
-    /** Complete encoded Avro blocks, distinct from cached manifest entries and sidecar bytes. */
-    private static final class ManifestBlockSegment implements Segments {
-        private final byte[] bytes;
-
-        private ManifestBlockSegment(byte[] bytes) {
-            this.bytes = bytes;
-        }
-
-        @Override
-        public long totalMemorySize() {
-            return bytes.length;
-        }
+                : new SelectedBlockInput(io, path, selected);
     }
 
     /** An OCF stream comprising the original header and selected complete compressed blocks. */
     private static final class SelectedBlockInput extends InputStream {
+
         private final FileIO io;
         private final Path path;
         private final Selection selected;
-        @Nullable private final SegmentsCache<Object> cache;
         @Nullable private SeekableInputStream input;
         private boolean closed;
         private int headerPosition;
@@ -762,12 +716,10 @@ public final class ManifestSidecar {
         private int bufferPosition;
         private int bufferLimit;
 
-        private SelectedBlockInput(
-                FileIO io, Path path, Selection selected, @Nullable SegmentsCache<Object> cache) {
+        private SelectedBlockInput(FileIO io, Path path, Selection selected) {
             this.io = io;
             this.path = path;
             this.selected = selected;
-            this.cache = cache;
         }
 
         @Override
@@ -808,26 +760,17 @@ public final class ManifestSidecar {
                 if (blockPosition == selected.blocks.size()) {
                     return false;
                 }
-                Block next = selected.blocks.get(blockPosition);
-                if (cache != null && next.length <= cache.maxElementSize()) {
-                    readCachedBlocks(next);
-                    return true;
-                }
                 Block block = selected.blocks.get(blockPosition++);
                 long end = block.offset + block.length;
                 while (blockPosition < selected.blocks.size()
-                        && selected.blocks.get(blockPosition).offset == end
-                        && (cache == null
-                                || selected.blocks.get(blockPosition).length
-                                        > cache.maxElementSize())) {
+                        && selected.blocks.get(blockPosition).offset == end) {
                     end += selected.blocks.get(blockPosition++).length;
                 }
                 seekInput(block.offset);
                 remaining = end - block.offset;
             }
             int requested = (int) Math.min(BLOCK_READ_BUFFER_BYTES, remaining);
-            // A previous buffer may be shared with other readers through the block cache.
-            if (cache != null || buffer == null || buffer.length < requested) {
+            if (buffer == null || buffer.length < requested) {
                 buffer = new byte[requested];
             }
             bufferPosition = 0;
@@ -836,63 +779,6 @@ public final class ManifestSidecar {
             bufferLimit = requested;
             remaining -= requested;
             return true;
-        }
-
-        private void readCachedBlocks(Block first) throws IOException {
-            byte[] cached = cachedBlock(first);
-            if (cached != null) {
-                blockPosition++;
-                buffer = cached;
-            } else {
-                int firstPosition = blockPosition++;
-                long end = first.offset + first.length;
-                while (blockPosition < selected.blocks.size()) {
-                    Block next = selected.blocks.get(blockPosition);
-                    if (next.offset != end
-                            || next.length > cache.maxElementSize()
-                            || end - first.offset + next.length > BLOCK_READ_BUFFER_BYTES
-                            || cachedBlock(next) != null) {
-                        break;
-                    }
-                    end += next.length;
-                    blockPosition++;
-                }
-
-                byte[] bytes = new byte[(int) (end - first.offset)];
-                seekInput(first.offset);
-                readFully(bytes, bytes.length);
-                // Publish only complete reads, and use individual block keys so overlapping
-                // selections can share data even when their coalesced read spans differ.
-                int offset = 0;
-                for (int i = firstPosition; i < blockPosition; i++) {
-                    Block block = selected.blocks.get(i);
-                    int length = (int) block.length;
-                    byte[] blockBytes =
-                            length == bytes.length
-                                    ? bytes
-                                    : Arrays.copyOfRange(bytes, offset, offset + length);
-                    cache.put(
-                            new BlockCacheKey(path, block.offset, block.length),
-                            new ManifestBlockSegment(blockBytes));
-                    offset += length;
-                }
-                buffer = bytes;
-            }
-            bufferPosition = 0;
-            bufferLimit = buffer.length;
-        }
-
-        @Nullable
-        private byte[] cachedBlock(Block block) {
-            Segments cached =
-                    cache.getIfPresents(new BlockCacheKey(path, block.offset, block.length));
-            if (cached instanceof ManifestBlockSegment) {
-                byte[] bytes = ((ManifestBlockSegment) cached).bytes;
-                if (bytes.length == block.length) {
-                    return bytes;
-                }
-            }
-            return null;
         }
 
         private void seekInput(long offset) throws IOException {

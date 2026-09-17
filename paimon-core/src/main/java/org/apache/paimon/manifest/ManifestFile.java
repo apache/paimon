@@ -21,6 +21,7 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Segments;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.avro.AvroFileFormat;
 import org.apache.paimon.fs.FileIO;
@@ -46,6 +47,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
 
@@ -62,7 +64,9 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     private final AvroFileFormat avroFileFormat;
     private final long suggestedFileSize;
     private final CoreOptions options;
+    @Nullable private final SegmentsCache<Path> manifestCache;
     @Nullable private final SegmentsCache<Path> sidecarCache;
+    @Nullable private CacheMetrics cacheMetrics;
 
     private ManifestFile(
             FileIO fileIO,
@@ -86,37 +90,32 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 avroFileFormat.createWriterFactory(ManifestEntry.MANIFEST_ROW_TYPE),
                 compression,
                 pathFactory,
-                cache);
+                null);
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
         this.avroFileFormat = avroFileFormat;
         this.suggestedFileSize = suggestedFileSize;
         this.options = options;
+        this.manifestCache = cache;
         this.sidecarCache = sidecarCache == null ? cache : sidecarCache;
     }
 
     @Override
-    protected ManifestEntryCache createCache(
-            @Nullable SegmentsCache<Path> cache, RowType formatType) {
-        return new ManifestEntryCache(
-                cache,
-                serializer,
-                formatType,
-                super::fileSize,
-                this::createIterator,
-                (path, fileSize, partitionFilter, bucketFilter) ->
-                        createManifestIterator(
-                                fileIO,
-                                path,
-                                ManifestEntry.MANIFEST_ROW_TYPE,
-                                partitionFilter,
-                                bucketFilter));
+    public ManifestFile withCacheMetrics(@Nullable CacheMetrics cacheMetrics) {
+        this.cacheMetrics = cacheMetrics;
+        return this;
     }
 
     @Override
-    public ManifestFile withCacheMetrics(@Nullable CacheMetrics cacheMetrics) {
-        super.withCacheMetrics(cacheMetrics);
-        return this;
+    protected <T> List<T> readWithIOException(
+            String fileName,
+            @Nullable Long fileSize,
+            Filter<InternalRow> readFilter,
+            Filter<ManifestEntry> readTFilter,
+            Function<ManifestEntry, T> convertor)
+            throws IOException {
+        return readEntries(
+                fileName, fileSize, null, null, readFilter, readTFilter, convertor, null);
     }
 
     public List<ManifestEntry> read(
@@ -164,31 +163,195 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             Filter<ManifestEntry> readTFilter,
             Function<ManifestEntry, T> convertor,
             @Nullable ManifestSidecar.Selection selected) {
-        if (selected != null && selected.blocks().isEmpty()) {
-            return java.util.Collections.emptyList();
-        }
         try {
-            Path path = pathFactory.toPath(fileName);
-            // Sidecar selections use the block cache, even when every block is selected.
-            if (cache != null && selected == null) {
-                ManifestEntryFilters filters =
-                        new ManifestEntryFilters(
-                                partitionFilter, bucketFilter, readFilter, readTFilter);
-                return cache.read(path, fileSize, filters, convertor);
-            }
+            return readEntries(
+                    fileName,
+                    fileSize,
+                    partitionFilter,
+                    bucketFilter,
+                    readFilter,
+                    readTFilter,
+                    convertor,
+                    selected);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
 
-            CloseableIterator<InternalRow> iterator =
+    private <T> List<T> readEntries(
+            String fileName,
+            @Nullable Long fileSize,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable BucketFilter bucketFilter,
+            Filter<InternalRow> readFilter,
+            Filter<ManifestEntry> readTFilter,
+            Function<ManifestEntry, T> convertor,
+            @Nullable ManifestSidecar.Selection selected)
+            throws IOException {
+        if (selected != null && selected.blocks().isEmpty()) {
+            return Collections.emptyList();
+        }
+        Path path = pathFactory.toPath(fileName);
+        if (manifestCache == null) {
+            return readFromIterator(
                     createManifestIterator(
                             fileIO,
                             path,
                             ManifestEntry.MANIFEST_ROW_TYPE,
                             partitionFilter,
                             bucketFilter,
-                            selected,
-                            cache == null ? null : cache.segmentsCache());
-            return readFromIterator(iterator, serializer, readFilter, readTFilter, convertor);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+                            selected),
+                    serializer,
+                    readFilter,
+                    readTFilter,
+                    convertor);
+        }
+        ManifestEntryFilters filters =
+                new ManifestEntryFilters(partitionFilter, bucketFilter, readFilter, readTFilter);
+        if (selected == null) {
+            Segments cached = manifestCache.getIfPresents(path);
+            if (cached instanceof BlockDirectory) {
+                BlockDirectory directory = (BlockDirectory) cached;
+                if (fileSize == null || fileSize == directory.fileSize) {
+                    selected = directory.selection;
+                }
+            }
+        }
+        return selected == null
+                ? readAllBlocks(path, fileSize, filters, convertor)
+                : readSelectedBlocks(path, fileSize, selected, filters, convertor);
+    }
+
+    @SuppressWarnings("unchecked")
+    private SegmentsCache<BlockKey> blockCache() {
+        // The catalog budget is shared by path-keyed metadata and physical block keys.
+        return (SegmentsCache<BlockKey>) (SegmentsCache<?>) manifestCache;
+    }
+
+    private ManifestEntryCache entryCache(ManifestBlockReader input) {
+        ManifestEntryCache entries =
+                new ManifestEntryCache(
+                        blockCache(),
+                        serializer,
+                        ManifestEntry.MANIFEST_ROW_TYPE,
+                        BlockKey::length,
+                        (key, size) -> input.rows(key, null, null),
+                        (key, size, partition, bucket) -> input.rows(key, partition, bucket));
+        entries.withCacheMetrics(cacheMetrics);
+        return entries;
+    }
+
+    private <T> List<T> readAllBlocks(
+            Path path,
+            @Nullable Long fileSize,
+            ManifestEntryFilters filters,
+            Function<ManifestEntry, T> convertor)
+            throws IOException {
+        List<T> result = new ArrayList<>();
+        List<ManifestSidecar.Block> blocks = new ArrayList<>();
+        byte[] header;
+        long size;
+        try (ManifestBlockReader input = new ManifestBlockReader(fileIO, path, null)) {
+            header = input.header();
+            size = header.length;
+            ManifestEntryCache entries = entryCache(input);
+            while (input.hasNext()) {
+                ManifestSidecar.Block block = input.next();
+                blocks.add(block);
+                size = Math.addExact(block.offset, block.length);
+                result.addAll(
+                        entries.read(
+                                new BlockKey(path, block.offset, block.length),
+                                block.length,
+                                filters,
+                                convertor));
+            }
+            if (fileSize != null && fileSize != size) {
+                throw new IOException("Manifest size does not match its block directory");
+            }
+        }
+        // Only EOF proves that this directory describes the entire file.
+        cacheDirectory(path, size, new ManifestSidecar.Selection(header, blocks));
+        return result;
+    }
+
+    private <T> List<T> readSelectedBlocks(
+            Path path,
+            @Nullable Long fileSize,
+            ManifestSidecar.Selection selected,
+            ManifestEntryFilters filters,
+            Function<ManifestEntry, T> convertor)
+            throws IOException {
+        List<ManifestEntrySegments> hits = new ArrayList<>();
+        List<ManifestSidecar.Block> misses = new ArrayList<>();
+        SegmentsCache<BlockKey> cache = blockCache();
+        for (ManifestSidecar.Block block : selected.blocks()) {
+            Segments value = cache.getIfPresents(new BlockKey(path, block.offset, block.length));
+            ManifestEntrySegments entries =
+                    value instanceof ManifestEntrySegments ? (ManifestEntrySegments) value : null;
+            // Pin hits for this read, so concurrent eviction cannot invalidate the miss sequence.
+            hits.add(entries);
+            if (entries == null) {
+                misses.add(block);
+            }
+        }
+        List<T> result = new ArrayList<>();
+        try (ManifestBlockReader input =
+                new ManifestBlockReader(
+                        fileIO, path, new ManifestSidecar.Selection(selected.header(), misses))) {
+            ManifestEntryCache entries = entryCache(input);
+            for (int i = 0; i < selected.blocks().size(); i++) {
+                ManifestSidecar.Block block = selected.blocks().get(i);
+                ManifestEntrySegments hit = hits.get(i);
+                result.addAll(
+                        hit == null
+                                ? entries.read(
+                                        new BlockKey(path, block.offset, block.length),
+                                        block.length,
+                                        filters,
+                                        convertor)
+                                : entries.readCached(hit, filters, convertor));
+            }
+        }
+        if (fileSize != null && isComplete(selected, fileSize)) {
+            cacheDirectory(path, fileSize, selected);
+        }
+        return result;
+    }
+
+    private static boolean isComplete(ManifestSidecar.Selection selected, long fileSize) {
+        long offset = selected.header().length;
+        for (ManifestSidecar.Block block : selected.blocks()) {
+            if (block.offset != offset || block.length > fileSize - offset) {
+                return false;
+            }
+            offset += block.length;
+        }
+        return offset == fileSize;
+    }
+
+    private void cacheDirectory(Path path, long fileSize, ManifestSidecar.Selection selected) {
+        BlockDirectory directory = new BlockDirectory(fileSize, selected);
+        if (directory.totalMemorySize() <= manifestCache.maxElementSize()
+                && directory.totalMemorySize() <= manifestCache.maxMemorySize().getBytes()) {
+            manifestCache.put(path, directory);
+        }
+    }
+
+    /** Complete physical directory only; no duplicate copy of the entries is retained here. */
+    private static final class BlockDirectory implements Segments {
+
+        private final long fileSize;
+        private final ManifestSidecar.Selection selection;
+
+        private BlockDirectory(long fileSize, ManifestSidecar.Selection selection) {
+            this.fileSize = fileSize;
+            this.selection = selection;
+        }
+
+        @Override
+        public long totalMemorySize() {
+            return selection.header().length + 64L * selection.blocks().size() + 64;
         }
     }
 
@@ -240,7 +403,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             @Nullable BucketFilter bucketFilter)
             throws IOException {
         return createManifestIterator(
-                fileIO, path, projectedType, partitionFilter, bucketFilter, null, null);
+                fileIO, path, projectedType, partitionFilter, bucketFilter, null);
     }
 
     private static CloseableIterator<InternalRow> createManifestIterator(
@@ -249,13 +412,11 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             RowType projectedType,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable BucketFilter bucketFilter,
-            @Nullable ManifestSidecar.Selection selected,
-            @Nullable SegmentsCache<Object> cache)
+            @Nullable ManifestSidecar.Selection selected)
             throws IOException {
         try {
             ManifestAvroReader reader =
-                    new ManifestAvroReader(
-                            ManifestSidecar.openManifest(fileIO, path, selected, cache));
+                    new ManifestAvroReader(ManifestSidecar.openManifest(fileIO, path, selected));
             return reader.read(projectedType, partitionFilter, bucketFilter);
         } catch (IOException e) {
             FileUtils.checkExists(fileIO, path);

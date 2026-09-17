@@ -812,203 +812,6 @@ class ManifestSidecarTest {
     }
 
     @Test
-    void cachedBlocksAreSharedByDifferentSelectionsWithoutOpeningTheManifest() throws Exception {
-        byte[] header = header();
-        byte[] manifest = Arrays.copyOf(header, header.length + 400);
-        for (int i = header.length; i < manifest.length; i++) {
-            manifest[i] = (byte) i;
-        }
-        Path path = new Path(temp.toString(), "manifest-golden");
-        SegmentsCache<Object> cache =
-                new SegmentsCache<>(1024, MemorySize.ofMebiBytes(1), 400, null, false);
-        cache.put(
-                new ManifestSidecar.BlockCacheKey(path, header.length, 100),
-                new SingleSegments(MemorySegment.wrap(new byte[100]), 100));
-        FileIO io = mock(FileIO.class);
-        CountingInput stream = new CountingInput(manifest, Integer.MAX_VALUE);
-        when(io.newInputStream(path)).thenReturn(stream);
-        ManifestSidecar.Selection all =
-                ManifestSidecar.select(
-                        testSidecar(),
-                        testMeta(),
-                        RowRangeIndex.create(
-                                Collections.singletonList(new Range(0, Long.MAX_VALUE))));
-        try (InputStream in = ManifestSidecar.openManifest(io, path, all, cache)) {
-            assertThat(IOUtils.readFully(in, false)).isEqualTo(manifest);
-        }
-        assertThat(stream.readLengths).containsExactly(400);
-        assertThat(stream.seeks).containsExactly((long) header.length);
-        assertThat(cache.estimatedSize()).isEqualTo(3);
-        assertThat(cache.getIfPresents(path)).isNull();
-        when(io.newInputStream(path)).thenThrow(new IOException("Must use cached blocks"));
-        for (long point : new long[] {20, 8254058425445L, 0}) {
-            ManifestSidecar.Selection selected = select(testSidecar(), testMeta(), point);
-            ByteArrayOutputStream expected = new ByteArrayOutputStream();
-            expected.write(header);
-            for (ManifestSidecar.Block block : selected.blocks()) {
-                expected.write(manifest, (int) block.offset, (int) block.length);
-            }
-            try (InputStream in = ManifestSidecar.openManifest(io, path, selected, cache)) {
-                assertThat(IOUtils.readFully(in, false)).isEqualTo(expected.toByteArray());
-            }
-        }
-        verify(io, times(1)).newInputStream(path);
-
-        Path other = new Path(temp.toString(), "other/manifest-golden");
-        byte[] otherBytes = manifest.clone();
-        otherBytes[header.length] ^= 1;
-        when(io.newInputStream(other)).thenReturn(new CountingInput(otherBytes, Integer.MAX_VALUE));
-        try (InputStream in =
-                ManifestSidecar.openManifest(
-                        io, other, select(testSidecar(), testMeta(), 0), cache)) {
-            assertThat(IOUtils.readFully(in, false))
-                    .isEqualTo(Arrays.copyOf(otherBytes, header.length + 100));
-        }
-        verify(io).newInputStream(other);
-    }
-
-    @Test
-    void mixedHitsAndMissesReadOnlyUncachedBlocks() throws Exception {
-        byte[] header = header();
-        byte[] manifest = Arrays.copyOf(header, header.length + 400);
-        FileIO io = mock(FileIO.class);
-        Path path = new Path(temp.toString(), "manifest-golden");
-        CountingInput cold = new CountingInput(manifest, Integer.MAX_VALUE);
-        CountingInput mixed = new CountingInput(manifest, Integer.MAX_VALUE);
-        when(io.newInputStream(path)).thenReturn(cold, mixed);
-        SegmentsCache<Object> cache =
-                new SegmentsCache<>(1024, MemorySize.ofMebiBytes(1), 400, null, false);
-        try (InputStream in =
-                ManifestSidecar.openManifest(
-                        io, path, select(testSidecar(), testMeta(), 8254058425445L), cache)) {
-            IOUtils.readFully(in, false);
-        }
-        ManifestSidecar.Selection all =
-                ManifestSidecar.select(
-                        testSidecar(),
-                        testMeta(),
-                        RowRangeIndex.create(
-                                Collections.singletonList(new Range(0, Long.MAX_VALUE))));
-        try (InputStream in = ManifestSidecar.openManifest(io, path, all, cache)) {
-            assertThat(IOUtils.readFully(in, false)).isEqualTo(manifest);
-        }
-        assertThat(mixed.readLengths).containsExactly(100, 100);
-        assertThat(mixed.seeks).containsExactly((long) header.length, header.length + 300L);
-        try (InputStream in = ManifestSidecar.openManifest(io, path, all, cache)) {
-            assertThat(IOUtils.readFully(in, false)).isEqualTo(manifest);
-        }
-        verify(io, times(2)).newInputStream(path);
-    }
-
-    @Test
-    void truncatedCoalescedReadsDoNotPopulateTheBlockCache() throws Exception {
-        byte[] header = header();
-        byte[] manifest = Arrays.copyOf(header, header.length + 400);
-        FileIO io = mock(FileIO.class);
-        Path path = new Path(temp.toString(), "manifest-golden");
-        CountingInput truncated =
-                new CountingInput(Arrays.copyOf(manifest, manifest.length - 1), 7);
-        CountingInput complete = new CountingInput(manifest, 7);
-        when(io.newInputStream(path)).thenReturn(truncated, complete);
-        SegmentsCache<Object> cache =
-                new SegmentsCache<>(1024, MemorySize.ofMebiBytes(1), 400, null, false);
-        ManifestSidecar.Selection all =
-                ManifestSidecar.select(
-                        testSidecar(),
-                        testMeta(),
-                        RowRangeIndex.create(
-                                Collections.singletonList(new Range(0, Long.MAX_VALUE))));
-        try (InputStream in = ManifestSidecar.openManifest(io, path, all, cache)) {
-            assertThatThrownBy(() -> IOUtils.readFully(in, false)).isInstanceOf(EOFException.class);
-        }
-        assertThat(truncated.closed).isTrue();
-        assertThat(cache.estimatedSize()).isZero();
-        try (InputStream in = ManifestSidecar.openManifest(io, path, all, cache)) {
-            assertThat(IOUtils.readFully(in, false)).isEqualTo(manifest);
-        }
-        assertThat(complete.closed).isTrue();
-        assertThat(cache.estimatedSize()).isEqualTo(3);
-    }
-
-    @Test
-    void evictedBlocksAreReadAgainWithinTheSharedBudget() throws Exception {
-        byte[] header = header();
-        byte[] manifest = Arrays.copyOf(header, header.length + 400);
-        Path path = new Path(temp.toString(), "manifest-golden");
-        FileIO io = mock(FileIO.class);
-        when(io.newInputStream(path))
-                .thenAnswer(ignored -> new CountingInput(manifest, Integer.MAX_VALUE));
-        SegmentsCache<Object> cache =
-                new SegmentsCache<>(1024, MemorySize.ofBytes(1300), 400, null, false);
-        ManifestSidecar.Selection all =
-                ManifestSidecar.select(
-                        testSidecar(),
-                        testMeta(),
-                        RowRangeIndex.create(
-                                Collections.singletonList(new Range(0, Long.MAX_VALUE))));
-        for (int round = 0; round < 2; round++) {
-            try (InputStream in = ManifestSidecar.openManifest(io, path, all, cache)) {
-                assertThat(IOUtils.readFully(in, false)).isEqualTo(manifest);
-            }
-            assertThat(cache.totalCacheBytes()).isLessThanOrEqualTo(1300);
-            assertThat(cache.estimatedSize()).isEqualTo(1);
-        }
-        verify(io, times(2)).newInputStream(path);
-    }
-
-    @Test
-    void oversizedBlocksUseBoundedReadsWithoutModifyingPreviouslyCachedBytes() throws Exception {
-        byte[] header = header();
-        int cachedLength = (4 << 20) + 17;
-        int uncachedLength = 2 * (4 << 20) + 31;
-        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
-        builder.beginBlock(header.length, cachedLength, 1);
-        builder.add(0L, 1);
-        builder.endBlock();
-        builder.beginBlock(header.length + cachedLength, uncachedLength, 1);
-        builder.add(100L, 1);
-        builder.endBlock();
-        byte[] manifest = Arrays.copyOf(header, header.length + cachedLength + uncachedLength);
-        Arrays.fill(manifest, header.length, header.length + cachedLength, (byte) 7);
-        Arrays.fill(manifest, header.length + cachedLength, manifest.length, (byte) 9);
-        byte[] data = builder.serialize(manifest.length, 2);
-        ManifestFileMeta meta = meta("large", manifest.length, 2);
-        Path path = new Path(temp.toString(), "large");
-        FileIO io = mock(FileIO.class);
-        CountingInput cold = new CountingInput(manifest, Integer.MAX_VALUE);
-        CountingInput mixed = new CountingInput(manifest, Integer.MAX_VALUE);
-        when(io.newInputStream(path)).thenReturn(cold, mixed);
-        SegmentsCache<Object> cache =
-                new SegmentsCache<>(1024, MemorySize.ofMebiBytes(8), cachedLength, null, false);
-        ManifestSidecar.Selection first = select(data, meta, 0);
-        byte[] expected = Arrays.copyOf(manifest, header.length + cachedLength);
-        try (InputStream in = ManifestSidecar.openManifest(io, path, first, cache)) {
-            assertThat(IOUtils.readFully(in, false)).isEqualTo(expected);
-        }
-        assertThat(cold.readLengths).containsExactly(4 << 20, 17);
-        ManifestSidecar.Selection all =
-                ManifestSidecar.select(
-                        data,
-                        meta,
-                        RowRangeIndex.create(
-                                Collections.singletonList(new Range(0, Long.MAX_VALUE))));
-        try (InputStream in = ManifestSidecar.openManifest(io, path, all, cache)) {
-            assertThat(IOUtils.readFully(in, false)).isEqualTo(manifest);
-        }
-        assertThat(mixed.readLengths).containsExactly(4 << 20, 4 << 20, 31);
-        assertThat(cache.estimatedSize()).isEqualTo(1);
-        assertThat(
-                        cache.getIfPresents(
-                                new ManifestSidecar.BlockCacheKey(
-                                        path, header.length + cachedLength, uncachedLength)))
-                .isNull();
-        try (InputStream in = ManifestSidecar.openManifest(io, path, first, cache)) {
-            assertThat(IOUtils.readFully(in, false)).isEqualTo(expected);
-        }
-        verify(io, times(2)).newInputStream(path);
-    }
-
-    @Test
     void largeBlockSpansUseBoundedReads() throws Exception {
         byte[] header = header();
         ManifestSidecar.Builder builder = new ManifestSidecar.Builder(header, true, true);
@@ -1022,33 +825,17 @@ class ManifestSidecarTest {
         byte[] data = builder.serialize(offset, 5);
         byte[] manifest = Arrays.copyOf(header, (int) offset);
         Path path = new Path(temp.toString(), "manifest-large");
-        for (boolean withCache : new boolean[] {false, true}) {
-            CountingInput stream = new CountingInput(manifest, Integer.MAX_VALUE);
-            FileIO io = mock(FileIO.class);
-            when(io.newInputStream(path)).thenReturn(stream);
-            SegmentsCache<Object> cache =
-                    withCache
-                            ? new SegmentsCache<>(
-                                    1024, MemorySize.ofMebiBytes(16), 4 << 20, null, false)
-                            : null;
-            try (InputStream input =
-                    ManifestSidecar.openManifest(
-                            io, path, select(data, meta("manifest-large", offset, 5), 20), cache)) {
-                assertThat(IOUtils.readFully(input, false)).isEqualTo(manifest);
-            }
-            assertThat(stream.readLengths).containsExactly(4 << 20, 4 << 20, 1 << 20);
-            if (withCache) {
-                assertThat(stream.seeks)
-                        .containsExactly(
-                                (long) header.length,
-                                header.length + (4L << 20),
-                                header.length + (8L << 20));
-                assertThat(cache.estimatedSize()).isEqualTo(5);
-            } else {
-                assertThat(stream.seeks).containsExactly((long) header.length);
-            }
-            assertThat(stream.closed).isTrue();
+        CountingInput stream = new CountingInput(manifest, Integer.MAX_VALUE);
+        FileIO io = mock(FileIO.class);
+        when(io.newInputStream(path)).thenReturn(stream);
+        try (InputStream input =
+                ManifestSidecar.openManifest(
+                        io, path, select(data, meta("manifest-large", offset, 5), 20))) {
+            assertThat(IOUtils.readFully(input, false)).isEqualTo(manifest);
         }
+        assertThat(stream.readLengths).containsExactly(4 << 20, 4 << 20, 1 << 20);
+        assertThat(stream.seeks).containsExactly((long) header.length);
+        assertThat(stream.closed).isTrue();
     }
 
     @Test

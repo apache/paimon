@@ -1471,7 +1471,7 @@ public class ManifestFileTest {
         assertThat(io.opened).isEmpty();
         assertThat(factory.create().read(meta.fileName()))
                 .containsExactlyInAnyOrderElementsOf(entries);
-        assertThat(cache.estimatedSize()).isEqualTo(1);
+        assertThat(cache.estimatedSize()).isEqualTo(2);
         assertThat(sidecarCache.estimatedSize()).isEqualTo(1);
         assertThat(cache.getIfPresents(sidecarPath)).isNull();
         assertThat(
@@ -1554,8 +1554,9 @@ public class ManifestFileTest {
                             .hasSize(round == 0 || !cacheManifest ? 1 : 0);
                 }
                 if (manifestCache != null) {
-                    // Blocks stay in the manifest cache; sidecar bytes only join them on fallback.
-                    assertThat(manifestCache.estimatedSize()).isEqualTo(cacheSidecar ? 1 : 2);
+                    // One decoded block plus its complete directory; sidecar bytes join only on
+                    // fallback.
+                    assertThat(manifestCache.estimatedSize()).isEqualTo(cacheSidecar ? 2 : 3);
                 }
                 if (sidecarCache != null) {
                     assertThat(sidecarCache.estimatedSize()).isEqualTo(1);
@@ -1631,17 +1632,21 @@ public class ManifestFileTest {
         assertThat(readSelectedEntries(factory.create(), meta, allBlocks))
                 .containsExactlyInAnyOrderElementsOf(entries);
         assertThat(fileIO.opened).containsExactly(manifestPath);
-        assertThat(cache.getIfPresents(manifestPath)).isNull();
+        assertThat(cache.getIfPresents(manifestPath))
+                .isNotNull()
+                .isNotInstanceOf(ManifestEntrySegments.class);
 
         fileIO.reset();
         assertThat(readSelectedEntries(factory.create(), meta, allBlocks))
                 .containsExactlyInAnyOrderElementsOf(entries);
         assertThat(fileIO.opened).isEmpty();
-        assertThat(cache.getIfPresents(manifestPath)).isNull();
+        assertThat(cache.getIfPresents(manifestPath))
+                .isNotNull()
+                .isNotInstanceOf(ManifestEntrySegments.class);
 
-        // Reads without a sidecar selection populate and reuse the full-manifest cache.
+        // Full reads reuse exactly the same decoded blocks, not a second copy of all entries.
         assertThat(manifests.read(meta.fileName())).containsExactlyInAnyOrderElementsOf(entries);
-        assertThat(fileIO.opened).containsExactly(manifestPath);
+        assertThat(fileIO.opened).isEmpty();
         assertThat(cache.getIfPresents(manifestPath)).isNotNull();
 
         fileIO.reset();
@@ -1652,7 +1657,7 @@ public class ManifestFileTest {
                 allBlocks.blocks().stream().mapToLong(block -> block.length).max().getAsLong();
         assertThat(meta.fileSize()).isGreaterThan(largestBlock);
         SegmentsCache<Path> blockCache =
-                new SegmentsCache<>(1024, MemorySize.ofMebiBytes(16), largestBlock, null, false);
+                new SegmentsCache<>(1024, MemorySize.ofMebiBytes(16), 1 << 20, null, false);
         ManifestFile.Factory limitedFactory =
                 createManifestFileFactory(
                         tempDir.toString(), Long.MAX_VALUE, options, fileIO, blockCache);
@@ -1667,7 +1672,8 @@ public class ManifestFileTest {
         assertThat(
                         blockCache.getIfPresents(
                                 new Path(tempDir.toString(), "manifest/" + meta.fileName())))
-                .isNull();
+                .isNotNull()
+                .isNotInstanceOf(ManifestEntrySegments.class);
     }
 
     @Test

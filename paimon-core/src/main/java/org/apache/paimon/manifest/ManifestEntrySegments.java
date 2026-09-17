@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Segments;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,12 +39,8 @@ public class ManifestEntrySegments implements Segments {
     private final Map<BinaryRow, Map<Integer, List<RichSegments>>> indexedSegments;
 
     public ManifestEntrySegments(List<RichSegments> segments) {
-        this.segments = segments;
-        this.totalMemorySize =
-                segments.stream()
-                        .map(RichSegments::segments)
-                        .mapToLong(Segments::totalMemorySize)
-                        .sum();
+        this.segments = Collections.unmodifiableList(new ArrayList<>(segments));
+        this.totalMemorySize = segments.stream().mapToLong(RichSegments::totalMemorySize).sum();
         this.indexedSegments = new HashMap<>();
         for (RichSegments seg : segments) {
             indexedSegments
@@ -95,6 +92,15 @@ public class ManifestEntrySegments implements Segments {
 
         public Segments segments() {
             return segments;
+        }
+
+        long totalMemorySize() {
+            // Include the partition copy and an estimate for the run and lookup-index objects.
+            return segments.totalMemorySize() + metadataMemorySize(partition);
+        }
+
+        static long metadataMemorySize(BinaryRow partition) {
+            return partition.getSizeInBytes() + 192L;
         }
     }
 }

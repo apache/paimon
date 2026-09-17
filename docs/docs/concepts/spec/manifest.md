@@ -84,9 +84,16 @@ perform sidecar I/O. Sidecar caching is controlled by the catalog option
 additional budget independent of the manifest content cache. When set to 0, sidecars reuse
 the manifest content cache, or remain uncached if that cache is disabled. Sidecar caching
 uses the catalog's `cache.expire-after-access` and `cache.manifest.soft-values` policies.
-Selected block bytes still share the manifest content cache without populating the
-whole-manifest entry cache with partial results. The low-level `build` method returns
-sidecar bytes without writing or publishing another file.
+Manifest contents use one decoded-entry cache keyed by physical block path, offset and length.
+Full reads and sidecar-selected reads reuse the same complete, unfiltered blocks; compressed
+block bytes and whole-file entry copies are not retained separately. Query filters and
+converters run after loading the cached entries. Decoded buffers and their lookup metadata
+are accounted against the manifest content cache budget, and oversized blocks are read
+without retaining a partial cache entry. A complete block directory may be cached separately
+from the entries after reaching EOF, or after selecting every physical block. Without that
+directory, the first full read still scans the manifest to discover block boundaries, while
+reusing any already decoded blocks. The low-level `build` method returns sidecar bytes without
+writing or publishing another file.
 
 PyPaimon can read these sidecars and prune manifest blocks using partition, row-ID and bucket
 filters. Its `manifest.sidecar.enabled` option inherits `manifest-sort.enabled` when unset.
@@ -305,17 +312,21 @@ not sidecar storage I/O. Selected compressed Avro blocks are read by byte range 
 spans coalesced and individual read requests bounded to 4 MiB. Building a sidecar does not
 modify the original manifest.
 
-`read` and `openManifest` accept an optional caller-supplied `SegmentsCache<Object>`. Complete
-sidecar bytes are keyed by their explicit `Path`. Only successful reads and selections
+`read` accepts an optional caller-supplied `SegmentsCache<Path>`. Complete sidecar bytes
+are keyed by their explicit `Path`. Only successful reads and selections
 populate the cache; query-specific selections are not cached. Cache entry-size limits affect
 admission only: larger sidecars are still fully read, validated and used.
 
-Selected Avro blocks also share this cache. Each entry contains one complete compressed block,
-keyed by the manifest's full path, original offset and encoded length, separately from whole-file
-keys. Different selections reuse the same blocks. Only complete reads populate the cache;
-oversized blocks stream through the read buffer. Adjacent uncached blocks fitting the buffer
-are read together and cached individually. Fully cached selections do not open the manifest.
-The cache retains its configured memory budget, entry-size limit, expiration and eviction policy.
+Manifest reads cache the decoded entries of each complete Avro block, keyed by
+`(path, offset, length)` in a namespace distinct from metadata path keys. These entries have
+the complete manifest schema and are independent of query filters and converters. Full and
+selected reads reuse the same entries; there is no separate compressed-block cache. Only
+successful complete decoding populates a block entry. If decoded buffers exceed the entry
+or memory limit, the reader replays its current raw block without another file read and
+without retaining a filtered prefix. Adjacent missing blocks are fetched together in bounded
+reads. Fully cached selections do not open the manifest. A path-keyed complete block directory
+contains only the header and physical descriptors, not a second copy of manifest entries.
+The caches retain their configured memory budgets, expiration and eviction policies.
 
 ## Manifest
 

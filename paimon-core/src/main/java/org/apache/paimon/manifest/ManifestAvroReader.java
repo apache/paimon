@@ -439,7 +439,7 @@ public final class ManifestAvroReader implements AutoCloseable {
             return toRows(projectedType, null, null, true);
         }
 
-        private RowIterator toRows(
+        RowIterator toRows(
                 RowType projectedType,
                 @Nullable PartitionPredicate partitionFilter,
                 @Nullable BucketFilter bucketFilter,

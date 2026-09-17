@@ -167,7 +167,7 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
         return read(fileName, fileSize, readFilter, readTFilter, Function.identity());
     }
 
-    private <R> List<R> readWithIOException(
+    protected <R> List<R> readWithIOException(
             String fileName,
             @Nullable Long fileSize,
             Filter<InternalRow> readFilter,

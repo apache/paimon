@@ -76,6 +76,13 @@ public class DataPagedOutputSerializer {
         return pagedOut;
     }
 
+    /** Returns the bytes currently allocated for serialized data. */
+    public long memorySize() {
+        return pagedOut == null
+                ? initialOut.getSharedBuffer().length
+                : (long) pagedOut.fullSegments().size() * pageSize;
+    }
+
     /**
      * Serializes a binary row to the output.
      *

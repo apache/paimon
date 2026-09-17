@@ -64,8 +64,13 @@ class ManifestEntrySegmentsTest {
         assertThat(manifestEntrySegments.segments()).containsExactlyElementsOf(richSegmentsList);
 
         // Test totalMemorySize() method
-        long expectedTotalMemorySize = 100 + 200 + 300;
-        assertThat(manifestEntrySegments.totalMemorySize()).isEqualTo(expectedTotalMemorySize);
+        long expectedTotalMemorySize =
+                richSegments1.totalMemorySize()
+                        + richSegments2.totalMemorySize()
+                        + richSegments3.totalMemorySize();
+        assertThat(manifestEntrySegments.totalMemorySize())
+                .isEqualTo(expectedTotalMemorySize)
+                .isGreaterThan(100 + 200 + 300);
 
         // Test indexedSegments() method
         Map<BinaryRow, Map<Integer, List<RichSegments>>> indexedSegments =
