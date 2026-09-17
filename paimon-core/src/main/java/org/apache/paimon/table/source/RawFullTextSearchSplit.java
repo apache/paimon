@@ -18,15 +18,8 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.index.IndexFileMetaSerializer;
-import org.apache.paimon.io.DataInputViewStreamWrapper;
-import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.utils.Range;
 
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -37,50 +30,14 @@ public class RawFullTextSearchSplit extends FullTextSearchSplit {
 
     private static final long serialVersionUID = 1L;
 
-    private static final int VERSION = 1;
-
-    private static final ThreadLocal<IndexFileMetaSerializer> INDEX_SERIALIZER =
-            ThreadLocal.withInitial(IndexFileMetaSerializer::new);
-
     private final List<Range> rowRanges;
-    private transient List<IndexFileMeta> scalarIndexFiles;
 
     public RawFullTextSearchSplit(List<Range> rowRanges) {
-        this(rowRanges, Collections.emptyList());
-    }
-
-    public RawFullTextSearchSplit(List<Range> rowRanges, List<IndexFileMeta> scalarIndexFiles) {
         this.rowRanges = Collections.unmodifiableList(new ArrayList<>(rowRanges));
-        this.scalarIndexFiles = Collections.unmodifiableList(new ArrayList<>(scalarIndexFiles));
     }
 
     public List<Range> rowRanges() {
         return rowRanges;
-    }
-
-    /** Scalar global index files intersecting the raw ranges, used to pre-filter rows. */
-    public List<IndexFileMeta> scalarIndexFiles() {
-        return scalarIndexFiles;
-    }
-
-    private void writeObject(ObjectOutputStream out) throws IOException {
-        out.defaultWriteObject();
-        out.writeInt(VERSION);
-        IndexFileMetaSerializer serializer = INDEX_SERIALIZER.get();
-        DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
-        serializer.serializeList(scalarIndexFiles, view);
-    }
-
-    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
-        in.defaultReadObject();
-        int version = in.readInt();
-        if (version != VERSION) {
-            throw new IOException("Unsupported RawFullTextSearchSplit version: " + version);
-        }
-        IndexFileMetaSerializer serializer = INDEX_SERIALIZER.get();
-        DataInputViewStreamWrapper view = new DataInputViewStreamWrapper(in);
-        this.scalarIndexFiles =
-                Collections.unmodifiableList(new ArrayList<>(serializer.deserializeList(view)));
     }
 
     @Override
@@ -89,22 +46,16 @@ public class RawFullTextSearchSplit extends FullTextSearchSplit {
             return false;
         }
         RawFullTextSearchSplit that = (RawFullTextSearchSplit) o;
-        return Objects.equals(rowRanges, that.rowRanges)
-                && Objects.equals(scalarIndexFiles, that.scalarIndexFiles);
+        return Objects.equals(rowRanges, that.rowRanges);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(rowRanges, scalarIndexFiles);
+        return Objects.hash(rowRanges);
     }
 
     @Override
     public String toString() {
-        return "RawFullTextSearchSplit{"
-                + "rowRanges="
-                + rowRanges
-                + ", scalarIndexFiles="
-                + scalarIndexFiles
-                + '}';
+        return "RawFullTextSearchSplit{" + "rowRanges=" + rowRanges + '}';
     }
 }

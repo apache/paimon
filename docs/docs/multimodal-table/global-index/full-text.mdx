@@ -292,25 +292,31 @@ remaining predicates are evaluated **before** top-k ranking, so the result is
 the top-k among matching rows rather than a filtered subset of the unfiltered
 top-k.
 
-Non-partition predicates are evaluated through the scalar global indexes
-(BTree, Bitmap, Multivalue, FM) built on the filtered columns, the same way
-[vector search pre-filters](./vector#vector-search) rows. Build a scalar index
-on the columns you filter by. How rows whose filter columns are not covered by
-a scalar index are handled follows `scalar-index.search-mode`:
+Non-partition predicates are resolved into an exact set of matching rows
+**before** ranking, and that set is handed to the existing full-text index, so
+BM25 statistics are always those of the full corpus:
 
-| `scalar-index.search-mode` | Rows with an index on the filter columns | Rows without one |
-|---|---|---|
-| `fast` (default) | Evaluated through the index | Excluded from the search; a warning is logged |
-| `full` / `detail` | Evaluated through the index | Read from the data files and filtered row by row before a temporary full-text index ranks them |
+- Rows whose filter columns are covered by a scalar global index (BTree,
+  Bitmap, Multivalue, FM) are decided by the index, the same way
+  [vector search pre-filters](./vector#vector-search) rows. When the index can
+  only produce candidates (a conjunct no index could evaluate, or `contains`,
+  ends-with and `LIKE` on a BTree index), the candidates are verified by reading
+  their filter columns.
+- Rows whose filter columns are not covered by a scalar index follow
+  `scalar-index.search-mode`:
 
+| `scalar-index.search-mode` | Rows without an index on the filter columns |
+|---|---|
+| `fast` (default) | Excluded from the search; a warning is logged |
+| `full` / `detail` | Decided by reading their filter columns |
+
+Build a scalar index on the columns you filter by to avoid the data read.
 With `full-text-index.search-mode=fast`, only rows covered by the full-text
-index are considered in either case. In `fast` mode a conjunction whose members
-are only partly indexed (`indexed_col = 1 AND unindexed_col = 2`) is narrowed by
-the indexed members alone, so the candidate set is a superset. Predicates the
-engine cannot push down (for example, UDFs) are likewise applied by the engine
-after the search. In both situations the rows returned are correct, but a query
-may return fewer than `limit` rows; use `full` mode or index every filtered
-column when the exact top-k matters.
+index are considered in either case; rows outside the coverage are searched
+through a temporary index in `full` mode, where the filter is applied the same
+way. Predicates the engine cannot push down (for example, UDFs) are applied by
+the engine after the search, so such queries may return fewer than `limit`
+rows.
 
 Primary-key full-text indexes do not support row filters yet; see
 [Primary-Key Indexes](../../primary-key-table/global-index#limitations).

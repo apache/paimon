@@ -156,6 +156,114 @@ public class NativeFullTextRowFilterTest {
         assertThat(none.results().isEmpty()).isTrue();
     }
 
+    @Test
+    public void testUnindexedFilterInFullModeKeepsOriginalRanking() throws Exception {
+        // `id` has no scalar index. In scalar-index.search-mode=full the filter must be resolved
+        // against the existing full-text index, not by rebuilding an index over the filtered
+        // rows: a smaller corpus changes BM25 document frequencies and average length, which
+        // changes which rows make the top-k, not just their reported scores.
+        int rowCount = 2_000;
+        Dataset dataset = writeDataset("unindexed_full_mode", rowCount, 8, 42);
+        FileStoreTable table =
+                (FileStoreTable)
+                        dataset.table.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "full"));
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        String query = matchQuery("paimon lake");
+        int limit = 20;
+        int idFrom = 1_800;
+
+        ScoredGlobalIndexResult all =
+                (ScoredGlobalIndexResult)
+                        table.newFullTextSearchBuilder()
+                                .withQuery("content", query)
+                                .withLimit(rowCount)
+                                .executeLocal();
+        List<Long> expected = new ArrayList<>();
+        for (long rowId : all.results()) {
+            if (rowId >= idFrom) {
+                expected.add(rowId);
+            }
+        }
+        expected.sort(
+                (a, b) -> {
+                    int byScore =
+                            Float.compare(all.scoreGetter().score(b), all.scoreGetter().score(a));
+                    return byScore != 0 ? byScore : Long.compare(a, b);
+                });
+        List<Long> expectedTopK = expected.subList(0, Math.min(limit, expected.size()));
+        float cutoff = all.scoreGetter().score(expectedTopK.get(expectedTopK.size() - 1));
+
+        ScoredGlobalIndexResult filtered =
+                (ScoredGlobalIndexResult)
+                        table.newFullTextSearchBuilder()
+                                .withQuery("content", query)
+                                .withLimit(limit)
+                                .withFilter(builder.greaterOrEqual(0, idFrom))
+                                .executeLocal();
+
+        List<Long> actual = new ArrayList<>();
+        filtered.results().forEach(actual::add);
+        // Membership first: every returned row must reach the cutoff of the original ranking.
+        for (long rowId : actual) {
+            assertThat(rowId).isGreaterThanOrEqualTo(idFrom);
+            assertThat(all.scoreGetter().score(rowId))
+                    .as(
+                            "row %s (original score %s) is below the filtered top-%s cutoff %s",
+                            rowId, all.scoreGetter().score(rowId), limit, cutoff)
+                    .isGreaterThanOrEqualTo(cutoff);
+        }
+        assertThat(actual).hasSize(expectedTopK.size());
+        for (long rowId : actual) {
+            assertThat(filtered.scoreGetter().score(rowId))
+                    .as("row %s must keep its score from the original index", rowId)
+                    .isEqualTo(all.scoreGetter().score(rowId));
+        }
+    }
+
+    @Test
+    public void testRawPathAppliesFilterOverTheWholeRawCorpus() throws Exception {
+        // Rows 0-999 are covered by the full-text index, rows 1000-1999 are not. In full-text
+        // mode full the uncovered rows are searched through a temporary index; a filter must not
+        // shrink that temporary corpus, so scores of the returned raw rows equal the scores of an
+        // unfiltered raw search.
+        int rowCount = 2_000;
+        int indexedRows = 1_000;
+        Dataset dataset = writeDataset("raw_corpus", rowCount, 8, 42, indexedRows);
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE.key(), "full");
+        options.put(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "full");
+        FileStoreTable table = (FileStoreTable) dataset.table.copy(options);
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        String query = matchQuery("paimon lake");
+        int limit = 20;
+        int idFrom = 1_800;
+
+        ScoredGlobalIndexResult unfiltered =
+                (ScoredGlobalIndexResult)
+                        table.newFullTextSearchBuilder()
+                                .withQuery("content", query)
+                                .withLimit(rowCount)
+                                .executeLocal();
+        ScoredGlobalIndexResult filtered =
+                (ScoredGlobalIndexResult)
+                        table.newFullTextSearchBuilder()
+                                .withQuery("content", query)
+                                .withLimit(limit)
+                                .withFilter(builder.greaterOrEqual(0, idFrom))
+                                .executeLocal();
+
+        assertThat(filtered.results().getLongCardinality()).isEqualTo(limit);
+        for (long rowId : filtered.results()) {
+            assertThat(rowId).isGreaterThanOrEqualTo(idFrom);
+            assertThat(unfiltered.results().contains(rowId)).isTrue();
+            assertThat(filtered.scoreGetter().score(rowId))
+                    .as("row %s must keep the score of the unfiltered raw corpus", rowId)
+                    .isEqualTo(unfiltered.scoreGetter().score(rowId));
+        }
+    }
+
     /**
      * Run with {@code mvn -pl paimon-full-text test -Dtest=NativeFullTextRowFilterTest
      * -DextraJavaTestArgs=-Dpaimon.benchmark=true}. Prints one line per strategy.
@@ -272,6 +380,12 @@ public class NativeFullTextRowFilterTest {
      */
     private Dataset writeDataset(String tableName, int rowCount, int categories, long seed)
             throws Exception {
+        return writeDataset(tableName, rowCount, categories, seed, rowCount);
+    }
+
+    private Dataset writeDataset(
+            String tableName, int rowCount, int categories, long seed, int fullTextIndexedRows)
+            throws Exception {
         Path tablePath = new Path(tempDir.resolve(tableName).toUri());
         LocalFileIO fileIO = LocalFileIO.create();
 
@@ -338,7 +452,7 @@ public class NativeFullTextRowFilterTest {
                                 NativeFullTextGlobalIndexerFactory.IDENTIFIER,
                                 contentField,
                                 table.coreOptions().toConfiguration());
-        for (int i = 0; i < rowCount; i++) {
+        for (int i = 0; i < fullTextIndexedRows; i++) {
             textWriter.write(BinaryString.fromString(contents.get(i)), i);
         }
         List<IndexFileMeta> indexFiles =
@@ -347,7 +461,7 @@ public class NativeFullTextRowFilterTest {
                                 table.fileIO(),
                                 table.store().pathFactory().globalIndexFileFactory(),
                                 table.coreOptions(),
-                                rowRange,
+                                new Range(0, fullTextIndexedRows - 1),
                                 contentField.id(),
                                 NativeFullTextGlobalIndexerFactory.IDENTIFIER,
                                 textWriter.finish()));

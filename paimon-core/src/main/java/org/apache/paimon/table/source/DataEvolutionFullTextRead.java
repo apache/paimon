@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
@@ -35,7 +36,13 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.Contains;
+import org.apache.paimon.predicate.EndsWith;
 import org.apache.paimon.predicate.FullTextSearch;
+import org.apache.paimon.predicate.LeafFunction;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Like;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
@@ -61,6 +68,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
+import static org.apache.paimon.predicate.PredicateVisitor.collectFieldIds;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Implementation for {@link FullTextRead}. */
@@ -127,7 +135,6 @@ public class DataEvolutionFullTextRead implements FullTextRead {
         Map<String, List<IndexFullTextSearchSplit>> splitsByColumn = new HashMap<>();
         List<IndexFullTextSearchSplit> indexSplits = new ArrayList<>();
         List<Range> rawRowRanges = new ArrayList<>();
-        List<RawFullTextSearchSplit> rawSplits = new ArrayList<>();
         for (FullTextSearchSplit split : splits) {
             if (split instanceof IndexFullTextSearchSplit) {
                 IndexFullTextSearchSplit indexSplit = (IndexFullTextSearchSplit) split;
@@ -136,16 +143,14 @@ public class DataEvolutionFullTextRead implements FullTextRead {
                         .computeIfAbsent(indexSplit.columnName(), k -> new ArrayList<>())
                         .add(indexSplit);
             } else if (split instanceof RawFullTextSearchSplit) {
-                RawFullTextSearchSplit rawSplit = (RawFullTextSearchSplit) split;
-                rawSplits.add(rawSplit);
-                rawRowRanges.addAll(rawSplit.rowRanges());
+                rawRowRanges.addAll(((RawFullTextSearchSplit) split).rowRanges());
             }
         }
 
         GlobalIndexFileReader indexFileReader = m -> table.fileIO().newInputStream(m.filePath());
         RoaringNavigableMap64 liveRows =
                 GlobalIndexLiveRowFilter.liveRows(table, planSnapshot, partitionFilter, null);
-        RoaringNavigableMap64 matchedRows = scalarMatchedRows(indexSplits, planSnapshot);
+        RoaringNavigableMap64 matchedRows = matchedRows(indexSplits, planSnapshot, liveRows);
         ScoredGlobalIndexResult result =
                 evalQuery(
                         splitsByColumn,
@@ -164,94 +169,136 @@ public class DataEvolutionFullTextRead implements FullTextRead {
                                     limit,
                                     textColumn,
                                     this::evalQuery)
-                            .withRawSearch(
-                                    result,
-                                    rawRowRanges,
-                                    rawPreFilter(rawSplits, planSnapshot),
-                                    splitsByColumn,
-                                    executor);
+                            .withRawSearch(result, rawRowRanges, splitsByColumn, executor);
         }
         return result.topK(limit);
     }
 
     /**
-     * Rows of the indexed splits that satisfy {@link #filter} according to the scalar global
-     * indexes attached to them, or {@code null} when there is no filter. Rows whose filter columns
-     * are not indexed are absent from the result: in {@code fast} scalar search mode they are
-     * excluded, in other modes the scan already routed them to a raw split where the predicate is
-     * evaluated on the data.
+     * Rows of the indexed splits that satisfy {@link #filter}, or {@code null} when there is no
+     * filter. The set is exact: rows enter top-k ranking only when the whole predicate holds.
+     *
+     * <ul>
+     *   <li>Rows whose filter columns are covered by a scalar global index are decided by the
+     *       index. When the index answer may be a superset (a conjunct it could not evaluate was
+     *       dropped, or a {@code contains} / {@code endsWith} / {@code like} leaf, which BTree
+     *       answers with every non-null row), the candidates are refined by reading their filter
+     *       columns.
+     *   <li>Rows whose filter columns are not covered follow {@code scalar-index.search-mode}:
+     *       excluded in {@code fast}, otherwise decided by reading their filter columns.
+     * </ul>
+     *
+     * <p>Either way the rows stay in the existing full-text index and are handed to it as an
+     * include bitmap, so BM25 statistics are those of the full corpus.
      */
     @Nullable
-    private RoaringNavigableMap64 scalarMatchedRows(
-            List<IndexFullTextSearchSplit> indexSplits, @Nullable Snapshot planSnapshot) {
+    private RoaringNavigableMap64 matchedRows(
+            List<IndexFullTextSearchSplit> indexSplits,
+            @Nullable Snapshot planSnapshot,
+            @Nullable RoaringNavigableMap64 liveRows) {
         if (filter == null || indexSplits.isEmpty()) {
             return null;
         }
 
+        RoaringNavigableMap64 covered = new RoaringNavigableMap64();
         Set<IndexFileMeta> scalarIndexFiles =
                 new TreeSet<>(Comparator.comparing(IndexFileMeta::fileName));
         for (IndexFullTextSearchSplit split : indexSplits) {
+            for (Range range : split.searchRowRanges()) {
+                covered.addRange(range);
+            }
             scalarIndexFiles.addAll(split.scalarIndexFiles());
         }
+        if (liveRows != null) {
+            covered.and(liveRows);
+        }
 
+        RoaringNavigableMap64 unindexed = new RoaringNavigableMap64();
+        for (Range range :
+                new DataEvolutionGlobalIndexCoverage(
+                                table,
+                                planSnapshot,
+                                partitionFilter,
+                                scalarIndexFiles,
+                                table.coreOptions().scalarIndexSearchMode())
+                        .unindexedRanges(table.rowType(), filter)) {
+            unindexed.addRange(range);
+        }
+        unindexed.and(covered);
+        RoaringNavigableMap64 decidedByIndex =
+                RoaringNavigableMap64.or(new RoaringNavigableMap64(), covered);
+        decidedByIndex.andNot(unindexed);
+
+        RoaringNavigableMap64 matched = new RoaringNavigableMap64();
+        if (!decidedByIndex.isEmpty()) {
+            Optional<GlobalIndexEvaluator.Evaluation> evaluation =
+                    evaluateWithIndexes(scalarIndexFiles, planSnapshot);
+            if (evaluation.isPresent()) {
+                RoaringNavigableMap64 fromIndex =
+                        RoaringNavigableMap64.and(
+                                evaluation.get().result().results(), decidedByIndex);
+                if (!isExact(evaluation.get()) && !fromIndex.isEmpty()) {
+                    fromIndex =
+                            new FilteredRowIdReader(table, planSnapshot, partitionFilter, filter)
+                                    .matchingRowIds(fromIndex);
+                }
+                matched.or(fromIndex);
+            } else {
+                warnUnindexedFilter();
+            }
+        }
+        if (!unindexed.isEmpty()) {
+            matched.or(
+                    new FilteredRowIdReader(table, planSnapshot, partitionFilter, filter)
+                            .matchingRowIds(unindexed));
+        }
+        return matched;
+    }
+
+    private Optional<GlobalIndexEvaluator.Evaluation> evaluateWithIndexes(
+            Set<IndexFileMeta> scalarIndexFiles, @Nullable Snapshot planSnapshot) {
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
                 DataEvolutionGlobalIndexScanner.create(
                         table, planSnapshot, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
-            warnUnindexedFilter();
-            return new RoaringNavigableMap64();
+            return Optional.empty();
         }
-
         try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
-            Optional<GlobalIndexResult> result = scanner.scan(filter);
-            if (!result.isPresent()) {
-                warnUnindexedFilter();
-                return new RoaringNavigableMap64();
-            }
-            return result.get().results();
+            return scanner.scanWithCoverage(filter);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
     /**
-     * Rows of the raw splits that may satisfy {@link #filter}: rows matched by the scalar indexes
-     * plus rows those indexes do not cover, or {@code null} when nothing can be pre-filtered. The
-     * raw read still evaluates the predicate row by row, so this only bounds the rows to scan.
+     * Whether an index evaluation is an exact match set. The global index contract only promises
+     * candidates: a conjunct no index could evaluate is dropped, and BTree answers substring
+     * predicates with every non-null row. Both cases are refined from the data.
      */
-    @Nullable
-    private RoaringNavigableMap64 rawPreFilter(
-            List<RawFullTextSearchSplit> rawSplits, @Nullable Snapshot planSnapshot) {
-        if (filter == null || rawSplits.isEmpty()) {
-            return null;
+    private boolean isExact(GlobalIndexEvaluator.Evaluation evaluation) {
+        Set<Integer> filterFieldIds = collectFieldIds(table.rowType(), filter);
+        if (!evaluation.contributingFieldIds().containsAll(filterFieldIds)) {
+            return false;
         }
+        return !hasCandidateOnlyLeaf(filter);
+    }
 
-        Set<IndexFileMeta> scalarIndexFiles =
-                new TreeSet<>(Comparator.comparing(IndexFileMeta::fileName));
-        for (RawFullTextSearchSplit split : rawSplits) {
-            scalarIndexFiles.addAll(split.scalarIndexFiles());
-        }
-        Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
-                DataEvolutionGlobalIndexScanner.create(
-                        table, planSnapshot, partitionFilter, scalarIndexFiles);
-        if (!optionalScanner.isPresent()) {
-            return null;
-        }
-
-        RoaringNavigableMap64 include = new RoaringNavigableMap64();
-        try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
-            Optional<GlobalIndexEvaluator.Evaluation> result = scanner.scanWithCoverage(filter);
-            if (!result.isPresent()) {
-                return null;
+    private static boolean hasCandidateOnlyLeaf(Predicate predicate) {
+        if (predicate instanceof CompoundPredicate) {
+            for (Predicate child : ((CompoundPredicate) predicate).children()) {
+                if (hasCandidateOnlyLeaf(child)) {
+                    return true;
+                }
             }
-            include.or(result.get().result().results());
-            include.or(
-                    scanner.unindexedRowsForContributingFields(result.get().contributingFieldIds())
-                            .results());
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+            return false;
         }
-        return include;
+        if (predicate instanceof LeafPredicate) {
+            LeafFunction function = ((LeafPredicate) predicate).function();
+            return function instanceof Contains
+                    || function instanceof EndsWith
+                    || function instanceof Like;
+        }
+        return false;
     }
 
     private void warnUnindexedFilter() {
@@ -270,8 +317,10 @@ public class DataEvolutionFullTextRead implements FullTextRead {
             Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
             IndexPathFactory indexPathFactory,
             GlobalIndexFileReader indexFileReader,
-            ExecutorService executor) {
-        return evalQuery(splitsByColumn, indexPathFactory, indexFileReader, executor, null, null);
+            ExecutorService executor,
+            @Nullable RoaringNavigableMap64 includeRowIds) {
+        return evalQuery(
+                splitsByColumn, indexPathFactory, indexFileReader, executor, null, includeRowIds);
     }
 
     private ScoredGlobalIndexResult evalQuery(

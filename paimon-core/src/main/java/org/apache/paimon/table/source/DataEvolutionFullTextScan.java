@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
@@ -150,12 +149,11 @@ public class DataEvolutionFullTextScan implements FullTextScan {
         }
 
         // Build splits: for each chosen full-text range, attach the scalar index files that can
-        // pre-filter its rows.
+        // pre-filter its rows. Rows the full-text index does not cover go to the raw split; rows
+        // it covers but no scalar index does are resolved from the data at read time.
         List<FullTextSearchSplit> splits = new ArrayList<>();
-        List<Range> fullTextIndexedRanges = new ArrayList<>();
         for (IndexRangeSelection selection :
                 chooseIndexRanges(fullTextIndexFiles, textColumnIds, idToColumn)) {
-            fullTextIndexedRanges.addAll(selection.searchRanges);
             splits.add(
                     new IndexFullTextSearchSplit(
                             selection.columnName,
@@ -169,42 +167,16 @@ public class DataEvolutionFullTextScan implements FullTextScan {
         }
 
         if (!fullTextIndexFiles.isEmpty()) {
-            GlobalIndexSearchMode fullTextSearchMode =
-                    table.coreOptions().fullTextIndexSearchMode();
             List<Range> rawRowRanges =
                     new DataEvolutionGlobalIndexCoverage(
                                     table,
                                     snapshot,
                                     partitionFilter,
                                     fullTextIndexFiles,
-                                    fullTextSearchMode)
+                                    table.coreOptions().fullTextIndexSearchMode())
                             .unindexedRanges(textColumnIds);
-            if (filter != null) {
-                // Rows whose filter columns are not covered by a scalar index cannot be
-                // pre-filtered through the index; scan them raw so the predicate is evaluated
-                // on the data, following scalar-index.search-mode.
-                List<Range> scalarUnindexedRanges =
-                        new DataEvolutionGlobalIndexCoverage(
-                                        table,
-                                        snapshot,
-                                        partitionFilter,
-                                        scalarIndexFiles,
-                                        table.coreOptions().scalarIndexSearchMode())
-                                .unindexedRanges(table.rowType(), filter);
-                if (fullTextSearchMode == GlobalIndexSearchMode.FAST) {
-                    scalarUnindexedRanges =
-                            Range.and(
-                                    scalarUnindexedRanges,
-                                    Range.sortAndMergeOverlap(fullTextIndexedRanges, true));
-                }
-                rawRowRanges =
-                        Range.sortAndMergeOverlap(
-                                addAll(rawRowRanges, scalarUnindexedRanges), true);
-            }
             if (!rawRowRanges.isEmpty()) {
-                splits.add(
-                        new RawFullTextSearchSplit(
-                                rawRowRanges, scalarIndexFiles(scalarIndexFiles, rawRowRanges)));
+                splits.add(new RawFullTextSearchSplit(rawRowRanges));
             }
         }
 
@@ -509,13 +481,6 @@ public class DataEvolutionFullTextScan implements FullTextScan {
                 }
             }
         }
-        return result;
-    }
-
-    private static List<Range> addAll(List<Range> left, List<Range> right) {
-        List<Range> result = new ArrayList<>(left.size() + right.size());
-        result.addAll(left);
-        result.addAll(right);
         return result;
     }
 
