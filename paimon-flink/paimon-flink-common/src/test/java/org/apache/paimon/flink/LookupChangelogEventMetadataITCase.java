@@ -36,7 +36,7 @@ public class LookupChangelogEventMetadataITCase extends CatalogITCaseBase {
                         + "id INT PRIMARY KEY NOT ENFORCED, "
                         + "data INT, "
                         + "event_ts BIGINT, "
-                        + "writetime BIGINT METADATA FROM 'paimon.event.event_ts' VIRTUAL"
+                        + "writetime BIGINT METADATA FROM '__internal__event_ts' VIRTUAL"
                         + ") WITH ("
                         + "'bucket'='1', "
                         + "'changelog-producer'='lookup', "
@@ -68,11 +68,12 @@ public class LookupChangelogEventMetadataITCase extends CatalogITCaseBase {
                         + "id INT PRIMARY KEY NOT ENFORCED, "
                         + "data INT, "
                         + "event_ts BIGINT, "
-                        + "writetime BIGINT METADATA FROM 'paimon.event.event_ts' VIRTUAL"
+                        + "writetime BIGINT METADATA FROM '__event__event_ts' VIRTUAL"
                         + ") WITH ("
                         + "'bucket'='1', "
                         + "'changelog-producer'='lookup', "
                         + "'sequence.field'='event_ts', "
+                        + "'changelog-producer.metadata-field-prefix'='__event__', "
                         + "'changelog-producer.expose-field-as-metadata'='event_ts')");
 
         BlockingIterator<Row, Row> iterator =

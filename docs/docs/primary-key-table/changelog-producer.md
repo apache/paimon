@@ -111,10 +111,16 @@ changelog generation, use `full-compaction` instead.
 
 Set `'changelog-producer.expose-field-as-metadata'` to a comma-separated list of columns to copy
 from the lookup changelog event into metadata columns. Metadata columns are named by concatenating
-the configured prefix and column name (`__internal__<column>` by default). For retractions (`-U`, `-D`),
-regular columns contain the before-image while metadata columns contain the event values; for forward
-records (`+I`, `+U`), they mirror the regular values. External sinks that need event timestamps for
-conflict resolution can read these metadata columns.
+the configured prefix and column name (`__internal__<column>` by default). The same name is used as
+the Flink metadata key. For retractions (`-U`, `-D`), regular columns contain the before-image while
+metadata columns contain the event values; for forward records (`+I`, `+U`), they mirror the regular
+values. External sinks that need event timestamps for conflict resolution can read these metadata
+columns.
+
+Paimon readers such as Spark expose these generated fields as regular columns using the configured
+names. Flink SQL must declare the field as a metadata column, for example
+`METADATA FROM '__internal__event_ts'` with the default prefix. The Flink column alias is not a
+physical Paimon column and is not automatically visible to Spark.
 
 The metadata values come from the merge result, which equals the incoming value for the `deduplicate`
 merge engine but may differ for aggregation engines. This option is supported only by the `lookup`
@@ -138,7 +144,7 @@ CREATE TABLE external_sink (
     id INT,
     data STRING,
     event_ts BIGINT,
-    retract_event_ts BIGINT METADATA FROM 'paimon.event.event_ts'
+    retract_event_ts BIGINT METADATA FROM '__internal__event_ts'
 ) WITH (...);
 ```
 
