@@ -1113,6 +1113,36 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
       Seq(Row(1, null, null), Row(2, 7, 1L)))
   }
 
+  test("Paimon Variant pushdown: timestamp extraction follows the session time zone") {
+    // The test JVM runs in America/Los_Angeles; the session zone below differs from it, so a
+    // pushed-down extraction must convert with the session zone Spark hands to the scan.
+    withSparkSQLConf("spark.sql.session.timeZone" -> "Asia/Shanghai") {
+      sql("CREATE TABLE T (id INT, v VARIANT)")
+      sql("""INSERT INTO T VALUES (1, to_variant_object(named_struct(
+            |  'ts', timestamp'2023-11-15 06:13:20.5',
+            |  'ntz', timestamp_ntz'2023-11-15 06:13:20.5',
+            |  'd', date'2024-10-04')))
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("""SELECT
+              |  variant_get(v, '$.ts', 'string'),
+              |  CAST(try_variant_get(v, '$.ts', 'timestamp_ntz') AS STRING),
+              |  CAST(try_variant_get(v, '$.ts', 'date') AS STRING),
+              |  CAST(try_variant_get(v, '$.ntz', 'timestamp') AS STRING),
+              |  CAST(try_variant_get(v, '$.d', 'timestamp') AS STRING)
+              |FROM T""".stripMargin),
+        Seq(
+          Row(
+            "2023-11-15 06:13:20.5",
+            "2023-11-15 06:13:20.5",
+            "2023-11-15",
+            "2023-11-15 06:13:20.5",
+            "2024-10-04 00:00:00"))
+      )
+    }
+  }
+
   test("Paimon Variant pushdown: nested variant column inside a struct") {
     assume(gteqSpark4_1)
     sql("CREATE TABLE T (id INT, nested STRUCT<v: VARIANT, x: INT>)")
