@@ -24,6 +24,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderContext;
+import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.FileSource;
@@ -48,8 +50,11 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link RollingFileWriterImpl}. */
 public class RollingFileWriterTest {
@@ -138,6 +143,42 @@ public class RollingFileWriterTest {
                 assertFileNum(3);
             }
         }
+    }
+
+    @Test
+    public void testCloseAfterWriteFailure() throws IOException {
+        Path path = new Path(tempDir.resolve("failed-file").toString());
+        OutOfMemoryError expected = new OutOfMemoryError("expected");
+        RollingFileWriterImpl<InternalRow, Void> writer =
+                new RollingFileWriterImpl<>(
+                        () ->
+                                new TestSingleFileWriter(
+                                        LocalFileIO.create(),
+                                        (out, compression) ->
+                                                new FormatWriter() {
+                                                    @Override
+                                                    public void addElement(InternalRow element) {
+                                                        throw expected;
+                                                    }
+
+                                                    @Override
+                                                    public boolean reachTargetSize(
+                                                            boolean suggestedCheck,
+                                                            long targetSize) {
+                                                        return false;
+                                                    }
+
+                                                    @Override
+                                                    public void close() {}
+                                                },
+                                        path),
+                        Long.MAX_VALUE,
+                        Long.MAX_VALUE);
+
+        assertThatThrownBy(() -> writer.write(GenericRow.of(1))).isSameAs(expected);
+        assertThat(LocalFileIO.create().exists(path)).isFalse();
+        assertThatCode(writer::abort).doesNotThrowAnyException();
+        assertThatCode(writer::close).doesNotThrowAnyException();
     }
 
     @Test
@@ -311,6 +352,20 @@ public class RollingFileWriterTest {
         DataFileMeta file = rollingFileWriter.result().get(0);
         assertThat(file.valueStatsCols()).isNull();
         assertThat(file.valueStats().minValues().getFieldCount()).isEqualTo(SCHEMA.getFieldCount());
+    }
+
+    private static class TestSingleFileWriter extends SingleFileWriter<InternalRow, Void> {
+
+        private TestSingleFileWriter(
+                LocalFileIO fileIO, FormatWriterFactory writerFactory, Path path) {
+            super(fileIO, writerFactory, path, Function.identity(), null, false);
+        }
+
+        @Override
+        public Void result() throws IOException {
+            fileIO.getFileSize(path);
+            return null;
+        }
     }
 
     private static class SingleUseBundleRecords implements BundleRecords {

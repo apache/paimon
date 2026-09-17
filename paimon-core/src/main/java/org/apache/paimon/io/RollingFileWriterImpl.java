@@ -177,8 +177,12 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
 
     @Override
     public void abort() {
-        if (currentWriter != null) {
-            currentWriter.abort();
+        SingleFileWriter<T, R> writer = currentWriter;
+        currentWriter = null;
+        closed = true;
+
+        if (writer != null) {
+            writer.abort();
         }
         for (FileWriterAbortExecutor abortExecutor : closedWriters) {
             abortExecutor.abort();
