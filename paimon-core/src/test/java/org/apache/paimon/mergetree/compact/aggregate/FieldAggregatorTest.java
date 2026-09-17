@@ -622,7 +622,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumIntAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new IntType(), null, null);
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new IntType());
         assertThat(fieldSumAgg.agg(null, 10)).isEqualTo(10);
         assertThat(fieldSumAgg.agg(1, 10)).isEqualTo(11);
         assertThat(fieldSumAgg.retract(10, 5)).isEqualTo(5);
@@ -631,8 +631,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductIntAgg() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new IntType(), null, null);
+        FieldProductAgg fieldProductAgg = new FieldProductAggFactory().create(new IntType());
         assertThat(fieldProductAgg.agg(null, 10)).isEqualTo(10);
         assertThat(fieldProductAgg.agg(1, 10)).isEqualTo(10);
         assertThat(fieldProductAgg.retract(10, 5)).isEqualTo(2);
@@ -641,7 +640,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumByteAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new TinyIntType(), null, null);
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new TinyIntType());
         assertThat(fieldSumAgg.agg(null, (byte) 10)).isEqualTo((byte) 10);
         assertThat(fieldSumAgg.agg((byte) 1, (byte) 10)).isEqualTo((byte) 11);
         assertThat(fieldSumAgg.retract((byte) 10, (byte) 5)).isEqualTo((byte) 5);
@@ -650,8 +649,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductByteAgg() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new TinyIntType(), null, null);
+        FieldProductAgg fieldProductAgg = new FieldProductAggFactory().create(new TinyIntType());
         assertThat(fieldProductAgg.agg(null, (byte) 10)).isEqualTo((byte) 10);
         assertThat(fieldProductAgg.agg((byte) 1, (byte) 10)).isEqualTo((byte) 10);
         assertThat(fieldProductAgg.retract((byte) 10, (byte) 5)).isEqualTo((byte) 2);
@@ -660,8 +658,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductShortAgg() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new SmallIntType(), null, null);
+        FieldProductAgg fieldProductAgg = new FieldProductAggFactory().create(new SmallIntType());
         assertThat(fieldProductAgg.agg(null, (short) 10)).isEqualTo((short) 10);
         assertThat(fieldProductAgg.agg((short) 1, (short) 10)).isEqualTo((short) 10);
         assertThat(fieldProductAgg.retract((short) 10, (short) 5)).isEqualTo((short) 2);
@@ -670,7 +667,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumShortAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new SmallIntType(), null, null);
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new SmallIntType());
         assertThat(fieldSumAgg.agg(null, (short) 10)).isEqualTo((short) 10);
         assertThat(fieldSumAgg.agg((short) 1, (short) 10)).isEqualTo((short) 11);
         assertThat(fieldSumAgg.retract((short) 10, (short) 5)).isEqualTo((short) 5);
@@ -679,7 +676,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumLongAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new BigIntType(), null, null);
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new BigIntType());
         assertThat(fieldSumAgg.agg(null, 10L)).isEqualTo(10L);
         assertThat(fieldSumAgg.agg(1L, 10L)).isEqualTo(11L);
         assertThat(fieldSumAgg.retract(10L, 5L)).isEqualTo(5L);
@@ -688,8 +685,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductLongAgg() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new BigIntType(), null, null);
+        FieldProductAgg fieldProductAgg = new FieldProductAggFactory().create(new BigIntType());
         assertThat(fieldProductAgg.agg(null, 10L)).isEqualTo(10L);
         assertThat(fieldProductAgg.agg(1L, 10L)).isEqualTo(10L);
         assertThat(fieldProductAgg.retract(10L, 5L)).isEqualTo(2L);
@@ -697,9 +693,37 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldProductOverflowDisabled() {
+        assertProductOverflowDisabled(
+                new TinyIntType(), Byte.MIN_VALUE, (byte) 2, (byte) -1, (byte) 0);
+        assertProductOverflowDisabled(
+                new SmallIntType(), Short.MIN_VALUE, (short) 2, (short) -1, (short) 0);
+        assertProductOverflowDisabled(new IntType(), Integer.MIN_VALUE, 2, -1, 0);
+        assertProductOverflowDisabled(new BigIntType(), Long.MIN_VALUE, 2L, -1L, 0L);
+    }
+
+    private void assertProductOverflowDisabled(
+            DataType type, Object min, Object two, Object minusOne, Object zero) {
+        CoreOptions coreOptions =
+                CoreOptions.fromMap(
+                        Collections.singletonMap("fields.f.product.fail-on-overflow", "false"));
+        for (FieldProductAgg agg :
+                new FieldProductAgg[] {
+                    new FieldProductAggFactory().create(type),
+                    new FieldProductAggFactory().create(type, coreOptions, "f")
+                }) {
+            assertThat(agg.agg(min, two)).isEqualTo(zero);
+            assertThat(agg.agg(min, minusOne)).isEqualTo(min);
+            assertThat(agg.retract(min, minusOne)).isEqualTo(min);
+            assertThatThrownBy(() -> agg.retract(min, zero))
+                    .isInstanceOf(ArithmeticException.class)
+                    .hasMessage("/ by zero");
+        }
+    }
+
+    @Test
     public void testFieldProductByteOverflow() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new TinyIntType(), null, null);
+        FieldProductAgg fieldProductAgg = createProductWithOverflowCheck(new TinyIntType());
         assertThatThrownBy(() -> fieldProductAgg.agg((byte) 64, (byte) 2))
                 .isInstanceOf(ArithmeticException.class);
         assertThatThrownBy(() -> fieldProductAgg.agg((byte) -64, (byte) 4))
@@ -708,8 +732,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductShortOverflow() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new SmallIntType(), null, null);
+        FieldProductAgg fieldProductAgg = createProductWithOverflowCheck(new SmallIntType());
         assertThatThrownBy(() -> fieldProductAgg.agg((short) 1000, (short) 100))
                 .isInstanceOf(ArithmeticException.class);
         assertThatThrownBy(() -> fieldProductAgg.agg(Short.MIN_VALUE, (short) 2))
@@ -718,8 +741,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductIntOverflow() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new IntType(), null, null);
+        FieldProductAgg fieldProductAgg = createProductWithOverflowCheck(new IntType());
         assertThatThrownBy(() -> fieldProductAgg.agg(100_000, 100_000))
                 .isInstanceOf(ArithmeticException.class);
         assertThatThrownBy(() -> fieldProductAgg.agg(Integer.MIN_VALUE, -1))
@@ -728,8 +750,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductLongOverflow() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new BigIntType(), null, null);
+        FieldProductAgg fieldProductAgg = createProductWithOverflowCheck(new BigIntType());
         assertThatThrownBy(() -> fieldProductAgg.agg(Long.MAX_VALUE, 2L))
                 .isInstanceOf(ArithmeticException.class);
         assertThatThrownBy(() -> fieldProductAgg.agg(Long.MIN_VALUE, -1L))
@@ -738,39 +759,73 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductByteRetractOverflow() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new TinyIntType(), null, null);
+        FieldProductAgg fieldProductAgg = createProductWithOverflowCheck(new TinyIntType());
         assertThatThrownBy(() -> fieldProductAgg.retract(Byte.MIN_VALUE, (byte) -1))
                 .isInstanceOf(ArithmeticException.class);
     }
 
     @Test
     public void testFieldProductShortRetractOverflow() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new SmallIntType(), null, null);
+        FieldProductAgg fieldProductAgg = createProductWithOverflowCheck(new SmallIntType());
         assertThatThrownBy(() -> fieldProductAgg.retract(Short.MIN_VALUE, (short) -1))
                 .isInstanceOf(ArithmeticException.class);
     }
 
     @Test
     public void testFieldProductIntRetractOverflow() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new IntType(), null, null);
+        FieldProductAgg fieldProductAgg = createProductWithOverflowCheck(new IntType());
         assertThatThrownBy(() -> fieldProductAgg.retract(Integer.MIN_VALUE, -1))
                 .isInstanceOf(ArithmeticException.class);
     }
 
     @Test
     public void testFieldProductLongRetractOverflow() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new BigIntType(), null, null);
+        FieldProductAgg fieldProductAgg = createProductWithOverflowCheck(new BigIntType());
         assertThatThrownBy(() -> fieldProductAgg.retract(Long.MIN_VALUE, -1L))
                 .isInstanceOf(ArithmeticException.class);
     }
 
+    private FieldProductAgg createProductWithOverflowCheck(DataType type) {
+        return new FieldProductAggFactory()
+                .create(
+                        type,
+                        CoreOptions.fromMap(
+                                Collections.singletonMap(
+                                        "fields.f.product.fail-on-overflow", "true")),
+                        "f");
+    }
+
+    @Test
+    public void testFieldSumOverflowDisabled() {
+        assertSumOverflowDisabled(
+                new TinyIntType(), Byte.MIN_VALUE, Byte.MAX_VALUE, (byte) 1, (byte) -1);
+        assertSumOverflowDisabled(
+                new SmallIntType(), Short.MIN_VALUE, Short.MAX_VALUE, (short) 1, (short) -1);
+        assertSumOverflowDisabled(new IntType(), Integer.MIN_VALUE, Integer.MAX_VALUE, 1, -1);
+        assertSumOverflowDisabled(new BigIntType(), Long.MIN_VALUE, Long.MAX_VALUE, 1L, -1L);
+    }
+
+    private void assertSumOverflowDisabled(
+            DataType type, Object min, Object max, Object one, Object minusOne) {
+        CoreOptions coreOptions =
+                CoreOptions.fromMap(
+                        Collections.singletonMap("fields.f.sum.fail-on-overflow", "false"));
+        for (FieldSumAgg agg :
+                new FieldSumAgg[] {
+                    new FieldSumAggFactory().create(type),
+                    new FieldSumAggFactory().create(type, coreOptions, "f")
+                }) {
+            assertThat(agg.agg(max, one)).isEqualTo(min);
+            assertThat(agg.agg(min, minusOne)).isEqualTo(max);
+            assertThat(agg.retract(min, one)).isEqualTo(max);
+            assertThat(agg.retract(max, minusOne)).isEqualTo(min);
+            assertThat(agg.retract(null, min)).isEqualTo(min);
+        }
+    }
+
     @Test
     public void testFieldSumByteOverflow() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new TinyIntType(), null, null);
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new TinyIntType());
         assertThatThrownBy(() -> fieldSumAgg.agg(Byte.MAX_VALUE, (byte) 1))
                 .isInstanceOf(ArithmeticException.class);
         assertThatThrownBy(() -> fieldSumAgg.agg(Byte.MIN_VALUE, (byte) -1))
@@ -779,7 +834,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumShortOverflow() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new SmallIntType(), null, null);
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new SmallIntType());
         assertThatThrownBy(() -> fieldSumAgg.agg(Short.MAX_VALUE, (short) 1))
                 .isInstanceOf(ArithmeticException.class);
         assertThatThrownBy(() -> fieldSumAgg.agg(Short.MIN_VALUE, (short) -1))
@@ -788,7 +843,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumIntOverflow() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new IntType(), null, null);
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new IntType());
         assertThatThrownBy(() -> fieldSumAgg.agg(Integer.MAX_VALUE, 1))
                 .isInstanceOf(ArithmeticException.class);
         assertThatThrownBy(() -> fieldSumAgg.agg(Integer.MIN_VALUE, -1))
@@ -797,7 +852,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumLongOverflow() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new BigIntType(), null, null);
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new BigIntType());
         assertThatThrownBy(() -> fieldSumAgg.agg(Long.MAX_VALUE, 1L))
                 .isInstanceOf(ArithmeticException.class);
         assertThatThrownBy(() -> fieldSumAgg.agg(Long.MIN_VALUE, -1L))
@@ -806,7 +861,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumByteRetractOverflow() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new TinyIntType(), null, null);
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new TinyIntType());
         assertThatThrownBy(() -> fieldSumAgg.retract(Byte.MIN_VALUE, (byte) 1))
                 .isInstanceOf(ArithmeticException.class);
         assertThatThrownBy(() -> fieldSumAgg.retract(Byte.MAX_VALUE, (byte) -1))
@@ -818,7 +873,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumShortRetractOverflow() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new SmallIntType(), null, null);
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new SmallIntType());
         assertThatThrownBy(() -> fieldSumAgg.retract(Short.MIN_VALUE, (short) 1))
                 .isInstanceOf(ArithmeticException.class);
         assertThatThrownBy(() -> fieldSumAgg.retract(Short.MAX_VALUE, (short) -1))
@@ -829,7 +884,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumIntRetractOverflow() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new IntType(), null, null);
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new IntType());
         assertThatThrownBy(() -> fieldSumAgg.retract(Integer.MIN_VALUE, 1))
                 .isInstanceOf(ArithmeticException.class);
         assertThatThrownBy(() -> fieldSumAgg.retract(Integer.MAX_VALUE, -1))
@@ -840,7 +895,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumLongRetractOverflow() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new BigIntType(), null, null);
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new BigIntType());
         assertThatThrownBy(() -> fieldSumAgg.retract(Long.MIN_VALUE, 1L))
                 .isInstanceOf(ArithmeticException.class);
         assertThatThrownBy(() -> fieldSumAgg.retract(Long.MAX_VALUE, -1L))
@@ -849,10 +904,18 @@ public class FieldAggregatorTest {
                 .isInstanceOf(ArithmeticException.class);
     }
 
+    private FieldSumAgg createSumWithOverflowCheck(DataType type) {
+        return new FieldSumAggFactory()
+                .create(
+                        type,
+                        CoreOptions.fromMap(
+                                Collections.singletonMap("fields.f.sum.fail-on-overflow", "true")),
+                        "f");
+    }
+
     @Test
     public void testFieldProductFloatAgg() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new FloatType(), null, null);
+        FieldProductAgg fieldProductAgg = new FieldProductAggFactory().create(new FloatType());
         assertThat(fieldProductAgg.agg(null, (float) 10)).isEqualTo((float) 10);
         assertThat(fieldProductAgg.agg((float) 1, (float) 10)).isEqualTo((float) 10);
         assertThat(fieldProductAgg.retract((float) 10, (float) 5)).isEqualTo((float) 2);
@@ -861,7 +924,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumFloatAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new FloatType(), null, null);
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new FloatType());
         assertThat(fieldSumAgg.agg(null, (float) 10)).isEqualTo((float) 10);
         assertThat(fieldSumAgg.agg((float) 1, (float) 10)).isEqualTo((float) 11);
         assertThat(fieldSumAgg.retract((float) 10, (float) 5)).isEqualTo((float) 5);
@@ -870,8 +933,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductDoubleAgg() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new DoubleType(), null, null);
+        FieldProductAgg fieldProductAgg = new FieldProductAggFactory().create(new DoubleType());
         assertThat(fieldProductAgg.agg(null, (double) 10)).isEqualTo((double) 10);
         assertThat(fieldProductAgg.agg((double) 1, (double) 10)).isEqualTo((double) 10);
         assertThat(fieldProductAgg.retract((double) 10, (double) 5)).isEqualTo((double) 2);
@@ -880,7 +942,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumDoubleAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new DoubleType(), null, null);
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new DoubleType());
         assertThat(fieldSumAgg.agg(null, (double) 10)).isEqualTo((double) 10);
         assertThat(fieldSumAgg.agg((double) 1, (double) 10)).isEqualTo((double) 11);
         assertThat(fieldSumAgg.retract((double) 10, (double) 5)).isEqualTo((double) 5);
@@ -889,8 +951,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductDecimalAgg() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new DecimalType(), null, null);
+        FieldProductAgg fieldProductAgg = new FieldProductAggFactory().create(new DecimalType());
         assertThat(fieldProductAgg.agg(null, toDecimal(10))).isEqualTo(toDecimal(10));
         assertThat(fieldProductAgg.agg(toDecimal(1), toDecimal(10))).isEqualTo(toDecimal(10));
         assertThat(fieldProductAgg.retract(toDecimal(10), toDecimal(5))).isEqualTo(toDecimal(2));
@@ -899,7 +960,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumDecimalAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new DecimalType(), null, null);
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new DecimalType());
         assertThat(fieldSumAgg.agg(null, toDecimal(10))).isEqualTo(toDecimal(10));
         assertThat(fieldSumAgg.agg(toDecimal(1), toDecimal(10))).isEqualTo(toDecimal(11));
         assertThat(fieldSumAgg.retract(toDecimal(10), toDecimal(5))).isEqualTo(toDecimal(5));
