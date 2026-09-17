@@ -24,6 +24,8 @@ import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
 
+import java.util.stream.Collectors;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** End-to-end tests for lookup changelog event metadata. */
@@ -91,6 +93,63 @@ public class LookupChangelogEventMetadataITCase extends CatalogITCaseBase {
         sql("INSERT INTO filtered_source VALUES (1, 20, 100)");
         assertThat(iterator.collect(1))
                 .containsExactly(Row.ofKind(RowKind.UPDATE_BEFORE, 1, 10, 50L, 100L));
+
+        iterator.close();
+    }
+
+    @Test
+    public void testPhysicalTableCanBeReadWithFlinkMetadataAlias() throws Exception {
+        String tableName = "physical_table";
+        sql(
+                "CREATE TABLE "
+                        + tableName
+                        + " ("
+                        + "id INT PRIMARY KEY NOT ENFORCED, "
+                        + "data INT, "
+                        + "event_ts BIGINT"
+                        + ") WITH ("
+                        + "'bucket'='1', "
+                        + "'changelog-producer'='lookup', "
+                        + "'sequence.field'='event_ts', "
+                        + "'changelog-producer.expose-field-as-metadata'='event_ts')");
+
+        // A table created without a Flink metadata alias stores only its physical columns. Verify
+        // that Flink can read that schema before registering a metadata alias.
+        assertThat(
+                        table(tableName).getUnresolvedSchema().getColumns().stream()
+                                .map(column -> column.getName())
+                                .collect(Collectors.toList()))
+                .containsExactly("id", "data", "event_ts");
+
+        sql("INSERT INTO " + tableName + " VALUES (1, 10, 50)");
+        assertThat(sql("SELECT id, data, event_ts FROM " + tableName))
+                .containsExactly(Row.of(1, 10, 50L));
+
+        // Read the same physical table through a separate Flink connector definition. This is
+        // equivalent to registering a metadata alias when consuming a table created by another
+        // engine.
+        sEnv.executeSql(
+                String.format(
+                        "CREATE TEMPORARY TABLE flink_reader ("
+                                + "id INT PRIMARY KEY NOT ENFORCED, "
+                                + "data INT, "
+                                + "event_ts BIGINT, "
+                                + "writetime BIGINT METADATA FROM '__internal__event_ts' VIRTUAL"
+                                + ") WITH ("
+                                + "'connector'='paimon', "
+                                + "'path'='%s')",
+                        getTableDirectory(tableName)));
+
+        BlockingIterator<Row, Row> iterator =
+                streamSqlBlockIter("SELECT id, data, event_ts, writetime FROM flink_reader");
+
+        assertThat(iterator.collect(1)).containsExactly(Row.of(1, 10, 50L, 50L));
+
+        sql("INSERT INTO " + tableName + " VALUES (1, 20, 100)");
+        assertThat(iterator.collect(2))
+                .containsExactly(
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, 10, 50L, 100L),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, 20, 100L, 100L));
 
         iterator.close();
     }
