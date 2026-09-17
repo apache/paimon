@@ -478,7 +478,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         GlobalIndexMeta globalIndex = meta.globalIndexMeta();
         checkNotNull(globalIndex);
         Path filePath = indexPathFactory.toPath(meta);
-        return new GlobalIndexIOMeta(filePath, meta.fileSize(), globalIndex.indexMeta());
+        return new GlobalIndexIOMeta(
+                filePath, meta.fileSize(), meta.rowCount(), globalIndex.indexMeta());
     }
 
     @Override

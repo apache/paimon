@@ -62,6 +62,52 @@ class VideoFrameCollatorTest(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_accepts_batch_callback_without_single_frame_callback(self):
+        descriptors = [
+            self._descriptor("episode.mp4", b"video", index)
+            for index in (2, 0)
+        ]
+        for kwargs in ({}, {"decode_fn": None}):
+            with self.subTest(kwargs=kwargs):
+                collator = VideoFrameCollator(
+                    self.table,
+                    video_column="video",
+                    decoder_factory=lambda stream: _Decoder(stream, []),
+                    decode_batch_fn=lambda decoder, indices, rows: [
+                        decoder.decode(index) for index in indices
+                    ],
+                    collate_fn=lambda rows: rows,
+                    **kwargs,
+                )
+                try:
+                    result = collator([{"video": value} for value in descriptors])
+                    self.assertEqual([(b"video", 2), (b"video", 0)],
+                                     [row["frame"] for row in result])
+                finally:
+                    collator.close()
+
+    def test_rejects_missing_or_invalid_decode_callbacks(self):
+        callback = lambda *args: None
+        cases = [
+            ({}, "At least one"),
+            ({"decode_fn": None, "decode_batch_fn": None}, "At least one"),
+            ({"decode_fn": False}, "decode_fn must be callable"),
+            ({"decode_fn": False, "decode_batch_fn": callback},
+             "decode_fn must be callable"),
+            ({"decode_batch_fn": False}, "decode_batch_fn must be callable"),
+            ({"decode_fn": callback, "decode_batch_fn": False},
+             "decode_batch_fn must be callable"),
+        ]
+        for kwargs, message in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    VideoFrameCollator(
+                        self.table,
+                        video_column="video",
+                        decoder_factory=lambda stream: _Decoder(stream, []),
+                        **kwargs,
+                    )
+
     def test_reuses_decoder_for_rows_with_same_descriptor(self):
         descriptors = [
             self._descriptor("episode-1.mp4", b"video-one", frame)
@@ -71,7 +117,10 @@ class VideoFrameCollatorTest(unittest.TestCase):
 
         def factory(stream):
             factory_calls.append("open")
-            return _Decoder(stream, factory_calls)
+            decoder = _Decoder(stream, factory_calls)
+            decoder.get_frames_at = lambda indices: self.fail(
+                "must preserve the custom single-frame callback")
+            return decoder
 
         collator = VideoFrameCollator(
             self.table,
@@ -173,6 +222,87 @@ class VideoFrameCollatorTest(unittest.TestCase):
         self.assertEqual([["base", "delta"]], collator.calls)
         self.assertEqual("decoded-base", row_groups[0][4]["video"])
         self.assertEqual("decoded-delta", row_groups[1][1]["video"])
+
+    def test_batch_decode_groups_payload_ranges_and_restores_order(self):
+        path = os.path.join(self.temp_dir.name, "shared.video")
+        with open(path, "wb") as output:
+            output.write(b"firstsecond")
+        calls = []
+        created = []
+
+        def factory(stream):
+            decoder = _Decoder(stream, [])
+            created.append(decoder)
+            return decoder
+
+        def decode_batch(decoder, indices, rows):
+            calls.append((decoder.decode(0)[0], indices))
+            return [
+                (row["request"], decoder.decode(index))
+                for index, row in zip(indices, rows)
+            ]
+
+        def row(request, offset, length, index):
+            return {"request": request, "video": VideoFrameDescriptor(
+                path, offset, length, index).serialize()}
+
+        collator = VideoFrameCollator(
+            self.table,
+            video_column="video",
+            decoder_factory=factory,
+            decode_fn=lambda *args: self.fail("unexpected single decode"),
+            decode_batch_fn=decode_batch,
+            max_open_videos=2,
+            collate_fn=lambda rows: rows,
+        )
+        rows = [
+            row("a", 0, 5, 3), row("b", 5, 6, 2),
+            row("c", 0, 5, 1), row("d", 0, 5, 3),
+            {"request": "e", "video": None}, row("f", 0, 11, 0),
+        ]
+        try:
+            result = collator(rows)
+            self.assertEqual(
+                [(b"first", [1, 3, 3]), (b"second", [2]),
+                 (b"firstsecond", [0])], calls)
+            self.assertEqual([r["request"] for r in rows],
+                             [r["request"] for r in result])
+            self.assertEqual(
+                [("a", (b"first", 3)), ("b", (b"second", 2)),
+                 ("c", (b"first", 1)), ("d", (b"first", 3)),
+                 None, ("f", (b"firstsecond", 0))],
+                [r["frame"] for r in result])
+            self.assertTrue(all("frame" not in r for r in rows))
+            self.assertEqual(3, len(created))
+            self.assertTrue(created[0].closed)
+            self.assertEqual(2, len(collator._decoders))
+            self.assertEqual(
+                ("g", (b"second", 1)),
+                collator(row("g", 5, 6, 1))["frame"])
+            self.assertEqual(3, len(created))
+            self.assertEqual([], collator([]))
+            self.assertEqual(4, len(calls))
+        finally:
+            collator.close()
+        self.assertTrue(all(decoder.closed for decoder in created))
+
+    def test_batch_decode_rejects_wrong_result_count(self):
+        descriptor = self._descriptor("episode.mp4", b"video", 0)
+        for count in (0, 2):
+            with self.subTest(count=count):
+                collator = VideoFrameCollator(
+                    self.table,
+                    video_column="video",
+                    decoder_factory=lambda stream: _Decoder(stream, []),
+                    decode_fn=lambda *args: self.fail("unexpected fallback"),
+                    decode_batch_fn=lambda *args: [None] * count,
+                    collate_fn=lambda rows: rows,
+                )
+                try:
+                    with self.assertRaisesRegex(ValueError, "one frame per row"):
+                        collator([{"video": descriptor}])
+                finally:
+                    collator.close()
 
     def test_evicts_least_recently_used_decoder(self):
         descriptors = [
