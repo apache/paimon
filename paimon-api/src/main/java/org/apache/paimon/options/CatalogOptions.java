@@ -130,6 +130,16 @@ public class CatalogOptions {
                     .noDefaultValue()
                     .withDescription("Controls the maximum memory to cache manifest content.");
 
+    public static final ConfigOption<MemorySize> CACHE_MANIFEST_SIDECAR_MAX_MEMORY =
+            key("cache.manifest-sidecar.max-memory")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(64))
+                    .withDescription(
+                            "Controls the maximum memory for the separate manifest sidecar cache. "
+                                    + "This budget is additional to the manifest content cache. "
+                                    + "Set to 0 to reuse the manifest content cache. It uses "
+                                    + "'cache.expire-after-access' and 'cache.manifest.soft-values'.");
+
     public static final ConfigOption<Boolean> CACHE_MANIFEST_SOFT_VALUES =
             key("cache.manifest.soft-values")
                     .booleanType()

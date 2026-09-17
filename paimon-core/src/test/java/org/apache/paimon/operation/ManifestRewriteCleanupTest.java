@@ -669,6 +669,7 @@ class ManifestRewriteCleanupTest extends ManifestFileMetaTestBase {
                                 null),
                         suggestedFileSize,
                         null,
+                        null,
                         new CoreOptions(new Options()))
                 .create();
     }

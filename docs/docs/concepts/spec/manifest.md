@@ -72,20 +72,28 @@ using independent partition, row-ID and bucket coverage. A sidecar uses the
 derived file name. The Avro schemas and `_VERSION` identifiers remain unchanged.
 
 The utility includes construction, validation, block selection and optional caching. Java table
-writers generate sidecars when `manifest.sidecar.enabled` is true; when unset, it inherits
+writers and scans use sidecars when `manifest.sidecar.enabled` is true; when unset, it inherits
 `manifest-sort.enabled`. Both ordinary writes and raw manifest rewrites build the sidecar from
 the completed output manifest and publish its `_EXTRA_FILES` reference only after both files
 close successfully. Failed writes and aborted writers clean up their own manifest/sidecar pairs.
-Scans do not yet invoke sidecar pruning automatically. Callers remain responsible for applying
-entry filters and reconciling ADD/DELETE entries after block selection. The low-level `build`
-method returns sidecar bytes without writing or publishing another file.
+Scans with partition, row-ID or bucket filters select blocks before reading manifest entries.
+Normal entry filtering and ADD/DELETE reconciliation still apply. Missing or unusable sidecars
+fall back to normal manifest reads; disabled sidecars and scans without these filters do not
+perform sidecar I/O. Sidecar caching is controlled by the catalog option
+`cache.manifest-sidecar.max-memory` (64 MiB by default). A positive value supplies an
+additional budget independent of the manifest content cache. When set to 0, sidecars reuse
+the manifest content cache, or remain uncached if that cache is disabled. Sidecar caching
+uses the catalog's `cache.expire-after-access` and `cache.manifest.soft-values` policies.
+Selected block bytes still share the manifest content cache without populating the
+whole-manifest entry cache with partial results. The low-level `build` method returns
+sidecar bytes without writing or publishing another file.
 
 Callers decide whether to invoke `build` and `read`; these utilities have no read/write switches.
 `build` and `Builder` accept `rowIdEnabled` and `bucketEnabled` arguments for independent
 payload generation. Partition generation is always enabled,
 including the empty partition tuple for unpartitioned tables. Missing or invalid
-metadata makes only the affected block's dimension unavailable. There is no sidecar byte budget:
-construction keeps complete coverage and `read` consumes the entire file once it is opened.
+metadata makes only the affected block's dimension unavailable. Cache limits do not truncate
+sidecars: construction keeps complete coverage and `read` consumes the entire file once it is opened.
 
 `read` returns null for an absent sidecar reference or an `IOException`, allowing the caller
 to fall back to the manifest. If the thread is interrupted, the I/O failure is propagated as
