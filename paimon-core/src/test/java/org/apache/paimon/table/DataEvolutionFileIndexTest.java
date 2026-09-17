@@ -33,6 +33,7 @@ import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory;
 import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
 import org.apache.paimon.fileindex.bsi.BitSliceIndexBitmapFileIndexFactory;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -458,6 +459,48 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testBitmapSelectionComposesWithDeletionVectorForNonZeroRowId() throws Exception {
+        Map<String, String> options = bitmapOptions("f1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        FileStoreTable table = createTable("bitmap_dv_non_zero_row_id", options);
+        writeAllColumns(table, ROW_COUNT);
+        writeAllColumns(table, ROW_COUNT);
+
+        deleteRowsFrom(table, ROW_COUNT, 50);
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        DataSplit targetSplit =
+                latest.newReadBuilder().newScan().plan().splits().stream()
+                        .map(split -> (DataSplit) split)
+                        .filter(
+                                split ->
+                                        split.dataFiles().stream()
+                                                .anyMatch(
+                                                        file ->
+                                                                file.nonNullFirstRowId()
+                                                                        == ROW_COUNT))
+                        .findFirst()
+                        .orElseThrow(IllegalStateException::new);
+        DataFileMeta targetFile =
+                targetSplit.dataFiles().stream()
+                        .filter(file -> file.nonNullFirstRowId() == ROW_COUNT)
+                        .findFirst()
+                        .orElseThrow(IllegalStateException::new);
+        Path targetPath =
+                latest.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(targetSplit.partition(), targetSplit.bucket())
+                        .toPath(targetFile);
+        assertThat(latest.fileIO().delete(targetPath, false)).isTrue();
+
+        // The second group can only succeed now if the bitmap hit is intersected with its DV
+        // before opening the missing data file. The first group remains visible.
+        RowType readType = rowTypeWithRowId(rowType()).project(SpecialFields.ROW_ID.name(), "f1");
+        List<InternalRow> rows = readWithFilter(table, equalF1(f1(50)), readType);
+        assertThat(rowIds(rows)).containsExactly(50L);
+    }
+
+    @Test
     public void testMergedGroupKeptWhenFilterColumnOverwritten() throws Exception {
         FileStoreTable table = createTable("overwritten", Collections.emptyMap());
         writeThenOverwriteF1(table, ROW_COUNT);
@@ -483,7 +526,28 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         FileStoreTable latest = getTable(identifier(table.name()));
         List<DataFileMeta> dataFiles =
                 ((DataSplit) latest.newReadBuilder().newScan().plan().splits().get(0)).dataFiles();
-        String anchor = retrieveAnchorFile(dataFiles, file -> file).fileName();
+        deleteRows(latest, retrieveAnchorFile(dataFiles, file -> file), positions);
+    }
+
+    private void deleteRowsFrom(FileStoreTable table, long firstRowId, long... positions)
+            throws Exception {
+        FileStoreTable latest = getTable(identifier(table.name()));
+        DataFileMeta anchor =
+                latest.newReadBuilder().newScan().plan().splits().stream()
+                        .map(split -> (DataSplit) split)
+                        .flatMap(split -> split.dataFiles().stream())
+                        .filter(file -> file.nonNullFirstRowId() == firstRowId)
+                        .findFirst()
+                        .orElseThrow(
+                                () ->
+                                        new IllegalArgumentException(
+                                                "Cannot find data file with first row id "
+                                                        + firstRowId));
+        deleteRows(latest, anchor, positions);
+    }
+
+    private void deleteRows(FileStoreTable latest, DataFileMeta anchor, long... positions)
+            throws Exception {
 
         BaseAppendDeleteFileMaintainer maintainer =
                 BaseAppendDeleteFileMaintainer.forUnawareAppend(
@@ -494,7 +558,7 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         for (long position : positions) {
             deletionVector.delete(position);
         }
-        maintainer.notifyNewDeletionVector(anchor, deletionVector);
+        maintainer.notifyNewDeletionVector(anchor.fileName(), deletionVector);
 
         List<IndexFileMeta> newIndexFiles = new ArrayList<>();
         for (IndexManifestEntry entry : maintainer.persist()) {

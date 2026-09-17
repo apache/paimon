@@ -558,6 +558,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         FileIndexResult fileIndexResult = null;
         if (fileIndexReadEnabled) {
+            DeletionVector dv = deletionVector == null ? null : deletionVector.deletionVector;
+            long fileOffset =
+                    dv == null || dv.isEmpty()
+                            ? 0L
+                            : deletionVectorOffset(
+                                    file.nonNullRowIdRange(), rowRanges, deletionVector);
             fileIndexResult =
                     FileIndexEvaluator.evaluate(
                             fileIO,
@@ -567,7 +573,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                             null,
                             dataFilePathFactory,
                             file,
-                            null);
+                            dv,
+                            fileOffset);
             if (!fileIndexResult.remain()) {
                 return new EmptyFileRecordReader<>();
             }
@@ -666,6 +673,15 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             return reader;
         }
 
+        return new ApplyDeletionVectorReader(
+                reader,
+                deletionVector.deletionVector,
+                // Convert anchor-range DV positions to this reader's local returned positions.
+                deletionVectorOffset(readerRange, rowRanges, deletionVector));
+    }
+
+    private long deletionVectorOffset(
+            Range readerRange, List<Range> rowRanges, DeletionVectorWithRange deletionVector) {
         checkArgument(
                 selectedRangesContainedByDeletionVector(
                         readerRange, rowRanges, deletionVector.range),
@@ -673,12 +689,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 deletionVector.range,
                 rowRanges,
                 readerRange);
-
-        return new ApplyDeletionVectorReader(
-                reader,
-                deletionVector.deletionVector,
-                // Convert anchor-range DV positions to this reader's local returned positions.
-                readerRange.from - deletionVector.range.from);
+        return readerRange.from - deletionVector.range.from;
     }
 
     private boolean selectedRangesContainedByDeletionVector(

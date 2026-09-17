@@ -34,6 +34,7 @@ import org.apache.paimon.utils.RoaringBitmap32;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -53,6 +54,27 @@ public class FileIndexEvaluator {
             DataFileMeta file,
             @Nullable DeletionVector dv)
             throws IOException {
+        return evaluate(
+                fileIO, dataSchema, dataFilter, topN, limit, dataFilePathFactory, file, dv, 0L);
+    }
+
+    /**
+     * Evaluates a file index with a deletion vector whose positions may be relative to a containing
+     * file range.
+     *
+     * @param fileOffset offset from this file's local position to the deletion vector position
+     */
+    public static FileIndexResult evaluate(
+            FileIO fileIO,
+            TableSchema dataSchema,
+            List<Predicate> dataFilter,
+            @Nullable TopN topN,
+            @Nullable Integer limit,
+            DataFilePathFactory dataFilePathFactory,
+            DataFileMeta file,
+            @Nullable DeletionVector dv,
+            long fileOffset)
+            throws IOException {
         // File index selections use 32-bit positions. Fall back when they cannot safely represent
         // the file or its deletion vector.
         if (file.rowCount() > RoaringBitmap32.MAX_VALUE || dv instanceof Bitmap64DeletionVector) {
@@ -64,7 +86,7 @@ public class FileIndexEvaluator {
                 return FileIndexResult.REMAIN;
             } else {
                 // limit can not work with other predicates.
-                return createBaseSelection(file, dv).limit(limit);
+                return createBaseSelection(file, dv, fileOffset).limit(limit);
             }
         }
 
@@ -74,7 +96,7 @@ public class FileIndexEvaluator {
                 return FileIndexResult.REMAIN;
             }
 
-            BitmapIndexResult selection = createBaseSelection(file, dv);
+            BitmapIndexResult selection = createBaseSelection(file, dv, fileOffset);
             FileIndexResult result;
             if (!isNullOrEmpty(dataFilter)) {
                 Predicate filter = PredicateBuilder.and(dataFilter.toArray(new Predicate[0]));
@@ -105,11 +127,22 @@ public class FileIndexEvaluator {
     }
 
     private static BitmapIndexResult createBaseSelection(
-            DataFileMeta file, @Nullable DeletionVector dv) {
+            DataFileMeta file, @Nullable DeletionVector dv, long fileOffset) {
         BitmapIndexResult selection =
                 new BitmapIndexResult(() -> RoaringBitmap32.bitmapOfRange(0, file.rowCount()));
         if (dv instanceof BitmapDeletionVector) {
             RoaringBitmap32 deletion = ((BitmapDeletionVector) dv).get();
+            if (fileOffset != 0) {
+                RoaringBitmap32 localDeletion = new RoaringBitmap32();
+                Iterator<Integer> iterator = deletion.iterator();
+                while (iterator.hasNext()) {
+                    long localPosition = (long) iterator.next() - fileOffset;
+                    if (localPosition >= 0 && localPosition < file.rowCount()) {
+                        localDeletion.add((int) localPosition);
+                    }
+                }
+                deletion = localDeletion;
+            }
             selection = selection.andNot(deletion);
         }
         return selection;

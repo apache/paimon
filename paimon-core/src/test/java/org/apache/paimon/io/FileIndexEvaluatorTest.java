@@ -112,37 +112,51 @@ public class FileIndexEvaluatorTest {
         BitmapDeletionVector deletionVector = new BitmapDeletionVector();
         deletionVector.delete(0);
 
-        FileIndexResult result =
-                FileIndexEvaluator.evaluate(
-                        null,
-                        tableSchema(),
-                        Collections.singletonList(
-                                new PredicateBuilder(
-                                                RowType.of(
-                                                        new DataType[] {DataTypes.INT()},
-                                                        new String[] {"a"}))
-                                        .equal(0, 1)),
-                        null,
-                        null,
-                        null,
-                        DataFileMeta.forAppend(
-                                "file",
-                                0,
-                                2,
-                                SimpleStats.EMPTY_STATS,
-                                0,
-                                0,
-                                0,
-                                Collections.emptyList(),
-                                embeddedBitmapIndex(),
-                                null,
-                                null,
-                                null,
-                                null,
-                                null),
-                        deletionVector);
+        assertThat(evaluateEmbeddedIndex(deletionVector, 0L)).isSameAs(FileIndexResult.SKIP);
+    }
 
-        assertThat(result).isSameAs(FileIndexResult.SKIP);
+    @Test
+    public void testDataFilterIntersectsOffsetDeletionVector() throws Exception {
+        BitmapDeletionVector hit = new BitmapDeletionVector();
+        hit.delete(10);
+        assertThat(evaluateEmbeddedIndex(hit, 10L)).isSameAs(FileIndexResult.SKIP);
+
+        BitmapDeletionVector neighbour = new BitmapDeletionVector();
+        neighbour.delete(11);
+        assertThat(evaluateEmbeddedIndex(neighbour, 10L).remain()).isTrue();
+    }
+
+    private static FileIndexResult evaluateEmbeddedIndex(
+            BitmapDeletionVector deletionVector, long fileOffset) throws IOException {
+        return FileIndexEvaluator.evaluate(
+                null,
+                tableSchema(),
+                Collections.singletonList(
+                        new PredicateBuilder(
+                                        RowType.of(
+                                                new DataType[] {DataTypes.INT()},
+                                                new String[] {"a"}))
+                                .equal(0, 1)),
+                null,
+                null,
+                null,
+                DataFileMeta.forAppend(
+                        "file",
+                        0,
+                        2,
+                        SimpleStats.EMPTY_STATS,
+                        0,
+                        0,
+                        0,
+                        Collections.emptyList(),
+                        embeddedBitmapIndex(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null),
+                deletionVector,
+                fileOffset);
     }
 
     private static TableSchema tableSchema() {
