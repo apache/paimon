@@ -125,6 +125,14 @@ public class ResolvingFileIO implements FileIO {
     }
 
     @Override
+    public RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
+            throws IOException {
+        // the interface default would hide the resolved FileIO's iterative listing override and
+        // list each directory with listStatus instead
+        return wrap(() -> fileIO(path).listFilesIterative(path, recursive));
+    }
+
+    @Override
     public String createBlobPresignedUrl(
             Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
         return wrap(
