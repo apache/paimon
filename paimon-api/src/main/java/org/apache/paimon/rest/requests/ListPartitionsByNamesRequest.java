@@ -19,6 +19,7 @@
 package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -30,12 +31,18 @@ import java.util.Map;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ListPartitionsByNamesRequest extends BasePartitionsRequest {
 
-    public static final String API_NAME = "ListPartitionsByNames";
+    private static final String API_NAME = "ListPartitionsByNames";
 
     @JsonCreator
     @ConstructorProperties({FIELD_PARTITION_SPECS})
     public ListPartitionsByNamesRequest(
             @JsonProperty(FIELD_PARTITION_SPECS) List<Map<String, String>> partitionSpecs) {
         super(partitionSpecs);
+    }
+
+    @JsonIgnore
+    @Override
+    public String apiName() {
+        return API_NAME;
     }
 }

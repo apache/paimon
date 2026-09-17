@@ -335,7 +335,7 @@ class HttpClient(RESTClient):
         try:
             body_str = JSON.to_json(body)
             auth_headers = _get_headers(
-                path, "POST", None, body_str, rest_auth_function, getattr(body, "API_NAME", None))
+                path, "POST", None, body_str, rest_auth_function, body.api_name())
             url = self._get_request_url(path, None)
             return self._execute_request("POST", url, data=body_str, headers=auth_headers, response_type=response_type)
         except RESTException as e:
@@ -355,7 +355,7 @@ class HttpClient(RESTClient):
         try:
             body_str = JSON.to_json(body)
             auth_headers = _get_headers(
-                path, "DELETE", None, body_str, rest_auth_function, getattr(body, "API_NAME", None))
+                path, "DELETE", None, body_str, rest_auth_function, body.api_name())
             url = self._get_request_url(path, None)
 
             return self._execute_request("DELETE", url, data=body_str, headers=auth_headers,

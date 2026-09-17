@@ -25,6 +25,7 @@ import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
@@ -41,7 +42,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class DropPolicyRequest implements RESTRequest {
 
-    public static final String API_NAME = "DropPolicy";
+    private static final String API_NAME = "DropPolicy";
 
     private static final String FIELD_TYPE = "type";
     private static final String FIELD_PRINCIPAL = "principal";
@@ -97,5 +98,11 @@ public class DropPolicyRequest implements RESTRequest {
 
     private static boolean isBlank(@Nullable String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    @JsonIgnore
+    @Override
+    public String apiName() {
+        return API_NAME;
     }
 }

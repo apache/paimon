@@ -44,8 +44,6 @@ import org.apache.hc.core5.http.protocol.HttpContext;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
@@ -56,23 +54,6 @@ import static org.apache.paimon.rest.HttpClientUtils.DEFAULT_HTTP_CLIENT;
 
 /** Apache HTTP client for REST catalog. */
 public class HttpClient implements RESTClient {
-
-    /** Reads each request class's public static {@code API_NAME} once; null if it has none. */
-    private static final ClassValue<String> API_NAMES =
-            new ClassValue<String>() {
-                @Override
-                protected String computeValue(Class<?> type) {
-                    try {
-                        Field field = type.getField("API_NAME");
-                        return Modifier.isStatic(field.getModifiers())
-                                        && field.getType() == String.class
-                                ? (String) field.get(null)
-                                : null;
-                    } catch (NoSuchFieldException | IllegalAccessException e) {
-                        return null;
-                    }
-                }
-            };
 
     private final String uri;
 
@@ -192,7 +173,7 @@ public class HttpClient implements RESTClient {
 
     @Nullable
     private static String apiName(@Nullable RESTRequest body) {
-        return body == null ? null : API_NAMES.get(body.getClass());
+        return body == null ? null : body.apiName();
     }
 
     @VisibleForTesting

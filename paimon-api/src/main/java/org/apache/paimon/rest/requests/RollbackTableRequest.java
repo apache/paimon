@@ -23,6 +23,7 @@ import org.apache.paimon.table.Instant;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
@@ -33,7 +34,7 @@ import javax.annotation.Nullable;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RollbackTableRequest implements RESTRequest {
 
-    public static final String API_NAME = "RollbackToSnapshot";
+    private static final String API_NAME = "RollbackToSnapshot";
 
     private static final String FIELD_INSTANT = "instant";
     private static final String FIELD_FROM_SNAPSHOT = "fromSnapshot";
@@ -63,5 +64,11 @@ public class RollbackTableRequest implements RESTRequest {
     @Nullable
     public Long getFromSnapshot() {
         return fromSnapshot;
+    }
+
+    @JsonIgnore
+    @Override
+    public String apiName() {
+        return API_NAME;
     }
 }

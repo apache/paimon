@@ -23,6 +23,7 @@ import org.apache.paimon.view.ViewChange;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -32,7 +33,7 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AlterViewRequest implements RESTRequest {
 
-    public static final String API_NAME = "AlterView";
+    private static final String API_NAME = "AlterView";
 
     private static final String FIELD_CHANGES = "changes";
 
@@ -47,5 +48,11 @@ public class AlterViewRequest implements RESTRequest {
     @JsonGetter(FIELD_CHANGES)
     public List<ViewChange> viewChanges() {
         return viewChanges;
+    }
+
+    @JsonIgnore
+    @Override
+    public String apiName() {
+        return API_NAME;
     }
 }

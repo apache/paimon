@@ -25,6 +25,7 @@ import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -35,7 +36,7 @@ import java.beans.ConstructorProperties;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RevokePermissionRequest implements RESTRequest {
 
-    public static final String API_NAME = "RevokePermissionAssignment";
+    private static final String API_NAME = "RevokePermissionAssignment";
 
     private static final String FIELD_RESOURCE = "resource";
     private static final String FIELD_ACCESS = "access";
@@ -70,5 +71,11 @@ public class RevokePermissionRequest implements RESTRequest {
     @JsonGetter(FIELD_PRINCIPAL)
     public String getPrincipal() {
         return principal;
+    }
+
+    @JsonIgnore
+    @Override
+    public String apiName() {
+        return API_NAME;
     }
 }

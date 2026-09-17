@@ -24,6 +24,7 @@ import org.apache.paimon.schema.Schema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -31,7 +32,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CreateTableRequest implements RESTRequest {
 
-    public static final String API_NAME = "CreateTable";
+    private static final String API_NAME = "CreateTable";
 
     private static final String FIELD_IDENTIFIER = "identifier";
     private static final String FIELD_SCHEMA = "schema";
@@ -58,5 +59,11 @@ public class CreateTableRequest implements RESTRequest {
     @JsonGetter(FIELD_SCHEMA)
     public Schema getSchema() {
         return schema;
+    }
+
+    @JsonIgnore
+    @Override
+    public String apiName() {
+        return API_NAME;
     }
 }

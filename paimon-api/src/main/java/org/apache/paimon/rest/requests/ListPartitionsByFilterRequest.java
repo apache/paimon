@@ -22,6 +22,7 @@ import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
@@ -35,7 +36,7 @@ import java.beans.ConstructorProperties;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class ListPartitionsByFilterRequest implements RESTRequest {
 
-    public static final String API_NAME = "ListPartitionsByFilter";
+    private static final String API_NAME = "ListPartitionsByFilter";
 
     private static final String FIELD_FILTER = "filter";
     private static final String FIELD_PARTITION_NAME_PATTERN = "partitionNamePattern";
@@ -105,5 +106,11 @@ public class ListPartitionsByFilterRequest implements RESTRequest {
     @Nullable
     public String getPageToken() {
         return pageToken;
+    }
+
+    @JsonIgnore
+    @Override
+    public String apiName() {
+        return API_NAME;
     }
 }

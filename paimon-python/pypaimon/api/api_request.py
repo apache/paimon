@@ -37,6 +37,10 @@ class RESTRequest(ABC):
     # The API this request calls, which signers may send with it; None if it names none.
     API_NAME: ClassVar[Optional[str]] = None
 
+    def api_name(self) -> Optional[str]:
+        """The API this request calls, from its API_NAME."""
+        return self.API_NAME
+
 
 @dataclass
 class CreateDatabaseRequest(RESTRequest):

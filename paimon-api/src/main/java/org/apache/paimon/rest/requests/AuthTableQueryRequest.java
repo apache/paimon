@@ -22,6 +22,7 @@ import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -34,7 +35,7 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AuthTableQueryRequest implements RESTRequest {
 
-    public static final String API_NAME = "AuthTableQuery";
+    private static final String API_NAME = "AuthTableQuery";
 
     private static final String FIELD_SELECT = "select";
 
@@ -52,5 +53,11 @@ public class AuthTableQueryRequest implements RESTRequest {
     @Nullable
     public List<String> select() {
         return select;
+    }
+
+    @JsonIgnore
+    @Override
+    public String apiName() {
+        return API_NAME;
     }
 }

@@ -25,6 +25,7 @@ import org.apache.paimon.types.DataField;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -35,7 +36,7 @@ import java.util.Map;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CreateFunctionRequest implements RESTRequest {
 
-    public static final String API_NAME = "CreateFunction";
+    private static final String API_NAME = "CreateFunction";
 
     private static final String FIELD_NAME = "name";
     private static final String FIELD_INPUT_PARAMETERS = "inputParams";
@@ -131,5 +132,11 @@ public class CreateFunctionRequest implements RESTRequest {
     @JsonGetter(FIELD_OPTIONS)
     public Map<String, String> options() {
         return options;
+    }
+
+    @JsonIgnore
+    @Override
+    public String apiName() {
+        return API_NAME;
     }
 }

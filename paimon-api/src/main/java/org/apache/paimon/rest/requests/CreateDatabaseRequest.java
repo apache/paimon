@@ -22,6 +22,7 @@ import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -32,7 +33,7 @@ import java.util.Map;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CreateDatabaseRequest implements RESTRequest {
 
-    public static final String API_NAME = "CreateDatabase";
+    private static final String API_NAME = "CreateDatabase";
 
     private static final String FIELD_NAME = "name";
     private static final String FIELD_OPTIONS = "options";
@@ -60,5 +61,11 @@ public class CreateDatabaseRequest implements RESTRequest {
     @JsonGetter(FIELD_OPTIONS)
     public Map<String, String> getOptions() {
         return options;
+    }
+
+    @JsonIgnore
+    @Override
+    public String apiName() {
+        return API_NAME;
     }
 }
