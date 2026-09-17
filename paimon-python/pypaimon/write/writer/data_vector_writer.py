@@ -266,55 +266,60 @@ class DataVectorWriter(DataWriter):
         file_name = f"{CoreOptions.data_file_prefix(self.options)}{uuid.uuid4()}-0.{self.file_format}"
         file_path = self._generate_file_path(file_name)
 
-        if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
-            shredding_stats = self._write_parquet_data(file_path, data)
-        elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
-            self.file_io.write_orc(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
-        elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
-            self.file_io.write_avro(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
-        elif self.file_format == CoreOptions.FILE_FORMAT_LANCE:
-            self.file_io.write_lance(file_path, data)
-        elif self.file_format == CoreOptions.FILE_FORMAT_VORTEX:
-            self.file_io.write_vortex(file_path, data)
-        elif self.file_format == CoreOptions.FILE_FORMAT_MOSAIC:
-            self.file_io.write_mosaic(file_path, data, options=self.mosaic_writer_options)
-        elif self.file_format == CoreOptions.FILE_FORMAT_ROW:
-            self.file_io.write_row(file_path, data, zstd_level=self.zstd_level)
-        else:
-            raise ValueError(f"Unsupported file format: {self.file_format}")
+        # Until metadata is returned, no caller can track this file for abort.
+        try:
+            if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
+                shredding_stats = self._write_parquet_data(file_path, data)
+            elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
+                self.file_io.write_orc(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
+            elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
+                self.file_io.write_avro(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
+            elif self.file_format == CoreOptions.FILE_FORMAT_LANCE:
+                self.file_io.write_lance(file_path, data)
+            elif self.file_format == CoreOptions.FILE_FORMAT_VORTEX:
+                self.file_io.write_vortex(file_path, data)
+            elif self.file_format == CoreOptions.FILE_FORMAT_MOSAIC:
+                self.file_io.write_mosaic(file_path, data, options=self.mosaic_writer_options)
+            elif self.file_format == CoreOptions.FILE_FORMAT_ROW:
+                self.file_io.write_row(file_path, data, zstd_level=self.zstd_level)
+            else:
+                raise ValueError(f"Unsupported file format: {self.file_format}")
 
-        is_external_path = self.external_path_provider is not None
-        external_path_str = file_path if is_external_path else None
+            is_external_path = self.external_path_provider is not None
+            external_path_str = file_path if is_external_path else None
 
-        metadata_stats_enabled = self.options.metadata_stats_enabled()
-        stats_columns = self.normal_columns if metadata_stats_enabled else []
-        value_stats = self._collect_value_stats(data, stats_columns)
+            metadata_stats_enabled = self.options.metadata_stats_enabled()
+            stats_columns = self.normal_columns if metadata_stats_enabled else []
+            value_stats = self._collect_value_stats(data, stats_columns)
 
-        min_seq, max_seq = self._append_file_sequence_range(data.num_rows)
+            min_seq, max_seq = self._append_file_sequence_range(data.num_rows)
 
-        meta = DataFileMeta.create(
-            file_name=file_name,
-            file_size=self.file_io.get_file_size(file_path),
-            row_count=data.num_rows,
-            min_key=GenericRow([], []),
-            max_key=GenericRow([], []),
-            key_stats=SimpleStats.empty_stats(),
-            value_stats=value_stats,
-            min_sequence_number=min_seq,
-            max_sequence_number=max_seq,
-            schema_id=self.table.table_schema.id,
-            level=0,
-            extra_files=[],
-            creation_time=Timestamp.now(),
-            delete_row_count=0,
-            file_source=0,
-            value_stats_cols=[column.name for column in stats_columns],
-            external_path=external_path_str,
-            file_path=file_path,
-            write_cols=self.write_cols,
-        )
-        self._map_shared_shredding.file_completed(shredding_stats)
-        return meta
+            meta = DataFileMeta.create(
+                file_name=file_name,
+                file_size=self.file_io.get_file_size(file_path),
+                row_count=data.num_rows,
+                min_key=GenericRow([], []),
+                max_key=GenericRow([], []),
+                key_stats=SimpleStats.empty_stats(),
+                value_stats=value_stats,
+                min_sequence_number=min_seq,
+                max_sequence_number=max_seq,
+                schema_id=self.table.table_schema.id,
+                level=0,
+                extra_files=[],
+                creation_time=Timestamp.now(),
+                delete_row_count=0,
+                file_source=0,
+                value_stats_cols=[column.name for column in stats_columns],
+                external_path=external_path_str,
+                file_path=file_path,
+                write_cols=self.write_cols,
+            )
+            self._map_shared_shredding.file_completed(shredding_stats)
+            return meta
+        except Exception:
+            self.file_io.delete_quietly(file_path)
+            raise
 
     def _validate_consistency(
             self, normal_meta: DataFileMeta, vector_metas: List[DataFileMeta]):
