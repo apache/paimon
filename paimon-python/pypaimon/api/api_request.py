@@ -37,8 +37,10 @@ class RESTRequest(ABC):
     # The API this request calls, which signers may send with it; None if it names none.
     API_NAME: ClassVar[Optional[str]] = None
 
-    def api_name(self) -> Optional[str]:
+    def api_name(self) -> str:
         """The API this request calls, from its API_NAME."""
+        if self.API_NAME is None:
+            raise NotImplementedError("%s does not name the API it calls" % type(self).__name__)
         return self.API_NAME
 
 
@@ -247,102 +249,82 @@ class ForwardBranchRequest(RESTRequest):
     API_NAME = "FastForwardBranch"
 
 
-# Requests sent without a body; each only names the API it calls.
-@dataclass
-class GetConfigRequest(RESTRequest):
+# Names the APIs whose requests are sent without a body.
+class GetConfigRequest:
     API_NAME = "GetConfig"
 
 
-@dataclass
-class ListDatabasesRequest(RESTRequest):
+class ListDatabasesRequest:
     API_NAME = "ListDatabases"
 
 
-@dataclass
-class GetDatabaseRequest(RESTRequest):
+class GetDatabaseRequest:
     API_NAME = "GetDatabase"
 
 
-@dataclass
-class DropDatabaseRequest(RESTRequest):
+class DropDatabaseRequest:
     API_NAME = "DropDatabase"
 
 
-@dataclass
-class ListTablesRequest(RESTRequest):
+class ListTablesRequest:
     API_NAME = "ListTables"
 
 
-@dataclass
-class GetTableRequest(RESTRequest):
+class GetTableRequest:
     API_NAME = "GetTable"
 
 
-@dataclass
-class DropTableRequest(RESTRequest):
+class DropTableRequest:
     API_NAME = "DropTable"
 
 
-@dataclass
-class GetTableTokenRequest(RESTRequest):
+class GetTableTokenRequest:
     API_NAME = "GetTableToken"
 
 
-@dataclass
-class GetTableSnapshotRequest(RESTRequest):
+class GetTableSnapshotRequest:
     API_NAME = "GetTableSnapshot"
 
 
-@dataclass
-class ListPartitionsRequest(RESTRequest):
+class ListPartitionsRequest:
     API_NAME = "ListPartitions"
 
 
-@dataclass
-class ListBranchesRequest(RESTRequest):
+class ListBranchesRequest:
     API_NAME = "ListBranches"
 
 
-@dataclass
-class DropBranchRequest(RESTRequest):
+class DropBranchRequest:
     API_NAME = "DropBranch"
 
 
-@dataclass
-class ListTagsRequest(RESTRequest):
+class ListTagsRequest:
     API_NAME = "ListTags"
 
 
-@dataclass
-class GetTagRequest(RESTRequest):
+class GetTagRequest:
     API_NAME = "GetTag"
 
 
-@dataclass
-class DropTagRequest(RESTRequest):
+class DropTagRequest:
     API_NAME = "DropTag"
 
 
-@dataclass
-class ListFunctionsRequest(RESTRequest):
+class ListFunctionsRequest:
     API_NAME = "ListFunctions"
 
 
-@dataclass
-class ListFunctionDetailsRequest(RESTRequest):
+class ListFunctionDetailsRequest:
     API_NAME = "ListFunctionDetails"
 
 
-@dataclass
-class ListFunctionsGloballyRequest(RESTRequest):
+class ListFunctionsGloballyRequest:
     API_NAME = "ListFunctionsGlobally"
 
 
-@dataclass
-class GetFunctionRequest(RESTRequest):
+class GetFunctionRequest:
     API_NAME = "GetFunction"
 
 
-@dataclass
-class DropFunctionRequest(RESTRequest):
+class DropFunctionRequest:
     API_NAME = "DropFunction"

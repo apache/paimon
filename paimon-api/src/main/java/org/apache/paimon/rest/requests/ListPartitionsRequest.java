@@ -18,13 +18,8 @@
 
 package org.apache.paimon.rest.requests;
 
-import org.apache.paimon.rest.RESTRequest;
-
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-
-/** Request for the {@code ListPartitions} API, which is sent without a body. */
-@JsonIgnoreProperties(ignoreUnknown = true)
-public class ListPartitionsRequest implements RESTRequest {
+/** Names the {@code ListPartitions} API, whose request is sent without a body. */
+public class ListPartitionsRequest {
 
     public static final String API_NAME = "ListPartitions";
 }

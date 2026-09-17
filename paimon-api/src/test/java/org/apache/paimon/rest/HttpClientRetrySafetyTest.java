@@ -155,6 +155,11 @@ public class HttpClientRetrySafetyTest {
     /** A request that leaves {@link RESTRequest#isRetrySafe()} at its default, as nearly all do. */
     private static class DefaultRetrySafety implements RESTRequest {
 
+        @Override
+        public String apiName() {
+            return "DefaultRetrySafety";
+        }
+
         @JsonGetter("partitionSpecs")
         public List<Map<String, String>> getPartitionSpecs() {
             return Collections.singletonList(SPEC);

@@ -41,4 +41,9 @@ public class MockRESTData implements RESTRequest, RESTResponse {
     public String data() {
         return data;
     }
+
+    @Override
+    public String apiName() {
+        return "MockRESTData";
+    }
 }

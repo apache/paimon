@@ -1895,6 +1895,11 @@ class MockRESTCatalogTest extends RESTCatalogTest {
 
     private static class RawCreatePartitionsRequest implements RESTRequest {
 
+        @Override
+        public String apiName() {
+            return "CreatePartitions";
+        }
+
         private final List<Map<String, String>> partitionSpecs;
         private final List<PartitionStatistics> partitionStatistics;
         private final Boolean replaceStatistics;
@@ -1944,6 +1949,11 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     }
 
     private static class InvalidColumnGrantRequest implements RESTRequest {
+
+        @Override
+        public String apiName() {
+            return "GrantPermissionAssignment";
+        }
 
         private final PermissionResource resource;
 

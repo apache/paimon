@@ -18,13 +18,8 @@
 
 package org.apache.paimon.rest.requests;
 
-import org.apache.paimon.rest.RESTRequest;
-
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-
-/** Request for the {@code DropBranch} API, which is sent without a body. */
-@JsonIgnoreProperties(ignoreUnknown = true)
-public class DropBranchRequest implements RESTRequest {
+/** Names the {@code DropBranch} API, whose request is sent without a body. */
+public class DropBranchRequest {
 
     public static final String API_NAME = "DropBranch";
 }

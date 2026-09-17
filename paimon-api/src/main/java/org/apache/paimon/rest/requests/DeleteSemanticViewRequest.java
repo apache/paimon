@@ -18,13 +18,8 @@
 
 package org.apache.paimon.rest.requests;
 
-import org.apache.paimon.rest.RESTRequest;
-
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-
-/** Request for the {@code DeleteSemanticView} API, which is sent without a body. */
-@JsonIgnoreProperties(ignoreUnknown = true)
-public class DeleteSemanticViewRequest implements RESTRequest {
+/** Names the {@code DeleteSemanticView} API, whose request is sent without a body. */
+public class DeleteSemanticViewRequest {
 
     public static final String API_NAME = "DeleteSemanticView";
 }
