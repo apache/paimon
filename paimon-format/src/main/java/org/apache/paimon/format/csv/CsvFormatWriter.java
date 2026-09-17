@@ -22,6 +22,7 @@ import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.text.AbstractTextFileWriter;
+import org.apache.paimon.format.text.TextLineReader;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
@@ -43,6 +44,10 @@ public class CsvFormatWriter extends AbstractTextFileWriter {
     private final CsvOptions csvOptions;
     private boolean headerWritten = false;
     private final StringBuilder stringBuilder;
+    private final String[] fieldNames;
+    // CR and LF only split a line when StandardLineReader is in use, which TextLineReader picks
+    // solely from the delimiter; under a custom delimiter they are ordinary bytes.
+    private final boolean lineBreakSplitsLine;
 
     public CsvFormatWriter(
             PositionOutputStream out, RowType rowType, CsvOptions options, String compression)
@@ -50,6 +55,8 @@ public class CsvFormatWriter extends AbstractTextFileWriter {
         super(out, rowType, compression);
         this.csvOptions = options;
         this.stringBuilder = new StringBuilder();
+        this.fieldNames = rowType.getFieldNames().toArray(new String[0]);
+        this.lineBreakSplitsLine = TextLineReader.isDefaultDelimiter(options.lineDelimiter());
     }
 
     @Override
@@ -71,7 +78,8 @@ public class CsvFormatWriter extends AbstractTextFileWriter {
 
             Object value =
                     InternalRow.createFieldGetter(rowType.getTypeAt(i), i).getFieldOrNull(element);
-            String fieldValue = escapeField(castToStringOptimized(value, rowType.getTypeAt(i)));
+            String fieldValue =
+                    escapeField(castToStringOptimized(value, rowType.getTypeAt(i)), fieldNames[i]);
             stringBuilder.append(fieldValue);
         }
         stringBuilder.append(csvOptions.lineDelimiter());
@@ -87,28 +95,46 @@ public class CsvFormatWriter extends AbstractTextFileWriter {
             if (i > 0) {
                 stringBuilder.append(csvOptions.fieldDelimiter());
             }
-            stringBuilder.append(escapeField(rowType.getFieldNames().get(i)));
+            stringBuilder.append(escapeField(fieldNames[i], fieldNames[i]));
         }
         stringBuilder.append(csvOptions.lineDelimiter());
         writer.write(stringBuilder.toString());
     }
 
-    private String escapeField(String field) {
+    private String escapeField(String field, String fieldName) {
         if (field == null) {
             return csvOptions.nullLiteral();
         }
 
         String quote = csvOptions.quoteCharacter();
         String escape = csvOptions.escapeCharacter();
-        boolean escapable = !escape.isEmpty();
+        String lineDelimiter = csvOptions.lineDelimiter();
 
-        // Optimized escaping with early exit checks
+        // A value carrying the row separator cannot be read back. The line readers match it
+        // without tracking quotes, and a split boundary may fall inside the value, so quoting
+        // cannot rescue it without giving up splittability. Refuse the value rather than write a
+        // file that reads back as extra rows. CR and LF only count when they are the separator:
+        // under a custom delimiter CustomLineReader treats them as ordinary bytes, which is the
+        // documented way to carry a line break inside a value.
+        if (field.contains(lineDelimiter)
+                || (lineBreakSplitsLine
+                        && (field.indexOf('\r') >= 0 || field.indexOf('\n') >= 0))) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Column '%s' contains the row separator, which the CSV format cannot "
+                                    + "represent: '%s'",
+                            fieldName, truncate(field)));
+        }
+
+        // Optimized escaping with early exit checks. A value that merely starts a delimiter match
+        // still has to be quoted: CustomLineReader is leftmost-match, so the delimiter appended
+        // after the row would complete a match begun by the value's own trailing bytes.
         boolean needsQuoting =
                 field.equals(csvOptions.nullLiteral())
-                        || field.indexOf(csvOptions.fieldDelimiter().charAt(0)) >= 0
-                        || field.indexOf(csvOptions.lineDelimiter().charAt(0)) >= 0
-                        || field.indexOf(quote.charAt(0)) >= 0
-                        || (escapable && field.indexOf(escape.charAt(0)) >= 0);
+                        || field.contains(csvOptions.fieldDelimiter())
+                        || field.indexOf(lineDelimiter.charAt(0)) >= 0
+                        || field.contains(quote)
+                        || field.contains(escape);
 
         if (!needsQuoting) {
             return field;
@@ -117,8 +143,13 @@ public class CsvFormatWriter extends AbstractTextFileWriter {
         // Only escape if needed. The escape character goes first: CsvParser drops an escape
         // character that is not followed by a quote or another escape, and escaping the quotes
         // first would double the escape characters inserted for them.
-        String escaped = escapable ? field.replace(escape, escape + escape) : field;
+        String escaped = field.replace(escape, escape + escape);
         return quote + escaped.replace(quote, escape + quote) + quote;
+    }
+
+    /** Keeps an unbounded STRING value from turning into an unbounded exception message. */
+    private static String truncate(String field) {
+        return field.length() <= 64 ? field : field.substring(0, 64) + "...";
     }
 
     /** Optimized string casting with caching and fast paths for common types. */
