@@ -22,7 +22,6 @@ import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -62,11 +61,5 @@ public class AlterDatabaseRequest implements RESTRequest {
     @JsonGetter(FIELD_UPDATES)
     public Map<String, String> getUpdates() {
         return updates;
-    }
-
-    @JsonIgnore
-    @Override
-    public String apiName() {
-        return API_NAME;
     }
 }

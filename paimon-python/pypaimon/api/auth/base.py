@@ -16,7 +16,7 @@
 # under the License.
 
 from abc import ABC, abstractmethod
-from typing import Dict, Optional
+from typing import Dict
 
 from pypaimon.api.typedef import RESTAuthParameter
 
@@ -34,20 +34,12 @@ class RESTAuthFunction:
 
     def __init__(self,
                  init_header: Dict[str, str],
-                 auth_provider: AuthProvider,
-                 api_name: Optional[str] = None):
+                 auth_provider: AuthProvider):
         self.init_header = init_header.copy() if init_header else {}
         self.auth_provider = auth_provider
-        self.api_name = api_name
-
-    def with_api_name(self, api_name: str) -> "RESTAuthFunction":
-        """Returns a function that tags every request it signs with the given API name."""
-        return RESTAuthFunction(self.init_header, self.auth_provider, api_name)
 
     def __call__(
             self, rest_auth_parameter: RESTAuthParameter) -> Dict[str, str]:
-        if self.api_name is not None:
-            rest_auth_parameter = rest_auth_parameter.with_api_name(self.api_name)
         return self.auth_provider.merge_auth_header(
             self.init_header, rest_auth_parameter
         )

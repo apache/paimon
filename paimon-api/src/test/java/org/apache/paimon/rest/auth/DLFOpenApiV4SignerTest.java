@@ -268,7 +268,7 @@ public class DLFOpenApiV4SignerTest {
     }
 
     @Test
-    public void testAuthFunctionSendsSignedAction() {
+    public void testAuthProviderSendsSignedAction() {
         DLFAuthProvider provider =
                 DLFAuthProvider.fromAccessKey(
                         "akId",
@@ -279,14 +279,14 @@ public class DLFOpenApiV4SignerTest {
                         DLFOpenApiV4Signer.IDENTIFIER);
 
         Map<String, String> headers =
-                new RESTAuthFunction(new HashMap<>(), provider)
-                        .withApiName("GetTableToken")
-                        .apply(
-                                new RESTAuthParameter(
+                provider.mergeAuthHeader(
+                        new HashMap<>(),
+                        new RESTAuthParameter(
                                         "/v1/clg-paimon-1/databases/db/tables/t/token",
                                         new HashMap<>(),
                                         "GET",
-                                        null));
+                                        null)
+                                .withApiName("GetTableToken"));
 
         assertEquals("GetTableToken", headers.get("x-acs-action"));
         assertTrue(

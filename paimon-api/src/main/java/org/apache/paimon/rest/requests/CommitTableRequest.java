@@ -24,7 +24,6 @@ import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -87,11 +86,5 @@ public class CommitTableRequest implements RESTRequest {
     @JsonGetter(FIELD_STATISTICS)
     public List<PartitionStatistics> getStatistics() {
         return statistics;
-    }
-
-    @JsonIgnore
-    @Override
-    public String apiName() {
-        return API_NAME;
     }
 }

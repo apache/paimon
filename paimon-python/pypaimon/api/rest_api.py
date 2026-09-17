@@ -106,8 +106,9 @@ class RESTApi:
             config_response = self.client.get_with_params(
                 ResourcePaths.config(),
                 query_params,
+                GetConfigRequest,
                 ConfigResponse,
-                RESTAuthFunction(base_headers, auth_provider).with_api_name(GetConfigRequest.API_NAME),
+                RESTAuthFunction(base_headers, auth_provider),
             )
             options = config_response.merge(options)
             base_headers.update(
@@ -117,9 +118,6 @@ class RESTApi:
         self.rest_auth_function = RESTAuthFunction(base_headers, auth_provider)
         self.options = options
         self.resource_paths = ResourcePaths.for_catalog_properties(options)
-
-    def _auth_for(self, api_name: str) -> RESTAuthFunction:
-        return self.rest_auth_function.with_api_name(api_name)
 
     def __build_paged_query_params(
             self,
@@ -173,8 +171,9 @@ class RESTApi:
             lambda query_params: self.client.get_with_params(
                 self.resource_paths.databases(),
                 query_params,
+                ListDatabasesRequest,
                 ListDatabasesResponse,
-                self._auth_for(ListDatabasesRequest.API_NAME),
+                self.rest_auth_function,
             )
         )
 
@@ -192,8 +191,9 @@ class RESTApi:
                 page_token,
                 {self.DATABASE_NAME_PATTERN: database_name_pattern},
             ),
+            ListDatabasesRequest,
             ListDatabasesResponse,
-            self._auth_for(ListDatabasesRequest.API_NAME),
+            self.rest_auth_function,
         )
 
         databases = response.data() or []
@@ -216,8 +216,9 @@ class RESTApi:
 
         return self.client.get(
             self.resource_paths.database(name),
+            GetDatabaseRequest,
             GetDatabaseResponse,
-            self._auth_for(GetDatabaseRequest.API_NAME),
+            self.rest_auth_function,
         )
 
     def drop_database(self, name: str) -> None:
@@ -226,7 +227,8 @@ class RESTApi:
 
         self.client.delete(
             self.resource_paths.database(name),
-            self._auth_for(DropDatabaseRequest.API_NAME))
+            DropDatabaseRequest,
+            self.rest_auth_function)
 
     def alter_database(
             self,
@@ -253,8 +255,9 @@ class RESTApi:
             lambda query_params: self.client.get_with_params(
                 self.resource_paths.tables(database_name),
                 query_params,
+                ListTablesRequest,
                 ListTablesResponse,
-                self._auth_for(ListTablesRequest.API_NAME),
+                self.rest_auth_function,
             )
         )
 
@@ -279,8 +282,9 @@ class RESTApi:
                     self.TABLE_TYPE: table_type,
                 },
             ),
+            ListTablesRequest,
             ListTablesResponse,
-            self._auth_for(ListTablesRequest.API_NAME),
+            self.rest_auth_function,
         )
 
         tables = response.data() or []
@@ -304,8 +308,9 @@ class RESTApi:
             self.resource_paths.table(
                 database_name,
                 table_name),
+            GetTableRequest,
             GetTableResponse,
-            self._auth_for(GetTableRequest.API_NAME),
+            self.rest_auth_function,
         )
 
     def drop_table(self, identifier: Identifier) -> GetTableResponse:
@@ -315,7 +320,8 @@ class RESTApi:
             self.resource_paths.table(
                 database_name,
                 table_name),
-            self._auth_for(DropTableRequest.API_NAME),
+            DropTableRequest,
+            self.rest_auth_function,
         )
 
     def rename_table(self, source_identifier: Identifier, target_identifier: Identifier) -> None:
@@ -350,8 +356,9 @@ class RESTApi:
             self.resource_paths.table_token(
                 database_name,
                 table_name),
+            GetTableTokenRequest,
             GetTableTokenResponse,
-            self._auth_for(GetTableTokenRequest.API_NAME),
+            self.rest_auth_function,
         )
 
     def commit_snapshot(
@@ -433,9 +440,9 @@ class RESTApi:
         database_name, table_name = self.__validate_identifier(identifier)
         response = self.client.get(
             self.resource_paths.table_snapshot(database_name, table_name),
+            GetTableSnapshotRequest,
             GetTableSnapshotResponse,
-            self._auth_for(GetTableSnapshotRequest.API_NAME)
-        )
+            self.rest_auth_function)
         if response is None:
             return None
         return response.get_snapshot()
@@ -456,8 +463,9 @@ class RESTApi:
                 page_token,
                 {self.PARTITION_NAME_PATTERN: partition_name_pattern},
             ),
+            ListPartitionsRequest,
             ListPartitionsResponse,
-            self._auth_for(ListPartitionsRequest.API_NAME),
+            self.rest_auth_function,
         )
 
         partitions = response.data() or []
@@ -505,8 +513,9 @@ class RESTApi:
         database_name, table_name = self.__validate_identifier(identifier)
         return self.client.get(
             self.resource_paths.tag(database_name, table_name, tag_name),
+            GetTagRequest,
             GetTagResponse,
-            self._auth_for(GetTagRequest.API_NAME),
+            self.rest_auth_function,
         )
 
     def list_tags_paged(
@@ -524,8 +533,9 @@ class RESTApi:
                 page_token,
                 {self.TAG_NAME_PREFIX: tag_name_prefix},
             ),
+            ListTagsRequest,
             ListTagsResponse,
-            self._auth_for(ListTagsRequest.API_NAME),
+            self.rest_auth_function,
         )
         tags = response.data() or []
         return PagedList(tags, response.get_next_page_token())
@@ -534,7 +544,8 @@ class RESTApi:
         database_name, table_name = self.__validate_identifier(identifier)
         self.client.delete(
             self.resource_paths.tag(database_name, table_name, tag_name),
-            self._auth_for(DropTagRequest.API_NAME),
+            DropTagRequest,
+            self.rest_auth_function,
         )
 
     # Branch CRUD wrappers — mirror Java RESTApi branch methods.
@@ -558,7 +569,8 @@ class RESTApi:
         database_name, table_name = self.__validate_identifier(identifier)
         self.client.delete(
             self.resource_paths.branch(database_name, table_name, branch_name),
-            self._auth_for(DropBranchRequest.API_NAME),
+            DropBranchRequest,
+            self.rest_auth_function,
         )
 
     def rename_branch(
@@ -589,8 +601,9 @@ class RESTApi:
         database_name, table_name = self.__validate_identifier(identifier)
         response = self.client.get(
             self.resource_paths.branches(database_name, table_name),
+            ListBranchesRequest,
             ListBranchesResponse,
-            self._auth_for(ListBranchesRequest.API_NAME),
+            self.rest_auth_function,
         )
         return response.branches or []
 
@@ -610,8 +623,9 @@ class RESTApi:
             lambda query_params: self.client.get_with_params(
                 self.resource_paths.functions(database_name),
                 query_params,
+                ListFunctionsRequest,
                 ListFunctionsResponse,
-                self._auth_for(ListFunctionsRequest.API_NAME),
+                self.rest_auth_function,
             )
         )
 
@@ -629,8 +643,9 @@ class RESTApi:
                 page_token,
                 {self.FUNCTION_NAME_PATTERN: function_name_pattern},
             ),
+            ListFunctionsRequest,
             ListFunctionsResponse,
-            self._auth_for(ListFunctionsRequest.API_NAME),
+            self.rest_auth_function,
         )
         functions = response.functions if response.functions else []
         return PagedList(functions, response.get_next_page_token())
@@ -649,8 +664,9 @@ class RESTApi:
                 page_token,
                 {self.FUNCTION_NAME_PATTERN: function_name_pattern},
             ),
+            ListFunctionDetailsRequest,
             ListFunctionDetailsResponse,
-            self._auth_for(ListFunctionDetailsRequest.API_NAME),
+            self.rest_auth_function,
         )
         function_details = response.data() if response.data() else []
         return PagedList(function_details, response.get_next_page_token())
@@ -672,8 +688,9 @@ class RESTApi:
                     self.FUNCTION_NAME_PATTERN: function_name_pattern,
                 },
             ),
+            ListFunctionsGloballyRequest,
             ListFunctionsGloballyResponse,
-            self._auth_for(ListFunctionsGloballyRequest.API_NAME),
+            self.rest_auth_function,
         )
         functions = response.data() if response.data() else []
         return PagedList(functions, response.get_next_page_token())
@@ -689,8 +706,9 @@ class RESTApi:
         return self.client.get(
             self.resource_paths.function(
                 identifier.get_database_name(), identifier.get_object_name()),
+            GetFunctionRequest,
             GetFunctionResponse,
-            self._auth_for(GetFunctionRequest.API_NAME),
+            self.rest_auth_function,
         )
 
     def create_function(self, identifier: Identifier, function) -> None:
@@ -715,7 +733,8 @@ class RESTApi:
         self.client.delete(
             self.resource_paths.function(
                 identifier.get_database_name(), identifier.get_object_name()),
-            self._auth_for(DropFunctionRequest.API_NAME),
+            DropFunctionRequest,
+            self.rest_auth_function,
         )
 
     def alter_function(self, identifier: Identifier, changes: List) -> None:

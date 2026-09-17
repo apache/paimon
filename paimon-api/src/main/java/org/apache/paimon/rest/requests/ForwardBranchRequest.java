@@ -20,7 +20,6 @@ package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.rest.RESTRequest;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 /** Request for forwarding branch. */
@@ -28,10 +27,4 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgn
 public class ForwardBranchRequest implements RESTRequest {
 
     public static final String API_NAME = "FastForwardBranch";
-
-    @JsonIgnore
-    @Override
-    public String apiName() {
-        return API_NAME;
-    }
 }

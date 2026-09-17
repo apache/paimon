@@ -20,9 +20,7 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 
-import javax.annotation.Nullable;
-
-/** Interface to mark a REST request. */
+/** Interface to mark a REST request. Each request names the API it calls in {@code API_NAME}. */
 public interface RESTRequest extends RESTMessage {
 
     /**
@@ -42,12 +40,5 @@ public interface RESTRequest extends RESTMessage {
     @JsonIgnore
     default boolean isRetrySafe() {
         return true;
-    }
-
-    /** The API this request calls, which signers may send with it; null if it names none. */
-    @JsonIgnore
-    @Nullable
-    default String apiName() {
-        return null;
     }
 }

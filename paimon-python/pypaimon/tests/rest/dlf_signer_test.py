@@ -23,13 +23,11 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 from pypaimon.api.auth import (
-    AuthProvider,
     DLFAuthProvider,
     DLFAuthProviderFactory,
     DLFDefaultSigner,
     DLFOpenApiSigner,
     DLFOpenApiV4Signer,
-    RESTAuthFunction,
 )
 from pypaimon.api.token_loader import DLFToken
 from pypaimon.api.typedef import RESTAuthParameter
@@ -495,22 +493,6 @@ class DLFSignerTest(unittest.TestCase):
         self.assertEqual((param.method, param.path, param.data), (named.method, named.path, named.data))
         self.assertIsNone(param.api_name)
 
-    def test_rest_auth_function_with_api_name(self):
-        seen = []
-
-        class Recording(AuthProvider):
-            def merge_auth_header(self, base_header, rest_auth_parameter):
-                seen.append(rest_auth_parameter)
-                return dict(base_header)
-
-        function = RESTAuthFunction({"k": "v"}, Recording())
-        param = RESTAuthParameter("GET", "/v1/config", "", {})
-
-        self.assertEqual({"k": "v"}, function.with_api_name("GetConfig")(param))
-        self.assertEqual("GetConfig", seen[-1].api_name)
-        function(param)
-        self.assertIs(param, seen[-1])
-
     def test_openapi_v4_known_signature_with_api_name(self):
         """Known answer with a body and an API name. The Java signer pins the same string."""
         signer = DLFOpenApiV4Signer("cn-hangzhou")
@@ -543,7 +525,7 @@ class DLFSignerTest(unittest.TestCase):
         self.assertNotIn("x-acs-action", headers)
         self.assertEqual(set(signer.sign_headers(None, now, None, host)), set(headers))
 
-    def test_auth_function_sends_signed_action(self):
+    def test_auth_provider_sends_signed_action(self):
         provider = DLFAuthProvider(
             uri="https://dlfnext.cn-hangzhou.aliyuncs.com",
             region="cn-hangzhou",
@@ -551,8 +533,8 @@ class DLFSignerTest(unittest.TestCase):
             token=DLFToken("akId", "akSecret", "securityToken", None)
         )
 
-        header = RESTAuthFunction({}, provider).with_api_name("GetTableToken")(
-            RESTAuthParameter("GET", "/v1/clg-paimon-1/databases/db/tables/t/token", "", {}))
+        header = provider.merge_auth_header({}, RESTAuthParameter(
+            "GET", "/v1/clg-paimon-1/databases/db/tables/t/token", "", {}).with_api_name("GetTableToken"))
 
         self.assertEqual("GetTableToken", header["x-acs-action"])
         self.assertIn(

@@ -186,13 +186,13 @@ class ExponentialRetry:
 class RESTClient(ABC):
 
     @abstractmethod
-    def get(self, path: str, response_type: Type[T],
+    def get(self, path: str, request_type: Optional[Type[RESTRequest]], response_type: Type[T],
             rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
         pass
 
     @abstractmethod
     def get_with_params(self, path: str, query_params: Dict[str, str],
-                        response_type: Type[T],
+                        request_type: Optional[Type[RESTRequest]], response_type: Type[T],
                         rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
         pass
 
@@ -207,7 +207,7 @@ class RESTClient(ABC):
         pass
 
     @abstractmethod
-    def delete(self, path: str,
+    def delete(self, path: str, request_type: Optional[Type[RESTRequest]],
                rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
         pass
 
@@ -266,6 +266,11 @@ def _get_headers_with_params(path: str, query_params: Dict[str, str],
     return header_function(rest_auth_parameter)
 
 
+def _api_name(request_type: Optional[type]) -> Optional[str]:
+    """The API a request class names in its API_NAME, or None."""
+    return getattr(request_type, "API_NAME", None) if request_type is not None else None
+
+
 def _get_headers(path: str, method: str, query_params: Dict[str, str], data: str,
                  header_function: Callable[[RESTAuthParameter], Dict[str, str]],
                  api_name: Optional[str] = None) -> Dict[str, str]:
@@ -308,18 +313,19 @@ class HttpClient(RESTClient):
     def set_error_handler(self, error_handler: ErrorHandler) -> None:
         self.error_handler = error_handler
 
-    def get(self, path: str, response_type: Type[T],
+    def get(self, path: str, request_type: Optional[Type[RESTRequest]], response_type: Type[T],
             rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
-        auth_headers = _get_headers(path, "GET", {}, "", rest_auth_function)
+        auth_headers = _get_headers(path, "GET", {}, "", rest_auth_function, _api_name(request_type))
         url = self._get_request_url(path, None)
 
         return self._execute_request("GET", url, headers=auth_headers,
                                      response_type=response_type)
 
     def get_with_params(self, path: str, query_params: Dict[str, str],
-                        response_type: Type[T],
+                        request_type: Optional[Type[RESTRequest]], response_type: Type[T],
                         rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
-        auth_headers = _get_headers(path, "GET", query_params, None, rest_auth_function)
+        auth_headers = _get_headers(
+            path, "GET", query_params, None, rest_auth_function, _api_name(request_type))
         url = self._get_request_url(path, query_params)
 
         return self._execute_request("GET", url, headers=auth_headers,
@@ -334,7 +340,7 @@ class HttpClient(RESTClient):
         try:
             body_str = JSON.to_json(body)
             auth_headers = _get_headers(
-                path, "POST", None, body_str, rest_auth_function, getattr(body, "API_NAME", None))
+                path, "POST", None, body_str, rest_auth_function, _api_name(type(body)))
             url = self._get_request_url(path, None)
             return self._execute_request("POST", url, data=body_str, headers=auth_headers, response_type=response_type)
         except RESTException as e:
@@ -342,9 +348,9 @@ class HttpClient(RESTClient):
         except Exception as e:
             raise RESTException("build request failed.", cause=e)
 
-    def delete(self, path: str,
+    def delete(self, path: str, request_type: Optional[Type[RESTRequest]],
                rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
-        auth_headers = _get_headers(path, "DELETE", None, "", rest_auth_function)
+        auth_headers = _get_headers(path, "DELETE", None, "", rest_auth_function, _api_name(request_type))
         url = self._get_request_url(path, None)
 
         return self._execute_request("DELETE", url, headers=auth_headers, response_type=None)
@@ -354,7 +360,7 @@ class HttpClient(RESTClient):
         try:
             body_str = JSON.to_json(body)
             auth_headers = _get_headers(
-                path, "DELETE", None, body_str, rest_auth_function, getattr(body, "API_NAME", None))
+                path, "DELETE", None, body_str, rest_auth_function, _api_name(type(body)))
             url = self._get_request_url(path, None)
 
             return self._execute_request("DELETE", url, data=body_str, headers=auth_headers,

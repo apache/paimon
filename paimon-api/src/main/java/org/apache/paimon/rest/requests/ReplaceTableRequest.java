@@ -23,7 +23,6 @@ import org.apache.paimon.schema.Schema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -46,11 +45,5 @@ public class ReplaceTableRequest implements RESTRequest {
     @JsonGetter(FIELD_SCHEMA)
     public Schema getSchema() {
         return schema;
-    }
-
-    @JsonIgnore
-    @Override
-    public String apiName() {
-        return API_NAME;
     }
 }

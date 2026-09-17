@@ -21,16 +21,12 @@ package org.apache.paimon.rest.auth;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 
-/** Test for {@link RESTAuthFunction} and {@link RESTAuthParameter#withApiName}. */
-public class RESTAuthFunctionTest {
+/** Test for {@link RESTAuthParameter}. */
+public class RESTAuthParameterTest {
 
     @Test
     public void testParameterHasNoApiNameByDefault() {
@@ -58,25 +54,5 @@ public class RESTAuthFunctionTest {
         assertEquals(parameter.method(), named.method());
         assertEquals(parameter.data(), named.data());
         assertNull(parameter.apiName());
-    }
-
-    @Test
-    public void testWithApiNameTagsRequestsWithoutChangingTheOriginal() {
-        AtomicReference<RESTAuthParameter> seen = new AtomicReference<>();
-        Map<String, String> initHeader = Collections.singletonMap("k", "v");
-        AuthProvider provider =
-                (baseHeader, restAuthParameter) -> {
-                    seen.set(restAuthParameter);
-                    return new HashMap<>(baseHeader);
-                };
-        RESTAuthFunction function = new RESTAuthFunction(initHeader, provider);
-        RESTAuthParameter parameter =
-                new RESTAuthParameter("/v1/config", Collections.emptyMap(), "GET", null);
-
-        assertEquals(initHeader, function.withApiName("GetConfig").apply(parameter));
-        assertEquals("GetConfig", seen.get().apiName());
-
-        function.apply(parameter);
-        assertSame(parameter, seen.get());
     }
 }

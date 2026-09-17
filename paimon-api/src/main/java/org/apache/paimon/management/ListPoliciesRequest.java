@@ -29,8 +29,6 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 @Experimental
 public class ListPoliciesRequest {
 
-    public static final String API_NAME = "ListPolicies";
-
     private final PermissionResource resource;
     @Nullable private final PolicyType type;
     @Nullable private final String principal;

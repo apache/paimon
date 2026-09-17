@@ -24,7 +24,6 @@ import org.apache.paimon.view.SemanticViewDefinition;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.beans.ConstructorProperties;
@@ -50,11 +49,5 @@ public class UpsertSemanticViewRequest implements RESTRequest {
     @JsonGetter("definition")
     public SemanticViewDefinition getDefinition() {
         return definition;
-    }
-
-    @JsonIgnore
-    @Override
-    public String apiName() {
-        return API_NAME;
     }
 }

@@ -44,6 +44,8 @@ import org.apache.hc.core5.http.protocol.HttpContext;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
@@ -54,6 +56,23 @@ import static org.apache.paimon.rest.HttpClientUtils.DEFAULT_HTTP_CLIENT;
 
 /** Apache HTTP client for REST catalog. */
 public class HttpClient implements RESTClient {
+
+    /** Reads each request class's public static {@code API_NAME} once; null if it has none. */
+    private static final ClassValue<String> API_NAMES =
+            new ClassValue<String>() {
+                @Override
+                protected String computeValue(Class<?> type) {
+                    try {
+                        Field field = type.getField("API_NAME");
+                        return Modifier.isStatic(field.getModifiers())
+                                        && field.getType() == String.class
+                                ? (String) field.get(null)
+                                : null;
+                    } catch (NoSuchFieldException | IllegalAccessException e) {
+                        return null;
+                    }
+                }
+            };
 
     private final String uri;
 
@@ -67,10 +86,16 @@ public class HttpClient implements RESTClient {
     @Override
     public <T extends RESTResponse> T get(
             String path, Class<T> responseType, RESTAuthFunction restAuthFunction) {
-        Header[] authHeaders = getHeaders(path, "GET", "", null, restAuthFunction);
-        HttpGet httpGet = HttpClientUtils.newHttpGet(getRequestUrl(path, null));
-        httpGet.setHeaders(authHeaders);
-        return exec(httpGet, responseType);
+        return doGet(path, null, null, responseType, restAuthFunction);
+    }
+
+    @Override
+    public <T extends RESTResponse> T get(
+            String path,
+            Class<? extends RESTRequest> requestType,
+            Class<T> responseType,
+            RESTAuthFunction restAuthFunction) {
+        return doGet(path, null, apiName(requestType), responseType, restAuthFunction);
     }
 
     @Override
@@ -79,7 +104,29 @@ public class HttpClient implements RESTClient {
             Map<String, String> queryParams,
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
-        Header[] authHeaders = getHeaders(path, queryParams, "GET", "", null, restAuthFunction);
+        return doGet(path, queryParams, null, responseType, restAuthFunction);
+    }
+
+    @Override
+    public <T extends RESTResponse> T get(
+            String path,
+            Map<String, String> queryParams,
+            Class<? extends RESTRequest> requestType,
+            Class<T> responseType,
+            RESTAuthFunction restAuthFunction) {
+        return doGet(path, queryParams, apiName(requestType), responseType, restAuthFunction);
+    }
+
+    private <T extends RESTResponse> T doGet(
+            String path,
+            @Nullable Map<String, String> queryParams,
+            @Nullable String apiName,
+            Class<T> responseType,
+            RESTAuthFunction restAuthFunction) {
+        Header[] authHeaders =
+                queryParams == null
+                        ? getHeaders(path, "GET", "", apiName, restAuthFunction)
+                        : getHeaders(path, queryParams, "GET", "", apiName, restAuthFunction);
         HttpGet httpGet = HttpClientUtils.newHttpGet(getRequestUrl(path, queryParams));
         httpGet.setHeaders(authHeaders);
         return exec(httpGet, responseType);
@@ -116,26 +163,46 @@ public class HttpClient implements RESTClient {
 
     @Override
     public <T extends RESTResponse> T delete(String path, RESTAuthFunction restAuthFunction) {
-        return delete(path, null, restAuthFunction);
+        return doDelete(path, null, null, restAuthFunction);
+    }
+
+    @Override
+    public <T extends RESTResponse> T delete(
+            String path,
+            Class<? extends RESTRequest> requestType,
+            RESTAuthFunction restAuthFunction) {
+        return doDelete(path, null, apiName(requestType), restAuthFunction);
     }
 
     @Override
     public <T extends RESTResponse> T delete(
             String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
+        return doDelete(path, body, apiName(body), restAuthFunction);
+    }
+
+    private <T extends RESTResponse> T doDelete(
+            String path,
+            @Nullable RESTRequest body,
+            @Nullable String apiName,
+            RESTAuthFunction restAuthFunction) {
         HttpDelete httpDelete = HttpClientUtils.newHttpDelete(getRequestUrl(path, null));
         String encodedBody = RESTUtil.encodedBody(body);
         if (encodedBody != null) {
             httpDelete.setEntity(new StringEntity(encodedBody, ContentType.APPLICATION_JSON));
         }
-        Header[] authHeaders =
-                getHeaders(path, "DELETE", encodedBody, apiName(body), restAuthFunction);
+        Header[] authHeaders = getHeaders(path, "DELETE", encodedBody, apiName, restAuthFunction);
         httpDelete.setHeaders(authHeaders);
         return exec(httpDelete, null);
     }
 
     @Nullable
     private static String apiName(@Nullable RESTRequest body) {
-        return body == null ? null : body.apiName();
+        return body == null ? null : apiName(body.getClass());
+    }
+
+    @Nullable
+    private static String apiName(@Nullable Class<? extends RESTRequest> requestType) {
+        return requestType == null ? null : API_NAMES.get(requestType);
     }
 
     @VisibleForTesting

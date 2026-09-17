@@ -34,6 +34,25 @@ public interface RESTClient {
             Class<T> responseType,
             RESTAuthFunction restAuthFunction);
 
+    /** Sends a GET for the API that {@code requestType} names in its {@code API_NAME}. */
+    default <T extends RESTResponse> T get(
+            String path,
+            Class<? extends RESTRequest> requestType,
+            Class<T> responseType,
+            RESTAuthFunction restAuthFunction) {
+        return get(path, responseType, restAuthFunction);
+    }
+
+    /** Sends a GET with query parameters for the API that {@code requestType} names. */
+    default <T extends RESTResponse> T get(
+            String path,
+            Map<String, String> queryParams,
+            Class<? extends RESTRequest> requestType,
+            Class<T> responseType,
+            RESTAuthFunction restAuthFunction) {
+        return get(path, queryParams, responseType, restAuthFunction);
+    }
+
     <T extends RESTResponse> T post(
             String path, RESTRequest body, RESTAuthFunction restAuthFunction);
 
@@ -44,6 +63,14 @@ public interface RESTClient {
             RESTAuthFunction restAuthFunction);
 
     <T extends RESTResponse> T delete(String path, RESTAuthFunction restAuthFunction);
+
+    /** Sends a DELETE for the API that {@code requestType} names in its {@code API_NAME}. */
+    default <T extends RESTResponse> T delete(
+            String path,
+            Class<? extends RESTRequest> requestType,
+            RESTAuthFunction restAuthFunction) {
+        return delete(path, restAuthFunction);
+    }
 
     <T extends RESTResponse> T delete(
             String path, RESTRequest body, RESTAuthFunction restAuthFunction);
