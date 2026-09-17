@@ -162,10 +162,13 @@ class LeRobotValidationTest(unittest.TestCase):
             "length": 400,
             "tasks": ["pick", "place"],
         } for index in range(50)]
-        episodes = Dataset(pa.Table.from_pylist(rows))
+        episodes_arrow = pa.Table.from_pylist(rows)
+        fingerprint = "0123456789abcdef"
+        episodes = Dataset(episodes_arrow, fingerprint=fingerprint)
         metadata = _PaimonLeRobotMetadata(
             "robot", "tag", {"fps": 50}, None, episodes, ["pick", "place"],
             None)
+        metadata._episodes_source = (episodes, episodes_arrow, fingerprint)
 
         payload = pickle.dumps(metadata)
         self.assertLess(len(payload), len(pickle.dumps(episodes)) * 3 // 4)
@@ -176,6 +179,11 @@ class LeRobotValidationTest(unittest.TestCase):
         self.assertEqual(episodes._fingerprint, restored.episodes._fingerprint)
         self.assertEqual("tag", restored.revision)
         self.assertEqual(50, restored.fps)
+
+        episodes.set_format("numpy")
+        restored = pickle.loads(pickle.dumps(metadata))
+        self.assertEqual("numpy", restored.episodes.format["type"])
+        episodes.reset_format()
 
         metadata.episodes = episodes.with_format("numpy")
         restored = pickle.loads(pickle.dumps(metadata))
@@ -2958,11 +2966,16 @@ class LeRobotImportTest(unittest.TestCase):
         table = self.connection.get_table("worker_pickle")
         dataset = pmm.PaimonLeRobotDataset(table, return_uint8=True)
         restored = pickle.loads(pickle.dumps(dataset))
+        reopened = pmm.PaimonLeRobotDataset(table, return_uint8=True)
 
         self.assertEqual(dataset.meta.episodes[:], restored.meta.episodes[:])
         self.assertEqual(
             dataset.meta.episodes._fingerprint,
             restored.meta.episodes._fingerprint,
+        )
+        self.assertEqual(
+            dataset.meta.episodes._fingerprint,
+            reopened.meta.episodes._fingerprint,
         )
         for index in (0, 2, 4):
             original = dataset[index]

@@ -18,6 +18,7 @@
 """LeRobot-compatible map-style reads from a multimodal Paimon table."""
 
 import bisect
+import hashlib
 import io
 import json
 import math
@@ -710,28 +711,24 @@ class _PaimonLeRobotMetadata:
         self.episodes = episodes
         self.tasks = tasks
         self.subtasks = subtasks
+        self._episodes_source = None
 
     def __getstate__(self):
         state = self.__dict__.copy()
-        try:
-            from datasets import Dataset
-        except ImportError:
+        source = state.pop("_episodes_source", None)
+        if source is None:
+            return state
+        source_episodes, table, fingerprint = source
+        if self.episodes is not source_episodes:
             return state
         episodes = self.episodes
-        if type(episodes) is not Dataset:
-            return state
         default_format = {
             "type": None, "format_kwargs": {},
             "columns": episodes.column_names, "output_all_columns": False,
         }
-        if (not episodes.cache_files
-                and episodes._indices is None
-                and not episodes._indexes
-                and episodes.format == default_format):
-            # Rebuild Dataset's derived batch index in the worker.
+        if episodes.format == default_format and not episodes.list_indexes():
             state["episodes"] = (
-                episodes.data.table, episodes.info, episodes.split,
-                episodes._fingerprint)
+                table, episodes.info, episodes.split, fingerprint)
             state["_episodes_as_arrow"] = True
         return state
 
@@ -739,8 +736,10 @@ class _PaimonLeRobotMetadata:
         if state.pop("_episodes_as_arrow", False):
             from datasets import Dataset
             table, info, split, fingerprint = state["episodes"]
-            state["episodes"] = Dataset(
+            episodes = Dataset(
                 table, info=info, split=split, fingerprint=fingerprint)
+            state["episodes"] = episodes
+            state["_episodes_source"] = (episodes, table, fingerprint)
         self.__dict__.update(state)
 
     def __getattr__(self, name):
@@ -833,7 +832,7 @@ def _load_dataset(table, tag_name):
     frames = _component_table(catalog, raw_table, tag_name)
     episodes_table = _component_table(
         catalog, catalog.get_table(identifiers["episodes"]), tag_name)
-    episodes = _episode_dataset(episodes_table)
+    episodes, episodes_arrow, fingerprint = _episode_dataset(episodes_table)
     tasks_table = _component_table(
         catalog, catalog.get_table(identifiers["tasks"]), tag_name)
     tasks = _component_dataframe(tasks_table, "task_index")
@@ -855,6 +854,7 @@ def _load_dataset(table, tag_name):
     metadata = _PaimonLeRobotMetadata(
         str(table.identifier), tag_name, info, stats, episodes, tasks,
         subtasks)
+    metadata._episodes_source = (episodes, episodes_arrow, fingerprint)
     return frames, metadata
 
 
@@ -890,7 +890,13 @@ def _episode_dataset(table):
         if not name.startswith("stats/")
     ]
     data = _read_arrow(table, projection).sort_by("episode_index")
-    return Dataset(data)
+    # Keep the fingerprint stable when workers rebuild the Dataset.
+    with pa.BufferOutputStream() as output:
+        with pa.ipc.new_stream(output, data.schema) as writer:
+            writer.write_table(data)
+        fingerprint = hashlib.blake2b(
+            output.getvalue(), digest_size=8).hexdigest()
+    return Dataset(data, fingerprint=fingerprint), data, fingerprint
 
 
 def _component_dataframe(table, index_field):
