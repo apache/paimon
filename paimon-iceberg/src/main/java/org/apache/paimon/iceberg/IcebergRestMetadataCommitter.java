@@ -512,11 +512,12 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                 || registered != newMetadata.currentSnapshot().snapshotId()) {
             throw new IllegalStateException(
                     String.format(
-                            "Registered catalog table is at snapshot %s instead of %s",
+                            "Registered catalog table is at snapshot %s instead of %s for table %s",
                             registered,
                             newMetadata.currentSnapshot() == null
                                     ? "null"
-                                    : newMetadata.currentSnapshot().snapshotId()));
+                                    : newMetadata.currentSnapshot().snapshotId(),
+                            icebergTableIdentifier));
         }
     }
 
