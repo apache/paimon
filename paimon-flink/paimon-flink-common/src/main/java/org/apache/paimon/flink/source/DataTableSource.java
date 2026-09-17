@@ -176,8 +176,6 @@ public class DataTableSource extends BaseDataTableSource
                 rowLevelModificationSnapshotId);
     }
 
-    public static final String EVENT_METADATA_PREFIX = "paimon.event.";
-
     public Map<String, DataType> listReadableMetadata() {
         Map<String, DataType> metadata = new LinkedHashMap<>();
 
@@ -199,7 +197,7 @@ public class DataTableSource extends BaseDataTableSource
                     DataType flinkType =
                             TypeConversions.fromLogicalToDataType(
                                     LogicalTypeConversion.toLogicalType(field.type().copy(true)));
-                    metadata.put(EVENT_METADATA_PREFIX + col, flinkType.nullable());
+                    metadata.put(eventMetadataPrefix() + col, flinkType.nullable());
                 }
             }
         }
@@ -210,7 +208,7 @@ public class DataTableSource extends BaseDataTableSource
     public void applyReadableMetadata(List<String> metadataKeys, DataType producedDataType) {
         for (String metadataKey : metadataKeys) {
             if (SpecialFields.ROW_ID.name().equals(metadataKey)
-                    || metadataKey.startsWith(EVENT_METADATA_PREFIX)) {
+                    || metadataKey.startsWith(eventMetadataPrefix())) {
                 continue;
             }
             throw new UnsupportedOperationException(
@@ -221,6 +219,10 @@ public class DataTableSource extends BaseDataTableSource
 
     private List<String> eventPreserveColumns() {
         return CoreOptions.fromMap(table.options()).changelogExposeFieldAsMetadata();
+    }
+
+    private String eventMetadataPrefix() {
+        return CoreOptions.fromMap(table.options()).changelogMetadataFieldPrefix();
     }
 
     @Override
@@ -276,7 +278,7 @@ public class DataTableSource extends BaseDataTableSource
 
     private Table wrapForEventMetadata(Table scanTable) {
         boolean hasEventMetadata =
-                metadataKeys.stream().anyMatch(k -> k.startsWith(EVENT_METADATA_PREFIX));
+                metadataKeys.stream().anyMatch(k -> k.startsWith(eventMetadataPrefix()));
         if (hasEventMetadata && scanTable instanceof FileStoreTable) {
             return new ChangelogEventMetadataTable((FileStoreTable) scanTable);
         }
@@ -301,10 +303,11 @@ public class DataTableSource extends BaseDataTableSource
         List<String> preserveColumns = eventPreserveColumns();
         int[][] projection =
                 Arrays.copyOf(physicalProjection, physicalProjection.length + metadataKeys.size());
+        String metadataPrefix = eventMetadataPrefix();
         for (int i = 0; i < metadataKeys.size(); i++) {
             String key = metadataKeys.get(i);
-            if (key.startsWith(EVENT_METADATA_PREFIX)) {
-                String colName = key.substring(EVENT_METADATA_PREFIX.length());
+            if (key.startsWith(metadataPrefix)) {
+                String colName = key.substring(metadataPrefix.length());
                 int preserveIdx = preserveColumns.indexOf(colName);
                 if (preserveIdx < 0) {
                     throw new UnsupportedOperationException(
