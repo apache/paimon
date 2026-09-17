@@ -301,6 +301,20 @@ class CoreOptions:
         .with_description("The parallelism for scanning manifest files.")
     )
 
+    MANIFEST_SIDECAR_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("manifest.sidecar.enabled")
+        .boolean_type()
+        .no_default_value()
+        .with_description("Enable sidecar pruning on reads. Defaults to manifest-sort.enabled when unset.")
+    )
+
+    MANIFEST_SORT_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("manifest-sort.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Manifest sort setting. Also supplies the default for manifest sidecar reads.")
+    )
+
     MANIFEST_COMPRESSION: ConfigOption[str] = (
         ConfigOptions.key("manifest.compression")
         .string_type()
@@ -1265,6 +1279,13 @@ class CoreOptions:
         if default is not None and not isinstance(default, MemorySize):
             default = MemorySize.of_bytes(default) if isinstance(default, int) else MemorySize.parse(default)
         return self.options.get(CoreOptions.MANIFEST_TARGET_FILE_SIZE, default).get_bytes()
+
+    def manifest_sidecar_enabled(self):
+        enabled = self.options.get(CoreOptions.MANIFEST_SIDECAR_ENABLED)
+        return self.manifest_sort_enabled() if enabled is None else enabled
+
+    def manifest_sort_enabled(self):
+        return self.options.get(CoreOptions.MANIFEST_SORT_ENABLED)
 
     def manifest_merge_skip_on_write_only(self, default=None):
         return self.options.get(CoreOptions.MANIFEST_MERGE_SKIP_ON_WRITE_ONLY, default)
