@@ -1156,7 +1156,7 @@ public class CoreOptions implements Serializable {
                                     + "columns. For forward records (+I, +U), the metadata columns "
                                     + "mirror the regular values for schema consistency. These columns "
                                     + "can be read as Flink metadata columns by sinks that need the "
-                                    + "event timestamp (e.g. Cassandra WRITETIME). "
+                                    + "event timestamps for conflict resolution. "
                                     + "Only valid when changelog-producer is lookup.");
 
     public static final ConfigOption<String> CHANGELOG_PRODUCER_METADATA_FIELD_PREFIX =
