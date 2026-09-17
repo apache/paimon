@@ -24,7 +24,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import java.time.LocalDateTime;
 import java.util.Optional;
 
-/** Extracts Spark's weekday, Monday = 0 through Sunday = 6. */
+/** Extracts the weekday, Monday = 0 through Sunday = 6. */
 public class WeekdayTransform extends DateExtractTransform {
 
     private static final long serialVersionUID = 1L;

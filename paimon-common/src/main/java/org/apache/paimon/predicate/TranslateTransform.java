@@ -64,8 +64,8 @@ public class TranslateTransform extends StringTransform {
         int[] replacements = replacement.toString().codePoints().toArray();
         Map<Integer, Integer> dictionary = new HashMap<>();
         for (int i = 0; i < matches.length; i++) {
-            // Spark keeps the first mapping for duplicate characters, including a first mapping
-            // to deletion. Map.putIfAbsent cannot express that because it treats a null value as
+            // Keep the first mapping for duplicate characters, including a first mapping to
+            // deletion. Map.putIfAbsent cannot express that because it treats a null value as
             // absent.
             if (!dictionary.containsKey(matches[i])) {
                 dictionary.put(

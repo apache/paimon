@@ -220,7 +220,7 @@ class TransformJsonSerdeTest {
                 TestSpec.forTransform(new LengthTransform(Collections.singletonList(null)))
                         .expectJson("{\"name\":\"LENGTH\",\"inputs\":[null]}"),
 
-                // Remaining Spark scalar transforms
+                // Additional scalar transforms
                 TestSpec.forTransform(
                                 new BitLengthTransform(
                                         Collections.singletonList(

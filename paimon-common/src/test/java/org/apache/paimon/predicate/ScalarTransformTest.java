@@ -31,8 +31,8 @@ import java.util.Collections;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Behavioral tests for scalar transforms emitted by Spark's V2 expression builder. */
-class SparkScalarTransformTest {
+/** Behavioral tests for scalar transforms. */
+class ScalarTransformTest {
 
     @Test
     void testBitLengthUsesUtf8BytesAndPropagatesNull() {
@@ -45,7 +45,7 @@ class SparkScalarTransformTest {
     }
 
     @Test
-    void testTranslateMatchesSparkCodePointAndDuplicateSemantics() {
+    void testTranslateCodePointAndDuplicateSemantics() {
         assertThat(
                         new TranslateTransform(
                                         Arrays.asList(string("A😀B"), string("😀"), string("界")))
@@ -59,7 +59,7 @@ class SparkScalarTransformTest {
                                 .transform(GenericRow.of()))
                 .isEqualTo(string("b"));
 
-        // Spark uses the NUL code point as the deletion sentinel.
+        // A NUL replacement code point acts as the deletion sentinel.
         assertThat(
                         new TranslateTransform(
                                         Arrays.asList(string("aba"), string("a"), string("\u0000")))
@@ -75,14 +75,14 @@ class SparkScalarTransformTest {
     @Test
     void testOverlayDefaultExplicitAndUnicodeSemantics() {
         assertThat(
-                        new OverlayTransform(Arrays.asList(string("Spark SQL"), string("_"), 6))
+                        new OverlayTransform(Arrays.asList(string("Hello SQL"), string("_"), 6))
                                 .transform(GenericRow.of()))
-                .isEqualTo(string("Spark_SQL"));
+                .isEqualTo(string("Hello_SQL"));
         assertThat(
                         new OverlayTransform(
-                                        Arrays.asList(string("Spark SQL"), string("ANSI "), 7, 0))
+                                        Arrays.asList(string("Hello SQL"), string("ANSI "), 7, 0))
                                 .transform(GenericRow.of()))
-                .isEqualTo(string("Spark ANSI SQL"));
+                .isEqualTo(string("Hello ANSI SQL"));
         assertThat(
                         new OverlayTransform(Arrays.asList(string("a😀c"), string("界"), 2, 1))
                                 .transform(GenericRow.of()))
@@ -94,7 +94,7 @@ class SparkScalarTransformTest {
     }
 
     @Test
-    void testPadMatchesSparkForPaddingTruncationAndEmptyPad() {
+    void testPadForPaddingTruncationAndEmptyPad() {
         assertThat(pad(PadTransform.Direction.LEFT, "hi", 5, "??")).isEqualTo(string("???hi"));
         assertThat(pad(PadTransform.Direction.RIGHT, "hi", 5, "??")).isEqualTo(string("hi???"));
         assertThat(pad(PadTransform.Direction.LEFT, "a😀c", 2, "x")).isEqualTo(string("a😀"));
@@ -119,7 +119,7 @@ class SparkScalarTransformTest {
     }
 
     @Test
-    void testDateTruncSupportsEverySparkDateLevel() {
+    void testDateTruncSupportsEveryDateLevel() {
         FieldRef date = new FieldRef(0, "date", DataTypes.DATE());
         GenericRow row = GenericRow.of(epochDay("2025-05-18"));
 

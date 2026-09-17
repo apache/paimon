@@ -24,7 +24,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import java.time.LocalDateTime;
 import java.util.Optional;
 
-/** Extracts Spark's day of week, Sunday = 1 through Saturday = 7. */
+/** Extracts the day of week, Sunday = 1 through Saturday = 7. */
 public class DayOfWeekTransform extends DateExtractTransform {
 
     private static final long serialVersionUID = 1L;
