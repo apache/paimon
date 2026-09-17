@@ -36,6 +36,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
+import org.apache.flink.streaming.api.transformations.SourceTransformation;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -1188,19 +1189,21 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         assertThat(sourceParallelism(buildSimpleQuery(table))).isEqualTo(bExeEnv.getParallelism());
 
         // with hint
-        assertThat(
-                        sourceParallelism(
-                                buildQueryWithTableOptions(
-                                        table,
-                                        "*",
-                                        "",
-                                        new HashMap<String, String>() {
-                                            {
-                                                put(INFER_SCAN_PARALLELISM.key(), "false");
-                                                put(SCAN_PARALLELISM.key(), "66");
-                                            }
-                                        })))
-                .isEqualTo(66);
+        String queryWithHint =
+                buildQueryWithTableOptions(
+                        table,
+                        "*",
+                        "",
+                        new HashMap<String, String>() {
+                            {
+                                put(INFER_SCAN_PARALLELISM.key(), "false");
+                                put(SCAN_PARALLELISM.key(), "66");
+                            }
+                        });
+        DataStream<Row> result =
+                ((StreamTableEnvironment) bEnv).toChangelogStream(bEnv.sqlQuery(queryWithHint));
+        assertThat(result.getParallelism()).isEqualTo(bExeEnv.getParallelism());
+        assertThat(sourceParallelism(result)).isEqualTo(66);
     }
 
     @Test
@@ -1283,7 +1286,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                                         put(SCAN_PARALLELISM.key(), "-2");
                                                     }
                                                 })))
-                .hasMessageContaining("The parallelism of an operator must be at least 1");
+                .hasMessageContaining("Invalid configured parallelism -2");
 
         // 2 splits, the parallelism is splits num: 2
         insertInto(table, "('Euro', 119)");
@@ -1329,7 +1332,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                         3L,
                                         Collections.singletonMap(
                                                 INFER_SCAN_PARALLELISM.key(), "true"))))
-                .isEqualTo(1);
+                .isEqualTo(2);
 
         // 2 splits, infer parallelism is disabled, the parallelism is scan.parallelism
         assertThat(
@@ -1879,13 +1882,22 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     private int sourceParallelism(String sql) {
         DataStream<Row> stream =
                 ((StreamTableEnvironment) bEnv).toChangelogStream(bEnv.sqlQuery(sql));
-        return stream.getParallelism();
+        return sourceParallelism(stream);
     }
 
     private int sourceParallelismStreaming(String sql) {
         DataStream<Row> stream =
                 ((StreamTableEnvironment) sEnv).toChangelogStream(sEnv.sqlQuery(sql));
-        return stream.getParallelism();
+        return sourceParallelism(stream);
+    }
+
+    private int sourceParallelism(DataStream<Row> stream) {
+        return stream.getTransformation().getTransitivePredecessors().stream()
+                .filter(SourceTransformation.class::isInstance)
+                .map(SourceTransformation.class::cast)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Source transformation not found"))
+                .getParallelism();
     }
 
     private void testSinkParallelism(
