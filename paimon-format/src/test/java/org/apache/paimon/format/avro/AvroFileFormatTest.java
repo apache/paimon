@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.avro;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
@@ -97,6 +98,34 @@ public class AvroFileFormatTest {
             options.setString("file.block-size", blockSize);
         }
         FileFormat format = FileFormat.fromIdentifier("avro", options);
+        assertFileBlockSize(format, expectedBlockSize, compression);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"avro", "parquet", "orc"})
+    void testManifestIgnoresDataFileBlockSize(String identifier) throws IOException {
+        Options options = new Options();
+        options.set(CoreOptions.FILE_FORMAT, identifier);
+        options.setString("file.block-size", "1 kb");
+
+        FileFormat manifestFormat = FileFormat.manifestFormat(new CoreOptions(options));
+        assertFileBlockSize(manifestFormat, 64000, "null");
+
+        assertThat(options.get(CoreOptions.FILE_BLOCK_SIZE).getBytes()).isEqualTo(1024);
+        assertFileBlockSize(FileFormat.fromIdentifier("avro", options), 1024, "null");
+    }
+
+    @Test
+    void testManifestIgnoresLargeDataFileBlockSize() throws IOException {
+        Options options = new Options();
+        options.set(CoreOptions.FILE_FORMAT, "parquet");
+        options.setString("file.block-size", "256 mb");
+
+        assertFileBlockSize(FileFormat.manifestFormat(new CoreOptions(options)), 64000, "null");
+    }
+
+    private void assertFileBlockSize(FileFormat format, int expectedBlockSize, String compression)
+            throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull()).notNull();
         LocalFileIO fileIO = LocalFileIO.create();
         Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
