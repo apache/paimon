@@ -18,6 +18,8 @@
 
 package org.apache.paimon.rest.auth;
 
+import javax.annotation.Nullable;
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -30,16 +32,37 @@ public class RESTAuthParameter {
     private final Map<String, String> parameters;
     private final String method;
     private final String data;
+    @Nullable private final String apiName;
 
     public RESTAuthParameter(
             String resourcePath, Map<String, String> parameters, String method, String data) {
+        this(resourcePath, encode(parameters), method, data, null);
+    }
+
+    private RESTAuthParameter(
+            String resourcePath,
+            Map<String, String> encodedParameters,
+            String method,
+            String data,
+            @Nullable String apiName) {
         this.resourcePath = resourcePath;
-        this.parameters = new HashMap<>();
-        for (Map.Entry<String, String> entry : parameters.entrySet()) {
-            this.parameters.put(entry.getKey(), encodeString(entry.getValue()));
-        }
+        this.parameters = encodedParameters;
         this.method = method;
         this.data = data;
+        this.apiName = apiName;
+    }
+
+    private static Map<String, String> encode(Map<String, String> parameters) {
+        Map<String, String> encoded = new HashMap<>();
+        for (Map.Entry<String, String> entry : parameters.entrySet()) {
+            encoded.put(entry.getKey(), encodeString(entry.getValue()));
+        }
+        return encoded;
+    }
+
+    /** Returns a copy naming the API this request calls; parameters are not encoded again. */
+    public RESTAuthParameter withApiName(@Nullable String apiName) {
+        return new RESTAuthParameter(resourcePath, parameters, method, data, apiName);
     }
 
     public String resourcePath() {
@@ -56,5 +79,11 @@ public class RESTAuthParameter {
 
     public String data() {
         return data;
+    }
+
+    /** The API this request calls, as listed in {@link org.apache.paimon.rest.RESTApiNames}. */
+    @Nullable
+    public String apiName() {
+        return apiName;
     }
 }

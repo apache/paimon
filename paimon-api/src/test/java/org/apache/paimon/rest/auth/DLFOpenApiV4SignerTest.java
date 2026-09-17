@@ -227,6 +227,75 @@ public class DLFOpenApiV4SignerTest {
                 authorization);
     }
 
+    /** Known answer with a body and an API name; pypaimon pins the same string. */
+    @Test
+    public void testKnownSignatureWithApiName() throws Exception {
+        DLFOpenApiV4Signer signer = new DLFOpenApiV4Signer("cn-hangzhou");
+        DLFToken token = new DLFToken("TestAKId", "TestAKSecret", null, null);
+        String host = "dlfnext.cn-hangzhou.aliyuncs.com";
+        String body = "{\"identifier\":{\"database\":\"db\",\"object\":\"t\"}}";
+        RESTAuthParameter restAuthParameter =
+                new RESTAuthParameter(
+                                "/v1/clg-paimon-1/databases/db/tables",
+                                new HashMap<>(),
+                                "POST",
+                                body)
+                        .withApiName("CreateTable");
+
+        Map<String, String> signHeaders =
+                signer.signRequestHeaders(restAuthParameter, NOW, null, host);
+        signHeaders.put("x-acs-signature-nonce", "fixed-nonce-for-test");
+
+        assertEquals("CreateTable", signHeaders.get("x-acs-action"));
+        assertEquals(
+                "ACS4-HMAC-SHA256 Credential=TestAKId/20250416/cn-hangzhou/DlfNext/aliyun_v4_request,"
+                        + "SignedHeaders=content-type;host;x-acs-action;x-acs-content-sha256;"
+                        + "x-acs-date;x-acs-signature-nonce;x-acs-version,"
+                        + "Signature=420206b5263536e6bc271a7a32582b4a820e23c8c58ae692b708c69f9d19e51d",
+                signer.authorization(restAuthParameter, token, host, signHeaders));
+    }
+
+    @Test
+    public void testSignRequestHeadersWithoutApiNameSendsNoAction() {
+        DLFOpenApiV4Signer signer = new DLFOpenApiV4Signer(REGION);
+        RESTAuthParameter restAuthParameter =
+                new RESTAuthParameter("/v1/clg-paimon-1/databases", new HashMap<>(), "GET", null);
+
+        Map<String, String> headers = signer.signRequestHeaders(restAuthParameter, NOW, null, HOST);
+
+        assertFalse(headers.containsKey("x-acs-action"));
+        assertEquals(signer.signHeaders(null, NOW, null, HOST).keySet(), headers.keySet());
+    }
+
+    @Test
+    public void testAuthFunctionSendsSignedAction() {
+        DLFAuthProvider provider =
+                DLFAuthProvider.fromAccessKey(
+                        "akId",
+                        "akSecret",
+                        "securityToken",
+                        "https://dlfnext.cn-hangzhou.aliyuncs.com",
+                        "cn-hangzhou",
+                        DLFOpenApiV4Signer.IDENTIFIER);
+
+        Map<String, String> headers =
+                new RESTAuthFunction(new HashMap<>(), provider)
+                        .withApiName("GetTableToken")
+                        .apply(
+                                new RESTAuthParameter(
+                                        "/v1/clg-paimon-1/databases/db/tables/t/token",
+                                        new HashMap<>(),
+                                        "GET",
+                                        null));
+
+        assertEquals("GetTableToken", headers.get("x-acs-action"));
+        assertTrue(
+                headers.get("Authorization")
+                        .contains(
+                                "SignedHeaders=host;x-acs-action;x-acs-content-sha256;x-acs-date;"
+                                        + "x-acs-security-token;x-acs-signature-nonce;x-acs-version,"));
+    }
+
     @Test
     public void testSignedHeadersIncludeHostAndContentType() throws Exception {
         DLFOpenApiV4Signer signer = new DLFOpenApiV4Signer(REGION);

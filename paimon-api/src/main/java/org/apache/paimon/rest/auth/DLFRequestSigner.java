@@ -42,6 +42,18 @@ public interface DLFRequestSigner {
             @Nullable String body, Instant now, @Nullable String securityToken, String host);
 
     /**
+     * Generate signature headers from the whole request, for signers that need more than the body;
+     * by default it delegates to {@link #signHeaders}.
+     */
+    default Map<String, String> signRequestHeaders(
+            RESTAuthParameter restAuthParameter,
+            Instant now,
+            @Nullable String securityToken,
+            String host) {
+        return signHeaders(restAuthParameter.data(), now, securityToken, host);
+    }
+
+    /**
      * Generate the Authorization header value.
      *
      * @param restAuthParameter request parameters (method, path, query, body)

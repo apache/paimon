@@ -18,6 +18,8 @@
 
 package org.apache.paimon.rest.auth;
 
+import javax.annotation.Nullable;
+
 import java.util.Map;
 import java.util.function.Function;
 
@@ -26,14 +28,28 @@ public class RESTAuthFunction implements Function<RESTAuthParameter, Map<String,
 
     private final Map<String, String> initHeader;
     private final AuthProvider authProvider;
+    @Nullable private final String apiName;
 
     public RESTAuthFunction(Map<String, String> initHeader, AuthProvider authProvider) {
+        this(initHeader, authProvider, null);
+    }
+
+    private RESTAuthFunction(
+            Map<String, String> initHeader, AuthProvider authProvider, @Nullable String apiName) {
         this.initHeader = initHeader;
         this.authProvider = authProvider;
+        this.apiName = apiName;
+    }
+
+    /** Returns a function that tags every request it signs with the given API name. */
+    public RESTAuthFunction withApiName(String apiName) {
+        return new RESTAuthFunction(initHeader, authProvider, apiName);
     }
 
     @Override
     public Map<String, String> apply(RESTAuthParameter restAuthParameter) {
-        return authProvider.mergeAuthHeader(initHeader, restAuthParameter);
+        RESTAuthParameter parameter =
+                apiName == null ? restAuthParameter : restAuthParameter.withApiName(apiName);
+        return authProvider.mergeAuthHeader(initHeader, parameter);
     }
 }

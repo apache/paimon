@@ -23,11 +23,13 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 from pypaimon.api.auth import (
+    AuthProvider,
     DLFAuthProvider,
     DLFAuthProviderFactory,
     DLFDefaultSigner,
     DLFOpenApiSigner,
     DLFOpenApiV4Signer,
+    RESTAuthFunction,
 )
 from pypaimon.api.token_loader import DLFToken
 from pypaimon.api.typedef import RESTAuthParameter
@@ -478,6 +480,98 @@ class DLFSignerTest(unittest.TestCase):
         """Derived independently, so a typo in the constant cannot pass."""
         self.assertEqual(
             hashlib.sha256(b"").hexdigest(), DLFOpenApiV4Signer.EMPTY_BODY_SHA256)
+
+    def test_rest_auth_parameter_has_no_api_name_by_default(self):
+        self.assertIsNone(RESTAuthParameter("GET", "/v1/config", "", {}).api_name)
+
+    def test_with_api_name_does_not_encode_parameters_twice(self):
+        """The copy keeps the encoded parameters as they are, rather than encoding them again."""
+        param = RESTAuthParameter("GET", "/v1/prefix/databases", "body", {"databaseNamePattern": "db %"})
+
+        named = param.with_api_name("ListDatabases")
+
+        self.assertEqual("ListDatabases", named.api_name)
+        self.assertEqual(param.parameters, named.parameters)
+        self.assertEqual((param.method, param.path, param.data), (named.method, named.path, named.data))
+        self.assertIsNone(param.api_name)
+
+    def test_rest_auth_function_with_api_name(self):
+        seen = []
+
+        class Recording(AuthProvider):
+            def merge_auth_header(self, base_header, rest_auth_parameter):
+                seen.append(rest_auth_parameter)
+                return dict(base_header)
+
+        function = RESTAuthFunction({"k": "v"}, Recording())
+        param = RESTAuthParameter("GET", "/v1/config", "", {})
+
+        self.assertEqual({"k": "v"}, function.with_api_name("GetConfig")(param))
+        self.assertEqual("GetConfig", seen[-1].api_name)
+        function(param)
+        self.assertIs(param, seen[-1])
+
+    def test_openapi_v4_known_signature_with_api_name(self):
+        """Known answer with a body and an API name. The Java signer pins the same string."""
+        signer = DLFOpenApiV4Signer("cn-hangzhou")
+        token = DLFToken("TestAKId", "TestAKSecret", None, None)
+        host = "dlfnext.cn-hangzhou.aliyuncs.com"
+        now = datetime(2025, 4, 16, 3, 44, 46, tzinfo=timezone.utc)
+        body = '{"identifier":{"database":"db","object":"t"}}'
+        rest_param = RESTAuthParameter(
+            "POST", "/v1/clg-paimon-1/databases/db/tables", body, {}).with_api_name("CreateTable")
+
+        headers = signer.sign_request_headers(rest_param, now, None, host)
+        headers["x-acs-signature-nonce"] = "fixed-nonce-for-test"
+
+        self.assertEqual("CreateTable", headers["x-acs-action"])
+        self.assertEqual(
+            "ACS4-HMAC-SHA256 Credential=TestAKId/20250416/cn-hangzhou/DlfNext/aliyun_v4_request,"
+            "SignedHeaders=content-type;host;x-acs-action;x-acs-content-sha256;"
+            "x-acs-date;x-acs-signature-nonce;x-acs-version,"
+            "Signature=420206b5263536e6bc271a7a32582b4a820e23c8c58ae692b708c69f9d19e51d",
+            signer.authorization(rest_param, token, host, headers))
+
+    def test_openapi_v4_without_api_name_sends_no_action(self):
+        signer = DLFOpenApiV4Signer("cn-hangzhou")
+        host = "dlfnext.cn-hangzhou.aliyuncs.com"
+        now = datetime(2025, 4, 16, 3, 44, 46, tzinfo=timezone.utc)
+
+        headers = signer.sign_request_headers(
+            RESTAuthParameter("GET", "/v1/clg-paimon-1/databases", "", {}), now, None, host)
+
+        self.assertNotIn("x-acs-action", headers)
+        self.assertEqual(set(signer.sign_headers(None, now, None, host)), set(headers))
+
+    def test_auth_function_sends_signed_action(self):
+        provider = DLFAuthProvider(
+            uri="https://dlfnext.cn-hangzhou.aliyuncs.com",
+            region="cn-hangzhou",
+            signing_algorithm=DLFOpenApiV4Signer.IDENTIFIER,
+            token=DLFToken("akId", "akSecret", "securityToken", None)
+        )
+
+        header = RESTAuthFunction({}, provider).with_api_name("GetTableToken")(
+            RESTAuthParameter("GET", "/v1/clg-paimon-1/databases/db/tables/t/token", "", {}))
+
+        self.assertEqual("GetTableToken", header["x-acs-action"])
+        self.assertIn(
+            "SignedHeaders=host;x-acs-action;x-acs-content-sha256;x-acs-date;"
+            "x-acs-security-token;x-acs-signature-nonce;x-acs-version,",
+            header["Authorization"])
+
+    def test_only_openapi_v4_sends_api_name(self):
+        """Only the ACS4 signer turns an API name into a header; the other schemes are unchanged."""
+        rest_param = RESTAuthParameter(
+            "GET", "/v1/clg-paimon-1/databases/db/tables/t/token", "", {}).with_api_name("GetTableToken")
+        for algorithm in (DLFDefaultSigner.IDENTIFIER, DLFOpenApiSigner.IDENTIFIER):
+            provider = DLFAuthProvider(
+                uri="https://dlfnext.cn-hangzhou.aliyuncs.com",
+                region="cn-hangzhou",
+                signing_algorithm=algorithm,
+                token=DLFToken("akId", "akSecret", None, None)
+            )
+            self.assertNotIn("x-acs-action", provider.merge_auth_header({}, rest_param), algorithm)
 
 
 if __name__ == '__main__':

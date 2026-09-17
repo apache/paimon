@@ -34,6 +34,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -163,6 +164,32 @@ public class DLFRequestSignerTest {
         // Verify that authorization is generated with query params
         assertNotNull(authorization);
         assertTrue(authorization.startsWith("acs "));
+    }
+
+    /** Only the ACS4 signer turns an API name into a header; the other schemes are unchanged. */
+    @Test
+    public void testOnlyOpenApiV4SendsApiName() {
+        RESTAuthParameter restAuthParameter =
+                new RESTAuthParameter(
+                                "/v1/clg-paimon-1/databases/db/tables/t/token",
+                                new HashMap<>(),
+                                "GET",
+                                null)
+                        .withApiName("GetTableToken");
+        for (String algorithm :
+                new String[] {DLFDefaultSigner.IDENTIFIER, DLFOpenApiSigner.IDENTIFIER}) {
+            DLFAuthProvider provider =
+                    DLFAuthProvider.fromAccessKey(
+                            "akId",
+                            "akSecret",
+                            null,
+                            "https://dlfnext.cn-hangzhou.aliyuncs.com",
+                            "cn-hangzhou",
+                            algorithm);
+            Map<String, String> headers =
+                    provider.mergeAuthHeader(new HashMap<>(), restAuthParameter);
+            assertFalse(headers.containsKey("x-acs-action"), algorithm);
+        }
     }
 
     @Test

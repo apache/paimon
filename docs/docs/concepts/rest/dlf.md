@@ -145,7 +145,9 @@ The client selects a request signer from the configured endpoint unless
 
 URIs containing `dlfnext` select the OpenAPI signer; other URIs select the default signer. Set
 `dlf.signing-algorithm` to `openapi-v4` to sign with ACS4-HMAC-SHA256 instead, which hashes a
-canonical request and derives its key from the date, the region and the product. That signer is
-opt-in: no endpoint selects it on its own. The client also infers the region from the URI.
+canonical request and derives its key from the date, the region and the product. It also signs an
+`x-acs-action` header carrying the name of the API being called, which some gateways require before
+they route the call. That signer is opt-in: no endpoint selects it on its own. The client also
+infers the region from the URI.
 Set `dlf.region` explicitly if the endpoint does not contain a recognizable region, for example when
 using a custom hostname.

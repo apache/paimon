@@ -15,8 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import copy
 from dataclasses import dataclass, field
-from typing import Dict, TypeVar
+from typing import Dict, Optional, TypeVar
 from urllib.parse import quote
 
 T = TypeVar("T")
@@ -34,9 +35,16 @@ class RESTAuthParameter:
     path: str
     data: str
     parameters: Dict[str, str] = field(default_factory=dict)
+    api_name: Optional[str] = None
 
     def __post_init__(self):
         if self.parameters:
             self.parameters = {
                 k: _encode_string(v) for k, v in self.parameters.items()
             }
+
+    def with_api_name(self, api_name: Optional[str]) -> "RESTAuthParameter":
+        """Returns a copy naming the API this request calls; parameters are not encoded again."""
+        named = copy.copy(self)
+        named.api_name = api_name
+        return named
