@@ -44,7 +44,9 @@ import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.io.BinaryDecoder;
 import org.apache.avro.io.BinaryEncoder;
+import org.apache.avro.io.BufferedBinaryEncoder;
 import org.apache.avro.io.DecoderFactory;
+import org.apache.avro.io.DirectBinaryEncoder;
 import org.apache.avro.io.EncoderFactory;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -186,6 +188,10 @@ public class AvroFileFormatTest {
         try (PositionOutputStream out = fileIO.newOutputStream(file, false);
                 FormatWriter writer =
                         fileFormat.createWriterFactory(rowType).create(out, compression)) {
+            assertThat(writer)
+                    .extracting("writer")
+                    .extracting("bufOut")
+                    .isInstanceOf(BufferedBinaryEncoder.class);
             // Leave a partial record-encoder buffer as well as a partial Avro block.
             writer.addElement(GenericRow.of(42));
         }
@@ -203,8 +209,29 @@ public class AvroFileFormatTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"avro", "parquet", "orc"})
+    void testManifestWriterUsesDirectEncoder(String dataFileFormat) throws IOException {
+        Options options = new Options();
+        options.set(CoreOptions.FILE_FORMAT, dataFileFormat);
+        FileFormat manifestFormat = FileFormat.manifestFormat(new CoreOptions(options));
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull()).notNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
+                FormatWriter writer =
+                        manifestFormat.createWriterFactory(rowType).create(out, "null")) {
+            assertThat(writer)
+                    .extracting("writer")
+                    .extracting("bufOut")
+                    .isInstanceOf(DirectBinaryEncoder.class);
+            writer.addElement(GenericRow.of(42));
+        }
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"null", "deflate", "snappy", "zstd"})
-    void testBufferedRecordsAroundRawBlockCopy(String compression) throws IOException {
+    void testRecordsAroundRawBlockCopy(String compression) throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull()).notNull();
         LocalFileIO fileIO = LocalFileIO.create();
         Path source = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
@@ -225,9 +252,16 @@ public class AvroFileFormatTest {
         try (AvroBlockReader reader = new AvroBlockReader(fileIO.newInputStream(source));
                 PositionOutputStream out = fileIO.newOutputStream(target, false);
                 AvroBlockWriter writer = fileFormat.createBlockWriter(out, rowType, compression)) {
+            assertThat(writer)
+                    .extracting("writer")
+                    .extracting("bufOut")
+                    .isInstanceOf(DirectBinaryEncoder.class);
             writer.addElement(GenericRow.of(0));
-            writer.addEncoded(ByteBuffer.wrap(encoded.toByteArray()));
-            // Copying a raw block must first flush buffered rows and encoded records.
+            ByteBuffer record = ByteBuffer.wrap(encoded.toByteArray());
+            writer.addEncoded(record);
+            assertThat(record.position()).isZero();
+            assertThat(record.remaining()).isEqualTo(encoded.size());
+            // Copying a raw block must first flush pending rows and encoded records.
             writer.addEncodedBlock(reader.nextBorrowedRawBlock());
             writer.addElement(GenericRow.of(4));
         }
