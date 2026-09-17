@@ -26,6 +26,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.utils.StringUtils;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -301,6 +302,11 @@ public class InferVariantShreddingSchema {
 
                 for (int i = 0; i < size; i++) {
                     GenericVariant.ObjectField field = v.getFieldAtIndex(i);
+                    if (StringUtils.isNullOrWhitespaceOnly(field.key)) {
+                        // A blank key is a valid variant object key but not a RowType field
+                        // name, so leave it in the unshredded value instead of failing the write
+                        continue;
+                    }
                     DataType fieldType = schemaOf(field.value, maxDepth - 1);
                     // Store count in description temporarily (will be used in mergeRowTypes)
                     DataField dataField = new DataField(i, field.key, fieldType, "1");
@@ -308,7 +314,7 @@ public class InferVariantShreddingSchema {
                 }
 
                 // According to the variant spec, object fields must be sorted alphabetically
-                for (int i = 1; i < size; i++) {
+                for (int i = 1; i < fields.size(); i++) {
                     if (fields.get(i - 1).name().compareTo(fields.get(i).name()) >= 0) {
                         throw new RuntimeException(
                                 "Variant object fields must be sorted alphabetically");

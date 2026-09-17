@@ -31,6 +31,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -209,6 +210,33 @@ public class InferVariantShreddingSchemaTest {
                         new String[] {"big", "price", "tiny", "whole"});
         assertThat(inferredSchema.getField("v").type())
                 .isEqualTo(variantShreddingSchema(expectedType));
+    }
+
+    @Test
+    void testInferSchemaSkipsBlankKeys() {
+        RowType schema = RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"v"});
+
+        // An empty or blank key is a valid variant object key but not a RowType field name;
+        // it must stay in the unshredded value rather than fail the inference
+        GenericVariant variant1 = GenericVariant.fromJson("{\"\": 1, \" \": 2, \"a\": 3}");
+        GenericVariant variant2 = GenericVariant.fromJson("{\"\": 4, \"a\": 5}");
+
+        List<InternalRow> rows = Arrays.asList(GenericRow.of(variant1), GenericRow.of(variant2));
+
+        InferVariantShreddingSchema inferrer = defaultInferVariantShreddingSchema(schema);
+        RowType inferredSchema = inferrer.inferSchema(rows);
+
+        RowType expectedType = RowType.of(new DataType[] {DataTypes.BIGINT()}, new String[] {"a"});
+        assertThat(inferredSchema.getField("v").type())
+                .isEqualTo(variantShreddingSchema(expectedType));
+
+        // an object made only of blank keys has nothing to shred and stays unshredded
+        RowType blankOnly =
+                inferrer.inferSchema(
+                        Collections.singletonList(
+                                GenericRow.of(GenericVariant.fromJson("{\"\": 1}"))));
+        assertThat(blankOnly.getField("v").type())
+                .isEqualTo(variantShreddingSchema(DataTypes.VARIANT()));
     }
 
     @Test
