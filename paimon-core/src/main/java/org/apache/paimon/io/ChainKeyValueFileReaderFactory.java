@@ -62,7 +62,8 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
             DeletionVector.Factory dvFactory,
             ChainReadContext chainReadContext,
             CoreOptions coreOptions,
-            @Nullable ReadBatchSizer readBatchSizer) {
+            @Nullable ReadBatchSizer readBatchSizer,
+            @Nullable int[] metadataFallbackMapping) {
         super(
                 fileIO,
                 schemaManager,
@@ -74,7 +75,8 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
                 partition,
                 dvFactory,
                 coreOptions,
-                readBatchSizer);
+                readBatchSizer,
+                metadataFallbackMapping);
         this.chainReadContext = chainReadContext;
         CoreOptions options = new CoreOptions(schema.options());
         this.currentBranch = options.branch();
@@ -123,7 +125,9 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
                         valueType,
                         file.level(),
                         overrideSequenceWithSnapshotId,
-                        file.minSequenceNumber());
+                        file.minSequenceNumber(),
+                        metadataFallbackMapping,
+                        !isChangelogFile(file));
 
         if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
             return new ExposeDeletionKeyValueReader(reader, deletionVector.get());
@@ -165,7 +169,8 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
                     dvFactory,
                     chainReadContext,
                     wrapped.options,
-                    wrapped.readBatchSizer);
+                    wrapped.readBatchSizer,
+                    wrapped.createMetadataFallbackMapping());
         }
     }
 }

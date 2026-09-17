@@ -172,6 +172,33 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                 adjustedReadType = new RowType(allFields);
             }
         }
+
+        // Metadata columns are backed by values from the incoming event. Ordinary data files do
+        // not physically contain the synthetic metadata fields, so retain the corresponding
+        // physical fields while reading whenever a metadata field was requested. The outer read
+        // projection removes these internal dependencies after the reader has populated the
+        // metadata columns.
+        List<String> preserveColumns = options.changelogExposeFieldAsMetadata();
+        if (!preserveColumns.isEmpty()) {
+            List<String> readFieldNames = adjustedReadType.getFieldNames();
+            List<DataField> extraFields = new ArrayList<>();
+            RowType logicalRowType = tableSchema.logicalRowType();
+            for (String preserveColumn : preserveColumns) {
+                String metadataName = options.changelogMetadataFieldPrefix() + preserveColumn;
+                if (readFieldNames.contains(metadataName)
+                        && !readFieldNames.contains(preserveColumn)) {
+                    int fieldIndex = logicalRowType.getFieldNames().indexOf(preserveColumn);
+                    if (fieldIndex >= 0) {
+                        extraFields.add(logicalRowType.getFields().get(fieldIndex));
+                    }
+                }
+            }
+            if (!extraFields.isEmpty()) {
+                List<DataField> allFields = new ArrayList<>(adjustedReadType.getFields());
+                allFields.addAll(extraFields);
+                adjustedReadType = new RowType(allFields);
+            }
+        }
         adjustedReadType = mfFactory.adjustReadType(adjustedReadType);
         return adjustedReadType;
     }
