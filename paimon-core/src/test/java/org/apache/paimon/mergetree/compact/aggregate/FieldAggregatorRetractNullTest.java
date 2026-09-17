@@ -185,8 +185,7 @@ public class FieldAggregatorRetractNullTest {
 
     @Test
     public void testFieldProductAgg() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(DataTypes.INT(), null, null);
+        FieldProductAgg fieldProductAgg = new FieldProductAggFactory().create(DataTypes.INT());
         assertThat(fieldProductAgg.retract(1, 1)).isNotNull();
     }
 

@@ -3370,7 +3370,14 @@ public class CoreOptions implements Serializable {
         return options.get(
                 key(FIELDS_PREFIX + "." + fieldName + ".sum.fail-on-overflow")
                         .booleanType()
-                        .defaultValue(true));
+                        .defaultValue(false));
+    }
+
+    public boolean fieldProductAggFailOnOverflow(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + ".product.fail-on-overflow")
+                        .booleanType()
+                        .defaultValue(false));
     }
 
     public List<String> fieldNestedUpdateAggNestedKey(String fieldName) {
