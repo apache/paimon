@@ -20,6 +20,8 @@ package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.catalog.Identifier;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
+
 /** Request for renaming a view; the body is the same as {@link RenameTableRequest}. */
 public class RenameViewRequest extends RenameTableRequest {
 
@@ -27,5 +29,11 @@ public class RenameViewRequest extends RenameTableRequest {
 
     public RenameViewRequest(Identifier source, Identifier destination) {
         super(source, destination);
+    }
+
+    @JsonIgnore
+    @Override
+    public String apiName() {
+        return API_NAME;
     }
 }

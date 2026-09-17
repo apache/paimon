@@ -175,4 +175,10 @@ public class CreatePartitionsRequest implements RESTRequest {
                 || partitionStatistics.isEmpty()
                 || Boolean.TRUE.equals(replaceStatistics);
     }
+
+    @JsonIgnore
+    @Override
+    public String apiName() {
+        return API_NAME;
+    }
 }

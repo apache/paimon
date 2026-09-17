@@ -67,7 +67,7 @@ public class HttpClient implements RESTClient {
     @Override
     public <T extends RESTResponse> T get(
             String path, Class<T> responseType, RESTAuthFunction restAuthFunction) {
-        Header[] authHeaders = getHeaders(path, "GET", "", restAuthFunction);
+        Header[] authHeaders = getHeaders(path, "GET", "", null, restAuthFunction);
         HttpGet httpGet = HttpClientUtils.newHttpGet(getRequestUrl(path, null));
         httpGet.setHeaders(authHeaders);
         return exec(httpGet, responseType);
@@ -79,7 +79,7 @@ public class HttpClient implements RESTClient {
             Map<String, String> queryParams,
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
-        Header[] authHeaders = getHeaders(path, queryParams, "GET", "", restAuthFunction);
+        Header[] authHeaders = getHeaders(path, queryParams, "GET", "", null, restAuthFunction);
         HttpGet httpGet = HttpClientUtils.newHttpGet(getRequestUrl(path, queryParams));
         httpGet.setHeaders(authHeaders);
         return exec(httpGet, responseType);
@@ -102,7 +102,8 @@ public class HttpClient implements RESTClient {
         if (encodedBody != null) {
             httpPost.setEntity(new StringEntity(encodedBody, ContentType.APPLICATION_JSON));
         }
-        Header[] authHeaders = getHeaders(path, "POST", encodedBody, restAuthFunction);
+        Header[] authHeaders =
+                getHeaders(path, "POST", encodedBody, apiName(body), restAuthFunction);
         httpPost.setHeaders(authHeaders);
         // A POST the server cannot absorb twice is sent exactly once, whatever the status says.
         return exec(
@@ -126,9 +127,15 @@ public class HttpClient implements RESTClient {
         if (encodedBody != null) {
             httpDelete.setEntity(new StringEntity(encodedBody, ContentType.APPLICATION_JSON));
         }
-        Header[] authHeaders = getHeaders(path, "DELETE", encodedBody, restAuthFunction);
+        Header[] authHeaders =
+                getHeaders(path, "DELETE", encodedBody, apiName(body), restAuthFunction);
         httpDelete.setHeaders(authHeaders);
         return exec(httpDelete, null);
+    }
+
+    @Nullable
+    private static String apiName(@Nullable RESTRequest body) {
+        return body == null ? null : body.apiName();
     }
 
     @VisibleForTesting
@@ -232,8 +239,9 @@ public class HttpClient implements RESTClient {
             String path,
             String method,
             String data,
+            @Nullable String apiName,
             Function<RESTAuthParameter, Map<String, String>> headerFunction) {
-        return getHeaders(path, Collections.emptyMap(), method, data, headerFunction);
+        return getHeaders(path, Collections.emptyMap(), method, data, apiName, headerFunction);
     }
 
     private static Header[] getHeaders(
@@ -241,12 +249,13 @@ public class HttpClient implements RESTClient {
             Map<String, String> queryParams,
             String method,
             String data,
+            @Nullable String apiName,
             Function<RESTAuthParameter, Map<String, String>> headerFunction) {
         if (headerFunction == null) {
             return new Header[0];
         }
         RESTAuthParameter restAuthParameter =
-                new RESTAuthParameter(path, queryParams, method, data);
+                new RESTAuthParameter(path, queryParams, method, data).withApiName(apiName);
         Map<String, String> headers = headerFunction.apply(restAuthParameter);
         return headers.entrySet().stream()
                 .map(entry -> new BasicHeader(entry.getKey(), entry.getValue()))

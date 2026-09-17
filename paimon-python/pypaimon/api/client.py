@@ -254,19 +254,22 @@ def _parse_error_response(response_body: Optional[str], status_code: int) -> Err
 
 def _get_headers_with_params(path: str, query_params: Dict[str, str],
                              method: str, data: str,
-                             header_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> Dict[str, str]:
+                             header_function: Callable[[RESTAuthParameter], Dict[str, str]],
+                             api_name: Optional[str] = None) -> Dict[str, str]:
     rest_auth_parameter = RESTAuthParameter(
         path=path,
         parameters=query_params,
         method=method,
-        data=data
+        data=data,
+        api_name=api_name
     )
     return header_function(rest_auth_parameter)
 
 
 def _get_headers(path: str, method: str, query_params: Dict[str, str], data: str,
-                 header_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> Dict[str, str]:
-    return _get_headers_with_params(path, query_params, method, data, header_function)
+                 header_function: Callable[[RESTAuthParameter], Dict[str, str]],
+                 api_name: Optional[str] = None) -> Dict[str, str]:
+    return _get_headers_with_params(path, query_params, method, data, header_function, api_name)
 
 
 class HttpClient(RESTClient):
@@ -330,7 +333,8 @@ class HttpClient(RESTClient):
                                 rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
         try:
             body_str = JSON.to_json(body)
-            auth_headers = _get_headers(path, "POST", None, body_str, rest_auth_function)
+            auth_headers = _get_headers(
+                path, "POST", None, body_str, rest_auth_function, getattr(body, "API_NAME", None))
             url = self._get_request_url(path, None)
             return self._execute_request("POST", url, data=body_str, headers=auth_headers, response_type=response_type)
         except RESTException as e:
@@ -349,7 +353,8 @@ class HttpClient(RESTClient):
                          rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
         try:
             body_str = JSON.to_json(body)
-            auth_headers = _get_headers(path, "DELETE", body_str, rest_auth_function)
+            auth_headers = _get_headers(
+                path, "DELETE", None, body_str, rest_auth_function, getattr(body, "API_NAME", None))
             url = self._get_request_url(path, None)
 
             return self._execute_request("DELETE", url, data=body_str, headers=auth_headers,

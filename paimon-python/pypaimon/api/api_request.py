@@ -17,7 +17,7 @@
 
 from abc import ABC
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import ClassVar, Dict, List, Optional
 
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import json_field
@@ -33,6 +33,9 @@ from pypaimon.table.instant import Instant
 
 class RESTRequest(ABC):
     """RESTRequest"""
+
+    # The API this request calls, which signers may send with it; None if it names none.
+    API_NAME: ClassVar[Optional[str]] = None
 
 
 @dataclass

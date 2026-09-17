@@ -95,4 +95,10 @@ public class PolicyRequest implements RESTRequest {
     public String getPrincipal() {
         return principal;
     }
+
+    @JsonIgnore
+    @Override
+    public String apiName() {
+        return API_NAME;
+    }
 }
