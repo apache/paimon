@@ -116,6 +116,15 @@ public class FileIndexEvaluatorTest {
     }
 
     @Test
+    public void testFullyDeletedFileIsSkipped() throws Exception {
+        BitmapDeletionVector deletionVector = new BitmapDeletionVector();
+        deletionVector.delete(0);
+        deletionVector.delete(1);
+
+        assertThat(evaluateEmbeddedIndex(deletionVector, 0L)).isSameAs(FileIndexResult.SKIP);
+    }
+
+    @Test
     public void testDataFilterIntersectsOffsetDeletionVector() throws Exception {
         BitmapDeletionVector hit = new BitmapDeletionVector();
         hit.delete(10);

@@ -112,14 +112,14 @@ public class FileIndexEvaluator {
                 return FileIndexResult.REMAIN;
             }
 
+            if (!result.remain()) {
+                return FileIndexResult.SKIP;
+            }
+
             // if all position selected, or if only and not the deletion
             // the effect will not obvious, just return REMAIN.
             if (Objects.equals(result, selection)) {
                 return FileIndexResult.REMAIN;
-            }
-
-            if (!result.remain()) {
-                return FileIndexResult.SKIP;
             }
 
             return result;
