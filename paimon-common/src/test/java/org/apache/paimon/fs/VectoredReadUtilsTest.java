@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ThreadLocalRandom;
@@ -177,6 +178,41 @@ class VectoredReadUtilsTest {
     }
 
     @Test
+    public void testSingleRangeIsReadOnCallingThread() throws Exception {
+        TestRecordingVectoredReadable readable = new TestRecordingVectoredReadable();
+
+        byte[] buffer = new byte[100];
+        FileRange range = FileRange.createFileRange(200, buffer);
+        VectoredReadUtils.ReadOptions options =
+                new VectoredReadUtils.ReadOptions(1000, 100, 2, false);
+
+        VectoredReadUtils.readVectored(readable, Collections.singletonList(range), options);
+
+        assertThat(readable.positionReadThreads).containsExactly(Thread.currentThread());
+        assertThat(range.getData().isDone()).isTrue();
+        assertThat(range.getData().get()).isSameAs(buffer);
+        assertThat(buffer).isEqualTo(Arrays.copyOfRange(bytes, 200, 300));
+    }
+
+    @Test
+    public void testInterruptedCallerDoesNotReadInline() {
+        TestRecordingVectoredReadable readable = new TestRecordingVectoredReadable();
+
+        List<FileRange> ranges = Collections.singletonList(FileRange.createFileRange(200, 100));
+        VectoredReadUtils.ReadOptions options =
+                new VectoredReadUtils.ReadOptions(1000, 100, 2, false);
+
+        Thread.currentThread().interrupt();
+        try {
+            assertThatThrownBy(() -> VectoredReadUtils.readVectored(readable, ranges, options))
+                    .isInstanceOf(RuntimeException.class);
+            assertThat(readable.positionReadThreads).isEmpty();
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
     public void testReadOptionsPropagateSplitReadFailure() throws Exception {
         VectoredReadable readable =
                 new VectoredReadable() {
@@ -201,6 +237,41 @@ class VectoredReadUtilsTest {
         assertThatThrownBy(() -> ranges.get(1).getData().get(5, TimeUnit.SECONDS))
                 .isInstanceOf(ExecutionException.class)
                 .hasMessageContaining("failed");
+    }
+
+    private class TestRecordingVectoredReadable extends SeekableInputStream
+            implements VectoredReadable {
+
+        private final CopyOnWriteArrayList<Thread> positionReadThreads =
+                new CopyOnWriteArrayList<>();
+
+        @Override
+        public void seek(long desired) {}
+
+        @Override
+        public long getPos() {
+            return 0;
+        }
+
+        @Override
+        public int read() throws IOException {
+            throw new IOException("Sequential read should not be used");
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            throw new IOException("Sequential read should not be used");
+        }
+
+        @Override
+        public void close() {}
+
+        @Override
+        public int pread(long position, byte[] buffer, int offset, int length) {
+            positionReadThreads.add(Thread.currentThread());
+            System.arraycopy(bytes, (int) position, buffer, offset, length);
+            return length;
+        }
     }
 
     private class TestSeekableVectoredReadable extends SeekableInputStream

@@ -76,6 +76,14 @@ public class VectoredReadUtils {
             return;
         }
 
+        // A lone range needs neither coalescing nor fan-out, so read it on the calling thread
+        // instead of paying an executor hand-off. An interrupted caller keeps the executor path:
+        // an inline read would close an interruptible channel and kill the shared stream.
+        if (sortRanges.size() == 1 && !Thread.currentThread().isInterrupted()) {
+            readSingleRange(readable, sortRanges.get(0));
+            return;
+        }
+
         BlockingExecutor executor = new BlockingExecutor(IO_THREAD_POOL, parallelism);
         long batchSize = options.batchSizeForVectorReads;
         for (CombinedRange combinedRange : combinedRanges) {
