@@ -41,9 +41,22 @@ object SparkExpressionConverter {
   private val LOWER = "LOWER"
   private val SUBSTRING = "SUBSTRING"
   private val CHAR_LENGTH = "CHAR_LENGTH"
+  private val BIT_LENGTH = "BIT_LENGTH"
+  private val TRANSLATE = "TRANSLATE"
+  private val OVERLAY = "OVERLAY"
+  private val LPAD = "LPAD"
+  private val RPAD = "RPAD"
   private val TRIM = "TRIM"
   private val LTRIM = "LTRIM"
   private val RTRIM = "RTRIM"
+  private val DATE_ADD = "DATE_ADD"
+  private val DATE_DIFF = "DATE_DIFF"
+  private val TRUNC = "TRUNC"
+
+  // Spark encodes dayofweek and weekday as arithmetic over an ISO EXTRACT(DAY_OF_WEEK).
+  private val ADD = "+"
+  private val SUBTRACT = "-"
+  private val REMAINDER = "%"
 
   // Supported fields of the EXTRACT expression
   private val EXTRACT_YEAR = "YEAR"
@@ -52,6 +65,11 @@ object SparkExpressionConverter {
   private val EXTRACT_HOUR = "HOUR"
   private val EXTRACT_MINUTE = "MINUTE"
   private val EXTRACT_SECOND = "SECOND"
+  private val EXTRACT_QUARTER = "QUARTER"
+  private val EXTRACT_DAY_OF_WEEK = "DAY_OF_WEEK"
+  private val EXTRACT_DAY_OF_YEAR = "DAY_OF_YEAR"
+  private val EXTRACT_WEEK = "WEEK"
+  private val EXTRACT_YEAR_OF_WEEK = "YEAR_OF_WEEK"
 
   /** Convert Spark [[Expression]] to Paimon [[Transform]], return None if not supported. */
   def toPaimonTransform(exp: Expression, rowType: RowType): Option[Transform] = {
@@ -69,6 +87,48 @@ object SparkExpressionConverter {
       }
     }
 
+    def literalEquals(exp: Expression, value: Int): Boolean = exp match {
+      case l: Literal[_] =>
+        l.value() match {
+          case i: Int => i == value
+          case _ => false
+        }
+      case _ => false
+    }
+
+    def dayOfWeekField(exp: Expression): Option[FieldRef] = {
+      if (org.apache.spark.SPARK_VERSION < "3.4") {
+        None
+      } else {
+        exp match {
+          case extract: Extract if extract.field() == EXTRACT_DAY_OF_WEEK =>
+            extract.source() match {
+              case n: NamedReference => Some(toPaimonFieldRef(n, rowType))
+              case _ => None
+            }
+          case _ => None
+        }
+      }
+    }
+
+    def sparkDayOfWeek(children: Seq[Expression]): Option[Transform] = children match {
+      case Seq(remainder: GeneralScalarExpression, one)
+          if literalEquals(one, 1) &&
+            remainder.name() == REMAINDER =>
+        remainder.children().toSeq match {
+          case Seq(extract, seven) if literalEquals(seven, 7) =>
+            dayOfWeekField(extract).flatMap(DayOfWeekTransform.tryCreate)
+          case _ => None
+        }
+      case _ => None
+    }
+
+    def sparkWeekday(children: Seq[Expression]): Option[Transform] = children match {
+      case Seq(extract, one) if literalEquals(one, 1) =>
+        dayOfWeekField(extract).flatMap(WeekdayTransform.tryCreate)
+      case _ => None
+    }
+
     exp match {
       case n: NamedReference => Some(new FieldTransform(toPaimonFieldRef(n, rowType)))
       case s: GeneralScalarExpression =>
@@ -78,6 +138,14 @@ object SparkExpressionConverter {
           case LOWER => convertChildren(s.children()).map(i => new LowerTransform(i))
           case SUBSTRING => convertChildren(s.children()).map(i => new SubstringTransform(i))
           case CHAR_LENGTH => convertChildren(s.children()).map(i => new LengthTransform(i))
+          case BIT_LENGTH => convertChildren(s.children()).map(i => new BitLengthTransform(i))
+          case TRANSLATE => convertChildren(s.children()).map(i => new TranslateTransform(i))
+          case OVERLAY => convertChildren(s.children()).map(i => new OverlayTransform(i))
+          case LPAD =>
+            convertChildren(s.children()).map(i => new PadTransform(i, PadTransform.Direction.LEFT))
+          case RPAD =>
+            convertChildren(s.children()).map(
+              i => new PadTransform(i, PadTransform.Direction.RIGHT))
           case TRIM =>
             convertChildren(s.children()).map(i => new TrimTransform(i, TrimTransform.Flag.BOTH))
           case LTRIM =>
@@ -85,6 +153,11 @@ object SparkExpressionConverter {
           case RTRIM =>
             convertChildren(s.children()).map(
               i => new TrimTransform(i, TrimTransform.Flag.TRAILING))
+          case DATE_ADD => convertChildren(s.children()).map(i => new DateAddTransform(i))
+          case DATE_DIFF => convertChildren(s.children()).map(i => new DateDiffTransform(i))
+          case TRUNC => convertChildren(s.children()).map(i => new DateTruncTransform(i))
+          case ADD => sparkDayOfWeek(s.children())
+          case SUBTRACT => sparkWeekday(s.children())
           case _ => None
         }
       case c: Cast =>
@@ -119,6 +192,11 @@ object SparkExpressionConverter {
                     case EXTRACT_HOUR => HourTransform.tryCreate(fieldRef)
                     case EXTRACT_MINUTE => MinuteTransform.tryCreate(fieldRef)
                     case EXTRACT_SECOND => SecondTransform.tryCreate(fieldRef)
+                    case EXTRACT_QUARTER => QuarterTransform.tryCreate(fieldRef)
+                    case EXTRACT_DAY_OF_WEEK => IsoDayOfWeekTransform.tryCreate(fieldRef)
+                    case EXTRACT_DAY_OF_YEAR => DayOfYearTransform.tryCreate(fieldRef)
+                    case EXTRACT_WEEK => WeekTransform.tryCreate(fieldRef)
+                    case EXTRACT_YEAR_OF_WEEK => YearOfWeekTransform.tryCreate(fieldRef)
                     case _ => None
                   }
                 }

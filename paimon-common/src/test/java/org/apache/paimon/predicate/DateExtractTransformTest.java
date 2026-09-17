@@ -52,6 +52,23 @@ class DateExtractTransformTest {
         assertThat(extract(DataTypes.DATE(), YearTransform::new, value)).isEqualTo(2023);
         assertThat(extract(DataTypes.DATE(), MonthTransform::new, value)).isEqualTo(7);
         assertThat(extract(DataTypes.DATE(), DayTransform::new, value)).isEqualTo(15);
+        assertThat(extract(DataTypes.DATE(), QuarterTransform::new, value)).isEqualTo(3);
+        assertThat(extract(DataTypes.DATE(), IsoDayOfWeekTransform::new, value)).isEqualTo(6);
+        assertThat(extract(DataTypes.DATE(), DayOfWeekTransform::new, value)).isEqualTo(7);
+        assertThat(extract(DataTypes.DATE(), WeekdayTransform::new, value)).isEqualTo(5);
+        assertThat(extract(DataTypes.DATE(), DayOfYearTransform::new, value)).isEqualTo(196);
+        assertThat(extract(DataTypes.DATE(), WeekTransform::new, value)).isEqualTo(28);
+        assertThat(extract(DataTypes.DATE(), YearOfWeekTransform::new, value)).isEqualTo(2023);
+    }
+
+    @Test
+    public void testIsoWeekCrossesCalendarYear() {
+        int value = epochDay(2024, 12, 30);
+        assertThat(extract(DataTypes.DATE(), WeekTransform::new, value)).isEqualTo(1);
+        assertThat(extract(DataTypes.DATE(), YearOfWeekTransform::new, value)).isEqualTo(2025);
+        assertThat(extract(DataTypes.DATE(), IsoDayOfWeekTransform::new, value)).isEqualTo(1);
+        assertThat(extract(DataTypes.DATE(), DayOfWeekTransform::new, value)).isEqualTo(2);
+        assertThat(extract(DataTypes.DATE(), WeekdayTransform::new, value)).isEqualTo(0);
     }
 
     @Test

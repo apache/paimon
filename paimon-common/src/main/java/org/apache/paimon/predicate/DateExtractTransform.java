@@ -41,7 +41,9 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * Base {@link Transform} that extracts a calendar field from a {@code DATE} or {@code TIMESTAMP}
  * field, like SQL {@code EXTRACT(YEAR FROM d)} and the {@code year}, {@code month}, ... functions.
  * See the subclasses {@link YearTransform}, {@link MonthTransform}, {@link DayTransform}, {@link
- * HourTransform}, {@link MinuteTransform} and {@link SecondTransform}.
+ * HourTransform}, {@link MinuteTransform}, {@link SecondTransform}, {@link QuarterTransform},
+ * {@link IsoDayOfWeekTransform}, {@link DayOfWeekTransform}, {@link WeekdayTransform}, {@link
+ * DayOfYearTransform}, {@link WeekTransform} and {@link YearOfWeekTransform}.
  *
  * <p>{@code TIMESTAMP WITH LOCAL TIME ZONE} is deliberately not supported: extracting a calendar
  * field from it depends on a session time zone, which the reader does not know, so such a predicate
