@@ -29,6 +29,7 @@ import org.apache.paimon.fs.CloseShieldOutputStream;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
@@ -65,12 +66,14 @@ public class AvroFileFormat extends FileFormat {
 
     private final Options options;
     private final int zstdLevel;
+    @Nullable private final MemorySize blockSize;
 
     public AvroFileFormat(FormatContext context) {
         super(IDENTIFIER);
 
         this.options = getIdentifierPrefixOptions(context.options());
         this.zstdLevel = context.zstdLevel();
+        this.blockSize = context.blockSize();
     }
 
     @Override
@@ -93,6 +96,9 @@ public class AvroFileFormat extends FileFormat {
         AvroRowDatumWriter datumWriter = new AvroRowDatumWriter(rowType);
         DataFileWriter<InternalRow> writer = new DataFileWriter<>(datumWriter);
         writer.setCodec(createCodecFactory(compression));
+        if (blockSize != null) {
+            writer.setSyncInterval(Math.toIntExact(blockSize.getBytes()));
+        }
         writer.setFlushOnEveryBlock(false);
         writer.create(schema, new CloseShieldOutputStream(out));
         return new AvroBlockWriter(writer, out, schema);

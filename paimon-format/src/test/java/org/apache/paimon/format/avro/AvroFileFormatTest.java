@@ -48,6 +48,9 @@ import org.apache.avro.io.EncoderFactory;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -74,6 +77,74 @@ public class AvroFileFormatTest {
     @BeforeAll
     public static void before() {
         fileFormat = new AvroFileFormat(new FormatContext(new Options(), 1024, 1024));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        ", 64000, null",
+        ", 64000, deflate",
+        "1 kb, 1024, null",
+        "1 kb, 1024, deflate",
+        "4 kb, 4096, null",
+        "4 kb, 4096, deflate",
+        "128 kb, 131072, null",
+        "128 kb, 131072, deflate"
+    })
+    void testFileBlockSize(String blockSize, int expectedBlockSize, String compression)
+            throws IOException {
+        Options options = new Options();
+        if (blockSize != null) {
+            options.setString("file.block-size", blockSize);
+        }
+        FileFormat format = FileFormat.fromIdentifier("avro", options);
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull()).notNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+        int numRecords = 300_000;
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
+                FormatWriter writer =
+                        format.createWriterFactory(rowType).create(out, compression)) {
+            // Each record is encoded as one byte, so record counts also give uncompressed sizes.
+            for (int i = 0; i < numRecords; i++) {
+                writer.addElement(GenericRow.of(0));
+            }
+        }
+
+        long records = 0;
+        try (AvroBlockReader reader = new AvroBlockReader(fileIO.newInputStream(file))) {
+            while (reader.hasNextBlock()) {
+                AvroRawBlock block = reader.nextBorrowedRawBlock();
+                long expectedRecords = Math.min(expectedBlockSize, numRecords - records);
+                assertThat(block.recordCount()).isEqualTo(expectedRecords);
+                assertThat(block.decompress(null).remaining()).isEqualTo((int) expectedRecords);
+                records += block.recordCount();
+            }
+        }
+        assertThat(records).isEqualTo(numRecords);
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {2147483648L, 4294968320L, Long.MAX_VALUE})
+    void testFileBlockSizeOverflow(long blockSize) throws IOException {
+        Options options = new Options();
+        options.setString("file.block-size", Long.toString(blockSize));
+        FileFormat format = FileFormat.fromIdentifier("avro", options);
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull()).notNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            assertThatThrownBy(
+                            () -> {
+                                try (FormatWriter writer =
+                                        format.createWriterFactory(rowType).create(out, "null")) {
+                                    writer.addElement(GenericRow.of(0));
+                                }
+                            })
+                    .isInstanceOf(ArithmeticException.class)
+                    .hasMessage("integer overflow");
+        }
     }
 
     @Test
