@@ -46,6 +46,8 @@ import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.exceptions.AlreadyExistsException;
+import org.apache.iceberg.exceptions.CommitFailedException;
+import org.apache.iceberg.exceptions.CommitStateUnknownException;
 import org.apache.iceberg.rest.Endpoint;
 import org.apache.iceberg.rest.RESTCatalog;
 import org.apache.iceberg.types.Types;
@@ -79,6 +81,8 @@ import static org.apache.iceberg.TableProperties.RESERVED_PROPERTIES;
 public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
     private static final String PAIMON_COMMIT_IDENTITY = "paimon-commit-identity";
+
+    private static final int MAX_COMMIT_ATTEMPTS = 3;
 
     private static final Logger LOG = LoggerFactory.getLogger(IcebergRestMetadataCommitter.class);
 
@@ -140,11 +144,26 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     @Override
     public void commitMetadata(
             IcebergMetadata newIcebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata) {
-        try {
-            commitMetadataImpl(newIcebergMetadata, baseIcebergMetadata);
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Fail to commit iceberg metadata for table: " + icebergTableIdentifier, e);
+        for (int attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt++) {
+            try {
+                commitMetadataImpl(newIcebergMetadata, baseIcebergMetadata);
+                return;
+            } catch (CommitStateUnknownException | CommitFailedException e) {
+                if (attempt == MAX_COMMIT_ATTEMPTS) {
+                    throw new RuntimeException(
+                            "Fail to commit iceberg metadata for table: " + icebergTableIdentifier,
+                            e);
+                }
+                LOG.warn(
+                        "Commit attempt {} to rest catalog failed for table {}; reloading catalog"
+                                + " state before retrying.",
+                        attempt,
+                        icebergTableIdentifier,
+                        e);
+            } catch (Exception e) {
+                throw new RuntimeException(
+                        "Fail to commit iceberg metadata for table: " + icebergTableIdentifier, e);
+            }
         }
     }
 
@@ -251,14 +270,20 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         }
 
         try {
-            ((BaseTable) icebergTable)
-                    .operations()
-                    .commit(((BaseTable) icebergTable).operations().current(), updatedForCommit);
+            BaseTable table = (BaseTable) icebergTable;
+            commit(table, table.operations().current(), updatedForCommit);
+        } catch (CommitStateUnknownException | CommitFailedException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException(
                     "Fail to commit metadata to rest catalog for table: " + icebergTableIdentifier,
                     e);
         }
+    }
+
+    @VisibleForTesting
+    protected void commit(BaseTable table, TableMetadata base, TableMetadata updated) {
+        table.operations().commit(base, updated);
     }
 
     private TableMetadata.Builder updatesForCorrectBase(
