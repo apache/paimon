@@ -231,25 +231,46 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         if (readType == null || group.size() <= 1) {
             return group;
         }
+        Set<Integer> filterFieldIds = Collections.emptySet();
+        if (inputFilter != null) {
+            // executeFilter may need columns absent from the output projection. Keep their latest
+            // files too, otherwise widening the reader could see an older value or a null.
+            filterFieldIds = new HashSet<>();
+            Set<String> filterFields = PredicateVisitor.collectFieldNames(inputFilter);
+            for (DataField field : schema.fields()) {
+                if (filterFields.contains(field.name())) {
+                    filterFieldIds.add(field.id());
+                }
+            }
+        }
+        return pruneByReadType(
+                group,
+                readType,
+                filterFieldIds,
+                deletionVectorsEnabled,
+                this::fileFieldIdsForEntry);
+    }
+
+    @VisibleForTesting
+    static List<ManifestEntry> pruneByReadType(
+            List<ManifestEntry> group,
+            RowType readType,
+            Set<Integer> filterFieldIds,
+            boolean deletionVectorsEnabled,
+            Function<ManifestEntry, Set<Integer>> fileFieldIds) {
         ManifestEntry anchor =
                 deletionVectorsEnabled ? retrieveAnchorFile(group, ManifestEntry::file) : null;
         Set<Integer> readFieldIds = new HashSet<>();
         for (DataField f : readType.getFields()) {
             readFieldIds.add(f.id());
         }
-        if (inputFilter != null) {
-            // executeFilter may need columns absent from the output projection. Keep their latest
-            // files too, otherwise widening the reader could see an older value or a null.
-            Set<String> filterFields = PredicateVisitor.collectFieldNames(inputFilter);
-            for (DataField field : schema.fields()) {
-                if (filterFields.contains(field.name())) {
-                    readFieldIds.add(field.id());
-                }
-            }
-        }
+        // The caller (which has the schema) folds in any fields referenced only by the filter, so
+        // their latest files are kept too; otherwise widening the reader could see an older value
+        // or a null.
+        readFieldIds.addAll(filterFieldIds);
         List<ManifestEntry> kept = new ArrayList<>(group.size());
         for (ManifestEntry entry : group) {
-            Set<Integer> fileIds = fileFieldIdsForEntry(entry);
+            Set<Integer> fileIds = fileFieldIds.apply(entry);
             for (int id : readFieldIds) {
                 if (fileIds.contains(id)) {
                     kept.add(entry);
@@ -261,8 +282,12 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             kept.add(anchor);
         }
         // Group must contribute at least one file so the reader sees rowCount and can NULL-fill
-        // missing columns for the projection's rows.
-        return kept.isEmpty() ? Collections.singletonList(group.get(0)) : kept;
+        // missing columns for the projection's rows. The representative must be a full-range
+        // normal file: a blob or vector-store file covers only a sub-range of the group's row
+        // ids, so the split would silently emit fewer rows than the group contains.
+        return kept.isEmpty()
+                ? Collections.singletonList(retrieveAnchorFile(group, ManifestEntry::file))
+                : kept;
     }
 
     private Set<Integer> fileFieldIdsForEntry(ManifestEntry entry) {
