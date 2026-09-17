@@ -37,6 +37,7 @@ import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -455,18 +456,24 @@ public class DataEvolutionBatchScan implements DataTableScan {
     public static Plan wrapToIndexSplits(
             List<Split> splits, RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
         List<Split> indexedSplits = new ArrayList<>();
-        Function<Split, List<IndexedSplit>> process =
-                split ->
-                        Collections.singletonList(
-                                split instanceof IndexedSplit
-                                        ? (IndexedSplit) split
-                                        : wrap((DataSplit) split, rowRangeIndex, scoreGetter));
+        Function<Split, List<Split>> process =
+                split -> Collections.singletonList(wrap(split, rowRangeIndex, scoreGetter));
         randomlyExecuteSequentialReturn(process, splits, null).forEachRemaining(indexedSplits::add);
         return () -> indexedSplits;
     }
 
-    private static IndexedSplit wrap(
-            DataSplit dataSplit, final RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
+    private static Split wrap(
+            Split split, final RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
+        if (split instanceof QueryAuthSplit) {
+            QueryAuthSplit authSplit = (QueryAuthSplit) split;
+            return new QueryAuthSplit(
+                    wrap(authSplit.split(), rowRangeIndex, scoreGetter), authSplit.authResult());
+        }
+        if (split instanceof IndexedSplit) {
+            return split;
+        }
+
+        DataSplit dataSplit = (DataSplit) split;
         List<DataFileMeta> files = dataSplit.dataFiles();
 
         List<Range> expected = new ArrayList<>();
