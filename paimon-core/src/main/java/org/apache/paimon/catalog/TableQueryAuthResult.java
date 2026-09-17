@@ -55,6 +55,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
@@ -93,6 +94,38 @@ public class TableQueryAuthResult implements Serializable {
 
     public boolean hasRules() {
         return extractPredicate() != null || !extractColumnMasking().isEmpty();
+    }
+
+    /**
+     * A catalog builds a fresh instance per authorization call and deserialization builds another,
+     * so identity says nothing about whether two results agree.
+     *
+     * <p>Compared as the rules parse out rather than as they arrive, the filter as the set of its
+     * conjuncts, so neither the JSON text nor the order the catalog lists them in matters.
+     */
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof TableQueryAuthResult)) {
+            return false;
+        }
+        TableQueryAuthResult that = (TableQueryAuthResult) o;
+        return parsedFilterConjuncts().equals(that.parsedFilterConjuncts())
+                && extractColumnMasking().equals(that.extractColumnMasking());
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(parsedFilterConjuncts(), extractColumnMasking());
+    }
+
+    private Set<Predicate> parsedFilterConjuncts() {
+        Predicate predicate = extractPredicate();
+        return predicate == null
+                ? Collections.emptySet()
+                : new HashSet<>(PredicateBuilder.splitAnd(predicate));
     }
 
     /**
