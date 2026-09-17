@@ -49,8 +49,8 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * A {@link Table} wrapper that extends the row type with {@code _EVENT_<column>} metadata columns
- * for changelog retraction records. These columns carry the incoming event's preserved field values
+ * A {@link Table} wrapper that extends the row type with configured-prefix metadata columns for
+ * changelog retraction records. These columns carry the incoming event's preserved field values
  * alongside the correct before-image.
  */
 public class ChangelogEventMetadataTable implements DataTable, ReadonlyTable {

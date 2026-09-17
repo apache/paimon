@@ -1168,6 +1168,7 @@ public class CoreOptions implements Serializable {
                                     + "'changelog-producer.expose-field-as-metadata'. For example, "
                                     + "with the default prefix '__internal__' and a preserved column "
                                     + "'event_ts', the metadata column is named '__internal__event_ts'. "
+                                    + "The same name is used as the Flink readable metadata key. "
                                     + "Change this if the default prefix conflicts with existing "
                                     + "column names.");
 
