@@ -30,6 +30,8 @@ import org.mockito.Mockito;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InterruptedIOException;
+import java.nio.channels.ClosedByInterruptException;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.FileAlreadyExistsException;
@@ -51,6 +53,52 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class FileIOTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    @Test
+    public void testReadFileUtf8PropagatesInterruptedRead() throws IOException {
+        FileIO fileIO = Mockito.spy(LocalFileIO.create());
+        Path file = new Path(tempDir.resolve("file").toUri());
+        fileIO.writeFile(file, "content", false);
+        InterruptedIOException interrupted = new InterruptedIOException("Interrupted");
+        Mockito.doAnswer(
+                        invocation -> {
+                            fileIO.deleteQuietly(file);
+                            throw interrupted;
+                        })
+                .when(fileIO)
+                .newInputStream(file);
+        Mockito.clearInvocations(fileIO);
+
+        assertThatThrownBy(() -> fileIO.readFileUtf8(file)).isSameAs(interrupted);
+        Mockito.verify(fileIO, Mockito.never()).exists(file);
+
+        Path closed = new Path(tempDir.resolve("closed").toUri());
+        fileIO.writeFile(closed, "content", false);
+        ClosedByInterruptException closedByInterrupt = new ClosedByInterruptException();
+        Mockito.doAnswer(
+                        invocation -> {
+                            fileIO.deleteQuietly(closed);
+                            throw closedByInterrupt;
+                        })
+                .when(fileIO)
+                .newInputStream(closed);
+
+        assertThatThrownBy(() -> fileIO.readFileUtf8(closed)).isSameAs(closedByInterrupt);
+    }
+
+    @Test
+    public void testReadFileUtf8KeepsReadFailureReusedByExistenceCheck() throws IOException {
+        FileIO fileIO = Mockito.spy(LocalFileIO.create());
+        Path file = new Path(tempDir.resolve("file").toUri());
+        fileIO.writeFile(file, "content", false);
+        IOException failure = new IOException("Cached failure");
+        Mockito.doThrow(failure).when(fileIO).newInputStream(file);
+        Mockito.doThrow(failure).when(fileIO).exists(file);
+
+        assertThatThrownBy(() -> fileIO.readFileUtf8(file))
+                .isSameAs(failure)
+                .satisfies(e -> assertThat(e.getSuppressed()).isEmpty());
+    }
 
     @Test
     public void testReadFileUtf8ReportsFileDeletedDuringReadAsNotFound() throws IOException {

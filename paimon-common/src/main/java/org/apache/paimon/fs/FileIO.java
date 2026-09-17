@@ -35,9 +35,11 @@ import java.io.Closeable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.InterruptedIOException;
 import java.io.OutputStreamWriter;
 import java.io.Serializable;
 import java.net.URI;
+import java.nio.channels.ClosedByInterruptException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -343,6 +345,9 @@ public interface FileIO extends Serializable, Closeable {
             return builder.toString();
         } catch (FileNotFoundException e) {
             throw e;
+        } catch (InterruptedIOException | ClosedByInterruptException e) {
+            // An interrupted read says nothing about whether the file is still there.
+            throw e;
         } catch (IOException e) {
             // Some object stores throw a plain IOException for a file deleted during reading.
             boolean missing;
@@ -350,7 +355,9 @@ public interface FileIO extends Serializable, Closeable {
                 missing = !exists(path);
             } catch (IOException | RuntimeException checkFailure) {
                 // Keep the original failure when the file cannot be confirmed to be gone.
-                e.addSuppressed(checkFailure);
+                if (checkFailure != e) {
+                    e.addSuppressed(checkFailure);
+                }
                 throw e;
             }
             if (!missing) {
