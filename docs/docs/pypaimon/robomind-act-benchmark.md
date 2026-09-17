@@ -42,19 +42,36 @@ Python 3.10 or newer is required.
 pip install 'pypaimon[act,hdf5]'
 ```
 
-## 1. Prepare the experiment
+## 1. Ingest and publish the table group
+
+```shell
+python -m pypaimon.benchmark.act ingest \
+  --input /data/RoboMIND/h5_agilex_3rgb \
+  --warehouse /data/warehouse \
+  --statistics-version act-release-1
+```
+
+Use a new warehouse. This writes exactly four tables: `info`, `episode`,
+`frame`, and `stat`. The stat row contains raw feature moments and the nested
+`stats.act` normalization scope; no separate ACT statistics table is created.
+`--statistics-version` is also the immutable Tag shared by all group members;
+`info` is published last. Original images remain in the frame table. The
+[ingestion contract](./robomind-agilex) describes the schemas and source mapping.
+
+## 2. Prepare the experiment
 
 ```shell
 python -m pypaimon.benchmark.act prepare \
   --input /data/RoboMIND/h5_agilex_3rgb \
   --warehouse /data/warehouse \
+  --statistics-version act-release-1 \
   --output /data/results/experiment.json
 ```
 
 Preparation is not timed. It verifies that HDF5 discovery matches the Paimon
-episodes table, checks versioned action statistics against train-only HDF5
-moments, selects eligible train and validation episodes, pins the frames
-snapshot, and materializes deterministic measurement, training, and validation
+episode table at the published Tag, checks versioned action statistics against train-only HDF5
+moments from `stat.stats.act`, selects eligible train and validation episodes, pins the frames
+snapshot resolved from that same Tag, and materializes deterministic measurement, training, and validation
 window indices.
 
 Without `--experiment`, preparation starts from the packaged
@@ -71,6 +88,7 @@ python -m pypaimon.benchmark.act prepare \
   --batch-size 2 \
   --fetch-batches 8 \
   --rounds 3 \
+  --statistics-version act-release-1 \
   --output /data/results/experiment.json
 ```
 
@@ -81,9 +99,16 @@ The resolved experiment embeds the effective parameters as well as:
 - selected train and validation episode IDs;
 - every logical window index, the window-plan SHA-256, and the
   episode-qualified sample-sequence SHA-256;
-- the Paimon database, frames table, and pinned snapshot ID.
+- the Paimon database, group Tag, frames table, and pinned snapshot ID.
 
-## 2. Run each backend
+Only valid, successful episodes are eligible for training and normalization.
+The source manifest still retains excluded episodes. The comparison requires
+all frames in the selected training/eval episodes to be valid: a dirty selected
+episode is rejected instead of silently changing the HDF5/Paimon window
+sequence. Opening a group also verifies that every registered member has the
+published Tag, including the stat table.
+
+## 3. Run each backend
 
 ```shell
 python -m pypaimon.benchmark.act run \
@@ -111,11 +136,13 @@ summary metrics.
 Both adapters produce the same shared sample contract. State and camera images
 come from the anchor frame; action covers the complete horizon. HDF5 reads a
 window on demand from one episode file. Paimon uses a lazy, snapshot-pinned
-`ContiguousWindowDataset`; image columns are anchor-only, and plural
+`ContiguousWindowDataset` grouped by `episode_index` and ordered by
+`frame_index`. It resolves the source episode ID from the episode table for
+HDF5 comparison. Image columns are anchor-only, and plural
 `__getitems__` access coalesces multiple logical batches into a physical
 fetch before splitting them back into the unchanged model batch size.
 
-## 3. Compare results
+## 4. Compare results
 
 Compare explicit files:
 
@@ -173,6 +200,8 @@ remain outside this benchmark.
 
 ## Code organization
 
+- `benchmark.act.robomind_agilex`: source discovery, ingestion, action backfill,
+  contract schemas, and table-group publication;
 - `benchmark.act.harness`: shared ACT tensors, model, trainer, window plan, and
   measurement lifecycle;
 - `benchmark.act.hdf5`: HDF5 window dataset and train normalization moments;
@@ -181,5 +210,5 @@ remain outside this benchmark.
 - `benchmark.act.runner`: experiment preparation and one-backend execution;
 - `benchmark.act.compare`: result discovery, compatibility checks, grouping by
   experiment, and aggregation of compatible repeated runs;
-- `benchmark.act.__main__`: the `prepare`, `run`, and `compare`
+- `benchmark.act.__main__`: the `ingest`, `prepare`, `run`, and `compare`
   command-line interface.

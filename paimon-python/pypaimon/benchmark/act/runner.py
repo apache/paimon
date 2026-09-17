@@ -22,7 +22,7 @@ seed before constructing the same LeRobot ACT policy and AdamW trainer for each
 backend. Each backend runs independently without attempting OS cache control
 and writes its tensor fingerprint, loss trace, timing metrics, and Python
 allocation metrics to one result JSON document.
-Ingestion and canonical-action backfill are deliberately outside the benchmark.
+Ingestion and canonical-action backfill run before the timed benchmark.
 """
 
 import gc
@@ -58,10 +58,12 @@ from pypaimon.benchmark.act.harness import (
 from pypaimon.benchmark.act.compare import canonical_sha256
 from pypaimon.benchmark.act.paimon import (
     create_datasets as create_paimon_datasets,
-    latest_snapshot_id,
+    contract_table,
+    episode_indices,
+    tagged_snapshot_id,
     statistics_row,
 )
-from pypaimon.sample import robomind_agilex as agilex
+from pypaimon.benchmark.act import robomind_agilex as agilex
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,7 @@ class _BenchmarkEpisode:
     split: str
     success: bool
     frame_count: int
+    quality_status: int = 0
 
 
 def prepare_experiment(
@@ -114,10 +117,10 @@ def prepare_experiment(
     connection = pmm.connect(
         database=database, options={"warehouse": str(warehouse)})
     source_episodes, source_sha256 = _validate_source_identity(
-        discovered, _episode_rows(connection))
+        discovered, _episode_rows(connection, statistics_version))
     source_by_id = {episode.episode_id: episode for episode in source_episodes}
-    frames = connection.get_table(agilex.FRAMES_TABLE)
-    frames_snapshot_id = latest_snapshot_id(frames)
+    frames = contract_table(connection, "frame", statistics_version)
+    frames_snapshot_id = tagged_snapshot_id(frames, statistics_version)
     normalization, normalization_metadata = _shared_normalization(
         source_episodes,
         connection,
@@ -133,10 +136,14 @@ def prepare_experiment(
     )
     validation_episode = _select_episode(
         source_by_id,
-        split="val",
+        split="eval",
         requested=definition.get("validation_episode_id"),
         action_horizon=config.action_horizon,
     )
+    _require_valid_frames(
+        frames, statistics_version,
+        (train_episode.episode_id, validation_episode.episode_id),
+        episode_indices(connection, statistics_version))
     plan = build_window_plan(
         train_episode.frame_count - config.action_horizon + 1,
         validation_episode.frame_count - config.action_horizon + 1,
@@ -150,6 +157,7 @@ def prepare_experiment(
         "split": episode.split,
         "success": episode.success,
         "frame_count": episode.frame_count,
+        "quality_status": episode.quality_status,
     } for episode in source_episodes), key=lambda item: item["episode_id"])
     experiment = {
         "schema_version": "act-benchmark-experiment@1",
@@ -171,7 +179,8 @@ def prepare_experiment(
         },
         "paimon": {
             "database": database,
-            "frames_table": agilex.FRAMES_TABLE,
+            "frames_table": str(frames.identifier),
+            "tag_name": statistics_version,
             "frames_snapshot_id": frames_snapshot_id,
         },
     }
@@ -381,6 +390,7 @@ def _hdf5_episodes_from_experiment(input_root, experiment):
             split=item["split"],
             success=item["success"],
             frame_count=item["frame_count"],
+            quality_status=item["quality_status"],
         )
         for item in expected
     ]
@@ -395,10 +405,15 @@ def _paimon_factory_from_experiment(
         database=paimon["database"],
         options={"warehouse": str(warehouse)},
     )
-    frames = connection.get_table(paimon["frames_table"])
+    tag_name = experiment["statistics_version"]
+    frames = contract_table(connection, "frame", tag_name)
     snapshot_id = paimon["frames_snapshot_id"]
+    if str(frames.identifier) != paimon["frames_table"]:
+        raise ValueError("Paimon frame table differs from the ACT experiment.")
+    if tagged_snapshot_id(frames, tag_name) != snapshot_id:
+        raise ValueError("Paimon frame Tag differs from the ACT experiment.")
     expected_episodes = experiment["source"]["episodes"]
-    actual_episodes = sorted(_episode_rows(connection),
+    actual_episodes = sorted(_episode_rows(connection, tag_name),
                              key=lambda item: item["episode_id"])
     if actual_episodes != expected_episodes:
         raise ValueError("Paimon source differs from the ACT experiment.")
@@ -418,14 +433,19 @@ def _paimon_factory_from_experiment(
         raise ValueError(
             "Paimon normalization differs from the ACT experiment.")
 
+    indices = episode_indices(connection, tag_name)
+    selected = {experiment["train_episode_id"], experiment["validation_episode_id"]}
+    _require_valid_frames(frames, tag_name, selected, indices)
+
     def factory():
         return create_paimon_datasets(
             frames,
             snapshot_id,
-            experiment["train_episode_id"],
-            experiment["validation_episode_id"],
+            indices[experiment["train_episode_id"]],
+            indices[experiment["validation_episode_id"]],
             normalization,
             config,
+            {index: source_id for source_id, index in indices.items()},
         )
 
     return factory, {
@@ -535,14 +555,20 @@ def _shared_normalization(
     }
 
 
-def _episode_rows(connection):
-    return connection.get_table(agilex.EPISODES_TABLE).scan().select([
-        "episode_id",
-        "source_key",
-        "split",
-        "success",
-        "frame_count",
-    ]).to_list()
+def _episode_rows(connection, tag_name):
+    rows = contract_table(connection, "episode", tag_name).scan(
+        tag_name=tag_name).select([
+            "source_episode_key", "metadata", "split", "success", "frame_count",
+            "quality_status",
+        ]).to_list()
+    return [{
+        "episode_id": row["source_episode_key"],
+        "source_key": json.loads(row["metadata"])["source_key"],
+        "split": row["split"],
+        "success": row["success"],
+        "frame_count": row["frame_count"],
+        "quality_status": row["quality_status"],
+    } for row in rows]
 
 
 def _validate_source_identity(episodes, rows):
@@ -584,6 +610,7 @@ def _validate_source_identity(episodes, rows):
             split=item.split,
             success=item.success,
             frame_count=rows_by_id[item.episode_id]["frame_count"],
+            quality_status=rows_by_id[item.episode_id]["quality_status"],
         )
         for item in episodes
     ]
@@ -594,11 +621,24 @@ def _validate_source_identity(episodes, rows):
             "split": item.split,
             "success": item.success,
             "frame_count": rows_by_id[item.episode_id]["frame_count"],
+            "quality_status": rows_by_id[item.episode_id]["quality_status"],
         }
         for item in episodes
     ], key=lambda item: item["episode_id"])
     payload = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
     return enriched, hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _require_valid_frames(frames, tag_name, selected, indices):
+    """Keep dense HDF5/Paimon comparison windows identical in quality scope."""
+    for episode_id in selected:
+        invalid = frames.scan(tag_name=tag_name).where(
+            "episode_index = %d AND quality_status <> 0" % indices[episode_id]
+        ).select(["frame_index"]).limit(1).to_list()
+        if invalid:
+            raise ValueError(
+                "ACT comparison requires all frames of selected episode %s "
+                "to be valid; select a clean episode." % episode_id)
 
 
 def _select_episode(source_by_id, split, requested, action_horizon):
@@ -612,6 +652,7 @@ def _select_episode(source_by_id, split, requested, action_horizon):
         for episode_id, episode in source_by_id.items()
         if episode.split == split
         and episode.success
+        and episode.quality_status == 0
         and episode.frame_count >= action_horizon
     }
     if not eligible:
