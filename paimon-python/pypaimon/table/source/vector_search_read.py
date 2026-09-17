@@ -18,8 +18,10 @@
 """Vector search read to read index files."""
 
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -94,7 +96,7 @@ class AbstractVectorSearchReadImpl:
         return _raw_search_metric(
             self._table, self._vector_column, self._options, index_type)
 
-    def _record_index_metric(self, reader, index_type):
+    def _record_index_metric(self, reader, index_type, metric_lock=None):
         """Keep one persisted metric for indexed scores, raw search and refinement."""
         metric_getter = getattr(reader, "vector_metric", None)
         if metric_getter is None:
@@ -106,6 +108,13 @@ class AbstractVectorSearchReadImpl:
             raise ValueError(
                 "Query vector metric '%s' does not match index metric '%s' for column '%s'."
                 % (requested, metric, self._vector_column.name))
+        if metric_lock is None:
+            self._set_index_metric(metric)
+        else:
+            with metric_lock:
+                self._set_index_metric(metric)
+
+    def _set_index_metric(self, metric):
         if self._index_metric is not None and self._index_metric != metric:
             raise ValueError(
                 "Cannot merge vector indexes with different metrics '%s' and '%s' for column '%s'."
@@ -235,7 +244,8 @@ class AbstractVectorSearchReadImpl:
         finally:
             scanner.close()
 
-    def _open_offset_reader(self, vector_index_files, row_range_start, row_range_end):
+    def _open_offset_reader(self, vector_index_files, row_range_start, row_range_end,
+                            metric_lock=None):
         """Open a vector index reader for the split, wrapped with the row-id offset.
 
         The caller must close the returned reader once its future completes.
@@ -261,14 +271,14 @@ class AbstractVectorSearchReadImpl:
             self._table.table_schema.options,
         )
         try:
-            self._record_index_metric(reader, vector_index_files[0].index_type)
+            self._record_index_metric(reader, vector_index_files[0].index_type, metric_lock)
             return reader, OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
         except Exception:
             reader.close()
             raise
 
     def _eval(self, row_range_start, row_range_end, vector_index_files,
-              query_vector, search_limit, include_row_ids):
+              query_vector, search_limit, include_row_ids, metric_lock=None):
         from pypaimon.globalindex.global_index_reader import _completed_future
 
         if not vector_index_files:
@@ -284,7 +294,7 @@ class AbstractVectorSearchReadImpl:
             vector_search = vector_search.with_include_row_ids(include_row_ids)
 
         reader, offset_reader = self._open_offset_reader(
-            vector_index_files, row_range_start, row_range_end)
+            vector_index_files, row_range_start, row_range_end, metric_lock)
         try:
             future = offset_reader.visit_vector_search(vector_search)
         except BaseException:
@@ -426,7 +436,7 @@ class AbstractVectorSearchReadImpl:
         return projection
 
     def _eval_batch(self, row_range_start, row_range_end, vector_index_files,
-                    query_vectors, search_limit, include_row_ids):
+                    query_vectors, search_limit, include_row_ids, metric_lock=None):
         from pypaimon.globalindex.global_index_reader import _completed_future
 
         if not vector_index_files:
@@ -442,7 +452,7 @@ class AbstractVectorSearchReadImpl:
             batch_vector_search = batch_vector_search.with_include_row_ids(include_row_ids)
 
         reader, offset_reader = self._open_offset_reader(
-            vector_index_files, row_range_start, row_range_end)
+            vector_index_files, row_range_start, row_range_end, metric_lock)
         try:
             future = offset_reader.visit_batch_vector_search(batch_vector_search)
         except BaseException:
@@ -450,6 +460,44 @@ class AbstractVectorSearchReadImpl:
             raise
         future.add_done_callback(lambda _: reader.close())
         return future
+
+    def _search_index_splits(self, splits, query, search_limit, pre_filters, batch=False):
+        # Native readers finish their search before returning a completed Future.
+        # Schedule the entire open/search/close operation, not just Future.result().
+        option = CoreOptions.GLOBAL_INDEX_THREAD_NUM
+        key = option.key()
+        value = _table_options_map(self._table).get(key, option.default_value())
+        try:
+            parallelism = int(str(value))
+        except (ValueError, TypeError):
+            parallelism = 0
+        if parallelism < 1:
+            raise ValueError("'%s' must be a positive integer, got: %s" % (key, value))
+
+        metric_lock = Lock()
+        evaluate = self._eval_batch if batch else self._eval
+
+        def search(i):
+            split = splits[i]
+            return evaluate(
+                split.row_range_start, split.row_range_end, split.vector_index_files,
+                query, search_limit, None if not pre_filters else pre_filters[i],
+                metric_lock,
+            ).result()
+
+        workers = min(parallelism, len(splits))
+        if workers <= 1:
+            return [search(i) for i in range(len(splits))]
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = []
+            try:
+                for i in range(len(splits)):
+                    futures.append(executor.submit(search, i))
+                return [future.result() for future in futures]
+            finally:
+                for future in futures:
+                    future.cancel()
+                # Executor shutdown waits for started readers to close on failure.
 
     def _indexed_search_limit(self, index_type):
         refine_factor = self._configured_refine_factor(index_type)
@@ -597,22 +645,11 @@ class DataEvolutionVectorRead(AbstractVectorSearchReadImpl, VectorSearchRead):
         index_type = _vector_index_type(splits)
         search_limit = self._indexed_search_limit(index_type)
         pre_filters = self._pre_filters(splits, snapshot)
-        futures = [
-            self._eval(
-                split.row_range_start, split.row_range_end,
-                split.vector_index_files,
-                query_vector,
-                search_limit,
-                None if not pre_filters else pre_filters[i]
-            )
-            for i, split in enumerate(splits)
-        ]
-
-        wait(futures)
+        results = self._search_index_splits(
+            splits, query_vector, search_limit, pre_filters)
 
         merged_scores = {}
-        for future in futures:
-            split_result = future.result()
+        for split_result in results:
             if split_result is not None:
                 score_getter = split_result.score_getter()
                 for row_id in split_result.results():
@@ -648,22 +685,12 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         index_type = _vector_index_type(index_splits)
         search_limit = self._indexed_search_limit(index_type)
         pre_filters = self._pre_filters(index_splits, snapshot)
-        futures = [
-            self._eval_batch(
-                split.row_range_start, split.row_range_end,
-                split.vector_index_files, self._query_vectors,
-                search_limit,
-                None if not pre_filters else pre_filters[i],
-            )
-            for i, split in enumerate(index_splits)
-        ]
-
-        wait(futures)
+        results = self._search_index_splits(
+            index_splits, self._query_vectors, search_limit, pre_filters, batch=True)
 
         # Merge each query vector's indexed results across index splits.
         merged_scores = [{} for _ in range(n)]
-        for future in futures:
-            split_results = future.result()
+        for split_results in results:
             for i in range(n):
                 split_result = split_results[i]
                 if split_result is None:
