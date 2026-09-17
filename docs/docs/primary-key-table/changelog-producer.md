@@ -122,6 +122,11 @@ incoming event for the `deduplicate` merge engine but may differ for aggregation
 
 This option is only supported by the `lookup` changelog producer.
 
+The metadata column name is formed by concatenating the configured prefix and the preserved
+column name. The default prefix is `__internal__`, so preserving `event_ts` creates the
+`__internal__event_ts` metadata column. Set `'changelog-producer.metadata-field-prefix'` to a
+different prefix if the default conflicts with an existing column name.
+
 ```sql
 -- Source table with event metadata preservation
 CREATE TABLE my_table (
