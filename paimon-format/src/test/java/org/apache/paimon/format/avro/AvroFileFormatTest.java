@@ -209,6 +209,57 @@ public class AvroFileFormatTest {
     }
 
     @ParameterizedTest
+    @CsvSource({
+        "null, 16",
+        "null, 4096",
+        "deflate, 16",
+        "deflate, 4096",
+        "snappy, 16",
+        "snappy, 4096",
+        "zstd, 16",
+        "zstd, 4096"
+    })
+    void testBufferedRecordSerializationFailureRollsBack(String compression, int payloadSize)
+            throws IOException {
+        RowType rowType =
+                DataTypes.ROW(DataTypes.BYTES().notNull(), DataTypes.INT().notNull()).notNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+        GenericRow before = GenericRow.of(new byte[] {1, 2, 3}, 42);
+        GenericRow after = GenericRow.of(new byte[] {4, 5, 6}, 43);
+        byte[] failedPayload = new byte[payloadSize];
+        Arrays.fill(failedPayload, (byte) 7);
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
+                FormatWriter writer =
+                        fileFormat.createWriterFactory(rowType).create(out, compression)) {
+            assertThat(writer)
+                    .extracting("writer")
+                    .extracting("bufOut")
+                    .isInstanceOf(BufferedBinaryEncoder.class);
+            writer.addElement(before);
+            // The first field is written before the second field fails. Small payloads stay in
+            // the encoder buffer; large payloads flush it and reach the Avro block buffer.
+            assertThatThrownBy(() -> writer.addElement(GenericRow.of(failedPayload, "not an int")))
+                    .isInstanceOf(DataFileWriter.AppendWriteException.class)
+                    .hasCauseInstanceOf(ClassCastException.class);
+            writer.addElement(after);
+        }
+
+        List<GenericRow> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                fileFormat
+                        .createReaderFactory(rowType, rowType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            reader.forEachRemaining(
+                    row -> result.add(GenericRow.of(row.getBinary(0), row.getInt(1))));
+        }
+        assertThat(result).containsExactly(before, after);
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"avro", "parquet", "orc"})
     void testManifestWriterUsesDirectEncoder(String dataFileFormat) throws IOException {
         Options options = new Options();
