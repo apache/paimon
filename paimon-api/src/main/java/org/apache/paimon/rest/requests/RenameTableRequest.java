@@ -30,6 +30,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RenameTableRequest implements RESTRequest {
 
+    public static final String API_NAME = "RenameTable";
+
     private static final String FIELD_SOURCE = "source";
     private static final String FIELD_DESTINATION = "destination";
 

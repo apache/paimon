@@ -35,6 +35,8 @@ import java.util.Map;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class DropPartitionsRequest implements RESTRequest {
 
+    public static final String API_NAME = "DropPartitions";
+
     private static final String FIELD_PARTITION_SPECS = "partitionSpecs";
     private static final String FIELD_IGNORE_IF_NOT_EXISTS = "ignoreIfNotExists";
 

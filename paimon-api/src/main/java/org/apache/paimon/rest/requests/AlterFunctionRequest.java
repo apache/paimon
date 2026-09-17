@@ -32,6 +32,8 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AlterFunctionRequest implements RESTRequest {
 
+    public static final String API_NAME = "AlterFunction";
+
     private static final String FIELD_CHANGES = "changes";
 
     @JsonProperty(FIELD_CHANGES)

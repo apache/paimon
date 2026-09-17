@@ -32,6 +32,8 @@ import java.util.Map;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CreateDatabaseRequest implements RESTRequest {
 
+    public static final String API_NAME = "CreateDatabase";
+
     private static final String FIELD_NAME = "name";
     private static final String FIELD_OPTIONS = "options";
 

@@ -37,6 +37,8 @@ class RESTRequest(ABC):
 
 @dataclass
 class CreateDatabaseRequest(RESTRequest):
+    API_NAME = "CreateDatabase"
+
     FIELD_NAME = "name"
     FIELD_OPTIONS = "options"
 
@@ -46,6 +48,8 @@ class CreateDatabaseRequest(RESTRequest):
 
 @dataclass
 class AlterDatabaseRequest(RESTRequest):
+    API_NAME = "AlterDatabase"
+
     FIELD_REMOVALS = "removals"
     FIELD_UPDATES = "updates"
 
@@ -55,6 +59,8 @@ class AlterDatabaseRequest(RESTRequest):
 
 @dataclass
 class RenameTableRequest(RESTRequest):
+    API_NAME = "RenameTable"
+
     FIELD_SOURCE = "source"
     FIELD_DESTINATION = "destination"
 
@@ -64,6 +70,8 @@ class RenameTableRequest(RESTRequest):
 
 @dataclass
 class CreateTableRequest(RESTRequest):
+    API_NAME = "CreateTable"
+
     FIELD_IDENTIFIER = "identifier"
     FIELD_SCHEMA = "schema"
 
@@ -73,6 +81,8 @@ class CreateTableRequest(RESTRequest):
 
 @dataclass
 class CommitTableRequest(RESTRequest):
+    API_NAME = "CommitTable"
+
     FIELD_TABLE_ID = "tableId"
     FIELD_BASE_SNAPSHOT_UUID = "baseSnapshotUuid"
     FIELD_SNAPSHOT = "snapshot"
@@ -88,6 +98,8 @@ class CommitTableRequest(RESTRequest):
 
 @dataclass
 class AlterTableRequest(RESTRequest):
+    API_NAME = "AlterTable"
+
     FIELD_CHANGES = "changes"
 
     changes: List[SchemaChange] = json_field(FIELD_CHANGES)
@@ -95,6 +107,8 @@ class AlterTableRequest(RESTRequest):
 
 @dataclass
 class RollbackTableRequest(RESTRequest):
+    API_NAME = "RollbackToSnapshot"
+
     FIELD_INSTANT = "instant"
     FIELD_FROM_SNAPSHOT = "fromSnapshot"
 
@@ -104,6 +118,8 @@ class RollbackTableRequest(RESTRequest):
 
 @dataclass
 class CreateFunctionRequest(RESTRequest):
+    API_NAME = "CreateFunction"
+
     FIELD_NAME = "name"
     FIELD_INPUT_PARAMS = "inputParams"
     FIELD_RETURN_PARAMS = "returnParams"
@@ -151,6 +167,8 @@ class CreateFunctionRequest(RESTRequest):
 
 @dataclass
 class AlterFunctionRequest(RESTRequest):
+    API_NAME = "AlterFunction"
+
     FIELD_CHANGES = "changes"
 
     changes: List[FunctionChange] = json_field(FIELD_CHANGES)
@@ -168,6 +186,8 @@ class AlterFunctionRequest(RESTRequest):
 # of the wire format.
 @dataclass
 class CreateTagRequest(RESTRequest):
+    API_NAME = "CreateTag"
+
     FIELD_TAG_NAME = "tagName"
     FIELD_SNAPSHOT_ID = "snapshotId"
     FIELD_TIME_RETAINED = "timeRetained"
@@ -179,6 +199,8 @@ class CreateTagRequest(RESTRequest):
 
 @dataclass
 class CreatePartitionsRequest(RESTRequest):
+    API_NAME = "CreatePartitions"
+
     FIELD_PARTITION_SPECS = "partitionSpecs"
     FIELD_IGNORE_IF_EXISTS = "ignoreIfExists"
 
@@ -194,6 +216,8 @@ class CreatePartitionsRequest(RESTRequest):
 # paimon-api/.../rest/requests/.
 @dataclass
 class CreateBranchRequest(RESTRequest):
+    API_NAME = "CreateBranch"
+
     FIELD_BRANCH = "branch"
     FIELD_FROM_TAG = "fromTag"
 
@@ -203,6 +227,8 @@ class CreateBranchRequest(RESTRequest):
 
 @dataclass
 class RenameBranchRequest(RESTRequest):
+    API_NAME = "RenameBranch"
+
     FIELD_TO_BRANCH = "toBranch"
 
     to_branch: str = json_field(FIELD_TO_BRANCH)
@@ -211,4 +237,105 @@ class RenameBranchRequest(RESTRequest):
 @dataclass
 class ForwardBranchRequest(RESTRequest):
     """Empty body request; serializes to ``{}`` per Java ForwardBranchRequest."""
-    pass
+    API_NAME = "FastForwardBranch"
+
+
+# Requests sent without a body; each only names the API it calls.
+@dataclass
+class GetConfigRequest(RESTRequest):
+    API_NAME = "GetConfig"
+
+
+@dataclass
+class ListDatabasesRequest(RESTRequest):
+    API_NAME = "ListDatabases"
+
+
+@dataclass
+class GetDatabaseRequest(RESTRequest):
+    API_NAME = "GetDatabase"
+
+
+@dataclass
+class DropDatabaseRequest(RESTRequest):
+    API_NAME = "DropDatabase"
+
+
+@dataclass
+class ListTablesRequest(RESTRequest):
+    API_NAME = "ListTables"
+
+
+@dataclass
+class GetTableRequest(RESTRequest):
+    API_NAME = "GetTable"
+
+
+@dataclass
+class DropTableRequest(RESTRequest):
+    API_NAME = "DropTable"
+
+
+@dataclass
+class GetTableTokenRequest(RESTRequest):
+    API_NAME = "GetTableToken"
+
+
+@dataclass
+class GetTableSnapshotRequest(RESTRequest):
+    API_NAME = "GetTableSnapshot"
+
+
+@dataclass
+class ListPartitionsRequest(RESTRequest):
+    API_NAME = "ListPartitions"
+
+
+@dataclass
+class ListBranchesRequest(RESTRequest):
+    API_NAME = "ListBranches"
+
+
+@dataclass
+class DropBranchRequest(RESTRequest):
+    API_NAME = "DropBranch"
+
+
+@dataclass
+class ListTagsRequest(RESTRequest):
+    API_NAME = "ListTags"
+
+
+@dataclass
+class GetTagRequest(RESTRequest):
+    API_NAME = "GetTag"
+
+
+@dataclass
+class DropTagRequest(RESTRequest):
+    API_NAME = "DropTag"
+
+
+@dataclass
+class ListFunctionsRequest(RESTRequest):
+    API_NAME = "ListFunctions"
+
+
+@dataclass
+class ListFunctionDetailsRequest(RESTRequest):
+    API_NAME = "ListFunctionDetails"
+
+
+@dataclass
+class ListFunctionsGloballyRequest(RESTRequest):
+    API_NAME = "ListFunctionsGlobally"
+
+
+@dataclass
+class GetFunctionRequest(RESTRequest):
+    API_NAME = "GetFunction"
+
+
+@dataclass
+class DropFunctionRequest(RESTRequest):
+    API_NAME = "DropFunction"

@@ -30,6 +30,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ReplaceTableRequest implements RESTRequest {
 
+    public static final String API_NAME = "ReplaceTable";
+
     private static final String FIELD_SCHEMA = "schema";
 
     @JsonProperty(FIELD_SCHEMA)

@@ -30,6 +30,8 @@ import java.util.Map;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ListPartitionsByNamesRequest extends BasePartitionsRequest {
 
+    public static final String API_NAME = "ListPartitionsByNames";
+
     @JsonCreator
     @ConstructorProperties({FIELD_PARTITION_SPECS})
     public ListPartitionsByNamesRequest(

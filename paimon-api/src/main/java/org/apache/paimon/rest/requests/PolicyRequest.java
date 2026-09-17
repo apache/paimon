@@ -41,6 +41,8 @@ import java.beans.ConstructorProperties;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class PolicyRequest implements RESTRequest {
 
+    public static final String API_NAME = "CreatePolicy";
+
     private static final String FIELD_ROW_FILTER = "rowFilter";
     private static final String FIELD_COLUMN_MASK = "columnMask";
     private static final String FIELD_PRINCIPAL = "principal";

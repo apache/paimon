@@ -30,6 +30,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RegisterTableRequest implements RESTRequest {
 
+    public static final String API_NAME = "RegisterTable";
+
     private static final String FIELD_IDENTIFIER = "identifier";
 
     private static final String FIELD_PATH = "path";

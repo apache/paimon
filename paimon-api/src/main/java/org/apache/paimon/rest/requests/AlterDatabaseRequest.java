@@ -33,6 +33,8 @@ import java.util.Map;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AlterDatabaseRequest implements RESTRequest {
 
+    public static final String API_NAME = "AlterDatabase";
+
     private static final String FIELD_REMOVALS = "removals";
     private static final String FIELD_UPDATES = "updates";
 

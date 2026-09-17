@@ -34,6 +34,8 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AuthTableQueryRequest implements RESTRequest {
 
+    public static final String API_NAME = "AuthTableQuery";
+
     private static final String FIELD_SELECT = "select";
 
     @JsonProperty(FIELD_SELECT)

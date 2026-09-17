@@ -33,6 +33,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 @Experimental
 public class UpsertLabelRequest implements RESTRequest {
 
+    public static final String API_NAME = "UpsertLabel";
+
     private static final String FIELD_VALUE = "value";
 
     @JsonProperty(FIELD_VALUE)

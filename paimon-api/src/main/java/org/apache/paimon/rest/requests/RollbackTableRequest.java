@@ -33,6 +33,8 @@ import javax.annotation.Nullable;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RollbackTableRequest implements RESTRequest {
 
+    public static final String API_NAME = "RollbackToSnapshot";
+
     private static final String FIELD_INSTANT = "instant";
     private static final String FIELD_FROM_SNAPSHOT = "fromSnapshot";
 

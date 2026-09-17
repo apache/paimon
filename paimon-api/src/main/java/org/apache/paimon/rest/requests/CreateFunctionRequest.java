@@ -35,6 +35,8 @@ import java.util.Map;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CreateFunctionRequest implements RESTRequest {
 
+    public static final String API_NAME = "CreateFunction";
+
     private static final String FIELD_NAME = "name";
     private static final String FIELD_INPUT_PARAMETERS = "inputParams";
     private static final String FIELD_RETURN_PARAMETERS = "returnParams";

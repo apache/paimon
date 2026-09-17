@@ -33,6 +33,8 @@ import java.beans.ConstructorProperties;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CreateBranchRequest implements RESTRequest {
 
+    public static final String API_NAME = "CreateBranch";
+
     private static final String FIELD_BRANCH = "branch";
     private static final String FIELD_FROM_TAG = "fromTag";
 

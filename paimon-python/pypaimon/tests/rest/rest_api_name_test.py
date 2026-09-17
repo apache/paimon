@@ -21,7 +21,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pyarrow as pa
 
 from pypaimon.api.rest_api import RESTApi
-from pypaimon.api.rest_api_names import RESTApiNames
 from pypaimon.common.identifier import Identifier
 from pypaimon.function.function import FunctionImpl
 from pypaimon.function.function_change import FunctionChange
@@ -61,7 +60,7 @@ class _Recorder(BaseHTTPRequestHandler):
         pass
 
 
-class RESTApiNamesTest(unittest.TestCase):
+class RESTApiNameTest(unittest.TestCase):
     """Every RESTApi call names its API, and the ACS4 signer sends it as x-acs-action."""
 
     def setUp(self):
@@ -95,75 +94,75 @@ class RESTApiNamesTest(unittest.TestCase):
 
     def test_config(self):
         options = dict(self.options, warehouse="wh")
-        self.expect("GET", "/v1/config", RESTApiNames.GET_CONFIG, lambda: RESTApi(options))
+        self.expect("GET", "/v1/config", "GetConfig", lambda: RESTApi(options))
 
     def test_databases(self):
         dbs = "/v1/catalog/databases"
         api = self.api
-        self.expect("GET", dbs, RESTApiNames.LIST_DATABASES, api.list_databases)
-        self.expect("GET", dbs, RESTApiNames.LIST_DATABASES, lambda: api.list_databases_paged(10, None, "d%"))
-        self.expect("POST", dbs, RESTApiNames.CREATE_DATABASE, lambda: api.create_database("db", {}))
-        self.expect("GET", DB, RESTApiNames.GET_DATABASE, lambda: api.get_database("db"))
-        self.expect("POST", DB, RESTApiNames.ALTER_DATABASE, lambda: api.alter_database("db", updates={"k": "v"}))
-        self.expect("DELETE", DB, RESTApiNames.DROP_DATABASE, lambda: api.drop_database("db"))
+        self.expect("GET", dbs, "ListDatabases", api.list_databases)
+        self.expect("GET", dbs, "ListDatabases", lambda: api.list_databases_paged(10, None, "d%"))
+        self.expect("POST", dbs, "CreateDatabase", lambda: api.create_database("db", {}))
+        self.expect("GET", DB, "GetDatabase", lambda: api.get_database("db"))
+        self.expect("POST", DB, "AlterDatabase", lambda: api.alter_database("db", updates={"k": "v"}))
+        self.expect("DELETE", DB, "DropDatabase", lambda: api.drop_database("db"))
 
     def test_tables(self):
         api = self.api
         schema = Schema.from_pyarrow_schema(pa.schema([("id", pa.int32())]))
-        self.expect("GET", DB + "/tables", RESTApiNames.LIST_TABLES, lambda: api.list_tables("db"))
-        self.expect("GET", DB + "/tables", RESTApiNames.LIST_TABLES, lambda: api.list_tables_paged("db", 10))
-        self.expect("POST", DB + "/tables", RESTApiNames.CREATE_TABLE, lambda: api.create_table(ID, schema))
-        self.expect("GET", TABLE, RESTApiNames.GET_TABLE, lambda: api.get_table(ID))
-        self.expect("POST", TABLE, RESTApiNames.ALTER_TABLE,
+        self.expect("GET", DB + "/tables", "ListTables", lambda: api.list_tables("db"))
+        self.expect("GET", DB + "/tables", "ListTables", lambda: api.list_tables_paged("db", 10))
+        self.expect("POST", DB + "/tables", "CreateTable", lambda: api.create_table(ID, schema))
+        self.expect("GET", TABLE, "GetTable", lambda: api.get_table(ID))
+        self.expect("POST", TABLE, "AlterTable",
                     lambda: api.alter_table(ID, [SchemaChange.add_column("c", AtomicType("INT"))]))
-        self.expect("DELETE", TABLE, RESTApiNames.DROP_TABLE, lambda: api.drop_table(ID))
-        self.expect("POST", "/v1/catalog/tables/rename", RESTApiNames.RENAME_TABLE,
+        self.expect("DELETE", TABLE, "DropTable", lambda: api.drop_table(ID))
+        self.expect("POST", "/v1/catalog/tables/rename", "RenameTable",
                     lambda: api.rename_table(ID, Identifier.create("db", "t2")))
-        self.expect("GET", TABLE + "/token", RESTApiNames.GET_TABLE_TOKEN, lambda: api.load_table_token(ID))
-        self.expect("POST", TABLE + "/auth", RESTApiNames.AUTH_TABLE_QUERY, lambda: api.auth_table_query(ID, ["id"]))
+        self.expect("GET", TABLE + "/token", "GetTableToken", lambda: api.load_table_token(ID))
+        self.expect("POST", TABLE + "/auth", "AuthTableQuery", lambda: api.auth_table_query(ID, ["id"]))
 
     def test_snapshots_and_partitions(self):
         api = self.api
-        self.expect("POST", TABLE + "/commit", RESTApiNames.COMMIT_TABLE,
+        self.expect("POST", TABLE + "/commit", "CommitTable",
                     lambda: api.commit_snapshot(ID, "uuid", None, SNAPSHOT, []))
-        self.expect("GET", TABLE + "/snapshot", RESTApiNames.GET_TABLE_SNAPSHOT, lambda: api.load_snapshot(ID))
-        self.expect("POST", TABLE + "/rollback", RESTApiNames.ROLLBACK_TO_SNAPSHOT,
+        self.expect("GET", TABLE + "/snapshot", "GetTableSnapshot", lambda: api.load_snapshot(ID))
+        self.expect("POST", TABLE + "/rollback", "RollbackToSnapshot",
                     lambda: api.rollback_to(ID, SnapshotInstant(1)))
-        self.expect("GET", TABLE + "/partitions", RESTApiNames.LIST_PARTITIONS,
+        self.expect("GET", TABLE + "/partitions", "ListPartitions",
                     lambda: api.list_partitions_paged(ID, 10))
-        self.expect("POST", TABLE + "/partitions", RESTApiNames.CREATE_PARTITIONS,
+        self.expect("POST", TABLE + "/partitions", "CreatePartitions",
                     lambda: api.create_partitions(ID, [{"dt": "1"}]))
 
     def test_branches_and_tags(self):
         api = self.api
-        self.expect("GET", TABLE + "/branches", RESTApiNames.LIST_BRANCHES, lambda: api.list_branches(ID))
-        self.expect("POST", TABLE + "/branches", RESTApiNames.CREATE_BRANCH, lambda: api.create_branch(ID, "b"))
-        self.expect("DELETE", TABLE + "/branches/b", RESTApiNames.DROP_BRANCH, lambda: api.drop_branch(ID, "b"))
-        self.expect("POST", TABLE + "/branches/b/forward", RESTApiNames.FAST_FORWARD_BRANCH,
+        self.expect("GET", TABLE + "/branches", "ListBranches", lambda: api.list_branches(ID))
+        self.expect("POST", TABLE + "/branches", "CreateBranch", lambda: api.create_branch(ID, "b"))
+        self.expect("DELETE", TABLE + "/branches/b", "DropBranch", lambda: api.drop_branch(ID, "b"))
+        self.expect("POST", TABLE + "/branches/b/forward", "FastForwardBranch",
                     lambda: api.fast_forward(ID, "b"))
-        self.expect("POST", TABLE + "/branches/b/rename", RESTApiNames.RENAME_BRANCH,
+        self.expect("POST", TABLE + "/branches/b/rename", "RenameBranch",
                     lambda: api.rename_branch(ID, "b", "b2"))
-        self.expect("GET", TABLE + "/tags", RESTApiNames.LIST_TAGS, lambda: api.list_tags_paged(ID, 10))
-        self.expect("POST", TABLE + "/tags", RESTApiNames.CREATE_TAG, lambda: api.create_tag(ID, "tag", 1))
-        self.expect("GET", TABLE + "/tags/tag", RESTApiNames.GET_TAG, lambda: api.get_tag(ID, "tag"))
-        self.expect("DELETE", TABLE + "/tags/tag", RESTApiNames.DROP_TAG, lambda: api.delete_tag(ID, "tag"))
+        self.expect("GET", TABLE + "/tags", "ListTags", lambda: api.list_tags_paged(ID, 10))
+        self.expect("POST", TABLE + "/tags", "CreateTag", lambda: api.create_tag(ID, "tag", 1))
+        self.expect("GET", TABLE + "/tags/tag", "GetTag", lambda: api.get_tag(ID, "tag"))
+        self.expect("DELETE", TABLE + "/tags/tag", "DropTag", lambda: api.delete_tag(ID, "tag"))
 
     def test_functions(self):
         api = self.api
         function = Identifier.create("db", "f")
-        self.expect("GET", DB + "/functions", RESTApiNames.LIST_FUNCTIONS, lambda: api.list_functions("db"))
-        self.expect("GET", DB + "/functions", RESTApiNames.LIST_FUNCTIONS,
+        self.expect("GET", DB + "/functions", "ListFunctions", lambda: api.list_functions("db"))
+        self.expect("GET", DB + "/functions", "ListFunctions",
                     lambda: api.list_functions_paged("db", 10))
-        self.expect("GET", DB + "/function-details", RESTApiNames.LIST_FUNCTION_DETAILS,
+        self.expect("GET", DB + "/function-details", "ListFunctionDetails",
                     lambda: api.list_function_details_paged("db", 10))
-        self.expect("GET", "/v1/catalog/functions", RESTApiNames.LIST_FUNCTIONS_GLOBALLY,
+        self.expect("GET", "/v1/catalog/functions", "ListFunctionsGlobally",
                     lambda: api.list_functions_paged_globally(max_results=10))
-        self.expect("POST", DB + "/functions", RESTApiNames.CREATE_FUNCTION,
+        self.expect("POST", DB + "/functions", "CreateFunction",
                     lambda: api.create_function(function, FunctionImpl(function)))
-        self.expect("GET", DB + "/functions/f", RESTApiNames.GET_FUNCTION, lambda: api.get_function(function))
-        self.expect("POST", DB + "/functions/f", RESTApiNames.ALTER_FUNCTION,
+        self.expect("GET", DB + "/functions/f", "GetFunction", lambda: api.get_function(function))
+        self.expect("POST", DB + "/functions/f", "AlterFunction",
                     lambda: api.alter_function(function, [FunctionChange.set_option("k", "v")]))
-        self.expect("DELETE", DB + "/functions/f", RESTApiNames.DROP_FUNCTION, lambda: api.drop_function(function))
+        self.expect("DELETE", DB + "/functions/f", "DropFunction", lambda: api.drop_function(function))
 
 
 if __name__ == '__main__':

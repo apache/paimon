@@ -32,6 +32,8 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AlterTableRequest implements RESTRequest {
 
+    public static final String API_NAME = "AlterTable";
+
     private static final String FIELD_NEW_UPDATE = "changes";
 
     @JsonProperty(FIELD_NEW_UPDATE)

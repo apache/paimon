@@ -30,6 +30,8 @@ import java.util.Map;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class MarkDonePartitionsRequest extends BasePartitionsRequest {
 
+    public static final String API_NAME = "MarkDonePartitions";
+
     @JsonCreator
     @ConstructorProperties({FIELD_PARTITION_SPECS})
     public MarkDonePartitionsRequest(

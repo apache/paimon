@@ -35,6 +35,8 @@ import java.beans.ConstructorProperties;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class ListPartitionsByFilterRequest implements RESTRequest {
 
+    public static final String API_NAME = "ListPartitionsByFilter";
+
     private static final String FIELD_FILTER = "filter";
     private static final String FIELD_PARTITION_NAME_PATTERN = "partitionNamePattern";
     private static final String FIELD_MAX_RESULTS = "maxResults";

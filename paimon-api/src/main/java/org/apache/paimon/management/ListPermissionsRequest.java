@@ -29,6 +29,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 @Experimental
 public class ListPermissionsRequest {
 
+    public static final String API_NAME = "ListPermissionAssignments";
+
     public static final int MAX_PAGE_SIZE = 1000;
 
     private final PermissionResource resource;

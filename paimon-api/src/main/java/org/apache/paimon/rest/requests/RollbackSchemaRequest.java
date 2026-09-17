@@ -31,6 +31,8 @@ import java.beans.ConstructorProperties;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RollbackSchemaRequest implements RESTRequest {
 
+    public static final String API_NAME = "RollbackSchema";
+
     private static final String FIELD_SCHEMA_ID = "schemaId";
 
     @JsonProperty(FIELD_SCHEMA_ID)

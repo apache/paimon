@@ -53,16 +53,56 @@ import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
+import org.apache.paimon.rest.requests.DeleteLabelRequest;
+import org.apache.paimon.rest.requests.DeleteSemanticViewRequest;
+import org.apache.paimon.rest.requests.DropBranchRequest;
+import org.apache.paimon.rest.requests.DropDatabaseRequest;
+import org.apache.paimon.rest.requests.DropFunctionRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.DropPolicyRequest;
+import org.apache.paimon.rest.requests.DropTableRequest;
+import org.apache.paimon.rest.requests.DropTagRequest;
+import org.apache.paimon.rest.requests.DropViewRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
+import org.apache.paimon.rest.requests.GetConfigRequest;
+import org.apache.paimon.rest.requests.GetDatabaseRequest;
+import org.apache.paimon.rest.requests.GetFunctionRequest;
+import org.apache.paimon.rest.requests.GetLabelRequest;
+import org.apache.paimon.rest.requests.GetSchemaRequest;
+import org.apache.paimon.rest.requests.GetSemanticViewRequest;
+import org.apache.paimon.rest.requests.GetTableByIdRequest;
+import org.apache.paimon.rest.requests.GetTableRequest;
+import org.apache.paimon.rest.requests.GetTableSnapshotRequest;
+import org.apache.paimon.rest.requests.GetTableTokenRequest;
+import org.apache.paimon.rest.requests.GetTagRequest;
+import org.apache.paimon.rest.requests.GetVersionSnapshotRequest;
+import org.apache.paimon.rest.requests.GetViewRequest;
 import org.apache.paimon.rest.requests.GrantPermissionRequest;
+import org.apache.paimon.rest.requests.ListBranchesRequest;
+import org.apache.paimon.rest.requests.ListConsumersRequest;
+import org.apache.paimon.rest.requests.ListDatabasesRequest;
+import org.apache.paimon.rest.requests.ListFunctionDetailsRequest;
+import org.apache.paimon.rest.requests.ListFunctionsGloballyRequest;
+import org.apache.paimon.rest.requests.ListFunctionsRequest;
+import org.apache.paimon.rest.requests.ListLabelsRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
+import org.apache.paimon.rest.requests.ListPartitionsRequest;
+import org.apache.paimon.rest.requests.ListSchemasRequest;
+import org.apache.paimon.rest.requests.ListSemanticViewsRequest;
+import org.apache.paimon.rest.requests.ListSnapshotsRequest;
+import org.apache.paimon.rest.requests.ListTableDetailsRequest;
+import org.apache.paimon.rest.requests.ListTablesGloballyRequest;
+import org.apache.paimon.rest.requests.ListTablesRequest;
+import org.apache.paimon.rest.requests.ListTagsRequest;
+import org.apache.paimon.rest.requests.ListViewDetailsRequest;
+import org.apache.paimon.rest.requests.ListViewsGloballyRequest;
+import org.apache.paimon.rest.requests.ListViewsRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.PolicyRequest;
 import org.apache.paimon.rest.requests.RegisterTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.RenameViewRequest;
 import org.apache.paimon.rest.requests.ReplaceTableRequest;
 import org.apache.paimon.rest.requests.ResetConsumerRequest;
 import org.apache.paimon.rest.requests.RevokePermissionRequest;
@@ -241,7 +281,7 @@ public class RESTApi {
                                             queryParams,
                                             ConfigResponse.class,
                                             new RESTAuthFunction(baseHeaders, authProvider)
-                                                    .withApiName(RESTApiNames.GET_CONFIG))
+                                                    .withApiName(GetConfigRequest.API_NAME))
                                     .merge(options.toMap()));
             baseHeaders.putAll(extractPrefixMap(options, HEADER_PREFIX));
         }
@@ -268,7 +308,7 @@ public class RESTApi {
                                 resourcePaths.databases(),
                                 queryParams,
                                 ListDatabasesResponse.class,
-                                restAuthFunction.withApiName(RESTApiNames.LIST_DATABASES)));
+                                restAuthFunction.withApiName(ListDatabasesRequest.API_NAME)));
     }
 
     /**
@@ -296,7 +336,7 @@ public class RESTApi {
                                 pageToken,
                                 Pair.of(DATABASE_NAME_PATTERN, databaseNamePattern)),
                         ListDatabasesResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_DATABASES));
+                        restAuthFunction.withApiName(ListDatabasesRequest.API_NAME));
         List<String> databases = response.getDatabases();
         if (databases == null) {
             return new PagedList<>(emptyList(), null);
@@ -317,7 +357,7 @@ public class RESTApi {
         client.post(
                 resourcePaths.databases(),
                 request,
-                restAuthFunction.withApiName(RESTApiNames.CREATE_DATABASE));
+                restAuthFunction.withApiName(CreateDatabaseRequest.API_NAME));
     }
 
     /**
@@ -333,7 +373,7 @@ public class RESTApi {
         return client.get(
                 resourcePaths.database(name),
                 GetDatabaseResponse.class,
-                restAuthFunction.withApiName(RESTApiNames.GET_DATABASE));
+                restAuthFunction.withApiName(GetDatabaseRequest.API_NAME));
     }
 
     /**
@@ -347,7 +387,7 @@ public class RESTApi {
     public void dropDatabase(String name) {
         client.delete(
                 resourcePaths.database(name),
-                restAuthFunction.withApiName(RESTApiNames.DROP_DATABASE));
+                restAuthFunction.withApiName(DropDatabaseRequest.API_NAME));
     }
 
     /**
@@ -365,7 +405,7 @@ public class RESTApi {
                 resourcePaths.database(name),
                 new AlterDatabaseRequest(removals, updates),
                 AlterDatabaseResponse.class,
-                restAuthFunction.withApiName(RESTApiNames.ALTER_DATABASE));
+                restAuthFunction.withApiName(AlterDatabaseRequest.API_NAME));
     }
 
     /**
@@ -384,7 +424,7 @@ public class RESTApi {
                                 resourcePaths.tables(databaseName),
                                 queryParams,
                                 ListTablesResponse.class,
-                                restAuthFunction.withApiName(RESTApiNames.LIST_TABLES)));
+                                restAuthFunction.withApiName(ListTablesRequest.API_NAME)));
     }
 
     /**
@@ -421,7 +461,7 @@ public class RESTApi {
                                 Pair.of(TABLE_NAME_PATTERN, tableNamePattern),
                                 Pair.of(TABLE_TYPE, tableType)),
                         ListTablesResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_TABLES));
+                        restAuthFunction.withApiName(ListTablesRequest.API_NAME));
         List<String> tables = response.getTables();
         if (tables == null) {
             return new PagedList<>(emptyList(), null);
@@ -465,7 +505,7 @@ public class RESTApi {
                                 Pair.of(TABLE_NAME_PATTERN, tableNamePattern),
                                 Pair.of(TABLE_TYPE, tableType)),
                         ListTableDetailsResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_TABLE_DETAILS));
+                        restAuthFunction.withApiName(ListTableDetailsRequest.API_NAME));
         List<GetTableResponse> tables = response.getTableDetails();
         if (tables == null) {
             return new PagedList<>(emptyList(), null);
@@ -492,7 +532,7 @@ public class RESTApi {
                                 resourcePaths.tableDetails(databaseName),
                                 queryParams,
                                 ListTableDetailsResponse.class,
-                                restAuthFunction.withApiName(RESTApiNames.LIST_TABLE_DETAILS)));
+                                restAuthFunction.withApiName(ListTableDetailsRequest.API_NAME)));
     }
 
     /**
@@ -528,7 +568,7 @@ public class RESTApi {
                                 Pair.of(DATABASE_NAME_PATTERN, databaseNamePattern),
                                 Pair.of(TABLE_NAME_PATTERN, tableNamePattern)),
                         ListTablesGloballyResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_TABLES_GLOBALLY));
+                        restAuthFunction.withApiName(ListTablesGloballyRequest.API_NAME));
         List<Identifier> tables = response.getTables();
         if (tables == null) {
             return new PagedList<>(emptyList(), null);
@@ -549,7 +589,7 @@ public class RESTApi {
         return client.get(
                 resourcePaths.table(identifier.getDatabaseName(), identifier.getObjectName()),
                 GetTableResponse.class,
-                restAuthFunction.withApiName(RESTApiNames.GET_TABLE));
+                restAuthFunction.withApiName(GetTableRequest.API_NAME));
     }
 
     /**
@@ -565,7 +605,7 @@ public class RESTApi {
         return client.get(
                 resourcePaths.table(tableId),
                 GetTableResponse.class,
-                restAuthFunction.withApiName(RESTApiNames.GET_TABLE_BY_ID));
+                restAuthFunction.withApiName(GetTableByIdRequest.API_NAME));
     }
 
     /**
@@ -584,7 +624,7 @@ public class RESTApi {
                         resourcePaths.tableSnapshot(
                                 identifier.getDatabaseName(), identifier.getObjectName()),
                         GetTableSnapshotResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.GET_TABLE_SNAPSHOT));
+                        restAuthFunction.withApiName(GetTableSnapshotRequest.API_NAME));
         return response.getSnapshot();
     }
 
@@ -612,7 +652,7 @@ public class RESTApi {
                         resourcePaths.tableSnapshot(
                                 identifier.getDatabaseName(), identifier.getObjectName(), version),
                         GetVersionSnapshotResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.GET_VERSION_SNAPSHOT));
+                        restAuthFunction.withApiName(GetVersionSnapshotRequest.API_NAME));
         return response.getSnapshot();
     }
 
@@ -640,7 +680,7 @@ public class RESTApi {
                                 identifier.getDatabaseName(), identifier.getObjectName()),
                         buildPagedQueryParams(maxResults, pageToken),
                         ListSnapshotsResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_SNAPSHOTS));
+                        restAuthFunction.withApiName(ListSnapshotsRequest.API_NAME));
         List<Snapshot> snapshots = response.getSnapshots();
         if (snapshots == null) {
             return new PagedList<>(emptyList(), null);
@@ -671,7 +711,7 @@ public class RESTApi {
                                 identifier.getDatabaseName(), identifier.getObjectName()),
                         buildPagedQueryParams(maxResults, pageToken),
                         ListConsumersResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_CONSUMERS));
+                        restAuthFunction.withApiName(ListConsumersRequest.API_NAME));
         List<ConsumerInfo> consumers = response.getConsumers();
         if (consumers == null) {
             return new PagedList<>(emptyList(), null);
@@ -696,7 +736,7 @@ public class RESTApi {
                 resourcePaths.resetConsumer(
                         identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
-                restAuthFunction.withApiName(RESTApiNames.RESET_CONSUMER));
+                restAuthFunction.withApiName(ResetConsumerRequest.API_NAME));
     }
 
     /**
@@ -726,7 +766,7 @@ public class RESTApi {
                                 identifier.getDatabaseName(), identifier.getObjectName()),
                         request,
                         CommitTableResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.COMMIT_TABLE));
+                        restAuthFunction.withApiName(CommitTableRequest.API_NAME));
         return response.isSuccess();
     }
 
@@ -762,7 +802,7 @@ public class RESTApi {
                 resourcePaths.rollbackTable(
                         identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
-                restAuthFunction.withApiName(RESTApiNames.ROLLBACK_TO_SNAPSHOT));
+                restAuthFunction.withApiName(RollbackTableRequest.API_NAME));
     }
 
     /**
@@ -780,7 +820,7 @@ public class RESTApi {
                 resourcePaths.rollbackSchemaTable(
                         identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
-                restAuthFunction.withApiName(RESTApiNames.ROLLBACK_SCHEMA));
+                restAuthFunction.withApiName(RollbackSchemaRequest.API_NAME));
     }
 
     /** Load the schema of a table for the given version. */
@@ -790,7 +830,7 @@ public class RESTApi {
                         resourcePaths.schemas(
                                 identifier.getDatabaseName(), identifier.getObjectName(), version),
                         GetSchemaResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.GET_SCHEMA));
+                        restAuthFunction.withApiName(GetSchemaRequest.API_NAME));
         return response.getSchema();
     }
 
@@ -803,7 +843,7 @@ public class RESTApi {
                                 identifier.getDatabaseName(), identifier.getObjectName()),
                         buildPagedQueryParams(maxResults, pageToken),
                         ListSchemasResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_SCHEMAS));
+                        restAuthFunction.withApiName(ListSchemasRequest.API_NAME));
         List<TableSchema> schemas = response.getSchemas();
         if (schemas == null) {
             return new PagedList<>(emptyList(), null);
@@ -826,7 +866,7 @@ public class RESTApi {
         client.post(
                 resourcePaths.tables(identifier.getDatabaseName()),
                 request,
-                restAuthFunction.withApiName(RESTApiNames.CREATE_TABLE));
+                restAuthFunction.withApiName(CreateTableRequest.API_NAME));
     }
 
     /**
@@ -844,7 +884,7 @@ public class RESTApi {
         client.post(
                 resourcePaths.renameTable(),
                 request,
-                restAuthFunction.withApiName(RESTApiNames.RENAME_TABLE));
+                restAuthFunction.withApiName(RenameTableRequest.API_NAME));
     }
 
     /**
@@ -861,7 +901,7 @@ public class RESTApi {
         client.post(
                 resourcePaths.table(identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
-                restAuthFunction.withApiName(RESTApiNames.ALTER_TABLE));
+                restAuthFunction.withApiName(AlterTableRequest.API_NAME));
     }
 
     /**
@@ -879,7 +919,7 @@ public class RESTApi {
                 resourcePaths.replaceTable(
                         identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
-                restAuthFunction.withApiName(RESTApiNames.REPLACE_TABLE));
+                restAuthFunction.withApiName(ReplaceTableRequest.API_NAME));
     }
 
     /**
@@ -899,7 +939,7 @@ public class RESTApi {
                 resourcePaths.authTable(identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
                 AuthTableQueryResponse.class,
-                restAuthFunction.withApiName(RESTApiNames.AUTH_TABLE_QUERY));
+                restAuthFunction.withApiName(AuthTableQueryRequest.API_NAME));
     }
 
     /**
@@ -920,7 +960,7 @@ public class RESTApi {
         client.post(
                 resourcePaths.label(entityType, entityName, key),
                 new UpsertLabelRequest(value),
-                restAuthFunction.withApiName(RESTApiNames.UPSERT_LABEL));
+                restAuthFunction.withApiName(UpsertLabelRequest.API_NAME));
     }
 
     /**
@@ -934,7 +974,7 @@ public class RESTApi {
         return client.get(
                 resourcePaths.label(entityType, entityName, key),
                 GetLabelResponse.class,
-                restAuthFunction.withApiName(RESTApiNames.GET_LABEL));
+                restAuthFunction.withApiName(GetLabelRequest.API_NAME));
     }
 
     /** Lists all labels attached directly to an entity, following catalog pagination. */
@@ -947,7 +987,7 @@ public class RESTApi {
                                 path,
                                 queryParams,
                                 ListLabelsResponse.class,
-                                restAuthFunction.withApiName(RESTApiNames.LIST_LABELS)));
+                                restAuthFunction.withApiName(ListLabelsRequest.API_NAME)));
     }
 
     /**
@@ -972,7 +1012,7 @@ public class RESTApi {
                         resourcePaths.labels(entityType, entityName),
                         buildPagedQueryParams(maxResults, pageToken),
                         ListLabelsResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_LABELS));
+                        restAuthFunction.withApiName(ListLabelsRequest.API_NAME));
         return new PagedList<>(response.getLabels(), response.getNextPageToken());
     }
 
@@ -986,7 +1026,7 @@ public class RESTApi {
     public void deleteLabel(String entityType, String entityName, String key) {
         client.delete(
                 resourcePaths.label(entityType, entityName, key),
-                restAuthFunction.withApiName(RESTApiNames.DELETE_LABEL));
+                restAuthFunction.withApiName(DeleteLabelRequest.API_NAME));
     }
 
     /**
@@ -1003,7 +1043,7 @@ public class RESTApi {
                         identifier.getDatabaseName(), identifier.getObjectName()),
                 new UpsertSemanticViewRequest(definition),
                 GetSemanticViewResponse.class,
-                restAuthFunction.withApiName(RESTApiNames.UPSERT_SEMANTIC_VIEW));
+                restAuthFunction.withApiName(UpsertSemanticViewRequest.API_NAME));
     }
 
     /** Gets the complete model definition. Missing objects return HTTP 404. */
@@ -1014,7 +1054,7 @@ public class RESTApi {
                 resourcePaths.semanticView(
                         identifier.getDatabaseName(), identifier.getObjectName()),
                 GetSemanticViewResponse.class,
-                restAuthFunction.withApiName(RESTApiNames.GET_SEMANTIC_VIEW));
+                restAuthFunction.withApiName(GetSemanticViewRequest.API_NAME));
     }
 
     /** Lists semantic view names only, following catalog pagination. */
@@ -1036,7 +1076,7 @@ public class RESTApi {
                         resourcePaths.semanticViews(database),
                         buildPagedQueryParams(maxResults, pageToken),
                         ListSemanticViewsResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_SEMANTIC_VIEWS));
+                        restAuthFunction.withApiName(ListSemanticViewsRequest.API_NAME));
         return new PagedList<>(response.getSemanticViews(), response.getNextPageToken());
     }
 
@@ -1047,7 +1087,7 @@ public class RESTApi {
         client.delete(
                 resourcePaths.semanticView(
                         identifier.getDatabaseName(), identifier.getObjectName()),
-                restAuthFunction.withApiName(RESTApiNames.DELETE_SEMANTIC_VIEW));
+                restAuthFunction.withApiName(DeleteSemanticViewRequest.API_NAME));
     }
 
     /** Lists permissions on an exact resource in the configured REST catalog. */
@@ -1069,7 +1109,7 @@ public class RESTApi {
                 resourcePaths.permissions(),
                 queryParams,
                 ListPermissionsResponse.class,
-                restAuthFunction.withApiName(RESTApiNames.LIST_PERMISSION_ASSIGNMENTS));
+                restAuthFunction.withApiName(ListPermissionsRequest.API_NAME));
     }
 
     /** Grants a permission for the configured REST catalog. */
@@ -1078,7 +1118,7 @@ public class RESTApi {
         client.post(
                 resourcePaths.grantPermission(),
                 new GrantPermissionRequest(assignment),
-                restAuthFunction.withApiName(RESTApiNames.GRANT_PERMISSION_ASSIGNMENT));
+                restAuthFunction.withApiName(GrantPermissionRequest.API_NAME));
     }
 
     /** Revokes a permission for the configured REST catalog. */
@@ -1087,7 +1127,7 @@ public class RESTApi {
         client.post(
                 resourcePaths.revokePermission(),
                 new RevokePermissionRequest(resource, access, principal),
-                restAuthFunction.withApiName(RESTApiNames.REVOKE_PERMISSION_ASSIGNMENT));
+                restAuthFunction.withApiName(RevokePermissionRequest.API_NAME));
     }
 
     /** Lists policies attached to an exact table resource. */
@@ -1107,7 +1147,7 @@ public class RESTApi {
                 resourcePaths.policies(request.getResource()),
                 queryParams,
                 ListPoliciesResponse.class,
-                restAuthFunction.withApiName(RESTApiNames.LIST_POLICIES));
+                restAuthFunction.withApiName(ListPoliciesRequest.API_NAME));
     }
 
     /** Creates a principal policy on its attachment resource. */
@@ -1116,7 +1156,7 @@ public class RESTApi {
         client.post(
                 resourcePaths.policies(policy.getResource()),
                 new PolicyRequest(policy),
-                restAuthFunction.withApiName(RESTApiNames.CREATE_POLICY));
+                restAuthFunction.withApiName(PolicyRequest.API_NAME));
     }
 
     /** Drops a principal policy from its exact attachment resource. */
@@ -1132,7 +1172,7 @@ public class RESTApi {
             client.post(
                     resourcePaths.dropPolicy(resource),
                     new DropPolicyRequest(type, principal, column),
-                    restAuthFunction.withApiName(RESTApiNames.DROP_POLICY));
+                    restAuthFunction.withApiName(DropPolicyRequest.API_NAME));
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists
                     || !ErrorResponse.RESOURCE_TYPE_POLICY.equals(e.resourceType())) {
@@ -1152,14 +1192,14 @@ public class RESTApi {
     public void dropTable(Identifier identifier) {
         client.delete(
                 resourcePaths.table(identifier.getDatabaseName(), identifier.getObjectName()),
-                restAuthFunction.withApiName(RESTApiNames.DROP_TABLE));
+                restAuthFunction.withApiName(DropTableRequest.API_NAME));
     }
 
     public void registerTable(Identifier identifier, String path) {
         client.post(
                 resourcePaths.registerTable(identifier.getDatabaseName()),
                 new RegisterTableRequest(identifier, path),
-                restAuthFunction.withApiName(RESTApiNames.REGISTER_TABLE));
+                restAuthFunction.withApiName(RegisterTableRequest.API_NAME));
     }
 
     /**
@@ -1177,7 +1217,7 @@ public class RESTApi {
                 resourcePaths.markDonePartitions(
                         identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
-                restAuthFunction.withApiName(RESTApiNames.MARK_DONE_PARTITIONS));
+                restAuthFunction.withApiName(MarkDonePartitionsRequest.API_NAME));
     }
 
     /**
@@ -1226,7 +1266,7 @@ public class RESTApi {
                 resourcePaths.partitions(identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
                 CreatePartitionsResponse.class,
-                restAuthFunction.withApiName(RESTApiNames.CREATE_PARTITIONS));
+                restAuthFunction.withApiName(CreatePartitionsRequest.API_NAME));
     }
 
     /** Drop (unregister) partitions for table; the server never deletes data files. */
@@ -1240,7 +1280,7 @@ public class RESTApi {
                         identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
                 DropPartitionsResponse.class,
-                restAuthFunction.withApiName(RESTApiNames.DROP_PARTITIONS));
+                restAuthFunction.withApiName(DropPartitionsRequest.API_NAME));
     }
 
     /**
@@ -1260,7 +1300,7 @@ public class RESTApi {
                                         identifier.getDatabaseName(), identifier.getObjectName()),
                                 queryParams,
                                 ListPartitionsResponse.class,
-                                restAuthFunction.withApiName(RESTApiNames.LIST_PARTITIONS)));
+                                restAuthFunction.withApiName(ListPartitionsRequest.API_NAME)));
     }
 
     /**
@@ -1296,7 +1336,7 @@ public class RESTApi {
                                 pageToken,
                                 Pair.of(PARTITION_NAME_PATTERN, partitionNamePattern)),
                         ListPartitionsResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_PARTITIONS));
+                        restAuthFunction.withApiName(ListPartitionsRequest.API_NAME));
         List<Partition> partitions = response.getPartitions();
         if (partitions == null) {
             return new PagedList<>(emptyList(), null);
@@ -1328,7 +1368,7 @@ public class RESTApi {
                                 identifier.getDatabaseName(), identifier.getObjectName()),
                         request,
                         ListPartitionsResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_PARTITIONS_BY_NAMES));
+                        restAuthFunction.withApiName(ListPartitionsByNamesRequest.API_NAME));
         List<Partition> partitions = response.getPartitions();
         if (partitions == null) {
             return emptyList();
@@ -1370,7 +1410,7 @@ public class RESTApi {
                                 identifier.getDatabaseName(), identifier.getObjectName()),
                         request,
                         ListPartitionsResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_PARTITIONS_BY_FILTER));
+                        restAuthFunction.withApiName(ListPartitionsByFilterRequest.API_NAME));
         List<Partition> partitions = response.getPartitions();
         if (partitions == null) {
             return new PagedList<>(emptyList(), response.getNextPageToken());
@@ -1395,7 +1435,7 @@ public class RESTApi {
         client.post(
                 resourcePaths.branches(identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
-                restAuthFunction.withApiName(RESTApiNames.CREATE_BRANCH));
+                restAuthFunction.withApiName(CreateBranchRequest.API_NAME));
     }
 
     /**
@@ -1411,7 +1451,7 @@ public class RESTApi {
         client.delete(
                 resourcePaths.branch(
                         identifier.getDatabaseName(), identifier.getObjectName(), branch),
-                restAuthFunction.withApiName(RESTApiNames.DROP_BRANCH));
+                restAuthFunction.withApiName(DropBranchRequest.API_NAME));
     }
 
     /**
@@ -1430,7 +1470,7 @@ public class RESTApi {
                 resourcePaths.forwardBranch(
                         identifier.getDatabaseName(), identifier.getObjectName(), branch),
                 request,
-                restAuthFunction.withApiName(RESTApiNames.FAST_FORWARD_BRANCH));
+                restAuthFunction.withApiName(ForwardBranchRequest.API_NAME));
     }
 
     /**
@@ -1448,7 +1488,7 @@ public class RESTApi {
                         resourcePaths.branches(
                                 identifier.getDatabaseName(), identifier.getObjectName()),
                         ListBranchesResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_BRANCHES));
+                        restAuthFunction.withApiName(ListBranchesRequest.API_NAME));
         if (response.branches() == null) {
             return emptyList();
         }
@@ -1470,7 +1510,7 @@ public class RESTApi {
                 resourcePaths.tag(
                         identifier.getDatabaseName(), identifier.getObjectName(), tagName),
                 GetTagResponse.class,
-                restAuthFunction.withApiName(RESTApiNames.GET_TAG));
+                restAuthFunction.withApiName(GetTagRequest.API_NAME));
     }
 
     /**
@@ -1495,7 +1535,7 @@ public class RESTApi {
         client.post(
                 resourcePaths.tags(identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
-                restAuthFunction.withApiName(RESTApiNames.CREATE_TAG));
+                restAuthFunction.withApiName(CreateTagRequest.API_NAME));
     }
 
     /**
@@ -1525,7 +1565,7 @@ public class RESTApi {
                         buildPagedQueryParams(
                                 maxResults, pageToken, Pair.of(TAG_NAME_PREFIX, tagNamePrefix)),
                         ListTagsResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_TAGS));
+                        restAuthFunction.withApiName(ListTagsRequest.API_NAME));
         List<String> tags = response.tags();
         if (tags == null) {
             return new PagedList<>(emptyList(), null);
@@ -1546,7 +1586,7 @@ public class RESTApi {
         client.delete(
                 resourcePaths.tag(
                         identifier.getDatabaseName(), identifier.getObjectName(), tagName),
-                restAuthFunction.withApiName(RESTApiNames.DROP_TAG));
+                restAuthFunction.withApiName(DropTagRequest.API_NAME));
     }
 
     /**
@@ -1562,7 +1602,7 @@ public class RESTApi {
                                 resourcePaths.functions(databaseName),
                                 queryParams,
                                 ListFunctionsResponse.class,
-                                restAuthFunction.withApiName(RESTApiNames.LIST_FUNCTIONS)));
+                                restAuthFunction.withApiName(ListFunctionsRequest.API_NAME)));
     }
 
     /**
@@ -1597,7 +1637,7 @@ public class RESTApi {
                                 pageToken,
                                 Pair.of(FUNCTION_NAME_PATTERN, functionNamePattern)),
                         ListFunctionsResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_FUNCTIONS));
+                        restAuthFunction.withApiName(ListFunctionsRequest.API_NAME));
         List<String> functions = response.functions();
         if (functions == null) {
             return new PagedList<>(emptyList(), null);
@@ -1637,7 +1677,7 @@ public class RESTApi {
                                 pageToken,
                                 Pair.of(FUNCTION_NAME_PATTERN, functionNamePattern)),
                         ListFunctionDetailsResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_FUNCTION_DETAILS));
+                        restAuthFunction.withApiName(ListFunctionDetailsRequest.API_NAME));
         List<GetFunctionResponse> functionDetails = response.data();
         if (functionDetails == null) {
             return new PagedList<>(emptyList(), null);
@@ -1678,7 +1718,7 @@ public class RESTApi {
                                 Pair.of(DATABASE_NAME_PATTERN, databaseNamePattern),
                                 Pair.of(FUNCTION_NAME_PATTERN, functionNamePattern)),
                         ListFunctionsGloballyResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_FUNCTIONS_GLOBALLY));
+                        restAuthFunction.withApiName(ListFunctionsGloballyRequest.API_NAME));
         List<Identifier> functions = response.data();
         if (functions == null) {
             return new PagedList<>(emptyList(), null);
@@ -1705,7 +1745,7 @@ public class RESTApi {
         return client.get(
                 resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
                 GetFunctionResponse.class,
-                restAuthFunction.withApiName(RESTApiNames.GET_FUNCTION));
+                restAuthFunction.withApiName(GetFunctionRequest.API_NAME));
     }
 
     /**
@@ -1723,7 +1763,7 @@ public class RESTApi {
         client.post(
                 resourcePaths.functions(identifier.getDatabaseName()),
                 new CreateFunctionRequest(function),
-                restAuthFunction.withApiName(RESTApiNames.CREATE_FUNCTION));
+                restAuthFunction.withApiName(CreateFunctionRequest.API_NAME));
     }
 
     /**
@@ -1738,7 +1778,7 @@ public class RESTApi {
         checkFunctionName(identifier.getObjectName());
         client.delete(
                 resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
-                restAuthFunction.withApiName(RESTApiNames.DROP_FUNCTION));
+                restAuthFunction.withApiName(DropFunctionRequest.API_NAME));
     }
 
     /**
@@ -1754,7 +1794,7 @@ public class RESTApi {
         client.post(
                 resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
                 new AlterFunctionRequest(changes),
-                restAuthFunction.withApiName(RESTApiNames.ALTER_FUNCTION));
+                restAuthFunction.withApiName(AlterFunctionRequest.API_NAME));
     }
 
     /**
@@ -1770,7 +1810,7 @@ public class RESTApi {
         return client.get(
                 resourcePaths.view(identifier.getDatabaseName(), identifier.getObjectName()),
                 GetViewResponse.class,
-                restAuthFunction.withApiName(RESTApiNames.GET_VIEW));
+                restAuthFunction.withApiName(GetViewRequest.API_NAME));
     }
 
     /**
@@ -1784,7 +1824,7 @@ public class RESTApi {
     public void dropView(Identifier identifier) {
         client.delete(
                 resourcePaths.view(identifier.getDatabaseName(), identifier.getObjectName()),
-                restAuthFunction.withApiName(RESTApiNames.DROP_VIEW));
+                restAuthFunction.withApiName(DropViewRequest.API_NAME));
     }
 
     /**
@@ -1801,7 +1841,7 @@ public class RESTApi {
         client.post(
                 resourcePaths.views(identifier.getDatabaseName()),
                 request,
-                restAuthFunction.withApiName(RESTApiNames.CREATE_VIEW));
+                restAuthFunction.withApiName(CreateViewRequest.API_NAME));
     }
 
     /**
@@ -1820,7 +1860,7 @@ public class RESTApi {
                                 resourcePaths.views(databaseName),
                                 queryParams,
                                 ListViewsResponse.class,
-                                restAuthFunction.withApiName(RESTApiNames.LIST_VIEWS)));
+                                restAuthFunction.withApiName(ListViewsRequest.API_NAME)));
     }
 
     /**
@@ -1853,7 +1893,7 @@ public class RESTApi {
                         buildPagedQueryParams(
                                 maxResults, pageToken, Pair.of(VIEW_NAME_PATTERN, viewNamePattern)),
                         ListViewsResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_VIEWS));
+                        restAuthFunction.withApiName(ListViewsRequest.API_NAME));
         List<String> views = response.getViews();
         if (views == null) {
             return new PagedList<>(emptyList(), null);
@@ -1891,7 +1931,7 @@ public class RESTApi {
                         buildPagedQueryParams(
                                 maxResults, pageToken, Pair.of(VIEW_NAME_PATTERN, viewNamePattern)),
                         ListViewDetailsResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_VIEW_DETAILS));
+                        restAuthFunction.withApiName(ListViewDetailsRequest.API_NAME));
         List<GetViewResponse> views = response.getViewDetails();
         if (views == null) {
             return new PagedList<>(emptyList(), null);
@@ -1932,7 +1972,7 @@ public class RESTApi {
                                 Pair.of(DATABASE_NAME_PATTERN, databaseNamePattern),
                                 Pair.of(VIEW_NAME_PATTERN, viewNamePattern)),
                         ListViewsGloballyResponse.class,
-                        restAuthFunction.withApiName(RESTApiNames.LIST_VIEWS_GLOBALLY));
+                        restAuthFunction.withApiName(ListViewsGloballyRequest.API_NAME));
         List<Identifier> views = response.getViews();
         if (views == null) {
             return new PagedList<>(emptyList(), null);
@@ -1951,11 +1991,11 @@ public class RESTApi {
      *     views
      */
     public void renameView(Identifier fromView, Identifier toView) {
-        RenameTableRequest request = new RenameTableRequest(fromView, toView);
+        RenameViewRequest request = new RenameViewRequest(fromView, toView);
         client.post(
                 resourcePaths.renameView(),
                 request,
-                restAuthFunction.withApiName(RESTApiNames.RENAME_VIEW));
+                restAuthFunction.withApiName(RenameViewRequest.API_NAME));
     }
 
     /**
@@ -1972,7 +2012,7 @@ public class RESTApi {
         client.post(
                 resourcePaths.view(identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
-                restAuthFunction.withApiName(RESTApiNames.ALTER_VIEW));
+                restAuthFunction.withApiName(AlterViewRequest.API_NAME));
     }
 
     /**
@@ -1988,7 +2028,7 @@ public class RESTApi {
         return client.get(
                 resourcePaths.tableToken(identifier.getDatabaseName(), identifier.getObjectName()),
                 GetTableTokenResponse.class,
-                restAuthFunction.withApiName(RESTApiNames.GET_TABLE_TOKEN));
+                restAuthFunction.withApiName(GetTableTokenRequest.API_NAME));
     }
 
     /** Util method to deserialize object from json. */

@@ -33,6 +33,8 @@ import java.beans.ConstructorProperties;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CreateTagRequest implements RESTRequest {
 
+    public static final String API_NAME = "CreateTag";
+
     private static final String FIELD_TAG_NAME = "tagName";
     private static final String FIELD_SNAPSHOT_ID = "snapshotId";
     private static final String FIELD_TIME_RETAINED = "timeRetained";

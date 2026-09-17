@@ -24,4 +24,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgn
 
 /** Request for forwarding branch. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ForwardBranchRequest implements RESTRequest {}
+public class ForwardBranchRequest implements RESTRequest {
+
+    public static final String API_NAME = "FastForwardBranch";
+}

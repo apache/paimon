@@ -47,6 +47,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CreatePartitionsRequest implements RESTRequest {
 
+    public static final String API_NAME = "CreatePartitions";
+
     private static final String FIELD_PARTITION_SPECS = "partitionSpecs";
     private static final String FIELD_IGNORE_IF_EXISTS = "ignoreIfExists";
     private static final String FIELD_PARTITION_STATISTICS = "partitionStatistics";

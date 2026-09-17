@@ -33,6 +33,8 @@ import java.beans.ConstructorProperties;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ResetConsumerRequest implements RESTRequest {
 
+    public static final String API_NAME = "ResetConsumer";
+
     private static final String FIELD_CONSUMER_ID = "consumerId";
     private static final String FIELD_NEXT_SNAPSHOT_ID = "nextSnapshotId";
 

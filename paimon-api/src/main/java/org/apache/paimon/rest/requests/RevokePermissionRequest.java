@@ -35,6 +35,8 @@ import java.beans.ConstructorProperties;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RevokePermissionRequest implements RESTRequest {
 
+    public static final String API_NAME = "RevokePermissionAssignment";
+
     private static final String FIELD_RESOURCE = "resource";
     private static final String FIELD_ACCESS = "access";
     private static final String FIELD_PRINCIPAL = "principal";

@@ -34,6 +34,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 @Experimental
 public class UpsertSemanticViewRequest implements RESTRequest {
 
+    public static final String API_NAME = "UpsertSemanticView";
+
     private final SemanticViewDefinition definition;
 
     @JsonCreator

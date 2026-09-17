@@ -621,6 +621,8 @@ class ListFunctionsGloballyResponse(PagedResponse[Identifier]):
 
 @dataclass
 class AuthTableQueryRequest(RESTRequest):
+    API_NAME = "AuthTableQuery"
+
     select: Optional[List[str]] = json_field("select", default=None)
 
 

@@ -41,6 +41,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class DropPolicyRequest implements RESTRequest {
 
+    public static final String API_NAME = "DropPolicy";
+
     private static final String FIELD_TYPE = "type";
     private static final String FIELD_PRINCIPAL = "principal";
     private static final String FIELD_COLUMN = "column";

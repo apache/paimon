@@ -35,6 +35,8 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CommitTableRequest implements RESTRequest {
 
+    public static final String API_NAME = "CommitTable";
+
     private static final String FIELD_TABLE_ID = "tableId";
     private static final String FIELD_BASE_SNAPSHOT_UUID = "baseSnapshotUuid";
     private static final String FIELD_SNAPSHOT = "snapshot";

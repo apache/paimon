@@ -81,7 +81,7 @@ public class RESTAuthParameter {
         return data;
     }
 
-    /** The API this request calls, as listed in {@link org.apache.paimon.rest.RESTApiNames}. */
+    /** The API this request calls, as its request class declares in {@code API_NAME}. */
     @Nullable
     public String apiName() {
         return apiName;
