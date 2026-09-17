@@ -18,12 +18,13 @@
 """LeRobot-compatible map-style reads from a multimodal Paimon table."""
 
 import bisect
-import hashlib
 import io
 import json
 import math
 import operator
+import pickle
 import sys
+import zlib
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -711,35 +712,21 @@ class _PaimonLeRobotMetadata:
         self.episodes = episodes
         self.tasks = tasks
         self.subtasks = subtasks
-        self._episodes_source = None
+        self._compress_episodes = False
 
     def __getstate__(self):
         state = self.__dict__.copy()
-        source = state.pop("_episodes_source", None)
-        if source is None:
-            return state
-        source_episodes, table, fingerprint = source
-        if self.episodes is not source_episodes:
-            return state
-        episodes = self.episodes
-        default_format = {
-            "type": None, "format_kwargs": {},
-            "columns": episodes.column_names, "output_all_columns": False,
-        }
-        if episodes.format == default_format and not episodes.list_indexes():
-            state["episodes"] = (
-                table, episodes.info, episodes.split, fingerprint)
-            state["_episodes_as_arrow"] = True
+        if state.get("_compress_episodes", False):
+            # Keep worker-startup payloads small without changing Dataset state.
+            state["episodes"] = zlib.compress(
+                pickle.dumps(self.episodes, protocol=pickle.HIGHEST_PROTOCOL),
+                level=1)
+            state["_episodes_zlib"] = True
         return state
 
     def __setstate__(self, state):
-        if state.pop("_episodes_as_arrow", False):
-            from datasets import Dataset
-            table, info, split, fingerprint = state["episodes"]
-            episodes = Dataset(
-                table, info=info, split=split, fingerprint=fingerprint)
-            state["episodes"] = episodes
-            state["_episodes_source"] = (episodes, table, fingerprint)
+        if state.pop("_episodes_zlib", False):
+            state["episodes"] = pickle.loads(zlib.decompress(state["episodes"]))
         self.__dict__.update(state)
 
     def __getattr__(self, name):
@@ -832,7 +819,7 @@ def _load_dataset(table, tag_name):
     frames = _component_table(catalog, raw_table, tag_name)
     episodes_table = _component_table(
         catalog, catalog.get_table(identifiers["episodes"]), tag_name)
-    episodes, episodes_arrow, fingerprint = _episode_dataset(episodes_table)
+    episodes = _episode_dataset(episodes_table)
     tasks_table = _component_table(
         catalog, catalog.get_table(identifiers["tasks"]), tag_name)
     tasks = _component_dataframe(tasks_table, "task_index")
@@ -854,7 +841,7 @@ def _load_dataset(table, tag_name):
     metadata = _PaimonLeRobotMetadata(
         str(table.identifier), tag_name, info, stats, episodes, tasks,
         subtasks)
-    metadata._episodes_source = (episodes, episodes_arrow, fingerprint)
+    metadata._compress_episodes = True
     return frames, metadata
 
 
@@ -890,13 +877,7 @@ def _episode_dataset(table):
         if not name.startswith("stats/")
     ]
     data = _read_arrow(table, projection).sort_by("episode_index")
-    # Keep the fingerprint stable when workers rebuild the Dataset.
-    with pa.BufferOutputStream() as output:
-        with pa.ipc.new_stream(output, data.schema) as writer:
-            writer.write_table(data)
-        fingerprint = hashlib.blake2b(
-            output.getvalue(), digest_size=8).hexdigest()
-    return Dataset(data, fingerprint=fingerprint), data, fingerprint
+    return Dataset(data)
 
 
 def _component_dataframe(table, index_field):
