@@ -53,14 +53,19 @@ _TEMPORAL_ROW_GROUP_CACHE_MAX_SIZE = 64 * 1024 * 1024
 
 
 def join_asof(left, right, *, on, by, direction="backward", tolerance=None,
-              right_on=None, suffix="_right") -> "TemporalAlignment":
-    """Join each left row with at most one time-aligned right row."""
+              right_on=None, suffix="_right",
+              allow_exact_matches=True) -> "TemporalAlignment":
+    """Join each left row with at most one time-aligned right row.
+
+    Set allow_exact_matches=False to exclude equal timestamps.
+    """
     return TemporalAlignment(left, on=on, by=by).join_asof(
         right,
         direction=direction,
         tolerance=tolerance,
         right_on=right_on,
         suffix=suffix,
+        allow_exact_matches=allow_exact_matches,
     )
 
 
@@ -125,8 +130,12 @@ class TemporalAlignment:
         self.schema = self._output_schema()
 
     def join_asof(self, right, *, direction="backward", tolerance=None,
-                  right_on=None, suffix="_right") -> "TemporalAlignment":
-        """Append a right-side as-of join without materializing this scan."""
+                  right_on=None, suffix="_right",
+                  allow_exact_matches=True) -> "TemporalAlignment":
+        """Append a right-side as-of join without materializing this scan.
+
+        Set allow_exact_matches=False to exclude equal timestamps.
+        """
         position = len(self._sources) + 1
         label = "right source %d" % position
         source = _AsOfJoinRight(
@@ -138,6 +147,7 @@ class TemporalAlignment:
             tolerance,
             right_on,
             suffix,
+            allow_exact_matches=allow_exact_matches,
         )
         return self._append(source)
 
@@ -342,11 +352,14 @@ class TemporalAlignment:
 class _AsOfJoinRight:
 
     def __init__(self, label, query, anchor_on, by, direction, tolerance,
-                 right_on, suffix):
+                 right_on, suffix, *, allow_exact_matches=True):
         _validate_join_options(direction, tolerance, right_on, suffix)
+        if not isinstance(allow_exact_matches, bool):
+            raise TypeError("allow_exact_matches must be a bool.")
         self.label = label
         self.query = _pin_scan_to_snapshot(_require_scan(query, label))
         self.direction = direction
+        self.allow_exact_matches = allow_exact_matches
         self.suffix = suffix
         self.anchor_on = anchor_on
         self.on = anchor_on if right_on is None else right_on
@@ -395,7 +408,8 @@ class _AsOfJoinRight:
             return None
         target_key = anchor_row[_TIME_KEY]
         index = _match_index(
-            self._time_keys, target_key, self.direction, *bounds)
+            self._time_keys, target_key, self.direction, *bounds,
+            allow_exact_matches=self.allow_exact_matches)
         if index is None:
             return None
         matched_key = _python_scalar(self._time_keys[index])
@@ -1464,24 +1478,31 @@ def _project_effective_schema(
     return pa.schema(fields, metadata=schema.metadata)
 
 
-def _match_index(times, target, method, start=0, end=None):
+def _match_index(times, target, method, start=0, end=None, *,
+                 allow_exact_matches=True):
     end = len(times) if end is None else end
     if start >= end:
         return None
     position = bisect_left(times, target, start, end)
     if method == "backward":
-        position = bisect_right(times, target, start, end)
+        if allow_exact_matches:
+            position = bisect_right(times, target, start, end)
         return position - 1 if position > start else None
     if method == "forward":
+        if not allow_exact_matches:
+            position = bisect_right(times, target, position, end)
         return position if position < end else None
     if method == "nearest":
-        if position < end and times[position] == target:
+        if (allow_exact_matches
+                and position < end and times[position] == target):
             return bisect_right(times, target, position, end) - 1
-        if position == start:
-            return start
-        if position == end:
-            return end - 1
         before = position - 1
+        if not allow_exact_matches:
+            position = bisect_right(times, target, position, end)
+        if before < start:
+            return position if position < end else None
+        if position == end:
+            return before
         before_value = _python_scalar(times[before])
         after_value = _python_scalar(times[position])
         if target - before_value <= after_value - target:

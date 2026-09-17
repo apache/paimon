@@ -77,10 +77,21 @@ for batch in aligned.to_arrow_batch_reader(batch_size=128):
 ```
 
 `direction` is `backward`, `forward`, or `nearest`; tolerance is inclusive and
-zero means exact. Nearest ties use the earlier time. For duplicate timestamps,
-backward uses the last row and forward uses the first. Nearest uses the last
+zero permits only exact matches. Nearest ties use the earlier time. For duplicate
+timestamps, backward uses the last row and forward uses the first. Nearest uses the last
 row for an exact match; otherwise it uses the backward or forward candidate's
 rule. Misses return null.
+
+Both top-level and chained `join_asof` calls accept `allow_exact_matches`, which
+defaults to `True`. Set it to `False` to exclude all right rows with the same
+timestamp as the left row. Backward then matches strictly earlier timestamps,
+forward matches strictly later timestamps, and nearest selects the closest
+non-equal timestamp, still preferring the earlier time on ties. For example,
+with a left time of `10` and right times `[9, 10]`, strict backward matches `9`.
+This is useful when aligning an event with a state from strictly before it.
+Combining `allow_exact_matches=False` with `tolerance=0` (or `timedelta(0)` for
+timestamp keys) produces no matches: left rows are preserved with null right
+values.
 
 Keys must be non-null with matching types. Use `right_on` for a different right
 timestamp and `suffix` for conflicts. Select the right timestamp to compute the
