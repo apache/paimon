@@ -203,13 +203,21 @@ class _DeleteRequestHandler(BaseHTTPRequestHandler):
                 if item.tag.rsplit("}", 1)[-1] == "Key"]
         objects = (self.server.bucket_objects.setdefault(bucket, set())
                    if hasattr(self.server, "bucket_objects") else self.server.objects)
+        failed = getattr(self.server, "fail_delete_key_once", None)
+        if failed in keys:
+            self.server.fail_delete_key_once = None
+        deleted = []
         for key in keys:
-            objects.discard(key)
-            if key == getattr(self.server, "inject_late_after_delete", None):
-                objects.add(self.server.prefix + "late.parquet")
-        result = "<DeleteResult>{}</DeleteResult>".format(
+            if key != failed:
+                objects.discard(key)
+                deleted.append(key)
+                if key == getattr(self.server, "inject_late_after_delete", None):
+                    objects.add(self.server.prefix + "late.parquet")
+        result = "<DeleteResult>{}{}</DeleteResult>".format(
             "".join("<Deleted><Key>{}</Key></Deleted>".format(escape(key))
-                    for key in keys))
+                    for key in deleted),
+            "<Error><Key>{}</Key><Code>AccessDenied</Code></Error>".format(
+                escape(failed)) if failed in keys else "")
         self._respond(200, result.encode())
 
     def log_message(self, *args):
@@ -1579,6 +1587,62 @@ class CustomS3EndpointTest(unittest.TestCase):
             self.assertIn("/test-bucket/" + carriage_return, individual)
             self.assertIn("/test-bucket/" + control, individual)
             self.assertEqual(1, sum(
+                method == "POST" for method, _ in server.requests))
+        finally:
+            server.shutdown()
+            server.server_close()
+            server_thread.join()
+
+    @unittest.skipUnless(
+        parse(pyarrow.__version__) >= parse("22.0.0"),
+        "requires PyArrow 22+ and boto3",
+    )
+    def test_recursive_delete_retries_partial_batch_failure(self):
+        server = _ThreadingHTTPServer(
+            ("127.0.0.1", 0), _DeleteRequestHandler)
+        server.requests = []
+        server.prefix = "parent/table/"
+        deleted = server.prefix + "data/deleted.parquet"
+        failed = server.prefix + "data/failed.parquet"
+        schema_zero = server.prefix + "schema/schema-0"
+        server.objects = {server.prefix, deleted, failed, schema_zero}
+        server.fail_delete_key_once = failed
+        server.late_object_added = False
+        server.missing_object_removed = False
+        server_thread = threading.Thread(target=server.serve_forever)
+        server_thread.start()
+        try:
+            options = Options({
+                S3Options.S3_ACCESS_KEY_ID.key(): "ak",
+                S3Options.S3_ACCESS_KEY_SECRET.key(): "sk",
+                S3Options.S3_ENDPOINT.key():
+                    "http://127.0.0.1:{}".format(server.server_port),
+                S3Options.S3_REGION.key(): "us-east-1",
+                "fs.s3.path.style.access": "true",
+            })
+            with mock.patch.object(
+                    PyArrowFileIO, "_initialize_s3_fs", return_value=mock.Mock()), \
+                    mock.patch.dict(os.environ, {
+                        "NO_PROXY": "127.0.0.1,localhost",
+                        "no_proxy": "127.0.0.1,localhost",
+                    }):
+                file_io = PyArrowFileIO("s3://test-bucket/parent/table", options)
+                file_io.filesystem = mock.Mock(spec=pafs.S3FileSystem)
+                file_io.filesystem.get_file_info.return_value = [
+                    _file_info("test-bucket/parent/table",
+                               pafs.FileType.Directory)]
+                with self.assertRaisesRegex(OSError, "AccessDenied") as error:
+                    file_io.delete(
+                        "s3://test-bucket/parent/table", recursive=True)
+                self.assertIn(failed, str(error.exception))
+                self.assertEqual(
+                    {server.prefix, failed, schema_zero}, server.objects)
+                self.assertTrue(file_io.delete(
+                    "s3://test-bucket/parent/table", recursive=True))
+                file_io._s3_delete_client.close()
+
+            self.assertEqual({"parent/"}, server.objects)
+            self.assertEqual(3, sum(
                 method == "POST" for method, _ in server.requests))
         finally:
             server.shutdown()
