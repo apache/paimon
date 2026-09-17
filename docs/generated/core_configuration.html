@@ -234,7 +234,7 @@ under the License.
             <td><h5>changelog-producer.metadata-field-prefix</h5></td>
             <td style="word-wrap: break-word;">"__internal__"</td>
             <td>String</td>
-            <td>The prefix used for naming the extra metadata columns created by 'changelog-producer.expose-field-as-metadata'. For example, with the default prefix '__internal__' and a preserved column 'event_ts', the metadata column is named '__internal__event_ts'. Change this if the default prefix conflicts with existing column names.</td>
+            <td>The prefix used for naming the extra metadata columns created by 'changelog-producer.expose-field-as-metadata'. For example, with the default prefix '__internal__' and a preserved column 'event_ts', the metadata column is named '__internal__event_ts'. The same name is used as the Flink readable metadata key. Change this if the default prefix conflicts with existing column names.</td>
         </tr>
         <tr>
             <td><h5>changelog-producer.row-deduplicate</h5></td>
