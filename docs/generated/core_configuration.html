@@ -216,7 +216,7 @@ under the License.
             <td><h5>changelog-producer.expose-field-as-metadata</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>A comma-separated list of column names whose values from the incoming event (merged result) should be stored as additional metadata columns in all changelog records. For retraction records (-U, -D), the regular value columns retain the correct before-image so standard changelog consumers (filters, aggregations) work correctly while the event values are available as extra '&lt;prefix&gt;&lt;column&gt;' columns. For forward records (+I, +U), the metadata columns mirror the regular values for schema consistency. These columns can be read as Flink metadata columns by sinks that need the event timestamp (e.g. Cassandra WRITETIME). Only valid when changelog-producer is lookup.</td>
+            <td>A comma-separated list of column names whose values from the incoming event (merged result) should be stored as additional metadata columns in all changelog records. For retraction records (-U, -D), the regular value columns retain the correct before-image so standard changelog consumers (filters, aggregations) work correctly while the event values are available as extra '&lt;prefix&gt;&lt;column&gt;' columns. For forward records (+I, +U), the metadata columns mirror the regular values for schema consistency. These columns can be read as Flink metadata columns by sinks that need the event timestamps for conflict resolution. Only valid when changelog-producer is lookup.</td>
         </tr>
         <tr>
             <td><h5>changelog-producer.ignore-delete</h5></td>
