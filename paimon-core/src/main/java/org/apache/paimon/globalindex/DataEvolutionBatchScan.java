@@ -271,6 +271,11 @@ public class DataEvolutionBatchScan implements DataTableScan {
     }
 
     @Override
+    public List<BinaryRow> topNPartitions(int num, int partitionFieldCount) {
+        return batchScan.topNPartitions(num, partitionFieldCount);
+    }
+
+    @Override
     public Plan plan() {
         RowRangeIndex rowRangeIndex = this.pushedRowRangeIndex;
         ScoreGetter scoreGetter = null;

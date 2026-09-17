@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.SortValue;
@@ -159,6 +160,12 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
             startingScanner = createStartingScanner(false);
         }
         return startingScanner.scanPartitions(snapshotReader);
+    }
+
+    @Override
+    public List<BinaryRow> topNPartitions(int num, int partitionFieldCount) {
+        return PartitionTopNUtils.topNFileStorePartitions(
+                listPartitionEntries(), schema.logicalPartitionType(), num, partitionFieldCount);
     }
 
     private Optional<StartingScanner.Result> applyPushDownLimit() {

@@ -1394,6 +1394,58 @@ public class FormatTableScanTest {
                                                         .equals(entry.partition().getString(0))));
     }
 
+    @TestTemplate
+    void testTopNPartitions() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO fileIO = LocalFileIO.create();
+        FormatTable formatTable = createYearMonthFormatTable(fileIO, tableLocation);
+        String defaultPartName = formatTable.defaultPartName();
+
+        String nullPartition =
+                enablePartitionValueOnly
+                        ? defaultPartName + "/1"
+                        : "year=" + defaultPartName + "/month=1";
+        writeTestFile(fileIO, new Path(tableLocation, nullPartition + "/data.csv"), 10);
+
+        String empty2026 = enablePartitionValueOnly ? "2026/1" : "year=2026/month=1";
+        fileIO.mkdirs(new Path(tableLocation, empty2026));
+        assertThat(new FormatTableScan(formatTable, null, null).topNPartitions(1, 1)).isEmpty();
+
+        String data2025 = enablePartitionValueOnly ? "2025/1" : "year=2025/month=1";
+        writeTestFile(fileIO, new Path(tableLocation, data2025 + "/data.csv"), 10);
+        assertThat(
+                        yearMonthPartitions(
+                                new FormatTableScan(formatTable, null, null).topNPartitions(1, 1)))
+                .containsExactly("2025/1");
+
+        String data2026 = enablePartitionValueOnly ? "2026/2" : "year=2026/month=2";
+        writeTestFile(fileIO, new Path(tableLocation, data2026 + "/data.csv"), 10);
+        String data2026Month3 = enablePartitionValueOnly ? "2026/3" : "year=2026/month=3";
+        writeTestFile(fileIO, new Path(tableLocation, data2026Month3 + "/data.csv"), 10);
+        FormatTableScan scan = new FormatTableScan(formatTable, null, null);
+        assertThat(yearMonthPartitions(scan.topNPartitions(1, 1)))
+                .containsExactly("2026/3", "2026/2");
+        assertThat(yearMonthPartitions(scan.topNPartitions(2, 1)))
+                .containsExactly("2026/3", "2026/2", "2025/1");
+        assertThat(yearMonthPartitions(scan.topNPartitions(1, 2))).containsExactly("2026/3");
+
+        PredicateBuilder builder = new PredicateBuilder(formatTable.partitionType());
+        PartitionPredicate upTo2025 =
+                PartitionPredicate.fromPredicate(
+                        formatTable.partitionType(), builder.lessOrEqual(0, 2025));
+        assertThat(
+                        yearMonthPartitions(
+                                new FormatTableScan(formatTable, upTo2025, null)
+                                        .topNPartitions(1, 1)))
+                .containsExactly("2025/1");
+    }
+
+    private List<String> yearMonthPartitions(List<BinaryRow> partitions) {
+        return partitions.stream()
+                .map(row -> row.getInt(0) + "/" + row.getInt(1))
+                .collect(java.util.stream.Collectors.toList());
+    }
+
     private void createYearMonthPartitionDirs(LocalFileIO fileIO, Path tableLocation)
             throws IOException {
         for (int year = 2022; year <= 2026; year++) {
