@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 
@@ -35,8 +36,32 @@ public class FixedBucketSink extends FlinkWriteSink<InternalRow> {
 
     private static final long serialVersionUID = 1L;
 
+    private final PartitionBucketMapping partitionBucketMapping;
+
     public FixedBucketSink(FileStoreTable table, @Nullable Map<String, String> overwritePartition) {
+        this(table, overwritePartition, PartitionBucketMapping.loadFromTable(table));
+    }
+
+    public FixedBucketSink(
+            FileStoreTable table,
+            @Nullable Map<String, String> overwritePartition,
+            PartitionBucketMapping partitionBucketMapping) {
         super(table, overwritePartition);
+        this.partitionBucketMapping = partitionBucketMapping;
+    }
+
+    @Override
+    protected StoreSinkWrite.Provider createWriteProvider(
+            org.apache.flink.streaming.api.environment.CheckpointConfig checkpointConfig,
+            boolean isStreaming,
+            boolean hasSinkMaterializer) {
+        return StoreSinkWrite.createWriteProvider(
+                table,
+                checkpointConfig,
+                isStreaming,
+                ignorePreviousFiles(),
+                hasSinkMaterializer,
+                partitionBucketMapping);
     }
 
     @Override

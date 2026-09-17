@@ -26,6 +26,8 @@ import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.utils.Preconditions;
@@ -124,6 +126,22 @@ public interface StoreSinkWrite {
             boolean isStreaming,
             boolean ignorePreviousFiles,
             boolean hasSinkMaterializer) {
+        return createWriteProvider(
+                fileStoreTable,
+                checkpointConfig,
+                isStreaming,
+                ignorePreviousFiles,
+                hasSinkMaterializer,
+                null);
+    }
+
+    static StoreSinkWrite.Provider createWriteProvider(
+            FileStoreTable fileStoreTable,
+            CheckpointConfig checkpointConfig,
+            boolean isStreaming,
+            boolean ignorePreviousFiles,
+            boolean hasSinkMaterializer,
+            @Nullable PartitionBucketMapping partitionBucketMapping) {
         SerializableRunnable assertNoSinkMaterializer =
                 () ->
                         Preconditions.checkArgument(
@@ -171,7 +189,9 @@ public interface StoreSinkWrite {
                             finalDeltaCommits,
                             isStreaming,
                             memoryPoolFactory,
-                            metricGroup);
+                            metricGroup,
+                            partitionBucketMapping,
+                            tableWriteFactory(partitionBucketMapping));
                 };
             }
 
@@ -187,7 +207,9 @@ public interface StoreSinkWrite {
                             waitCompaction,
                             isStreaming,
                             memoryPoolFactory,
-                            metricGroup);
+                            metricGroup,
+                            partitionBucketMapping,
+                            tableWriteFactory(partitionBucketMapping));
                 };
             }
         }
@@ -203,8 +225,22 @@ public interface StoreSinkWrite {
                     waitCompaction,
                     isStreaming,
                     memoryPoolFactory,
-                    metricGroup);
+                    metricGroup,
+                    partitionBucketMapping,
+                    tableWriteFactory(partitionBucketMapping));
         };
+    }
+
+    static StoreSinkWriteImpl.TableWriteFactory tableWriteFactory(
+            @Nullable PartitionBucketMapping partitionBucketMapping) {
+        if (partitionBucketMapping == null) {
+            return FileStoreTable::newWrite;
+        }
+        return (table, commitUser, writeId) ->
+                table.newWrite(
+                        commitUser,
+                        writeId,
+                        new FixedBucketRowKeyExtractor(table.schema(), partitionBucketMapping));
     }
 
     static StoreSinkWrite.Provider createPostponeFixedBucketWriteProvider(
@@ -227,6 +263,7 @@ public interface StoreSinkWrite {
                     isStreaming,
                     memoryPoolFactory,
                     metricGroup,
+                    null,
                     (t, user, writeId) ->
                             t.newPostponeFixedBucketWriteBuilder().newWrite(user, writeId));
         };
