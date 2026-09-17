@@ -278,7 +278,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 createReader(dataSplit, rowRanges, info.actualReadType), info);
     }
 
-    private DataEvolutionFileReader createUnionReader(
+    private RecordReader<InternalRow> createUnionReader(
             List<DataFileMeta> needMergeFiles,
             BinaryRow partition,
             DataFilePathFactory dataFilePathFactory,
@@ -286,6 +286,54 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             RowType readRowType,
             @Nullable DeletionVectorWithRange deletionVector)
             throws IOException {
+        List<DataEvolutionVectorReadPlanner.ReadRange> vectorRanges =
+                DataEvolutionVectorReadPlanner.plan(
+                        needMergeFiles,
+                        readRowType,
+                        file ->
+                                schemaFetcher
+                                        .apply(file.schemaId())
+                                        .dataFileSchema(file.writeCols())
+                                        .logicalRowType());
+        if (vectorRanges != null) {
+            List<FieldBunch> nonVectorBunches =
+                    splitFieldBunches(
+                            needMergeFiles.stream()
+                                    .filter(file -> !isVectorStoreFile(file.fileName()))
+                                    .collect(Collectors.toList()),
+                            file -> schemaFetcher.apply(file.schemaId()).logicalRowType(),
+                            rowRanges != null);
+            List<Range> selectedRanges = Range.sortAndMergeOverlap(rowRanges, true);
+            List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
+            for (DataEvolutionVectorReadPlanner.ReadRange vectorRange : vectorRanges) {
+                List<Range> ranges = Collections.singletonList(vectorRange.range);
+                if (rowRanges != null) {
+                    ranges = Range.and(ranges, selectedRanges);
+                }
+                if (ranges.isEmpty()) {
+                    continue;
+                }
+                // Union readers have fixed field offsets. Apply the same selection to every
+                // column reader so their rows remain aligned when a vector provider changes.
+                List<Range> readRanges = ranges;
+                List<FieldBunch> bunches = new ArrayList<>(nonVectorBunches);
+                // Providers are newest-first within this range. Keep fields from the same
+                // physical file together so the column planner opens that file only once.
+                vectorRange.files.forEach(file -> bunches.add(new DataBunch(file)));
+                suppliers.add(
+                        () ->
+                                createUnionReader(
+                                        bunches,
+                                        needMergeFiles,
+                                        partition,
+                                        dataFilePathFactory,
+                                        readRanges,
+                                        readRowType,
+                                        deletionVector));
+            }
+            return ConcatRecordReader.create(suppliers);
+        }
+
         List<FieldBunch> fieldsFiles =
                 splitFieldBunches(
                         needMergeFiles,
@@ -297,6 +345,26 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                             return schemaFetcher.apply(file.schemaId()).logicalRowType();
                         },
                         rowRanges != null);
+
+        return createUnionReader(
+                fieldsFiles,
+                needMergeFiles,
+                partition,
+                dataFilePathFactory,
+                rowRanges,
+                readRowType,
+                deletionVector);
+    }
+
+    private RecordReader<InternalRow> createUnionReader(
+            List<FieldBunch> fieldsFiles,
+            List<DataFileMeta> needMergeFiles,
+            BinaryRow partition,
+            DataFilePathFactory dataFilePathFactory,
+            List<Range> rowRanges,
+            RowType readRowType,
+            @Nullable DeletionVectorWithRange deletionVector)
+            throws IOException {
 
         long rowCount = fieldsFiles.get(0).rowCount();
         long firstRowId = bunchFirstRowId(fieldsFiles.get(0));
@@ -331,6 +399,21 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         DataEvolutionReadPlanner.DataEvolutionReadPlan plan =
                 new DataEvolutionReadPlanner(readRowType, bunchAvailTypes, nestedFieldEnabled)
                         .plan();
+        if (plan.bunchReadFields.stream().allMatch(List::isEmpty)) {
+            // For example, a newly added vector column may cover only part of the normal file's
+            // row range. Projecting only that column leaves no fields to merge in uncovered ranges,
+            // but the selected rows must still be emitted.
+            // Read one bunch and let schema evolution fill the missing fields with NULL.
+            return createMissingFieldsReader(
+                    partition,
+                    fieldsFiles.get(0),
+                    bunchDataSchemas[0],
+                    dataFilePathFactory,
+                    formatBuilder,
+                    rowRanges,
+                    readRowType,
+                    deletionVector);
+        }
 
         // Build the per-bunch readers from the planned partial read row types.
         for (int i = 0; i < numBunches; i++) {
@@ -377,6 +460,35 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         plan.rowOffsets, plan.fieldOffsets, fileRecordReaders, plan.nested)
                 : new DataEvolutionFileReader(
                         plan.rowOffsets, plan.fieldOffsets, fileRecordReaders);
+    }
+
+    private RecordReader<InternalRow> createMissingFieldsReader(
+            BinaryRow partition,
+            FieldBunch bunch,
+            TableSchema dataSchema,
+            DataFilePathFactory dataFilePathFactory,
+            Builder formatBuilder,
+            List<Range> rowRanges,
+            RowType readRowType,
+            @Nullable DeletionVectorWithRange deletionVector)
+            throws IOException {
+        DataFileMeta firstFile = bunch.files().get(0);
+        // Use the physical schema: the full table schema may declare columns this file never wrote.
+        FormatReaderMapping mapping =
+                formatBuilder.build(
+                        readTarget(firstFile, dataFilePathFactory, rowRanges).formatIdentifier,
+                        schema,
+                        dataSchema,
+                        readRowType.getFields(),
+                        false);
+        return createFieldBunchReader(
+                partition,
+                bunch,
+                dataFilePathFactory,
+                mapping,
+                rowRanges,
+                readRowType,
+                deletionVector);
     }
 
     private boolean nestedFieldEnabledFor(List<DataFileMeta> files) {
