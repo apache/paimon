@@ -103,9 +103,6 @@ Lookup uses memory and local disk caches:
 | `lookup.cache-max-disk-size` | Unlimited | Bound local disk usage |
 | `lookup.cache-max-memory-size` | `256 mb` | Bound in-memory cache usage |
 
-In Flink, `execution.checkpointing.max-concurrent-checkpoints` can also affect throughput when
-checkpoint completion waits for compaction. Tune it with checkpoint duration and resource usage.
-
 `lookup` is incompatible with `full-compaction.delta-commits`. For periodic full compaction with
 changelog generation, use `full-compaction` instead.
 
