@@ -31,7 +31,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from types import SimpleNamespace
 from unittest import mock
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 from xml.etree import ElementTree
 from xml.sax.saxutils import escape
 
@@ -113,25 +113,35 @@ class _DeleteRequestHandler(BaseHTTPRequestHandler):
             else:
                 contents.append(key)
         contents = contents[:max_keys]
+        encode_keys = getattr(self.server, "encode_list_keys", False)
+        response_prefix = quote(prefix, safe="/") if encode_keys else prefix
+        response_delimiter = quote(delimiter, safe="/") if encode_keys else delimiter
+        response_contents = (
+            [quote(key, safe="/") for key in contents]
+            if encode_keys else contents)
+        response_common_prefixes = (
+            [quote(key, safe="/") for key in sorted(common_prefixes)]
+            if encode_keys else sorted(common_prefixes))
         body = (
             '<?xml version="1.0" encoding="UTF-8"?>'
             '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
             '<Name>{}</Name><Prefix>{}</Prefix><Delimiter>{}</Delimiter>'
-            '<KeyCount>{}</KeyCount><MaxKeys>{}</MaxKeys>'
+            '<KeyCount>{}</KeyCount><MaxKeys>{}</MaxKeys>{}'
             '<IsTruncated>false</IsTruncated>{}{}</ListBucketResult>'.format(
-                escape(bucket), escape(prefix), escape(delimiter),
+                escape(bucket), escape(response_prefix), escape(response_delimiter),
                 len(contents) + len(common_prefixes), max_keys,
+                '<EncodingType>url</EncodingType>' if encode_keys else '',
                 "".join(
                     "<Contents><Key>{}</Key>"
                     "<LastModified>2026-01-01T00:00:00Z</LastModified>"
                     "<Size>{}</Size><StorageClass>STANDARD</StorageClass>"
                     "</Contents>".format(
                         escape(key), 0 if key.endswith("/") else 1)
-                    for key in contents),
+                    for key in response_contents),
                 "".join(
                     "<CommonPrefixes><Prefix>{}</Prefix></CommonPrefixes>".format(
                         escape(child))
-                    for child in sorted(common_prefixes))))
+                    for child in response_common_prefixes)))
         if (not hasattr(self.server, "bucket_objects")
                 and keys == [self.server.prefix]
                 and not self.server.late_object_added):
@@ -186,6 +196,8 @@ class _DeleteRequestHandler(BaseHTTPRequestHandler):
         if self.headers.get("Content-MD5") != content_md5:
             return self._respond(
                 400, b"<Error><Code>MissingArgument</Code></Error>")
+        if b"\x01" in body:
+            return self._respond(400, b"<Error><Code>MalformedXML</Code></Error>")
         bucket, _ = self._target()
         keys = [item.text for item in ElementTree.fromstring(body).iter()
                 if item.tag.rsplit("}", 1)[-1] == "Key"]
@@ -725,8 +737,10 @@ class OssLegacyModeTest(unittest.TestCase):
         client.delete_objects.return_value = {
             "Deleted": [], "Errors": [{"Key": data, "Code": "AccessDenied"}]}
 
-        with self.assertRaisesRegex(OSError, "batch delete incomplete"):
+        with self.assertRaisesRegex(OSError, "batch delete incomplete") as error:
             file_io.delete(TABLE_PATH, recursive=True)
+        self.assertIn("AccessDenied", str(error.exception))
+        self.assertIn(data, str(error.exception))
 
         client.delete_object.assert_not_called()
         client.put_object.assert_not_called()
@@ -1490,6 +1504,63 @@ class CustomS3EndpointTest(unittest.TestCase):
                 ["/test-bucket"],
                 [urlsplit(path).path for method, path in server.requests
                  if method == "POST"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            server_thread.join()
+
+    @unittest.skipUnless(
+        parse(pyarrow.__version__) >= parse("22.0.0"),
+        "requires PyArrow 22+ and boto3",
+    )
+    def test_recursive_delete_control_character_keys(self):
+        server = _ThreadingHTTPServer(
+            ("127.0.0.1", 0), _DeleteRequestHandler)
+        server.requests = []
+        server.prefix = "parent/table/"
+        server.encode_list_keys = True
+        carriage_return = server.prefix + "data/part\rfile.parquet"
+        control = server.prefix + "data/part\x01file.parquet"
+        server.objects = {
+            server.prefix, carriage_return, control,
+            server.prefix + "schema/schema-0",
+        }
+        server.late_object_added = False
+        server.missing_object_removed = False
+        server_thread = threading.Thread(target=server.serve_forever)
+        server_thread.start()
+        try:
+            options = Options({
+                S3Options.S3_ACCESS_KEY_ID.key(): "ak",
+                S3Options.S3_ACCESS_KEY_SECRET.key(): "sk",
+                S3Options.S3_ENDPOINT.key():
+                    "http://127.0.0.1:{}".format(server.server_port),
+                S3Options.S3_REGION.key(): "us-east-1",
+                "fs.s3.path.style.access": "true",
+            })
+            with mock.patch.object(
+                    PyArrowFileIO, "_initialize_s3_fs", return_value=mock.Mock()), \
+                    mock.patch.dict(os.environ, {
+                        "NO_PROXY": "127.0.0.1,localhost",
+                        "no_proxy": "127.0.0.1,localhost",
+                    }):
+                file_io = PyArrowFileIO("s3://test-bucket/parent/table", options)
+                file_io.filesystem = mock.Mock(spec=pafs.S3FileSystem)
+                file_io.filesystem.get_file_info.return_value = [
+                    _file_info("test-bucket/parent/table",
+                               pafs.FileType.Directory)]
+                self.assertTrue(file_io.delete(
+                    "s3://test-bucket/parent/table", recursive=True))
+                file_io._s3_delete_client.close()
+
+            self.assertEqual({"parent/"}, server.objects)
+            individual = [unquote(urlsplit(path).path)
+                          for method, path in server.requests
+                          if method == "DELETE"]
+            self.assertIn("/test-bucket/" + carriage_return, individual)
+            self.assertIn("/test-bucket/" + control, individual)
+            self.assertEqual(1, sum(
+                method == "POST" for method, _ in server.requests))
         finally:
             server.shutdown()
             server.server_close()

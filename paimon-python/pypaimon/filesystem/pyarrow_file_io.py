@@ -286,20 +286,9 @@ class PyArrowFileIO(FileIO):
         return self._create_s3_filesystem(client_kwargs, compatible=True)
 
     def _initialize_s3_fs(self) -> FileSystem:
-        access_key = self._get_property(
-            S3Options.S3_ACCESS_KEY_ID.key(),
-            *self._s3_key_variants("access-key", "access.key"))
-        secret_key = self._get_property(
-            S3Options.S3_ACCESS_KEY_SECRET.key(),
-            *self._s3_key_variants("secret-key", "secret.key"))
-        session_token = self._get_property(
-            S3Options.S3_SECURITY_TOKEN.key(),
-            *self._s3_key_variants(
-                "session-token", "session.token",
-                "security-token", "security.token"))
-        region = self._get_s3_property("region", S3Options.S3_REGION.key())
+        connection = self._s3_connection_options()
 
-        if access_key:
+        if connection["access_key"]:
             # When explicit credentials are provided, disable the EC2 Instance Metadata
             # Service (IMDS) probe to avoid multi-second timeouts in non-AWS environments.
             # Uses setdefault so that an explicit user setting is never overridden.
@@ -308,22 +297,38 @@ class PyArrowFileIO(FileIO):
 
         client_kwargs = {
             "endpoint_override": self._s3_endpoint,
-            "access_key": access_key,
-            "secret_key": secret_key,
-            "session_token": session_token,
-            "region": region,
+            "access_key": connection["access_key"],
+            "secret_key": connection["secret_key"],
+            "session_token": connection["session_token"],
+            "region": connection["region"],
         }
         if self._pyarrow_gte_16:
-            path_style_access = (
-                self._get_s3_boolean_property("path-style-access") or
-                self._get_s3_boolean_property("path.style.access"))
-            client_kwargs["force_virtual_addressing"] = not path_style_access
+            client_kwargs["force_virtual_addressing"] = not connection["path_style"]
 
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)
 
         return self._create_s3_filesystem(
             client_kwargs, compatible=bool(self._s3_endpoint))
+
+    def _s3_connection_options(self):
+        return {
+            "access_key": self._get_property(
+                S3Options.S3_ACCESS_KEY_ID.key(),
+                *self._s3_key_variants("access-key", "access.key")),
+            "secret_key": self._get_property(
+                S3Options.S3_ACCESS_KEY_SECRET.key(),
+                *self._s3_key_variants("secret-key", "secret.key")),
+            "session_token": self._get_property(
+                S3Options.S3_SECURITY_TOKEN.key(),
+                *self._s3_key_variants(
+                    "session-token", "session.token",
+                    "security-token", "security.token")),
+            "region": self._get_s3_property("region", S3Options.S3_REGION.key()),
+            "path_style": (self._pyarrow_gte_16 and (
+                self._get_s3_boolean_property("path-style-access") or
+                self._get_s3_boolean_property("path.style.access"))),
+        }
 
     def _initialize_hdfs_fs(self, scheme: str, netloc: Optional[str]) -> FileSystem:
         if 'HADOOP_HOME' not in os.environ:
@@ -660,12 +665,29 @@ class PyArrowFileIO(FileIO):
             if not batch:
                 return
             PyArrowFileIO._check_s3_delete_deadline(deadline, path_str)
+            ordinary = []
+            for key in batch:
+                if key.isprintable():
+                    ordinary.append(key)
+                else:
+                    # Non-printable keys may not round-trip through DeleteObjects XML.
+                    PyArrowFileIO._check_s3_delete_deadline(deadline, path_str)
+                    client.delete_object(Bucket=bucket, Key=key)
+            if not ordinary:
+                continue
             response = client.delete_objects(
                 Bucket=bucket,
-                Delete={"Objects": [{"Key": key} for key in batch], "Quiet": False})
+                Delete={"Objects": [{"Key": key} for key in ordinary],
+                        "Quiet": False})
             deleted = [item["Key"] for item in response.get("Deleted", ())]
-            if response.get("Errors") or set(deleted) != set(batch) \
-                    or len(deleted) != len(batch):
+            errors = response.get("Errors", ())
+            if errors:
+                examples = ", ".join(
+                    "{}: {!r}".format(item.get("Code"), item.get("Key"))
+                    for item in errors[:3])
+                raise OSError(
+                    f"S3 batch delete incomplete for {path_str}: {examples}")
+            if set(deleted) != set(ordinary) or len(deleted) != len(ordinary):
                 raise OSError(f"S3 batch delete incomplete for {path_str}")
 
     @staticmethod
@@ -689,22 +711,12 @@ class PyArrowFileIO(FileIO):
             addressing_style = "virtual"
         else:
             endpoint = self._s3_endpoint
-            access_key = self._get_property(
-                S3Options.S3_ACCESS_KEY_ID.key(),
-                *self._s3_key_variants("access-key", "access.key"))
-            secret_key = self._get_property(
-                S3Options.S3_ACCESS_KEY_SECRET.key(),
-                *self._s3_key_variants("secret-key", "secret.key"))
-            session_token = self._get_property(
-                S3Options.S3_SECURITY_TOKEN.key(),
-                *self._s3_key_variants(
-                    "session-token", "session.token",
-                    "security-token", "security.token"))
-            region = self._get_s3_property("region", S3Options.S3_REGION.key())
-            path_style = (
-                self._get_s3_boolean_property("path-style-access") or
-                self._get_s3_boolean_property("path.style.access"))
-            addressing_style = "path" if path_style else "virtual"
+            connection = self._s3_connection_options()
+            access_key = connection["access_key"]
+            secret_key = connection["secret_key"]
+            session_token = connection["session_token"]
+            region = connection["region"]
+            addressing_style = "path" if connection["path_style"] else "virtual"
 
         region = region or self.filesystem.region
         if endpoint and "://" not in endpoint:
