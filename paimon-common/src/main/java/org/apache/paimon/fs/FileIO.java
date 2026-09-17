@@ -35,9 +35,11 @@ import java.io.Closeable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.InterruptedIOException;
 import java.io.OutputStreamWriter;
 import java.io.Serializable;
 import java.net.URI;
+import java.nio.channels.ClosedByInterruptException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -341,6 +343,32 @@ public interface FileIO extends Serializable, Closeable {
                 builder.append(line);
             }
             return builder.toString();
+        } catch (FileNotFoundException e) {
+            throw e;
+        } catch (InterruptedIOException | ClosedByInterruptException e) {
+            // An interrupted read says nothing about whether the file is still there.
+            throw e;
+        } catch (IOException e) {
+            // Some object stores throw a plain IOException for a file deleted during reading.
+            boolean missing;
+            try {
+                missing = !exists(path);
+            } catch (IOException | RuntimeException checkFailure) {
+                // Keep the original failure when the file cannot be confirmed to be gone.
+                if (checkFailure != e) {
+                    e.addSuppressed(checkFailure);
+                }
+                throw e;
+            }
+            if (!missing) {
+                throw e;
+            }
+            LOG.debug(
+                    "Read of {} failed and the file is gone, reporting it as not found.", path, e);
+            FileNotFoundException notFound =
+                    new FileNotFoundException("File " + path + " does not exist.");
+            notFound.initCause(e);
+            throw notFound;
         }
     }
 
