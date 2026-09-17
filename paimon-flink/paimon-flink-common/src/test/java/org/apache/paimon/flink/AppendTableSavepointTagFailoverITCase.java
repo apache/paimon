@@ -250,10 +250,18 @@ public class AppendTableSavepointTagFailoverITCase extends AbstractTestBase {
                                                     ExceptionUtils.findThrowable(
                                                             e, CheckpointException.class))
                                             .isPresent());
+            // Also guards the wait below: with no injected failure there is no savepoint id.
+            assertThat(FailOnSavepointOperator.hasFailed())
+                    .describedAs("the injected failure never fired, so no region failover happened")
+                    .isTrue();
             assertThat(savepointTags(table)).isEmpty();
 
             // Wait until the job has recovered and resumed committing after the region failover.
-            waitUntilRecoveredAndCommitting(table);
+            // "A new snapshot appeared" is not that: the coordinator commits asynchronously, so a
+            // commit already in flight when the region failed can bump the snapshot id while the
+            // region is still restarting, and the savepoint below would then be rejected because
+            // not all tasks are running.
+            waitUntilCommittedPast(table, FailOnSavepointOperator.savepointCheckpointId());
 
             // Savepoint 2: after recovery it must be tagged correctly, proving the region failover
             // did not break the coordinator's auto-tag state.
@@ -482,6 +490,25 @@ public class AppendTableSavepointTagFailoverITCase extends AbstractTestBase {
     }
 
     /**
+     * Waits until a snapshot commits with an identifier past {@code checkpointId}. Commit
+     * identifiers are Flink checkpoint ids, and a checkpoint only completes once every task has
+     * acknowledged it, so a commit past the aborted savepoint proves the failed region is running
+     * again - which is what triggering another savepoint requires.
+     */
+    private void waitUntilCommittedPast(FileStoreTable table, long checkpointId) throws Exception {
+        long deadline = System.currentTimeMillis() + WAIT_TIMEOUT_MILLIS;
+        while (System.currentTimeMillis() < deadline) {
+            Snapshot latest = table.snapshotManager().latestSnapshot();
+            if (latest != null && latest.commitIdentifier() > checkpointId) {
+                return;
+            }
+            Thread.sleep(200);
+        }
+        throw new IllegalStateException(
+                "no checkpoint completed past the aborted savepoint within timeout");
+    }
+
+    /**
      * Waits until at least {@code count} more snapshots commit past the current latest.
      * Restore-time tag work runs before the resumed job commits again, so requiring several fresh
      * commits gives that work room to fully settle before we assert on tags.
@@ -579,6 +606,10 @@ public class AppendTableSavepointTagFailoverITCase extends AbstractTestBase {
 
         static long savepointCheckpointId() {
             return savepointCheckpointId;
+        }
+
+        static boolean hasFailed() {
+            return FAILED.get();
         }
 
         @Override
