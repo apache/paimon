@@ -675,6 +675,7 @@ class PyArrowFileIO(FileIO):
                     client.delete_object(Bucket=bucket, Key=key)
             if not ordinary:
                 continue
+            PyArrowFileIO._check_s3_delete_deadline(deadline, path_str)
             response = client.delete_objects(
                 Bucket=bucket,
                 Delete={"Objects": [{"Key": key} for key in ordinary],

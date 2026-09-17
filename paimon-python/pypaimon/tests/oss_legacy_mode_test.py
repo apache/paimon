@@ -703,6 +703,25 @@ class OssLegacyModeTest(unittest.TestCase):
         client.delete_object.assert_not_called()
         client.put_object.assert_not_called()
 
+    def test_mixed_delete_stops_before_batch_after_deadline(self):
+        client = mock.Mock()
+        ordinary = "db-uuid.db/tbl-uuid/data/file.parquet"
+        special = "db-uuid.db/tbl-uuid/data/part\rfile.parquet"
+        client.delete_objects.return_value = {"Deleted": [{"Key": ordinary}]}
+        clock = mock.Mock()
+        clock.monotonic.side_effect = \
+            lambda: 2 if client.delete_object.called else 0
+
+        with mock.patch("pypaimon.filesystem.pyarrow_file_io.time", clock):
+            with self.assertRaisesRegex(TimeoutError, "deleting S3 directory"):
+                PyArrowFileIO._delete_s3_objects(
+                    client, "test-bucket", [ordinary, special], 1,
+                    TABLE_PATH)
+
+        client.delete_object.assert_called_once_with(
+            Bucket="test-bucket", Key=special)
+        client.delete_objects.assert_not_called()
+
     def test_recursive_delete_batches_at_most_1000_keys(self):
         file_io = self._new_file_io(legacy=False)
         file_io._pyarrow_gte_22 = True
