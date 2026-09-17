@@ -77,9 +77,11 @@ writers and scans use sidecars when `manifest.sidecar.enabled` is true; when uns
 the completed output manifest and publish its `_EXTRA_FILES` reference only after both files
 close successfully. Failed writes and aborted writers clean up their own manifest/sidecar pairs.
 Scans with partition, row-ID or bucket filters select blocks before reading manifest entries.
-Normal entry filtering and ADD/DELETE reconciliation still apply. Missing or unusable sidecars
-fall back to normal manifest reads; disabled sidecars and scans without these filters do not
-perform sidecar I/O. Sidecar caching is controlled by the catalog option
+Unfiltered scans also select all sidecar blocks when a manifest cache is configured, so unfiltered
+prefetches and later filtered reads share the same block cache. Without a manifest cache, unfiltered
+scans keep the normal whole-manifest read path. Normal entry filtering and ADD/DELETE reconciliation
+still apply. Missing or unusable sidecars fall back to normal manifest reads; disabled sidecars do
+not perform sidecar I/O. Sidecar caching is controlled by the catalog option
 `cache.manifest-sidecar.max-memory` (64 MiB by default). A positive value supplies an
 additional budget independent of the manifest content cache. When set to 0, sidecars reuse
 the manifest content cache, or remain uncached if that cache is disabled. Sidecar caching
