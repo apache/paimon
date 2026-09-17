@@ -54,6 +54,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for variant shredding read. */
 public class VariantShreddingReadTest {
@@ -542,6 +543,55 @@ public class VariantShreddingReadTest {
                                 BinaryString.fromString("0"),
                                 Decimal.fromBigDecimal(new BigDecimal("2.50"), 10, 2),
                                 0.0));
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "null",
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"n\",\"type\":\"BIGINT\"},{\"name\":\"d\",\"type\":\"DOUBLE\"}]}}]}"
+            })
+    public void testReadIntegralOverflowAsInvalidCast(String shreddingSchema) throws Exception {
+        // A shredded typed_value is narrowed by the scalar reader and an unshredded value by
+        // VariantGet; both must reject an out-of-range number instead of wrapping it.
+        Options options = new Options();
+        if (!shreddingSchema.equals("null")) {
+            options.set("parquet.variant.shreddingSchema", shreddingSchema);
+        }
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+        writeRows(
+                format.createWriterFactory(writeType),
+                GenericRow.of(GenericVariant.fromJson("{\"n\":99999999999,\"d\":1e30}")),
+                GenericRow.of(GenericVariant.fromJson("{\"n\":7,\"d\":1.5}")));
+
+        RowType tryReadType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.INT(), "$.n", false, "UTC")
+                                        .field(DataTypes.BIGINT(), "$.d", false, "UTC")
+                                        .build()));
+        List<InternalRow> result = readRows(format, tryReadType);
+        assertThat(result.get(0).getRow(0, 2).isNullAt(0)).isTrue();
+        assertThat(result.get(0).getRow(0, 2).isNullAt(1)).isTrue();
+        assertThat(result.get(1).getRow(0, 2).getInt(0)).isEqualTo(7);
+        assertThat(result.get(1).getRow(0, 2).getLong(1)).isEqualTo(1L);
+
+        RowType strictReadType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.INT(), "$.n", true, "UTC")
+                                        .build()));
+        assertThatThrownBy(() -> readRows(format, strictReadType))
+                .hasMessageContaining("Invalid cast 99999999999 to INT");
     }
 
     protected List<InternalRow> readRows(ParquetFileFormat format, RowType rowType)
