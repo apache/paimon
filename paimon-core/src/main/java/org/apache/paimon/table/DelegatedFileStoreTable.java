@@ -146,6 +146,17 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void setManifestSidecarCache(SegmentsCache<Path> manifestSidecarCache) {
+        wrapped.setManifestSidecarCache(manifestSidecarCache);
+    }
+
+    @Nullable
+    @Override
+    public SegmentsCache<Path> getManifestSidecarCache() {
+        return wrapped.getManifestSidecarCache();
+    }
+
+    @Override
     public void setSnapshotCache(Cache<Path, Snapshot> cache) {
         wrapped.setSnapshotCache(cache);
     }

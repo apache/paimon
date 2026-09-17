@@ -632,7 +632,7 @@ public final class ManifestSidecar {
             @Nullable PartitionPredicate partitionFilter,
             @Nullable RowType partitionType,
             @Nullable BiPredicate<Integer, Integer> bucketFilter,
-            @Nullable SegmentsCache<Object> cache) {
+            @Nullable SegmentsCache<Path> cache) {
         String sidecarFileName = fileName(manifest);
         if (sidecarFileName == null) {
             return null;
@@ -660,7 +660,7 @@ public final class ManifestSidecar {
         }
     }
 
-    /** Complete sidecar bytes stored in the shared manifest cache. */
+    /** Complete sidecar bytes stored in the configured sidecar cache. */
     static final class ManifestSidecarSegment implements Segments {
         private final byte[] bytes;
 
