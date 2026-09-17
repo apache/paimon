@@ -120,6 +120,134 @@ class MultimodalTemporalTest(unittest.TestCase):
                 ).to_list()[0]
                 self.assertEqual(expected, row["value"])
 
+    def test_asof_excludes_exact_matches_within_group(self):
+        anchors = self._table("strict_anchors", {
+            "episode_id": pa.int32(), "event_time": pa.int64(),
+        })
+        samples = self._table("strict_samples", {
+            "episode_id": pa.int32(), "event_time": pa.int64(),
+            "value": pa.int32(),
+        })
+        groups = [
+            [9, 9, 10, 10, 11, 11],
+            [10, 10],
+            [10, 10, 11],
+            [9, 10, 10],
+            [],
+            [8, 11],
+        ]
+        anchors.add([
+            {"episode_id": group, "event_time": 10}
+            for group in range(len(groups))
+        ])
+        samples.add([
+            {"episode_id": group, "event_time": time, "value": index}
+            for group, times in enumerate(groups)
+            for index, time in enumerate(times)
+        ])
+
+        for direction, expected in (
+                ("backward", [1, None, None, 0, None, 0]),
+                ("forward", [4, None, 2, None, None, 1]),
+                ("nearest", [1, None, 2, 0, None, 1])):
+            with self.subTest(direction=direction):
+                rows = pmm.join_asof(
+                    anchors.scan(), samples.scan().select("value"),
+                    on="event_time", by="episode_id", direction=direction,
+                    allow_exact_matches=False,
+                ).to_list()
+                self.assertEqual(dict(enumerate(expected)), {
+                    row["episode_id"]: row["value"] for row in rows
+                })
+
+    def test_asof_exact_match_options_are_independent_in_chain(self):
+        anchors = self._table("strict_chain_anchors", {
+            "episode_id": pa.int32(), "event_time": pa.int64(),
+        })
+        samples = self._table("strict_chain_samples", {
+            "episode_id": pa.int32(), "sample_time": pa.int64(),
+            "value": pa.int32(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 10}])
+        samples.add([
+            {"episode_id": 1, "sample_time": time, "value": time}
+            for time in [9, 10, 10, 11]
+        ])
+        for direction, expected in (
+                ("backward", 9), ("forward", 11), ("nearest", 9)):
+            for tolerance in (0, 0.5, 1, None):
+                with self.subTest(direction=direction, tolerance=tolerance):
+                    aligned = pmm.join_asof(
+                        anchors.scan(), samples.scan().select("value"),
+                        on="event_time", by="episode_id",
+                        right_on="sample_time", direction=direction,
+                        tolerance=tolerance, allow_exact_matches=False,
+                    )
+                    row = aligned.join_asof(
+                        samples.scan().select("value"),
+                        right_on="sample_time", allow_exact_matches=True,
+                    ).join_asof(
+                        samples.scan().select("value"),
+                        right_on="sample_time", allow_exact_matches=False,
+                        suffix="_strict",
+                    ).to_list()[0]
+                    self.assertEqual(
+                        expected if tolerance in (1, None) else None,
+                        row["value"],
+                    )
+                    self.assertEqual(10, row["value_right"])
+                    self.assertEqual(9, row["value_strict"])
+
+    def test_asof_excludes_exact_nanosecond_timestamps(self):
+        anchors = self._table("strict_ns_anchors", {
+            "episode_id": pa.int32(), "event_time": pa.timestamp("ns"),
+        })
+        samples = self._table("strict_ns_samples", {
+            "episode_id": pa.int32(), "event_time": pa.timestamp("ns"),
+            "value": pa.int32(),
+        })
+        anchors.add(pa.table({
+            "episode_id": pa.array([1], type=pa.int32()),
+            "event_time": pa.array(
+                [1_000_000_001], type=pa.int64()).cast(pa.timestamp("ns")),
+        }))
+        samples.add(pa.table({
+            "episode_id": pa.array([1, 1, 1], type=pa.int32()),
+            "event_time": pa.array(
+                [1_000_000_000, 1_000_000_001, 1_000_000_002],
+                type=pa.int64()).cast(pa.timestamp("ns")),
+            "value": pa.array([9, 10, 11], type=pa.int32()),
+        }))
+        for direction, expected in (
+                ("backward", 9), ("forward", 11), ("nearest", 9)):
+            for tolerance in (timedelta(0), timedelta(microseconds=1)):
+                with self.subTest(direction=direction, tolerance=tolerance):
+                    row = pmm.join_asof(
+                        anchors.scan(), samples.scan().select("value"),
+                        on="event_time", by="episode_id",
+                        direction=direction, tolerance=tolerance,
+                        allow_exact_matches=False,
+                    ).to_list()[0]
+                    self.assertEqual(
+                        expected if tolerance else None, row["value"])
+
+    def test_asof_validates_allow_exact_matches(self):
+        table = self._table("strict_options", {
+            "episode_id": pa.int32(), "event_time": pa.int64(),
+        })
+        aligned = pmm.join_asof(
+            table.scan(), table.scan(), on="event_time", by="episode_id")
+        for value in (None, 0, 1, "false"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(TypeError, "allow_exact_matches"):
+                    pmm.join_asof(
+                        table.scan(), table.scan(),
+                        on="event_time", by="episode_id",
+                        allow_exact_matches=value,
+                    )
+                with self.assertRaisesRegex(TypeError, "allow_exact_matches"):
+                    aligned.join_asof(table.scan(), allow_exact_matches=value)
+
     def test_nearest_uses_candidate_side_for_duplicate_timestamps(self):
         anchors = self._table("duplicate_nearest_anchors", {
             "episode_id": pa.int32(),
