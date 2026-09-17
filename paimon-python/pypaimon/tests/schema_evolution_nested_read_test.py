@@ -100,6 +100,63 @@ class _NestedBase(unittest.TestCase):
 class SchemaEvolutionNestedReadTest(_NestedBase):
     """Top-level struct/array/map column evolution (works)."""
 
+    def test_reject_partial_nested_data_evolution_file(self):
+        schema = pa.schema([
+            ('id', pa.int64()),
+            ('nest', pa.struct([('a', pa.int64()), ('b', pa.int64())])),
+        ])
+        table_name = 'default.partial_nested_de'
+        self.catalog.create_table(
+            table_name,
+            Schema.from_pyarrow_schema(schema, options={
+                'bucket': '-1',
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }),
+            False,
+        )
+        table = self.catalog.get_table(table_name)
+        self._write(table, pa.Table.from_pylist([
+            {'id': 1, 'nest': {'a': 10, 'b': 20}},
+        ], schema=schema))
+
+        read_builder = table.new_read_builder()
+        split = read_builder.new_scan().plan().splits()[0]
+        split.files[0].write_cols = ['id', 'nest.a']
+        with self.assertRaisesRegex(NotImplementedError, 'nested write column'):
+            read_builder.new_read().to_arrow([split])
+
+        id_builder = table.new_read_builder().with_projection(['id'])
+        self.assertEqual(
+            [1], id_builder.new_read().to_arrow([split]).column('id').to_pylist())
+
+    def test_literal_dotted_top_level_write_column(self):
+        schema = pa.schema([
+            ('id', pa.int64()),
+            ('nest.a', pa.int64()),
+        ])
+        table_name = 'default.dotted_top_level_de'
+        self.catalog.create_table(
+            table_name,
+            Schema.from_pyarrow_schema(schema, options={
+                'bucket': '-1',
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }),
+            False,
+        )
+        table = self.catalog.get_table(table_name)
+        self._write(table, pa.Table.from_pydict({
+            'id': [1],
+            'nest.a': [10],
+        }, schema=schema))
+
+        read_builder = table.new_read_builder()
+        split = read_builder.new_scan().plan().splits()[0]
+        split.files[0].write_cols = ['id', 'nest.a']
+        result = read_builder.new_read().to_arrow([split])
+        self.assertEqual([10], result.column('nest.a').to_pylist())
+
     # -- C1: add a new struct top-level column ---------------------------
 
     def test_add_struct_column(self):

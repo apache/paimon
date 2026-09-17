@@ -1197,6 +1197,24 @@ class DataEvolutionSplitRead(SplitRead):
     def _create_raw_reader(self) -> RecordReader:
         """Core read logic: split_by_row_id -> suppliers -> ConcatBatchReader -> filter."""
         files = self.split.files
+        read_field_ids = {field.id for field in self.read_fields}
+        # A partial nested write only replaces selected struct leaves. The
+        # current merge reader combines complete top-level fields, so treating
+        # "nest.a" as an unknown column can silently return an older value.
+        for file in files:
+            if not file.write_cols:
+                continue
+            file_schema = self._resolve_schema(file.schema_id)
+            top_level_fields = {field.name: field for field in file_schema.fields}
+            for write_col in file.write_cols:
+                if "." not in write_col or write_col in top_level_fields:
+                    continue
+                parent = top_level_fields.get(write_col.split(".", 1)[0])
+                if parent is None or parent.id in read_field_ids:
+                    raise NotImplementedError(
+                        "PyPaimon cannot read data evolution files with nested "
+                        f"write column {write_col!r} in {file.file_name!r}; "
+                        "use the Java reader until nested field merging is supported")
         suppliers = []
         self._genarate_deletion_file_readers()
 
