@@ -184,7 +184,7 @@ class VectoredReadUtilsTest {
         byte[] buffer = new byte[100];
         FileRange range = FileRange.createFileRange(200, buffer);
         VectoredReadUtils.ReadOptions options =
-                new VectoredReadUtils.ReadOptions(1000, 100, 2, false);
+                new VectoredReadUtils.ReadOptions(1000, 100, 2, false).withInlineSingleRange(true);
 
         VectoredReadUtils.readVectored(readable, Collections.singletonList(range), options);
 
@@ -200,7 +200,7 @@ class VectoredReadUtilsTest {
 
         List<FileRange> ranges = Collections.singletonList(FileRange.createFileRange(200, 100));
         VectoredReadUtils.ReadOptions options =
-                new VectoredReadUtils.ReadOptions(1000, 100, 2, false);
+                new VectoredReadUtils.ReadOptions(1000, 100, 2, false).withInlineSingleRange(true);
 
         Thread.currentThread().interrupt();
         try {
@@ -210,6 +210,43 @@ class VectoredReadUtilsTest {
         } finally {
             Thread.interrupted();
         }
+    }
+
+    @Test
+    public void testDefaultOptionsKeepSingleRangeOnExecutor() throws Exception {
+        TestRecordingVectoredReadable readable = new TestRecordingVectoredReadable();
+
+        byte[] buffer = new byte[100];
+        FileRange range = FileRange.createFileRange(200, buffer);
+        VectoredReadUtils.ReadOptions options =
+                VectoredReadUtils.ReadOptions.from(readable).withSequentialReadFallback(false);
+
+        VectoredReadUtils.readVectored(readable, Collections.singletonList(range), options);
+
+        assertThat(range.getData().get(5, TimeUnit.SECONDS)).isSameAs(buffer);
+        assertThat(buffer).isEqualTo(Arrays.copyOfRange(bytes, 200, 300));
+        assertThat(readable.positionReadThreads).hasSize(1).doesNotContain(Thread.currentThread());
+    }
+
+    @Test
+    public void testInlineSingleRangeOptionPreservesOtherOptions() throws Exception {
+        TestSeekableVectoredReadable readable = new TestSeekableVectoredReadable(2);
+
+        List<FileRange> ranges =
+                Arrays.asList(
+                        FileRange.createFileRange(0, 100), FileRange.createFileRange(150, 100));
+        VectoredReadUtils.ReadOptions options =
+                new VectoredReadUtils.ReadOptions(1000, 100, 2, false).withInlineSingleRange(true);
+
+        VectoredReadUtils.readVectored(readable, ranges, options);
+        assertThat(readable.readsStarted.await(5, TimeUnit.SECONDS)).isTrue();
+        readable.finishReads.countDown();
+
+        for (FileRange range : ranges) {
+            assertThat(range.getData().get(5, TimeUnit.SECONDS)).hasSize(range.getLength());
+        }
+        assertThat(readable.sequentialReads).hasValue(0);
+        assertThat(readable.maxActiveReads).hasValue(2);
     }
 
     @Test

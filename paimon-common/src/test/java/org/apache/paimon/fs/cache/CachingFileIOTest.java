@@ -1019,7 +1019,8 @@ class CachingFileIOTest {
         return VectoredReadUtils.ReadOptions.from(stream)
                 .withMinSeekForVectorReads(16 * 1024)
                 .withParallelismForVectorReads(VECTOR_PARALLELISM)
-                .withSequentialReadFallback(false);
+                .withSequentialReadFallback(false)
+                .withInlineSingleRange(true);
     }
 
     private static void closeRecordingFailure(

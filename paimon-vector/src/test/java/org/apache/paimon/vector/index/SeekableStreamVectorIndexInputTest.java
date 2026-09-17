@@ -56,6 +56,22 @@ public class SeekableStreamVectorIndexInputTest {
     }
 
     @Test
+    public void testSinglePositionIsReadOnCallingThread() {
+        byte[] data = data(1024);
+        TestVectoredSeekableInputStream input = new TestVectoredSeekableInputStream(data, 1);
+        NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput indexInput =
+                new NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput(input);
+
+        byte[][] buffers = new byte[][] {new byte[64]};
+        indexInput.pread(new long[] {128}, buffers);
+
+        assertThat(buffers[0]).isEqualTo(slice(data, 128, 64));
+        assertThat(input.positionReads).hasValue(1);
+        assertThat(input.sequentialReads).hasValue(0);
+        assertThat(input.positionReadThreads).containsExactly(Thread.currentThread());
+    }
+
+    @Test
     public void testFallbackToSequentialReadWhenRangesOverlap() {
         byte[] data = data(1024);
         TestVectoredSeekableInputStream input = new TestVectoredSeekableInputStream(data, 0);
@@ -97,6 +113,8 @@ public class SeekableStreamVectorIndexInputTest {
         private final AtomicInteger maxActiveReads = new AtomicInteger();
         private final CopyOnWriteArrayList<byte[]> positionReadBuffers =
                 new CopyOnWriteArrayList<>();
+        private final CopyOnWriteArrayList<Thread> positionReadThreads =
+                new CopyOnWriteArrayList<>();
 
         private int position;
 
@@ -137,6 +155,7 @@ public class SeekableStreamVectorIndexInputTest {
         @Override
         public int pread(long position, byte[] buffer, int offset, int length) throws IOException {
             positionReadBuffers.add(buffer);
+            positionReadThreads.add(Thread.currentThread());
             int active = activeReads.incrementAndGet();
             maxActiveReads.accumulateAndGet(active, Math::max);
             readsStarted.countDown();

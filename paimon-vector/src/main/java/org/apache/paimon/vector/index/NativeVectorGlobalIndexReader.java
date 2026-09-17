@@ -479,7 +479,8 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
                             .withMinSeekForVectorReads(VECTOR_INDEX_MIN_SEEK_FOR_VECTOR_READS)
                             .withParallelismForVectorReads(
                                     VECTOR_INDEX_PARALLELISM_FOR_VECTOR_READS)
-                            .withSequentialReadFallback(false);
+                            .withSequentialReadFallback(false)
+                            .withInlineSingleRange(true);
             VectoredReadUtils.readVectored(readable, ranges, options);
 
             for (FileRange range : ranges) {

@@ -76,10 +76,13 @@ public class VectoredReadUtils {
             return;
         }
 
-        // A lone range needs neither coalescing nor fan-out, so read it on the calling thread
-        // instead of paying an executor hand-off. An interrupted caller keeps the executor path:
-        // an inline read would close an interruptible channel and kill the shared stream.
-        if (sortRanges.size() == 1 && !Thread.currentThread().isInterrupted()) {
+        // A lone range needs neither coalescing nor fan-out. Callers that join the result right
+        // away can opt out of the executor hand-off and read it here. An interrupted caller is left
+        // to the executor, which fails fast instead of reading inline and closing an interruptible
+        // channel out from under every other reader of the stream.
+        if (options.inlineSingleRange
+                && sortRanges.size() == 1
+                && !Thread.currentThread().isInterrupted()) {
             readSingleRange(readable, sortRanges.get(0));
             return;
         }
@@ -121,6 +124,7 @@ public class VectoredReadUtils {
         private final long batchSizeForVectorReads;
         private final int parallelismForVectorReads;
         private final boolean sequentialReadFallback;
+        private final boolean inlineSingleRange;
 
         public static ReadOptions from(VectoredReadable readable) {
             return new ReadOptions(
@@ -135,6 +139,20 @@ public class VectoredReadUtils {
                 long batchSizeForVectorReads,
                 int parallelismForVectorReads,
                 boolean sequentialReadFallback) {
+            this(
+                    minSeekForVectorReads,
+                    batchSizeForVectorReads,
+                    parallelismForVectorReads,
+                    sequentialReadFallback,
+                    false);
+        }
+
+        private ReadOptions(
+                int minSeekForVectorReads,
+                long batchSizeForVectorReads,
+                int parallelismForVectorReads,
+                boolean sequentialReadFallback,
+                boolean inlineSingleRange) {
             checkArgument(
                     minSeekForVectorReads >= 0,
                     "minSeekForVectorReads must be non-negative: %s",
@@ -151,6 +169,7 @@ public class VectoredReadUtils {
             this.batchSizeForVectorReads = batchSizeForVectorReads;
             this.parallelismForVectorReads = parallelismForVectorReads;
             this.sequentialReadFallback = sequentialReadFallback;
+            this.inlineSingleRange = inlineSingleRange;
         }
 
         public ReadOptions withMinSeekForVectorReads(int minSeekForVectorReads) {
@@ -158,7 +177,8 @@ public class VectoredReadUtils {
                     minSeekForVectorReads,
                     batchSizeForVectorReads,
                     parallelismForVectorReads,
-                    sequentialReadFallback);
+                    sequentialReadFallback,
+                    inlineSingleRange);
         }
 
         public ReadOptions withBatchSizeForVectorReads(long batchSizeForVectorReads) {
@@ -166,7 +186,8 @@ public class VectoredReadUtils {
                     minSeekForVectorReads,
                     batchSizeForVectorReads,
                     parallelismForVectorReads,
-                    sequentialReadFallback);
+                    sequentialReadFallback,
+                    inlineSingleRange);
         }
 
         public ReadOptions withParallelismForVectorReads(int parallelismForVectorReads) {
@@ -174,7 +195,8 @@ public class VectoredReadUtils {
                     minSeekForVectorReads,
                     batchSizeForVectorReads,
                     parallelismForVectorReads,
-                    sequentialReadFallback);
+                    sequentialReadFallback,
+                    inlineSingleRange);
         }
 
         public ReadOptions withSequentialReadFallback(boolean sequentialReadFallback) {
@@ -182,7 +204,18 @@ public class VectoredReadUtils {
                     minSeekForVectorReads,
                     batchSizeForVectorReads,
                     parallelismForVectorReads,
-                    sequentialReadFallback);
+                    sequentialReadFallback,
+                    inlineSingleRange);
+        }
+
+        /** Reads a lone range on the calling thread, unless the sequential fallback claims it. */
+        public ReadOptions withInlineSingleRange(boolean inlineSingleRange) {
+            return new ReadOptions(
+                    minSeekForVectorReads,
+                    batchSizeForVectorReads,
+                    parallelismForVectorReads,
+                    sequentialReadFallback,
+                    inlineSingleRange);
         }
     }
 
