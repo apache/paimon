@@ -29,6 +29,8 @@ from pypaimon.api.auth import (
     DLFOpenApiSigner,
     DLFOpenApiV4Signer,
 )
+from pypaimon.api.auth.dlf_openapi_actions import OPERATIONS, resolve_action
+from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.token_loader import DLFToken
 from pypaimon.api.typedef import RESTAuthParameter
 
@@ -478,6 +480,127 @@ class DLFSignerTest(unittest.TestCase):
         """Derived independently, so a typo in the constant cannot pass."""
         self.assertEqual(
             hashlib.sha256(b"").hexdigest(), DLFOpenApiV4Signer.EMPTY_BODY_SHA256)
+
+    def test_openapi_v4_every_operation_resolves_to_itself(self):
+        """Each template, filled in, must come back to its own action rather than an earlier one."""
+        actions = set()
+        for method, template, action in OPERATIONS:
+            path = re.sub(r"\{[^}]+\}", "x1", template)
+            self.assertEqual(action, resolve_action(method, path), path)
+            actions.add(action)
+        self.assertEqual(53, len(actions))
+
+    def test_openapi_v4_client_paths_resolve_to_registered_actions(self):
+        paths = ResourcePaths("clg-paimon-1")
+        cases = [
+            ("GetConfig", "GET", ResourcePaths.config()),
+            ("ListDatabases", "GET", paths.databases()),
+            ("CreateDatabase", "POST", paths.databases()),
+            ("GetDatabase", "GET", paths.database("db")),
+            ("DropDatabase", "DELETE", paths.database("db")),
+            ("ListTables", "GET", paths.tables("db")),
+            ("CreateTable", "POST", paths.tables("db")),
+            ("ListTableDetails", "GET", paths.table_details("db")),
+            ("GetTable", "GET", paths.table("db", "t")),
+            ("AlterTable", "POST", paths.table("db", "t")),
+            ("DropTable", "DELETE", paths.table("db", "t")),
+            ("RenameTable", "POST", paths.rename_table()),
+            ("GetTableToken", "GET", paths.table_token("db", "t")),
+            ("CommitTable", "POST", paths.commit_table("db", "t")),
+            ("RollbackToSnapshot", "POST", paths.rollback_table("db", "t")),
+            ("GetTableSnapshot", "GET", paths.table_snapshot("db", "t")),
+            ("ListPartitions", "GET", paths.partitions("db", "t")),
+            ("ListFunctions", "GET", paths.functions("db")),
+            ("GetFunction", "GET", paths.function("db", "f")),
+            ("ListTags", "GET", paths.tags("db", "t")),
+            ("GetTag", "GET", paths.tag("db", "t", "tag")),
+            ("ListBranches", "GET", paths.branches("db", "t")),
+            ("DropBranch", "DELETE", paths.branch("db", "t", "b")),
+            ("FastForwardBranch", "POST", paths.forward_branch("db", "t", "b")),
+            ("AuthTableQuery", "POST", paths.auth_table("db", "t")),
+        ]
+        for action, method, path in cases:
+            self.assertEqual(action, resolve_action(method, path), method + " " + path)
+
+    def test_openapi_v4_names_spelled_like_literals(self):
+        """Names match whole segments, so one spelled like a literal still resolves."""
+        paths = ResourcePaths("clg-paimon-1")
+        self.assertEqual("GetDatabase", resolve_action("GET", paths.database("tables")))
+        self.assertEqual("GetTable", resolve_action("GET", paths.table("db", "token")))
+        self.assertEqual("DropBranch", resolve_action("DELETE", paths.branch("db", "t", "forward")))
+        self.assertEqual("GetTableToken", resolve_action("GET", paths.table_token("config", "t$snapshots")))
+        self.assertEqual("GetTable", resolve_action("GET", "/v1/clg-paimon-1/databases/a%2Fb/tables/c%20d"))
+        self.assertEqual("ListDatabases", resolve_action("get", ResourcePaths("rename").databases()))
+
+    def test_openapi_v4_unregistered_requests_have_no_action(self):
+        paths = ResourcePaths("clg-paimon-1")
+        self.assertIsNone(resolve_action("GET", paths.tables()))
+        self.assertIsNone(resolve_action("POST", paths.rename_branch("db", "t", "b")))
+        self.assertIsNone(resolve_action("PUT", paths.table("db", "t")))
+        self.assertIsNone(resolve_action("GET", ResourcePaths.config() + "/"))
+        self.assertIsNone(resolve_action("GET", "/v1//databases"))
+        self.assertIsNone(resolve_action(None, ResourcePaths.config()))
+        self.assertIsNone(resolve_action("GET", None))
+
+    def test_openapi_v4_known_signature_with_action(self):
+        """Known answer with a body and a resolved action. The Java signer pins the same string."""
+        signer = DLFOpenApiV4Signer("cn-hangzhou")
+        token = DLFToken("TestAKId", "TestAKSecret", None, None)
+        host = "dlfnext.cn-hangzhou.aliyuncs.com"
+        now = datetime(2025, 4, 16, 3, 44, 46, tzinfo=timezone.utc)
+        body = '{"identifier":{"database":"db","object":"t"}}'
+        rest_param = RESTAuthParameter("POST", "/v1/clg-paimon-1/databases/db/tables", body, {})
+
+        headers = signer.sign_request_headers(rest_param, now, None, host)
+        headers["x-acs-signature-nonce"] = "fixed-nonce-for-test"
+
+        self.assertEqual("CreateTable", headers["x-acs-action"])
+        self.assertEqual(
+            "ACS4-HMAC-SHA256 Credential=TestAKId/20250416/cn-hangzhou/DlfNext/aliyun_v4_request,"
+            "SignedHeaders=content-type;host;x-acs-action;x-acs-content-sha256;"
+            "x-acs-date;x-acs-signature-nonce;x-acs-version,"
+            "Signature=420206b5263536e6bc271a7a32582b4a820e23c8c58ae692b708c69f9d19e51d",
+            signer.authorization(rest_param, token, host, headers))
+
+    def test_openapi_v4_omits_action_for_unregistered_path(self):
+        signer = DLFOpenApiV4Signer("cn-hangzhou")
+        host = "dlfnext.cn-hangzhou.aliyuncs.com"
+        now = datetime(2025, 4, 16, 3, 44, 46, tzinfo=timezone.utc)
+        rest_param = RESTAuthParameter("GET", "/v1/clg-paimon-1/tables", "", {})
+
+        headers = signer.sign_request_headers(rest_param, now, None, host)
+
+        self.assertNotIn("x-acs-action", headers)
+        self.assertEqual(set(signer.sign_headers(None, now, None, host)), set(headers))
+
+    def test_auth_provider_sends_signed_action(self):
+        provider = DLFAuthProvider(
+            uri="https://dlfnext.cn-hangzhou.aliyuncs.com",
+            region="cn-hangzhou",
+            signing_algorithm=DLFOpenApiV4Signer.IDENTIFIER,
+            token=DLFToken("akId", "akSecret", "securityToken", None)
+        )
+
+        header = provider.merge_auth_header(
+            {}, RESTAuthParameter("GET", "/v1/clg-paimon-1/databases/db/tables/t/token", "", {}))
+
+        self.assertEqual("GetTableToken", header["x-acs-action"])
+        self.assertIn(
+            "SignedHeaders=host;x-acs-action;x-acs-content-sha256;x-acs-date;"
+            "x-acs-security-token;x-acs-signature-nonce;x-acs-version,",
+            header["Authorization"])
+
+    def test_only_openapi_v4_sends_action(self):
+        """Only the ACS4 signer resolves an action; the other schemes send what they always did."""
+        rest_param = RESTAuthParameter("GET", "/v1/clg-paimon-1/databases/db/tables/t/token", "", {})
+        for algorithm in (DLFDefaultSigner.IDENTIFIER, DLFOpenApiSigner.IDENTIFIER):
+            provider = DLFAuthProvider(
+                uri="https://dlfnext.cn-hangzhou.aliyuncs.com",
+                region="cn-hangzhou",
+                signing_algorithm=algorithm,
+                token=DLFToken("akId", "akSecret", None, None)
+            )
+            self.assertNotIn("x-acs-action", provider.merge_auth_header({}, rest_param), algorithm)
 
 
 if __name__ == '__main__':

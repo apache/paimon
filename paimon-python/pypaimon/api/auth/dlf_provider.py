@@ -88,8 +88,8 @@ class DLFAuthProvider(AuthProvider):
             now = datetime.now(timezone.utc)
             host = self.extract_host(self.uri)
 
-            sign_headers = self.signer.sign_headers(
-                rest_auth_parameter.data,
+            sign_headers = self.signer.sign_request_headers(
+                rest_auth_parameter,
                 now,
                 token.security_token,
                 host

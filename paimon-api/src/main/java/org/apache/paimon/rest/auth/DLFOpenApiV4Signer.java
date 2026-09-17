@@ -70,6 +70,7 @@ public class DLFOpenApiV4Signer implements DLFRequestSigner {
     private static final String X_ACS_VERSION = "x-acs-version";
     private static final String X_ACS_CONTENT_SHA256 = "x-acs-content-sha256";
     private static final String X_ACS_SECURITY_TOKEN = "x-acs-security-token";
+    private static final String X_ACS_ACTION = "x-acs-action";
 
     private static final String CONTENT_TYPE_VALUE = "application/json";
     private static final String API_VERSION = "2026-01-18";
@@ -123,6 +124,27 @@ public class DLFOpenApiV4Signer implements DLFRequestSigner {
             headers.put(X_ACS_SECURITY_TOKEN, securityToken);
         }
 
+        return headers;
+    }
+
+    /** Adds the signed {@code x-acs-action}, which POP gateways may require to route the call. */
+    @Override
+    public Map<String, String> signRequestHeaders(
+            RESTAuthParameter restAuthParameter,
+            Instant now,
+            @Nullable String securityToken,
+            String host) {
+        if (restAuthParameter == null) {
+            throw new IllegalArgumentException("Parameter 'restAuthParameter' cannot be null");
+        }
+        Map<String, String> headers =
+                signHeaders(restAuthParameter.data(), now, securityToken, host);
+        String action =
+                DLFOpenApiActions.resolve(
+                        restAuthParameter.method(), restAuthParameter.resourcePath());
+        if (action != null) {
+            headers.put(X_ACS_ACTION, action);
+        }
         return headers;
     }
 

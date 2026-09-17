@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from typing import Dict, NamedTuple, Optional
 from urllib.parse import quote, unquote
 
+from pypaimon.api.auth.dlf_openapi_actions import resolve_action
 from pypaimon.api.token_loader import DLFToken
 from pypaimon.api.typedef import RESTAuthParameter
 
@@ -58,6 +59,17 @@ class DLFRequestSigner(ABC):
             map of signature-related headers
         """
         pass
+
+    def sign_request_headers(
+            self,
+            rest_auth_parameter: RESTAuthParameter,
+            now: datetime,
+            security_token: Optional[str],
+            host: str
+    ) -> Dict[str, str]:
+        """Signature headers for a request whose method and path the signer may need; by
+        default only the body is used, as in sign_headers()."""
+        return self.sign_headers(rest_auth_parameter.data, now, security_token, host)
 
     @abstractmethod
     def authorization(
@@ -536,6 +548,7 @@ class DLFOpenApiV4Signer(DLFRequestSigner):
     X_ACS_VERSION = "x-acs-version"
     X_ACS_CONTENT_SHA256 = "x-acs-content-sha256"
     X_ACS_SECURITY_TOKEN = "x-acs-security-token"
+    X_ACS_ACTION = "x-acs-action"
 
     # Values
     ACS_DATE_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
@@ -585,6 +598,22 @@ class DLFOpenApiV4Signer(DLFRequestSigner):
         if security_token is not None:
             headers[self.X_ACS_SECURITY_TOKEN] = security_token
 
+        return headers
+
+    def sign_request_headers(
+            self,
+            rest_auth_parameter: RESTAuthParameter,
+            now: datetime,
+            security_token: Optional[str],
+            host: str
+    ) -> Dict[str, str]:
+        """Adds the signed x-acs-action, which POP gateways may require to route the call."""
+        if rest_auth_parameter is None:
+            raise ValueError("Parameter 'rest_auth_parameter' cannot be None")
+        headers = self.sign_headers(rest_auth_parameter.data, now, security_token, host)
+        action = resolve_action(rest_auth_parameter.method, rest_auth_parameter.path)
+        if action is not None:
+            headers[self.X_ACS_ACTION] = action
         return headers
 
     def authorization(
