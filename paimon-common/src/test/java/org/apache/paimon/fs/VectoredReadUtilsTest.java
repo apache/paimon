@@ -19,6 +19,7 @@
 package org.apache.paimon.fs;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -201,6 +202,35 @@ class VectoredReadUtilsTest {
         assertThatThrownBy(() -> ranges.get(1).getData().get(5, TimeUnit.SECONDS))
                 .isInstanceOf(ExecutionException.class)
                 .hasMessageContaining("failed");
+    }
+
+    @Test
+    @Timeout(30)
+    public void testErrorFromReadStillCompletesTheRange() throws Exception {
+        VectoredReadable readable =
+                new VectoredReadable() {
+                    @Override
+                    public int pread(long position, byte[] buffer, int offset, int length) {
+                        // FSError, which RawLocalFileSystem raises for any IOException, is an Error
+                        throw new Error("failed");
+                    }
+                };
+
+        // far enough apart not to coalesce, so each range is read on its own and completed
+        // directly, which is the branch Parquet and ORC take
+        List<FileRange> ranges =
+                Arrays.asList(
+                        FileRange.createFileRange(0, 100), FileRange.createFileRange(500, 100));
+        VectoredReadUtils.ReadOptions options =
+                new VectoredReadUtils.ReadOptions(100, 100, 2, false);
+
+        VectoredReadUtils.readVectored(readable, ranges, options);
+
+        for (FileRange range : ranges) {
+            assertThatThrownBy(() -> range.getData().get(5, TimeUnit.SECONDS))
+                    .isInstanceOf(ExecutionException.class)
+                    .hasMessageContaining("failed");
+        }
     }
 
     private class TestSeekableVectoredReadable extends SeekableInputStream

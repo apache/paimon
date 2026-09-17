@@ -27,6 +27,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.VectoredReadable;
 import org.apache.paimon.hadoop.SerializableConfiguration;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.FunctionWithException;
@@ -101,7 +102,18 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
-        return new HadoopSeekableInputStream(getFileSystem(hadoopPath).open(hadoopPath));
+        FSDataInputStream in = getFileSystem(hadoopPath).open(hadoopPath);
+        // An object store stream has no positional read of its own, so it inherits the one
+        // FSInputStream emulates with a seek and a seek back. That costs a round trip in each
+        // direction instead of saving one, so only a block file system gets the vectored stream.
+        return isObjectStore(path)
+                ? new HadoopSeekableInputStream(in)
+                : new VectoredHadoopSeekableInputStream(in);
+    }
+
+    private static boolean isObjectStore(Path path) {
+        String scheme = path.toUri().getScheme();
+        return scheme != null && FileIOUtils.isObjectStore(scheme.toLowerCase(Locale.US));
     }
 
     @Override
@@ -248,7 +260,7 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
          */
         private static final int MIN_SKIP_BYTES = 1024 * 1024;
 
-        private final FSDataInputStream in;
+        protected final FSDataInputStream in;
 
         private HadoopSeekableInputStream(FSDataInputStream in) {
             this.in = in;
@@ -312,6 +324,20 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
             // hadoop's helper probes with read() before calling it EOF, because skip may return 0
             // without being at the end. The loop this replaces subtracted that 0 and asked again.
             IOUtils.skipFully(in, bytes);
+        }
+    }
+
+    /** For a file system that implements positional reads rather than emulating them. */
+    private static class VectoredHadoopSeekableInputStream extends HadoopSeekableInputStream
+            implements VectoredReadable {
+
+        private VectoredHadoopSeekableInputStream(FSDataInputStream in) {
+            super(in);
+        }
+
+        @Override
+        public int pread(long position, byte[] b, int off, int len) throws IOException {
+            return in.read(position, b, off, len);
         }
     }
 

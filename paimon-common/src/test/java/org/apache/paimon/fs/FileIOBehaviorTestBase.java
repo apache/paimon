@@ -23,15 +23,25 @@ import org.apache.paimon.utils.StringUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.fail;
+import static org.assertj.core.api.Assumptions.assumeThat;
 
 /** Common tests for the behavior of {@link FileIO} methods. */
 public abstract class FileIOBehaviorTestBase {
@@ -53,6 +63,14 @@ public abstract class FileIOBehaviorTestBase {
 
     /** Gets the base path in the file system under which tests will place their temporary files. */
     protected abstract Path getBasePath() throws Exception;
+
+    /**
+     * Whether {@link FileIO#newInputStream} serves positional reads. A FileIO that returns false
+     * falls back to seek plus a sequential read at every {@code instanceof VectoredReadable} gate.
+     */
+    protected boolean supportsVectoredRead() {
+        return true;
+    }
 
     // ------------------------------------------------------------------------
     //  Init / Cleanup
@@ -260,6 +278,123 @@ public abstract class FileIOBehaviorTestBase {
         }
     }
 
+    // --- positional read
+
+    @Test
+    void testInputStreamSupportsVectoredRead() throws IOException {
+        Path file = writeFile(randomBytes(256));
+        try (SeekableInputStream in = fs.newInputStream(file)) {
+            // asserted rather than assumed, so that the flag cannot quietly go stale and leave
+            // the rest of the read-path contract skipped forever
+            assertThat(in instanceof VectoredReadable)
+                    .describedAs(
+                            "a FileIO that serves no positional read falls back to seek at every "
+                                    + "instanceof VectoredReadable gate")
+                    .isEqualTo(supportsVectoredRead());
+        }
+    }
+
+    @Test
+    void testPositionalReadContract() throws IOException {
+        assumeThat(supportsVectoredRead()).isTrue();
+        byte[] content = randomBytes(2048);
+        Path file = writeFile(content);
+        try (SeekableInputStream in = fs.newInputStream(file)) {
+            VectoredReadable readable = (VectoredReadable) in;
+
+            // a non-zero buffer offset pins that it is not confused with the file position
+            byte[] buffer = new byte[100];
+            int read = readable.pread(500, buffer, 20, 64);
+            assertThat(read).isGreaterThan(0).isLessThanOrEqualTo(64);
+            assertThat(Arrays.copyOfRange(buffer, 20, 20 + read))
+                    .isEqualTo(Arrays.copyOfRange(content, 500, 500 + read));
+            assertThat(Arrays.copyOfRange(buffer, 0, 20)).containsOnly((byte) 0);
+            assertThat(Arrays.copyOfRange(buffer, 20 + read, 100)).containsOnly((byte) 0);
+
+            assertThat(readable.pread(content.length, new byte[16], 0, 16)).isEqualTo(-1);
+            assertThat(readable.pread(content.length - 8, new byte[16], 0, 16))
+                    .isGreaterThan(0)
+                    .isLessThanOrEqualTo(8);
+            assertThatThrownBy(() -> readable.preadFully(content.length - 8, new byte[16], 0, 16))
+                    .isInstanceOf(EOFException.class);
+        }
+    }
+
+    @Test
+    void testPositionalReadLeavesStreamPositionAlone() throws IOException {
+        assumeThat(supportsVectoredRead()).isTrue();
+        byte[] content = randomBytes(2048);
+        Path file = writeFile(content);
+        try (SeekableInputStream in = fs.newInputStream(file)) {
+            in.seek(100);
+
+            byte[] buffer = new byte[64];
+            ((VectoredReadable) in).preadFully(500, buffer, 0, buffer.length);
+
+            assertThat(buffer).isEqualTo(Arrays.copyOfRange(content, 500, 564));
+            assertThat(in.getPos()).isEqualTo(100);
+            assertThat(in.read()).isEqualTo(content[100] & 0xFF);
+        }
+    }
+
+    @Test
+    @Timeout(180)
+    void testConcurrentPositionalReads() throws Exception {
+        assumeThat(supportsVectoredRead()).isTrue();
+        int rangeSize = 4096;
+        int concurrency = 8;
+        int rounds = 5;
+        byte[] content = randomBytes(rangeSize * concurrency);
+        Path file = writeFile(content);
+
+        try (SeekableInputStream in = fs.newInputStream(file)) {
+            VectoredReadable readable = (VectoredReadable) in;
+            CyclicBarrier barrier = new CyclicBarrier(concurrency);
+            ExecutorService pool = Executors.newFixedThreadPool(concurrency);
+            try {
+                List<Future<?>> futures = new ArrayList<>();
+                for (int i = 0; i < concurrency; i++) {
+                    int offset = i * rangeSize;
+                    futures.add(
+                            pool.submit(
+                                    () -> {
+                                        byte[] expected =
+                                                Arrays.copyOfRange(
+                                                        content, offset, offset + rangeSize);
+                                        byte[] buffer = new byte[rangeSize];
+                                        // the reads have to overlap, or this proves nothing
+                                        barrier.await(60, TimeUnit.SECONDS);
+                                        for (int round = 0; round < rounds; round++) {
+                                            // a read that returns without filling the buffer is
+                                            // the symptom being hunted, so never reuse the bytes
+                                            Arrays.fill(buffer, (byte) 0);
+                                            readable.preadFully(offset, buffer, 0, rangeSize);
+                                            assertThat(buffer).isEqualTo(expected);
+                                        }
+                                        return null;
+                                    }));
+                }
+
+                List<Throwable> failures = new ArrayList<>();
+                for (Future<?> future : futures) {
+                    try {
+                        future.get(60, TimeUnit.SECONDS);
+                    } catch (ExecutionException e) {
+                        failures.add(e.getCause());
+                    }
+                }
+                if (!failures.isEmpty()) {
+                    AssertionError error =
+                            new AssertionError(failures.size() + " concurrent readers failed");
+                    failures.forEach(error::addSuppressed);
+                    throw error;
+                }
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+    }
+
     // ------------------------------------------------------------------------
     //  Utilities
     // ------------------------------------------------------------------------
@@ -272,6 +407,20 @@ public abstract class FileIOBehaviorTestBase {
         try (PositionOutputStream out = fs.newOutputStream(file, false)) {
             out.write(new byte[] {1, 2, 3, 4, 5, 6, 7, 8});
         }
+    }
+
+    private static byte[] randomBytes(int length) {
+        byte[] bytes = new byte[length];
+        RND.nextBytes(bytes);
+        return bytes;
+    }
+
+    private Path writeFile(byte[] content) throws IOException {
+        Path file = new Path(basePath, randomName());
+        try (PositionOutputStream out = fs.newOutputStream(file, false)) {
+            out.write(content);
+        }
+        return file;
     }
 
     private Path createRandomFileInDirectory(Path directory) throws IOException {

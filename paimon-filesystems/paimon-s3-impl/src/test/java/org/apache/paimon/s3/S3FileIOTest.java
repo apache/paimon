@@ -57,6 +57,14 @@ class S3FileIOTest extends FileIOBehaviorTestBase {
         return new Path(MINIO_CONTAINER.getS3UriForDefaultBucket() + "/test");
     }
 
+    @Override
+    protected boolean supportsVectoredRead() {
+        // S3AInputStream has no positional read of its own, so PositionedReadable would only buy a
+        // seek and a seek back. S3A implements Hadoop's own readVectored instead, which is what
+        // this stream should be wired to.
+        return false;
+    }
+
     private static S3FileIO createFileIO(Map<String, String> options) {
         S3FileIO fileIO = new S3FileIO();
         fileIO.configure(CatalogContext.create(Options.fromMap(options)));

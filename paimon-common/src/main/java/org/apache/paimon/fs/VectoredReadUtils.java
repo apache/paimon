@@ -189,18 +189,20 @@ public class VectoredReadUtils {
     }
 
     private static void readSingleRange(VectoredReadable readable, FileRange range) {
-        if (range.getLength() == 0) {
-            range.getData().complete(getOrCreateBuffer(range));
-            return;
-        }
         try {
+            if (range.getLength() == 0) {
+                range.getData().complete(getOrCreateBuffer(range));
+                return;
+            }
             long position = range.getOffset();
             int length = range.getLength();
             byte[] buffer = getOrCreateBuffer(range);
             readable.preadFully(position, buffer, 0, length);
             range.getData().complete(buffer);
-        } catch (Exception ex) {
-            range.getData().completeExceptionally(ex);
+        } catch (Throwable t) {
+            // an Error has to complete the range too: the submitted task's Future is dropped, so a
+            // range left uncompleted stalls every getData() caller
+            range.getData().completeExceptionally(t);
         }
     }
 
