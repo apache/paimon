@@ -45,7 +45,7 @@ public class LookupChangelogEventMetadataITCase extends CatalogITCaseBase {
                         + "'sequence.field'='event_ts', "
                         + "'changelog-producer.expose-field-as-metadata'='event_ts')");
 
-        // The metadata column models a Cassandra sink column populated from WRITETIME. The
+        // The metadata column models an external sink populated from an event timestamp. The
         // physical event_ts column remains available to normal Flink operators, while writetime
         // carries the incoming event value even on an UPDATE_BEFORE retraction.
         BlockingIterator<Row, Row> iterator =
@@ -88,8 +88,7 @@ public class LookupChangelogEventMetadataITCase extends CatalogITCaseBase {
 
         // The update-after value is filtered out, but the update-before must retain the old
         // physical event_ts so that the downstream filter can retract the old row. Its metadata
-        // value remains the incoming event timestamp, which is the value a Cassandra WRITETIME
-        // sink needs.
+        // value remains the incoming event timestamp, which is the value an external sink needs.
         sql("INSERT INTO filtered_source VALUES (1, 20, 100)");
         assertThat(iterator.collect(1))
                 .containsExactly(Row.ofKind(RowKind.UPDATE_BEFORE, 1, 10, 50L, 100L));
@@ -121,9 +120,14 @@ public class LookupChangelogEventMetadataITCase extends CatalogITCaseBase {
                                 .collect(Collectors.toList()))
                 .containsExactly("id", "data", "event_ts");
 
+        // Without a metadata column in the Flink schema, a wildcard sees only the three physical
+        // columns and the changelog contains the same three-column shape.
+        BlockingIterator<Row, Row> physicalIterator =
+                streamSqlBlockIter("SELECT * FROM " + tableName);
+
         sql("INSERT INTO " + tableName + " VALUES (1, 10, 50)");
-        assertThat(sql("SELECT id, data, event_ts FROM " + tableName))
-                .containsExactly(Row.of(1, 10, 50L));
+        assertThat(physicalIterator.collect(1)).containsExactly(Row.of(1, 10, 50L));
+        assertThat(sql("SELECT * FROM " + tableName)).containsExactly(Row.of(1, 10, 50L));
 
         // Read the same physical table through a separate Flink connector definition. This is
         // equivalent to registering a metadata alias when consuming a table created by another
@@ -140,8 +144,9 @@ public class LookupChangelogEventMetadataITCase extends CatalogITCaseBase {
                                 + "'path'='%s')",
                         getTableDirectory(tableName)));
 
-        BlockingIterator<Row, Row> iterator =
-                streamSqlBlockIter("SELECT id, data, event_ts, writetime FROM flink_reader");
+        // A wildcard projection should include the physical columns followed by the declared
+        // metadata alias, so verify the same shape while reading the changelog.
+        BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM flink_reader");
 
         assertThat(iterator.collect(1)).containsExactly(Row.of(1, 10, 50L, 50L));
 
@@ -151,6 +156,12 @@ public class LookupChangelogEventMetadataITCase extends CatalogITCaseBase {
                         Row.ofKind(RowKind.UPDATE_BEFORE, 1, 10, 50L, 100L),
                         Row.ofKind(RowKind.UPDATE_AFTER, 1, 20, 100L, 100L));
 
+        assertThat(physicalIterator.collect(2))
+                .containsExactly(
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, 10, 50L),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, 20, 100L));
+
+        physicalIterator.close();
         iterator.close();
     }
 }

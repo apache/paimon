@@ -64,35 +64,70 @@ public class SparkE2eTest extends E2eReaderTestBase {
                         createCatalogSql("my_spark", warehousePath),
                         createTableSql(table),
                         createInsertSql(table)));
-        checkQueryResults(
-                sparkTable,
-                sql -> {
-                    Container.ExecResult execResult =
-                            getSpark()
-                                    .execInContainer(
-                                            "/spark/bin/spark-sql",
-                                            "--master",
-                                            "spark://spark-master:7077",
-                                            "--conf",
-                                            "spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions",
-                                            "--conf",
-                                            "spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog",
-                                            "--conf",
-                                            "spark.sql.catalog.paimon.warehouse=file:"
-                                                    + warehousePath,
-                                            "-f",
-                                            TEST_DATA_DIR + "/" + sql);
-                    if (execResult.getExitCode() != 0) {
-                        LOG.info(execResult.getStdout());
-                        LOG.info(execResult.getStderr());
-                        throw new AssertionError("Failed when running spark sql.");
-                    }
-                    String stdout = stripTrailingSparkErrorLogs(execResult.getStdout());
-                    return Arrays.stream(stdout.split("\n"))
-                                    .filter(s -> !s.contains("WARN"))
-                                    .collect(Collectors.joining("\n"))
-                            + "\n";
-                });
+        checkQueryResults(sparkTable, sql -> executeSparkSql(warehousePath, sql));
+    }
+
+    @Test
+    public void testFlinkCreateAndSparkReadChangelogEventMetadata() throws Exception {
+        String warehousePath = TEST_DATA_DIR + "/" + UUID.randomUUID() + "_warehouse";
+        final String table = "event_metadata";
+        final String sparkTable = String.format("paimon.default.%s", table);
+
+        runBatchSql(
+                String.join(
+                        "\n",
+                        createCatalogSql("my_flink", warehousePath),
+                        "CREATE TABLE "
+                                + table
+                                + " ("
+                                + "  id INT,"
+                                + "  data INT,"
+                                + "  event_ts BIGINT,"
+                                + "  PRIMARY KEY (id) NOT ENFORCED"
+                                + ") WITH ("
+                                + "  'bucket' = '1',"
+                                + "  'changelog-producer' = 'lookup',"
+                                + "  'sequence.field' = 'event_ts',"
+                                + "  'changelog-producer.expose-field-as-metadata' = 'event_ts'"
+                                + ");",
+                        "INSERT INTO " + table + " VALUES (1, 10, 50);",
+                        "INSERT INTO " + table + " VALUES (1, 20, 100);"));
+
+        // Flink created the table without a METADATA FROM alias. Spark reads the generated field
+        // using the physical metadata name stored in the table properties.
+        checkQueryResult(
+                sql -> executeSparkSql(warehousePath, sql),
+                "SELECT id, data, event_ts, __internal__event_ts FROM "
+                        + sparkTable
+                        + " ORDER BY id",
+                "1\t20\t100\t100\n");
+    }
+
+    private String executeSparkSql(String warehousePath, String sqlFile) throws Exception {
+        Container.ExecResult execResult =
+                getSpark()
+                        .execInContainer(
+                                "/spark/bin/spark-sql",
+                                "--master",
+                                "spark://spark-master:7077",
+                                "--conf",
+                                "spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions",
+                                "--conf",
+                                "spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog",
+                                "--conf",
+                                "spark.sql.catalog.paimon.warehouse=file:" + warehousePath,
+                                "-f",
+                                TEST_DATA_DIR + "/" + sqlFile);
+        if (execResult.getExitCode() != 0) {
+            LOG.info(execResult.getStdout());
+            LOG.info(execResult.getStderr());
+            throw new AssertionError("Failed when running spark sql.");
+        }
+        String stdout = stripTrailingSparkErrorLogs(execResult.getStdout());
+        return Arrays.stream(stdout.split("\n"))
+                        .filter(s -> !s.contains("WARN"))
+                        .collect(Collectors.joining("\n"))
+                + "\n";
     }
 
     /**
