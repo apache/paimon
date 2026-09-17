@@ -63,6 +63,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     private final long suggestedFileSize;
     private final CoreOptions options;
     @Nullable private final SegmentsCache<Path> sidecarCache;
+    @Nullable private CacheMetrics cacheMetrics;
 
     private ManifestFile(
             FileIO fileIO,
@@ -116,6 +117,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     @Override
     public ManifestFile withCacheMetrics(@Nullable CacheMetrics cacheMetrics) {
         super.withCacheMetrics(cacheMetrics);
+        this.cacheMetrics = cacheMetrics;
         return this;
     }
 
@@ -177,16 +179,32 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 return cache.read(path, fileSize, filters, convertor);
             }
 
-            CloseableIterator<InternalRow> iterator =
-                    createManifestIterator(
-                            fileIO,
-                            path,
-                            ManifestEntry.MANIFEST_ROW_TYPE,
-                            partitionFilter,
-                            bucketFilter,
-                            selected,
-                            cache == null ? null : cache.segmentsCache());
-            return readFromIterator(iterator, serializer, readFilter, readTFilter, convertor);
+            CacheMetrics metrics = cacheMetrics;
+            ManifestSidecar.CacheStatus cacheStatus =
+                    selected != null && cache != null && metrics != null
+                            ? new ManifestSidecar.CacheStatus()
+                            : null;
+            try {
+                CloseableIterator<InternalRow> iterator =
+                        createManifestIterator(
+                                fileIO,
+                                path,
+                                ManifestEntry.MANIFEST_ROW_TYPE,
+                                partitionFilter,
+                                bucketFilter,
+                                selected,
+                                cache == null ? null : cache.segmentsCache(),
+                                cacheStatus);
+                return readFromIterator(iterator, serializer, readFilter, readTFilter, convertor);
+            } finally {
+                if (cacheStatus != null) {
+                    if (cacheStatus.hit()) {
+                        metrics.increaseHitObject();
+                    } else {
+                        metrics.increaseMissedObject();
+                    }
+                }
+            }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -240,7 +258,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             @Nullable BucketFilter bucketFilter)
             throws IOException {
         return createManifestIterator(
-                fileIO, path, projectedType, partitionFilter, bucketFilter, null, null);
+                fileIO, path, projectedType, partitionFilter, bucketFilter, null, null, null);
     }
 
     private static CloseableIterator<InternalRow> createManifestIterator(
@@ -250,12 +268,14 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             @Nullable PartitionPredicate partitionFilter,
             @Nullable BucketFilter bucketFilter,
             @Nullable ManifestSidecar.Selection selected,
-            @Nullable SegmentsCache<Object> cache)
+            @Nullable SegmentsCache<Object> cache,
+            @Nullable ManifestSidecar.CacheStatus cacheStatus)
             throws IOException {
         try {
             ManifestAvroReader reader =
                     new ManifestAvroReader(
-                            ManifestSidecar.openManifest(fileIO, path, selected, cache));
+                            ManifestSidecar.openManifest(
+                                    fileIO, path, selected, cache, cacheStatus));
             return reader.read(projectedType, partitionFilter, bucketFilter);
         } catch (IOException e) {
             FileUtils.checkExists(fileIO, path);

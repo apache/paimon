@@ -36,6 +36,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaWriteColsLegacySerializer;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.ManifestsReader;
+import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -1935,7 +1936,8 @@ public class ManifestFileTest {
                             FileKind.ADD, entry.partition(), i / 1000, 4, entry.file()));
         }
         ManifestFileMeta meta = factory.create().write(entries).get(0);
-        ManifestFile manifests = factory.create();
+        CacheMetrics metrics = new CacheMetrics();
+        ManifestFile manifests = factory.create().withCacheMetrics(metrics);
         Path manifestPath = new Path(tempDir.toString(), "manifest/" + meta.fileName());
         Path sidecarPath = ManifestSidecar.path(manifestPath);
 
@@ -1945,6 +1947,16 @@ public class ManifestFileTest {
                 .containsExactlyElementsOf(entries);
         assertThat(io.opened).containsExactly(sidecarPath, manifestPath);
         assertThat(cache.getIfPresents(manifestPath)).isNull();
+        assertThat(metrics.getMissedObject()).hasValue(1);
+        assertThat(metrics.getHitObject()).hasValue(0);
+
+        io.reset();
+        ManifestSidecar.Selection cachedBlocks = manifests.selectBlocks(meta, null);
+        assertThat(readSelectedEntries(manifests, meta, cachedBlocks))
+                .containsExactlyElementsOf(entries);
+        assertThat(io.opened).isEmpty();
+        assertThat(metrics.getMissedObject()).hasValue(1);
+        assertThat(metrics.getHitObject()).hasValue(1);
 
         BucketFilter bucketFilter = new BucketFilter(false, 1, null, null);
         io.reset();
@@ -1962,6 +1974,8 @@ public class ManifestFileTest {
                 .containsExactlyElementsOf(entries.subList(1000, 2000));
         assertThat(io.opened).isEmpty();
         assertThat(io.bytes.get()).isZero();
+        assertThat(metrics.getMissedObject()).hasValue(1);
+        assertThat(metrics.getHitObject()).hasValue(2);
     }
 
     @Test

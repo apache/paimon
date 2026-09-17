@@ -692,7 +692,7 @@ public final class ManifestSidecar {
 
     static InputStream openManifest(FileIO io, Path path, @Nullable Selection selected)
             throws IOException {
-        return openManifest(io, path, selected, null);
+        return openManifest(io, path, selected, null, null);
     }
 
     static InputStream openManifest(
@@ -701,9 +701,38 @@ public final class ManifestSidecar {
             @Nullable Selection selected,
             @Nullable SegmentsCache<Object> cache)
             throws IOException {
+        return openManifest(io, path, selected, cache, null);
+    }
+
+    static InputStream openManifest(
+            FileIO io,
+            Path path,
+            @Nullable Selection selected,
+            @Nullable SegmentsCache<Object> cache,
+            @Nullable CacheStatus cacheStatus)
+            throws IOException {
         return selected == null
                 ? io.newInputStream(path)
-                : new SelectedBlockInput(io, path, selected, cache);
+                : new SelectedBlockInput(io, path, selected, cache, cacheStatus);
+    }
+
+    /** Per-manifest status for reporting whether every selected block was served by the cache. */
+    static final class CacheStatus {
+        private boolean accessed;
+        private boolean missed;
+
+        private void hitBlock() {
+            accessed = true;
+        }
+
+        private void miss() {
+            accessed = true;
+            missed = true;
+        }
+
+        boolean hit() {
+            return accessed && !missed;
+        }
     }
 
     /** Separates physical byte ranges from whole-file cache keys. */
@@ -753,6 +782,7 @@ public final class ManifestSidecar {
         private final Path path;
         private final Selection selected;
         @Nullable private final SegmentsCache<Object> cache;
+        @Nullable private final CacheStatus cacheStatus;
         @Nullable private SeekableInputStream input;
         private boolean closed;
         private int headerPosition;
@@ -763,11 +793,16 @@ public final class ManifestSidecar {
         private int bufferLimit;
 
         private SelectedBlockInput(
-                FileIO io, Path path, Selection selected, @Nullable SegmentsCache<Object> cache) {
+                FileIO io,
+                Path path,
+                Selection selected,
+                @Nullable SegmentsCache<Object> cache,
+                @Nullable CacheStatus cacheStatus) {
             this.io = io;
             this.path = path;
             this.selected = selected;
             this.cache = cache;
+            this.cacheStatus = cacheStatus;
         }
 
         @Override
@@ -822,6 +857,9 @@ public final class ManifestSidecar {
                                         > cache.maxElementSize())) {
                     end += selected.blocks.get(blockPosition++).length;
                 }
+                if (cacheStatus != null) {
+                    cacheStatus.miss();
+                }
                 seekInput(block.offset);
                 remaining = end - block.offset;
             }
@@ -841,9 +879,15 @@ public final class ManifestSidecar {
         private void readCachedBlocks(Block first) throws IOException {
             byte[] cached = cachedBlock(first);
             if (cached != null) {
+                if (cacheStatus != null) {
+                    cacheStatus.hitBlock();
+                }
                 blockPosition++;
                 buffer = cached;
             } else {
+                if (cacheStatus != null) {
+                    cacheStatus.miss();
+                }
                 int firstPosition = blockPosition++;
                 long end = first.offset + first.length;
                 while (blockPosition < selected.blocks.size()) {
