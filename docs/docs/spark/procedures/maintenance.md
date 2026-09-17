@@ -236,6 +236,8 @@ Remove the orphan data files and metadata files.
 - `parallelism` (`INT`, optional): The maximum number of concurrent deleting files. By default is the number of processors available to the Java virtual machine.
 - `mode` (`STRING`, optional): The mode of remove orphan clean procedure (local or distributed) . By default is distributed.
 
+This procedure does not delete primary-key `.managed.blob` packs. Use [`remove_orphan_blobs`](#remove_orphan_blobs).
+
 ```sql
 CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00');
 
@@ -254,6 +256,41 @@ CALL sys.remove_orphan_files(
   table => 'default.T',
   older_than => '2023-10-31 12:00:00',
   dry_run => true,
+  parallelism => 5,
+  mode => 'local'
+);
+```
+
+## remove_orphan_blobs
+
+Remove unreferenced primary-key `.managed.blob` packs.
+
+**Arguments**
+
+- `table` (`STRING`, required): the target table identifier. Use `database_name.*` to process the whole database.
+- `older_than` (`STRING`, optional): an absolute timestamp cutoff. Only packs whose modification time is earlier than this timestamp are candidates. The default cutoff is 1 day before the procedure starts.
+- `dry_run` (`BOOLEAN`, optional): when true, calculate the candidate file count and total bytes without deleting files. The procedure returns aggregate counts, not individual pack paths. Default is false.
+- `parallelism` (`INT`, optional): per-table concurrency. In `distributed` mode this is the Spark task parallelism of each table job (default: the larger of Spark's default parallelism and `spark.sql.shuffle.partitions`). In `local` mode this is the per-table file-operation thread limit (default: the number of processors available to the Java virtual machine). For `database_name.*`, `distributed` mode runs tables one Spark job at a time, so cluster concurrency stays within this per-table value; `local` mode may run several tables at once, so total threads can exceed this value.
+- `mode` (`STRING`, optional): The mode of remove orphan blob procedure (`local` or `distributed`). By default is `distributed`.
+
+```sql
+CALL sys.remove_orphan_blobs(table => 'default.T', older_than => '2023-10-31 12:00:00');
+
+CALL sys.remove_orphan_blobs(table => 'default.*', older_than => '2023-10-31 12:00:00');
+
+CALL sys.remove_orphan_blobs(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true);
+
+CALL sys.remove_orphan_blobs(
+  table => 'default.T',
+  older_than => '2023-10-31 12:00:00',
+  dry_run => false,
+  parallelism => 5
+);
+
+CALL sys.remove_orphan_blobs(
+  table => 'default.T',
+  older_than => '2023-10-31 12:00:00',
+  dry_run => false,
   parallelism => 5,
   mode => 'local'
 );
