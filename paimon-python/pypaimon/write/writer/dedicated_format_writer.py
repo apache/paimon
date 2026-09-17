@@ -708,31 +708,36 @@ class DedicatedFormatWriter(DataWriter):
         file_name = f"{CoreOptions.data_file_prefix(self.options)}{uuid.uuid4()}-0.{self.file_format}"
         file_path = self._generate_file_path(file_name)
 
-        # Write file based on format
-        if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
-            shredding_stats = self._write_parquet_data(file_path, data)
-        elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
-            self.file_io.write_orc(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
-        elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
-            self.file_io.write_avro(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
-        elif self.file_format == CoreOptions.FILE_FORMAT_LANCE:
-            self.file_io.write_lance(file_path, data)
-        elif self.file_format == CoreOptions.FILE_FORMAT_VORTEX:
-            self.file_io.write_vortex(file_path, data)
-        elif self.file_format == CoreOptions.FILE_FORMAT_MOSAIC:
-            self.file_io.write_mosaic(file_path, data, options=self.mosaic_writer_options)
-        elif self.file_format == CoreOptions.FILE_FORMAT_ROW:
-            self.file_io.write_row(file_path, data, zstd_level=self.zstd_level)
-        else:
-            raise ValueError(f"Unsupported file format: {self.file_format}")
+        # Until metadata is returned, no caller can track this file for abort.
+        try:
+            # Write file based on format
+            if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
+                shredding_stats = self._write_parquet_data(file_path, data)
+            elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
+                self.file_io.write_orc(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
+            elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
+                self.file_io.write_avro(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
+            elif self.file_format == CoreOptions.FILE_FORMAT_LANCE:
+                self.file_io.write_lance(file_path, data)
+            elif self.file_format == CoreOptions.FILE_FORMAT_VORTEX:
+                self.file_io.write_vortex(file_path, data)
+            elif self.file_format == CoreOptions.FILE_FORMAT_MOSAIC:
+                self.file_io.write_mosaic(file_path, data, options=self.mosaic_writer_options)
+            elif self.file_format == CoreOptions.FILE_FORMAT_ROW:
+                self.file_io.write_row(file_path, data, zstd_level=self.zstd_level)
+            else:
+                raise ValueError(f"Unsupported file format: {self.file_format}")
 
-        # Determine if this is an external path
-        is_external_path = self.external_path_provider is not None
-        external_path_str = file_path if is_external_path else None
+            # Determine if this is an external path
+            is_external_path = self.external_path_provider is not None
+            external_path_str = file_path if is_external_path else None
 
-        meta = self._create_data_file_meta(file_name, file_path, data, external_path_str)
-        self._map_shared_shredding.file_completed(shredding_stats)
-        return meta
+            meta = self._create_data_file_meta(file_name, file_path, data, external_path_str)
+            self._map_shared_shredding.file_completed(shredding_stats)
+            return meta
+        except Exception:
+            self.file_io.delete_quietly(file_path)
+            raise
 
     def _create_data_file_meta(self, file_name: str, file_path: str, data: pa.Table,
                                external_path: Optional[str] = None) -> DataFileMeta:
