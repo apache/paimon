@@ -31,6 +31,9 @@ except ImportError:  # pragma: no cover - supported fastavro versions provide th
 
 from datetime import datetime
 
+from pypaimon.manifest.manifest_sidecar import (
+    Query, read_sidecar, read_selected_bytes,
+)
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
                                                      ManifestEntry)
@@ -128,13 +131,27 @@ class ManifestFileManager:
                               early_entry_filter: Optional[Callable[[int, int], bool]] = None,
                               early_record_filter: Optional[Callable[[dict], bool]] = None,
                               partition_filter=None,
+                              row_ranges=None,
                               ) -> List[ManifestEntry]:
 
-        def _process_single_manifest(manifest_file: ManifestFileMeta) -> List[ManifestEntry]:
-            return self.read(manifest_file.file_name, manifest_entry_filter, drop_stats,
-                             early_entry_filter=early_entry_filter,
-                             early_record_filter=early_record_filter,
-                             partition_filter=partition_filter)
+        enabled = self.table.options.manifest_sidecar_enabled()
+        query = Query(row_ranges) if enabled and row_ranges is not None else None
+
+        def _process_single_manifest(manifest_file: ManifestFileMeta):
+            path = f"{self.manifest_path}/{manifest_file.file_name}"
+            selected = None
+            if enabled and (
+                    query is not None or partition_filter is not None or early_entry_filter is not None):
+                selected = read_sidecar(self.file_io, path, manifest_file, query,
+                                        partition_filter, self.partition_keys_fields, early_entry_filter)
+                if selected is not None and not selected.blocks:
+                    return []
+            return self.read(
+                manifest_file.file_name, manifest_entry_filter, drop_stats,
+                early_entry_filter=early_entry_filter,
+                early_record_filter=early_record_filter,
+                partition_filter=partition_filter,
+                selected_blocks=selected)
 
         def _entry_identifier(e: ManifestEntry) -> tuple:
             return (
@@ -177,6 +194,7 @@ class ManifestFileManager:
              early_entry_filter: Optional[Callable[[int, int], bool]] = None,
              early_record_filter: Optional[Callable[[dict], bool]] = None,
              partition_filter=None,
+             selected_blocks=None,
              ) -> List[ManifestEntry]:
         """
         early_entry_filter: ``(bucket, total_buckets) -> bool``, skip before deserializing _FILE.
@@ -190,8 +208,11 @@ class ManifestFileManager:
         manifest_file_path = f"{self.manifest_path}/{manifest_file_name}"
 
         entries = []
-        with self.file_io.new_input_stream(manifest_file_path) as input_stream:
-            avro_bytes = input_stream.read()
+        if selected_blocks is not None:
+            avro_bytes = read_selected_bytes(self.file_io, manifest_file_path, selected_blocks)
+        else:
+            with self.file_io.new_input_stream(manifest_file_path) as input_stream:
+                avro_bytes = input_stream.read()
         buffer = BytesIO(avro_bytes)
         records = _read_manifest_records(
             buffer, early_entry_filter, partition_filter,
