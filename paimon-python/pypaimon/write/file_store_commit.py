@@ -120,8 +120,14 @@ def _manifest_file_key(manifest: ManifestFileMeta):
         GenericRowSerializer.to_bytes(stats.max_values),
         tuple(stats.null_counts) if stats.null_counts is not None else None,
         manifest.schema_id,
+        manifest.min_bucket,
+        manifest.max_bucket,
+        manifest.min_level,
+        manifest.max_level,
         manifest.min_row_id,
         manifest.max_row_id,
+        manifest.total_buckets,
+        tuple(manifest.extra_files) if manifest.extra_files is not None else None,
     )
 
 
