@@ -109,23 +109,17 @@ checkpoint completion waits for compaction. Tune it with checkpoint duration and
 `lookup` is incompatible with `full-compaction.delta-commits`. For periodic full compaction with
 changelog generation, use `full-compaction` instead.
 
-By setting `'changelog-producer.expose-field-as-metadata'` to a comma-separated list of column names,
-the lookup changelog producer stores those columns' values from the incoming event as additional metadata
-columns (`__internal__<column>`) in all changelog records. For retraction records (`-U`, `-D`), the regular
-value columns retain the correct before-image so standard downstream operators (filters, aggregations)
-work correctly, while the metadata columns carry the event values. For forward records (`+I`, `+U`),
-the metadata columns mirror the regular values for schema consistency. Sinks that need the event
-timestamp — such as Cassandra using `WRITETIME` for conflict resolution — can read the metadata columns.
+Set `'changelog-producer.expose-field-as-metadata'` to a comma-separated list of columns to copy
+from the lookup changelog event into metadata columns. Metadata columns are named by concatenating
+the configured prefix and column name (`__internal__<column>` by default). For retractions (`-U`, `-D`),
+regular columns contain the before-image while metadata columns contain the event values; for forward
+records (`+I`, `+U`), they mirror the regular values. External sinks that need event timestamps for
+conflict resolution can read these metadata columns.
 
-**Note:** The event values come from the *merged result* of the merge function, which equals the raw
-incoming event for the `deduplicate` merge engine but may differ for aggregation merge engines.
-
-This option is only supported by the `lookup` changelog producer.
-
-The metadata column name is formed by concatenating the configured prefix and the preserved
-column name. The default prefix is `__internal__`, so preserving `event_ts` creates the
-`__internal__event_ts` metadata column. Set `'changelog-producer.metadata-field-prefix'` to a
-different prefix if the default conflicts with an existing column name.
+The metadata values come from the merge result, which equals the incoming value for the `deduplicate`
+merge engine but may differ for aggregation engines. This option is supported only by the `lookup`
+changelog producer. Set `'changelog-producer.metadata-field-prefix'` if the default prefix conflicts
+with an existing column name.
 
 ```sql
 -- Source table with event metadata preservation
@@ -139,17 +133,14 @@ CREATE TABLE my_table (
     'changelog-producer.expose-field-as-metadata' = 'event_ts'
 );
 
--- Sink table reading event metadata
-CREATE TABLE cassandra_sink (
+-- External sink reading event metadata
+CREATE TABLE external_sink (
     id INT,
     data STRING,
     event_ts BIGINT,
     retract_event_ts BIGINT METADATA FROM 'paimon.event.event_ts'
 ) WITH (...);
 ```
-
-(Note: Please increase `'execution.checkpointing.max-concurrent-checkpoints'` Flink configuration, this is very
-important for performance).
 
 ## Full Compaction
 
