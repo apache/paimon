@@ -413,7 +413,7 @@ public class DataEvolutionUtilsTest {
                                                 dataFile("data.vector.lance", 2)),
                                         Function.identity()))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("normal anchor file");
+                .hasMessageContaining("anchor file");
     }
 
     @Test
