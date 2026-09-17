@@ -18,7 +18,6 @@
 """LeRobot-compatible map-style reads from a multimodal Paimon table."""
 
 import bisect
-import io
 import json
 import math
 import operator
@@ -1438,14 +1437,10 @@ def _torch_row(row, features, return_uint8=False):
 def _image_tensor(payload, feature, return_uint8=False):
     if payload is None:
         raise ValueError("LeRobot image feature contains a null frame.")
-    import numpy as np
-    import torch
-    try:
-        from PIL import Image, ImageOps
-    except ImportError as error:
-        raise ImportError(
-            "PaimonLeRobotDataset requires Pillow from "
-            "'pypaimon[lerobot]'.") from error
+    from pypaimon.multimodal.window_transforms import (
+        _decode_image,
+        _image_array_to_tensor,
+    )
 
     expected_shape = _feature_shape(feature, "image")
     if len(expected_shape) != 3:
@@ -1455,21 +1450,12 @@ def _image_tensor(payload, feature, return_uint8=False):
     payload_shape = expected_shape[1:] + expected_shape[:1] \
         if names and names[0] in ("channel", "channels") \
         else expected_shape
-    with Image.open(io.BytesIO(payload)) as image:
-        array = np.array(ImageOps.exif_transpose(image), copy=True)
-    if array.ndim == 2:
-        array = array[:, :, None]
+    array = _decode_image(payload)
     if array.shape != payload_shape:
         raise ValueError(
             "LeRobot image payload has shape %s, expected %s."
             % (array.shape, payload_shape))
-    normalize = array.dtype == np.uint8
-    tensor = torch.from_numpy(array).permute(2, 0, 1)
-    if normalize and return_uint8:
-        return tensor
-    # Preserve high-bit-depth and floating-point images in native units.
-    tensor = tensor.float()
-    return tensor.div_(255) if normalize else tensor
+    return _image_array_to_tensor(array, return_uint8)
 
 
 def _video_tensor(frame, feature, return_uint8=False):
