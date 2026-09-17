@@ -100,6 +100,70 @@ matches = (
 )
 ```
 
+## Distributed Vector Search
+
+Use `execution="ray"` to execute a single vector query across Ray workers and
+return an Arrow table to the driver. This supports data-evolution tables;
+primary-key tables, batch vector queries, and hybrid queries are not supported
+by this execution mode.
+
+Install the same PyPaimon and index dependencies on the driver and workers:
+
+```shell
+python -m pip install 'pypaimon[ray,vindex]'
+```
+
+```python
+import ray
+
+ray.init()  # Use address="auto" to connect to an existing cluster.
+
+neighbors = (
+    docs.search(
+        [0.1, 0.2, 0.3],
+        column="embedding",
+        pre_filter="category = 'lake'",
+    )
+    .select(["id", "content"])
+    .limit(10)
+    .to_arrow(
+        execution="ray",
+        concurrency=4,
+        ray_remote_args={"num_cpus": 1},
+    )
+)
+```
+
+`execution` defaults to `"local"`. `concurrency` is a positive integer limiting
+the number of in-flight Ray tasks, with a default of 4. `ray_remote_args` supplies
+Ray task options, including resources and retry settings; `num_returns` is
+managed by PyPaimon. These two arguments require `execution="ray"`.
+Query vectors must contain finite values. If stored vectors produce NaN scores,
+Ray execution fails because NaN cannot be ranked consistently across tasks.
+
+The driver fixes one read snapshot and plans the query. Workers search individual
+index shards and, when required by the table's search mode, scan unindexed data.
+They return candidate row IDs and scores. The driver retains the local search
+rules for global candidate selection, refinement, filtering, and result lookup.
+In particular, `pre_filter` filters candidates before ranking; `where()` filters
+the selected rows and can return fewer than the requested number of results.
+
+Index search, raw scans, refinement, lookup, and task retries use the same read
+snapshot. The existing `snapshot_id` and `tag_name` arguments to `search()` also
+work with Ray execution. A failed task fails the query rather than returning
+partial results. Snapshot pinning does not prevent file expiration; the files
+needed by the query must remain available for its duration.
+
+All workers must be able to access the table's storage. Local filesystem paths
+are suitable for a local Ray cluster; multiple nodes require shared storage.
+Each index task searches one shard, while its native index I/O settings still
+apply. Raw-scan parallelism is limited by the number of planned read splits,
+controlled by the table's `source.split.target-size` option. Refinement and final
+row lookup run on the driver. Candidate traffic grows
+with the number of index shards and the configured refinement budget, so Ray
+execution is most useful when shard search or raw scanning outweighs scheduling
+and transfer costs. Small queries can be faster locally.
+
 ## Search Hybrid
 
 Use `search_hybrid` to combine vector and full-text routes, then rerank the

@@ -273,7 +273,7 @@ class AbstractVectorSearchReadImpl:
         try:
             self._record_index_metric(reader, vector_index_files[0].index_type, metric_lock)
             return reader, OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
-        except Exception:
+        except BaseException:
             reader.close()
             raise
 
@@ -314,11 +314,16 @@ class AbstractVectorSearchReadImpl:
         if table is None or table.num_rows == 0:
             return DictBasedScoredIndexResult({})
 
+        return self._score_raw_batches(
+            table.to_batches(max_chunksize=_score_block_size(query_vector)),
+            query_vector, self._search_metric(index_type), score_candidates)
+
+    def _score_raw_batches(self, batches, query_vector, metric, score_candidates=None, reject_nan=False):
+        """Score bounded Arrow batches, shared by local and distributed reads."""
+        import math
+
         top_k_heap = []
-        metric = self._search_metric(index_type)
-        block_size = _score_block_size(query_vector)
-        for start in range(0, table.num_rows, block_size):
-            block = table.slice(start, block_size)
+        for block in batches:
             row_ids = block.column(SpecialFields.ROW_ID.name).to_pylist()
             vectors = block.column(self._vector_column.name)
             if score_candidates is not None:
@@ -332,6 +337,8 @@ class AbstractVectorSearchReadImpl:
                 row_ids, _iter_arrow_scores(vectors, query_vector, metric)
             ):
                 if score is not None:
+                    if reject_nan and math.isnan(score):
+                        raise ValueError("Ray vector search cannot rank NaN scores.")
                     _offer_score(top_k_heap, self._limit, row_id, score)
         return _scored_result(top_k_heap)
 
