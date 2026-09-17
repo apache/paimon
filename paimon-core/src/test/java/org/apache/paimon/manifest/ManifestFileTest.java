@@ -1856,7 +1856,7 @@ public class ManifestFileTest {
     }
 
     @Test
-    void testUnknownRowIdKeepsPartitionIndexAndNoQueryDoesNotReadSidecar() {
+    void testUnfilteredReadWithoutCacheSkipsSidecar() {
         Options options = new Options();
         options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
         options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, true);
@@ -1864,7 +1864,8 @@ public class ManifestFileTest {
         ManifestFile manifests =
                 createManifestFileFactory(tempDir.toString(), Long.MAX_VALUE, options, fileIO)
                         .create();
-        ManifestFileMeta meta = manifests.write(Collections.singletonList(gen.next())).get(0);
+        ManifestEntry entry = gen.next();
+        ManifestFileMeta meta = manifests.write(Collections.singletonList(entry)).get(0);
         assertThat(ManifestSidecar.fileName(meta)).isNotNull();
         assertThat(
                         java.nio.file.Files.exists(
@@ -1874,7 +1875,93 @@ public class ManifestFileTest {
 
         fileIO.reset();
         assertThat(manifests.selectBlocks(meta, null)).isNull();
-        assertThat(fileIO.opened).isEmpty();
+        assertThat(manifests.read(meta.fileName())).containsExactly(entry);
+        assertThat(fileIO.opened)
+                .containsExactly(new Path(tempDir.toString(), "manifest/" + meta.fileName()));
+    }
+
+    @Test
+    void testUnfilteredReadWithCacheAndWithoutSidecarUsesWholeManifestCache() {
+        Options options = new Options();
+        options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, true);
+        RecordingFileIO io = new RecordingFileIO();
+        SegmentsCache<Path> cache =
+                new SegmentsCache<>(1024, MemorySize.ofMebiBytes(16), Long.MAX_VALUE);
+        ManifestFile manifests =
+                createManifestFileFactory(tempDir.toString(), Long.MAX_VALUE, options, io, cache)
+                        .create();
+        ManifestEntry entry = gen.next();
+        ManifestFileMeta written = manifests.write(Collections.singletonList(entry)).get(0);
+        ManifestFileMeta unindexed = withExtraFiles(written, null);
+        Path manifestPath = new Path(tempDir.toString(), "manifest/" + written.fileName());
+
+        io.reset();
+        ManifestSidecar.Selection selected = manifests.selectBlocks(unindexed, null);
+        assertThat(selected).isNull();
+        assertThat(
+                        manifests.read(
+                                unindexed.fileName(),
+                                unindexed.fileSize(),
+                                null,
+                                null,
+                                row -> true,
+                                manifestEntry -> true,
+                                java.util.function.Function.identity(),
+                                selected))
+                .containsExactly(entry);
+        assertThat(io.opened).containsExactly(manifestPath);
+        assertThat(cache.getIfPresents(manifestPath)).isNotNull();
+
+        io.reset();
+        assertThat(manifests.read(unindexed.fileName())).containsExactly(entry);
+        assertThat(io.opened).isEmpty();
+    }
+
+    @Test
+    void testUnfilteredReadWarmsBlockCacheForFilteredRead() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, 4);
+        options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, true);
+        RecordingFileIO io = new RecordingFileIO();
+        SegmentsCache<Path> cache =
+                new SegmentsCache<>(1024, MemorySize.ofMebiBytes(16), Long.MAX_VALUE);
+        ManifestFile.Factory factory =
+                createManifestFileFactory(tempDir.toString(), Long.MAX_VALUE, options, io, cache);
+        List<ManifestEntry> entries = new ArrayList<>();
+        for (int i = 0; i < 4000; i++) {
+            ManifestEntry entry = gen.next();
+            entries.add(
+                    ManifestEntry.create(
+                            FileKind.ADD, entry.partition(), i / 1000, 4, entry.file()));
+        }
+        ManifestFileMeta meta = factory.create().write(entries).get(0);
+        ManifestFile manifests = factory.create();
+        Path manifestPath = new Path(tempDir.toString(), "manifest/" + meta.fileName());
+        Path sidecarPath = ManifestSidecar.path(manifestPath);
+
+        io.reset();
+        ManifestSidecar.Selection allBlocks = manifests.selectBlocks(meta, null);
+        assertThat(readSelectedEntries(manifests, meta, allBlocks))
+                .containsExactlyElementsOf(entries);
+        assertThat(io.opened).containsExactly(sidecarPath, manifestPath);
+        assertThat(cache.getIfPresents(manifestPath)).isNull();
+
+        BucketFilter bucketFilter = new BucketFilter(false, 1, null, null);
+        io.reset();
+        ManifestSidecar.Selection selected = manifests.selectBlocks(meta, null, null, bucketFilter);
+        assertThat(
+                        manifests.read(
+                                meta.fileName(),
+                                meta.fileSize(),
+                                null,
+                                bucketFilter,
+                                row -> true,
+                                entry -> true,
+                                java.util.function.Function.identity(),
+                                selected))
+                .containsExactlyElementsOf(entries.subList(1000, 2000));
+        assertThat(io.opened).isEmpty();
+        assertThat(io.bytes.get()).isZero();
     }
 
     @Test

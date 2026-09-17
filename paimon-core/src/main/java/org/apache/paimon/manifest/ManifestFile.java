@@ -402,8 +402,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             @Nullable RowRangeIndex query,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable BucketFilter bucketFilter) {
-        return !options.manifestSidecarEnabled()
-                        || (query == null && partitionFilter == null && bucketFilter == null)
+        boolean hasFilter = query != null || partitionFilter != null || bucketFilter != null;
+        return !options.manifestSidecarEnabled() || (!hasFilter && cache == null)
                 ? null
                 : ManifestSidecar.read(
                         fileIO,
