@@ -88,7 +88,8 @@ class TableCommit:
                 overwrite_partition=self.overwrite_partition,
                 **commit_kwargs)
         else:
-            if not non_empty_messages:
+            if (not non_empty_messages
+                    and self.table.options.snapshot_ignore_empty_commit()):
                 return
             logger.info(
                 "Committing table %s, %d non-empty messages",

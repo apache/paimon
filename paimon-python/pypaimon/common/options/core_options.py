@@ -727,6 +727,16 @@ class CoreOptions:
         .with_description("The prefix for commit user.")
     )
 
+    SNAPSHOT_IGNORE_EMPTY_COMMIT: ConfigOption[bool] = (
+        ConfigOptions.key("snapshot.ignore-empty-commit")
+        .boolean_type()
+        .no_default_value()
+        .with_description(
+            "Whether to skip append commits without changes. "
+            "PyPaimon defaults to true; false allows tagging an empty table."
+        )
+    )
+
     COMMIT_MAX_RETRIES: ConfigOption[int] = (
         ConfigOptions.key("commit.max-retries")
         .int_type()
@@ -1608,6 +1618,9 @@ class CoreOptions:
                 )
             weights.append(parsed)
         return weights
+
+    def snapshot_ignore_empty_commit(self) -> bool:
+        return self.options.get(CoreOptions.SNAPSHOT_IGNORE_EMPTY_COMMIT, True)
 
     def commit_max_retries(self) -> int:
         return self.options.get(CoreOptions.COMMIT_MAX_RETRIES)
