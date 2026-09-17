@@ -258,6 +258,35 @@ public class BlobTableTest extends TableTestBase {
     }
 
     @Test
+    public void testWriteColsOptimizationCannotBeChangedDynamically() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        String key = CoreOptions.DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED.key();
+
+        assertThat(table.copy(Collections.singletonMap(key, "false"))).isNotNull();
+        assertThat(table.copy(Collections.singletonMap(key, null))).isNotNull();
+        assertThatThrownBy(() -> table.copy(Collections.singletonMap(key, "true")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("ALTER TABLE");
+        assertThatThrownBy(() -> table.copyWithoutTimeTravel(Collections.singletonMap(key, "true")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("ALTER TABLE");
+
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(SchemaChange.setOption(key, "true")),
+                false);
+        FileStoreTable altered = getTableDefault();
+        assertThat(altered.copy(Collections.singletonMap(key, "true"))).isNotNull();
+        assertThatThrownBy(() -> altered.copy(Collections.singletonMap(key, "false")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("ALTER TABLE");
+        assertThatThrownBy(() -> altered.copy(Collections.singletonMap(key, null)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("ALTER TABLE");
+    }
+
+    @Test
     public void testArrayBlobField() throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());

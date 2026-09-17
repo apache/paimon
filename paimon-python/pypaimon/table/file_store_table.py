@@ -523,9 +523,23 @@ class FileStoreTable(Table):
         new_options = CoreOptions.copy(self.options).options.to_map()
         for k, v in options.items():
             if v is None:
-                new_options.pop(k)
+                new_options.pop(k, None)
             else:
                 new_options[k] = v
+
+        write_cols_optimization_key = (
+            CoreOptions.DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED.key())
+        if write_cols_optimization_key in options:
+            old_enabled = self.options.data_evolution_write_cols_optimization_enabled(
+                False)
+            new_enabled = CoreOptions(
+                Options(new_options)).data_evolution_write_cols_optimization_enabled(
+                    False)
+            if old_enabled != new_enabled:
+                raise ValueError(
+                    f"{write_cols_optimization_key} must be changed through ALTER TABLE, "
+                    "not dynamic table options, because readers use the persisted "
+                    "table schema to interpret write columns")
 
         new_table_schema = self.table_schema.copy(new_options=new_options)
 

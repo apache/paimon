@@ -136,6 +136,39 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
         blob_writer.close()
 
+    def test_write_cols_optimization_cannot_be_changed_dynamically(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+        ])
+        table_name = 'test_db.dynamic_write_cols_optimization'
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            },
+        )
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+        key = 'data-evolution.write-cols-optimization.enabled'
+
+        self.assertIsNotNone(table.copy({key: 'false'}))
+        self.assertIsNotNone(table.copy({key: None}))
+        with self.assertRaisesRegex(ValueError, 'ALTER TABLE'):
+            table.copy({key: 'true'})
+        with self.assertRaisesRegex(ValueError, 'ALTER TABLE'):
+            table.copy_without_time_travel({key: 'true'})
+
+        self.catalog.alter_table(
+            table_name, [SchemaChange.set_option(key, 'true')], False)
+        altered = self.catalog.get_table(table_name)
+        self.assertIsNotNone(altered.copy({key: 'true'}))
+        with self.assertRaisesRegex(ValueError, 'ALTER TABLE'):
+            altered.copy({key: 'false'})
+        with self.assertRaisesRegex(ValueError, 'ALTER TABLE'):
+            altered.copy({key: None})
+
     def test_omit_write_cols_for_all_non_dedicated_columns(self):
         pa_schema = pa.schema([
             ('id', pa.int32()),

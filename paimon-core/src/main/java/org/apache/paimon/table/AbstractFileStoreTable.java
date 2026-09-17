@@ -347,6 +347,25 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private void checkImmutability(Map<String, String> dynamicOptions) {
         Map<String, String> oldOptions = tableSchema.options();
+        String writeColsOptimizationKey =
+                CoreOptions.DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED.key();
+        if (dynamicOptions.containsKey(writeColsOptimizationKey)) {
+            Map<String, String> newOptions = new HashMap<>(oldOptions);
+            String newValue = dynamicOptions.get(writeColsOptimizationKey);
+            if (newValue == null) {
+                newOptions.remove(writeColsOptimizationKey);
+            } else {
+                newOptions.put(writeColsOptimizationKey, newValue);
+            }
+            if (CoreOptions.fromMap(oldOptions).dataEvolutionWriteColsOptimizationEnabled()
+                    != CoreOptions.fromMap(newOptions)
+                            .dataEvolutionWriteColsOptimizationEnabled()) {
+                throw new UnsupportedOperationException(
+                        writeColsOptimizationKey
+                                + " must be changed through ALTER TABLE, not dynamic table options, "
+                                + "because readers use the persisted table schema to interpret write columns.");
+            }
+        }
         // check option is not immutable
         dynamicOptions.forEach(
                 (k, newValue) -> {
