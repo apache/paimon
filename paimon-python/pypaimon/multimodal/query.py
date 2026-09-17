@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from copy import copy
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pyarrow as pa
@@ -467,6 +468,15 @@ class ScanQuery:
 
 class _PreFilterQuery(ScanQuery):
 
+    def _for_execution(self):
+        from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+        query = copy(self)
+        query._table = self._table._copy_with_snapshot(TimeTravelUtil.resolve_snapshot(self._table))
+        return query
+
+    def to_arrow(self):
+        return ScanQuery.to_arrow(self._for_execution())
+
     def __init__(
             self,
             table,
@@ -525,7 +535,7 @@ class VectorQuery(_PreFilterQuery):
     def _execute_vector(self, query):
         limit = query._limit if query._limit is not None else 10
         builder = (
-            self._table.new_vector_search_builder()
+            query._table.new_vector_search_builder()
             .with_vector_column(self._vector_column)
             .with_query_vector(self._vector)
             .with_limit(limit)
@@ -547,7 +557,7 @@ class TextQuery(_PreFilterQuery):
     def _execute_fts(self, query):
         limit = query._limit if query._limit is not None else 10
         builder = (
-            self._table.new_full_text_search_builder()
+            query._table.new_full_text_search_builder()
             .with_query(self._text_query["column"], self._text_query["query"])
             .with_limit(limit)
         )
@@ -582,7 +592,7 @@ class HybridQuery(_PreFilterQuery):
         final_limit = query._limit if query._limit is not None else 10
         route_limit = self._route_limit or final_limit
         builder = (
-            self._table.new_hybrid_search_builder()
+            query._table.new_hybrid_search_builder()
             .with_limit(final_limit)
             .with_ranker(self._ranker)
         )
@@ -623,9 +633,10 @@ class BatchVectorQuery(_PreFilterQuery):
         super().__init__(table, pre_filter=pre_filter)
 
     def to_arrow(self):
+        query = self._for_execution()
         return [
-            self._read_global_index_result(result)
-            for result in self._execute_batch_vector(self)
+            query._read_global_index_result(result)
+            for result in query._execute_batch_vector(query)
         ]
 
     def to_pandas(self):
@@ -637,7 +648,7 @@ class BatchVectorQuery(_PreFilterQuery):
     def _execute_batch_vector(self, query):
         limit = query._limit if query._limit is not None else 10
         builder = (
-            self._table.new_batch_vector_search_builder()
+            query._table.new_batch_vector_search_builder()
             .with_vector_column(self._vector_column)
             .with_query_vectors(self._vectors)
             .with_limit(limit)
