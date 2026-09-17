@@ -34,6 +34,8 @@ import org.apache.paimon.format.shredding.ShreddingReadPlanFactory;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.types.ArrayType;
@@ -69,9 +71,12 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.IntFunction;
 
@@ -113,7 +118,21 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         this.readType = readType;
         this.batchSize = batchSize;
         this.caseSensitive = conf.getOptional(CatalogOptions.CASE_SENSITIVE).orElse(true);
-        this.predicates = predicates;
+        this.predicates = predicates == null ? null : new ArrayList<>();
+        if (predicates != null) {
+            Set<String> projectedFields =
+                    caseSensitive ? new HashSet<>() : new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+            projectedFields.addAll(readType.getFieldNames());
+            for (Predicate predicate : predicates) {
+                // Parquet treats unprojected filter columns as null. Keep only conjuncts
+                // covered by the projection; an OR with an unprojected field must be dropped.
+                for (Predicate conjunct : PredicateBuilder.splitAnd(predicate)) {
+                    if (projectedFields.containsAll(PredicateVisitor.collectFieldNames(conjunct))) {
+                        this.predicates.add(conjunct);
+                    }
+                }
+            }
+        }
     }
 
     @VisibleForTesting
