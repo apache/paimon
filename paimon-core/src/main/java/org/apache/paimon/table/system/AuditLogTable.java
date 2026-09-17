@@ -634,6 +634,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public List<BinaryRow> topNPartitions(int num, int partitionFieldCount) {
+            return batchScan.topNPartitions(num, partitionFieldCount);
+        }
+
+        @Override
         public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
             batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
             return this;
