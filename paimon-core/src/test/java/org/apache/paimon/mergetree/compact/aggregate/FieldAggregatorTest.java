@@ -2158,6 +2158,90 @@ public class FieldAggregatorTest {
                 .containsExactly(new byte[] {3, 4});
     }
 
+    /**
+     * A {@code GEOMETRY} or {@code GEOGRAPHY} element is a WKB {@code byte[]} just like a binary
+     * one, so distinct collection has to compare it by content as well.
+     */
+    @Test
+    public void testFieldCollectAggWithDistinctGeospatial() {
+        for (DataType elementType : Arrays.asList(DataTypes.GEOMETRY(), DataTypes.GEOGRAPHY())) {
+            FieldCollectAgg agg =
+                    new FieldCollectAggFactory()
+                            .create(
+                                    DataTypes.ARRAY(elementType),
+                                    CoreOptions.fromMap(
+                                            ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                    "fieldName");
+            InternalArray.ElementGetter elementGetter =
+                    InternalArray.createElementGetter(elementType);
+
+            InternalArray result =
+                    (InternalArray)
+                            agg.agg(
+                                    new GenericArray(new Object[] {new byte[] {1, 2}}),
+                                    new GenericArray(
+                                            new Object[] {new byte[] {1, 2}, new byte[] {3, 4}}));
+
+            assertThat(unnest(result, elementGetter))
+                    .as(elementType.toString())
+                    .usingRecursiveFieldByFieldElementComparator()
+                    .containsExactlyInAnyOrder(new byte[] {1, 2}, new byte[] {3, 4});
+        }
+    }
+
+    /**
+     * Retraction compares by content even when the array is not distinct: a retracted binary
+     * element must still be removed from the accumulator.
+     */
+    @Test
+    public void testFieldCollectAggRetractWithBinary() {
+        FieldCollectAgg agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(DataTypes.VARBINARY(10)),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "false")),
+                                "fieldName");
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(DataTypes.VARBINARY(10));
+
+        InternalArray result =
+                (InternalArray)
+                        agg.retract(
+                                new GenericArray(
+                                        new Object[] {new byte[] {1, 2}, new byte[] {3, 4}}),
+                                new GenericArray(new Object[] {new byte[] {1, 2}}));
+
+        assertThat(unnest(result, elementGetter))
+                .usingRecursiveFieldByFieldElementComparator()
+                .containsExactly(new byte[] {3, 4});
+    }
+
+    /** Without distinct, a binary array keeps duplicates: the equaliser must not de-duplicate. */
+    @Test
+    public void testFieldCollectAggKeepsDuplicatesWithBinary() {
+        FieldCollectAgg agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(DataTypes.VARBINARY(10)),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "false")),
+                                "fieldName");
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(DataTypes.VARBINARY(10));
+
+        InternalArray result =
+                (InternalArray)
+                        agg.agg(
+                                new GenericArray(new Object[] {new byte[] {1, 2}}),
+                                new GenericArray(
+                                        new Object[] {new byte[] {1, 2}, new byte[] {3, 4}}));
+
+        assertThat(unnest(result, elementGetter))
+                .usingRecursiveFieldByFieldElementComparator()
+                .containsExactly(new byte[] {1, 2}, new byte[] {1, 2}, new byte[] {3, 4});
+    }
+
     @Test
     public void testFiledCollectAggWithRowType() {
         RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
@@ -2594,6 +2678,25 @@ public class FieldAggregatorTest {
         assertThat(binaryKeyed(result)).containsOnlyKeys("0304");
     }
 
+    /** A {@code GEOMETRY} key is a WKB {@code byte[]} and must be merged by content as well. */
+    @Test
+    public void testFieldMergeMapAggWithGeospatialKey() {
+        FieldMergeMapAgg agg =
+                new FieldMergeMapAggFactory()
+                        .create(DataTypes.MAP(DataTypes.GEOMETRY(), DataTypes.INT()), null, null);
+
+        Map<Object, Object> first = new HashMap<>();
+        first.put(new byte[] {1, 2}, 1);
+        Map<Object, Object> second = new HashMap<>();
+        second.put(new byte[] {1, 2}, 2);
+        second.put(new byte[] {3, 4}, 3);
+
+        InternalMap merged = (InternalMap) agg.agg(new GenericMap(first), new GenericMap(second));
+
+        assertThat(merged.size()).isEqualTo(2);
+        assertThat(binaryKeyed(merged)).containsOnlyKeys("0102", "0304").containsValues(2, 3);
+    }
+
     /** Render an {@code InternalMap} with binary keys as hex so it can be asserted by value. */
     private Map<String, Object> binaryKeyed(InternalMap map) {
         InternalArray.ElementGetter keyGetter =
@@ -2937,6 +3040,35 @@ public class FieldAggregatorTest {
         assertThat(firstRowValue(merged)).isEqualTo("A1");
 
         // A null row is a tombstone and must remove the entry.
+        Map<Object, Object> tombstone = new HashMap<>();
+        tombstone.put(new byte[] {1, 2}, null);
+        acc = agg.agg(acc, new GenericMap(tombstone));
+        assertThat(((InternalMap) acc).size()).isEqualTo(0);
+    }
+
+    /** The same walk with a {@code GEOMETRY} key, which is a WKB {@code byte[]} as well. */
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggWithGeospatialKey() {
+        MapType mapType =
+                DataTypes.MAP(
+                        DataTypes.GEOMETRY(),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
+        FieldMergeMapWithKeyTimeAgg agg = new FieldMergeMapWithKeyTimeAgg("test", mapType, 1);
+
+        Object acc = agg.agg(null, binaryKeyedMap(new byte[] {1, 2}, "A", "100"));
+
+        acc = agg.agg(acc, binaryKeyedMap(new byte[] {1, 2}, "A1", "200"));
+        InternalMap merged = (InternalMap) acc;
+        assertThat(merged.size()).isEqualTo(1);
+        assertThat(firstRowValue(merged)).isEqualTo("A1");
+
+        acc = agg.agg(acc, binaryKeyedMap(new byte[] {1, 2}, "A0", "050"));
+        merged = (InternalMap) acc;
+        assertThat(merged.size()).isEqualTo(1);
+        assertThat(firstRowValue(merged)).isEqualTo("A1");
+
         Map<Object, Object> tombstone = new HashMap<>();
         tombstone.put(new byte[] {1, 2}, null);
         acc = agg.agg(acc, new GenericMap(tombstone));

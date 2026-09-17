@@ -36,7 +36,6 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Set;
 import java.util.function.BiFunction;
 
 import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
@@ -55,7 +54,9 @@ public class FieldCollectAgg extends FieldAggregator {
         this.distinct = distinct;
         this.elementGetter = InternalArray.createElementGetter(dataType.getElementType());
 
-        if (distinct && needsEqualiser(dataType.getElementType())) {
+        // The equaliser is built from the element type alone: retract() needs it whether or not
+        // the array is distinct, and agg() gates de-duplication on 'distinct' separately.
+        if (needsEqualiser(dataType.getElementType())) {
             DataType elementType = dataType.getElementType();
             List<DataType> fieldTypes =
                     elementType instanceof RowType
@@ -83,14 +84,13 @@ public class FieldCollectAgg extends FieldAggregator {
      * Whether elements of this type need the generated equaliser rather than {@link Object#equals}.
      *
      * <p>Constructed types need it because two rows holding the same values are not necessarily
-     * equal objects. Binary types need it for a blunter reason: an element of {@code BINARY} or
-     * {@code VARBINARY} is a {@code byte[]}, which inherits identity equality from {@link Object},
-     * so two arrays with the same content never compare equal and never share a hash bucket.
+     * equal objects. Binary types need it for a blunter reason: an element of {@code BINARY},
+     * {@code VARBINARY}, {@code GEOMETRY} or {@code GEOGRAPHY} is a {@code byte[]}, which inherits
+     * identity equality from {@link Object}, so two arrays with the same content never compare
+     * equal and never share a hash bucket.
      */
     private static boolean needsEqualiser(DataType elementType) {
-        Set<DataTypeFamily> families = elementType.getTypeRoot().getFamilies();
-        return families.contains(DataTypeFamily.CONSTRUCTED)
-                || families.contains(DataTypeFamily.BINARY_STRING);
+        return elementType.is(DataTypeFamily.CONSTRUCTED) || BinaryMapKeys.isBinary(elementType);
     }
 
     @Override
@@ -111,7 +111,7 @@ public class FieldCollectAgg extends FieldAggregator {
             return accumulator == null ? inputField : accumulator;
         }
 
-        if (equaliser != null) {
+        if (distinct && equaliser != null) {
             List<Object> collection = new ArrayList<>();
             // do not need to distinct accumulator, because the accumulator is always distinct, no
             // need to distinct it every time
