@@ -91,11 +91,8 @@ public class HttpClient implements RESTClient {
 
     @Override
     public <T extends RESTResponse> T get(
-            String path,
-            Class<? extends RESTRequest> requestType,
-            Class<T> responseType,
-            RESTAuthFunction restAuthFunction) {
-        return doGet(path, null, apiName(requestType), responseType, restAuthFunction);
+            String path, String apiName, Class<T> responseType, RESTAuthFunction restAuthFunction) {
+        return doGet(path, null, apiName, responseType, restAuthFunction);
     }
 
     @Override
@@ -111,10 +108,10 @@ public class HttpClient implements RESTClient {
     public <T extends RESTResponse> T get(
             String path,
             Map<String, String> queryParams,
-            Class<? extends RESTRequest> requestType,
+            String apiName,
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
-        return doGet(path, queryParams, apiName(requestType), responseType, restAuthFunction);
+        return doGet(path, queryParams, apiName, responseType, restAuthFunction);
     }
 
     private <T extends RESTResponse> T doGet(
@@ -168,10 +165,8 @@ public class HttpClient implements RESTClient {
 
     @Override
     public <T extends RESTResponse> T delete(
-            String path,
-            Class<? extends RESTRequest> requestType,
-            RESTAuthFunction restAuthFunction) {
-        return doDelete(path, null, apiName(requestType), restAuthFunction);
+            String path, String apiName, RESTAuthFunction restAuthFunction) {
+        return doDelete(path, null, apiName, restAuthFunction);
     }
 
     @Override
@@ -197,12 +192,7 @@ public class HttpClient implements RESTClient {
 
     @Nullable
     private static String apiName(@Nullable RESTRequest body) {
-        return body == null ? null : apiName(body.getClass());
-    }
-
-    @Nullable
-    private static String apiName(@Nullable Class<? extends RESTRequest> requestType) {
-        return requestType == null ? null : API_NAMES.get(requestType);
+        return body == null ? null : API_NAMES.get(body.getClass());
     }
 
     @VisibleForTesting
