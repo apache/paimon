@@ -19,6 +19,7 @@
 
 import heapq
 import math
+from copy import copy
 from abc import ABC, abstractmethod
 from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
@@ -312,16 +313,19 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
 
     def route_builders(self) -> List[HybridSearchRouteBuilder]:
         self._validate_search()
+        from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+        execution = copy(self)
+        execution._table = self._table._copy_with_snapshot(TimeTravelUtil.resolve_snapshot(self._table))
         builders = []
         for route in self._routes:
             if route.is_vector():
                 builders.append(
                     HybridSearchRouteBuilder(
-                        route, self._new_vector_search_builder(route)))
+                        route, execution._new_vector_search_builder(route)))
             else:
                 builders.append(
                     HybridSearchRouteBuilder(
-                        route, self._new_full_text_search_builder(route)))
+                        route, execution._new_full_text_search_builder(route)))
         return builders
 
     def to_route_result(
