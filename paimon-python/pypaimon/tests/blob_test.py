@@ -4135,6 +4135,68 @@ class CoalesceRangesTest(unittest.TestCase):
             self.assertEqual(got[4], data[100:])     # length -1 => read to EOF
             self.assertIsNone(got[5])                # None offset/length => skipped
 
+    def test_coalesce_limits_from_file_io_options(self):
+        from pypaimon.common.options.config import FileIOOptions
+        self.assertEqual(1 << 20, Options({}).get(
+            FileIOOptions.READ_COALESCE_MAX_GAP).get_bytes())
+        self.assertEqual(8 << 20, Options({}).get(
+            FileIOOptions.READ_COALESCE_MAX_BLOCK).get_bytes())
+        data = bytes(range(256))
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "f.bin")
+            with open(path, "wb") as output:
+                output.write(data)
+            file_io = FileIO.get(
+                "file://" + tmp_dir,
+                Options({
+                    "file-io.read-coalesce.max-gap": "64 b",
+                    "file-io.read-coalesce.max-block": "100 b",
+                }),
+            )
+            reads = []
+            original_open = file_io.new_input_stream
+
+            def new_input_stream(file_path):
+                stream = original_open(file_path)
+
+                class TrackingStream:
+                    def read_at(self, length, offset):
+                        reads.append((offset, length))
+                        return os.pread(stream.fileno(), length, offset)
+
+                    def close(self):
+                        stream.close()
+
+                return TrackingStream()
+
+            file_io.new_input_stream = new_input_stream
+            ranges = [(path, 0, 10), (path, 60, 10), (path, 120, 10)]
+
+            self.assertEqual(
+                [data[0:10], data[60:70], data[120:130]],
+                file_io.read_ranges_coalesced(ranges, parallelism=3),
+            )
+            self.assertEqual([(0, 70), (120, 10)], sorted(reads))
+
+            reads.clear()
+            views = file_io.read_ranges_coalesced_views(ranges, parallelism=3)
+            self.assertEqual([data[0:10], data[60:70], data[120:130]],
+                             [bytes(view) for view in views])
+            self.assertEqual([(0, 70), (120, 10)], sorted(reads))
+
+            reads.clear()
+            file_io.properties.set(
+                FileIOOptions.READ_COALESCE_MAX_GAP, "0 b")
+            file_io.read_ranges_coalesced(
+                ranges, parallelism=3)
+            self.assertEqual([(0, 10), (60, 10), (120, 10)], sorted(reads))
+
+            reads.clear()
+            file_io.properties.set(
+                FileIOOptions.READ_COALESCE_MAX_GAP, "64 b")
+            file_io.read_ranges_coalesced(ranges, parallelism=3)
+            self.assertEqual([(0, 70), (120, 10)], sorted(reads))
+
     def test_read_ranges_coalesced_views(self):
         from pypaimon.common.file_io import FileIO
         data = bytes(range(256)) * 4
@@ -4142,11 +4204,13 @@ class CoalesceRangesTest(unittest.TestCase):
             path = os.path.join(tmp_dir, "f.bin")
             with open(path, 'wb') as output:
                 output.write(data)
-            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            file_io = FileIO.get(
+                f"file://{tmp_dir}",
+                Options({"file-io.read-coalesce.max-gap": "100 b"}))
             ranges = [(path, 0, 10), (path, 10, 10), None,
                       (path, 500, 20), (path, 100, -1)]
             got = file_io.read_ranges_coalesced_views(
-                ranges, parallelism=4, max_gap=100)
+                ranges, parallelism=4)
 
             self.assertIsInstance(got[0], memoryview)
             self.assertIsInstance(got[1], memoryview)
@@ -4170,7 +4234,10 @@ class CoalesceRangesTest(unittest.TestCase):
             path = os.path.join(tmp_dir, "f.bin")
             with open(path, 'wb') as output:
                 output.write(data)
-            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            file_io = FileIO.get(
+                f"file://{tmp_dir}",
+                Options({"file-io.read-coalesce.max-gap": "1000 b",
+                         "file-io.read-coalesce.max-block": "1 mb"}))
             reads = []
             original_open = file_io.new_input_stream
 
@@ -4191,8 +4258,6 @@ class CoalesceRangesTest(unittest.TestCase):
             got = file_io.read_ranges_coalesced_views(
                 [(path, 0, 10), (path, 1000, 10)],
                 parallelism=4,
-                max_gap=1000,
-                max_span=1 << 20,
             )
 
             self.assertEqual(reads, [(path, 0, 1010)])
@@ -4204,8 +4269,6 @@ class CoalesceRangesTest(unittest.TestCase):
             shared = file_io.read_ranges_coalesced_views(
                 [(path, 0, 10), (path, 1000, 10)],
                 parallelism=4,
-                max_gap=1000,
-                max_span=1 << 20,
                 max_retained_amplification=0,
             )
             self.assertEqual(reads, [(path, 0, 1010)])
@@ -4219,7 +4282,9 @@ class CoalesceRangesTest(unittest.TestCase):
             path = os.path.join(tmp_dir, "blob.bin")
             with open(path, "wb") as output:
                 output.write(data)
-            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            file_io = FileIO.get(
+                f"file://{tmp_dir}",
+                Options({"file-io.read-coalesce.max-gap": "0 b"}))
             fallbacks = []
 
             class FailingStream:
@@ -4239,8 +4304,7 @@ class CoalesceRangesTest(unittest.TestCase):
 
             self.assertEqual(
                 [data[0:4], data[16:20]],
-                file_io.read_ranges_coalesced(
-                    ranges, parallelism=2, max_gap=0),
+                file_io.read_ranges_coalesced(ranges, parallelism=2),
             )
             self.assertEqual(2, len(fallbacks))
 
@@ -4297,7 +4361,7 @@ class CoalesceRangesTest(unittest.TestCase):
         self.assertEqual(
             [b"ok"] * parallelism,
             file_io.read_ranges_coalesced(
-                ranges, parallelism=parallelism, max_gap=0),
+                ranges, parallelism=parallelism),
         )
         self.assertLessEqual(max_open_streams, parallelism)
         self.assertEqual(0, open_streams)
@@ -4344,7 +4408,6 @@ class CoalesceRangesTest(unittest.TestCase):
             file_io.read_ranges_coalesced(
                 [("blob", 0, 5), ("blob", 5, -1)],
                 parallelism=1,
-                max_gap=0,
             ),
         )
         self.assertEqual([
@@ -4359,7 +4422,8 @@ class CoalesceRangesTest(unittest.TestCase):
         from pypaimon.common.file_io import FileIO
 
         data = bytes(range(128))
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
 
         class SerialStream:
             def __init__(self):
@@ -4396,8 +4460,7 @@ class CoalesceRangesTest(unittest.TestCase):
 
         self.assertEqual(
             [data[i * 4:i * 4 + 2] for i in range(16)],
-            file_io.read_ranges_coalesced(
-                ranges, parallelism=8, max_gap=0),
+            file_io.read_ranges_coalesced(ranges, parallelism=8),
         )
         self.assertGreater(len(streams), 1)
         self.assertLessEqual(len(streams), 8)
@@ -4406,7 +4469,8 @@ class CoalesceRangesTest(unittest.TestCase):
         from pypaimon.common.file_io import FileIO
 
         data = bytes(range(256)) * 64
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         streams = []
 
         class PositionalStream:
@@ -4440,8 +4504,7 @@ class CoalesceRangesTest(unittest.TestCase):
         self.assertEqual(
             [data[offset:offset + length]
              for _, offset, length in ranges],
-            file_io.read_ranges_coalesced(
-                ranges, parallelism=64, max_gap=0),
+            file_io.read_ranges_coalesced(ranges, parallelism=64),
         )
         self.assertEqual(16, len(streams))
         self.assertTrue(all(stream.reads == 4 for stream in streams))
@@ -4452,7 +4515,8 @@ class CoalesceRangesTest(unittest.TestCase):
         from pypaimon.common.file_io import FileIO
 
         large = 8 << 20
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         streams = []
 
         class PositionalStream:
@@ -4479,8 +4543,7 @@ class CoalesceRangesTest(unittest.TestCase):
             ranges.append(("blob", offset, length))
             offset += length + 1
 
-        file_io.read_ranges_coalesced(
-            ranges, parallelism=64, max_gap=0)
+        file_io.read_ranges_coalesced(ranges, parallelism=64)
 
         self.assertEqual(16, len(streams))
         self.assertEqual(
@@ -4493,7 +4556,8 @@ class CoalesceRangesTest(unittest.TestCase):
 
         from pypaimon.common.file_io import FileIO
 
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         streams = Counter()
         lock = threading.Lock()
 
@@ -4518,8 +4582,7 @@ class CoalesceRangesTest(unittest.TestCase):
             + [("cold", index * 2, 1) for index in range(100)]
         )
 
-        result = file_io.read_ranges_coalesced(
-            ranges, parallelism=64, max_gap=0)
+        result = file_io.read_ranges_coalesced(ranges, parallelism=64)
 
         self.assertEqual([b"h"] * 9900 + [b"c"] * 100, result)
         self.assertEqual(Counter({"hot": 16, "cold": 16}), streams)
@@ -4529,7 +4592,8 @@ class CoalesceRangesTest(unittest.TestCase):
 
         from pypaimon.common.file_io import FileIO
 
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         streams = Counter()
         lock = threading.Lock()
         active_streams = 0
@@ -4566,8 +4630,7 @@ class CoalesceRangesTest(unittest.TestCase):
             + [("cold-%d" % index, 0, 1) for index in range(63)]
         )
 
-        result = file_io.read_ranges_coalesced(
-            ranges, parallelism=64, max_gap=0)
+        result = file_io.read_ranges_coalesced(ranges, parallelism=64)
 
         self.assertEqual(10063, len(result))
         self.assertEqual(16, streams["hot"])
@@ -4577,7 +4640,8 @@ class CoalesceRangesTest(unittest.TestCase):
     def test_stream_count_is_bounded_across_paths(self):
         from pypaimon.common.file_io import FileIO
 
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         lock = threading.Lock()
         open_streams = 0
         max_open_streams = 0
@@ -4610,8 +4674,7 @@ class CoalesceRangesTest(unittest.TestCase):
 
         self.assertEqual(
             [bytes([offset]) * length for _, offset, length in ranges],
-            file_io.read_ranges_coalesced(
-                ranges, parallelism=4, max_gap=0),
+            file_io.read_ranges_coalesced(ranges, parallelism=4),
         )
         self.assertLessEqual(max_open_streams, 4)
         self.assertEqual(4, total_streams)
@@ -4621,7 +4684,8 @@ class CoalesceRangesTest(unittest.TestCase):
         from pypaimon.common.file_io import FileIO
 
         data = bytes(range(128))
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         streams = []
 
         class CloseStream:
@@ -4647,8 +4711,7 @@ class CoalesceRangesTest(unittest.TestCase):
         ranges = [("blob", offset, 4) for offset in range(0, 64, 8)]
 
         with self.assertRaisesRegex(IOError, "first close failed"):
-            file_io.read_ranges_coalesced(
-                ranges, parallelism=4, max_gap=0)
+            file_io.read_ranges_coalesced(ranges, parallelism=4)
 
         self.assertGreater(len(streams), 1)
         self.assertTrue(all(stream.closed for stream in streams))
@@ -4680,7 +4743,6 @@ class CoalesceRangesTest(unittest.TestCase):
             file_io.read_ranges_coalesced(
                 [("close-error", 0, 2), ("read-error", 0, 2)],
                 parallelism=2,
-                max_gap=0,
             )
 
     def test_failed_stream_close_stops_before_fallback(self):
@@ -4705,7 +4767,7 @@ class CoalesceRangesTest(unittest.TestCase):
 
         with self.assertRaisesRegex(IOError, "pooled read failed"):
             file_io.read_ranges_coalesced(
-                [("blob", 0, 2)], parallelism=1, max_gap=0)
+                [("blob", 0, 2)], parallelism=1)
         self.assertEqual([], fallbacks)
 
 
