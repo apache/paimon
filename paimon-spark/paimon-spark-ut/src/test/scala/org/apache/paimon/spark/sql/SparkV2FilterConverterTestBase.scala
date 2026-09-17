@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.data.{BinaryString, Decimal, Timestamp}
-import org.apache.paimon.predicate.{DayTransform, FieldRef, HourTransform, LengthTransform, MinuteTransform, MonthTransform, PredicateBuilder, SecondTransform, YearTransform}
+import org.apache.paimon.predicate.{BitLengthTransform, DateAddTransform, DateDiffTransform, DateTruncTransform, DayOfWeekTransform, DayOfYearTransform, DayTransform, FieldRef, HourTransform, LengthTransform, MinuteTransform, MonthTransform, OverlayTransform, PadTransform, PredicateBuilder, QuarterTransform, SecondTransform, Transform, TranslateTransform, WeekdayTransform, WeekTransform, YearOfWeekTransform, YearTransform}
 import org.apache.paimon.spark.{PaimonSparkTestBase, SparkV2FilterConverter}
 import org.apache.paimon.spark.util.shim.TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
 import org.apache.paimon.table.source.DataSplit
@@ -431,6 +431,76 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("V2Filter: remaining Spark string scalar expressions") {
+    if (gteqSpark3_4) {
+      val stringFieldRef = new FieldRef(0, "string_col", rowType.getTypeAt(0))
+      val specs: Seq[(String, Transform, Object, Seq[Row])] = Seq(
+        (
+          "bit_length(string_col) = 16",
+          new BitLengthTransform(List[Object](stringFieldRef).asJava),
+          Int.box(16),
+          Seq(Row("hi"))),
+        (
+          "translate(string_col, 'hel', 'xyz') = 'xyzzo'",
+          new TranslateTransform(
+            List[Object](
+              stringFieldRef,
+              BinaryString.fromString("hel"),
+              BinaryString.fromString("xyz")).asJava),
+          BinaryString.fromString("xyzzo"),
+          Seq(Row("hello"))),
+        (
+          "overlay(string_col, 'XX', 2, 2) = 'hXXlo'",
+          new OverlayTransform(
+            List[Object](
+              stringFieldRef,
+              BinaryString.fromString("XX"),
+              Int.box(2),
+              Int.box(2)).asJava),
+          BinaryString.fromString("hXXlo"),
+          Seq(Row("hello")))
+      )
+      specs.foreach {
+        case (filter, transform, expectedValue, expectedRows) =>
+          assert(
+            converter.convert(v2Filter(filter)).contains(builder.equal(transform, expectedValue)),
+            filter)
+          checkAnswer(
+            sql(s"SELECT string_col FROM test_tbl WHERE $filter ORDER BY string_col"),
+            expectedRows)
+      }
+    }
+  }
+
+  test("V2Filter: Spark 4.1 pad expressions") {
+    if (gteqSpark4_1) {
+      val stringFieldRef = new FieldRef(0, "string_col", rowType.getTypeAt(0))
+      Seq(
+        (
+          "lpad(string_col, 7, '_') = '__hello'",
+          PadTransform.Direction.LEFT,
+          BinaryString.fromString("__hello"),
+          Seq(Row("hello"))),
+        (
+          "rpad(string_col, 7, '_') = 'hello__'",
+          PadTransform.Direction.RIGHT,
+          BinaryString.fromString("hello__"),
+          Seq(Row("hello")))
+      ).foreach {
+        case (filter, direction, expectedValue, expectedRows) =>
+          val transform = new PadTransform(
+            List[Object](stringFieldRef, Int.box(7), BinaryString.fromString("_")).asJava,
+            direction)
+          assert(
+            converter.convert(v2Filter(filter)).contains(builder.equal(transform, expectedValue)),
+            filter)
+          checkAnswer(
+            sql(s"SELECT string_col FROM test_tbl WHERE $filter ORDER BY string_col"),
+            expectedRows)
+      }
+    }
+  }
+
   test("V2Filter: Year, Month and Day") {
     if (gteqSpark3_4) {
       val dateFieldRef = new FieldRef(9, "date_col", rowType.getTypeAt(9))
@@ -504,6 +574,67 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
         val ltzRowType = loadTable("extract_ltz_tbl").rowType()
         val ltzConverter = SparkV2FilterConverter(ltzRowType)
         assert(ltzConverter.convert(v2Filter("hour(ts_col) = 1", "extract_ltz_tbl")).isEmpty)
+      }
+    }
+  }
+
+  test("V2Filter: remaining date fields") {
+    if (gteqSpark3_4) {
+      val dateFieldRef = new FieldRef(9, "date_col", rowType.getTypeAt(9))
+      val specs: Seq[(String, Transform, Object, Int)] = Seq(
+        ("quarter(date_col) = 1", new QuarterTransform(dateFieldRef), Int.box(1), 4),
+        ("dayofweek(date_col) = 4", new DayOfWeekTransform(dateFieldRef), Int.box(4), 1),
+        ("weekday(date_col) = 2", new WeekdayTransform(dateFieldRef), Int.box(2), 1),
+        ("dayofyear(date_col) = 15", new DayOfYearTransform(dateFieldRef), Int.box(15), 1),
+        ("weekofyear(date_col) = 3", new WeekTransform(dateFieldRef), Int.box(3), 4),
+        (
+          "extract(YEAROFWEEK FROM date_col) = 2025",
+          new YearOfWeekTransform(dateFieldRef),
+          Int.box(2025),
+          4)
+      )
+      specs.foreach {
+        case (filter, transform, expectedValue, expectedCount) =>
+          assert(
+            converter.convert(v2Filter(filter)).contains(builder.equal(transform, expectedValue)),
+            filter)
+          assert(sql(s"SELECT date_col FROM test_tbl WHERE $filter").count() == expectedCount)
+      }
+    }
+  }
+
+  test("V2Filter: date scalar expressions") {
+    if (gteqSpark3_4) {
+      val dateFieldRef = new FieldRef(9, "date_col", rowType.getTypeAt(9))
+      val specs: Seq[(String, Transform, Object, String)] = Seq(
+        (
+          "date_add(date_col, 1) = date('2025-01-16')",
+          new DateAddTransform(List[Object](dateFieldRef, Int.box(1)).asJava),
+          Int.box(LocalDate.parse("2025-01-16").toEpochDay.toInt),
+          "SELECT date('2025-01-15')"),
+        (
+          "datediff(date_col, date('2025-01-01')) = 14",
+          new DateDiffTransform(
+            List[Object](
+              dateFieldRef,
+              Int.box(LocalDate.parse("2025-01-01").toEpochDay.toInt)).asJava),
+          Int.box(14),
+          "SELECT date('2025-01-15')"),
+        (
+          "trunc(date_col, 'MONTH') = date('2025-01-01')",
+          new DateTruncTransform(
+            List[Object](dateFieldRef, BinaryString.fromString("MONTH")).asJava),
+          Int.box(LocalDate.parse("2025-01-01").toEpochDay.toInt),
+          "SELECT date_col FROM test_tbl ORDER BY date_col")
+      )
+      specs.foreach {
+        case (filter, transform, expectedValue, expectedSql) =>
+          assert(
+            converter.convert(v2Filter(filter)).contains(builder.equal(transform, expectedValue)),
+            filter)
+          checkAnswer(
+            sql(s"SELECT date_col FROM test_tbl WHERE $filter ORDER BY date_col"),
+            sql(expectedSql))
       }
     }
   }
