@@ -71,6 +71,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DataFilePathFactories;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
@@ -430,19 +431,40 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             Path baseMetadataPath = pathFactory.toMetadataPath(snapshotId - 1);
 
             if (table.fileIO().exists(baseMetadataPath)) {
-                createMetadataWithBase(
-                        fileChangesCollector,
-                        indexFiles.stream()
-                                .filter(
-                                        index ->
-                                                index.indexFile()
-                                                        .indexType()
-                                                        .equals(DELETION_VECTORS_INDEX))
-                                .collect(Collectors.toList()),
-                        snapshot,
-                        baseMetadataPath,
-                        abandonedLastColumnId,
-                        abandonedNextRowId);
+                try {
+                    createMetadataWithBase(
+                            fileChangesCollector,
+                            indexFiles.stream()
+                                    .filter(
+                                            index ->
+                                                    index.indexFile()
+                                                            .indexType()
+                                                            .equals(DELETION_VECTORS_INDEX))
+                                    .collect(Collectors.toList()),
+                            snapshot,
+                            baseMetadataPath,
+                            abandonedLastColumnId,
+                            abandonedNextRowId);
+                } catch (RuntimeException e) {
+                    if (!ExceptionUtils.findThrowable(e, FileNotFoundException.class).isPresent()) {
+                        throw e;
+                    }
+                    // The base metadata file itself exists, but a manifest or manifest list it
+                    // transitively references (from its historical snapshot chain) has already
+                    // been pruned by unrelated, later retention cleanup, so the base is unusable
+                    // even though it exists. Rebuild from scratch instead of crashing permanently
+                    // on every retry: this loses that snapshot's Iceberg-side history/lineage,
+                    // the same tradeoff already accepted when the base file is simply absent.
+                    LOG.warn(
+                            "Failed to read base Iceberg metadata {} for table {} because a file "
+                                    + "it references is missing. Falling back to recreating "
+                                    + "metadata from scratch.",
+                            baseMetadataPath,
+                            table.fullName(),
+                            e);
+                    createMetadataWithoutBase(
+                            snapshotId, abandonedUuid, abandonedLastColumnId, abandonedNextRowId);
+                }
             } else {
                 createMetadataWithoutBase(
                         snapshotId, abandonedUuid, abandonedLastColumnId, abandonedNextRowId);

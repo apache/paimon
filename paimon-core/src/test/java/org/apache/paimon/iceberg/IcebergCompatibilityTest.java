@@ -472,6 +472,52 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
+    public void testCreateMetadataFallsBackWhenBaseManifestListIsMissing() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.emptyList(), Collections.singletonList("k"), 1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+
+        // The next commit will use this metadata file (snapshot 1's) as its base. Simulate
+        // unrelated, later retention cleanup having already pruned the manifest list that this
+        // base's own current snapshot points to, even though the base metadata file itself is
+        // still present and otherwise healthy.
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        Path baseMetadataPath = pathFactory.toMetadataPath(1);
+        assertThat(table.fileIO().exists(baseMetadataPath)).isTrue();
+        IcebergMetadata baseMetadata = IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
+        Path danglingManifestListPath =
+                pathFactory.toManifestListPath(baseMetadata.currentSnapshot().manifestList());
+        assertThat(table.fileIO().exists(danglingManifestListPath)).isTrue();
+        table.fileIO().deleteQuietly(danglingManifestListPath);
+
+        // Committing the next snapshot must not crash: createMetadataWithBase() will fail to
+        // read the now-missing manifest list, and the fallback must rebuild metadata from
+        // scratch instead of propagating the failure.
+        write.write(GenericRow.of(1, 11));
+        write.write(GenericRow.of(3, 30));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 11)", "Record(2, 20)", "Record(3, 30)");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
     public void testExpireAllBeforeSkipsAlreadyDeletedManifestList() throws Exception {
         RowType rowType =
                 RowType.of(
