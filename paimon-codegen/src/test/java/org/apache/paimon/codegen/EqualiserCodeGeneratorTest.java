@@ -571,6 +571,84 @@ public class EqualiserCodeGeneratorTest {
                 false);
     }
 
+    @Test
+    public void testArrayEqualiserTreatsNullElementsAsEqual() {
+        DataType intArrayType = DataTypes.ARRAY(DataTypes.INT());
+        RecordEqualiser intArrayEqualiser =
+                new EqualiserCodeGenerator(new DataType[] {intArrayType})
+                        .generateRecordEqualiser("nullElementIntArrayFieldEquals")
+                        .newInstance(Thread.currentThread().getContextClassLoader());
+        assertFloatingPointEqualiser(
+                intArrayEqualiser,
+                intArrayType,
+                new GenericArray(new Object[] {1, null}),
+                new GenericArray(new Object[] {1, null}),
+                true);
+        assertFloatingPointEqualiser(
+                intArrayEqualiser,
+                intArrayType,
+                new GenericArray(new Object[] {1, null}),
+                new GenericArray(new Object[] {1, 2}),
+                false);
+
+        DataType doubleArrayType = DataTypes.ARRAY(DataTypes.DOUBLE());
+        RecordEqualiser doubleArrayEqualiser =
+                new EqualiserCodeGenerator(new DataType[] {doubleArrayType})
+                        .generateRecordEqualiser("nullElementDoubleArrayFieldEquals")
+                        .newInstance(Thread.currentThread().getContextClassLoader());
+        assertFloatingPointEqualiser(
+                doubleArrayEqualiser,
+                doubleArrayType,
+                new GenericArray(new Object[] {1.0d, null}),
+                new GenericArray(new Object[] {1.0d, null}),
+                true);
+
+        DataType rowArrayType = DataTypes.ARRAY(DataTypes.ROW(DataTypes.INT()));
+        RecordEqualiser rowArrayEqualiser =
+                new EqualiserCodeGenerator(new DataType[] {rowArrayType})
+                        .generateRecordEqualiser("nullElementRowArrayFieldEquals")
+                        .newInstance(Thread.currentThread().getContextClassLoader());
+        assertFloatingPointEqualiser(
+                rowArrayEqualiser,
+                rowArrayType,
+                new GenericArray(new Object[] {null}),
+                new GenericArray(new Object[] {null}),
+                true);
+    }
+
+    @Test
+    public void testMapEqualiserTreatsNullValuesAsEqual() {
+        DataType intKeyMapType = DataTypes.MAP(DataTypes.INT(), DataTypes.INT());
+        RecordEqualiser intKeyMapEqualiser =
+                new EqualiserCodeGenerator(new DataType[] {intKeyMapType})
+                        .generateRecordEqualiser("nullValueIntKeyMapFieldEquals")
+                        .newInstance(Thread.currentThread().getContextClassLoader());
+        assertMapEqualiser(
+                intKeyMapEqualiser,
+                intKeyMapType,
+                new GenericMap(singletonMap(1, null)),
+                new GenericMap(singletonMap(1, null)),
+                true);
+        assertMapEqualiser(
+                intKeyMapEqualiser,
+                intKeyMapType,
+                new GenericMap(singletonMap(1, null)),
+                new GenericMap(singletonMap(1, 2)),
+                false);
+
+        DataType binaryKeyMapType = DataTypes.MAP(DataTypes.BYTES(), DataTypes.INT());
+        RecordEqualiser binaryKeyMapEqualiser =
+                new EqualiserCodeGenerator(new DataType[] {binaryKeyMapType})
+                        .generateRecordEqualiser("nullValueBinaryKeyMapFieldEquals")
+                        .newInstance(Thread.currentThread().getContextClassLoader());
+        assertMapEqualiser(
+                binaryKeyMapEqualiser,
+                binaryKeyMapType,
+                new GenericMap(singletonMap("k".getBytes(), null)),
+                new GenericMap(singletonMap("k".getBytes(), null)),
+                true);
+    }
+
     private static Map<Object, Object> singletonMap(Object key, Object value) {
         Map<Object, Object> map = new HashMap<>();
         map.put(key, value);
