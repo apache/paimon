@@ -317,7 +317,8 @@ class ManifestFileManager:
         elif not file_dict['_VALUE_STATS_COLS']:
             fields = []
         else:
-            fields = [self.table.field_dict[col] for col in file_dict['_VALUE_STATS_COLS']]
+            data_field_dict = {f.name: f for f in schema_fields}
+            fields = [data_field_dict[col] for col in file_dict['_VALUE_STATS_COLS']]
         return fields
 
     def write(self, file_name, entries: List[ManifestEntry]):
