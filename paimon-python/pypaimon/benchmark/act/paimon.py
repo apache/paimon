@@ -52,7 +52,7 @@ class PaimonACTAdapter:
         The persisted ``frame_index`` is forwarded as the shared ACT sample
         position.
         State and image columns are singleton lists; action retains the full
-        horizon and ``is_pad`` is forwarded unchanged.
+        horizon and ``action_is_pad`` becomes the ACT ``is_pad`` mask.
         """
         qpos = np.concatenate([
             np.asarray(sample[name][0], dtype=np.float32)
@@ -80,7 +80,7 @@ class PaimonACTAdapter:
             "qpos": torch.from_numpy(np.ascontiguousarray(qpos)),
             "action": torch.from_numpy(np.ascontiguousarray(action)),
             "images": torch.from_numpy(np.ascontiguousarray(images)),
-            "is_pad": sample["is_pad"],
+            "is_pad": sample["action_is_pad"],
         }
 
 
@@ -114,13 +114,14 @@ def create_datasets(
         frames.scan(snapshot_id=snapshot_id).where(
             "episode_id = '%s'" % episode_id.replace("'", "''")
         ).to_contiguous_window_dataset(
-            window_size=config.action_horizon,
+            frame_offsets={
+                name: range(config.action_horizon) for name in ACTION_COLUMNS
+            },
             columns=QPOS_COLUMNS + ACTION_COLUMNS + IMAGE_COLUMNS,
-            anchor_columns=QPOS_COLUMNS + IMAGE_COLUMNS,
             group_key="episode_id",
             order_key="frame_index",
             stride=1,
-            tail="drop",
+            boundary="drop",
             adapter=PaimonACTAdapter(normalization),
         )
         for episode_id in (train_episode_id, validation_episode_id)

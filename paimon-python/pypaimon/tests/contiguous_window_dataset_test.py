@@ -116,6 +116,242 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
             )
         )
 
+    def test_per_column_offsets_combine_history_future_and_anchor(self):
+        dataset = self._table().scan().to_contiguous_window_dataset(
+            columns=["value", "payload"], group_key="episode", order_key="step",
+            frame_offsets={"value": [-1, 0, 2]}, boundary="pad")
+
+        self.assertEqual(6, len(dataset))
+        sample = dataset[0]
+        self.assertEqual(("episode-a", 0), (sample["episode"], sample["step"]))
+        self.assertEqual([0, 0, 1], sample["value"])
+        self.assertEqual([True, False, True], sample["value_is_pad"].tolist())
+        self.assertEqual([b"episode-a-0"], sample["payload"])
+        self.assertEqual([False], sample["payload_is_pad"].tolist())
+        self.assertEqual(torch.bool, sample["value_is_pad"].dtype)
+        self.assertNotIn("is_pad", sample)
+        self.assertEqual([101, 102, 103], dataset[4]["value"])
+        self.assertEqual([False, False, True], dataset[4]["value_is_pad"].tolist())
+
+    def test_frame_mode_defaults_to_single_frame_with_time_dimension(self):
+        dataset = self._table().scan().select(["value"]).to_contiguous_window_dataset(
+            group_key="episode", order_key="step")
+
+        self.assertEqual(6, len(dataset))
+        self.assertEqual({"episode", "step", "value", "value_is_pad"}, set(dataset[0]))
+        self.assertEqual([0], dataset[0]["value"])
+        self.assertEqual([False], dataset[0]["value_is_pad"].tolist())
+        self.assertEqual(103, dataset[-1]["value"][0])
+
+    def test_drop_offsets_keep_stride_anchored_at_group_start(self):
+        table = self._table()
+        dataset = table.scan().to_contiguous_window_dataset(
+            columns=["value", "payload"], group_key="episode", order_key="step",
+            frame_offsets={"value": [-1, 0], "payload": [1]}, stride=2)
+
+        self.assertEqual(1, len(dataset))
+        self.assertEqual(("episode-b", 2), (dataset[0]["episode"], dataset[0]["step"]))
+        self.assertEqual([101, 102], dataset[0]["value"])
+        self.assertEqual([b"episode-b-3"], dataset[0]["payload"])
+        self.assertFalse(dataset[0]["value_is_pad"].any())
+        with self.assertRaisesRegex(
+                ValueError, r"episode-a.*at 0: offset bounds=\[-1, 0\]"):
+            table.scan().to_contiguous_window_dataset(
+                columns=["value"], group_key="episode", order_key="step",
+                frame_offsets={"value": [-1, 0]}, boundary="error")
+
+    def test_sparse_repeated_offsets_preserve_batch_and_slice_order(self):
+        dataset = self._table().scan().to_contiguous_window_dataset(
+            columns=["value"], group_key="episode", order_key="step",
+            frame_offsets={"value": [2, -1, 2, 0]}, boundary="pad")
+
+        samples = dataset.__getitems__([4, 0, 4, -1])
+        self.assertEqual([[103, 101, 103, 102], [1, 0, 1, 0],
+                          [103, 101, 103, 102], [103, 102, 103, 103]],
+                         [sample["value"] for sample in samples])
+        self.assertEqual([True, False, True, False], samples[0]["value_is_pad"].tolist())
+        self.assertEqual([dataset[i]["value"] for i in (5, 3, 1)],
+                         [sample["value"] for sample in dataset[::-2]])
+        self.assertEqual([], dataset.__getitems__([]))
+        with self.assertRaises(IndexError):
+            dataset.__getitems__([0, len(dataset)])
+
+    def test_custom_padding_precedes_transforms_even_for_all_padding(self):
+        dataset = self._table().scan().to_contiguous_window_dataset(
+            columns=["value", "payload"], group_key="episode", order_key="step",
+            frame_offsets={"value": [-10, 10], "payload": [0, 10]},
+            boundary="pad", pad_values={"value": -7, "payload": b"missing"},
+            column_transforms={"value": _TensorColumnTransform()})
+
+        with patch.object(dataset, "_read_rows", wraps=dataset._read_rows) as read:
+            sample = dataset[0]
+        self.assertEqual(1, read.call_count)
+        self.assertEqual(["payload"], read.call_args.args[1])
+        self.assertTrue(torch.equal(torch.tensor([-7, -7]), sample["value"]))
+        self.assertEqual([True, True], sample["value_is_pad"].tolist())
+        self.assertEqual([b"episode-a-0", b"missing"], sample["payload"])
+        self.assertEqual([False, True], sample["payload_is_pad"].tolist())
+
+    def test_seconds_offsets_match_frame_offsets_with_alignment_tolerance(self):
+        table = self._table()
+        kwargs = dict(columns=["value", "payload"], group_key="episode",
+                      order_key="step", boundary="pad")
+        frames = table.scan().to_contiguous_window_dataset(
+            frame_offsets={"value": [-1, 0, 2]}, **kwargs)
+        seconds = table.scan().to_contiguous_window_dataset(
+            delta_timestamps={"value": [-0.1, 0, 0.20001]}, fps=10,
+            tolerance_s=0.0001, **kwargs)
+
+        self.assertEqual(len(frames), len(seconds))
+        for expected, actual in zip(frames[:], seconds[:]):
+            self.assertEqual(expected["value"], actual["value"])
+            self.assertEqual(expected["payload"], actual["payload"])
+            self.assertTrue(torch.equal(expected["value_is_pad"], actual["value_is_pad"]))
+
+    def test_offset_projections_do_not_fetch_anchor_images_for_action_rows(self):
+        dataset = self._table().scan().to_contiguous_window_dataset(
+            columns=["value", "payload"], group_key="episode", order_key="step",
+            frame_offsets={"value": [-1, 0, 1], "payload": [0]}, boundary="pad")
+
+        with patch.object(dataset, "_read_rows", wraps=dataset._read_rows) as read, \
+                patch("pypaimon.multimodal.window_dataset.fetch_blob_bodies",
+                      side_effect=window_dataset.fetch_blob_bodies) as fetch:
+            samples = dataset.__getitems__([3, 4, 3])
+
+        projections = {tuple(call.args[1]): len(call.args[0]) for call in read.call_args_list}
+        self.assertEqual({("value",): 4, ("payload",): 2}, projections)
+        self.assertEqual(2, sum(len(call.args[1]["payload"]) for call in fetch.call_args_list))
+        self.assertEqual([[100, 101, 102], [101, 102, 103], [100, 101, 102]],
+                         [sample["value"] for sample in samples])
+
+    def test_unused_pad_values_do_not_split_reads(self):
+        table = self._table()
+        for boundary in ("drop", "error"):
+            with self.subTest(boundary=boundary):
+                dataset = table.scan().to_contiguous_window_dataset(
+                    columns=["value", "payload"], group_key="episode", order_key="step",
+                    frame_offsets={"value": [0, 1], "payload": [0, 1]},
+                    stride=2, boundary=boundary, pad_values={"value": -1})
+                with patch.object(dataset, "_read_rows", wraps=dataset._read_rows) as read:
+                    samples = dataset.__getitems__([0, 1, 0])
+                self.assertEqual(1, read.call_count)
+                self.assertEqual(["value", "payload"], read.call_args.args[1])
+                self.assertEqual(4, len(read.call_args.args[0]))
+                self.assertEqual([[0, 1], [100, 101], [0, 1]],
+                                 [sample["value"] for sample in samples])
+                self.assertEqual([b"episode-a-0", b"episode-a-1"], samples[0]["payload"])
+
+    def test_offset_padding_and_repeated_cells_are_mutably_isolated(self):
+        table = self.conn.create_table(
+            "offset_mutable", schema=pa.schema([
+                pa.field("episode", pa.string(), nullable=False),
+                pa.field("step", pa.int32(), nullable=False),
+                pa.field("values", pa.list_(pa.int32()), nullable=False),
+            ]), options=_TABLE_OPTIONS)
+        table.add([{"episode": "a", "step": 0, "values": [0]}])
+        pad = [-1]
+        dataset = table.scan().to_contiguous_window_dataset(
+            columns=["values"], group_key="episode", order_key="step",
+            frame_offsets={"values": [-1, 0, 0, 1]}, boundary="pad",
+            pad_values={"values": pad})
+
+        first, second = dataset.__getitems__([0, 0])
+        first["values"][0].append(99)
+        first["values"][1].append(99)
+        self.assertEqual([0], first["values"][2])
+        self.assertEqual([-1], first["values"][3])
+        self.assertEqual([[-1], [0], [0], [-1]], second["values"])
+        self.assertEqual([[-1], [0], [0], [-1]], dataset[0]["values"])
+        self.assertEqual([-1], pad)
+
+    def test_offset_dataloader_workers_and_distributed_sampler(self):
+        dataset = self._table().scan().to_contiguous_window_dataset(
+            columns=["value"], group_key="episode", order_key="step",
+            frame_offsets={"value": [-1, 0, 1]}, boundary="pad",
+            column_transforms={"value": _TensorColumnTransform()})
+        restored = pickle.loads(pickle.dumps(dataset))
+        self.assertEqual(dataset.snapshot_id, restored.snapshot_id)
+        batches = list(torch.utils.data.DataLoader(
+            restored, batch_size=2, num_workers=2, shuffle=False))
+        self.assertEqual([[0, 0, 1], [0, 1, 1], [100, 100, 101],
+                          [100, 101, 102], [101, 102, 103], [102, 103, 103]],
+                         [row for batch in batches for row in batch["value"].tolist()])
+        self.assertEqual((2, 3), tuple(batches[0]["value_is_pad"].shape))
+        self.assertEqual(torch.bool, batches[0]["value_is_pad"].dtype)
+        partitions = [list(torch.utils.data.DistributedSampler(
+            dataset, num_replicas=2, rank=rank, shuffle=False)) for rank in range(2)]
+        self.assertEqual([[0, 2, 4], [1, 3, 5]], partitions)
+        self.assertEqual([0, 100, 102], [dataset[i]["value"][1].item() for i in partitions[0]])
+
+    def test_rejects_invalid_offset_configuration_at_construction(self):
+        table = self._table()
+        cases = [
+            {"frame_offsets": {"missing": [0]}},
+            {"frame_offsets": {"value": []}},
+            {"frame_offsets": {"value": [1.0]}},
+            {"frame_offsets": {"value": [True]}},
+            {"frame_offsets": {"value": [0]}, "window_size": 2},
+            {"delta_timestamps": {"value": [0]}, "fps": 10, "window_size": 2},
+            {"frame_offsets": {"value": [0]}, "delta_timestamps": {"value": [0]}, "fps": 10},
+            {"delta_timestamps": {"value": [0]}},
+            {"delta_timestamps": {"value": []}, "fps": 10},
+            {"delta_timestamps": {"value": [float("nan")]}, "fps": 10},
+            {"delta_timestamps": {"value": [float("inf")]}, "fps": 10},
+            {"delta_timestamps": {"value": [0]}, "fps": 0},
+            {"delta_timestamps": {"value": [0]}, "fps": -1},
+            {"delta_timestamps": {"value": [0]}, "fps": float("inf")},
+            {"delta_timestamps": {"value": [0]}, "fps": float("nan")},
+            {"delta_timestamps": {"value": [0.05]}, "fps": 10},
+            {"frame_offsets": {"value": [0]}, "anchor_columns": ["value"]},
+            {"frame_offsets": {"value": [0]}, "tail": "pad"},
+            {"frame_offsets": {"value": [0]}, "tolerance_s": 0.01},
+            {"window_size": 2, "tolerance_s": 0.01},
+            {"window_size": 2, "tail": "pad", "boundary": "pad"},
+            {"boundary": "unknown"},
+        ]
+        for kwargs in cases:
+            with self.subTest(kwargs=kwargs), self.assertRaises((TypeError, ValueError)):
+                table.scan().to_contiguous_window_dataset(
+                    columns=["value"], group_key="episode", order_key="step", **kwargs)
+
+    def test_rejects_generated_padding_mask_collisions(self):
+        table = self.conn.create_table(
+            "mask_collision", schema=pa.schema([
+                pa.field("episode", pa.string(), nullable=False),
+                pa.field("step", pa.int32(), nullable=False),
+                pa.field("value", pa.int32(), nullable=False),
+                pa.field("value_is_pad", pa.int32(), nullable=False),
+            ]), options=_TABLE_OPTIONS)
+        table.add([{"episode": "a", "step": 0, "value": 1, "value_is_pad": 2}])
+        with self.assertRaises(ValueError):
+            table.scan().to_contiguous_window_dataset(
+                columns=["value", "value_is_pad"], group_key="episode", order_key="step")
+        with self.assertRaises(ValueError):
+            table.scan().to_contiguous_window_dataset(
+                columns=["value"], group_key="episode", order_key="value_is_pad")
+
+    def test_offset_mode_allows_is_pad_as_a_stored_column(self):
+        table = self.conn.create_table(
+            "stored_is_pad", schema=pa.schema([
+                pa.field("episode", pa.string(), nullable=False),
+                pa.field("step", pa.int32(), nullable=False),
+                pa.field("is_pad", pa.int32(), nullable=False),
+                pa.field("value", pa.int32(), nullable=False),
+            ]), options=_TABLE_OPTIONS)
+        table.add([{"episode": "a", "step": i, "is_pad": i, "value": 100 + i}
+                   for i in range(3)])
+        for group, order, column in (("episode", "step", "is_pad"),
+                                     ("is_pad", "step", "value"),
+                                     ("episode", "is_pad", "value")):
+            with self.subTest(group=group, order=order, column=column):
+                kwargs = dict(group_key=group, order_key=order, columns=[column])
+                dataset = table.scan().to_contiguous_window_dataset(**kwargs)
+                self.assertEqual(3, len(dataset))
+                self.assertEqual([0] if column == "is_pad" else [100], dataset[0][column])
+                self.assertEqual([False], dataset[0][column + "_is_pad"].tolist())
+                with self.assertRaises(ValueError):
+                    table.scan().to_contiguous_window_dataset(window_size=1, **kwargs)
+
     def test_sorts_rows_and_never_crosses_episode_boundaries(self):
         dataset = self._dataset(self._table())
 

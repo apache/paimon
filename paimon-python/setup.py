@@ -263,6 +263,7 @@ setup(
         ],
         'torch': [
             'torch',
+            'Pillow',
         ],
         'act': LEROBOT_DEPENDENCIES + [
             'Pillow; python_version>="3.10"',
