@@ -77,6 +77,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     private final BinaryRow partition;
     protected final DeletionVector.Factory dvFactory;
     @Nullable private final ReadBatchSizer readBatchSizer;
+    @Nullable protected final int[] metadataFallbackMapping;
+    private final String changelogFilePrefix;
 
     protected KeyValueFileReaderFactory(
             FileIO fileIO,
@@ -89,7 +91,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             BinaryRow partition,
             DeletionVector.Factory dvFactory,
             CoreOptions coreOptions,
-            @Nullable ReadBatchSizer readBatchSizer) {
+            @Nullable ReadBatchSizer readBatchSizer,
+            @Nullable int[] metadataFallbackMapping) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
@@ -105,6 +108,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         this.formatReaderMappings = new ConcurrentHashMap<>();
         this.dvFactory = dvFactory;
         this.readBatchSizer = readBatchSizer;
+        this.metadataFallbackMapping = metadataFallbackMapping;
+        this.changelogFilePrefix = coreOptions.changelogFilePrefix();
     }
 
     public TableSchema schema() {
@@ -149,7 +154,13 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                 valueType,
                 file.level(),
                 overrideSequenceWithSnapshotId,
-                file.minSequenceNumber());
+                file.minSequenceNumber(),
+                metadataFallbackMapping,
+                !isChangelogFile(file));
+    }
+
+    protected boolean isChangelogFile(DataFileMeta file) {
+        return file.fileName().startsWith(changelogFilePrefix);
     }
 
     private FileRecordReader<KeyValue> createRecordReader(
@@ -357,6 +368,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                 boolean projectKeys,
                 @Nullable List<Predicate> filters) {
             FormatReaderMapping.Builder builder = formatReaderMappingBuilder(projectKeys, filters);
+            int[] metadataFallbackMapping = createMetadataFallbackMapping();
             return new KeyValueFileReaderFactory(
                     fileIO,
                     schemaManager,
@@ -368,7 +380,38 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     partition,
                     dvFactory,
                     options,
-                    readBatchSizer);
+                    readBatchSizer,
+                    metadataFallbackMapping);
+        }
+
+        @Nullable
+        protected int[] createMetadataFallbackMapping() {
+            if (changelogExtraValueFields == null
+                    || changelogExtraValueFields.isEmpty()
+                    || options.changelogExposeFieldAsMetadata().isEmpty()) {
+                return null;
+            }
+
+            int[] mapping = new int[readValueType.getFieldCount()];
+            java.util.Arrays.fill(mapping, -1);
+            List<String> readFieldNames = readValueType.getFieldNames();
+            List<String> preserveColumns = options.changelogExposeFieldAsMetadata();
+            for (int i = 0; i < changelogExtraValueFields.size(); i++) {
+                if (i >= preserveColumns.size()) {
+                    break;
+                }
+                int metadataIndex = readFieldNames.indexOf(changelogExtraValueFields.get(i).name());
+                int valueIndex = readFieldNames.indexOf(preserveColumns.get(i));
+                if (metadataIndex >= 0 && valueIndex >= 0) {
+                    mapping[metadataIndex] = valueIndex;
+                }
+            }
+            for (int index : mapping) {
+                if (index >= 0) {
+                    return mapping;
+                }
+            }
+            return null;
         }
 
         protected FormatReaderMapping.Builder formatReaderMappingBuilder(
