@@ -50,6 +50,12 @@ public class ScanMetrics {
 
     private ScanStats latestScan;
 
+    // Reported separately from the scan itself: which entries of a plan are read depends on the
+    // consumer (a normal read takes the ADD entries, a change read takes DELETE entries as well),
+    // so the size and record count are folded after that choice is made, not at plan time.
+    private long latestResultedTableFilesSize;
+    private long latestResultedRecordCount;
+
     public ScanMetrics(MetricRegistry registry, String tableName) {
         metricGroup = registry.createTableMetricGroup(GROUP_NAME, tableName);
         metricGroup.gauge(
@@ -72,12 +78,8 @@ public class ScanMetrics {
         metricGroup.gauge(
                 LAST_SCAN_RESULTED_TABLE_FILES,
                 () -> latestScan == null ? 0L : latestScan.getResultedTableFiles());
-        metricGroup.gauge(
-                LAST_SCAN_RESULTED_TABLE_FILES_SIZE,
-                () -> latestScan == null ? 0L : latestScan.getResultedTableFilesSize());
-        metricGroup.gauge(
-                LAST_SCAN_RESULTED_RECORD_COUNT,
-                () -> latestScan == null ? 0L : latestScan.getResultedRecordCount());
+        metricGroup.gauge(LAST_SCAN_RESULTED_TABLE_FILES_SIZE, () -> latestResultedTableFilesSize);
+        metricGroup.gauge(LAST_SCAN_RESULTED_RECORD_COUNT, () -> latestResultedRecordCount);
         metricGroup.gauge(MANIFEST_HIT_CACHE, () -> cacheMetrics.getHitObject().get());
         metricGroup.gauge(MANIFEST_MISSED_CACHE, () -> cacheMetrics.getMissedObject().get());
         metricGroup.gauge(DVMETA_HIT_CACHE, () -> dvMetaCacheMetrics.getHitObject().get());
@@ -92,6 +94,15 @@ public class ScanMetrics {
     public void reportScan(ScanStats scanStats) {
         latestScan = scanStats;
         durationHistogram.update(scanStats.getDuration());
+    }
+
+    /**
+     * Reports the total size and record count of the data files the consumer of the latest plan
+     * will actually read. Called after the reader has decided which entries it takes from the plan.
+     */
+    public void reportResultedFiles(long tableFilesSize, long recordCount) {
+        latestResultedTableFilesSize = tableFilesSize;
+        latestResultedRecordCount = recordCount;
     }
 
     public CacheMetrics getCacheMetrics() {

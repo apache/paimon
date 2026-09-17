@@ -25,7 +25,6 @@ import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.BucketFilter;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileEntry.Identifier;
-import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
@@ -320,16 +319,9 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                     manifestsResult.allManifests.stream()
                             .mapToLong(f -> f.numAddedFiles() - f.numDeletedFiles())
                             .sum();
-            // for DELTA and CHANGELOG scan modes the result contains both ADD and DELETE entries,
-            // only ADD entries will actually be read, so size and record count only count them
-            long resultedTableFilesSize = 0L;
-            long resultedRecordCount = 0L;
-            for (ManifestEntry entry : result) {
-                if (entry.kind() == FileKind.ADD) {
-                    resultedTableFilesSize += entry.file().fileSize();
-                    resultedRecordCount += entry.file().rowCount();
-                }
-            }
+            // The size and record count of what will be read are not folded here: a DELTA plan
+            // holds both ADD and DELETE entries, and whether the DELETE entries get read depends
+            // on the consumer. SnapshotReaderImpl reports them once it has made that choice.
             scanMetrics.reportScan(
                     new ScanStats(
                             scanDuration,
@@ -337,9 +329,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                             manifests.size(),
                             manifestsResult.allManifests.size() - manifests.size(),
                             allDataFiles - result.size(),
-                            result.size(),
-                            resultedTableFilesSize,
-                            resultedRecordCount));
+                            result.size()));
         }
 
         return new Plan() {

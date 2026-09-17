@@ -145,13 +145,13 @@ public class ScanMetricsTest {
     }
 
     private void reportOnce(ScanMetrics scanMetrics) {
-        ScanStats scanStats = new ScanStats(200, 1L, 20, 5, 25, 10, 1024, 100);
-        scanMetrics.reportScan(scanStats);
+        scanMetrics.reportScan(new ScanStats(200, 1L, 20, 5, 25, 10));
+        scanMetrics.reportResultedFiles(1024, 100);
     }
 
     private void reportAgain(ScanMetrics scanMetrics) {
-        ScanStats scanStats = new ScanStats(500, 2L, 22, 7, 30, 8, 2048, 200);
-        scanMetrics.reportScan(scanStats);
+        scanMetrics.reportScan(new ScanStats(500, 2L, 22, 7, 30, 8));
+        scanMetrics.reportResultedFiles(2048, 200);
     }
 
     private ScanMetrics getScanMetrics() {
