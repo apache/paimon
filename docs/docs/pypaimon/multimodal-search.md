@@ -186,6 +186,9 @@ Dictionary vector routes also accept `anns_field`, `data`, and `param` aliases.
 
 Use `search_vectors` for multiple query vectors against one vector column. It
 returns one result set for each input vector, preserving input order.
+Batch results share a lookup of their combined row IDs, so overlapping results
+do not require reading the same row separately for each query. The limit and
+post-filter still apply to each query's result set.
 
 ```python
 batch_neighbors = (
