@@ -427,7 +427,7 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "File block size of format, default value of orc stripe is 64 MB, parquet row group is 128 MB, "
-                                    + "and avro block is 64000 bytes. For avro, this is the uncompressed block size threshold.");
+                                    + "and avro block is 64 KB.");
 
     public static final ConfigOption<MemorySize> FILE_INDEX_IN_MANIFEST_THRESHOLD =
             key("file-index.in-manifest-threshold")
