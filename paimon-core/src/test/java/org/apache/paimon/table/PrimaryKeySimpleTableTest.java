@@ -721,6 +721,57 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
+    public void testExpireSnapshotsKeepsBranchTag() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(true, 0));
+        }
+
+        table.createBranch(BRANCH_NAME);
+        FileStoreTable branchTable = table.switchToBranch(BRANCH_NAME);
+        try (StreamTableWrite write = branchTable.newWrite(commitUser);
+                StreamTableCommit commit = branchTable.newCommit(commitUser)) {
+            write.write(rowData(1, 20, 200L));
+            commit.commit(0, write.prepareCommit(true, 0));
+        }
+        long taggedSnapshotId = branchTable.snapshotManager().latestSnapshotId();
+        branchTable.createTag("branch_tag", taggedSnapshotId);
+        try (StreamTableWrite write = branchTable.newWrite(commitUser);
+                StreamTableCommit commit = branchTable.newCommit(commitUser)) {
+            write.write(rowData(1, 30, 300L));
+            commit.commit(1, write.prepareCommit(true, 1));
+            write.write(rowData(1, 40, 400L));
+            commit.commit(2, write.prepareCommit(true, 2));
+        }
+
+        // the store tag manager must resolve tags in the branch tag directory
+        assertThat(branchTable.store().newTagManager().tagDirectory())
+                .isEqualTo(branchTable.tagManager().tagDirectory());
+
+        Options options = new Options();
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 1);
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 1);
+        options.set(SNAPSHOT_EXPIRE_LIMIT, Integer.MAX_VALUE);
+        branchTable.copy(options.toMap()).newCommit("").expireSnapshots();
+        assertThat(branchTable.snapshotManager().earliestSnapshotId())
+                .isGreaterThan(taggedSnapshotId);
+
+        // files of the tagged snapshot must survive expiration on the branch
+        FileStoreTable tagTable =
+                branchTable.copy(
+                        Collections.singletonMap(CoreOptions.SCAN_TAG_NAME.key(), "branch_tag"));
+        ReadBuilder readBuilder = tagTable.newReadBuilder();
+        assertThat(
+                        getResult(
+                                readBuilder.newRead(),
+                                readBuilder.newScan().plan().splits(),
+                                BATCH_ROW_TO_STRING))
+                .containsExactlyInAnyOrder("1|20|200|binary|varbinary|mapKey:mapVal|multiset");
+    }
+
+    @Test
     public void testStreamingProjection() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
