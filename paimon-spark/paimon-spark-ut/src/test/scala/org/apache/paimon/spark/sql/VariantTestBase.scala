@@ -445,6 +445,20 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
       Seq(Row(1, 10.0, 100L), Row(2, 20.5, 7L)))
   }
 
+  test("Paimon Variant: blank object keys under inferred shredding") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    // an empty key cannot become a shredded column and used to fail inferred-shredding writes
+    sql("""INSERT INTO T VALUES
+          | (1, parse_json('{"":1,"a":2}')),
+          | (2, parse_json('{"":3," ":4,"a":5}'))
+          |""".stripMargin)
+
+    checkAnswer(
+      sql("SELECT id, to_json(v), variant_get(v, '$.a', 'bigint') FROM T ORDER BY id"),
+      Seq(Row(1, """{"":1,"a":2}""", 2L), Row(2, """{"":3," ":4,"a":5}""", 5L))
+    )
+  }
+
   test("Paimon Variant: read and write variant with null value") {
     withTable("source_tbl", "target_tbl") {
       sql("CREATE TABLE source_tbl (id INT, js STRING) USING paimon")

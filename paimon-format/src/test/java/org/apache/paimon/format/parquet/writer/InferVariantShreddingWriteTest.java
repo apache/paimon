@@ -466,6 +466,37 @@ public class InferVariantShreddingWriteTest {
     }
 
     @Test
+    public void testInferSchemaSkipsBlankKeys() throws Exception {
+        ParquetFileFormat format = createFormat();
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+
+        // an empty key is a valid variant object key but not a RowType field name; it used
+        // to fail the whole file write and must stay in the unshredded value instead
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+        writeRows(
+                factory,
+                GenericRow.of(GenericVariant.fromJson("{\"\":1,\"a\":2}")),
+                GenericRow.of(GenericVariant.fromJson("{\"\":3,\" \":4,\"a\":5}")));
+
+        RowType expectShreddedType =
+                RowType.of(new DataType[] {DataTypes.BIGINT()}, new String[] {"a"});
+        verifyShreddingSchema(expectShreddedType);
+
+        List<InternalRow> result = readRows(format, writeType);
+        assertThat(result.get(0).getVariant(0).toJson()).isEqualTo("{\"\":1,\"a\":2}");
+        assertThat(result.get(1).getVariant(0).toJson()).isEqualTo("{\"\":3,\" \":4,\"a\":5}");
+
+        RowType variantRowType =
+                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                        .field(DataTypes.BIGINT(), "$.a")
+                        .build();
+        RowType readType = DataTypes.ROW(DataTypes.FIELD(0, "v", variantRowType));
+        List<InternalRow> result2 = readRows(format, readType);
+        assertThat(result2.get(0)).isEqualTo(GenericRow.of(GenericRow.of(2L)));
+        assertThat(result2.get(1)).isEqualTo(GenericRow.of(GenericRow.of(5L)));
+    }
+
+    @Test
     public void testInferSchemaWithNullValues() throws Exception {
         ParquetFileFormat format = createFormat();
         RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
