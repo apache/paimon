@@ -65,8 +65,8 @@ public interface TableScan {
      * <p>A prefix consists of the first {@code partitionFieldCount} partition fields. Prefixes and
      * returned partitions are ordered descending by their logical field types. All returned rows
      * contain the complete partition, so selecting a prefix may return more than {@code num} rows.
-     * Partitions whose first field is null are ignored, and the current scan's partition filters
-     * are respected.
+     * Null values, including default partitions, are ordered below non-null values. The current
+     * scan's partition filters are respected.
      *
      * <p>This operation is only supported for batch scans of partitioned tables. {@code num} must
      * be positive, and {@code partitionFieldCount} must be between one and the number of partition

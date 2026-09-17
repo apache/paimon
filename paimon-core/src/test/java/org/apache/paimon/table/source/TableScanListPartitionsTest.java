@@ -76,7 +76,9 @@ public class TableScanListPartitionsTest extends ScannerTestBase {
         write.close();
         commit.close();
 
-        assertThat(table.newReadBuilder().newScan().topNPartitions(1, 1)).isEmpty();
+        assertThat(table.newReadBuilder().newScan().topNPartitions(1, 1))
+                .singleElement()
+                .satisfies(partition -> assertThat(partition.isNullAt(0)).isTrue());
 
         write = table.newWrite(commitUser);
         write.write(GenericRow.of(9, 1, 1L));

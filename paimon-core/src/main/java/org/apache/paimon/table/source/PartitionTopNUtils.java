@@ -97,10 +97,7 @@ public final class PartitionTopNUtils {
                 CodeGenUtils.newRecordComparator(partitionType.getFieldTypes());
 
         List<BinaryRow> sorted =
-                partitions.stream()
-                        .filter(partition -> !partition.isNullAt(0))
-                        .sorted(fullComparator.reversed())
-                        .collect(Collectors.toList());
+                partitions.stream().sorted(fullComparator.reversed()).collect(Collectors.toList());
         List<List<BinaryRow>> groups = new ArrayList<>();
         BinaryRow previousPartition = null;
         BinaryRow previousPrefix = null;

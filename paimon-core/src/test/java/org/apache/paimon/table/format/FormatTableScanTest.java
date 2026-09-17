@@ -1409,7 +1409,10 @@ public class FormatTableScanTest {
 
         String empty2026 = enablePartitionValueOnly ? "2026/1" : "year=2026/month=1";
         fileIO.mkdirs(new Path(tableLocation, empty2026));
-        assertThat(new FormatTableScan(formatTable, null, null).topNPartitions(1, 1)).isEmpty();
+        assertThat(
+                        yearMonthPartitions(
+                                new FormatTableScan(formatTable, null, null).topNPartitions(1, 1)))
+                .containsExactly("null/1");
 
         String data2025 = enablePartitionValueOnly ? "2025/1" : "year=2025/month=1";
         writeTestFile(fileIO, new Path(tableLocation, data2025 + "/data.csv"), 10);
@@ -1442,7 +1445,11 @@ public class FormatTableScanTest {
 
     private List<String> yearMonthPartitions(List<BinaryRow> partitions) {
         return partitions.stream()
-                .map(row -> row.getInt(0) + "/" + row.getInt(1))
+                .map(
+                        row ->
+                                (row.isNullAt(0) ? "null" : row.getInt(0))
+                                        + "/"
+                                        + (row.isNullAt(1) ? "null" : row.getInt(1)))
                 .collect(java.util.stream.Collectors.toList());
     }
 
