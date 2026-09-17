@@ -22,22 +22,37 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.FileStoreCommit;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitCallback;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
+import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.Triple;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.CoreOptions.createCommitUser;
 
 /**
  * A {@link CommitCallback} implementation to maintain chain table snapshot branch for overwrite
@@ -109,38 +124,126 @@ public class ChainTableOverwriteCommitCallback implements CommitCallback {
             if (snapshot.commitKind() != CommitKind.OVERWRITE) {
                 continue;
             }
-            truncateSnapshotPartitions(
-                    table.store()
-                            .newScan()
-                            .withKind(ScanMode.DELTA)
-                            .withSnapshot(snapshot.id())
-                            .plan()
-                            .files());
+            List<BinaryRow> overwritePartitions =
+                    overwritePartitions(
+                            table.store()
+                                    .newScan()
+                                    .withKind(ScanMode.DELTA)
+                                    .withSnapshot(snapshot.id())
+                                    .plan()
+                                    .files());
+            clearSnapshotFilesAsOf(overwritePartitions, snapshot.timeMillis());
         }
     }
 
-    private void truncateSnapshotPartitions(List<ManifestEntry> deltaFiles) {
+    /**
+     * Clear the files of the given partitions that the snapshot branch held when the overwrite was
+     * published, and nothing that landed there since. That is what {@link #call} cleared at the
+     * time; a replay that repeats it after later data arrived must not take that data with it,
+     * whether the original cleanup had completed or not.
+     */
+    private void clearSnapshotFilesAsOf(List<BinaryRow> partitions, long overwriteCommitMillis) {
+        if (partitions.isEmpty()) {
+            return;
+        }
+        FileStoreTable snapshotTable = snapshotTable();
+        SnapshotManager snapshotManager = snapshotTable.snapshotManager();
+        Snapshot asOf = snapshotManager.earlierOrEqualTimeMills(overwriteCommitMillis);
+        Snapshot latest = snapshotManager.latestSnapshot();
+        if (asOf == null || latest == null) {
+            return;
+        }
+        Set<FileEntry.Identifier> current =
+                filesOf(snapshotTable, latest, partitions).stream()
+                        .map(ManifestEntry::identifier)
+                        .collect(Collectors.toSet());
+        // Files cleared since, by the original callback or an earlier retry, are gone already.
+        Map<Triple<BinaryRow, Integer, Integer>, List<DataFileMeta>> superseded = new HashMap<>();
+        for (ManifestEntry entry : filesOf(snapshotTable, asOf, partitions)) {
+            if (current.contains(entry.identifier())) {
+                superseded
+                        .computeIfAbsent(
+                                Triple.of(
+                                        entry.partition().copy(),
+                                        entry.bucket(),
+                                        entry.totalBuckets()),
+                                k -> new ArrayList<>())
+                        .add(entry.file());
+            }
+        }
+        if (superseded.isEmpty()) {
+            return;
+        }
+        ManifestCommittable committable =
+                new ManifestCommittable(BatchWriteBuilder.COMMIT_IDENTIFIER);
+        superseded.forEach(
+                (key, files) ->
+                        committable.addFileCommittable(
+                                new CommitMessageImpl(
+                                        key.f0,
+                                        key.f1,
+                                        key.f2,
+                                        new DataIncrement(
+                                                Collections.emptyList(),
+                                                files,
+                                                Collections.emptyList()),
+                                        CompactIncrement.emptyIncrement())));
+        try (FileStoreCommit commit =
+                snapshotTable
+                        .store()
+                        .newCommit(
+                                createCommitUser(new Options(snapshotTable.options())),
+                                snapshotTable)) {
+            // The files being removed must still be there; a concurrent change to them is a
+            // conflict to report, not to skip over.
+            commit.commit(committable, true);
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to clear the files of partitions %s in the snapshot table.",
+                            partitions),
+                    e);
+        }
+    }
+
+    private static List<ManifestEntry> filesOf(
+            FileStoreTable table, Snapshot snapshot, List<BinaryRow> partitions) {
+        return table.store()
+                .newScan()
+                .withSnapshot(snapshot)
+                .withPartitionFilter(partitions)
+                .plan()
+                .files();
+    }
+
+    private FileStoreTable snapshotTable() {
         FileStoreTable candidateTable = ChainTableUtils.resolveChainPrimaryTable(table);
-        FileStoreTable snapshotTable =
-                candidateTable.switchToBranch(coreOptions.scanFallbackSnapshotBranch());
+        return candidateTable.switchToBranch(coreOptions.scanFallbackSnapshotBranch());
+    }
+
+    private static List<BinaryRow> overwritePartitions(List<ManifestEntry> deltaFiles) {
+        return deltaFiles.stream()
+                .map(ManifestEntry::partition)
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
+    private void truncateSnapshotPartitions(List<ManifestEntry> deltaFiles) {
+        List<BinaryRow> overwritePartitions = overwritePartitions(deltaFiles);
+        if (overwritePartitions.isEmpty()) {
+            return;
+        }
         InternalRowPartitionComputer partitionComputer =
                 new InternalRowPartitionComputer(
                         coreOptions.partitionDefaultName(),
                         table.schema().logicalPartitionType(),
                         table.schema().partitionKeys().toArray(new String[0]),
                         coreOptions.legacyPartitionName());
-        List<BinaryRow> overwritePartitions =
-                deltaFiles.stream()
-                        .map(ManifestEntry::partition)
-                        .distinct()
-                        .collect(Collectors.toList());
-        if (overwritePartitions.isEmpty()) {
-            return;
-        }
         List<Map<String, String>> candidatePartitions =
                 overwritePartitions.stream()
                         .map(partitionComputer::generatePartValues)
                         .collect(Collectors.toList());
+        FileStoreTable snapshotTable = snapshotTable();
         try (BatchTableCommit commit = snapshotTable.newBatchWriteBuilder().newCommit()) {
             commit.truncatePartitions(candidatePartitions);
         } catch (Exception e) {

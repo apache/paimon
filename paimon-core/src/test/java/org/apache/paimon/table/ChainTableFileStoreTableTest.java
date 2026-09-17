@@ -764,6 +764,73 @@ public class ChainTableFileStoreTableTest {
     }
 
     @Test
+    public void testChainOverwriteReplayKeepsSnapshotDataWrittenAfterTheOverwrite()
+            throws Exception {
+        createChainTable(options -> {});
+        FileStoreTable chainTable = loadTable();
+        FileStoreTable snapshotTable = chainTable.switchToBranch(SNAPSHOT_BRANCH);
+        FileStoreTable deltaTable = chainTable.switchToBranch(DELTA_BRANCH);
+        Map<String, String> partition = partition("20");
+
+        writeWithCommit(snapshotTable, row(1L, 1L, "value-1", "CN", "20250810", "20"));
+        // The overwrite and its cleanup both succeed.
+        commitOverwrite(deltaTable, partition, 0, row(1L, 2L, "value-2", "CN", "20250810", "20"));
+        assertThat(getResult(loadTable(), partition))
+                .containsExactly(row(1L, 2L, "value-2", "CN", "20250810", "20"));
+
+        // New data lands in the same partition of the snapshot branch afterwards and, being the
+        // snapshot, takes precedence over the delta.
+        writeWithCommit(snapshotTable, row(2L, 1L, "value-3", "CN", "20250810", "20"));
+        assertThat(getResult(loadTable(), partition))
+                .containsExactly(row(2L, 1L, "value-3", "CN", "20250810", "20"));
+
+        // The batch is replayed although its callback had completed, for example because the
+        // engine failed after the sink returned. The retry must not clear what landed later.
+        commitOverwrite(deltaTable, partition, 0, row(1L, 2L, "value-2", "CN", "20250810", "20"));
+
+        assertThat(getResult(snapshotTable, partition))
+                .as(
+                        "data written to the snapshot branch after the overwrite must survive its replay")
+                .containsExactly(row(2L, 1L, "value-3", "CN", "20250810", "20"));
+        assertThat(getResult(loadTable(), partition))
+                .containsExactly(row(2L, 1L, "value-3", "CN", "20250810", "20"));
+    }
+
+    @Test
+    public void testChainOverwriteReplayClearsOnlyWhatTheOverwriteSuperseded() throws Exception {
+        createChainTable(options -> {});
+        FileStoreTable chainTable = loadTable();
+        FileStoreTable snapshotTable = chainTable.switchToBranch(SNAPSHOT_BRANCH);
+        FileStoreTable deltaTable = chainTable.switchToBranch(DELTA_BRANCH);
+        Map<String, String> partition = partition("20");
+
+        writeWithCommit(snapshotTable, row(1L, 1L, "value-1", "CN", "20250810", "20"));
+        // The overwrite is published, its cleanup fails.
+        assertThatThrownBy(
+                        () ->
+                                commitOverwrite(
+                                        withFailingCleanup(deltaTable),
+                                        partition,
+                                        0,
+                                        row(1L, 2L, "value-2", "CN", "20250810", "20")))
+                .hasMessageContaining("does not exist");
+
+        // New data lands in the same partition of the snapshot branch before the replay.
+        writeWithCommit(snapshotTable, row(2L, 1L, "value-3", "CN", "20250810", "20"));
+
+        // Had the cleanup run when the overwrite was published, it would have cleared value-1
+        // and left value-3, which came later, in place. The retry has to do the same.
+        commitOverwrite(deltaTable, partition, 0, row(1L, 2L, "value-2", "CN", "20250810", "20"));
+
+        assertThat(getResult(snapshotTable, partition))
+                .as(
+                        "the retry must clear what the overwrite superseded and nothing that came later")
+                .containsExactly(row(2L, 1L, "value-3", "CN", "20250810", "20"));
+        assertThat(getResult(loadTable(), partition))
+                .containsExactly(row(2L, 1L, "value-3", "CN", "20250810", "20"));
+    }
+
+    @Test
     public void testChainOverwriteReplayWithoutSnapshotIsSkipped() throws Exception {
         createChainTable(options -> {});
         FileStoreTable deltaTable = loadTable().switchToBranch(DELTA_BRANCH);
