@@ -24,8 +24,8 @@ import uuid
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from datetime import datetime, timezone
-from typing import Dict, Optional
-from urllib.parse import unquote
+from typing import Dict, NamedTuple, Optional
+from urllib.parse import quote, unquote
 
 from pypaimon.api.token_loader import DLFToken
 from pypaimon.api.typedef import RESTAuthParameter
@@ -497,3 +497,227 @@ class DLFOpenApiSigner(DLFRequestSigner):
     @staticmethod
     def _trim(value: str) -> str:
         return value.strip() if value else ""
+
+
+class CanonicalHeadersResult(NamedTuple):
+    """The canonical header block and the SignedHeaders list that describes it."""
+    canonical_headers: str
+    signed_headers: str
+
+
+class DLFOpenApiV4Signer(DLFRequestSigner):
+    """
+    Signer for Aliyun OpenAPI V4 requests, using the ACS4-HMAC-SHA256 algorithm.
+
+    Unlike DLFOpenApiSigner, which signs a string built from the Date and
+    Content-MD5 headers with HMAC-SHA1, this signer hashes a canonical request
+    and signs it with a key derived from the date, the region and the product,
+    the way the POP gateway does.
+
+    Reference: https://github.com/aliyun/alibabacloud-gateway/tree/master/alibabacloud-gateway-pop
+    """
+
+    IDENTIFIER = "openapi-v4"
+
+    SIGNATURE_ALGORITHM = "ACS4-HMAC-SHA256"
+
+    # Key derivation prefix and terminator, shared with the DLF4 scheme
+    SIGN_PREFIX = "aliyun_v4"
+    REQUEST_TYPE = "aliyun_v4_request"
+
+    # POP product code; it is the third level of the credential scope
+    PRODUCT = "DlfNext"
+
+    # Header constants
+    HOST_HEADER = "host"
+    CONTENT_TYPE_HEADER = "content-type"
+    X_ACS_DATE = "x-acs-date"
+    X_ACS_SIGNATURE_NONCE = "x-acs-signature-nonce"
+    X_ACS_VERSION = "x-acs-version"
+    X_ACS_CONTENT_SHA256 = "x-acs-content-sha256"
+    X_ACS_SECURITY_TOKEN = "x-acs-security-token"
+
+    # Values
+    ACS_DATE_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+    CONTENT_TYPE_VALUE = "application/json"
+    API_VERSION = "2026-01-18"
+
+    EMPTY_BODY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+    def __init__(self, region: str):
+        if region is None:
+            raise ValueError("Parameter 'region' cannot be None")
+        self.region = region
+
+    def sign_headers(
+            self,
+            body: Optional[str],
+            now: datetime,
+            security_token: Optional[str],
+            host: str
+    ) -> Dict[str, str]:
+        if now is None:
+            raise ValueError("Parameter 'now' cannot be None")
+        if host is None:
+            raise ValueError("Parameter 'host' cannot be None")
+
+        headers = {}
+
+        # x-acs-date (ISO 8601, always UTC)
+        if now.tzinfo is None:
+            utc_now = now.replace(tzinfo=timezone.utc)
+        else:
+            utc_now = now.astimezone(timezone.utc)
+        headers[self.X_ACS_DATE] = utc_now.strftime(self.ACS_DATE_FORMAT)
+
+        headers[self.HOST_HEADER] = host
+
+        # An absent body hashes to the well-known SHA-256 of the empty string
+        if body is not None and body != "":
+            headers[self.X_ACS_CONTENT_SHA256] = self._sha256_hex(body)
+            headers[self.CONTENT_TYPE_HEADER] = self.CONTENT_TYPE_VALUE
+        else:
+            headers[self.X_ACS_CONTENT_SHA256] = self.EMPTY_BODY_SHA256
+
+        headers[self.X_ACS_SIGNATURE_NONCE] = self._generate_unique_nonce()
+        headers[self.X_ACS_VERSION] = self.API_VERSION
+
+        if security_token is not None:
+            headers[self.X_ACS_SECURITY_TOKEN] = security_token
+
+        return headers
+
+    def authorization(
+            self,
+            rest_auth_parameter: RESTAuthParameter,
+            token: DLFToken,
+            host: str,
+            sign_headers: Dict[str, str]
+    ) -> str:
+        if rest_auth_parameter is None:
+            raise ValueError("Parameter 'rest_auth_parameter' cannot be None")
+        if token is None:
+            raise ValueError("Parameter 'token' cannot be None")
+        if host is None:
+            raise ValueError("Parameter 'host' cannot be None")
+        if sign_headers is None:
+            raise ValueError("Parameter 'sign_headers' cannot be None")
+
+        try:
+            canonical = self._build_canonical_headers(sign_headers)
+            canonical_query_string = self._build_canonical_query_string(
+                rest_auth_parameter.parameters
+            )
+
+            canonical_uri = rest_auth_parameter.path
+            if not canonical_uri or not canonical_uri.strip():
+                canonical_uri = "/"
+
+            hashed_payload = sign_headers.get(
+                self.X_ACS_CONTENT_SHA256, self.EMPTY_BODY_SHA256
+            )
+
+            canonical_request = "\n".join([
+                rest_auth_parameter.method,
+                canonical_uri,
+                canonical_query_string,
+                canonical.canonical_headers,
+                canonical.signed_headers,
+                hashed_payload,
+            ])
+
+            string_to_sign = self.SIGNATURE_ALGORITHM + "\n" + self._sha256_hex(canonical_request)
+
+            # The credential scope date comes from the signed x-acs-date, so the two cannot drift
+            date = self._credential_scope_date(sign_headers.get(self.X_ACS_DATE))
+            signing_key = self._signing_key(token.access_key_secret, date)
+            signature = self._hmac_sha256(signing_key, string_to_sign).hex()
+
+            credential_scope = f"{date}/{self.region}/{self.PRODUCT}/{self.REQUEST_TYPE}"
+            return (
+                f"{self.SIGNATURE_ALGORITHM} "
+                f"Credential={token.access_key_id}/{credential_scope},"
+                f"SignedHeaders={canonical.signed_headers},"
+                f"Signature={signature}"
+            )
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to generate authorization: {e}")
+
+    def identifier(self) -> str:
+        return self.IDENTIFIER
+
+    @staticmethod
+    def _credential_scope_date(acs_date: Optional[str]) -> str:
+        """Turns 2025-04-16T03:44:46Z into 20250416."""
+        if acs_date is None or len(acs_date) < 10:
+            raise ValueError("Header 'x-acs-date' is missing or invalid")
+        return acs_date[:10].replace("-", "")
+
+    def _signing_key(self, access_key_secret: str, date: str) -> bytes:
+        """Derives the signing key: secret, then date, region, product and request type."""
+        date_key = self._hmac_sha256(
+            f"{self.SIGN_PREFIX}{access_key_secret}".encode("utf-8"), date
+        )
+        date_region_key = self._hmac_sha256(date_key, self.region)
+        date_region_product_key = self._hmac_sha256(date_region_key, self.PRODUCT)
+        return self._hmac_sha256(date_region_product_key, self.REQUEST_TYPE)
+
+    @staticmethod
+    def _build_canonical_headers(headers: Dict[str, str]) -> CanonicalHeadersResult:
+        """Signs host, content-type and every x-acs-* header, sorted and lowercased."""
+        canonicalized_keys = []
+        value_map = {}
+
+        for key, value in headers.items():
+            lower_key = key.lower()
+            if (lower_key.startswith("x-acs-")
+                    or lower_key == DLFOpenApiV4Signer.HOST_HEADER
+                    or lower_key == DLFOpenApiV4Signer.CONTENT_TYPE_HEADER):
+                if lower_key not in canonicalized_keys:
+                    canonicalized_keys.append(lower_key)
+                value_map[lower_key] = value.strip()
+
+        canonicalized_keys.sort()
+        canonical_headers = "".join(f"{key}:{value_map[key]}\n" for key in canonicalized_keys)
+
+        return CanonicalHeadersResult(canonical_headers, ";".join(canonicalized_keys))
+
+    @staticmethod
+    def _build_canonical_query_string(parameters: Optional[Dict[str, str]]) -> str:
+        """Build canonical query string with percent-encoding (RFC 3986)."""
+        if not parameters:
+            return ""
+
+        parts = []
+        for key in sorted(parameters.keys()):
+            value = parameters[key]
+            encoded_key = DLFOpenApiV4Signer._percent_encode(key)
+            if value is not None and value != "":
+                # RESTAuthParameter has already encoded the value once; decode it so the
+                # canonical form matches what the gateway rebuilds from the wire
+                decoded = DLFOpenApiV4Signer._percent_encode(unquote(value))
+                parts.append(f"{encoded_key}={decoded}")
+            else:
+                parts.append(f"{encoded_key}=")
+        return "&".join(parts)
+
+    @staticmethod
+    def _percent_encode(value: str) -> Optional[str]:
+        """RFC 3986 percent-encoding."""
+        if value is None:
+            return None
+        return quote(value, safe="~")
+
+    @staticmethod
+    def _generate_unique_nonce() -> str:
+        """Generate unique nonce with UUID, timestamp, and thread ID."""
+        return f"{uuid.uuid4()}{int(time.time() * 1000)}{threading.current_thread().ident}"
+
+    @staticmethod
+    def _sha256_hex(data: str) -> str:
+        return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _hmac_sha256(key: bytes, data: str) -> bytes:
+        return hmac.new(key, data.encode("utf-8"), hashlib.sha256).digest()

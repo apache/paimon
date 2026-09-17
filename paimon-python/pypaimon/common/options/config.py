@@ -126,7 +126,8 @@ class CatalogOptions:
     DLF_SIGNING_ALGORITHM = ConfigOptions.key(
         "dlf.signing-algorithm").string_type().default_value("default").with_description(
         "DLF signing algorithm. Options: 'default' (for VPC endpoint), "
-        "'openapi' (for DlfNext/2026-01-18). "
+        "'openapi-v4' (ACS4-HMAC-SHA256, for DlfNext/2026-01-18), "
+        "'openapi' (the earlier ROA HMAC-SHA1 scheme). "
         "If not set, will be automatically selected based on endpoint host.")
     PREFIX = ConfigOptions.key("prefix").string_type().no_default_value().with_description("Prefix")
     HTTP_USER_AGENT_HEADER = ConfigOptions.key(
