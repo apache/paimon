@@ -160,7 +160,9 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                     "Unsupported schema change class "
                             + schemaChange.getClass().getName()
                             + ", content "
-                            + schemaChange);
+                            + schemaChange
+                            + ", table "
+                            + identifier);
         }
     }
 

@@ -109,7 +109,7 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
                     } catch (RuntimeException e) {
                         throw e;
                     } catch (Exception e) {
-                        throw new RuntimeException(e);
+                        throw new RuntimeException("Failed to compute channel for table " + id, e);
                     }
                 });
     }
