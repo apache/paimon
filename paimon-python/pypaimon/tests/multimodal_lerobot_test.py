@@ -48,6 +48,7 @@ from pypaimon.multimodal.lerobot import load_from_lerobot
 from pypaimon.multimodal.lerobot.dataset import (
     _PyAVVideoDecoder,
     _arrow_rows,
+    _decode_video_frames,
     _decode_video_rows,
     _decode_video_windows,
     _image_tensor,
@@ -389,6 +390,168 @@ class LeRobotValidationTest(unittest.TestCase):
                 side_effect=OSError("unavailable")):
             with self.assertRaises(OSError):
                 _open_video_decoder(stream, backend="torchcodec")
+
+    def test_video_batches_include_delta_frames_and_preserve_backends(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+
+        metadata = {
+            "repo_id": "test/video-batches",
+            "info": {
+                "codebase_version": "v3.0", "fps": 10,
+                "total_frames": 3, "total_episodes": 1, "total_tasks": 1,
+                "features": {
+                    "index": {"dtype": "int64", "shape": [1]},
+                    "episode_index": {"dtype": "int64", "shape": [1]},
+                    "frame_index": {"dtype": "int64", "shape": [1]},
+                    "timestamp": {"dtype": "float32", "shape": [1]},
+                    "task_index": {"dtype": "int64", "shape": [1]},
+                    "camera": {"dtype": "video", "shape": [2, 2, 3],
+                               "names": ["height", "width", "channels"]},
+                },
+            },
+            "episodes": [{"episode_index": 0, "dataset_from_index": 0,
+                          "dataset_to_index": 3, "length": 3,
+                          "tasks": ["pick"]}],
+            "tasks": ["pick"],
+        }
+
+        class Reader(pmm.PaimonDatasetReader):
+
+            def read_indices(self, indices, columns):
+                return pa.Table.from_pylist([{
+                    "index": index, "episode_index": 0,
+                    "frame_index": index, "timestamp": index / 10,
+                    "task_index": 0,
+                    "camera": pmm.VideoFrameDescriptor(
+                        "file:///shared.video", 0, 5, index + 3).serialize(),
+                } for index in indices], schema=self.schema).select(columns)
+
+        for backend, batch in (("torchcodec", True), (None, True),
+                               ("pyav", False), (None, False)):
+            with self.subTest(backend=backend, batch=batch):
+                calls = []
+
+                class Decoder:
+                    def __getitem__(self, index):
+                        calls.append(index)
+                        return torch.full((3, 2, 2), index, dtype=torch.uint8)
+
+                class BatchDecoder(Decoder):
+                    def __getitem__(self, index):
+                        raise AssertionError("unexpected single-frame call")
+
+                    def get_frames_at(self, *, indices):
+                        calls.append(indices)
+                        return SimpleNamespace(data=torch.stack([
+                            torch.full((3, 2, 2), i, dtype=torch.uint8)
+                            for i in indices
+                        ]))
+
+                decoder = BatchDecoder() if batch else Decoder()
+                module = "pypaimon.multimodal.lerobot.dataset."
+                with patch(
+                        module + "_open_torchcodec_decoder",
+                        return_value=decoder,
+                        side_effect=None if batch else OSError("unavailable"),
+                ) as open_torchcodec, patch(
+                        module + "_PyAVVideoDecoder", return_value=decoder,
+                ) as open_pyav:
+                    file_io = SimpleNamespace(
+                        new_input_stream=lambda path: io.BytesIO(b"video"))
+                    reader = Reader(
+                        metadata, file_io=file_io, video_backend=backend,
+                        delta_timestamps={"camera": [-0.1, 0.0, 0.1]},
+                    )
+                    try:
+                        last, first, duplicate = reader.get_items([2, 0, 2])
+                        self.assertEqual([[3, 4, 5]] if batch else [3, 4, 5], calls)
+                        self.assertEqual([3, 3, 2, 2], list(last["camera"].shape))
+                        torch.testing.assert_close(
+                            last["camera"][:, 0, 0, 0],
+                            torch.tensor([4, 5, 5], dtype=torch.float32) / 255)
+                        torch.testing.assert_close(
+                            first["camera"][:, 0, 0, 0],
+                            torch.tensor([3, 3, 4], dtype=torch.float32) / 255)
+                        self.assertEqual([False, False, True],
+                                         last["camera_is_pad"].tolist())
+                        self.assertEqual([True, False, False],
+                                         first["camera_is_pad"].tolist())
+                        last["camera"].zero_()
+                        self.assertGreater(float(duplicate["camera"].sum()), 0)
+                        reader.get_items([1])
+                        self.assertEqual(
+                            [[3, 4, 5]] * 2 if batch else [3, 4, 5] * 2, calls)
+                        self.assertEqual(0 if backend == "pyav" else 1,
+                                         open_torchcodec.call_count)
+                        self.assertEqual(0 if batch else 1, open_pyav.call_count)
+                    finally:
+                        reader.close()
+
+    def test_video_batch_decode_propagates_errors(self):
+        decoder = Mock()
+        decoder.get_frames_at.side_effect = RuntimeError("decode failed")
+        with self.assertRaisesRegex(RuntimeError, "decode failed"):
+            _decode_video_frames(decoder, [0, 1], [{}, {}])
+        decoder.get_frames_at.assert_called_once_with(indices=[0, 1])
+
+    @unittest.skipUnless(
+        av is not None and importlib.util.find_spec("torchcodec") is not None,
+        "PyAV and TorchCodec are required for batch video decoding",
+    )
+    def test_torchcodec_batch_matches_single_frame_decoding(self):
+        import torch
+        try:
+            from torchcodec.decoders import VideoDecoder
+        except (ImportError, OSError, RuntimeError) as error:
+            self.skipTest(str(error))
+
+        output = io.BytesIO()
+        with av.open(output, mode="w", format="mp4") as container:
+            stream = container.add_stream("libx264", rate=10)
+            stream.width = stream.height = 16
+            stream.pix_fmt = "yuv420p"
+            stream.gop_size = 4
+            stream.codec_context.max_b_frames = 2
+            for index in range(12):
+                frame = av.VideoFrame.from_ndarray(
+                    np.full((16, 16, 3), index * 16, dtype=np.uint8),
+                    format="rgb24")
+                for packet in stream.encode(frame):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+
+        payload = output.getvalue()
+        decoder = _open_video_decoder(io.BytesIO(payload), backend="torchcodec")
+        self.assertIsInstance(decoder, VideoDecoder)
+        indices = [9, 1, 9, 5]
+        expected = torch.stack([decoder[index] for index in indices])
+        file_io = SimpleNamespace(
+            new_input_stream=lambda path: io.BytesIO(payload))
+        collator = pmm.VideoFrameCollator(
+            SimpleNamespace(file_io=file_io), video_column="video",
+            decoder_factory=lambda source: decoder,
+            decode_batch_fn=_decode_video_frames,
+            collate_fn=lambda rows: rows,
+        )
+        try:
+            with patch.object(
+                    decoder, "get_frames_at", wraps=decoder.get_frames_at,
+            ) as decode_batch:
+                result = collator([{
+                    "video": pmm.VideoFrameDescriptor(
+                        "file:///episode.mp4", 0, len(payload), index).serialize(),
+                } for index in indices])
+                decode_batch.assert_called_once_with(indices=[1, 5, 9, 9])
+            actual = torch.stack([row["frame"] for row in result])
+            self.assertEqual(torch.uint8, actual.dtype)
+            self.assertEqual((4, 3, 16, 16), tuple(actual.shape))
+            torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+        finally:
+            collator.close()
 
     def test_dataset_requires_supported_python(self):
         with patch(
