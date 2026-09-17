@@ -176,6 +176,74 @@ public class AvroFileFormatTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"null", "deflate", "snappy", "zstd"})
+    void testCloseFlushesBufferedRecords(String compression) throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull()).notNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
+                FormatWriter writer =
+                        fileFormat.createWriterFactory(rowType).create(out, compression)) {
+            // Leave a partial record-encoder buffer as well as a partial Avro block.
+            writer.addElement(GenericRow.of(42));
+        }
+
+        List<Integer> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                fileFormat
+                        .createReaderFactory(rowType, rowType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            reader.forEachRemaining(row -> result.add(row.getInt(0)));
+        }
+        assertThat(result).containsExactly(42);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"null", "deflate", "snappy", "zstd"})
+    void testBufferedRecordsAroundRawBlockCopy(String compression) throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull()).notNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path source = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+        Path target = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+
+        try (PositionOutputStream out = fileIO.newOutputStream(source, false);
+                FormatWriter writer =
+                        fileFormat.createWriterFactory(rowType).create(out, "deflate")) {
+            writer.addElement(GenericRow.of(2));
+            writer.addElement(GenericRow.of(3));
+        }
+
+        ByteArrayOutputStream encoded = new ByteArrayOutputStream();
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(encoded, null);
+        encoder.writeInt(1);
+        encoder.flush();
+
+        try (AvroBlockReader reader = new AvroBlockReader(fileIO.newInputStream(source));
+                PositionOutputStream out = fileIO.newOutputStream(target, false);
+                AvroBlockWriter writer = fileFormat.createBlockWriter(out, rowType, compression)) {
+            writer.addElement(GenericRow.of(0));
+            writer.addEncoded(ByteBuffer.wrap(encoded.toByteArray()));
+            // Copying a raw block must first flush buffered rows and encoded records.
+            writer.addEncodedBlock(reader.nextBorrowedRawBlock());
+            writer.addElement(GenericRow.of(4));
+        }
+
+        List<Integer> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                fileFormat
+                        .createReaderFactory(rowType, rowType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, target, fileIO.getFileSize(target), null, null))) {
+            reader.forEachRemaining(row -> result.add(row.getInt(0)));
+        }
+        assertThat(result).containsExactly(0, 1, 2, 3, 4);
+    }
+
     @Test
     public void testSupportedDataTypes() {
         ArrayList<DataField> dataFields = new ArrayList<>();

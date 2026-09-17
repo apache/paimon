@@ -39,6 +39,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.avro.Schema;
 import org.apache.avro.file.CodecFactory;
 import org.apache.avro.file.DataFileWriter;
+import org.apache.avro.io.EncoderFactory;
 
 import javax.annotation.Nullable;
 
@@ -95,6 +96,8 @@ public class AvroFileFormat extends FileFormat {
                 AvroSchemaConverter.convertToSchema(rowType, options.get(AVRO_ROW_NAME_MAPPING));
         AvroRowDatumWriter datumWriter = new AvroRowDatumWriter(rowType);
         DataFileWriter<InternalRow> writer = new DataFileWriter<>(datumWriter);
+        // Batch field encodings before writing them to the Avro block buffer.
+        writer.setEncoder(outputStream -> EncoderFactory.get().binaryEncoder(outputStream, null));
         writer.setCodec(createCodecFactory(compression));
         if (blockSize != null) {
             writer.setSyncInterval(Math.toIntExact(blockSize.getBytes()));
