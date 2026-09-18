@@ -110,6 +110,56 @@ class VectorScoringTest(unittest.TestCase):
         self.assertEqual(1.0, scores[1])
         self.assertEqual([1.0], list(_iter_arrow_scores(pa.array([[]], type=pa.list_(pa.float32())), [], "l2")))
 
+    def test_batch_null_vectors_preserve_scores_without_scalar_fallback(self):
+        rng = np.random.default_rng(37)
+        values = rng.standard_normal((2053, 7)).astype(np.float32).tolist()
+        for i in (0, 2, 511, 1025, 2051, 2052):
+            values[i] = None
+        queries = [[1.0] * 7, [0.0] * 7, [-0.5] * 7]
+        for dtype in (pa.list_(pa.float32()), pa.large_list(pa.float32()), pa.list_(pa.float32(), 7)):
+            sliced = pa.array(values, type=dtype).slice(2, 2050)
+            chunked = pa.chunked_array([sliced.slice(0, 513), sliced.slice(513)])
+            for vectors in (sliced, chunked):
+                for metric in ("l2", "cosine", "inner_product"):
+                    with self.subTest(dtype=dtype, chunked=isinstance(vectors, pa.ChunkedArray), metric=metric):
+                        expected = [[None if row is None else _compute_score(query, row, metric)
+                                     for row in values[2:2052]] for query in queries]
+                        actual = [[] for _ in queries]
+                        with mock.patch("pypaimon.table.source.vector_search_read._compute_score",
+                                        side_effect=AssertionError("valid rows must use vectorized scoring")):
+                            for start, query_index, scores in _iter_arrow_batch_scores(vectors, queries, metric):
+                                self.assertEqual(start, len(actual[query_index]))
+                                actual[query_index].extend(scores)
+                        self.assertEqual(expected, actual)
+
+    def test_batch_all_null_vectors_and_invalid_children_keep_existing_behavior(self):
+        queries = [[1.0, 0.0], [0.0, 0.0]]
+        for dtype in (pa.list_(pa.float32()), pa.large_list(pa.float32()), pa.list_(pa.float32(), 2)):
+            for metric in ("l2", "cosine", "inner_product"):
+                result = list(_iter_arrow_batch_scores(pa.array([None, None], type=dtype), queries, metric))
+                self.assertEqual([(0, 0, [None, None]), (0, 1, [None, None])], result)
+        for rows, exception, message in (
+                ([None, [1.0]], ValueError, "dimension mismatch"),
+                ([None, [1.0, None]], TypeError, "NoneType")):
+            with self.subTest(rows=rows):
+                vectors = pa.array(rows, type=pa.list_(pa.float32()))
+                with self.assertRaisesRegex(exception, message):
+                    list(_iter_arrow_batch_scores(vectors, queries, "l2"))
+        vectors = pa.array([None, [float("nan"), 0.0], [1.0, 0.0]], type=pa.list_(pa.float32()))
+        scores = list(_iter_arrow_batch_scores(vectors, queries, "l2"))[0][2]
+        self.assertIsNone(scores[0])
+        self.assertTrue(np.isnan(scores[1]))
+        self.assertEqual(1.0, scores[2])
+
+    def test_batch_null_parent_ignores_invalid_child_values(self):
+        vectors = pa.Array.from_buffers(
+            pa.list_(pa.float32(), 2), 2, [pa.py_buffer(b"\x02")],
+            children=[pa.array([float("nan"), None, 1.0, 2.0], type=pa.float32())])
+        with mock.patch("pypaimon.table.source.vector_search_read._compute_score",
+                        side_effect=AssertionError("null children must not disable the fast path")):
+            result = list(_iter_arrow_batch_scores(vectors, [[1.0, 2.0]], "l2"))
+        self.assertEqual([(0, 0, [None, 1.0])], result)
+
     def test_raw_search_filters_before_scoring_and_preserves_ties(self):
         column = _field(1, "embedding", "FLOAT")
         reader = DataEvolutionVectorRead(_StubTable([column], []), 2, column, [1, 0])
