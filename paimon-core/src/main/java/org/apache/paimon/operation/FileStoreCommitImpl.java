@@ -1044,7 +1044,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (!checkConflicts && shouldCheckSameFixedBucket(commitKind)) {
             checkSameFixedBucketFromSnapshot(deltaFiles, latestSnapshot);
         }
-        if (checkConflicts) {
+        if (checkConflicts
+                && !conflictDetection.canSkipDataFileConflictDetection(
+                        latestSnapshot, deltaFiles, indexFiles, commitKind)) {
             // latestSnapshotId is different from the snapshot id we've checked for conflicts,
             // so we have to check again
             if (changedPartitions == null) {
