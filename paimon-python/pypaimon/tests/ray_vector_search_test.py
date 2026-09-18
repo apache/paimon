@@ -317,7 +317,11 @@ def test_refinement_uses_global_candidates_despite_reverse_completion_order(tabl
     index_file = IndexFileMeta("ivf-flat", "fake", 1, 2, None)
     splits = [IndexVectorSearchSplit(0, 1, [index_file]), IndexVectorSearchSplit(2, 3, [index_file])]
 
-    def completed(*args):
+    def completed(worker, context, items, *args):
+        if worker is search_module._search_raw_split:
+            for ordinal, split in enumerate(items):
+                yield ordinal, worker(context, split)
+            return
         # Row 3 is the true nearest, but is outside the GLOBAL approximate top-2.
         # Refining independently per shard would incorrectly bring it back in.
         yield 1, ("l2", {2: 8., 3: 7.})

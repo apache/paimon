@@ -67,10 +67,6 @@ class _RayVectorSearchRead(DataEvolutionVectorRead):
         self._concurrency = concurrency
         self._remote_args = remote_args
 
-    def _score_raw_batches(self, batches, query_vector, metric, score_candidates=None, reject_nan=True):
-        # Refinement also runs through this scorer, before its local top-k.
-        return super()._score_raw_batches(batches, query_vector, metric, score_candidates, reject_nan=True)
-
     def _search_index_splits(self, splits, query, search_limit, pre_filters, batch=False):
         # Filters are planned once on the driver, at the query snapshot. Each
         # worker receives only its own include-row bitmap, not a table-wide set.
@@ -91,13 +87,11 @@ class _RayVectorSearchRead(DataEvolutionVectorRead):
     def _read_raw_search(self, raw_row_ranges, pre_filter, query_vector,
                          index_type=None, include_filter=True,
                          score_candidates=None, snapshot=None):
-        if score_candidates is not None:
-            # Refinement uses the globally selected indexed candidates.
-            return super()._read_raw_search(
-                raw_row_ranges, pre_filter, query_vector, index_type,
-                include_filter, score_candidates, snapshot)
-
         ranges = _filtered_raw_row_ranges(raw_row_ranges, pre_filter)
+        if score_candidates is not None:
+            # Refine only the globally selected candidates. Intersect before
+            # planning so workers neither read nor score other rows.
+            ranges = _filtered_raw_row_ranges(ranges, score_candidates.to_range_list())
         if not ranges:
             return DictBasedScoredIndexResult({})
         table_read, splits = self._plan_raw_read(ranges, include_filter, snapshot)
