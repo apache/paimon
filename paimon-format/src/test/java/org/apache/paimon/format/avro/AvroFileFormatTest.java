@@ -44,7 +44,9 @@ import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.io.BinaryDecoder;
 import org.apache.avro.io.BinaryEncoder;
+import org.apache.avro.io.BufferedBinaryEncoder;
 import org.apache.avro.io.DecoderFactory;
+import org.apache.avro.io.DirectBinaryEncoder;
 import org.apache.avro.io.EncoderFactory;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -174,6 +176,157 @@ public class AvroFileFormatTest {
                     .isInstanceOf(ArithmeticException.class)
                     .hasMessage("integer overflow");
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"null", "deflate", "snappy", "zstd"})
+    void testCloseFlushesBufferedRecords(String compression) throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull()).notNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
+                FormatWriter writer =
+                        fileFormat.createWriterFactory(rowType).create(out, compression)) {
+            assertThat(writer)
+                    .extracting("writer")
+                    .extracting("bufOut")
+                    .isInstanceOf(BufferedBinaryEncoder.class);
+            // Leave a partial record-encoder buffer as well as a partial Avro block.
+            writer.addElement(GenericRow.of(42));
+        }
+
+        List<Integer> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                fileFormat
+                        .createReaderFactory(rowType, rowType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            reader.forEachRemaining(row -> result.add(row.getInt(0)));
+        }
+        assertThat(result).containsExactly(42);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "null, 16",
+        "null, 4096",
+        "deflate, 16",
+        "deflate, 4096",
+        "snappy, 16",
+        "snappy, 4096",
+        "zstd, 16",
+        "zstd, 4096"
+    })
+    void testBufferedRecordSerializationFailureRollsBack(String compression, int payloadSize)
+            throws IOException {
+        RowType rowType =
+                DataTypes.ROW(DataTypes.BYTES().notNull(), DataTypes.INT().notNull()).notNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+        GenericRow before = GenericRow.of(new byte[] {1, 2, 3}, 42);
+        GenericRow after = GenericRow.of(new byte[] {4, 5, 6}, 43);
+        byte[] failedPayload = new byte[payloadSize];
+        Arrays.fill(failedPayload, (byte) 7);
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
+                FormatWriter writer =
+                        fileFormat.createWriterFactory(rowType).create(out, compression)) {
+            assertThat(writer)
+                    .extracting("writer")
+                    .extracting("bufOut")
+                    .isInstanceOf(BufferedBinaryEncoder.class);
+            writer.addElement(before);
+            // The first field is written before the second field fails. Small payloads stay in
+            // the encoder buffer; large payloads flush it and reach the Avro block buffer.
+            assertThatThrownBy(() -> writer.addElement(GenericRow.of(failedPayload, "not an int")))
+                    .isInstanceOf(DataFileWriter.AppendWriteException.class)
+                    .hasCauseInstanceOf(ClassCastException.class);
+            writer.addElement(after);
+        }
+
+        List<GenericRow> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                fileFormat
+                        .createReaderFactory(rowType, rowType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            reader.forEachRemaining(
+                    row -> result.add(GenericRow.of(row.getBinary(0), row.getInt(1))));
+        }
+        assertThat(result).containsExactly(before, after);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"avro", "parquet", "orc"})
+    void testManifestWriterUsesDirectEncoder(String dataFileFormat) throws IOException {
+        Options options = new Options();
+        options.set(CoreOptions.FILE_FORMAT, dataFileFormat);
+        FileFormat manifestFormat = FileFormat.manifestFormat(new CoreOptions(options));
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull()).notNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
+                FormatWriter writer =
+                        manifestFormat.createWriterFactory(rowType).create(out, "null")) {
+            assertThat(writer)
+                    .extracting("writer")
+                    .extracting("bufOut")
+                    .isInstanceOf(DirectBinaryEncoder.class);
+            writer.addElement(GenericRow.of(42));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"null", "deflate", "snappy", "zstd"})
+    void testRecordsAroundRawBlockCopy(String compression) throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull()).notNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path source = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+        Path target = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+
+        try (PositionOutputStream out = fileIO.newOutputStream(source, false);
+                FormatWriter writer =
+                        fileFormat.createWriterFactory(rowType).create(out, "deflate")) {
+            writer.addElement(GenericRow.of(2));
+            writer.addElement(GenericRow.of(3));
+        }
+
+        ByteArrayOutputStream encoded = new ByteArrayOutputStream();
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(encoded, null);
+        encoder.writeInt(1);
+        encoder.flush();
+
+        try (AvroBlockReader reader = new AvroBlockReader(fileIO.newInputStream(source));
+                PositionOutputStream out = fileIO.newOutputStream(target, false);
+                AvroBlockWriter writer = fileFormat.createBlockWriter(out, rowType, compression)) {
+            assertThat(writer)
+                    .extracting("writer")
+                    .extracting("bufOut")
+                    .isInstanceOf(DirectBinaryEncoder.class);
+            writer.addElement(GenericRow.of(0));
+            ByteBuffer record = ByteBuffer.wrap(encoded.toByteArray());
+            writer.addEncoded(record);
+            assertThat(record.position()).isZero();
+            assertThat(record.remaining()).isEqualTo(encoded.size());
+            // Copying a raw block must first flush pending rows and encoded records.
+            writer.addEncodedBlock(reader.nextBorrowedRawBlock());
+            writer.addElement(GenericRow.of(4));
+        }
+
+        List<Integer> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                fileFormat
+                        .createReaderFactory(rowType, rowType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, target, fileIO.getFileSize(target), null, null))) {
+            reader.forEachRemaining(row -> result.add(row.getInt(0)));
+        }
+        assertThat(result).containsExactly(0, 1, 2, 3, 4);
     }
 
     @Test

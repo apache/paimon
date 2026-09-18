@@ -39,6 +39,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.avro.Schema;
 import org.apache.avro.file.CodecFactory;
 import org.apache.avro.file.DataFileWriter;
+import org.apache.avro.io.EncoderFactory;
 
 import javax.annotation.Nullable;
 
@@ -67,6 +68,7 @@ public class AvroFileFormat extends FileFormat {
     private final Options options;
     private final int zstdLevel;
     @Nullable private final MemorySize blockSize;
+    private final boolean useBufferedEncoder;
 
     public AvroFileFormat(FormatContext context) {
         super(IDENTIFIER);
@@ -74,6 +76,7 @@ public class AvroFileFormat extends FileFormat {
         this.options = getIdentifierPrefixOptions(context.options());
         this.zstdLevel = context.zstdLevel();
         this.blockSize = context.blockSize();
+        this.useBufferedEncoder = !context.isManifest();
     }
 
     @Override
@@ -91,10 +94,26 @@ public class AvroFileFormat extends FileFormat {
 
     public AvroBlockWriter createBlockWriter(
             PositionOutputStream out, RowType rowType, String compression) throws IOException {
+        // Retain Avro's direct encoder for pre-encoded manifest records. The buffered encoder
+        // copies array-backed ByteBuffers into a temporary byte array for each appendEncoded call.
+        return createBlockWriter(out, rowType, compression, false);
+    }
+
+    private AvroBlockWriter createBlockWriter(
+            PositionOutputStream out,
+            RowType rowType,
+            String compression,
+            boolean useBufferedEncoder)
+            throws IOException {
         Schema schema =
                 AvroSchemaConverter.convertToSchema(rowType, options.get(AVRO_ROW_NAME_MAPPING));
         AvroRowDatumWriter datumWriter = new AvroRowDatumWriter(rowType);
         DataFileWriter<InternalRow> writer = new DataFileWriter<>(datumWriter);
+        if (useBufferedEncoder) {
+            // Batch data-file field encodings before writing them to the Avro block buffer.
+            writer.setEncoder(
+                    outputStream -> EncoderFactory.get().binaryEncoder(outputStream, null));
+        }
         writer.setCodec(createCodecFactory(compression));
         if (blockSize != null) {
             writer.setSyncInterval(Math.toIntExact(blockSize.getBytes()));
@@ -141,7 +160,7 @@ public class AvroFileFormat extends FileFormat {
         @Override
         public FormatWriter create(PositionOutputStream out, String compression)
                 throws IOException {
-            return createBlockWriter(out, rowType, compression);
+            return createBlockWriter(out, rowType, compression, useBufferedEncoder);
         }
     }
 }
