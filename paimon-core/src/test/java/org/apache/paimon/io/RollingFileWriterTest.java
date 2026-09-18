@@ -179,6 +179,8 @@ public class RollingFileWriterTest {
         assertThat(LocalFileIO.create().exists(path)).isFalse();
         assertThatCode(writer::abort).doesNotThrowAnyException();
         assertThatCode(writer::close).doesNotThrowAnyException();
+        assertThatThrownBy(writer::result).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(writer::drainAbortExecutors).isInstanceOf(IllegalStateException.class);
     }
 
     @Test
