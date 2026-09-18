@@ -94,6 +94,13 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(
             native_table.new_read_builder().explain().native_planned, expect_native)
 
+    @staticmethod
+    def _native_rows(builder, plan):
+        with patch(
+                'pypaimon.read.table_read.TableRead._create_split_read',
+                side_effect=AssertionError('Python reader was used')):
+            return builder.new_read().to_arrow(plan.splits()).to_pylist()
+
     def test_primary_key_matches_normal_plan(self):
         self.cat.create_table('default.pk_t', Schema.from_pyarrow_schema(
             self.schema, primary_keys=['k'], options={'bucket': '1'}), False)
@@ -289,7 +296,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._assert_matches('de_t')
 
         native_table = self.cat.get_table('default.de_t').copy(
-            {'scan.native-plan.enabled': 'true'})
+            {'read.native.enabled': 'true'})
         predicate = native_table.new_read_builder().new_predicate_builder().equal(
             'v', 'b2')
         builder = (native_table.new_read_builder()
@@ -297,7 +304,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
                    .with_filter(predicate)
                    .with_limit(1))
         plan = builder.new_scan().plan()
-        rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+        rows = self._native_rows(builder, plan)
 
         self.assertEqual(rows, [{'k': 2}])
         self.assertTrue(builder.explain().native_planned)
@@ -306,6 +313,9 @@ class NativePlanIntegrationTest(unittest.TestCase):
                         .with_projection(['media.camera'])
                         .with_limit(1))
         blob_plan = blob_builder.new_scan().plan()
+        # A dotted top-level field currently uses PyPaimon's nested-projection
+        # machinery, so this part deliberately exercises the documented
+        # Python fallback while the scalar projection above is native.
         blob_rows = blob_builder.new_read().to_arrow(
             blob_plan.splits()).to_pylist()
         self.assertEqual(blob_rows, [{'media.camera': b'a'}])
@@ -330,6 +340,58 @@ class NativePlanIntegrationTest(unittest.TestCase):
         )
         self.assertTrue(descriptor_builder.explain().native_planned)
 
+    @unittest.skipUnless(native_reader_available(),
+                         "pypaimon-rust native reader API not installed")
+    def test_native_read_data_evolution_partial_appends(self):
+        schema = pa.schema([
+            ('f0', pa.int32()),
+            ('f1', pa.string()),
+            ('f2', pa.string()),
+        ])
+        self.cat.create_table('default.de_order_t', Schema.from_pyarrow_schema(
+            schema, options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }), False)
+        table = self.cat.get_table('default.de_order_t')
+        write_builder = table.new_batch_write_builder()
+
+        base = write_builder.new_write()
+        base.write_arrow(pa.Table.from_pydict({
+            'f0': [0, 1],
+            'f1': ['z', 'a'],
+            'f2': ['q', 'b'],
+        }, schema=schema))
+        write_builder.new_commit().commit(base.prepare_commit())
+        base.close()
+
+        left = write_builder.new_write().with_write_type(['f0', 'f1'])
+        right = write_builder.new_write().with_write_type(['f2'])
+        left.write_arrow(pa.Table.from_pydict(
+            {'f0': [2], 'f1': ['x']},
+            schema=pa.schema([('f0', pa.int32()), ('f1', pa.string())])))
+        right.write_arrow(pa.Table.from_pydict(
+            {'f2': ['y']}, schema=pa.schema([('f2', pa.string())])))
+        messages = left.prepare_commit() + right.prepare_commit()
+        for message in messages:
+            for data_file in message.new_files:
+                data_file.first_row_id = 2
+        write_builder.new_commit().commit(messages)
+        left.close()
+        right.close()
+
+        native_table = table.copy({'read.native.enabled': 'true'})
+        builder = native_table.new_read_builder()
+        plan = builder.new_scan().plan()
+        rows = self._native_rows(builder, plan)
+
+        self.assertEqual(sorted(rows, key=lambda row: row['f0']), [
+            {'f0': 0, 'f1': 'z', 'f2': 'q'},
+            {'f0': 1, 'f1': 'a', 'f2': 'b'},
+            {'f0': 2, 'f1': 'x', 'f2': 'y'},
+        ])
+        self.assertTrue(builder.explain().native_planned)
+
     @unittest.skipUnless(_has_native_row_ranges(),
                          "pypaimon_rust row-range API not installed")
     def test_data_evolution_global_index_row_ranges(self):
@@ -344,7 +406,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
             {'k': 3, 'v': 'c'},
         ])
         table = self.cat.get_table('default.de_range_t').copy(
-            {'scan.native-plan.enabled': 'true'})
+            {'read.native.enabled': 'true'})
         builder = table.new_read_builder()
         scan = builder.new_scan().with_global_index_result(
             GlobalIndexResult.from_range(Range(1, 1)))
@@ -353,7 +415,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         with patch.object(
                 scan.file_scanner, 'scan', side_effect=AssertionError("fallback")):
             plan = scan.plan()
-        rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+        rows = self._native_rows(builder, plan)
 
         self.assertEqual(rows, [{'k': 2, 'v': 'b'}])
         self.assertEqual(

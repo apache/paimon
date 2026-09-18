@@ -24,6 +24,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional
 import pandas
 import pyarrow
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_json_parser import extract_referenced_fields
 from pypaimon.data.map_shared_shredding import map_selected_keys_field
@@ -46,6 +47,15 @@ ROW_KIND_COLUMN = "_row_kind"
 logger = logging.getLogger(__name__)
 _RECORD_BATCH_READER_FROM_STREAM = getattr(
     pyarrow.ipc.RecordBatchReader, "from_stream", None)
+_NATIVE_READ_FILE_FORMATS = frozenset({
+    CoreOptions.FILE_FORMAT_PARQUET,
+    CoreOptions.FILE_FORMAT_ORC,
+    CoreOptions.FILE_FORMAT_AVRO,
+    CoreOptions.FILE_FORMAT_ROW,
+    CoreOptions.FILE_FORMAT_MOSAIC,
+})
+_NATIVE_READ_FILE_SUFFIXES = tuple(
+    '.%s' % file_format for file_format in _NATIVE_READ_FILE_FORMATS)
 
 
 class _ClosableArrowBatchReader:
@@ -339,11 +349,15 @@ class TableRead:
                 or parallelism is not None
                 or blob_parallelism not in (None, 1)):
             return None
+        if self.table.options.file_format() not in _NATIVE_READ_FILE_FORMATS:
+            return None
         if not splits:
             return []
         rust_splits = []
         for split in splits:
             if isinstance(split, QueryAuthSplit):
+                return None
+            if not self._native_split_files_supported(split):
                 return None
             rust_split = getattr(split, '_native_split', None)
             if rust_split is None:
@@ -363,6 +377,15 @@ class TableRead:
                 "Native read failed, falling back to the Python reader: %s", e)
             return None
         return self._convert_native_batches(batches, schema)
+
+    @staticmethod
+    def _native_split_files_supported(split):
+        for data_file in split.files:
+            file_name = data_file.file_name.lower()
+            if ('.vector.' not in file_name
+                    and not file_name.endswith(_NATIVE_READ_FILE_SUFFIXES)):
+                return False
+        return True
 
     def _convert_native_batches(self, batches, schema):
         """Apply PyPaimon's exact output limit lazily to native batches."""

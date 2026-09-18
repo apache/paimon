@@ -24,13 +24,15 @@ from pypaimon.schema.data_types import AtomicType, DataField
 
 
 class _Split:
-    pass
+    def __init__(self, file_name='data.parquet'):
+        self.files = [Mock(file_name=file_name)]
 
 
 def _table_read(limit=None):
     read = TableRead.__new__(TableRead)
     read.table = Mock()
     read.table.options.native_read_enabled.return_value = True
+    read.table.options.file_format.return_value = 'parquet'
     read.predicate = None
     read.read_type = [DataField(0, 'id', AtomicType('INT'))]
     read.include_row_kind = False
@@ -96,3 +98,28 @@ def test_native_read_failure_falls_back():
     with patch('pypaimon.read.native_plan.native_read',
                side_effect=RuntimeError('unsupported')):
         assert read._try_native_batches([split], schema) is None
+
+
+def test_native_read_falls_back_for_unsupported_file_format():
+    read = _table_read()
+    read.table.options.file_format.return_value = 'vortex'
+    schema = pa.schema([('id', pa.int32())])
+    split = _Split()
+    split._native_split = object()
+
+    with patch('pypaimon.read.native_plan.native_read') as native:
+        assert read._try_native_batches([split], schema) is None
+
+    native.assert_not_called()
+
+
+def test_native_read_falls_back_for_unsupported_dedicated_file():
+    read = _table_read()
+    schema = pa.schema([('id', pa.int32())])
+    split = _Split('camera.video')
+    split._native_split = object()
+
+    with patch('pypaimon.read.native_plan.native_read') as native:
+        assert read._try_native_batches([split], schema) is None
+
+    native.assert_not_called()
