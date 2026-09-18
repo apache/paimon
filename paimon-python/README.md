@@ -107,11 +107,12 @@ The command will install the package and core dependencies to your local Python 
 
 # Parquet page-index reads
 
-`read.parquet.page-index.enabled` is disabled by default. Enable it for a read
-using a table copy, without changing persisted table options:
+PyPaimon uses the same `parquet.filter.columnindex.enabled` option as the Java
+reader. It defaults to `false` in Python and `true` in Java. Enable it for a Python
+read using a table copy, without changing persisted table options:
 
 ```python
-indexed_table = table.copy({"read.parquet.page-index.enabled": "true"})
+indexed_table = table.copy({"parquet.filter.columnindex.enabled": "true"})
 builder = indexed_table.new_read_builder()
 # On a row-tracking table, select a contiguous row-ID window.
 builder.with_filter(builder.new_predicate_builder().between("_ROW_ID", 100, 199))
