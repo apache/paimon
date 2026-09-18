@@ -137,10 +137,13 @@ rows = builder.new_read().to_arrow(plan.splits())
 Native reads return PyArrow batches through the Arrow C Data interface. They
 currently require untouched splits produced by the native planner and top-level
 projection. Query authorization, nested projection, row-kind output, and
-explicit Python/blob parallelism controls retain the Python reader. A missing
-reader capability, unsupported route, or native-reader construction failure
-falls back to Python; I/O and data errors raised after streaming starts surface
-to the caller.
+explicit blob parallelism retain the Python reader. For materialized
+`to_arrow()` reads, the effective split parallelism (the method argument,
+`read.parallelism`, or the automatic default) runs independent Rust readers
+over contiguous split groups. Streaming `to_arrow_batch_reader()` keeps one
+lazy Rust reader. A missing reader capability, unsupported route, or
+native-reader construction failure falls back to Python; I/O and data errors
+raised after streaming starts surface to the caller.
 
 With Rust main's `Table.from_resolved_schema()` binding, filesystem and JDBC catalog
 tables preserve the Python table's resolved schema and complete effective

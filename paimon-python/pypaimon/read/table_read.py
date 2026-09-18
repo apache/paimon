@@ -125,6 +125,10 @@ class _RemainingRows:
             return self._remaining <= 0
 
 
+class _NativeReadSetupError(Exception):
+    """Native reader construction failed before a batch was exposed."""
+
+
 class TableRead:
     """Implementation of TableRead for native Python reading."""
 
@@ -303,7 +307,7 @@ class TableRead:
         native_batches = self._try_native_batches(
             splits,
             schema,
-            parallelism=parallelism,
+            parallelism=effective,
             blob_parallelism=blob_parallelism,
         )
         if native_batches is not None:
@@ -346,7 +350,6 @@ class TableRead:
             return None
         # These Python-only output controls do not yet have native equivalents.
         if (self.include_row_kind or self.nested_name_paths
-                or parallelism is not None
                 or blob_parallelism not in (None, 1)):
             return None
         if self.table.options.file_format() not in _NATIVE_READ_FILE_FORMATS:
@@ -365,6 +368,20 @@ class TableRead:
             rust_splits.append(rust_split)
         try:
             from pypaimon.read.native_plan import native_read
+        except Exception as e:
+            logger.warning(
+                "Native read failed, falling back to the Python reader: %s", e)
+            return None
+        if (parallelism is not None
+                and self._should_run_parallel(splits, parallelism)):
+            try:
+                return self._native_batches_parallel(
+                    native_read, rust_splits, schema, parallelism)
+            except _NativeReadSetupError as e:
+                logger.warning(
+                    "Native read failed, falling back to the Python reader: %s", e)
+                return None
+        try:
             batches = native_read(
                 self.table,
                 rust_splits,
@@ -377,6 +394,67 @@ class TableRead:
                 "Native read failed, falling back to the Python reader: %s", e)
             return None
         return self._convert_native_batches(batches, schema)
+
+    def _native_batches_parallel(
+            self, native_read, rust_splits, schema, effective):
+        """Read contiguous split groups with independent Rust readers."""
+        workers = min(effective, len(rust_splits))
+        base_size, larger_groups = divmod(len(rust_splits), workers)
+        groups = []
+        offset = 0
+        for index in range(workers):
+            size = base_size + (1 if index < larger_groups else 0)
+            groups.append(rust_splits[offset:offset + size])
+            offset += size
+
+        remaining_state = _RemainingRows(self.limit)
+        results = [None] * len(groups)
+        with ThreadPoolExecutor(
+                max_workers=workers,
+                thread_name_prefix="pypaimon-native-read") as executor:
+            futures = {
+                executor.submit(
+                    self._read_native_split_group,
+                    native_read,
+                    group,
+                    schema,
+                    remaining_state,
+                ): index
+                for index, group in enumerate(groups)
+            }
+            for future in as_completed(futures):
+                results[futures[future]] = future.result()
+
+        return [batch for group_batches in results for batch in group_batches]
+
+    def _read_native_split_group(
+            self, native_read, rust_splits, schema, remaining_state):
+        if remaining_state.exhausted():
+            return []
+        try:
+            batches = native_read(
+                self.table,
+                rust_splits,
+                predicate=self.predicate,
+                limit=self.limit,
+                projection=[field.name for field in self.read_type],
+            )
+        except Exception as e:
+            raise _NativeReadSetupError(str(e)) from e
+        result = []
+        for batch in batches:
+            if batch.num_rows == 0:
+                continue
+            allowed = remaining_state.try_consume(batch.num_rows)
+            if allowed == 0:
+                break
+            if allowed < batch.num_rows:
+                batch = batch.slice(0, allowed)
+            batch = self._project_batch_to_output(batch)
+            result.append(self._try_to_pad_batch_by_schema(batch, schema))
+            if remaining_state.exhausted():
+                break
+        return result
 
     @staticmethod
     def _native_split_files_supported(split):

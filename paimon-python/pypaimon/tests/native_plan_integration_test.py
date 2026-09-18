@@ -27,7 +27,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.read.native_plan import (
     native_family_search_modes_available, native_method_available,
-    native_reader_available,
+    native_read, native_reader_available,
 )
 from pypaimon.table.row.blob import BlobDescriptor
 from pypaimon.utils.range import Range
@@ -180,6 +180,53 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(rows, [{'k': 2}, {'k': 3}])
         self.assertEqual(streamed, rows)
         self.assertTrue(builder.explain().native_planned)
+
+    @unittest.skipUnless(native_reader_available(),
+                         "pypaimon-rust native reader API not installed")
+    def test_native_read_uses_effective_split_parallelism(self):
+        schema = pa.schema([
+            ('k', pa.int64()),
+            ('v', pa.string()),
+            ('dt', pa.string()),
+        ])
+        self.cat.create_table('default.native_parallel_t',
+                              Schema.from_pyarrow_schema(
+                                  schema,
+                                  partition_keys=['dt']), False)
+        table = self.cat.get_table('default.native_parallel_t')
+        write_builder = table.new_batch_write_builder()
+        write = write_builder.new_write()
+        write.write_arrow(pa.Table.from_pylist([
+            {'k': 1, 'v': 'a', 'dt': 'p1'},
+            {'k': 2, 'v': 'b', 'dt': 'p2'},
+            {'k': 3, 'v': 'c', 'dt': 'p3'},
+            {'k': 4, 'v': 'd', 'dt': 'p4'},
+        ], schema=schema))
+        write_builder.new_commit().commit(write.prepare_commit())
+        write.close()
+
+        native_table = table.copy({
+            'read.native.enabled': 'true',
+            'read.parallelism': '2',
+        })
+        builder = native_table.new_read_builder()
+        plan = builder.new_scan().plan()
+        self.assertEqual(len(plan.splits()), 4)
+
+        with patch('pypaimon.read.native_plan.native_read',
+                   wraps=native_read) as rust_reads, \
+                patch(
+                    'pypaimon.read.table_read.TableRead._create_split_read',
+                    side_effect=AssertionError('Python reader was used')):
+            rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+
+        self.assertEqual(sorted(rows, key=lambda row: row['k']), [
+            {'k': 1, 'v': 'a', 'dt': 'p1'},
+            {'k': 2, 'v': 'b', 'dt': 'p2'},
+            {'k': 3, 'v': 'c', 'dt': 'p3'},
+            {'k': 4, 'v': 'd', 'dt': 'p4'},
+        ])
+        self.assertEqual(rust_reads.call_count, 2)
 
     @unittest.skipUnless(native_reader_available(),
                          "pypaimon-rust native reader API not installed")
