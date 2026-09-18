@@ -46,6 +46,9 @@ import static org.apache.paimon.rest.RESTUtil.decodeString;
  * Content-MD5} headers with HMAC-SHA1, this signer hashes a canonical request and signs it with a
  * key derived from the date, the region and the product, the way the POP gateway does.
  *
+ * <p>{@link #authorization} also puts the API name in the headers it is handed, because a POP
+ * gateway may route by that header and it has to be signed with the rest.
+ *
  * <p>Reference: https://github.com/aliyun/alibabacloud-gateway/tree/master/alibabacloud-gateway-pop
  */
 public class DLFOpenApiV4Signer implements DLFRequestSigner {
@@ -70,6 +73,7 @@ public class DLFOpenApiV4Signer implements DLFRequestSigner {
     private static final String X_ACS_VERSION = "x-acs-version";
     private static final String X_ACS_CONTENT_SHA256 = "x-acs-content-sha256";
     private static final String X_ACS_SECURITY_TOKEN = "x-acs-security-token";
+    private static final String X_ACS_ACTION = "x-acs-action";
 
     private static final String CONTENT_TYPE_VALUE = "application/json";
     private static final String API_VERSION = "2026-01-18";
@@ -151,6 +155,15 @@ public class DLFOpenApiV4Signer implements DLFRequestSigner {
         }
         if (signHeaders == null) {
             throw new IllegalArgumentException("Parameter 'signHeaders' cannot be null");
+        }
+
+        // POP gateways may route by this header, so it is added to the headers the caller sends
+        // and signed with them; the request names no API only when none is registered for it.
+        String action =
+                DLFOpenApiActions.resolve(
+                        restAuthParameter.method(), restAuthParameter.resourcePath());
+        if (action != null) {
+            signHeaders.put(X_ACS_ACTION, action);
         }
 
         CanonicalHeadersResult canonicalHeadersResult = buildCanonicalHeaders(signHeaders);
