@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
@@ -36,6 +37,7 @@ import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
@@ -44,6 +46,8 @@ import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -405,8 +409,11 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                                     tableSchema.logicalPartitionType(), snapshotSearchPred);
 
                     // List snapshot partitions for this group, sorted by chain dimension.
+                    // The anchor of an admitted logical partition sits in an earlier one, which a
+                    // rule on a chain partition key excludes.
                     List<BinaryRow> snapshotPartitionsInGroup =
                             newChainPartitionListingScan(true, snapshotAnchorPredicate)
+                                    .withoutAuthPartitionPushdown()
                                     .listPartitions();
 
                     // Find delta → snapshot mapping (for each delta partition, find the nearest
@@ -452,29 +459,25 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                             deltaScan.withPartitionFilter(selectedDeltaPartitions);
                         }
 
-                        List<DataSplit> deltaSubSplits =
-                                deltaScan.plan().splits().stream()
-                                        .map(s -> (DataSplit) s)
-                                        .collect(Collectors.toList());
+                        ChainAuth auth = new ChainAuth();
+                        List<DataSplit> deltaSubSplits = auth.unwrap(deltaScan.plan().splits());
                         List<DataSplit> snapshotSubSplits = new ArrayList<>();
                         if (partitionPairs.getValue() != null) {
                             snapshotScan.withPartitionFilter(
                                     Collections.singletonList(partitionPairs.getValue()));
-                            snapshotSubSplits =
-                                    snapshotScan.plan().splits().stream()
-                                            .map(s -> (DataSplit) s)
-                                            .collect(Collectors.toList());
+                            snapshotSubSplits = auth.unwrap(snapshotScan.plan().splits());
                         }
                         splits.addAll(
-                                ChainTableUtils.buildChainSplits(
-                                        partitionPairs.getKey(),
-                                        snapshotSubSplits,
-                                        deltaSubSplits,
-                                        options.scanFallbackSnapshotBranch(),
-                                        options.scanFallbackDeltaBranch(),
-                                        keyComparator,
-                                        targetSplitSize,
-                                        openFileCost));
+                                auth.reapply(
+                                        ChainTableUtils.buildChainSplits(
+                                                partitionPairs.getKey(),
+                                                snapshotSubSplits,
+                                                deltaSubSplits,
+                                                options.scanFallbackSnapshotBranch(),
+                                                options.scanFallbackDeltaBranch(),
+                                                keyComparator,
+                                                targetSplitSize,
+                                                openFileCost)));
                     }
                 }
             }
@@ -518,10 +521,12 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                 return snapshotPartitions;
             }
 
-            for (Split split : mainScan.plan().splits()) {
-                DataSplit dataSplit = (DataSplit) split;
-                splits.add(ChainSplit.from(dataSplit, options.scanFallbackSnapshotBranch()));
+            ChainAuth auth = new ChainAuth();
+            List<Split> chainSplits = new ArrayList<>();
+            for (DataSplit dataSplit : auth.unwrap(mainScan.plan().splits())) {
+                chainSplits.add(ChainSplit.from(dataSplit, options.scanFallbackSnapshotBranch()));
             }
+            splits.addAll(auth.reapply(chainSplits));
 
             snapshotPartitions.addAll(
                     newChainPartitionListingScan(true, getMainPartitionPredicate())
@@ -531,9 +536,10 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
         private DataTableScan newFilteredScan(boolean snapshot) {
             DataTableScan scan =
-                    snapshot
-                            ? chainGroupReadTable.newSnapshotScan(scanCreator)
-                            : chainGroupReadTable.newDeltaScan(scanCreator);
+                    (snapshot
+                                    ? chainGroupReadTable.newSnapshotScan(scanCreator)
+                                    : chainGroupReadTable.newDeltaScan(scanCreator))
+                            .withoutAuthPartitionPushdown();
             if (dataPredicate != null) {
                 scan.withFilter(dataPredicate);
             }
@@ -603,11 +609,48 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
-            if (split instanceof ChainSplit || split instanceof DataSplit) {
+            // fallbackRead unwraps and applies the rules itself, so it gets the wrapper untouched.
+            Split inner = QueryAuthSplit.unwrap(split);
+            if (inner instanceof ChainSplit || inner instanceof DataSplit) {
                 return fallbackRead.createReader(split);
             }
             throw new IllegalArgumentException(
-                    "Unsupported split type for chain table read: " + split.getClass().getName());
+                    "Unsupported split type for chain table read: " + inner.getClass().getName());
+        }
+    }
+
+    /**
+     * Carries the branch scans' authorization across chain split building; dropping it would turn
+     * the failed cast into unrestricted reads. Both branches authorize the same logical table, so
+     * one result covers the splits built from either side.
+     */
+    private static final class ChainAuth {
+
+        @Nullable private TableQueryAuthResult authResult;
+
+        List<DataSplit> unwrap(List<Split> splits) {
+            List<DataSplit> dataSplits = new ArrayList<>(splits.size());
+            for (Split split : splits) {
+                if (split instanceof QueryAuthSplit) {
+                    TableQueryAuthResult next = ((QueryAuthSplit) split).authResult();
+                    // Enforced rather than assumed: a divergence would apply one branch's rules to
+                    // the other's rows.
+                    checkArgument(
+                            authResult == null || authResult.equals(next),
+                            "Branch scans of the same chain table returned different authorization rules.");
+                    authResult = next;
+                }
+                dataSplits.add((DataSplit) QueryAuthSplit.unwrap(split));
+            }
+            return dataSplits;
+        }
+
+        List<Split> reapply(List<? extends Split> splits) {
+            List<Split> result = new ArrayList<>(splits.size());
+            for (Split split : splits) {
+                result.add(authResult == null ? split : new QueryAuthSplit(split, authResult));
+            }
+            return result;
         }
     }
 }

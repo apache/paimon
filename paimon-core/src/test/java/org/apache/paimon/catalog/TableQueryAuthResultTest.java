@@ -24,7 +24,9 @@ import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LowerTransform;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -161,5 +163,88 @@ public class TableQueryAuthResultTest {
         // a blank entry is now rejected rather than ignored, see testInvalidRowFilterFailsClosed
         Map<String, String> masking = Collections.singletonMap("display", maskJson());
         assertThat(new TableQueryAuthResult(null, masking).hasRules()).isTrue();
+    }
+
+    /**
+     * Chain table planning aborts a query whose branches disagree, so a difference that is not a
+     * difference in the rules would fail a query it should have served.
+     */
+    @Test
+    public void testEqualsComparesRulesNotTheTransportShapeTheyArriveIn() {
+        Map<String, String> masking = Collections.singletonMap("display", maskJson());
+
+        // the same conjuncts listed in the other order
+        assertThat(
+                        new TableQueryAuthResult(
+                                Arrays.asList(filterJson(), otherFilterJson()), masking))
+                .isEqualTo(
+                        new TableQueryAuthResult(
+                                Arrays.asList(otherFilterJson(), filterJson()), masking))
+                .hasSameHashCodeAs(
+                        new TableQueryAuthResult(
+                                Arrays.asList(otherFilterJson(), filterJson()), masking));
+
+        // an absent rule and an empty one
+        assertThat(new TableQueryAuthResult(Collections.singletonList(filterJson()), null))
+                .isEqualTo(
+                        new TableQueryAuthResult(
+                                Collections.singletonList(filterJson()), Collections.emptyMap()));
+        assertThat(new TableQueryAuthResult(null, masking))
+                .isEqualTo(new TableQueryAuthResult(Collections.emptyList(), masking));
+
+        assertThat(new TableQueryAuthResult(null, masking))
+                .isEqualTo(
+                        new TableQueryAuthResult(
+                                null, Collections.singletonMap("display", maskJson())));
+
+        // JSON spaced out by a different serializer
+        assertThat(new TableQueryAuthResult(Collections.singletonList(filterJson()), masking))
+                .isEqualTo(
+                        new TableQueryAuthResult(
+                                Collections.singletonList(spacedOut(filterJson())),
+                                Collections.singletonMap("display", spacedOut(maskJson()))));
+
+        // same shape, same column, still two different masks
+        assertThat(new TableQueryAuthResult(null, Collections.singletonMap("display", upperJson())))
+                .isNotEqualTo(
+                        new TableQueryAuthResult(
+                                null, Collections.singletonMap("display", lowerJson())));
+
+        // rules that really do differ
+        assertThat(new TableQueryAuthResult(Collections.singletonList(filterJson()), null))
+                .isNotEqualTo(
+                        new TableQueryAuthResult(
+                                Collections.singletonList(otherFilterJson()), null))
+                .isNotEqualTo(new TableQueryAuthResult(null, null));
+        assertThat(new TableQueryAuthResult(null, masking))
+                .isNotEqualTo(new TableQueryAuthResult(null, null))
+                .isNotEqualTo(
+                        new TableQueryAuthResult(
+                                null, Collections.singletonMap("other", maskJson())));
+    }
+
+    /** The same JSON, with another serializer's whitespace. */
+    private static String spacedOut(String json) {
+        return json.replace(",", ", ").replace(":", ": ");
+    }
+
+    private static String upperJson() {
+        return JsonSerdeUtil.toFlatJson(
+                new UpperTransform(
+                        Collections.singletonList(new FieldRef(1, "extra", DataTypes.STRING()))));
+    }
+
+    private static String lowerJson() {
+        return JsonSerdeUtil.toFlatJson(
+                new LowerTransform(
+                        Collections.singletonList(new FieldRef(1, "extra", DataTypes.STRING()))));
+    }
+
+    private static String otherFilterJson() {
+        return JsonSerdeUtil.toFlatJson(
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(1, "extra", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("y"))));
     }
 }
