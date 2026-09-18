@@ -31,6 +31,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.LazyField;
 
 import java.io.IOException;
@@ -61,6 +62,8 @@ import java.util.concurrent.ExecutorService;
  * <p>This approach significantly reduces memory pressure during index reads.
  */
 public class BTreeGlobalIndexer implements SortedGlobalIndexer {
+
+    private static final double BLOOM_FILTER_FPP = 0.05;
 
     private final KeySerializer keySerializer;
     private final GlobalIndexKeyExtractor keyExtractor;
@@ -96,10 +99,15 @@ public class BTreeGlobalIndexer implements SortedGlobalIndexer {
                 new CompressOptions(
                         options.get(BTreeIndexOptions.BTREE_INDEX_COMPRESSION),
                         options.get(BTreeIndexOptions.BTREE_INDEX_COMPRESSION_LEVEL));
+        BloomFilter.Builder bloomFilterBuilder =
+                options.get(BTreeIndexOptions.BTREE_INDEX_BLOOM_FILTER_ENABLED)
+                        ? BloomFilter.dynamicBuilder(BLOOM_FILTER_FPP)
+                        : null;
         return new BTreeIndexWriter(
                 fileWriter,
                 keySerializer,
                 (int) blockSize,
+                bloomFilterBuilder,
                 BlockCompressionFactory.create(compressOptions));
     }
 

@@ -39,6 +39,11 @@ from pypaimon.globalindex.block_compression import (
 from pypaimon.globalindex.btree.block_handle import BlockHandle
 from pypaimon.globalindex.btree.block_entry import BlockEntry
 from pypaimon.globalindex.btree.block_reader import BlockReader, BlockIterator
+from pypaimon.globalindex.btree.bloom_filter import (
+    BloomFilter,
+    murmur_hash_bytes,
+)
+from pypaimon.globalindex.btree.btree_file_footer import BloomFilterHandle
 from pypaimon.globalindex.memory_slice_input import MemorySliceInput
 
 
@@ -123,6 +128,7 @@ class SstFileReader:
         input_stream: BinaryIO,
         comparator: Callable[[bytes, bytes], int],
         index_block_handle: BlockHandle,
+        bloom_filter_handle: Optional[BloomFilterHandle] = None,
         use_pread: bool = False,
         io_lock: Optional[threading.Lock] = None,
     ):
@@ -130,6 +136,9 @@ class SstFileReader:
         self.input_stream = input_stream
         self._supports_pread = use_pread
         self._lock = io_lock or threading.Lock()
+        self._bloom_filter_handle = bloom_filter_handle
+        self._bloom_filter: Optional[BloomFilter] = None
+        self._bloom_filter_lock = threading.Lock()
         self.index_block = self._read_block(index_block_handle)
 
     def _read_from(self, offset: int, length: int) -> bytes:
@@ -172,6 +181,39 @@ class SstFileReader:
         return SstFileIterator(
             read_block,
             self.index_block.iterator())
+
+    def lookup(self, key: bytes) -> Optional[bytes]:
+        """Return the value for an exact key, or ``None`` when absent."""
+        if (
+            self._bloom_filter_handle is not None
+            and not self._test_bloom_filter(murmur_hash_bytes(key))
+        ):
+            return None
+
+        index_iterator = self.index_block.iterator()
+        index_iterator.seek_to(key)
+        if not index_iterator.has_next():
+            return None
+
+        index_entry = next(index_iterator)
+        handle = SstFileIterator._parse_block_handle(index_entry.value)
+        data_iterator = self._read_block(handle).iterator()
+        if not data_iterator.seek_to(key):
+            return None
+        return next(data_iterator).value
+
+    def _test_bloom_filter(self, hash_value: int) -> bool:
+        bloom_filter = self._bloom_filter
+        if bloom_filter is None:
+            with self._bloom_filter_lock:
+                bloom_filter = self._bloom_filter
+                if bloom_filter is None:
+                    handle = self._bloom_filter_handle
+                    data = self._read_from(handle.offset, handle.size)
+                    bloom_filter = BloomFilter(
+                        handle.expected_entries, handle.size, data)
+                    self._bloom_filter = bloom_filter
+        return bloom_filter.test_hash(hash_value)
 
     def close(self) -> None:
         """Close the reader and release resources."""
