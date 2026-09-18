@@ -143,8 +143,11 @@ Ray execution fails because NaN cannot be ranked consistently across tasks.
 
 The driver fixes one read snapshot and plans the query. Workers search individual
 index shards and, when required by the table's search mode, scan unindexed data.
-They return candidate row IDs and scores. The driver retains the local search
-rules for global candidate selection, refinement, filtering, and result lookup.
+They return candidate row IDs and scores. For single-vector queries with
+refinement enabled, the driver first selects the global candidate set, then
+workers read and score those candidate vectors using the index's persisted
+metric. The driver merges their results and retains the local rules for
+filtering and final row lookup.
 In particular, `pre_filter` filters candidates before ranking; `where()` filters
 the selected rows and can return fewer than the requested number of results.
 
@@ -158,8 +161,9 @@ All workers must be able to access the table's storage. Local filesystem paths
 are suitable for a local Ray cluster; multiple nodes require shared storage.
 Each index task searches one shard, while its native index I/O settings still
 apply. Raw-scan parallelism is limited by the number of planned read splits,
-controlled by the table's `source.split.target-size` option. Refinement and final
-row lookup run on the driver. Candidate traffic grows
+controlled by the table's `source.split.target-size` option. Single-vector
+refinement also uses planned read splits; workers return scores for merging.
+Final row lookup runs on the driver. Candidate traffic grows
 with the number of index shards and the configured refinement budget, so Ray
 execution is most useful when shard search or raw scanning outweighs scheduling
 and transfer costs. Small queries can be faster locally.

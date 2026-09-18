@@ -537,7 +537,7 @@ class VectorQuery(_PreFilterQuery):
 
         Ray execution supports data-evolution tables. ``concurrency`` bounds
         in-flight tasks (defaults to 4); ``ray_remote_args`` configures their
-        resources and retries. Refinement and result lookup run on the driver.
+        resources and retries. Result lookup runs on the driver.
         """
         if execution == "local":
             if concurrency is not None or ray_remote_args is not None:
