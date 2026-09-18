@@ -35,6 +35,7 @@ from pypaimon.globalindex.build_plan import (
     split_one_by_contiguous_row_range as _split_one_by_contiguous_row_range,
 )
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
+from pypaimon.globalindex.btree.btree_file_footer import BTreeFileFooter
 from pypaimon.globalindex.key_serializer import create_serializer
 from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
     FULL_TEXT_IDENTIFIER,
@@ -235,7 +236,10 @@ class GlobalIndexBuildTest(
 
         added = table.create_global_index(
             'id',
-            options={'sorted-index.records-per-range': '2'},
+            options={
+                'sorted-index.records-per-range': '2',
+                'btree-index.bloom-filter.enabled': 'true',
+            },
         )
 
         self.assertEqual(2, added)
@@ -247,6 +251,19 @@ class GlobalIndexBuildTest(
         self.assertEqual({'btree'}, {e.index_file.index_type for e in entries})
         self.assertEqual({0}, {e.index_file.global_index_meta.row_range_start for e in entries})
         self.assertEqual({3}, {e.index_file.global_index_meta.row_range_end for e in entries})
+
+        index_path_factory = table.path_factory().global_index_path_factory()
+        for entry in entries:
+            index_file = entry.index_file
+            index_path = index_file.external_path or index_path_factory.to_path(
+                index_file.file_name)
+            footer_bytes = table.file_io.read_file_range(
+                index_path,
+                index_file.file_size - BTreeFileFooter.ENCODED_LENGTH,
+                BTreeFileFooter.ENCODED_LENGTH,
+            )
+            footer = BTreeFileFooter.read_footer(footer_bytes)
+            self.assertIsNotNone(footer.bloom_filter_handle)
 
         read_builder = table.new_read_builder()
         predicate = read_builder.new_predicate_builder().equal('id', 2)

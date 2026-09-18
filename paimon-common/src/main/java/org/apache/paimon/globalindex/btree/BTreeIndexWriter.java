@@ -30,6 +30,7 @@ import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.sst.BlockHandle;
 import org.apache.paimon.sst.BloomFilterHandle;
 import org.apache.paimon.sst.SstFileWriter;
+import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -90,12 +91,21 @@ public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter {
             int blockSize,
             BlockCompressionFactory compressionFactory)
             throws IOException {
+        this(indexFileWriter, keySerializer, blockSize, null, compressionFactory);
+    }
+
+    public BTreeIndexWriter(
+            GlobalIndexFileWriter indexFileWriter,
+            KeySerializer keySerializer,
+            int blockSize,
+            @Nullable BloomFilter.Builder bloomFilterBuilder,
+            BlockCompressionFactory compressionFactory)
+            throws IOException {
         this.fileName = indexFileWriter.newFileName(BTreeGlobalIndexerFactory.IDENTIFIER);
         this.out = indexFileWriter.newOutputStream(this.fileName);
         this.keySerializer = keySerializer;
         this.comparator = keySerializer.createComparator();
-        // todo: we may enable bf to accelerate equal and in predicate in the future
-        this.writer = new SstFileWriter(out, blockSize, null, compressionFactory);
+        this.writer = new SstFileWriter(out, blockSize, bloomFilterBuilder, compressionFactory);
     }
 
     @Override
@@ -150,8 +160,7 @@ public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter {
             // write null bitmap
             BlockHandle nullBitmapHandle = writeNullBitmap();
 
-            // write bloom filter (currently is always null, but we could add it for equal
-            // and in condition.)
+            // write bloom filter
             BloomFilterHandle bloomFilterHandle = writer.writeBloomFilter();
 
             // write index block

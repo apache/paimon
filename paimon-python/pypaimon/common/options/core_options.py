@@ -1018,6 +1018,15 @@ class CoreOptions:
         .with_description("The block size to use for BTree global indexes.")
     )
 
+    BTREE_INDEX_BLOOM_FILTER_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("btree-index.bloom-filter.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether to enable the Bloom filter for BTree index point lookups."
+        )
+    )
+
     SORTED_INDEX_RECORDS_PER_RANGE: ConfigOption[int] = (
         ConfigOptions.key("sorted-index.records-per-range")
         .long_type()
@@ -1826,6 +1835,9 @@ class CoreOptions:
 
     def btree_index_block_size(self) -> int:
         return self.options.get(CoreOptions.BTREE_INDEX_BLOCK_SIZE).get_bytes()
+
+    def btree_index_bloom_filter_enabled(self) -> bool:
+        return self.options.get(CoreOptions.BTREE_INDEX_BLOOM_FILTER_ENABLED)
 
     def sorted_index_records_per_range(self) -> int:
         if self.options.contains(CoreOptions.SORTED_INDEX_RECORDS_PER_RANGE):

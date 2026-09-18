@@ -43,6 +43,13 @@ public class BTreeIndexOptions {
                     .defaultValue(MemorySize.ofKibiBytes(64))
                     .withDescription("The block size to use for BTreeIndex");
 
+    public static final ConfigOption<Boolean> BTREE_INDEX_BLOOM_FILTER_ENABLED =
+            ConfigOptions.key("btree-index.bloom-filter.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable the Bloom filter for BTree index point lookups.");
+
     public static final ConfigOption<MemorySize> BTREE_INDEX_CACHE_SIZE =
             ConfigOptions.key("btree-index.cache-size")
                     .memoryType()

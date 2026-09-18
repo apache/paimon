@@ -275,6 +275,8 @@ class GlobalIndexBuilder:
                 index_path,
                 key_serializer,
                 block_size=self._core_options.btree_index_block_size(),
+                bloom_filter_enabled=(
+                    self._core_options.btree_index_bloom_filter_enabled()),
             )
         if self._index_type == BITMAP_IDENTIFIER:
             return BitmapIndexWriter(
