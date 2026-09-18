@@ -120,6 +120,8 @@ public class DataEvolutionDeleteSink implements Serializable {
                         .setParallelism(sinkParallelism);
 
         String commitUser = CoreOptions.createCommitUser(table.coreOptions().toConfiguration());
+        Snapshot baseSnapshot = table.snapshotManager().snapshot(baseSnapshotId);
+        String baseSnapshotUuid = baseSnapshot != null ? baseSnapshot.uuid() : null;
         CommitterOperatorFactory<Committable, ManifestCommittable> committerOperator =
                 new CommitterOperatorFactory<>(
                         false,
@@ -130,7 +132,8 @@ public class DataEvolutionDeleteSink implements Serializable {
                                         table,
                                         table.newCommit(context.commitUser())
                                                 .withOperation(Snapshot.Operation.DELETE)
-                                                .rowIdCheckConflict(baseSnapshotId),
+                                                .rowIdCheckConflict(
+                                                        baseSnapshotId, baseSnapshotUuid),
                                         context),
                         new NoopCommittableStateManager());
 
