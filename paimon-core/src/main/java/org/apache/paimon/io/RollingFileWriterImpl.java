@@ -49,6 +49,7 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
     private long recordCount = 0;
     private long currentFileRecordCount = 0;
     private boolean closed = false;
+    private boolean aborted = false;
 
     public RollingFileWriterImpl(
             Supplier<? extends SingleFileWriter<T, R>> writerFactory,
@@ -177,8 +178,12 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
 
     @Override
     public void abort() {
-        if (currentWriter != null) {
-            currentWriter.abort();
+        SingleFileWriter<T, R> writer = currentWriter;
+        currentWriter = null;
+        aborted = true;
+
+        if (writer != null) {
+            writer.abort();
         }
         for (FileWriterAbortExecutor abortExecutor : closedWriters) {
             abortExecutor.abort();
@@ -201,7 +206,7 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
 
     @Override
     public void close() throws IOException {
-        if (closed) {
+        if (closed || aborted) {
             return;
         }
 
