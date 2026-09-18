@@ -1014,7 +1014,14 @@ def _iter_arrow_batch_scores(vectors, queries, metric):
 
     for start in range(0, len(vectors), block_size):
         block = vectors.slice(start, block_size)
-        matrix = _arrow_score_matrix(block, dimension) if fast_queries else None
+        positions = None
+        score_vectors = block
+        if fast_queries and block.null_count:
+            # Compact only this block; null rows must not disable vectorized
+            # scoring for the remaining rows or change their result positions.
+            positions = [i for i, valid in enumerate(block.is_valid().to_pylist()) if valid]
+            score_vectors = block.take(np.asarray(positions, dtype=np.int64))
+        matrix = _arrow_score_matrix(score_vectors, dimension) if fast_queries else None
         if matrix is not None and not np.isfinite(matrix).all():
             matrix = None
         if matrix is None:
@@ -1030,6 +1037,11 @@ def _iter_arrow_batch_scores(vectors, queries, metric):
             working = matrix if query_index == last_query else matrix.copy()
             scores = _compute_scores(query, working, metric)
             assert scores is not None
+            if positions is not None:
+                restored = [None] * len(block)
+                for position, score in zip(positions, scores):
+                    restored[position] = score
+                scores = restored
             yield start, query_index, scores
 
 
