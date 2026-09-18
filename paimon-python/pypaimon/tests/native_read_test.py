@@ -54,16 +54,19 @@ def _blob_table_read(limit=None):
     return read
 
 
+def _id_batch(values):
+    return pa.record_batch(
+        [pa.array(values, type=pa.int32())], names=['id'])
+
+
 def test_native_read_consumes_retained_rust_splits_and_enforces_limit():
     read = _table_read(limit=2)
     first, second = _Split(), _Split()
     first._native_split = object()
     second._native_split = object()
-    batches = [pa.record_batch({'id': [1, 2, 3]})]
+    batches = [_id_batch([1, 2, 3])]
 
     with patch(
-            'pypaimon.read.native_plan.native_blob_parallelism_available',
-            return_value=True), patch(
             'pypaimon.read.native_plan.native_read',
             return_value=batches) as native:
         result = read.to_arrow([first, second])
@@ -105,7 +108,7 @@ def test_native_read_uses_effective_parallelism_from_table_option():
         with worker_names_lock:
             worker_names.add(threading.current_thread().name)
         barrier.wait(timeout=5)
-        return [pa.record_batch({'id': rust_splits})]
+        return [_id_batch(rust_splits)]
 
     with patch('pypaimon.read.native_plan.native_read',
                side_effect=read_group) as native:
@@ -128,7 +131,7 @@ def test_native_read_runtime_parallelism_overrides_table_option():
     with patch(
             'pypaimon.read.native_plan.native_read',
             side_effect=lambda table, group, **kwargs: [
-                pa.record_batch({'id': group})]) as native:
+                _id_batch(group)]) as native:
         result = read.to_arrow(splits, parallelism=2)
 
     assert result.num_rows == 4
@@ -142,11 +145,9 @@ def test_native_read_caps_blob_parallelism_across_split_readers():
         split._native_split = index
 
     with patch(
-            'pypaimon.read.native_plan.native_blob_parallelism_available',
-            return_value=True), patch(
             'pypaimon.read.native_plan.native_read',
             side_effect=lambda table, group, **kwargs: [
-                pa.record_batch({'id': group})]) as native:
+                _id_batch(group)]) as native:
         result = read.to_arrow(
             splits, parallelism=16, blob_parallelism=16)
 
@@ -166,7 +167,7 @@ def test_parallel_native_read_shares_limit_across_readers():
     with patch(
             'pypaimon.read.native_plan.native_read',
             side_effect=lambda table, group, **kwargs: [
-                pa.record_batch({'id': group})]):
+                _id_batch(group)]):
         result = read.to_arrow(splits)
 
     assert result.num_rows == 3
@@ -239,25 +240,15 @@ def test_native_read_falls_back_for_unsupported_dedicated_file():
     native.assert_not_called()
 
 
-def test_native_read_blob_file_requires_parallelism_capability():
+def test_native_read_supports_blob_file_and_forwards_parallelism():
     read = _table_read()
     schema = pa.schema([('id', pa.int32())])
     split = _Split('picture.blob')
     split._native_split = object()
 
     with patch(
-            'pypaimon.read.native_plan.native_blob_parallelism_available',
-            return_value=False), patch(
-            'pypaimon.read.native_plan.native_read') as native:
-        assert read._try_native_batches(
-            [split], schema, blob_parallelism=1) is None
-    native.assert_not_called()
-
-    with patch(
-            'pypaimon.read.native_plan.native_blob_parallelism_available',
-            return_value=True), patch(
             'pypaimon.read.native_plan.native_read',
-            return_value=[pa.record_batch({'id': [1]})]) as native:
+            return_value=[_id_batch([1])]) as native:
         batches = list(read._try_native_batches(
             [split], schema, blob_parallelism=3))
 
@@ -265,16 +256,14 @@ def test_native_read_blob_file_requires_parallelism_capability():
     assert native.call_args.kwargs['blob_parallelism'] == 3
 
 
-def test_native_read_normalizes_serial_blob_schema_for_batch_reader():
+def test_native_read_preserves_large_binary_blob_schema_for_batch_reader():
     read = _blob_table_read()
     split = _Split('payload.blob')
     split._native_split = object()
     native_batch = pa.record_batch(
-        [pa.array([b'a'], type=pa.binary())], names=['payload'])
+        [pa.array([b'a'], type=pa.large_binary())], names=['payload'])
 
     with patch(
-            'pypaimon.read.native_plan.native_blob_parallelism_available',
-            return_value=True), patch(
             'pypaimon.read.native_plan.native_read',
             return_value=[native_batch]):
         result = read.to_arrow_batch_reader([split]).read_all()
@@ -283,18 +272,27 @@ def test_native_read_normalizes_serial_blob_schema_for_batch_reader():
     assert result.to_pydict() == {'payload': [b'a']}
 
 
-def test_native_read_normalizes_parallel_blob_schema():
+def test_native_read_does_not_cast_legacy_binary_blob_schema():
+    batch = pa.record_batch(
+        [pa.array([b'a'], type=pa.binary())], names=['payload'])
+
+    with pytest.raises(
+            TypeError,
+            match="Batch field 'payload' has type binary, expected large_binary"):
+        TableRead._try_to_pad_batch_by_schema(
+            batch, pa.schema([('payload', pa.large_binary())]))
+
+
+def test_native_read_preserves_parallel_large_binary_blob_schema():
     read = _blob_table_read()
     splits = [_Split('payload.blob') for _ in range(2)]
     for index, split in enumerate(splits):
         split._native_split = index
 
     with patch(
-            'pypaimon.read.native_plan.native_blob_parallelism_available',
-            return_value=True), patch(
             'pypaimon.read.native_plan.native_read',
             side_effect=lambda table, group, **kwargs: [pa.record_batch(
-                [pa.array([bytes(group)], type=pa.binary())],
+                [pa.array([bytes(group)], type=pa.large_binary())],
                 names=['payload'])]):
         result = read.to_arrow(splits, parallelism=2)
 
@@ -309,8 +307,6 @@ def test_native_read_defers_to_python_for_pruning_blob_limit():
     split.merged_row_count = Mock(return_value=2)
 
     with patch(
-            'pypaimon.read.native_plan.native_blob_parallelism_available',
-            return_value=True), patch(
             'pypaimon.read.native_plan.native_read') as native:
         assert read._try_native_batches(
             [split], pa.schema([('payload', pa.large_binary())]),

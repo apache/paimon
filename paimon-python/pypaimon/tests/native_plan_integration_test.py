@@ -26,9 +26,8 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.read.native_plan import (
-    native_blob_parallelism_available, native_family_search_modes_available,
-    native_method_available,
-    native_read, native_reader_available,
+    native_family_search_modes_available, native_method_available, native_read,
+    native_reader_available,
 )
 from pypaimon.table.row.blob import BlobDescriptor, BlobRef
 from pypaimon.utils.range import Range
@@ -440,8 +439,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         ])
         self.assertTrue(builder.explain().native_planned)
 
-    @unittest.skipUnless(native_blob_parallelism_available(),
-                         "pypaimon-rust native BLOB parallelism API not installed")
+    @unittest.skipUnless(native_reader_available(),
+                         "pypaimon-rust native reader API not installed")
     def test_native_read_data_evolution_blob_parallelism(self):
         schema = pa.schema([
             ('id', pa.int32()),
@@ -486,8 +485,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(batch_table.to_pydict(), expected)
         self.assertTrue(builder.explain().native_planned)
 
-    @unittest.skipUnless(native_blob_parallelism_available(),
-                         "pypaimon-rust native BLOB parallelism API not installed")
+    @unittest.skipUnless(native_reader_available(),
+                         "pypaimon-rust native reader API not installed")
     def test_native_read_pruning_limit_defers_blob_payload_io(self):
         schema = pa.schema([
             ('id', pa.int32()),

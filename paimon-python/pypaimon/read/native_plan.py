@@ -56,11 +56,6 @@ def native_reader_available() -> bool:
             and native_method_available('TableRead', 'read'))
 
 
-def native_blob_parallelism_available() -> bool:
-    """Whether the native read builder accepts a per-read BLOB I/O limit."""
-    return native_method_available('ReadBuilder', 'with_blob_parallelism')
-
-
 def native_family_search_modes_available() -> bool:
     """Whether Rust supports family-specific global-index search modes."""
     return native_version_at_least(0, 4)
@@ -331,11 +326,7 @@ def native_read(table, splits, predicate: Optional[Predicate] = None,
     builder = _configure_native_read_builder(
         _native_read_builder(table), predicate, limit, projection)
     if blob_parallelism is not None:
-        with_blob_parallelism = getattr(builder, 'with_blob_parallelism', None)
-        if not callable(with_blob_parallelism):
-            raise RuntimeError(
-                "Installed pypaimon-rust does not support blob_parallelism")
-        builder = with_blob_parallelism(blob_parallelism)
+        builder = builder.with_blob_parallelism(blob_parallelism)
     reader = builder.new_read()
     read_arrow = getattr(reader, 'read_arrow', None)
     return (read_arrow(splits) if callable(read_arrow)

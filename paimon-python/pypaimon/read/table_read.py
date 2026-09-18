@@ -263,7 +263,9 @@ class TableRead:
             if field.name in batch.schema.names:
                 col = batch.column(field.name)
                 if col.type != field.type:
-                    col = col.cast(field.type)
+                    raise TypeError(
+                        "Batch field '%s' has type %s, expected %s" % (
+                            field.name, col.type, field.type))
             else:
                 col = pyarrow.nulls(num_rows, type=field.type)
             columns.append(col)
@@ -365,33 +367,27 @@ class TableRead:
         if self._deferred_blob_limit_may_prune(splits):
             return None
         try:
-            from pypaimon.read.native_plan import (
-                native_blob_parallelism_available, native_read)
+            from pypaimon.read.native_plan import native_read
         except Exception as e:
             logger.warning(
                 "Native read failed, falling back to the Python reader: %s", e)
-            return None
-        blob_parallelism_available = native_blob_parallelism_available()
-        if ((blob_parallelism is not None and blob_parallelism > 1)
-                or self._deferred_blob_fields) and not blob_parallelism_available:
             return None
         rust_splits = []
         for split in splits:
             if isinstance(split, QueryAuthSplit):
                 return None
-            if not self._native_split_files_supported(
-                    split, blob_parallelism_available):
+            if not self._native_split_files_supported(split):
                 return None
             rust_split = getattr(split, '_native_split', None)
             if rust_split is None:
                 return None
             rust_splits.append(rust_split)
-        native_bp = blob_parallelism if blob_parallelism_available else None
         if (parallelism is not None
                 and self._should_run_parallel(splits, parallelism)):
             try:
                 return self._native_batches_parallel(
-                    native_read, rust_splits, schema, parallelism, native_bp)
+                    native_read, rust_splits, schema, parallelism,
+                    blob_parallelism)
             except _NativeReadSetupError as e:
                 logger.warning(
                     "Native read failed, falling back to the Python reader: %s", e)
@@ -402,8 +398,8 @@ class TableRead:
                 'limit': self.limit,
                 'projection': [field.name for field in self.read_type],
             }
-            if native_bp is not None:
-                read_kwargs['blob_parallelism'] = native_bp
+            if blob_parallelism is not None:
+                read_kwargs['blob_parallelism'] = blob_parallelism
             batches = native_read(self.table, rust_splits, **read_kwargs)
         except Exception as e:
             logger.warning(
@@ -477,13 +473,12 @@ class TableRead:
         return result
 
     @staticmethod
-    def _native_split_files_supported(split, blob_parallelism_available=False):
+    def _native_split_files_supported(split):
         for data_file in split.files:
             file_name = data_file.file_name.lower()
             if ('.vector.' not in file_name
                     and not file_name.endswith(_NATIVE_READ_FILE_SUFFIXES)
-                    and not (blob_parallelism_available
-                             and file_name.endswith(_NATIVE_BLOB_FILE_SUFFIX))):
+                    and not file_name.endswith(_NATIVE_BLOB_FILE_SUFFIX)):
                 return False
         return True
 
