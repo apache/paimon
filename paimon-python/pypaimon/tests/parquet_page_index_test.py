@@ -30,7 +30,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.read.reader import format_pyarrow_reader as reader_module
 from pypaimon.read.reader import parquet_page_index_reader as page_module
-from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
 from pypaimon.tests.parquet_metadata_cache_test import _CountingLocalFileSystem
 
 
@@ -113,7 +113,7 @@ def test_ranges_projection_missing_fields_and_fallback_in_same_file(fixture):
     assert result.column('added').null_count == len(result)
 
 
-@pytest.mark.parametrize('mode', ['full', 'no_index', 'nested', 'budget', 'cache', 'scattered'])
+@pytest.mark.parametrize('mode', ['full', 'no_index', 'budget', 'cache', 'scattered'])
 def test_unsupported_or_expensive_reads_fall_back(fixture, mode):
     path, table, file_io, counter = fixture
     kwargs = {}
@@ -123,9 +123,6 @@ def test_unsupported_or_expensive_reads_fall_back(fixture, mode):
         kwargs['row_ranges'] = [(5, 6), (4500, 4540)]
     elif mode == 'no_index':
         pq.write_table(table, path)
-    elif mode == 'nested':
-        pq.write_table(table.append_column('nested', pa.array([[i] for i in range(N)])),
-                       path, write_page_index=True)
     elif mode == 'cache':
         kwargs['row_group_cache'] = reader_module._DecodedRowGroupCache(4 * 1024 * 1024)
     with patch.object(page_module, '_MAX_PAGE_BYTES', 1 if mode == 'budget' else 32 * 1024 * 1024), \
@@ -296,12 +293,15 @@ def test_page_index_switch_bypasses_metadata_processing_when_disabled(fixture, v
     assert actual.equals(_expected(fixture[1], [(4500, 4540)]))
 
 
-def test_table_copy_can_enable_and_disable_page_index_reads(tmp_path):
+@pytest.mark.parametrize('nested', [False, True])
+def test_table_copy_can_enable_and_disable_page_index_reads(tmp_path, nested):
     from pypaimon import CatalogFactory, Schema
 
     catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
     catalog.create_database('default', False)
     data = pa.table({'id': range(N)})
+    if nested:
+        data = data.append_column('record', pa.array([{'value': i} for i in range(N)]))
     catalog.create_table('default.indexed', Schema.from_pyarrow_schema(
         data.schema, options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'}), False)
     table = catalog.get_table('default.indexed')
@@ -334,3 +334,118 @@ def test_table_copy_can_enable_and_disable_page_index_reads(tmp_path):
         assert actual.to_pydict() == {'id': list(range(4500, 4541)), '_ROW_ID': list(range(4500, 4541))}
     assert not table.options.parquet_column_index_enabled()
     assert not catalog.get_table('default.indexed').options.parquet_column_index_enabled()
+
+
+@pytest.fixture
+def nested_fixture(fixture):
+    path, original, file_io, counter = fixture
+    count = len(original)
+    child_type = pa.struct([('number', pa.int64()), ('text', pa.string())])
+    records = [None if i % 13 == 0 else {
+        'number': None if i % 11 == 0 else i,
+        'text': None if i % 7 == 0 else hashlib.sha256(str(i).encode()).hexdigest()
+    } for i in range(count)]
+    table = pa.table({
+        'record': pa.array(records, child_type),
+        'items': pa.array([None if i % 9 == 0 else
+                           [records[i]] * (4097 if i == N // 2 + 1 else i % 5)
+                           for i in range(count)], pa.list_(child_type)),
+        'mapping': pa.array([None if i % 9 == 0 else
+                             [('key-%d' % j, None if j == 1 else list(range(j)))
+                              for j in range(i % 4)] for i in range(count)],
+                            pa.map_(pa.string(), pa.list_(pa.int32()))),
+        'matrix': pa.array([None if i % 9 == 0 else
+                            [None, [], [None, i]] * (i % 3) for i in range(count)],
+                           pa.list_(pa.list_(pa.int64()))),
+        # Place flat columns after multiple nested physical leaves.
+        'id': original['id'],
+        'payload': original['payload'],
+    })
+    return path, table, file_io, counter
+
+
+@pytest.mark.parametrize('version', ['1.0', '2.0'])
+@pytest.mark.parametrize('dictionary', [False, True])
+@pytest.mark.parametrize('projection', ['flat', 'nested'])
+def test_nested_page_reads_preserve_structure_and_skip_bytes(
+        nested_fixture, version, dictionary, projection):
+    path, table, _, _ = nested_fixture
+    pq.write_table(table, path, write_page_index=True, data_page_version=version,
+                   use_dictionary=dictionary, dictionary_pagesize_limit=1024,
+                   data_page_size=2048, write_batch_size=64, row_group_size=N // 2)
+    names = ['payload', 'id'] if projection == 'flat' else list(reversed(table.column_names))
+    fields = PyarrowFieldParser.to_paimon_schema(table.select(names).schema)
+    # Cross a row-group boundary, including null parents, empty lists/maps,
+    # null elements, and multiple leaves with different page boundaries.
+    runs = [(N // 2 - 17, N // 2 + 83)]
+    baseline, baseline_reads = _read(nested_fixture, baseline=True, fields=fields, row_ranges=runs)
+    reader_module._reset_file_format_dataset_cache()
+    for _ in range(2):
+        with patch.object(page_module.ParquetPageIndexReader, '_column_payload',
+                          autospec=True, side_effect=page_module.ParquetPageIndexReader._column_payload
+                          ) as read_pages:
+            actual, reads = _read(nested_fixture, fields=fields, row_ranges=runs)
+        assert read_pages.called
+        assert actual.equals(baseline)
+        assert actual.equals(_expected(table.select(names), runs))
+        assert sum(size for _, size in reads) < sum(size for _, size in baseline_reads)
+
+
+def test_nested_child_projection_with_page_index(nested_fixture):
+    path, table, _, _ = nested_fixture
+    pq.write_table(table, path, write_page_index=True, use_dictionary=False,
+                   data_page_size=2048, write_batch_size=64)
+    fields = [DataField(0, 'text', AtomicType('STRING')),
+              DataField(1, 'missing', AtomicType('INT')),
+              DataField(2, 'id', AtomicType('BIGINT'))]
+    kwargs = {'fields': fields, 'nested_name_paths': [['record', 'text'], ['record', 'absent'], ['id']],
+              'row_ranges': [(4500, 4540)]}
+    baseline, _ = _read(nested_fixture, baseline=True, **kwargs)
+    with patch.object(page_module.ParquetPageIndexReader, '_column_payload',
+                      autospec=True, side_effect=page_module.ParquetPageIndexReader._column_payload
+                      ) as read_pages:
+        actual, _ = _read(nested_fixture, **kwargs)
+    assert read_pages.called
+    assert actual.equals(baseline)
+    assert actual.column('text').to_pylist() == [
+        None if value is None else value['text'] for value in table['record'].slice(4500, 41).to_pylist()]
+    assert actual.column('missing').null_count == 41
+
+
+@pytest.mark.parametrize('version', ['1.0', '2.0'])
+def test_repeated_page_row_count_corruption_is_not_hidden(nested_fixture, version):
+    path, table, _, _ = nested_fixture
+    # A single-leaf nested field isolates V1's value count from its row count.
+    table = table.select(['matrix'])
+    pq.write_table(table, path, write_page_index=True, data_page_version=version,
+                   use_dictionary=False, data_page_size=1024, write_batch_size=64)
+    with pa.OSFile(path, 'rb') as source:
+        reader = page_module.ParquetPageIndexReader.create(
+            source, pq.ParquetFile(source), ['matrix'], [0], 71)
+        chunk = page_module._get(page_module._get(reader.footer, 4)[1][0], 1)[1][0]
+        offset, size = page_module._get(chunk, 4), page_module._get(chunk, 5)
+        index = page_module._Compact(source.read_at(size, offset)).value(12)
+    second = page_module._get(index, 1)[1][1]
+    second[3] = (6, page_module._get(second, 3) + 1)
+    modified = page_module._encode(12, index)
+    assert len(modified) == size
+    with open(path, 'r+b') as output:
+        output.seek(offset)
+        output.write(modified)
+    fields = PyarrowFieldParser.to_paimon_schema(table.schema)
+    with pytest.raises((ValueError, pa.ArrowInvalid), match='rows|row'):
+        _read(nested_fixture, fields=fields, row_ranges=[(0, 2)])
+
+
+def test_nested_alignment_can_fall_back_when_no_pages_can_be_skipped(nested_fixture):
+    path, table, _, _ = nested_fixture
+    # One leaf has a single page, forcing the field's common span to the full group.
+    table = pa.table({'record': pa.StructArray.from_arrays(
+        [pa.array([True] * N), table['payload'].combine_chunks()], names=['flag', 'text'])})
+    pq.write_table(table, path, write_page_index=True, use_dictionary=False,
+                   data_page_size=4096, write_batch_size=64)
+    fields = PyarrowFieldParser.to_paimon_schema(table.schema)
+    with patch.object(page_module.ParquetPageIndexReader, '_column_payload',
+                      side_effect=AssertionError('must fall back before reading pages')):
+        actual, _ = _read(nested_fixture, fields=fields, row_ranges=[(4500, 4540)])
+    assert actual.equals(table.slice(4500, 41))

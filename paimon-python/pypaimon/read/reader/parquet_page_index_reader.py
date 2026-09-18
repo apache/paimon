@@ -15,13 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Read contiguous windows of flat Parquet columns using their OffsetIndex.
+"""Read contiguous Parquet row windows using their OffsetIndex.
 
 Selected encoded pages are placed in bounded, in-memory Parquet files. PyArrow
 still decodes the pages, including dictionary and compression encodings. Source
-files are never rewritten. Nested schemas and files without indexes use the
-normal reader. Disjoint ranges use the normal reader too: per-page seeks can
-amplify requests in filesystems that prefetch remote data (including Jindo).
+files are never rewritten. Nested fields retain their complete physical schema
+and align their leaf columns at common row boundaries. Files without indexes and
+disjoint ranges use the normal reader: per-page seeks can amplify requests in
+filesystems that prefetch remote data (including Jindo).
 """
 
 import base64
@@ -162,29 +163,27 @@ def _read_exact(source, offset, length):
 
 
 class ParquetPageIndexReader:
-    def __init__(self, source, metadata, schema, footer, columns, batch_size):
+    def __init__(self, source, metadata, schema, footer, columns, fields, batch_size):
         self.source = source
         self.metadata = metadata
         self.schema = schema
         self.footer = footer
         self.columns = columns
+        self.fields = fields
         self.batch_size = batch_size
 
     @classmethod
     def create(cls, source, parquet_file, columns, row_groups, batch_size):
         metadata = parquet_file.metadata
         schema = parquet_file.schema_arrow
-        # Flat columns have one schema element and one physical column each.
-        if not columns or any(pa.types.is_nested(field.type) for field in schema):
-            return None
-        if len(schema) != metadata.num_columns or len(set(schema.names)) != len(schema):
+        if not columns or len(set(schema.names)) != len(schema):
             return None
         indices = [schema.get_field_index(name) for name in columns]
         if any(index < 0 for index in indices) or len(set(indices)) != len(indices):
             return None
-        if not any(all(getattr(metadata.row_group(group).column(index),
-                               "has_offset_index", False) for index in indices)
-                   for group in row_groups):
+        if not any(getattr(metadata.row_group(group).column(index),
+                           "has_offset_index", False)
+                   for group in row_groups for index in range(metadata.num_columns)):
             return None
         output = pa.BufferOutputStream()
         metadata.write_metadata_file(output)
@@ -194,9 +193,32 @@ class ParquetPageIndexReader:
         if 8 in footer or 9 in footer:
             return None  # Encrypted pages need the original file identity/AAD.
         elements = _get(footer, 2)[1]
-        if len(elements) != metadata.num_columns + 1:
+        # Parquet stores a preorder schema tree and one chunk per physical leaf.
+        # Arrow field positions cannot be used as physical column positions.
+        fields = []
+        position, leaf = 1, 0
+        for _ in range(_get(elements[0], 5)):
+            start, first_leaf, pending = position, leaf, 1
+            while pending:
+                if position >= len(elements):
+                    raise ValueError("Truncated Parquet schema tree")
+                element = elements[position]
+                children = _get(element, 5, 0)
+                if children < 0 or (1 in element and children) or (1 not in element and not children):
+                    raise ValueError("Invalid Parquet schema child count")
+                pending += children - 1
+                leaf += int(1 in element)
+                position += 1
+            fields.append((elements[start:position], list(range(first_leaf, leaf))))
+        if (position != len(elements) or leaf != metadata.num_columns
+                or len(fields) != len(schema)):
             return None
-        return cls(source, metadata, schema, footer, indices, batch_size)
+        if not any(all(getattr(metadata.row_group(group).column(leaf),
+                               "has_offset_index", False)
+                       for index in indices for leaf in fields[index][1])
+                   for group in row_groups):
+            return None
+        return cls(source, metadata, schema, footer, indices, fields, batch_size)
 
     def read_row_group(self, group, runs):
         """Return selected batches, or None when the ordinary reader is cheaper."""
@@ -210,16 +232,18 @@ class ParquetPageIndexReader:
         if sum(upper - lower + 1 for lower, upper in runs) >= row_count:
             return None
         chunks = _get(row_group, 1)[1]
+        physical_columns = [leaf for index in self.columns for leaf in self.fields[index][1]]
         if any(4 not in chunks[index] or 5 not in chunks[index]
                or _get(chunks[index], 1) or 8 in chunks[index] or 9 in chunks[index]
                or 10 in _get(chunks[index], 3)  # Legacy index pages.
-               for index in self.columns):
+               for index in physical_columns):
             return None
+        indexed = {}
         plans = []
         selected_bytes = 0
         index_bytes = 0
         full_bytes = 0
-        for index in sorted(self.columns):
+        for index in sorted(physical_columns):
             chunk = chunks[index]
             index_size = _get(chunk, 5)
             if index_size > _MAX_INDEX_BYTES:
@@ -244,28 +268,42 @@ class ParquetPageIndexReader:
                 previous_end, previous_row = offset + size, first_row
             if _get(locations[0], 1) != data_offset or dictionary_offset > data_offset:
                 raise ValueError("Invalid Parquet OffsetIndex first page")
-            lower, upper = runs[0]
-            selected = range(bisect.bisect_right(starts, lower) - 1,
-                             bisect.bisect_right(starts, upper))
-            pages = []
-            infos = []
-            for position in selected:
-                page = locations[position]
-                pages.append((_get(page, 1), _get(page, 2)))
-                end = starts[position + 1] if position + 1 < len(starts) else row_count
-                infos.append((starts[position], end - starts[position]))
-            dictionary_size = data_offset - dictionary_offset
-            selected_bytes += dictionary_size + sum(size for _, size in pages)
+            indexed[index] = (column, dictionary_offset, data_offset - dictionary_offset,
+                              locations, starts)
             full_bytes += _get(column, 7)
-            plans.append((index, column, dictionary_offset, dictionary_size, pages, infos))
+        for field in sorted(self.columns):
+            leaves = self.fields[field][1]
+            # OffsetIndex pages must start at row boundaries (repetition level 0).
+            # Keep all leaves of a field aligned so Arrow can reconstruct nesting.
+            # ponytail: common boundaries may widen to the whole group; independent
+            # leaf decoding/reassembly can recover savings if this becomes costly.
+            boundaries = set(indexed[leaves[0]][4])
+            for leaf in leaves[1:]:
+                boundaries.intersection_update(indexed[leaf][4])
+            boundaries = sorted(boundaries) + [row_count]
+            lower, upper = runs[0]
+            lower = boundaries[bisect.bisect_right(boundaries, lower) - 1]
+            end = boundaries[bisect.bisect_right(boundaries, upper)]
+            column_plans = []
+            for index in leaves:
+                column, dictionary_offset, dictionary_size, locations, starts = indexed[index]
+                selected = range(bisect.bisect_left(starts, lower),
+                                 bisect.bisect_left(starts, end))
+                pages, infos = [], []
+                for position in selected:
+                    page = locations[position]
+                    pages.append((_get(page, 1), _get(page, 2)))
+                    next_row = starts[position + 1] if position + 1 < len(starts) else row_count
+                    infos.append((starts[position], next_row - starts[position]))
+                selected_bytes += dictionary_size + sum(size for _, size in pages)
+                column_plans.append((index, column, dictionary_offset, dictionary_size, pages, infos))
+            plans.append((field, column_plans, [(lower, end - lower)]))
         if (selected_bytes + index_bytes >= full_bytes
                 or selected_bytes > _MAX_PAGE_BYTES):
             return None
         return self._batches(plans, runs)
 
-    def _column_batches(self, plan, runs):
-        from pypaimon.read.reader.format_pyarrow_reader import _RowRunSlicer
-
+    def _column_payload(self, plan):
         index, column, dictionary_offset, dictionary_size, pages, infos = plan
         ranges = ([(dictionary_offset, dictionary_size)] if dictionary_size else []) + pages
         # Coalesce adjacent dictionary/data pages without fetching skipped pages.
@@ -279,6 +317,8 @@ class ParquetPageIndexReader:
                            for offset, length in groups)
         cursor = 0
         uncompressed_size = 0
+        num_values = 0
+        repeated = self.metadata.schema.column(index).max_repetition_level > 0
         for position, (_, length) in enumerate(ranges):
             parser = _Compact(memoryview(payload)[cursor:cursor + length])
             header = parser.value(12)
@@ -291,43 +331,73 @@ class ParquetPageIndexReader:
                 expected = infos[position - bool(dictionary_size)][1]
                 page_type = _get(header, 1)
                 if page_type == 0:
-                    actual = _get(_get(header, 5), 1)
+                    values = _get(_get(header, 5), 1)
+                    actual = expected if repeated else values
                 elif page_type == 3:
                     page_header = _get(header, 8)
                     actual = _get(page_header, 3)
-                    if _get(page_header, 1) != actual:
-                        raise ValueError("Invalid flat Parquet data page")
+                    values = _get(page_header, 1)
+                    if not repeated and values != actual:
+                        raise ValueError("Invalid non-repeated Parquet data page")
                 else:
                     raise ValueError("Invalid Parquet data page type")
-                if actual != expected:
+                if actual != expected or values < expected:
                     raise ValueError("Parquet page rows disagree with OffsetIndex")
+                num_values += values
             uncompressed_size += parser.position + _get(header, 2)
             cursor += length
 
-        num_rows = sum(count for _, count in infos)
         patched_column = {key: value for key, value in column.items() if key <= 8}
-        patched_column.update({5: (6, num_rows), 6: (6, uncompressed_size),
+        patched_column.update({5: (6, num_values), 6: (6, uncompressed_size),
                                7: (6, len(payload)), 9: (6, 4 + dictionary_size)})
         if dictionary_size:
             patched_column[11] = (6, 4)
-        patched_group = {1: (9, (12, [{2: (6, 0), 3: (12, patched_column)}])),
+        return payload, patched_column, uncompressed_size
+
+    def _column_batches(self, plan, runs):
+        from pypaimon.read.reader.format_pyarrow_reader import _RowRunSlicer
+
+        index, column_plans, infos = plan
+        payloads, chunks = [], []
+        offset, uncompressed_size = 0, 0
+        for column_plan in column_plans:
+            payload, column, size = self._column_payload(column_plan)
+            for field in (9, 11):
+                if field in column:
+                    column[field] = (6, _get(column, field) + offset)
+            chunks.append({2: (6, 0), 3: (12, column)})
+            payloads.append(payload)
+            offset += len(payload)
+            uncompressed_size += size
+        num_rows = sum(count for _, count in infos)
+        patched_group = {1: (9, (12, chunks)),
                          2: (6, uncompressed_size), 3: (6, num_rows)}
         elements = _get(self.footer, 2)[1]
         root = dict(elements[0])
         root[5] = (5, 1)
         schema = pa.schema([self.schema.field(index)])
         arrow_schema = base64.b64encode(schema.serialize().to_pybytes())
-        footer = {1: self.footer[1], 2: (9, (12, [root, elements[index + 1]])),
+        footer = {1: self.footer[1], 2: (9, (12, [root] + self.fields[index][0])),
                   3: (6, num_rows), 4: (9, (12, [patched_group])),
                   5: (9, (12, [{1: (8, b"ARROW:schema"), 2: (8, arrow_schema)}]))}
         if 6 in self.footer:
             footer[6] = self.footer[6]
         encoded = _encode(12, footer)
-        data = b"PAR1" + payload + encoded + struct.pack("<I", len(encoded)) + b"PAR1"
+        data = b"".join([b"PAR1"] + payloads + [encoded, struct.pack("<I", len(encoded)), b"PAR1"])
+        del payloads, payload
         reader = pq.ParquetFile(pa.BufferReader(data))
-        del payload, parser
         try:
-            batches = reader.iter_batches(batch_size=self.batch_size, use_threads=False)
+            def checked_batches():
+                count = 0
+                for batch in reader.iter_batches(batch_size=self.batch_size, use_threads=False):
+                    count += batch.num_rows
+                    if count > num_rows:
+                        raise ValueError("Parquet decoded rows disagree with OffsetIndex")
+                    yield batch
+                if count != num_rows:
+                    raise ValueError("Parquet decoded rows disagree with OffsetIndex")
+
+            batches = checked_batches()
             slicer = _RowRunSlicer(infos, runs)
             while True:
                 batch = slicer.next_batch(batches)

@@ -536,7 +536,6 @@ class FormatPyArrowReader(RecordBatchReader):
                         and options is not None
                         and options.parquet_column_index_enabled()
                         and self._row_group_cache is None
-                        and not self._has_nested_path
                         and not self._bounded_variant_read):
                     from pypaimon.read.reader.parquet_page_index_reader import (
                         ParquetPageIndexReader,
@@ -637,6 +636,7 @@ class FormatPyArrowReader(RecordBatchReader):
                         yield out
 
     def _iter_page_index_batches(self, selected_infos, runs):
+        select = self._select_nested_fields if self._has_nested_path else self._select_existing_fields
         run_index = 0
         for group, (offset, count) in zip(
                 self._selected_parquet_row_groups, selected_infos):
@@ -658,11 +658,11 @@ class FormatPyArrowReader(RecordBatchReader):
                     batch = slicer.next_batch(raw)
                     if batch is None:
                         break
-                    yield self._select_existing_fields(batch)
+                    yield select(batch)
             else:
                 try:
                     for batch in batches:
-                        yield self._select_existing_fields(batch)
+                        yield select(batch)
                 finally:
                     batches.close()
 

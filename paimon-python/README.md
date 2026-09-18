@@ -120,12 +120,18 @@ rows = builder.new_read().to_arrow(builder.new_scan().plan().splits())
 ```
 
 The optimization uses existing Parquet OffsetIndexes for one contiguous window
-per row group in flat schemas. Disjoint windows, nested schemas, missing indexes,
+per row group, including STRUCT, ARRAY, and MAP fields. Nested leaf columns are
+aligned to common page row boundaries while retaining the original schema and
+null/empty collection semantics. Unselected nested fields do not disable reads
+of ordinary columns. Disjoint windows, missing indexes,
 older Arrow versions without index metadata support, and decoded row-group cache
 reads retain the ordinary reader. Large or unprofitable page selections also fall
-back. Enabling this option does not enable ColumnIndex predicate filtering or
+back, including nested fields whose common boundaries require reading the whole
+leaf chunks without savings. VARIANT reads retain their existing path.
+Enabling this option does not enable ColumnIndex predicate filtering or
 force unsupported reads through the page-index path. It can reduce bytes read;
-fewer OSS HEAD/GET requests or lower latency are not guaranteed. Set the option to
+page seeks can also increase OSS GET requests despite reducing bytes, so lower
+latency or request cost is not guaranteed. Set the option to
 `"false"` to bypass page-index processing entirely.
 
 # Native scan planning
