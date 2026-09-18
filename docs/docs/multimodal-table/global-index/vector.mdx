@@ -285,6 +285,13 @@ The scalar filter is evaluated with matching scalar global indexes before vector
 BTree index for frequently used metadata filters, such as `category`, `tenant_id`, or `event_time`,
 so vector search can restrict the candidate row ids before running ANN search.
 
+An index answer that is only a candidate set — `contains`, ends-with or `LIKE` on a BTree index,
+or a conjunction with a member no index can evaluate — is never ranked as if it matched, because
+a non-matching but closer row would take a top-k slot from a matching one. By default such
+candidates are excluded and a warning is logged, so the result may hold fewer than `limit` rows;
+set `global-index.filter.refine-from-data=true` to verify them by reading their filter columns
+instead. That read runs on the caller and can cover every candidate row.
+
 </TabItem>
 
 </Tabs>

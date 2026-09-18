@@ -176,7 +176,8 @@ public class DataEvolutionFullTextRead implements FullTextRead {
      *       index. When the index answer may be a superset (a conjunct it could not evaluate was
      *       dropped, or a {@code contains} / {@code endsWith} / {@code like} leaf, which BTree
      *       answers with every non-null row), the candidates are refined by reading their filter
-     *       columns.
+     *       columns if {@code global-index.filter.refine-from-data} allows it, and excluded
+     *       otherwise.
      *   <li>Rows whose filter columns are not covered follow {@code scalar-index.search-mode}:
      *       excluded in {@code fast}, otherwise decided by reading their filter columns.
      * </ul>
@@ -232,9 +233,15 @@ public class DataEvolutionFullTextRead implements FullTextRead {
                                 evaluation.get().result().results(), decidedByIndex);
                 if (!FilteredRowIdReader.isExact(table.rowType(), filter, evaluation.get())
                         && !fromIndex.isEmpty()) {
-                    fromIndex =
-                            new FilteredRowIdReader(table, planSnapshot, partitionFilter, filter)
-                                    .matchingRowIds(fromIndex);
+                    if (table.coreOptions().globalIndexFilterRefineFromData()) {
+                        fromIndex =
+                                new FilteredRowIdReader(
+                                                table, planSnapshot, partitionFilter, filter)
+                                        .matchingRowIds(fromIndex);
+                    } else {
+                        FilteredRowIdReader.warnCandidatesExcluded(LOG, table, filter);
+                        fromIndex = new RoaringNavigableMap64();
+                    }
                 }
                 matched.or(fromIndex);
             } else {

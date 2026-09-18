@@ -300,8 +300,13 @@ BM25 statistics are always those of the full corpus:
   Bitmap, Multivalue, FM) are decided by the index, the same way
   [vector search pre-filters](./vector#vector-search) rows. When the index can
   only produce candidates (a conjunct no index could evaluate, or `contains`,
-  ends-with and `LIKE` on a BTree index), the candidates are verified by reading
-  their filter columns.
+  ends-with and `LIKE` on a BTree index), those candidates are never ranked as
+  if they matched: with `global-index.filter.refine-from-data=true` they are
+  verified by reading their filter columns, otherwise (the default) they are
+  excluded and a warning is logged, so the result may hold fewer than `limit`
+  rows. The read runs on the caller and can cover every candidate row, which is
+  why it is opt-in; prefer an index that answers the predicate exactly, such as
+  Bitmap or FM for `contains`.
 - Rows whose filter columns are not covered by a scalar index follow
   `scalar-index.search-mode`:
 

@@ -3000,6 +3000,21 @@ public class CoreOptions implements Serializable {
                     .defaultValue(GlobalIndexSearchMode.FAST)
                     .withDescription("Search mode for full-text index queries.");
 
+    public static final ConfigOption<Boolean> GLOBAL_INDEX_FILTER_REFINE_FROM_DATA =
+            key("global-index.filter.refine-from-data")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether a vector, hybrid or full-text search may read the filter "
+                                    + "columns of candidate rows to verify a row filter that the "
+                                    + "scalar global index can only answer with a superset, such "
+                                    + "as contains, ends-with or like on a BTree index or a "
+                                    + "conjunction with a member no index can evaluate. When "
+                                    + "false, such candidates are excluded from the search, which "
+                                    + "never returns a non-matching row but may return fewer than "
+                                    + "the requested top-k. When true, the read runs on the caller "
+                                    + "and may cover every candidate row.");
+
     public static final ConfigOption<Integer> GLOBAL_INDEX_THREAD_NUM =
             key("global-index.thread-num")
                     .intType()
@@ -4779,6 +4794,10 @@ public class CoreOptions implements Serializable {
 
     public GlobalIndexSearchMode scalarIndexSearchMode() {
         return indexSearchMode(SCALAR_INDEX_SEARCH_MODE);
+    }
+
+    public boolean globalIndexFilterRefineFromData() {
+        return options.get(GLOBAL_INDEX_FILTER_REFINE_FROM_DATA);
     }
 
     public GlobalIndexSearchMode vectorIndexSearchMode() {

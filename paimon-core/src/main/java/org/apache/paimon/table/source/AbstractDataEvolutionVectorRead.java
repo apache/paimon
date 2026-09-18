@@ -53,6 +53,9 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -74,6 +77,9 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Base implementation for vector reads. */
 public abstract class AbstractDataEvolutionVectorRead implements Serializable {
+
+    private static final Logger LOG =
+            LoggerFactory.getLogger(AbstractDataEvolutionVectorRead.class);
 
     private static final long serialVersionUID = 1L;
 
@@ -219,9 +225,10 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     /**
      * Rows of the indexed splits that satisfy {@link #filter} according to the scalar global
      * indexes, or {@code null} when no index can evaluate it. The set is exact: an index answer
-     * that may be a superset (see {@link FilteredRowIdReader#isExact}) is refined from the data,
-     * because a superset ranked by the ANN would push matching rows out of the top-k where the
-     * engine-side filter cannot bring them back.
+     * that may be a superset (see {@link FilteredRowIdReader#isExact}) is refined from the data
+     * when {@code global-index.filter.refine-from-data} allows it and excluded otherwise, because a
+     * superset ranked by the ANN would push matching rows out of the top-k where the engine-side
+     * filter cannot bring them back.
      */
     private RoaringNavigableMap64 scalarMatchedRows(List<IndexVectorSearchSplit> splits) {
         if (filter == null) {
@@ -251,6 +258,10 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             RoaringNavigableMap64 matched = evaluation.get().result().results();
             if (FilteredRowIdReader.isExact(table.rowType(), filter, evaluation.get())) {
                 return matched;
+            }
+            if (!table.coreOptions().globalIndexFilterRefineFromData()) {
+                FilteredRowIdReader.warnCandidatesExcluded(LOG, table, filter);
+                return new RoaringNavigableMap64();
             }
             RoaringNavigableMap64 candidates = RoaringNavigableMap64.and(matched, splitRows);
             return new FilteredRowIdReader(table, planSnapshot, partitionFilter, filter)

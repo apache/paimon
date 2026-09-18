@@ -67,10 +67,13 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
 
     @Override
     protected Schema schemaDefault() {
-        return schemaBuilder().build();
+        return schemaBuilder(true).build();
     }
 
-    private static Schema.Builder schemaBuilder() {
+    /**
+     * {@code refine} sets {@code global-index.filter.refine-from-data}, which defaults to false.
+     */
+    private static Schema.Builder schemaBuilder(boolean refine) {
         return Schema.newBuilder()
                 .column("id", DataTypes.INT())
                 .column("name", DataTypes.STRING())
@@ -78,8 +81,17 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
                 .option(CoreOptions.BUCKET.key(), "-1")
                 .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
                 .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                .option(
+                        CoreOptions.GLOBAL_INDEX_FILTER_REFINE_FROM_DATA.key(),
+                        Boolean.toString(refine))
                 .option("test.vector.dimension", "2")
                 .option("test.vector.metric", "l2");
+    }
+
+    private FileStoreTable createTable(String name, Schema.Builder schema) throws Exception {
+        Identifier identifier = identifier(name);
+        catalog.createTable(identifier, schema.build(), false);
+        return getTable(identifier);
     }
 
     private static org.apache.paimon.utils.RoaringNavigableMap64 search(
@@ -198,7 +210,9 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
         Identifier identifier = identifier("vector_refine_dv");
         catalog.createTable(
                 identifier,
-                schemaBuilder().option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true").build(),
+                schemaBuilder(true)
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build(),
                 false);
         FileStoreTable table = getTable(identifier);
         String[] names = {"alpha", "beta zeta", "gamma zeta"};
@@ -243,6 +257,141 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
                         .withLimit(1)
                         .executeLocal();
         assertThat(hybrid.results()).containsExactly(1L);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    //  global-index.filter.refine-from-data = false (the default)
+    // ---------------------------------------------------------------------------------------
+
+    @Test
+    public void testRefineFromDataIsOffByDefault() throws Exception {
+        FileStoreTable table =
+                createTable(
+                        "vector_refine_default",
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .column("name", DataTypes.STRING())
+                                .column("vec", new ArrayType(DataTypes.FLOAT()))
+                                .option(CoreOptions.BUCKET.key(), "-1")
+                                .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                                .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                                .option("test.vector.dimension", "2")
+                                .option("test.vector.metric", "l2"));
+        assertThat(table.coreOptions().globalIndexFilterRefineFromData()).isFalse();
+
+        String[] names = {"alpha", "beta zeta", "gamma"};
+        float[][] vectors = {{1.0f, 0.0f}, {0.6f, 0.8f}, {0.0f, 1.0f}};
+        write(table, names, vectors);
+        buildAndCommitVectorIndex(table, vectors);
+        buildAndCommitNameBTreeIndex(table, names);
+
+        // Candidates are excluded: never the non-matching row 0, and no data is read.
+        Predicate containsZeta =
+                new PredicateBuilder(table.rowType()).contains(1, BinaryString.fromString("zeta"));
+        assertThat(search(table, containsZeta, 1)).isEmpty();
+    }
+
+    @Test
+    public void testRefineDisabledExcludesEveryCandidateOnlyAnswer() throws Exception {
+        FileStoreTable table = createTable("vector_refine_off", schemaBuilder(false));
+        String[] names = {"alpha", "beta zeta", "gamma"};
+        float[][] vectors = {{1.0f, 0.0f}, {0.6f, 0.8f}, {0.0f, 1.0f}};
+        write(table, names, vectors);
+        buildAndCommitVectorIndex(table, vectors);
+        buildAndCommitNameBTreeIndex(table, names);
+
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        for (Predicate candidateOnly :
+                Arrays.asList(
+                        builder.contains(1, BinaryString.fromString("zeta")),
+                        builder.endsWith(1, BinaryString.fromString("zeta")),
+                        builder.like(1, BinaryString.fromString("%zeta")))) {
+            assertThat(search(table, candidateOnly, 3)).as(candidateOnly.toString()).isEmpty();
+        }
+
+        // Exact answers on the same index are unaffected by the option.
+        assertThat(search(table, builder.equal(1, BinaryString.fromString("beta zeta")), 1))
+                .containsExactly(1L);
+        assertThat(search(table, builder.startsWith(1, BinaryString.fromString("beta")), 1))
+                .containsExactly(1L);
+        assertThat(
+                        search(
+                                table,
+                                builder.in(
+                                        1,
+                                        Arrays.asList(
+                                                BinaryString.fromString("beta zeta"),
+                                                BinaryString.fromString("gamma"))),
+                                2))
+                .containsExactlyInAnyOrder(1L, 2L);
+
+        // A conjunction with a member no index can evaluate is a superset as well: excluded.
+        FileStoreTable partial = createTable("vector_refine_off_partial", schemaBuilder(false));
+        write(partial, names, vectors);
+        buildAndCommitVectorIndex(partial, vectors);
+        buildAndCommitIdBTreeIndex(partial, names.length);
+        PredicateBuilder partialBuilder = new PredicateBuilder(partial.rowType());
+        assertThat(
+                        search(
+                                partial,
+                                PredicateBuilder.and(
+                                        partialBuilder.greaterOrEqual(0, 0),
+                                        partialBuilder.equal(
+                                                1, BinaryString.fromString("beta zeta"))),
+                                3))
+                .isEmpty();
+        assertThat(search(partial, partialBuilder.greaterOrEqual(0, 1), 1)).containsExactly(1L);
+    }
+
+    @Test
+    public void testRefineDisabledAppliesToBatchAndHybridSearch() throws Exception {
+        FileStoreTable table = createTable("vector_refine_off_batch", schemaBuilder(false));
+        String[] names = {"alpha", "beta zeta", "gamma"};
+        float[][] vectors = {{1.0f, 0.0f}, {0.6f, 0.8f}, {0.0f, 1.0f}};
+        write(table, names, vectors);
+        buildAndCommitVectorIndex(table, vectors);
+        buildAndCommitNameBTreeIndex(table, names);
+        Predicate containsZeta =
+                new PredicateBuilder(table.rowType()).contains(1, BinaryString.fromString("zeta"));
+
+        List<GlobalIndexResult> batch =
+                table.newBatchVectorSearchBuilder()
+                        .withVectors(new float[][] {{1.0f, 0.0f}, {0.0f, 1.0f}})
+                        .withVectorColumn("vec")
+                        .withLimit(1)
+                        .withFilter(containsZeta)
+                        .executeBatchLocal();
+        assertThat(batch).hasSize(2);
+        assertThat(batch.get(0).results().isEmpty()).isTrue();
+        assertThat(batch.get(1).results().isEmpty()).isTrue();
+
+        GlobalIndexResult hybrid =
+                table.newHybridSearchBuilder()
+                        .addVectorRoute("vec", new float[] {1.0f, 0.0f}, 1)
+                        .withFilter(containsZeta)
+                        .withLimit(1)
+                        .executeLocal();
+        assertThat(hybrid.results().isEmpty()).isTrue();
+    }
+
+    @Test
+    public void testRefineDisabledKeepsUnindexedColumnsOnTheDataPathInFullMode() throws Exception {
+        // The option gates only candidate refinement; rows whose filter column has no index at
+        // all still follow scalar-index.search-mode.
+        FileStoreTable table =
+                createTable(
+                        "vector_refine_off_full",
+                        schemaBuilder(false)
+                                .option(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "full"));
+        String[] names = {"alpha", "beta zeta", "gamma"};
+        float[][] vectors = {{1.0f, 0.0f}, {0.6f, 0.8f}, {0.0f, 1.0f}};
+        write(table, names, vectors);
+        buildAndCommitVectorIndex(table, vectors);
+
+        Predicate nameFilter =
+                new PredicateBuilder(table.rowType())
+                        .equal(1, BinaryString.fromString("beta zeta"));
+        assertThat(search(table, nameFilter, 1)).containsExactly(1L);
     }
 
     @ParameterizedTest(name = "scalar-index.search-mode={0}")

@@ -38,6 +38,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import org.slf4j.Logger;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -105,6 +107,19 @@ class FilteredRowIdReader {
                     || function instanceof Like;
         }
         return false;
+    }
+
+    /** Logs that a candidate-only index answer was dropped because refinement is disabled. */
+    static void warnCandidatesExcluded(Logger log, FileStoreTable table, Predicate filter) {
+        log.warn(
+                "The scalar global index can only answer the row filter {} on table {} with "
+                        + "candidates, and {} is false, so those rows are excluded from the "
+                        + "search; the result may hold fewer rows than requested. Set the option "
+                        + "to true to verify the candidates against the data, or build an index "
+                        + "that answers the predicate exactly.",
+                filter,
+                table.name(),
+                CoreOptions.GLOBAL_INDEX_FILTER_REFINE_FROM_DATA.key());
     }
 
     /** The subset of {@code rows} whose data satisfies the filter. */
