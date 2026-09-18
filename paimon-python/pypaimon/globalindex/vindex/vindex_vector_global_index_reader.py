@@ -223,7 +223,7 @@ class VindexVectorGlobalIndexReader(GlobalIndexReader):
                 self._reader = reader
                 self._search_params_type = SearchParams
                 self._stream = stream
-            except Exception:
+            except BaseException:
                 try:
                     if reader is not None:
                         reader.close()
