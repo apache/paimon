@@ -68,7 +68,6 @@ public class AvroFileFormat extends FileFormat {
     private final Options options;
     private final int zstdLevel;
     @Nullable private final MemorySize blockSize;
-    private final boolean useBufferedEncoder;
 
     public AvroFileFormat(FormatContext context) {
         super(IDENTIFIER);
@@ -76,7 +75,6 @@ public class AvroFileFormat extends FileFormat {
         this.options = getIdentifierPrefixOptions(context.options());
         this.zstdLevel = context.zstdLevel();
         this.blockSize = context.blockSize();
-        this.useBufferedEncoder = !context.isManifest();
     }
 
     @Override
@@ -160,7 +158,7 @@ public class AvroFileFormat extends FileFormat {
         @Override
         public FormatWriter create(PositionOutputStream out, String compression)
                 throws IOException {
-            return createBlockWriter(out, rowType, compression, useBufferedEncoder);
+            return createBlockWriter(out, rowType, compression, true);
         }
     }
 }

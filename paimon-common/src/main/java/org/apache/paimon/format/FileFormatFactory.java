@@ -41,7 +41,6 @@ public interface FileFormatFactory {
         private final MemorySize writeBatchMemory;
         private final int zstdLevel;
         @Nullable private final MemorySize blockSize;
-        private final boolean manifest;
 
         @VisibleForTesting
         public FormatContext(Options options, int readBatchSize, int writeBatchSize) {
@@ -64,31 +63,12 @@ public interface FileFormatFactory {
                 MemorySize writeBatchMemory,
                 int zstdLevel,
                 @Nullable MemorySize blockSize) {
-            this(
-                    options,
-                    readBatchSize,
-                    writeBatchSize,
-                    writeBatchMemory,
-                    zstdLevel,
-                    blockSize,
-                    false);
-        }
-
-        public FormatContext(
-                Options options,
-                int readBatchSize,
-                int writeBatchSize,
-                MemorySize writeBatchMemory,
-                int zstdLevel,
-                @Nullable MemorySize blockSize,
-                boolean manifest) {
             this.options = options;
             this.readBatchSize = readBatchSize;
             this.writeBatchSize = writeBatchSize;
             this.writeBatchMemory = writeBatchMemory;
             this.zstdLevel = zstdLevel;
             this.blockSize = blockSize;
-            this.manifest = manifest;
         }
 
         public Options options() {
@@ -114,11 +94,6 @@ public interface FileFormatFactory {
         @Nullable
         public MemorySize blockSize() {
             return blockSize;
-        }
-
-        /** Whether the format is used for manifest metadata rather than data files. */
-        public boolean isManifest() {
-            return manifest;
         }
 
         public boolean caseSensitive() {
