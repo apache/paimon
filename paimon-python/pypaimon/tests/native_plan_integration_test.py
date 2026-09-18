@@ -26,7 +26,8 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.read.native_plan import (
-    native_family_search_modes_available, native_method_available,
+    native_blob_parallelism_available, native_family_search_modes_available,
+    native_method_available,
     native_read, native_reader_available,
 )
 from pypaimon.table.row.blob import BlobDescriptor
@@ -437,6 +438,50 @@ class NativePlanIntegrationTest(unittest.TestCase):
             {'f0': 1, 'f1': 'a', 'f2': 'b'},
             {'f0': 2, 'f1': 'x', 'f2': 'y'},
         ])
+        self.assertTrue(builder.explain().native_planned)
+
+    @unittest.skipUnless(native_blob_parallelism_available(),
+                         "pypaimon-rust native BLOB parallelism API not installed")
+    def test_native_read_data_evolution_blob_parallelism(self):
+        schema = pa.schema([
+            ('id', pa.int32()),
+            ('img', pa.large_binary()),
+        ])
+        self.cat.create_table('default.native_blob_t', Schema.from_pyarrow_schema(
+            schema, options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }), False)
+        table = self.cat.get_table('default.native_blob_t')
+        payloads = [b'a', b'bb', b'ccc']
+        write = table.new_batch_write_builder().new_write()
+        write.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'img': payloads,
+        }, schema=schema))
+        table.new_batch_write_builder().new_commit().commit(write.prepare_commit())
+        write.close()
+
+        native_table = table.copy({'read.native.enabled': 'true'})
+        builder = native_table.new_read_builder().with_projection(['id', 'img'])
+        plan = builder.new_scan().plan()
+        self.assertTrue(any(
+            data_file.file_name.endswith('.blob')
+            for split in plan.splits()
+            for data_file in split.files
+        ))
+
+        with patch(
+                'pypaimon.read.table_read.TableRead._create_split_read',
+                side_effect=AssertionError('Python reader was used')):
+            table_result = builder.new_read().to_arrow(
+                plan.splits(), parallelism=1, blob_parallelism=3)
+            batches = list(builder.new_read().to_arrow_batch_reader(
+                plan.splits(), blob_parallelism=2))
+
+        expected = {'id': [1, 2, 3], 'img': payloads}
+        self.assertEqual(table_result.to_pydict(), expected)
+        self.assertEqual(pa.Table.from_batches(batches).to_pydict(), expected)
         self.assertTrue(builder.explain().native_planned)
 
     @unittest.skipUnless(_has_native_row_ranges(),

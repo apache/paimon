@@ -56,6 +56,7 @@ _NATIVE_READ_FILE_FORMATS = frozenset({
 })
 _NATIVE_READ_FILE_SUFFIXES = tuple(
     '.%s' % file_format for file_format in _NATIVE_READ_FILE_FORMATS)
+_NATIVE_BLOB_FILE_SUFFIX = '.blob'
 
 
 class _ClosableArrowBatchReader:
@@ -132,9 +133,9 @@ class _NativeReadSetupError(Exception):
 class TableRead:
     """Implementation of TableRead for native Python reading."""
 
-    # Cap on peak concurrent blob reads across the whole parallel read: split
-    # workers (P) each spin up blob_parallelism (B) blob threads, so peak
-    # connections ~= P*B. Shrink per-split B to keep the product bounded.
+    # Cap peak concurrent BLOB range reads across the whole parallel read:
+    # split workers (P) each allow blob_parallelism (B) in-flight reads, so
+    # peak connections ~= P*B. Shrink per-reader B to keep the product bounded.
     _MAX_TOTAL_BLOB_WORKERS = 64
 
     def __init__(
@@ -232,12 +233,12 @@ class TableRead:
         schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
+        effective_bp = self._resolve_blob_parallelism(blob_parallelism)
         native_batches = self._try_native_batches(
-            splits, schema, blob_parallelism=blob_parallelism)
+            splits, schema, blob_parallelism=effective_bp)
         if native_batches is not None:
             batch_iterator = iter(native_batches)
         else:
-            effective_bp = self._resolve_blob_parallelism(blob_parallelism)
             batch_iterator = self._arrow_batch_generator(
                 splits, schema, effective_bp)
         reader_type = pyarrow.ipc.RecordBatchReader
@@ -289,10 +290,9 @@ class TableRead:
                 quota first is non-deterministic. Data-evolution reads with
                 deferred BLOB resolution run serially when a limit may discard
                 rows, so payloads are not materialized from discarded splits.
-            blob_parallelism: number of threads for concurrent blob reads
-                within each batch. ``None`` or ``1`` (default) reads blobs
-                serially; ``>= 2`` uses a thread pool with ``pread`` for
-                concurrent ranged reads. GIL is released during I/O. On the
+            blob_parallelism: maximum concurrent blob range reads within each
+                split reader. ``None`` or ``1`` (default) reads blobs serially;
+                ``>= 2`` enables concurrent ranged reads. On the
                 parallel path, peak blob threads (``parallelism`` *
                 ``blob_parallelism``) are capped at
                 ``_MAX_TOTAL_BLOB_WORKERS``; per-split ``blob_parallelism`` is
@@ -304,11 +304,16 @@ class TableRead:
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
 
+        native_parallel = self._should_run_parallel(splits, effective)
+        native_bp = effective_bp
+        if native_parallel:
+            native_bp = self._cap_blob_parallelism(
+                min(effective, len(splits)), effective_bp)
         native_batches = self._try_native_batches(
             splits,
             schema,
             parallelism=effective,
-            blob_parallelism=blob_parallelism,
+            blob_parallelism=native_bp,
         )
         if native_batches is not None:
             return self._batches_to_arrow(native_batches, schema)
@@ -349,46 +354,53 @@ class TableRead:
         if not self.table.options.native_read_enabled():
             return None
         # These Python-only output controls do not yet have native equivalents.
-        if (self.include_row_kind or self.nested_name_paths
-                or blob_parallelism not in (None, 1)):
+        if self.include_row_kind or self.nested_name_paths:
             return None
         if self.table.options.file_format() not in _NATIVE_READ_FILE_FORMATS:
             return None
         if not splits:
             return []
+        try:
+            from pypaimon.read.native_plan import (
+                native_blob_parallelism_available, native_read)
+        except Exception as e:
+            logger.warning(
+                "Native read failed, falling back to the Python reader: %s", e)
+            return None
+        blob_parallelism_available = native_blob_parallelism_available()
+        if ((blob_parallelism is not None and blob_parallelism > 1)
+                or self._deferred_blob_fields) and not blob_parallelism_available:
+            return None
         rust_splits = []
         for split in splits:
             if isinstance(split, QueryAuthSplit):
                 return None
-            if not self._native_split_files_supported(split):
+            if not self._native_split_files_supported(
+                    split, blob_parallelism_available):
                 return None
             rust_split = getattr(split, '_native_split', None)
             if rust_split is None:
                 return None
             rust_splits.append(rust_split)
-        try:
-            from pypaimon.read.native_plan import native_read
-        except Exception as e:
-            logger.warning(
-                "Native read failed, falling back to the Python reader: %s", e)
-            return None
+        native_bp = blob_parallelism if blob_parallelism_available else None
         if (parallelism is not None
                 and self._should_run_parallel(splits, parallelism)):
             try:
                 return self._native_batches_parallel(
-                    native_read, rust_splits, schema, parallelism)
+                    native_read, rust_splits, schema, parallelism, native_bp)
             except _NativeReadSetupError as e:
                 logger.warning(
                     "Native read failed, falling back to the Python reader: %s", e)
                 return None
         try:
-            batches = native_read(
-                self.table,
-                rust_splits,
-                predicate=self.predicate,
-                limit=self.limit,
-                projection=[field.name for field in self.read_type],
-            )
+            read_kwargs = {
+                'predicate': self.predicate,
+                'limit': self.limit,
+                'projection': [field.name for field in self.read_type],
+            }
+            if native_bp is not None:
+                read_kwargs['blob_parallelism'] = native_bp
+            batches = native_read(self.table, rust_splits, **read_kwargs)
         except Exception as e:
             logger.warning(
                 "Native read failed, falling back to the Python reader: %s", e)
@@ -396,7 +408,8 @@ class TableRead:
         return self._convert_native_batches(batches, schema)
 
     def _native_batches_parallel(
-            self, native_read, rust_splits, schema, effective):
+            self, native_read, rust_splits, schema, effective,
+            blob_parallelism):
         """Read contiguous split groups with independent Rust readers."""
         workers = min(effective, len(rust_splits))
         base_size, larger_groups = divmod(len(rust_splits), workers)
@@ -419,6 +432,7 @@ class TableRead:
                     group,
                     schema,
                     remaining_state,
+                    blob_parallelism,
                 ): index
                 for index, group in enumerate(groups)
             }
@@ -428,17 +442,19 @@ class TableRead:
         return [batch for group_batches in results for batch in group_batches]
 
     def _read_native_split_group(
-            self, native_read, rust_splits, schema, remaining_state):
+            self, native_read, rust_splits, schema, remaining_state,
+            blob_parallelism):
         if remaining_state.exhausted():
             return []
         try:
-            batches = native_read(
-                self.table,
-                rust_splits,
-                predicate=self.predicate,
-                limit=self.limit,
-                projection=[field.name for field in self.read_type],
-            )
+            read_kwargs = {
+                'predicate': self.predicate,
+                'limit': self.limit,
+                'projection': [field.name for field in self.read_type],
+            }
+            if blob_parallelism is not None:
+                read_kwargs['blob_parallelism'] = blob_parallelism
+            batches = native_read(self.table, rust_splits, **read_kwargs)
         except Exception as e:
             raise _NativeReadSetupError(str(e)) from e
         result = []
@@ -457,11 +473,13 @@ class TableRead:
         return result
 
     @staticmethod
-    def _native_split_files_supported(split):
+    def _native_split_files_supported(split, blob_parallelism_available=False):
         for data_file in split.files:
             file_name = data_file.file_name.lower()
             if ('.vector.' not in file_name
-                    and not file_name.endswith(_NATIVE_READ_FILE_SUFFIXES)):
+                    and not file_name.endswith(_NATIVE_READ_FILE_SUFFIXES)
+                    and not (blob_parallelism_available
+                             and file_name.endswith(_NATIVE_BLOB_FILE_SUFFIX))):
                 return False
         return True
 
