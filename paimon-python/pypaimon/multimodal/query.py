@@ -657,9 +657,29 @@ class BatchVectorQuery(_PreFilterQuery):
         self._vector_options = dict(vector_options or {})
         super().__init__(table, pre_filter=pre_filter)
 
-    def to_arrow(self):
+    def to_arrow(self, *, execution="local", concurrency=None, ray_remote_args=None):
+        """Return one Arrow table per query, optionally searching splits on Ray.
+
+        Ray execution supports data-evolution tables. ``concurrency`` bounds
+        in-flight tasks (defaults to 4); ``ray_remote_args`` configures their
+        resources and retries. Batch refinement and shared result lookup run
+        on the driver, using the same snapshot as all workers.
+        """
+        if execution == "local":
+            if concurrency is not None or ray_remote_args is not None:
+                raise ValueError("Ray options require execution='ray'.")
+            query = self._for_execution()
+            return query._read_batch_results(query._execute_batch_vector(query))
+        if execution != "ray":
+            raise ValueError("execution must be 'local' or 'ray'.")
+
+        from pypaimon.ray.batch_vector_search import _execute_batch_vector_search
+
         query = self._for_execution()
-        return query._read_batch_results(query._execute_batch_vector(query))
+        results = _execute_batch_vector_search(
+            self._batch_vector_search_builder(query),
+            concurrency=concurrency, ray_remote_args=ray_remote_args)
+        return query._read_batch_results(results)
 
     def _read_batch_results(self, results):
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -703,6 +723,9 @@ class BatchVectorQuery(_PreFilterQuery):
         return [table.to_pylist() for table in self.to_arrow()]
 
     def _execute_batch_vector(self, query):
+        return self._batch_vector_search_builder(query).execute_batch_local()
+
+    def _batch_vector_search_builder(self, query):
         limit = query._limit if query._limit is not None else 10
         builder = (
             query._table.new_batch_vector_search_builder()
@@ -713,4 +736,4 @@ class BatchVectorQuery(_PreFilterQuery):
         )
         if query._pre_filter is not None:
             builder = builder.with_filter(query._pre_filter)
-        return builder.execute_batch_local()
+        return builder
