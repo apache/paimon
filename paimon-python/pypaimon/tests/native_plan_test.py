@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import sys
 import unittest
 from types import ModuleType, SimpleNamespace
@@ -34,6 +35,7 @@ from pypaimon.read.native_plan import (
     _catalog_options,
     _predicate_to_native,
     _read_options,
+    _resolved_schema_json,
     _restore_python_partition_paths,
     native_family_search_modes_available,
     native_plan,
@@ -41,6 +43,8 @@ from pypaimon.read.native_plan import (
 )
 from pypaimon.read.plan import Plan
 from pypaimon.read.table_scan import TableScan
+from pypaimon.schema.data_types import AtomicType, DataField, MapType, RowType
+from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.utils.range import Range
 
@@ -106,6 +110,27 @@ class NativePlanTest(unittest.TestCase):
             version_patcher = patch('importlib.metadata.version', return_value='0.3.0')
             version_patcher.start()
             self.addCleanup(version_patcher.stop)
+
+    def test_resolved_schema_json_uses_canonical_nested_map_types(self):
+        schema = TableSchema(id=7, highest_field_id=1, time_millis=0, fields=[
+            DataField(0, 'attributes', MapType(False, AtomicType('STRING', False), RowType(True, [
+                DataField(1, 'counts', MapType(True, AtomicType('STRING', False), AtomicType('INT', False)))
+            ])))
+        ])
+        table = SimpleNamespace(table_schema=schema, options=CoreOptions(Options({})))
+        self.assertEqual(json.loads(_resolved_schema_json(table)), {
+            'version': 3, 'id': 7, 'highestFieldId': 1, 'timeMillis': 0,
+            'partitionKeys': [], 'primaryKeys': [], 'comment': None,
+            'options': {'source.split.target-size': '134217728',
+                        'source.split.open-file-cost': '4194304',
+                        'deletion-vectors.merge-on-read': 'false'},
+            'fields': [{'id': 0, 'name': 'attributes', 'type': {
+                'type': 'MAP NOT NULL', 'nullable': False, 'key': 'STRING NOT NULL',
+                'value': {'type': 'ROW', 'nullable': True, 'fields': [
+                    {'id': 1, 'name': 'counts', 'type': {
+                        'type': 'MAP', 'nullable': True,
+                        'key': 'STRING NOT NULL', 'value': 'INT NOT NULL'}}]}}}],
+        })
 
     def test_resolved_schema_keeps_custom_io_and_rest_on_catalog_path(self):
         from pypaimon.catalog.catalog_environment import CatalogEnvironment

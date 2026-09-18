@@ -92,6 +92,38 @@ class DataTypesTest(unittest.TestCase):
         self.assertEqual(str(MapType(True, AtomicType("STRING"), AtomicType("TIMESTAMP(6)"))),
                          "MAP<STRING, TIMESTAMP(6)>")
 
+    @parameterized.expand([
+        (nullable, key_nullable, value_nullable)
+        for nullable in (True, False)
+        for key_nullable in (True, False)
+        for value_nullable in (True, False)
+    ])
+    def test_map_json_uses_canonical_type(self, nullable, key_nullable, value_nullable):
+        key = "STRING" + ("" if key_nullable else " NOT NULL")
+        value = "INT" + ("" if value_nullable else " NOT NULL")
+        data_type = MapType(nullable, AtomicType("STRING", key_nullable),
+                            AtomicType("INT", value_nullable))
+        self.assertEqual(data_type.to_dict(), {
+            "type": "MAP" + ("" if nullable else " NOT NULL"),
+            "key": key, "value": value, "nullable": nullable,
+        })
+        self.assertEqual(str(data_type), "MAP<{}, {}>{}".format(
+            key, value, "" if nullable else " NOT NULL"))
+
+    @parameterized.expand([
+        ("MAP<STRING NOT NULL, INT NOT NULL>", {}, True),
+        ("MAP<STRING NOT NULL, INT NOT NULL>", {"nullable": True}, True),
+        ("MAP<STRING NOT NULL, INT NOT NULL>", {"nullable": False}, False),
+        ("MAP<STRING NOT NULL, INT NOT NULL> NOT NULL", {}, False),
+        ("MAP<STRING NOT NULL, INT NOT NULL> NOT NULL", {"nullable": None}, False),
+        ("MAP<STRING NOT NULL, INT NOT NULL> NOT NULL", {"nullable": True}, True),
+    ])
+    def test_legacy_map_json_nullability(self, type_name, attributes, nullable):
+        legacy = dict({"type": type_name, "key": "STRING NOT NULL", "value": "INT NOT NULL"},
+                      **attributes)
+        self.assertEqual(MapType.from_dict(legacy), MapType(
+            nullable, AtomicType("STRING", False), AtomicType("INT", False)))
+
     def test_map_nullability_dict_roundtrip(self):
         for map_nullable in (True, False):
             for value_nullable in (True, False):

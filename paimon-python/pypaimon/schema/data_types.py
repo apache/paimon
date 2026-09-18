@@ -263,7 +263,7 @@ class MapType(DataType):
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "type": "MAP<{}, {}>".format(self.key, self.value),
+            "type": "MAP" + (" NOT NULL" if not self.nullable else ""),
             "key": self.key.to_dict() if self.key else None,
             "value": self.value.to_dict() if self.value else None,
             "nullable": self.nullable,
