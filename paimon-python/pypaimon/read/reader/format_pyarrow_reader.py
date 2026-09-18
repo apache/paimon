@@ -534,7 +534,7 @@ class FormatPyArrowReader(RecordBatchReader):
                 self._parquet_file = pq.ParquetFile(self._parquet_source)
                 if (self._selected_parquet_row_groups is not None
                         and options is not None
-                        and options.read_parquet_page_index_enabled()
+                        and options.parquet_column_index_enabled()
                         and self._row_group_cache is None
                         and not self._has_nested_path
                         and not self._bounded_variant_read):

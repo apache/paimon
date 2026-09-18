@@ -41,7 +41,7 @@ N = 16384
 RUNS = [(0, 2), (125, 132), (4500, 4540), (N - 2, N - 1)]
 FIELDS = [DataField(0, 'id', AtomicType('BIGINT')),
           DataField(1, 'payload', AtomicType('STRING'))]
-PAGE_INDEX_OPTIONS = CoreOptions(Options({'read.parquet.page-index.enabled': 'true'}))
+PAGE_INDEX_OPTIONS = CoreOptions(Options({'parquet.filter.columnindex.enabled': 'true'}))
 
 
 @pytest.fixture
@@ -282,10 +282,10 @@ def test_missing_or_corrupt_parquet_still_raises(fixture, missing):
 
 @pytest.mark.parametrize('values,enabled', [
     (None, False), ({}, False),
-    ({'read.parquet.page-index.enabled': 'false'}, False),
-    ({'read.parquet.page-index.enabled': False}, False),
-    ({'read.parquet.page-index.enabled': 'true'}, True),
-    ({'read.parquet.page-index.enabled': True}, True),
+    ({'parquet.filter.columnindex.enabled': 'false'}, False),
+    ({'parquet.filter.columnindex.enabled': False}, False),
+    ({'parquet.filter.columnindex.enabled': 'true'}, True),
+    ({'parquet.filter.columnindex.enabled': True}, True),
 ])
 def test_page_index_switch_bypasses_metadata_processing_when_disabled(fixture, values, enabled):
     options = CoreOptions(Options(values)) if values is not None else None
@@ -324,7 +324,7 @@ def test_table_copy_can_enable_and_disable_page_index_reads(tmp_path):
 
     table = catalog.get_table('default.indexed')
     for value in ('true', 'false', 'true'):
-        copied = table.copy({'read.parquet.page-index.enabled': value})
+        copied = table.copy({'parquet.filter.columnindex.enabled': value})
         builder = copied.new_read_builder().with_projection(['id', '_ROW_ID'])
         builder.with_filter(builder.new_predicate_builder().between('_ROW_ID', 4500, 4540))
         with patch.object(page_module.ParquetPageIndexReader, 'create',
@@ -332,5 +332,5 @@ def test_table_copy_can_enable_and_disable_page_index_reads(tmp_path):
             actual = builder.new_read().to_arrow(builder.new_scan().plan().splits())
         assert create.called == (value == 'true')
         assert actual.to_pydict() == {'id': list(range(4500, 4541)), '_ROW_ID': list(range(4500, 4541))}
-    assert not table.options.read_parquet_page_index_enabled()
-    assert not catalog.get_table('default.indexed').options.read_parquet_page_index_enabled()
+    assert not table.options.parquet_column_index_enabled()
+    assert not catalog.get_table('default.indexed').options.parquet_column_index_enabled()

@@ -1128,13 +1128,14 @@ class CoreOptions:
         .with_description("Read batch size for any file format if it supports.")
     )
 
-    READ_PARQUET_PAGE_INDEX_ENABLED: ConfigOption[bool] = (
-        ConfigOptions.key("read.parquet.page-index.enabled")
+    PARQUET_COLUMN_INDEX_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("parquet.filter.columnindex.enabled")
         .boolean_type()
         .default_value(False)
         .with_description(
             "Enable PyPaimon Parquet OffsetIndex reads for contiguous row windows. "
-            "Disabled by default. Requires flat schemas and existing offset indexes; "
+            "Uses the same key as Java, but defaults to false in Python (true in Java). "
+            "Requires flat schemas and existing offset indexes; "
             "unsupported or expensive selections use the ordinary reader. "
             "Does not enable ColumnIndex predicate filtering."
         )
@@ -1890,8 +1891,8 @@ class CoreOptions:
     def read_batch_size(self, default=None) -> int:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
 
-    def read_parquet_page_index_enabled(self) -> bool:
-        return self.options.get(CoreOptions.READ_PARQUET_PAGE_INDEX_ENABLED)
+    def parquet_column_index_enabled(self) -> bool:
+        return self.options.get(CoreOptions.PARQUET_COLUMN_INDEX_ENABLED)
 
     def read_parallelism(self, default=None) -> Optional[int]:
         return self.options.get(CoreOptions.READ_PARALLELISM, default)
