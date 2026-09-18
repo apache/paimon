@@ -327,6 +327,12 @@ under the License.
             <td>In streaming job, whether to force creating snapshot when there is no data in this write-commit phase.</td>
         </tr>
         <tr>
+            <td><h5>commit.last-safe-snapshot</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>Snapshot preceding the earliest snapshot to inspect when committing. Only later snapshots are searched for this commit user's previous commits. This also provides the starting point for strict-mode checks when enabled. Keep this bound unchanged across retries and recovery.</td>
+        </tr>
+        <tr>
             <td><h5>commit.max-retries</h5></td>
             <td style="word-wrap: break-word;">10</td>
             <td>Integer</td>
@@ -345,10 +351,10 @@ under the License.
             <td>Min retry wait time when commit failed.</td>
         </tr>
         <tr>
-            <td><h5>commit.strict-mode.last-safe-snapshot</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Long</td>
-            <td>If set, committer will check if there are other commit user's snapshot starting from the snapshot after this one. If found a COMPACT / OVERWRITE snapshot, or found a APPEND snapshot which committed files to fixed bucket, commit will be aborted.If the value of this option is -1, committer will not check for its first commit.</td>
+            <td><h5>commit.strict-mode.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to check concurrent snapshot changes after commit.last-safe-snapshot, when that bound is configured. Rejects COMPACT or OVERWRITE changes in the same partition, and fixed-bucket APPEND changes when committing OVERWRITE. Disabling this does not disable regular conflict detection or the history search bound.</td>
         </tr>
         <tr>
             <td><h5>commit.timeout</h5></td>

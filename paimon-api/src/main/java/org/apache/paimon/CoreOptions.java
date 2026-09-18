@@ -2461,15 +2461,34 @@ public class CoreOptions implements Serializable {
                                     + "instead of at the end of the schema. "
                                     + "This only takes effect for partitioned tables.");
 
+    public static final ConfigOption<Long> COMMIT_LAST_SAFE_SNAPSHOT =
+            ConfigOptions.key("commit.last-safe-snapshot")
+                    .longType()
+                    .noDefaultValue()
+                    .withFallbackKeys("commit.strict-mode.last-safe-snapshot")
+                    .withDescription(
+                            "Snapshot preceding the earliest snapshot to inspect when committing. "
+                                    + "Only later snapshots are searched for this commit user's previous commits. "
+                                    + "This also provides the starting point for strict-mode checks when enabled. "
+                                    + "Keep this bound unchanged across retries and recovery.");
+
+    public static final ConfigOption<Boolean> COMMIT_STRICT_MODE_ENABLED =
+            ConfigOptions.key("commit.strict-mode.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to check concurrent snapshot changes after commit.last-safe-snapshot, "
+                                    + "when that bound is configured. Rejects COMPACT or OVERWRITE changes "
+                                    + "in the same partition, and fixed-bucket APPEND changes when committing OVERWRITE. "
+                                    + "Disabling this does not disable regular conflict detection or the history search bound.");
+
+    /** @deprecated Use {@link #COMMIT_LAST_SAFE_SNAPSHOT}. */
+    @Deprecated
     public static final ConfigOption<Long> COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT =
             ConfigOptions.key("commit.strict-mode.last-safe-snapshot")
                     .longType()
                     .noDefaultValue()
-                    .withDescription(
-                            "If set, committer will check if there are other commit user's snapshot starting from the "
-                                    + "snapshot after this one. If found a COMPACT / OVERWRITE snapshot, or found a "
-                                    + "APPEND snapshot which committed files to fixed bucket, commit will be aborted."
-                                    + "If the value of this option is -1, committer will not check for its first commit.");
+                    .withDescription("Deprecated alias for commit.last-safe-snapshot.");
 
     public static final ConfigOption<String> CLUSTERING_COLUMNS =
             key("clustering.columns")
@@ -4612,8 +4631,18 @@ public class CoreOptions implements Serializable {
         return options.get(AGGREGATION_REMOVE_RECORD_ON_DELETE);
     }
 
+    public Optional<Long> commitLastSafeSnapshot() {
+        return options.getOptional(COMMIT_LAST_SAFE_SNAPSHOT);
+    }
+
+    public boolean commitStrictModeEnabled() {
+        return options.get(COMMIT_STRICT_MODE_ENABLED);
+    }
+
+    /** @deprecated Use {@link #commitLastSafeSnapshot()}. */
+    @Deprecated
     public Optional<Long> commitStrictModeLastSafeSnapshot() {
-        return options.getOptional(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT);
+        return commitLastSafeSnapshot();
     }
 
     public List<String> clusteringColumns() {

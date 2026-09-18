@@ -367,6 +367,45 @@ public class FileStoreCommitTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"commit.last-safe-snapshot", "commit.strict-mode.last-safe-snapshot"})
+    public void testFilterCommittedWithStrictModeDisabled(String lastSafeKey) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(lastSafeKey, "2");
+        options.put(CoreOptions.COMMIT_STRICT_MODE_ENABLED.key(), "false");
+        TestFileStore store = createStore(false, options);
+        try (FileStoreCommit commit = store.newCommit("older-user", null)) {
+            commit.ignoreEmptyCommit(false);
+            commit.commit(new ManifestCommittable(1), false);
+            commit.commit(new ManifestCommittable(2), false);
+        }
+
+        // A disabled strict checker must still honor the search bound. Fail if the lookup
+        // reaches old history, rather than relying on timing to detect a full history scan.
+        Path oldSnapshot = store.snapshotManager().snapshotPath(1);
+        store.fileIO().deleteQuietly(oldSnapshot);
+        store.fileIO().writeFile(oldSnapshot, "not a snapshot", false);
+        store.snapshotManager().invalidateCache();
+        ManifestCommittable pending = new ManifestCommittable(10);
+        try (FileStoreCommit commit = store.newCommit("new-user", null)) {
+            assertThat(commit.filterCommitted(Collections.singletonList(pending)))
+                    .containsExactly(pending);
+            commit.ignoreEmptyCommit(false);
+            commit.commit(pending, false);
+        }
+        try (FileStoreCommit commit = store.newCommit("other-user", null)) {
+            commit.ignoreEmptyCommit(false);
+            commit.commit(new ManifestCommittable(1), false);
+        }
+
+        // Recovery after a successful commit with a lost response still deduplicates it.
+        try (FileStoreCommit recovered = store.newCommit("new-user", null)) {
+            ManifestCommittable next = new ManifestCommittable(11);
+            assertThat(recovered.filterCommitted(Arrays.asList(pending, next)))
+                    .containsExactly(next);
+        }
+    }
+
     protected void testRandomConcurrentNoConflict(
             int numThreads, boolean failing, CoreOptions.ChangelogProducer changelogProducer)
             throws Exception {

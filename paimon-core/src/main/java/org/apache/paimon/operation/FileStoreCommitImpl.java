@@ -222,7 +222,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.statsFileHandler = statsFileHandler;
         this.bucketMode = bucketMode;
         this.strictModeChecker =
-                options.commitStrictModeLastSafeSnapshot()
+                options.commitLastSafeSnapshot()
+                        .filter(ignored -> options.commitStrictModeEnabled())
                         .map(
                                 id ->
                                         new StrictModeChecker(
@@ -294,14 +295,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     "Committables must be sorted according to identifiers before filtering. This is unexpected.");
         }
 
-        Optional<Long> optionalStrictSnapshot = options.commitStrictModeLastSafeSnapshot();
+        Optional<Long> lastSafeSnapshot = options.commitLastSafeSnapshot();
         Optional<Snapshot> latestSnapshot;
-        if (optionalStrictSnapshot.isPresent()) {
+        if (lastSafeSnapshot.isPresent()) {
             latestSnapshot =
                     snapshotManager.latestSnapshotOfUser(
                             commitUser,
                             snapshotManager.latestSnapshotId(),
-                            optionalStrictSnapshot.get() + 1);
+                            lastSafeSnapshot.get() + 1);
         } else {
             latestSnapshot = snapshotManager.latestSnapshotOfUser(commitUser);
         }
