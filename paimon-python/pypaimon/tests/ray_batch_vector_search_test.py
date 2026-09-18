@@ -114,8 +114,8 @@ def test_native_query_blocks_and_shared_final_lookup(table, ray_cluster):
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("fail_scoring", [False, True])
-def test_raw_worker_streams_nullable_batches_and_closes_reader(table, fail_scoring):
+@pytest.mark.parametrize("fail_read", [False, True])
+def test_raw_worker_streams_nullable_batches_and_closes_reader(table, fail_read):
     query = table.search_vectors(QUERIES)
     reader = query._batch_vector_search_builder(query).new_batch_vector_search_read()
     schema = pa.schema([("_ROW_ID", pa.int64()), ("embedding", pa.list_(pa.float32(), 2))])
@@ -124,7 +124,9 @@ def test_raw_worker_streams_nullable_batches_and_closes_reader(table, fail_scori
     def batches():
         try:
             yield pa.record_batch([[0, 1], [[1., 1.], None]], schema=schema)
-            yield pa.record_batch([[2], [[float("nan") if fail_scoring else 10., 1.]]], schema=schema)
+            if fail_read:
+                raise RuntimeError("injected read failure")
+            yield pa.record_batch([[2], [[10., 1.]]], schema=schema)
         finally:
             closed.append(True)
 
@@ -132,8 +134,8 @@ def test_raw_worker_streams_nullable_batches_and_closes_reader(table, fail_scori
     arrow = pa.RecordBatchReader.from_batches(schema, source)
     table_read = SimpleNamespace(table=reader._table, _new_arrow_batch_reader=Mock(return_value=(arrow, source)))
     context = (table_read, reader._vector_column, QUERIES, 1, "l2")
-    if fail_scoring:
-        with pytest.raises(ValueError, match="cannot rank NaN"):
+    if fail_read:
+        with pytest.raises(RuntimeError, match="injected read failure"):
             search_module._search_batch_raw_split(context, "split")
     else:
         results = search_module._search_batch_raw_split(context, "split")
@@ -331,24 +333,3 @@ def test_rejects_non_data_evolution_table(table):
     with patch.object(query._table.options.__class__, "data_evolution_enabled", return_value=False), \
             pytest.raises(ValueError, match="only data-evolution tables"):
         query.to_arrow(execution="ray")
-
-
-@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
-def test_rejects_nonfinite_query_before_dispatch(table, value):
-    with pytest.raises(ValueError, match="finite query vectors"):
-        table.search_vectors([[1., 1.], [value, 1.]]).to_arrow(execution="ray")
-
-
-@pytest.mark.parametrize("refine", [False, True])
-def test_nan_scores_fail_before_top_k(table, ray_cluster, refine):
-    add_rows(table, [[1., 1.], [float("nan"), 1.], [10., 1.]])
-    query = table.search_vectors(QUERIES, options={"refine_factor": "2"}).limit(1)._for_execution()
-    reader = query._batch_vector_search_builder(query).new_batch_vector_search_read()
-    distributed = search_module._RayBatchVectorSearchRead(reader, 2, {})
-    with pytest.raises(ValueError, match="cannot rank NaN"):
-        if refine:
-            candidates = [DictBasedScoredIndexResult({0: 1., 1: 0.5})] * 3
-            distributed._maybe_rerank_indexed_results(
-                candidates, "ivf-flat", QUERIES, query._table._read_snapshot)
-        else:
-            query.to_arrow(execution="ray")

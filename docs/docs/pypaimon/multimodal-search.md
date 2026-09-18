@@ -138,8 +138,8 @@ neighbors = (
 the number of in-flight Ray tasks, with a default of 4. `ray_remote_args` supplies
 Ray task options, including resources and retry settings; `num_returns` is
 managed by PyPaimon. These two arguments require `execution="ray"`.
-Query vectors must contain finite values. If stored vectors produce NaN scores,
-Ray execution fails because NaN cannot be ranked consistently across tasks.
+Single-vector Ray queries require finite query values and fail if stored
+vectors produce NaN scores.
 
 Batch queries use the same execution options and return one Arrow table per
 input vector, in input order:

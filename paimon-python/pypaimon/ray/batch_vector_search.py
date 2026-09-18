@@ -18,11 +18,10 @@
 """Ray execution of snapshot-pinned batch vector queries."""
 
 from contextlib import closing
-import math
 
 from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.ray.vector_search import _execution_options, _map_tasks, _require_ray, _scores
+from pypaimon.ray.vector_search import _execution_options, _map_tasks, _require_ray
 from pypaimon.table.source.vector_search_read import (
     BatchVectorSearchReadImpl, _filtered_raw_row_ranges, _offer_score, _scored_result,
 )
@@ -35,8 +34,6 @@ def _execute_batch_vector_search(builder, *, concurrency=None, ray_remote_args=N
     if (type(reader) is not BatchVectorSearchReadImpl
             or not reader._table.options.data_evolution_enabled()):
         raise ValueError("Ray vector search supports only data-evolution tables.")
-    if not all(math.isfinite(float(value)) for query in reader._query_vectors for value in query):
-        raise ValueError("Ray vector search requires finite query vectors.")
     _require_ray()
     plan = builder.new_vector_search_scan().scan()
     return _RayBatchVectorSearchRead(reader, concurrency, remote_args).read_batch_plan(plan)
@@ -80,11 +77,6 @@ class _RayBatchVectorSearchRead(BatchVectorSearchReadImpl):
                         _offer_score(heap, self._limit, row_id, score)
         return [_scored_result(heap) for heap in heaps]
 
-    def _score_refine_splits(self, table_read, splits, queries_by_row, query_vectors, metric,
-                             reject_nan=True):
-        return super()._score_refine_splits(
-            table_read, splits, queries_by_row, query_vectors, metric, reject_nan=True)
-
 
 def _search_batch_index_split(context, item):
     table, column, queries, limit, options = context
@@ -114,4 +106,11 @@ def _search_batch_raw_split(context, split):
     scorer = BatchVectorSearchReadImpl(table_read.table, limit, column, queries)
     reader, batches = table_read._new_arrow_batch_reader([split])
     with _ClosableArrowBatchReader(reader, batches) as batch_reader:
-        return [_scores(result) for result in scorer._score_raw_batch_queries(batch_reader, metric, reject_nan=True)]
+        return [_scores(result) for result in scorer._score_raw_batch_queries(batch_reader, metric)]
+
+
+def _scores(result):
+    if result is None:
+        return {}
+    getter = result.score_getter()
+    return {row_id: getter(row_id) for row_id in result.results()}

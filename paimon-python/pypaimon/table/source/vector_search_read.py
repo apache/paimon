@@ -571,9 +571,7 @@ class AbstractVectorSearchReadImpl:
                         _offer_score(heap, self._limit, row_id, score_getter(row_id))
         return [_scored_result(heap) for heap in heaps]
 
-    def _score_refine_splits(self, table_read, splits, queries_by_row, query_vectors, metric,
-                             reject_nan=False):
-        import math
+    def _score_refine_splits(self, table_read, splits, queries_by_row, query_vectors, metric):
         from pypaimon.read.table_read import _ClosableArrowBatchReader
 
         heaps = [[] for _ in query_vectors]
@@ -595,8 +593,6 @@ class AbstractVectorSearchReadImpl:
                         scores = _iter_arrow_scores(vectors.take(block), query, metric)
                         for position, score in zip(block, scores):
                             if score is not None:
-                                if reject_nan and math.isnan(score):
-                                    raise ValueError("Ray vector search cannot rank NaN scores.")
                                 _offer_score(heaps[query_index], self._limit,
                                              row_ids[position], score)
                 del batch, row_ids, vectors
@@ -764,9 +760,7 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         with _ClosableArrowBatchReader(reader, batches) as batch_reader:
             return self._score_raw_batch_queries(batch_reader, metric)
 
-    def _score_raw_batch_queries(self, batches, metric, reject_nan=False):
-        import math
-
+    def _score_raw_batch_queries(self, batches, metric):
         heaps = [[] for _ in self._query_vectors]
         for batch in batches:
             row_ids = batch.column(SpecialFields.ROW_ID.name).to_pylist()
@@ -778,8 +772,6 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
                 block_row_ids = row_ids[start:start + len(scores)]
                 for row_id, score in zip(block_row_ids, scores):
                     if score is not None:
-                        if reject_nan and math.isnan(score):
-                            raise ValueError("Ray vector search cannot rank NaN scores.")
                         _offer_score(heap, self._limit, row_id, score)
             del batch, row_ids, vectors
         return [_scored_result(heap) for heap in heaps]
