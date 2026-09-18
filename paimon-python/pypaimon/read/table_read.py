@@ -252,7 +252,17 @@ class TableRead:
         return pyarrow.schema([row_kind_field] + list(schema))
 
     @staticmethod
-    def _try_to_pad_batch_by_schema(batch: pyarrow.RecordBatch, target_schema):
+    def _try_to_pad_batch_by_schema(
+            batch: pyarrow.RecordBatch,
+            target_schema,
+            allow_type_cast: bool = False):
+        """Align a batch with the requested schema.
+
+        Native batches stay strict so an outdated Rust BLOB representation
+        cannot be silently converted. Python query-auth masking is allowed
+        to cast internal dependency columns because masking intentionally may
+        change their logical type.
+        """
         if batch.schema.equals(target_schema, check_metadata=True):
             return batch
 
@@ -263,9 +273,11 @@ class TableRead:
             if field.name in batch.schema.names:
                 col = batch.column(field.name)
                 if col.type != field.type:
-                    raise TypeError(
-                        "Batch field '%s' has type %s, expected %s" % (
-                            field.name, col.type, field.type))
+                    if not allow_type_cast:
+                        raise TypeError(
+                            "Batch field '%s' has type %s, expected %s" % (
+                                field.name, col.type, field.type))
+                    col = col.cast(field.type)
             else:
                 col = pyarrow.nulls(num_rows, type=field.type)
             columns.append(col)
@@ -334,13 +346,16 @@ class TableRead:
         for batch in iter(batch_reader.read_next_batch, None):
             if batch.num_rows == 0:
                 continue
-            table_list.append(self._try_to_pad_batch_by_schema(batch, schema))
+            table_list.append(self._try_to_pad_batch_by_schema(
+                batch, schema, allow_type_cast=True))
 
-        return self._batches_to_arrow(table_list, schema)
+        return self._batches_to_arrow(
+            table_list, schema, allow_type_cast=True)
 
     @staticmethod
-    def _batches_to_arrow(batches, schema):
-        batches = [TableRead._try_to_pad_batch_by_schema(batch, schema)
+    def _batches_to_arrow(batches, schema, allow_type_cast: bool = False):
+        batches = [TableRead._try_to_pad_batch_by_schema(
+            batch, schema, allow_type_cast=allow_type_cast)
                    for batch in batches if batch.num_rows > 0]
         if not batches:
             return pyarrow.Table.from_arrays(
@@ -719,7 +734,8 @@ class TableRead:
             for batch in split_batches:
                 if batch.num_rows == 0:
                     continue
-                table_list.append(self._try_to_pad_batch_by_schema(batch, schema))
+                table_list.append(self._try_to_pad_batch_by_schema(
+                    batch, schema, allow_type_cast=True))
 
         if not table_list:
             return pyarrow.Table.from_arrays(
