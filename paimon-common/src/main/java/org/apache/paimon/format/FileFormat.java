@@ -74,10 +74,6 @@ public abstract class FileFormat {
     }
 
     public static FileFormat fromIdentifier(String identifier, Options options) {
-        return fromIdentifier(identifier, options, false);
-    }
-
-    private static FileFormat fromIdentifier(String identifier, Options options, boolean manifest) {
         return fromIdentifier(
                 normalizeFileFormat(identifier),
                 new FormatContext(
@@ -86,8 +82,7 @@ public abstract class FileFormat {
                         options.get(CoreOptions.WRITE_BATCH_SIZE),
                         options.get(CoreOptions.WRITE_BATCH_MEMORY),
                         options.get(CoreOptions.FILE_COMPRESSION_ZSTD_LEVEL),
-                        options.get(CoreOptions.FILE_BLOCK_SIZE),
-                        manifest));
+                        options.get(CoreOptions.FILE_BLOCK_SIZE)));
     }
 
     /** Create a {@link FileFormat} from format identifier and format options. */
@@ -125,6 +120,6 @@ public abstract class FileFormat {
         // Manifest blocks retain the Avro default independently of data-file block sizing.
         Options manifestOptions = new Options(options.toMap());
         manifestOptions.remove(CoreOptions.FILE_BLOCK_SIZE);
-        return FileFormat.fromIdentifier(CoreOptions.FILE_FORMAT_AVRO, manifestOptions, true);
+        return FileFormat.fromIdentifier(CoreOptions.FILE_FORMAT_AVRO, manifestOptions);
     }
 }

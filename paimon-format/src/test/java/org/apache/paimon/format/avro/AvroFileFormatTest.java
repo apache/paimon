@@ -261,7 +261,7 @@ public class AvroFileFormatTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"avro", "parquet", "orc"})
-    void testManifestWriterUsesDirectEncoder(String dataFileFormat) throws IOException {
+    void testManifestRowWriterUsesBufferedEncoder(String dataFileFormat) throws IOException {
         Options options = new Options();
         options.set(CoreOptions.FILE_FORMAT, dataFileFormat);
         FileFormat manifestFormat = FileFormat.manifestFormat(new CoreOptions(options));
@@ -275,7 +275,7 @@ public class AvroFileFormatTest {
             assertThat(writer)
                     .extracting("writer")
                     .extracting("bufOut")
-                    .isInstanceOf(DirectBinaryEncoder.class);
+                    .isInstanceOf(BufferedBinaryEncoder.class);
             writer.addElement(GenericRow.of(42));
         }
     }
