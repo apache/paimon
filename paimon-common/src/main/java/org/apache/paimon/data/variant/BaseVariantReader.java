@@ -543,7 +543,8 @@ public class BaseVariantReader {
             if (noNeedCast) {
                 return i;
             }
-            Object result = VariantGet.castScalar(i, scalaType, targetType, resolve);
+            Object result =
+                    VariantGet.castScalar(i, scalaType, targetType, resolve, castArgs.zoneId());
             return result == null ? invalidCast(row, topLevelMetadata) : result;
         }
     }

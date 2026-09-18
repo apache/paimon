@@ -29,16 +29,21 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.GenericVariantUtil.Type;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.utils.DateTimeUtils;
 
 import javax.annotation.Nullable;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.ZoneId;
 import java.util.HashMap;
+import java.util.TimeZone;
 
 /** Utils for variant get. */
 public class VariantGet {
@@ -175,7 +180,7 @@ public class VariantGet {
 
             CastExecutor<Object, Object> resolve =
                     (CastExecutor<Object, Object>) CastExecutors.resolve(inputType, dataType);
-            Object result = castScalar(input, inputType, dataType, resolve);
+            Object result = castScalar(input, inputType, dataType, resolve, castArgs.zoneId());
             return result == null ? invalidCast(v, dataType, castArgs) : result;
         }
     }
@@ -183,14 +188,21 @@ public class VariantGet {
     /**
      * Casts a non-null scalar read from a variant to {@code targetType}, returning null when the
      * cast is invalid. The generic cast rules wrap a numeric value that does not fit the target, so
-     * an out-of-range value is rejected here first, matching Spark's TRY cast semantics.
+     * an out-of-range value is rejected here first, matching Spark's TRY cast semantics. Casts that
+     * move between an instant and a local date or time use {@code zoneId}, the zone the query asked
+     * for, rather than the JVM default the generic rules fall back to.
      */
     @Nullable
     static Object castScalar(
             Object input,
             DataType inputType,
             DataType targetType,
-            @Nullable CastExecutor<Object, Object> executor) {
+            @Nullable CastExecutor<Object, Object> executor,
+            ZoneId zoneId) {
+        Object temporal = castTemporal(input, inputType, targetType, zoneId);
+        if (temporal != NOT_TEMPORAL) {
+            return temporal;
+        }
         if (executor == null || !fitsIntegralTarget(input, inputType, targetType)) {
             return null;
         }
@@ -199,6 +211,76 @@ public class VariantGet {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private static final Object NOT_TEMPORAL = new Object();
+
+    /**
+     * The casts whose result depends on a time zone: between a timestamp with local time zone and a
+     * string, a timestamp without time zone or a date, and from a string to a timestamp with local
+     * time zone. Returns {@link #NOT_TEMPORAL} for every other pair, and null for a string that
+     * does not parse. A timestamp renders like Spark's cast, without trailing fraction zeros.
+     */
+    @Nullable
+    private static Object castTemporal(
+            Object input, DataType inputType, DataType targetType, ZoneId zoneId) {
+        TimeZone tz = TimeZone.getTimeZone(zoneId);
+        switch (inputType.getTypeRoot()) {
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                Timestamp instant = (Timestamp) input;
+                switch (targetType.getTypeRoot()) {
+                    case CHAR:
+                    case VARCHAR:
+                        return BinaryString.fromString(
+                                DateTimeUtils.formatTimestamp(
+                                        DateTimeUtils.timestampWithLocalZoneToTimestamp(
+                                                instant, tz),
+                                        0));
+                    case TIMESTAMP_WITHOUT_TIME_ZONE:
+                        return truncate(
+                                DateTimeUtils.timestampWithLocalZoneToTimestamp(instant, tz),
+                                targetType);
+                    case DATE:
+                        return DateTimeUtils.timestampWithLocalZoneToDate(instant, tz);
+                    default:
+                        return NOT_TEMPORAL;
+                }
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                Timestamp local = (Timestamp) input;
+                switch (targetType.getTypeRoot()) {
+                    case CHAR:
+                    case VARCHAR:
+                        return BinaryString.fromString(DateTimeUtils.formatTimestamp(local, 0));
+                    case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                        return truncate(
+                                DateTimeUtils.timestampToTimestampWithLocalZone(local, tz),
+                                targetType);
+                    default:
+                        return NOT_TEMPORAL;
+                }
+            case DATE:
+                if (targetType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
+                    return DateTimeUtils.dateToTimestampWithLocalZone((Integer) input, tz);
+                }
+                return NOT_TEMPORAL;
+            case CHAR:
+            case VARCHAR:
+                if (targetType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
+                    try {
+                        return DateTimeUtils.parseTimestampData(
+                                input.toString(), DataTypeChecks.getPrecision(targetType), tz);
+                    } catch (Exception e) {
+                        return null;
+                    }
+                }
+                return NOT_TEMPORAL;
+            default:
+                return NOT_TEMPORAL;
+        }
+    }
+
+    private static Timestamp truncate(Timestamp timestamp, DataType targetType) {
+        return DateTimeUtils.truncate(timestamp, DataTypeChecks.getPrecision(targetType));
     }
 
     /** Whether a numeric {@code input} lies within the range of an integral {@code targetType}. */
