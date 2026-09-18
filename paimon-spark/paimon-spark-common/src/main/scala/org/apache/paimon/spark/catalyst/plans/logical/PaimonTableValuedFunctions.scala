@@ -69,6 +69,23 @@ object PaimonTableValuedFunctions {
       HYBRID_SEARCH,
       FULL_TEXT_SEARCH)
 
+  /**
+   * Rejects a vector / hybrid / full-text search that carries a residual predicate Spark cannot
+   * push into Paimon. Such a residual is applied by Spark above the search, whose result is already
+   * truncated to the top-K, so a row that satisfies the residual but ranks just outside the
+   * returned K is lost and the result comes back short. Failing is consistent with the Flink
+   * `vector_search` procedure, which rejects an inexpressible predicate rather than silently
+   * dropping rows.
+   */
+  def failUnpushableSearchFilter(residuals: Seq[String]): Nothing = {
+    throw new UnsupportedOperationException(
+      "Vector, hybrid or full-text search does not support a filter that cannot be pushed down " +
+        "to Paimon, because it would be applied above the already-truncated top-K result and can " +
+        "silently drop matching rows: " + residuals.mkString("[", ", ", "]") +
+        ". Rewrite it into a pushable predicate on table columns (avoid UDFs, column-to-column " +
+        "comparisons and unresolvable casts).")
+  }
+
   def parsePositiveLimit(value: Any): Int = {
     val limit = value match {
       case i: Int => i

@@ -48,6 +48,13 @@ object PushDownLateralVectorSearchFilter extends Rule[LogicalPlan] with Predicat
             .isDefined
       }
 
+      // A residual on searched-table columns that cannot be pushed into the search would be applied
+      // above its top-K result and can silently drop matching rows, so fail rather than mislead.
+      val unpushable = stayUp.filter(_.references.intersect(lvs.searchFilterOutputSet).nonEmpty)
+      if (unpushable.nonEmpty) {
+        PaimonTableValuedFunctions.failUnpushableSearchFilter(unpushable.map(_.sql))
+      }
+
       if (pushDownToLeft.isEmpty && pushDownToSearch.isEmpty) {
         filter
       } else {

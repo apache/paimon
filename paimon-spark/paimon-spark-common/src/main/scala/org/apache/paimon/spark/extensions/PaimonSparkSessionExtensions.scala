@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.extensions
 
 import org.apache.paimon.spark.catalyst.analysis.{PaimonAnalysis, PaimonDeleteTable, PaimonFunctionResolver, PaimonIncompatibleResolutionRules, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonProcedureResolver, PaimonUpdateTable, PaimonViewResolver, ReplacePaimonFunctions}
-import org.apache.paimon.spark.catalyst.optimizer.{MergePaimonScalarSubqueries, OptimizeMetadataOnlyDeleteFromPaimonTable, PushDownArrayPredicates, PushDownLateralVectorSearchFilter, RepartitionLateralVectorSearchInput}
+import org.apache.paimon.spark.catalyst.optimizer.{CheckUnpushableSearchFilter, MergePaimonScalarSubqueries, OptimizeMetadataOnlyDeleteFromPaimonTable, PushDownArrayPredicates, PushDownLateralVectorSearchFilter, RepartitionLateralVectorSearchInput}
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions
 import org.apache.paimon.spark.commands.BucketExpression
 import org.apache.paimon.spark.execution.{OldCompatibleStrategy, PaimonStrategy}
@@ -107,6 +107,7 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     }
     extensions.injectOptimizerRule(_ => RepartitionLateralVectorSearchInput)
     extensions.injectOptimizerRule(_ => PushDownLateralVectorSearchFilter)
+    extensions.injectOptimizerRule(_ => CheckUnpushableSearchFilter)
 
     // planner extensions
     extensions.injectPlannerStrategy(spark => PaimonStrategy(spark))
