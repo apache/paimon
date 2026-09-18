@@ -105,6 +105,28 @@ pip3 install dist/*.tar.gz
 
 The command will install the package and core dependencies to your local Python environment.
 
+# Parquet page-index reads
+
+`read.parquet.page-index.enabled` is disabled by default. Enable it for a read
+using a table copy, without changing persisted table options:
+
+```python
+indexed_table = table.copy({"read.parquet.page-index.enabled": "true"})
+builder = indexed_table.new_read_builder()
+# On a row-tracking table, select a contiguous row-ID window.
+builder.with_filter(builder.new_predicate_builder().between("_ROW_ID", 100, 199))
+rows = builder.new_read().to_arrow(builder.new_scan().plan().splits())
+```
+
+The optimization uses existing Parquet OffsetIndexes for one contiguous window
+per row group in flat schemas. Disjoint windows, nested schemas, missing indexes,
+older Arrow versions without index metadata support, and decoded row-group cache
+reads retain the ordinary reader. Large or unprofitable page selections also fall
+back. Enabling this option does not enable ColumnIndex predicate filtering or
+force unsupported reads through the page-index path. It can reduce bytes read;
+fewer OSS HEAD/GET requests or lower latency are not guaranteed. Set the option to
+`"false"` to bypass page-index processing entirely.
+
 # Native scan planning
 
 PyPaimon can plan splits with the optional `pypaimon-rust` package while retaining
