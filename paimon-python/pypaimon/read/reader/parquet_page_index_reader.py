@@ -15,13 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Read contiguous windows of flat Parquet columns using their OffsetIndex.
+"""Read contiguous windows of flat or standard VARIANT columns using OffsetIndex.
 
 Selected encoded pages are placed in bounded, in-memory Parquet files. PyArrow
 still decodes the pages, including dictionary and compression encodings. Source
-files are never rewritten. Nested schemas and files without indexes use the
-normal reader. Disjoint ranges use the normal reader too: per-page seeks can
-amplify requests in filesystems that prefetch remote data (including Jindo).
+files are never rewritten. Other nested schemas and files without indexes use
+the normal reader. Disjoint ranges use the normal reader too: per-page seeks
+can amplify requests in filesystems that prefetch remote data (including Jindo).
 """
 
 import base64
@@ -162,29 +162,24 @@ def _read_exact(source, offset, length):
 
 
 class ParquetPageIndexReader:
-    def __init__(self, source, metadata, schema, footer, columns, batch_size):
+    def __init__(self, source, metadata, footer, columns, projections,
+                 leaf_fields, schema_elements, batch_size):
         self.source = source
         self.metadata = metadata
-        self.schema = schema
         self.footer = footer
         self.columns = columns
+        self.projections = projections
+        self.leaf_fields = leaf_fields
+        self.schema_elements = schema_elements
         self.batch_size = batch_size
 
     @classmethod
     def create(cls, source, parquet_file, columns, row_groups, batch_size):
         metadata = parquet_file.metadata
         schema = parquet_file.schema_arrow
-        # Flat columns have one schema element and one physical column each.
-        if not columns or any(pa.types.is_nested(field.type) for field in schema):
+        if not columns or metadata.num_row_groups == 0:
             return None
-        if len(schema) != metadata.num_columns or len(set(schema.names)) != len(schema):
-            return None
-        indices = [schema.get_field_index(name) for name in columns]
-        if any(index < 0 for index in indices) or len(set(indices)) != len(indices):
-            return None
-        if not any(all(getattr(metadata.row_group(group).column(index),
-                               "has_offset_index", False) for index in indices)
-                   for group in row_groups):
+        if len(set(schema.names)) != len(schema):
             return None
         output = pa.BufferOutputStream()
         metadata.write_metadata_file(output)
@@ -194,9 +189,79 @@ class ParquetPageIndexReader:
         if 8 in footer or 9 in footer:
             return None  # Encrypted pages need the original file identity/AAD.
         elements = _get(footer, 2)[1]
-        if len(elements) != metadata.num_columns + 1:
+        if any(b'.' in _get(element, 4) for element in elements):
+            return None  # A joined physical path would be ambiguous.
+        leaf_elements = {}
+
+        def visit(position, prefix):
+            if len(prefix) > 64:
+                raise ValueError('Parquet schema nesting exceeds 64 levels')
+            element = elements[position]
+            name = _get(element, 4).decode('utf-8')
+            path = prefix + (name,)
+            position += 1
+            children = _get(element, 5, 0)
+            if children:
+                for _ in range(children):
+                    position = visit(position, path)
+            else:
+                leaf_elements['.'.join(path[1:])] = position - 1
+            return position
+
+        if visit(0, ()) != len(elements):
             return None
-        return cls(source, metadata, schema, footer, indices, batch_size)
+        physical = {
+            metadata.row_group(0).column(index).path_in_schema: index
+            for index in range(metadata.num_columns)
+        }
+        if len(physical) != metadata.num_columns:
+            return None
+        indices = []
+        projections = []
+        leaf_fields = {}
+        schema_elements = {}
+        for name in columns:
+            if '.' in name:
+                return None  # Avoid ambiguous physical paths for quoted dotted names.
+            field_index = schema.get_field_index(name)
+            if field_index < 0:
+                return None
+            field = schema.field(field_index)
+            if not pa.types.is_nested(field.type):
+                paths = [(name, field)]
+            elif (pa.types.is_struct(field.type)
+                  and len(field.type) == 2
+                  and [child.name for child in field.type] == ['value', 'metadata']
+                  and all(pa.types.is_binary(child.type) and not child.nullable
+                          for child in field.type)):
+                paths = [
+                    (name + '.' + child.name,
+                     pa.field(child.name, child.type, nullable=field.nullable))
+                    for child in field.type
+                ]
+            else:
+                return None
+            physical_indices = []
+            for path, leaf_field in paths:
+                index = physical.get(path)
+                if (index is None or path not in leaf_elements
+                        or parquet_file.schema.column(index).max_repetition_level != 0
+                        or parquet_file.schema.column(index).max_definition_level
+                        != int(leaf_field.nullable)):
+                    return None
+                physical_indices.append(index)
+                leaf_fields[index] = leaf_field
+                schema_elements[index] = leaf_elements[path]
+            indices.extend(physical_indices)
+            projections.append((field, physical_indices))
+        if len(set(indices)) != len(indices):
+            return None
+        if not any(all(getattr(metadata.row_group(group).column(index),
+                               'has_offset_index', False) for index in indices)
+                   for group in row_groups):
+            return None
+        return cls(source, metadata, footer, indices, projections,
+                   leaf_fields, schema_elements, batch_size)
 
     def read_row_group(self, group, runs):
         """Return selected batches, or None when the ordinary reader is cheaper."""
@@ -296,7 +361,7 @@ class ParquetPageIndexReader:
                     page_header = _get(header, 8)
                     actual = _get(page_header, 3)
                     if _get(page_header, 1) != actual:
-                        raise ValueError("Invalid flat Parquet data page")
+                        raise ValueError("Invalid non-repeated Parquet data page")
                 else:
                     raise ValueError("Invalid Parquet data page type")
                 if actual != expected:
@@ -315,9 +380,14 @@ class ParquetPageIndexReader:
         elements = _get(self.footer, 2)[1]
         root = dict(elements[0])
         root[5] = (5, 1)
-        schema = pa.schema([self.schema.field(index)])
+        schema = pa.schema([self.leaf_fields[index]])
         arrow_schema = base64.b64encode(schema.serialize().to_pybytes())
-        footer = {1: self.footer[1], 2: (9, (12, [root, elements[index + 1]])),
+        leaf = dict(elements[self.schema_elements[index]])
+        # A required VARIANT child inherits its optional parent's definition
+        # level when decoded as a temporary, flat leaf column.
+        leaf[3] = (5, int(self.leaf_fields[index].nullable))
+        footer = {1: self.footer[1],
+                  2: (9, (12, [root, leaf])),
                   3: (6, num_rows), 4: (9, (12, [patched_group])),
                   5: (9, (12, [{1: (8, b"ARROW:schema"), 2: (8, arrow_schema)}]))}
         if 6 in self.footer:
@@ -341,11 +411,9 @@ class ParquetPageIndexReader:
         readers = [self._column_batches(plan, runs) for plan in plans]
         remaining = sum(upper - lower + 1 for lower, upper in runs)
         positions = {plan[0]: position for position, plan in enumerate(plans)}
-        projection = [positions[index] for index in self.columns]
         try:
             arrays = [next(reader, None) for reader in readers]
             offsets = [0] * len(readers)
-            schema = pa.schema([self.schema.field(index) for index in self.columns])
             while any(array is not None for array in arrays):
                 if any(array is None for array in arrays):
                     raise ValueError("Parquet page-index columns have different row counts")
@@ -353,9 +421,20 @@ class ParquetPageIndexReader:
                 remaining -= count
                 if count <= 0 or remaining < 0:
                     raise ValueError("Invalid Parquet page-index result length")
+                projected = []
+                for field, indices in self.projections:
+                    parts = [arrays[positions[index]].slice(
+                        offsets[positions[index]], count) for index in indices]
+                    if len(parts) == 1:
+                        projected.append(parts[0])
+                    else:
+                        if not parts[0].is_null().equals(parts[1].is_null()):
+                            raise ValueError('VARIANT leaves have different null rows')
+                        projected.append(pa.StructArray.from_arrays(
+                            parts, fields=list(field.type),
+                            mask=parts[0].is_null() if field.nullable else None))
                 yield pa.RecordBatch.from_arrays(
-                    [arrays[index].slice(offsets[index], count) for index in projection],
-                    schema=schema)
+                    projected, schema=pa.schema([field for field, _ in self.projections]))
                 for index, array in enumerate(arrays):
                     offsets[index] += count
                     if offsets[index] == len(array):

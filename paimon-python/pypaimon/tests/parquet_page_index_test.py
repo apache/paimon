@@ -170,6 +170,90 @@ def test_sparse_row_indices_are_normalized(fixture):
     assert _read(fixture, row_ranges=[(N, N + 10)])[0] is None
 
 
+@pytest.mark.parametrize('selected_row', [0, 3009, 3011, 4095])
+@pytest.mark.parametrize('dictionary', [False, True])
+@pytest.mark.parametrize('page_version', ['1.0', '2.0'])
+def test_standard_variant_reads_only_selected_pages(
+        tmp_path, selected_row, dictionary, page_version):
+    count = 4096
+    variant_type = pa.struct([
+        pa.field('value', pa.binary(), nullable=False),
+        pa.field('metadata', pa.binary(), nullable=False),
+    ])
+    values = [
+        None if index % 17 == 0 else {
+            'value': hashlib.shake_256(str(index).encode()).digest(512),
+            'metadata': b'\x01',
+        }
+        for index in range(count)
+    ]
+    table = pa.table({
+        'id': pa.array(range(count), type=pa.int64()),
+        'record_value': pa.array(values, type=variant_type),
+    })
+    path = str(tmp_path / 'variant.parquet')
+    pq.write_table(table, path, write_page_index=True,
+                   data_page_size=4096, write_batch_size=32,
+                   row_group_size=count, use_dictionary=dictionary,
+                   compression='zstd', data_page_version=page_version)
+    counter = _CountingLocalFileSystem(skip_instance_cache=True)
+    file_io = LocalFileIO(str(tmp_path), Options({}))
+    file_io.filesystem = pafs.PyFileSystem(pafs.FSSpecHandler(counter))
+    fields = [DataField(0, 'id', AtomicType('BIGINT')),
+              DataField(1, 'record_value', AtomicType('VARIANT'))]
+
+    def read(options):
+        counter.reset_counts()
+        reader = reader_module.FormatPyArrowReader(
+            file_io, 'parquet', path, fields, None,
+            row_ranges=[(selected_row, selected_row)],
+            batch_size=31, options=options)
+        try:
+            if options is not None:
+                assert reader._page_index_reader is not None
+            batches = []
+            while True:
+                batch = reader.read_arrow_batch()
+                if batch is None:
+                    break
+                batches.append(batch)
+            return pa.Table.from_batches(batches), sum(size for _, size in counter.reads)
+        finally:
+            reader.close()
+
+    baseline, baseline_bytes = read(None)
+    optimized, optimized_bytes = read(PAGE_INDEX_OPTIONS)
+    assert optimized.equals(baseline)
+    assert optimized.equals(table.slice(selected_row, 1))
+    assert optimized_bytes < baseline_bytes * (0.8 if dictionary else 0.5)
+
+
+def test_variant_without_offset_index_uses_ordinary_reader(tmp_path):
+    variant_type = pa.struct([
+        pa.field('value', pa.binary(), nullable=False),
+        pa.field('metadata', pa.binary(), nullable=False),
+    ])
+    table = pa.table({
+        'record_value': pa.array([
+            {'value': b'one', 'metadata': b'\x01'},
+            {'value': b'two', 'metadata': b'\x01'},
+        ], type=variant_type),
+    })
+    path = str(tmp_path / 'unindexed-variant.parquet')
+    pq.write_table(table, path, write_page_index=False)
+    file_io = LocalFileIO(str(tmp_path), Options({}))
+    reader = reader_module.FormatPyArrowReader(
+        file_io, 'parquet', path,
+        [DataField(0, 'record_value', AtomicType('VARIANT'))], None,
+        row_ranges=[(1, 1)], options=PAGE_INDEX_OPTIONS)
+    try:
+        assert reader._page_index_reader is None
+        assert pa.Table.from_batches([reader.read_arrow_batch()]).equals(
+            table.slice(1, 1))
+    finally:
+        reader.close()
+
+
 def test_concurrent_readers_and_early_close(fixture):
     path, table, file_io, _ = fixture
 
