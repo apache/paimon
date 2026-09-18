@@ -20,15 +20,13 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FormatReaderFactory;
-import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.avro.AvroFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SegmentsCache;
@@ -37,22 +35,17 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 /** Index manifest file. */
 public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
 
-    private final FileFormat fileFormat;
-    private final RowType manifestType;
+    private final AvroFileFormat avroFileFormat;
 
     private IndexManifestFile(
             FileIO fileIO,
-            FileFormat fileFormat,
+            AvroFileFormat avroFileFormat,
             RowType schema,
-            FormatReaderFactory readerFactory,
-            FormatWriterFactory writerFactory,
             String compression,
             PathFactory pathFactory,
             @Nullable SegmentsCache<Path> cache) {
@@ -60,13 +53,12 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
                 fileIO,
                 new IndexManifestEntrySerializer(),
                 schema,
-                readerFactory,
-                writerFactory,
+                (path, ignoredFileSize) -> createIndexManifestIterator(fileIO, path, schema),
+                avroFileFormat.createWriterFactory(schema),
                 compression,
                 pathFactory,
                 cache);
-        this.fileFormat = fileFormat;
-        this.manifestType = schema;
+        this.avroFileFormat = avroFileFormat;
     }
 
     public Path indexManifestFilePath(String fileName) {
@@ -88,16 +80,10 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
             String fileName, BinaryIndexManifestEntry.Projection projection) {
         BinaryIndexManifestEntry entry = projection.createEntry();
         try {
-            CloseableIterator<InternalRow> rows =
-                    FileUtils.createFormatReader(
-                                    fileIO,
-                                    fileFormat.createReaderFactory(
-                                            manifestType,
-                                            projection.projectedType(),
-                                            Collections.emptyList()),
-                                    pathFactory.toPath(fileName),
-                                    null)
-                            .toCloseableIterator();
+            IndexManifestAvroReader reader =
+                    new IndexManifestAvroReader(
+                            fileIO.newInputStream(pathFactory.toPath(fileName)));
+            CloseableIterator<InternalRow> rows = reader.read(projection.projectedType(), true);
             return new CloseableIterator<BinaryIndexManifestEntry>() {
                 @Override
                 public boolean hasNext() {
@@ -120,6 +106,37 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
             };
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to read index manifest " + fileName, e);
+        }
+    }
+
+    /** Opens a block-aware reader over one index manifest. */
+    IndexManifestAvroReader scanAvroBlocks(String fileName) {
+        try {
+            return new IndexManifestAvroReader(fileIO.newInputStream(pathFactory.toPath(fileName)));
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read index manifest " + fileName, e);
+        }
+    }
+
+    /** Creates a one-file index manifest Avro writer. */
+    IndexManifestAvroWriter createAvroWriter() {
+        return new IndexManifestAvroWriter(
+                fileIO, avroFileFormat, serializer, compression, pathFactory);
+    }
+
+    /** Returns whether this complete index manifest is already materialized in the cache. */
+    boolean isCached(String fileName) {
+        return cache != null
+                && cache.segmentsCache().getIfPresents(pathFactory.toPath(fileName)) != null;
+    }
+
+    private static CloseableIterator<InternalRow> createIndexManifestIterator(
+            FileIO fileIO, Path path, RowType projectedType) throws IOException {
+        try {
+            return new IndexManifestAvroReader(fileIO.newInputStream(path)).read(projectedType);
+        } catch (IOException e) {
+            org.apache.paimon.utils.FileUtils.checkExists(fileIO, path);
+            throw e;
         }
     }
 
@@ -162,10 +179,8 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
             RowType schema = IndexManifestEntry.MANIFEST_ROW_TYPE;
             return new IndexManifestFile(
                     fileIO,
-                    fileFormat,
+                    (AvroFileFormat) fileFormat,
                     schema,
-                    fileFormat.createReaderFactory(schema, schema, new ArrayList<>()),
-                    fileFormat.createWriterFactory(schema),
                     compression,
                     pathFactory.indexManifestFileFactory(),
                     cache);

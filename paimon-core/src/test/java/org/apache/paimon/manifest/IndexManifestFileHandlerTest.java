@@ -20,17 +20,22 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.SegmentsCache;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -170,6 +175,62 @@ public class IndexManifestFileHandlerTest {
     }
 
     @Test
+    public void testLegacyIndexManifestRewriteFallsBackToResolvedRows() throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        FileFormat fileFormat = FileFormat.manifestFormat(fileStore.options());
+        IndexManifestFile indexManifestFile =
+                new IndexManifestFile.Factory(
+                                fileStore.fileIO(),
+                                fileFormat,
+                                "zstd",
+                                fileStore.pathFactory(),
+                                null)
+                        .create();
+        IndexManifestFileHandler handler =
+                new IndexManifestFileHandler(indexManifestFile, BucketMode.BUCKET_UNAWARE);
+
+        IndexManifestEntry previous = globalIndexEntry("previous", 0, 99, 1);
+        String legacyManifest = writeLegacyManifest(fileStore, fileFormat, previous);
+        IndexManifestEntry added = globalIndexEntry("added", 100, 199, 1);
+
+        String rewritten = handler.write(legacyManifest, Arrays.asList(added));
+
+        assertThat(indexManifestFile.read(rewritten)).containsExactlyInAnyOrder(previous, added);
+        try (IndexManifestAvroReader reader = indexManifestFile.scanAvroBlocks(rewritten)) {
+            assertThat(reader.rawBlockCopySupported()).isTrue();
+        }
+    }
+
+    @Test
+    public void testWarmCachedManifestUsesMaterializedRewrite() throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        SegmentsCache<Path> cache =
+                new SegmentsCache<>(1024, MemorySize.ofMebiBytes(1), Long.MAX_VALUE, null, false);
+        IndexManifestFile indexManifestFile =
+                new IndexManifestFile.Factory(
+                                fileStore.fileIO(),
+                                FileFormat.manifestFormat(fileStore.options()),
+                                "zstd",
+                                fileStore.pathFactory(),
+                                cache)
+                        .create();
+        IndexManifestFileHandler handler =
+                new IndexManifestFileHandler(indexManifestFile, BucketMode.BUCKET_UNAWARE);
+        IndexManifestEntry previous = globalIndexEntry("previous", 0, 99, 1);
+        String manifest = handler.write(null, Arrays.asList(previous));
+
+        assertThat(indexManifestFile.isCached(manifest)).isFalse();
+        assertThat(indexManifestFile.read(manifest)).containsExactly(previous);
+        assertThat(indexManifestFile.isCached(manifest)).isTrue();
+
+        IndexManifestEntry added = globalIndexEntry("added", 100, 199, 1);
+        String rewritten = handler.write(manifest, Arrays.asList(added));
+        assertThat(indexManifestFile.read(rewritten)).containsExactlyInAnyOrder(previous, added);
+    }
+
+    @Test
     public void testGlobalIndexOverlappingRangeRejectedWhenPreviousFileKept() throws Exception {
         TestAppendFileStore fileStore =
                 TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
@@ -190,6 +251,30 @@ public class IndexManifestFileHandlerTest {
                 .hasMessageContaining("prev-index")
                 .hasMessageContaining("new-index")
                 .hasMessageContaining("overlapping row range");
+    }
+
+    @Test
+    public void testFailedRewriteCleansNewIndexManifest() throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        IndexManifestFile indexManifestFile = createIndexManifestFile(fileStore);
+        IndexManifestFileHandler handler =
+                new IndexManifestFileHandler(indexManifestFile, BucketMode.BUCKET_UNAWARE);
+
+        IndexManifestEntry previous = globalIndexEntry("previous", 0, 99, 1);
+        String manifest = handler.write(null, Arrays.asList(previous));
+        int filesBefore =
+                fileStore.fileIO().listStatus(fileStore.pathFactory().manifestPath()).length;
+
+        assertThatThrownBy(
+                        () ->
+                                handler.write(
+                                        manifest,
+                                        Arrays.asList(globalIndexEntry("overlap", 50, 149, 1))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("overlapping row range");
+        assertThat(fileStore.fileIO().listStatus(fileStore.pathFactory().manifestPath()))
+                .hasSize(filesBefore);
     }
 
     @Test
@@ -346,6 +431,48 @@ public class IndexManifestFileHandlerTest {
                         fileStore.pathFactory(),
                         null)
                 .create();
+    }
+
+    private String writeLegacyManifest(
+            TestAppendFileStore fileStore, FileFormat fileFormat, IndexManifestEntry entry)
+            throws Exception {
+        RowType legacyGlobalIndexSchema =
+                GlobalIndexMeta.SCHEMA.copy(GlobalIndexMeta.SCHEMA.getFields().subList(0, 5));
+        List<DataField> legacyEntryFields = new ArrayList<>(IndexManifestEntry.SCHEMA.getFields());
+        legacyEntryFields.set(9, legacyEntryFields.get(9).newType(legacyGlobalIndexSchema));
+        RowType legacySchema =
+                ManifestSchemaUtils.withFormatIdentifier(new RowType(false, legacyEntryFields));
+
+        InternalRow current = new IndexManifestEntrySerializer().toRow(entry);
+        InternalRow currentGlobal = current.getRow(10, GlobalIndexMeta.SCHEMA.getFieldCount());
+        GenericRow legacyGlobal =
+                GenericRow.of(
+                        currentGlobal.getLong(0),
+                        currentGlobal.getLong(1),
+                        currentGlobal.getInt(2),
+                        currentGlobal.isNullAt(3) ? null : currentGlobal.getArray(3),
+                        currentGlobal.isNullAt(4) ? null : currentGlobal.getBinary(4));
+        GenericRow legacyRow =
+                GenericRow.of(
+                        current.getInt(0),
+                        current.getByte(1),
+                        current.getBinary(2),
+                        current.getInt(3),
+                        current.getString(4),
+                        current.getString(5),
+                        current.getLong(6),
+                        current.getLong(7),
+                        current.isNullAt(8) ? null : current.getArray(8),
+                        current.isNullAt(9) ? null : current.getString(9),
+                        legacyGlobal);
+
+        Path path = fileStore.pathFactory().indexManifestFileFactory().newPath();
+        try (PositionOutputStream out = fileStore.fileIO().newOutputStream(path, false);
+                FormatWriter writer =
+                        fileFormat.createWriterFactory(legacySchema).create(out, "zstd")) {
+            writer.addElement(legacyRow);
+        }
+        return path.getName();
     }
 
     private IndexManifestEntry globalIndexEntry(
