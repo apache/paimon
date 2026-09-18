@@ -30,4 +30,9 @@ class BTreeIndexOptionsTest {
         assertThat(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE.defaultValue())
                 .isEqualTo(10_000_000L);
     }
+
+    @Test
+    void testBloomFilterDisabledByDefault() {
+        assertThat(BTreeIndexOptions.BTREE_INDEX_BLOOM_FILTER_ENABLED.defaultValue()).isFalse();
+    }
 }

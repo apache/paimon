@@ -322,7 +322,7 @@ public class BTreeIndexReader implements Closeable {
     }
 
     public Optional<GlobalIndexResult> visitEqual(Object literal) {
-        return createResult(() -> rangeQuery(literal, literal, true, true));
+        return createResult(() -> pointQuery(literal));
     }
 
     public Optional<GlobalIndexResult> visitGreaterThan(Object literal) {
@@ -339,7 +339,7 @@ public class BTreeIndexReader implements Closeable {
                         if (literal == null) {
                             continue;
                         }
-                        result.or(rangeQuery(literal, literal, true, true));
+                        result.or(pointQuery(literal));
                     }
                     return result;
                 });
@@ -397,6 +397,17 @@ public class BTreeIndexReader implements Closeable {
             return new RoaringNavigableMap64();
         }
         return rangeQuery(minKey, maxKey, true, true);
+    }
+
+    private RoaringNavigableMap64 pointQuery(Object key) throws IOException {
+        RoaringNavigableMap64 result = new RoaringNavigableMap64();
+        byte[] rowIds = reader.lookup(keySerializer.serialize(key));
+        if (rowIds != null) {
+            for (long rowId : deserializeRowIds(MemorySlice.wrap(rowIds))) {
+                result.add(rowId);
+            }
+        }
+        return result;
     }
 
     private TopNGlobalIndexResult topN(
