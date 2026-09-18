@@ -35,6 +35,9 @@ def _table_read(limit=None):
     read.table = Mock()
     read.table.options.native_read_enabled.return_value = True
     read.table.options.file_format.return_value = 'parquet'
+    read.table.options.blob_as_descriptor.return_value = False
+    read.table.options.blob_descriptor_fields.return_value = set()
+    read.table.options.blob_view_fields.return_value = set()
     read.predicate = None
     read.read_type = [DataField(0, 'id', AtomicType('INT'))]
     read.include_row_kind = False
@@ -311,5 +314,36 @@ def test_native_read_defers_to_python_for_pruning_blob_limit():
         assert read._try_native_batches(
             [split], pa.schema([('payload', pa.large_binary())]),
             blob_parallelism=1) is None
+
+    native.assert_not_called()
+
+
+def test_native_read_defers_to_python_for_pruning_descriptor_blob_limit():
+    read = _blob_table_read(limit=1)
+    read.table.options.blob_descriptor_fields.return_value = {'payload'}
+    split = _Split('payload.parquet')
+    split._native_split = object()
+    split.merged_row_count = Mock(return_value=2)
+
+    with patch('pypaimon.read.native_plan.native_read') as native:
+        assert read._try_native_batches(
+            [split], pa.schema([('payload', pa.large_binary())]),
+            blob_parallelism=1) is None
+
+    native.assert_not_called()
+
+
+@pytest.mark.parametrize('data_type', [
+    pa.timestamp('s'),
+    pa.timestamp('s', tz='UTC'),
+])
+def test_native_read_falls_back_for_precision_zero_timestamps(data_type):
+    read = _table_read()
+    split = _Split()
+    split._native_split = object()
+
+    with patch('pypaimon.read.native_plan.native_read') as native:
+        assert read._try_native_batches(
+            [split], pa.schema([('ts', data_type)])) is None
 
     native.assert_not_called()

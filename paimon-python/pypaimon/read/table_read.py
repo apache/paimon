@@ -366,6 +366,8 @@ class TableRead:
             return []
         if self._deferred_blob_limit_may_prune(splits):
             return None
+        if self._native_schema_needs_python_fallback(schema):
+            return None
         try:
             from pypaimon.read.native_plan import native_read
         except Exception as e:
@@ -615,8 +617,52 @@ class TableRead:
 
     def _deferred_blob_limit_may_prune(self, splits: List[Split]) -> bool:
         return (self.limit is not None
-                and self._deferred_blob_fields
+                and (self._deferred_blob_fields
+                     or self._native_inline_blob_fields())
                 and not self._limit_covers_all_splits(splits))
+
+    def _native_inline_blob_fields(self) -> set:
+        """Return configured BLOB fields that native reads resolve eagerly."""
+        options = self.table.options
+        if options.blob_as_descriptor():
+            return set()
+        inline_fields = (
+            options.blob_descriptor_fields()
+            | options.blob_view_fields()
+        )
+        read_names = {
+            field.name
+            for field in getattr(self, '_scan_read_type', self.read_type)
+        }
+        return inline_fields & read_names
+
+    @classmethod
+    def _native_schema_needs_python_fallback(cls, schema: pyarrow.Schema) -> bool:
+        """Rust currently reads precision-zero timestamps as milliseconds."""
+        return any(
+            cls._native_type_needs_python_fallback(field.type)
+            for field in schema
+        )
+
+    @classmethod
+    def _native_type_needs_python_fallback(cls, data_type) -> bool:
+        if pyarrow.types.is_timestamp(data_type):
+            return data_type.unit == 's'
+        if pyarrow.types.is_struct(data_type):
+            return any(
+                cls._native_type_needs_python_fallback(field.type)
+                for field in data_type
+            )
+        if (pyarrow.types.is_list(data_type)
+                or pyarrow.types.is_large_list(data_type)
+                or pyarrow.types.is_fixed_size_list(data_type)):
+            return cls._native_type_needs_python_fallback(data_type.value_type)
+        if pyarrow.types.is_map(data_type):
+            return (
+                cls._native_type_needs_python_fallback(data_type.key_type)
+                or cls._native_type_needs_python_fallback(data_type.item_type)
+            )
+        return False
 
     def _limit_covers_all_splits(self, splits: List[Split]) -> bool:
         """Return whether split metadata proves that LIMIT cannot drop rows."""

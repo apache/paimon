@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import datetime
+import os
 import pickle
 import tempfile
 import unittest
@@ -525,6 +527,102 @@ class NativePlanIntegrationTest(unittest.TestCase):
         native.assert_not_called()
         self.assertEqual(result.to_pydict(), {'id': [1], 'payload': [b'a']})
         self.assertEqual(len(fetched), 1)
+
+    @unittest.skipUnless(native_reader_available(),
+                         "pypaimon-rust native reader API not installed")
+    def test_native_read_pruning_limit_defers_descriptor_blob_payload_io(self):
+        schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', pa.large_binary()),
+        ])
+        with tempfile.TemporaryDirectory() as payload_dir:
+            first_path = os.path.join(payload_dir, 'first')
+            with open(first_path, 'wb') as output:
+                output.write(b'first')
+            missing_path = os.path.join(payload_dir, 'missing')
+            descriptors = [
+                BlobDescriptor(
+                    'file://' + first_path, 0, 5).serialize(),
+                BlobDescriptor(
+                    'file://' + missing_path, 0, 7).serialize(),
+            ]
+
+            self.cat.create_table(
+                'default.native_descriptor_limit_t',
+                Schema.from_pyarrow_schema(schema, options={
+                    'row-tracking.enabled': 'true',
+                    'data-evolution.enabled': 'true',
+                    'blob-descriptor-field': 'payload',
+                }), False)
+            table = self.cat.get_table('default.native_descriptor_limit_t')
+            write = table.new_batch_write_builder().new_write()
+            write.write_arrow(pa.Table.from_pydict({
+                'id': [1, 2],
+                'payload': descriptors,
+            }, schema=schema))
+            table.new_batch_write_builder().new_commit().commit(
+                write.prepare_commit())
+            write.close()
+
+            native_table = table.copy({'read.native.enabled': 'true'})
+            builder = native_table.new_read_builder().with_limit(1)
+            plan = builder.new_scan().plan()
+            fetched = []
+            original_to_data = BlobRef.to_data
+
+            def tracked_to_data(blob):
+                fetched.append(blob)
+                return original_to_data(blob)
+
+            with patch.object(BlobRef, 'to_data', tracked_to_data), patch(
+                    'pypaimon.read.native_plan.native_read',
+                    return_value=[]) as native:
+                result = builder.new_read().to_arrow(plan.splits())
+
+            native.assert_not_called()
+            self.assertEqual(
+                result.to_pydict(), {'id': [1], 'payload': [b'first']})
+            self.assertEqual(len(fetched), 1)
+
+    @unittest.skipUnless(native_reader_available(),
+                         "pypaimon-rust native reader API not installed")
+    def test_native_read_falls_back_for_precision_zero_timestamps(self):
+        cases = [
+            ('timestamp', pa.timestamp('s'), datetime.datetime(1970, 1, 1)),
+            ('timestamp_ltz', pa.timestamp('s', tz='UTC'),
+             datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)),
+        ]
+        for name, timestamp_type, first_value in cases:
+            with self.subTest(name=name):
+                schema = pa.schema([
+                    ('id', pa.int32()),
+                    ('ts', timestamp_type),
+                ])
+                table_name = 'native_%s_zero_t' % name
+                self.cat.create_table(
+                    'default.%s' % table_name,
+                    Schema.from_pyarrow_schema(schema), False)
+                table = self.cat.get_table('default.%s' % table_name)
+                write = table.new_batch_write_builder().new_write()
+                write.write_arrow(pa.Table.from_pydict({
+                    'id': [1, 2],
+                    'ts': [first_value, first_value],
+                }, schema=schema))
+                table.new_batch_write_builder().new_commit().commit(
+                    write.prepare_commit())
+                write.close()
+
+                native_table = table.copy({'read.native.enabled': 'true'})
+                builder = native_table.new_read_builder()
+                plan = builder.new_scan().plan()
+                with patch(
+                        'pypaimon.read.native_plan.native_read',
+                        return_value=[]) as native:
+                    result = builder.new_read().to_arrow(plan.splits())
+
+                native.assert_not_called()
+                self.assertEqual(result.schema, schema)
+                self.assertEqual(result.num_rows, 2)
 
     @unittest.skipUnless(_has_native_row_ranges(),
                          "pypaimon_rust row-range API not installed")
