@@ -358,6 +358,11 @@ public class BTreeIndexReader implements Closeable {
                 });
     }
 
+    public Optional<GlobalIndexResult> visitRange(
+            Object from, Object to, boolean fromInclusive, boolean toInclusive) {
+        return createResult(() -> rangeQuery(from, to, fromInclusive, toInclusive));
+    }
+
     public Optional<GlobalIndexResult> visitBetween(Object from, Object to) {
         return createResult(() -> rangeQuery(from, to, true, true));
     }
