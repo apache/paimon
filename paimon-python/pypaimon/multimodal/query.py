@@ -634,10 +634,42 @@ class BatchVectorQuery(_PreFilterQuery):
 
     def to_arrow(self):
         query = self._for_execution()
-        return [
-            query._read_global_index_result(result)
-            for result in query._execute_batch_vector(query)
-        ]
+        return query._read_batch_results(query._execute_batch_vector(query))
+
+    def _read_batch_results(self, results):
+        from pypaimon.globalindex.global_index_result import GlobalIndexResult
+        from pypaimon.utils.roaring_bitmap import RoaringBitmap64
+
+        if len(results) <= 1 or not self._configured_read_builder().read_type():
+            return [self._read_global_index_result(result) for result in results]
+
+        row_ids = RoaringBitmap64()
+        for result in results:
+            row_ids = RoaringBitmap64.or_(row_ids, result.results())
+
+        lookup = copy(self)
+        # Each result is already top-k. A shared read must not apply that limit
+        # to the union; where() still filters the selected rows during lookup.
+        lookup._limit = None
+        projection = self._effective_projection()
+        lookup._projection = list(projection) if projection else [f.name for f in self._table.fields]
+        added_row_id = SpecialFields.ROW_ID.name not in lookup._projection
+        if added_row_id:
+            lookup._projection.append(SpecialFields.ROW_ID.name)
+        fields = lookup._configured_read_builder().read_type()
+        row_id_column = next(i for i, field in enumerate(fields) if field.id == SpecialFields.ROW_ID.id)
+        table = lookup._read_global_index_result(GlobalIndexResult.create(row_ids))
+        positions = {row_id: i for i, row_id in enumerate(table.column(row_id_column).to_pylist())}
+        if added_row_id:
+            table = table.select(list(range(table.num_columns - 1)))
+        output = []
+        for result in results:
+            # Keep the physical read order, rather than imposing score or row-id order.
+            selected = sorted(positions[row_id] for row_id in result.results() if row_id in positions)
+            if self._limit is not None:
+                selected = selected[:self._limit]
+            output.append(table.take(pa.array(selected, type=pa.int64())))
+        return output
 
     def to_pandas(self):
         return [table.to_pandas() for table in self.to_arrow()]
