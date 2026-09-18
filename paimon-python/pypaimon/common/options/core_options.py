@@ -686,6 +686,15 @@ class CoreOptions:
                           "reader still reads the files.")
     )
 
+    READ_NATIVE_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("read.native.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Read data via pypaimon_rust and return PyArrow batches. "
+                          "This also enables native split planning; unsupported "
+                          "routes fall back to pypaimon.")
+    )
+
     CHANGELOG_PRODUCER: ConfigOption[ChangelogProducer] = (
         ConfigOptions.key("changelog-producer")
         .enum_type(ChangelogProducer)
@@ -1581,6 +1590,9 @@ class CoreOptions:
 
     def native_plan_enabled(self, default=None):
         return self.options.get(CoreOptions.SCAN_NATIVE_PLAN_ENABLED, default)
+
+    def native_read_enabled(self, default=None):
+        return self.options.get(CoreOptions.READ_NATIVE_ENABLED, default)
 
     def changelog_producer(self, default=None):
         return self.options.get(CoreOptions.CHANGELOG_PRODUCER, default)

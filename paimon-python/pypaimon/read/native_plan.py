@@ -49,6 +49,13 @@ def native_runtime_available() -> bool:
     return hasattr(PaimonCatalog, 'get_table') and hasattr(Split, 'serialize')
 
 
+def native_reader_available() -> bool:
+    """Whether pypaimon-rust exposes the batch-read API used by PyPaimon."""
+    return (native_runtime_available()
+            and native_method_available('ReadBuilder', 'new_read')
+            and native_method_available('TableRead', 'read'))
+
+
 def native_family_search_modes_available() -> bool:
     """Whether Rust supports family-specific global-index search modes."""
     return native_version_at_least(0, 4)
@@ -260,25 +267,13 @@ def _restore_python_partition_paths(table, splits: List[Split]) -> None:
         for data_file, python_path in candidates:
             if data_file.file_name in bucket_files[bucket_path]:
                 data_file.file_path = python_path
+                # The retained Rust split still points at its canonical path.
+                # Invalidate it so native reading cannot bypass this repair.
+                split._native_split = None
 
 
-def native_plan(
-        table,
-        predicate: Optional[Predicate] = None,
-        limit: Optional[int] = None,
-        projection: Optional[List[str]] = None,
-        row_ranges: Optional[List[Tuple[int, int]]] = None,
-        incremental_range: Optional[Tuple[int, int]] = None,
-        row_position_slice: Optional[Tuple[int, int]] = None,
-        row_position_shard: Optional[Tuple[int, int]] = None) -> Plan:
-    """Plan with pypaimon_rust, preserving snapshot metadata.
-
-    Native conversion or planning failures are handled by TableScan, which
-    falls back to the Python planner.
-    """
-    if not native_runtime_available():
-        raise RuntimeError(
-            "scan.native-plan.enabled needs pypaimon-rust>=0.3.0 (split planning API)")
+def _native_read_builder(table):
+    """Reconstruct the Rust table and return a builder for the same schema."""
     file_io_options = _resolved_schema_file_io_options(table)
     if file_io_options is not None:
         from pypaimon_rust.datafusion import Table
@@ -307,12 +302,56 @@ def native_plan(
         branch = getattr(rt, 'branch', None)
         if not callable(branch) or branch() != table.current_branch():
             raise RuntimeError("Native table did not resolve the requested branch")
+    return builder
+
+
+def _configure_native_read_builder(builder, predicate, limit, projection):
     if projection is not None:
         builder = builder.with_projection(projection)
     if predicate is not None:
         builder = builder.with_filter(_predicate_to_native(predicate))
     if limit is not None:
         builder = builder.with_limit(limit)
+    return builder
+
+
+def native_read(table, splits, predicate: Optional[Predicate] = None,
+                limit: Optional[int] = None,
+                projection: Optional[List[str]] = None,
+                blob_parallelism: Optional[int] = None):
+    """Read Rust ``Split`` objects into PyArrow ``RecordBatch`` objects."""
+    if not native_reader_available():
+        raise RuntimeError(
+            "read.native.enabled needs the pypaimon-rust native reader API")
+    builder = _configure_native_read_builder(
+        _native_read_builder(table), predicate, limit, projection)
+    if blob_parallelism is not None:
+        builder = builder.with_blob_parallelism(blob_parallelism)
+    reader = builder.new_read()
+    read_arrow = getattr(reader, 'read_arrow', None)
+    return (read_arrow(splits) if callable(read_arrow)
+            else reader.read(splits))
+
+
+def native_plan(
+        table,
+        predicate: Optional[Predicate] = None,
+        limit: Optional[int] = None,
+        projection: Optional[List[str]] = None,
+        row_ranges: Optional[List[Tuple[int, int]]] = None,
+        incremental_range: Optional[Tuple[int, int]] = None,
+        row_position_slice: Optional[Tuple[int, int]] = None,
+        row_position_shard: Optional[Tuple[int, int]] = None) -> Plan:
+    """Plan with pypaimon_rust, preserving snapshot metadata.
+
+    Native conversion or planning failures are handled by TableScan, which
+    falls back to the Python planner.
+    """
+    if not native_runtime_available():
+        raise RuntimeError(
+            "scan.native-plan.enabled needs pypaimon-rust>=0.3.0 (split planning API)")
+    builder = _configure_native_read_builder(
+        _native_read_builder(table), predicate, limit, projection)
     if row_ranges is not None:
         builder = builder.with_row_ranges(row_ranges)
     scan = (builder.new_scan() if incremental_range is None
@@ -327,6 +366,14 @@ def native_plan(
     # Trimmed primary keys decode per-file min/max keys (PK merge-on-read).
     kfields = table.trimmed_primary_keys_fields
     splits = [deserialize_split_v1(split.serialize(), pfields, kfields) for split in rust_splits]
+    if table.options.native_read_enabled():
+        # Retain the opaque Rust split next to the Python metadata view. The
+        # normal planner/reader contract remains a Python Split list, while
+        # native reads can consume the exact Rust split without a second lossy
+        # conversion. Any Python split transformation creates a fresh object
+        # without this marker and thus safely falls back to the Python reader.
+        for split, rust_split in zip(splits, rust_splits):
+            split._native_split = rust_split
     _restore_python_partition_paths(table, splits)
     snapshot_id = getattr(rust_plan, 'snapshot_id', None)
     if callable(snapshot_id):

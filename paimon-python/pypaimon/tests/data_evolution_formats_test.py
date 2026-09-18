@@ -494,7 +494,9 @@ class DataEvolutionFormatsTest(unittest.TestCase):
             {'a': [1, 2, 3, 4], 'b': ['x', 'y', 'z', 'w'],
              'c': [0.1, 0.2, 0.3, 0.4]},
             schema=pa_schema)
-        self.assertEqual(actual, expect)
+        # Table scans are unordered; native planning may emit merged groups
+        # before raw groups.
+        self.assertEqual(actual.sort_by('a'), expect.sort_by('a'))
 
     # ------------------------------------------------------------------
     # Blob-format data evolution
