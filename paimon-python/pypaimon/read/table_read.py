@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import logging
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -42,6 +43,7 @@ from pypaimon.schema.data_types import (
 from pypaimon.table.row.offset_row import OffsetRow
 
 ROW_KIND_COLUMN = "_row_kind"
+logger = logging.getLogger(__name__)
 _RECORD_BATCH_READER_FROM_STREAM = getattr(
     pyarrow.ipc.RecordBatchReader, "from_stream", None)
 
@@ -213,11 +215,17 @@ class TableRead:
             self,
             splits: List[Split],
             blob_parallelism: Optional[int] = None):
-        effective_bp = self._resolve_blob_parallelism(blob_parallelism)
         schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
-        batch_iterator = self._arrow_batch_generator(splits, schema, effective_bp)
+        native_batches = self._try_native_batches(
+            splits, schema, blob_parallelism=blob_parallelism)
+        if native_batches is not None:
+            batch_iterator = iter(native_batches)
+        else:
+            effective_bp = self._resolve_blob_parallelism(blob_parallelism)
+            batch_iterator = self._arrow_batch_generator(
+                splits, schema, effective_bp)
         reader_type = pyarrow.ipc.RecordBatchReader
         reader = reader_type.from_batches(schema, batch_iterator)
         return reader, batch_iterator
@@ -282,10 +290,22 @@ class TableRead:
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
 
+        native_batches = self._try_native_batches(
+            splits,
+            schema,
+            parallelism=parallelism,
+            blob_parallelism=blob_parallelism,
+        )
+        if native_batches is not None:
+            return self._batches_to_arrow(native_batches, schema)
+
         if self._should_run_parallel(splits, effective):
             return self._to_arrow_parallel(splits, schema, effective, effective_bp)
 
-        batch_reader = self.to_arrow_batch_reader(splits, blob_parallelism=effective_bp)
+        batch_iterator = self._arrow_batch_generator(
+            splits, schema, effective_bp)
+        batch_reader = pyarrow.ipc.RecordBatchReader.from_batches(
+            schema, batch_iterator)
 
         table_list = []
         for batch in iter(batch_reader.read_next_batch, None):
@@ -293,10 +313,71 @@ class TableRead:
                 continue
             table_list.append(self._try_to_pad_batch_by_schema(batch, schema))
 
-        if not table_list:
-            return pyarrow.Table.from_arrays([pyarrow.array([], type=field.type) for field in schema], schema=schema)
-        else:
-            return pyarrow.Table.from_batches(table_list)
+        return self._batches_to_arrow(table_list, schema)
+
+    @staticmethod
+    def _batches_to_arrow(batches, schema):
+        batches = [TableRead._try_to_pad_batch_by_schema(batch, schema)
+                   for batch in batches if batch.num_rows > 0]
+        if not batches:
+            return pyarrow.Table.from_arrays(
+                [pyarrow.array([], type=field.type) for field in schema],
+                schema=schema)
+        return pyarrow.Table.from_batches(batches)
+
+    def _try_native_batches(
+            self,
+            splits: List[Split],
+            schema: pyarrow.Schema,
+            parallelism: Optional[int] = None,
+            blob_parallelism: Optional[int] = None):
+        """Return Rust-read batches, or ``None`` when this read must fall back."""
+        if not self.table.options.native_read_enabled():
+            return None
+        # These Python-only output controls do not yet have native equivalents.
+        if (self.include_row_kind or self.nested_name_paths
+                or parallelism is not None
+                or blob_parallelism not in (None, 1)):
+            return None
+        if not splits:
+            return []
+        rust_splits = []
+        for split in splits:
+            if isinstance(split, QueryAuthSplit):
+                return None
+            rust_split = getattr(split, '_native_split', None)
+            if rust_split is None:
+                return None
+            rust_splits.append(rust_split)
+        try:
+            from pypaimon.read.native_plan import native_read
+            batches = native_read(
+                self.table,
+                rust_splits,
+                predicate=self.predicate,
+                limit=self.limit,
+                projection=[field.name for field in self.read_type],
+            )
+        except Exception as e:
+            logger.warning(
+                "Native read failed, falling back to the Python reader: %s", e)
+            return None
+        return self._convert_native_batches(batches, schema)
+
+    def _convert_native_batches(self, batches, schema):
+        """Apply PyPaimon's exact output limit lazily to native batches."""
+        remaining = self.limit
+        for batch in batches:
+            if batch.num_rows == 0:
+                continue
+            if remaining is not None and batch.num_rows > remaining:
+                batch = batch.slice(0, remaining)
+            batch = self._project_batch_to_output(batch)
+            yield self._try_to_pad_batch_by_schema(batch, schema)
+            if remaining is not None:
+                remaining -= batch.num_rows
+                if remaining <= 0:
+                    break
 
     def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema,
                                blob_parallelism: int = 1) -> Iterator[pyarrow.RecordBatch]:

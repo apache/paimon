@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import pickle
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -26,6 +27,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.read.native_plan import (
     native_family_search_modes_available, native_method_available,
+    native_reader_available,
 )
 from pypaimon.table.row.blob import BlobDescriptor
 from pypaimon.utils.range import Range
@@ -144,6 +146,55 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._write('ap_t', [{'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}])
         self._write('ap_t', [{'k': 3, 'v': 'c'}])
         self._assert_matches('ap_t')
+
+    @unittest.skipUnless(native_reader_available(),
+                         "pypaimon-rust native reader API not installed")
+    def test_native_read_bypasses_python_split_reader(self):
+        self.cat.create_table(
+            'default.native_read_t', Schema.from_pyarrow_schema(self.schema), False)
+        self._write('native_read_t', [
+            {'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}, {'k': 3, 'v': 'c'}])
+
+        table = self.cat.get_table('default.native_read_t').copy(
+            {'read.native.enabled': 'true'})
+        builder = table.new_read_builder().with_projection(['k']).with_limit(2)
+        builder.with_filter(builder.new_predicate_builder().greater_or_equal('k', 2))
+        plan = builder.new_scan().plan()
+        splits = [pickle.loads(pickle.dumps(split)) for split in plan.splits()]
+
+        with patch(
+                'pypaimon.read.table_read.TableRead._create_split_read',
+                side_effect=AssertionError('Python reader was used')):
+            read = builder.new_read()
+            rows = read.to_arrow(splits).to_pylist()
+            streamed = pa.Table.from_batches(
+                list(read.to_arrow_batch_reader(splits))).to_pylist()
+
+        self.assertEqual(rows, [{'k': 2}, {'k': 3}])
+        self.assertEqual(streamed, rows)
+        self.assertTrue(builder.explain().native_planned)
+
+    @unittest.skipUnless(native_reader_available(),
+                         "pypaimon-rust native reader API not installed")
+    def test_native_read_primary_key_matches_python(self):
+        self.cat.create_table('default.native_read_pk', Schema.from_pyarrow_schema(
+            self.schema, primary_keys=['k'], options={'bucket': '1'}), False)
+        self._write('native_read_pk', [{'k': 1, 'v': 'a'}, {'k': 2, 'v': 'old'}])
+        self._write('native_read_pk', [{'k': 2, 'v': 'new'}, {'k': 3, 'v': 'c'}])
+
+        normal = self._plan_and_read('native_read_pk', native=False)[1]
+        table = self.cat.get_table('default.native_read_pk').copy(
+            {'read.native.enabled': 'true'})
+        builder = table.new_read_builder()
+        plan = builder.new_scan().plan()
+        with patch(
+                'pypaimon.read.table_read.TableRead._create_split_read',
+                side_effect=AssertionError('Python reader was used')):
+            native = sorted(
+                builder.new_read().to_arrow(plan.splits()).to_pylist(),
+                key=lambda row: row['k'])
+
+        self.assertEqual(native, normal)
 
     def test_append_distribution_matches_interleaved_partition_buckets(self):
         self.schema = pa.schema([('k', pa.int64()), ('v', pa.string()), ('p', pa.string())])

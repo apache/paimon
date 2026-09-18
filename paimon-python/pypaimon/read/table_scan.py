@@ -57,6 +57,7 @@ _NATIVE_FORWARDED_OPTIONS = frozenset({
 }) | _NATIVE_SEARCH_MODE_OPTIONS
 _NATIVE_PLAN_INDEPENDENT_OPTIONS = frozenset({
     CoreOptions.BLOB_AS_DESCRIPTOR.key(),
+    CoreOptions.READ_NATIVE_ENABLED.key(),
     CoreOptions.READ_BATCH_SIZE.key(),
     CoreOptions.READ_PARALLELISM.key(),
 })
@@ -95,7 +96,7 @@ class TableScan:
         auth_result = self.__auth_query()
         # The native planner bypasses the auth-aware file scanner. Resolve auth
         # before selecting a planning backend.
-        if (auth_result is None and self.table.options.native_plan_enabled()
+        if (auth_result is None and self._native_requested()
                 and self._native_plan_supported()):
             native = self._try_native_plan()
             if native is not None:
@@ -104,6 +105,14 @@ class TableScan:
             prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         plan = self.file_scanner.scan()
         return wrap_plan_with_auth(auth_result, plan)
+
+    def _native_requested(self) -> bool:
+        if self.table.options.native_plan_enabled():
+            return True
+        if not self.table.options.native_read_enabled():
+            return False
+        from pypaimon.read.native_plan import native_reader_available
+        return native_reader_available()
 
     def _native_plan_supported(self) -> bool:
         # Any probe failure (e.g. a remote schema/metadata read) must fall back, not fail the scan.
@@ -393,7 +402,7 @@ class TableScan:
         explain reports their split metadata without pruning counters.
         """
         auth_result = self.__auth_query()
-        if (auth_result is None and self.table.options.native_plan_enabled()
+        if (auth_result is None and self._native_requested()
                 and self._native_plan_supported()):
             native = self._try_native_plan()
             if native is not None:

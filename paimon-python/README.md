@@ -124,6 +124,24 @@ Python planner for unsupported scans. New bindings preserve `plan.snapshot_id`
 even when pruning removes every split. Native explain output includes snapshot
 and split metadata; native pruning counters are not exposed.
 
+To run both split planning and data-file reading in Rust, enable the independent
+native-read option:
+
+```python
+native_table = table.copy({"read.native.enabled": "true"})
+builder = native_table.new_read_builder().with_projection(["id", "name"])
+plan = builder.new_scan().plan()
+rows = builder.new_read().to_arrow(plan.splits())
+```
+
+Native reads return PyArrow batches through the Arrow C Data interface. They
+currently require untouched splits produced by the native planner and top-level
+projection. Query authorization, nested projection, row-kind output, and
+explicit Python/blob parallelism controls retain the Python reader. A missing
+reader capability, unsupported route, or native-reader construction failure
+falls back to Python; I/O and data errors raised after streaming starts surface
+to the caller.
+
 With Rust main's `Table.from_resolved_schema()` binding, filesystem and JDBC catalog
 tables preserve the Python table's resolved schema and complete effective
 options. Stale table objects, historical schemas, and `copy()` overrides or
