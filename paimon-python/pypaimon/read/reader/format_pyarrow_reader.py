@@ -279,6 +279,13 @@ def _file_format_dataset(file_io: FileIO, file_format: str, file_path: str,
     filesystem = file_io.filesystem
 
     def load():
+        if file_format == 'parquet':
+            parquet_format = ds.ParquetFileFormat()
+            fragment = parquet_format.make_fragment(
+                file_path_for_pyarrow, filesystem=filesystem)
+            # Reuse this fragment's footer for schema discovery and scanning.
+            return ds.FileSystemDataset(
+                [fragment], fragment.physical_schema, parquet_format, filesystem)
         return ds.dataset(
             file_path_for_pyarrow, format=file_format, filesystem=filesystem)
 
