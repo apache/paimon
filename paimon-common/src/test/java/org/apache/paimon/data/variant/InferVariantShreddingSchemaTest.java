@@ -240,6 +240,53 @@ public class InferVariantShreddingSchemaTest {
     }
 
     @Test
+    void testInferSchemaWithKeysInEitherWriterOrder() {
+        RowType schema = RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"v"});
+
+        // Paimon's builder sorts keys by UTF-8 bytes, where U+FFE5 (EF BF A5) precedes the
+        // emoji U+1F600 (F0 9F 98 80); Spark's sorts by UTF-16 code units, where the emoji's
+        // surrogate pair (D83D) comes first. Inference used to reject the byte order as unsorted,
+        // and it must merge objects written in either order.
+        String yen = "\uFFE5";
+        String smile = new String(Character.toChars(0x1F600));
+        GenericVariant byteOrdered =
+                GenericVariant.fromJson("{\"" + yen + "\": 100, \"" + smile + "\": \"s\"}");
+        GenericVariant codeUnitOrdered = withSwappedFields(byteOrdered);
+        assertThat(byteOrdered.getFieldAtIndex(0).key).isEqualTo(yen);
+        assertThat(codeUnitOrdered.getFieldAtIndex(0).key).isEqualTo(smile);
+        GenericVariant third = GenericVariant.fromJson("{\"" + smile + "\": \"t\", \"a\": 2}");
+
+        // merged in byte order, with every key kept exactly once and both rows counted
+        RowType expectedType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"a", yen, smile});
+        for (GenericVariant first : new GenericVariant[] {byteOrdered, codeUnitOrdered}) {
+            List<InternalRow> rows = Arrays.asList(GenericRow.of(first), GenericRow.of(third));
+            RowType inferredSchema = defaultInferVariantShreddingSchema(schema).inferSchema(rows);
+            assertThat(inferredSchema.getField("v").type())
+                    .isEqualTo(variantShreddingSchema(expectedType));
+        }
+    }
+
+    /**
+     * The same two-field object with its entries swapped, the order a UTF-16 sorting writer uses.
+     */
+    private static GenericVariant withSwappedFields(GenericVariant twoFields) {
+        byte[] value = twoFields.value().clone();
+        // header, size, then 2 one-byte ids and 3 one-byte offsets
+        int idStart = 2;
+        int offsetStart = idStart + 2;
+        byte temporary = value[idStart];
+        value[idStart] = value[idStart + 1];
+        value[idStart + 1] = temporary;
+        temporary = value[offsetStart];
+        value[offsetStart] = value[offsetStart + 1];
+        value[offsetStart + 1] = temporary;
+        return new GenericVariant(value, twoFields.metadata());
+    }
+
+    @Test
     void testInferSchemaWithNullValues() {
         // Schema: row<v: variant>
         RowType schema = RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"v"});

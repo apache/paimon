@@ -459,6 +459,23 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     )
   }
 
+  test("Paimon Variant: keys that UTF-8 and UTF-16 order differently under inferred shredding") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    // Spark orders "\uFFE5" after the emoji (UTF-16 code units), Paimon's builder before it
+    // (UTF-8 bytes); inferred shredding used to reject one of the two orders as unsorted and
+    // fail the write. Key order is not asserted because each writer renders its own.
+    sql("""INSERT INTO T VALUES
+          | (1, parse_json('{"\uFFE5":100,"\uD83D\uDE00":"s"}')),
+          | (2, parse_json('{"\uD83D\uDE00":"t","a":2}'))
+          |""".stripMargin)
+
+    checkAnswer(
+      sql(
+        "SELECT id, variant_get(v, '$[\"\uD83D\uDE00\"]', 'string'), try_variant_get(v, '$[\"\uFFE5\"]', 'bigint'), try_variant_get(v, '$.a', 'int') FROM T ORDER BY id"),
+      Seq(Row(1, "s", 100L, null), Row(2, "t", null, 2))
+    )
+  }
+
   test("Paimon Variant: read and write variant with null value") {
     withTable("source_tbl", "target_tbl") {
       sql("CREATE TABLE source_tbl (id INT, js STRING) USING paimon")
