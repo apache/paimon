@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from typing import Dict, NamedTuple, Optional
 from urllib.parse import quote, unquote
 
+from pypaimon.api.auth.dlf_openapi_actions import resolve_action
 from pypaimon.api.token_loader import DLFToken
 from pypaimon.api.typedef import RESTAuthParameter
 
@@ -536,6 +537,7 @@ class DLFOpenApiV4Signer(DLFRequestSigner):
     X_ACS_VERSION = "x-acs-version"
     X_ACS_CONTENT_SHA256 = "x-acs-content-sha256"
     X_ACS_SECURITY_TOKEN = "x-acs-security-token"
+    X_ACS_ACTION = "x-acs-action"
 
     # Values
     ACS_DATE_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
@@ -604,6 +606,12 @@ class DLFOpenApiV4Signer(DLFRequestSigner):
             raise ValueError("Parameter 'sign_headers' cannot be None")
 
         try:
+            # POP gateways may route by this header, so it is added to the headers the caller
+            # sends and signed with them; it is absent only when no API is registered for it.
+            action = resolve_action(rest_auth_parameter.method, rest_auth_parameter.path)
+            if action is not None:
+                sign_headers[self.X_ACS_ACTION] = action
+
             canonical = self._build_canonical_headers(sign_headers)
             canonical_query_string = self._build_canonical_query_string(
                 rest_auth_parameter.parameters
