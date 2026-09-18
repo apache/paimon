@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
@@ -33,6 +34,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamDataTableScan;
@@ -56,6 +58,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Streaming scan for chain tables with a two-phase design:
@@ -103,6 +107,9 @@ public class ChainTableStreamScan implements StreamDataTableScan {
 
     /** Whether the starting plan (Phase 1) has been completed. */
     private boolean startingDone = false;
+
+    /** Authorization removed while grouping the starting splits; re-applied before returning. */
+    @Nullable private TableQueryAuthResult startingAuthResult;
 
     /**
      * Predicates, shard, and bucket filter for applying to local scans in {@link #planStarting()}.
@@ -190,6 +197,9 @@ public class ChainTableStreamScan implements StreamDataTableScan {
      * allowing streaming readers to see cross-branch deletions and updates.
      */
     private TableScan.Plan planStarting() {
+        // restore() can re-run this on the same instance; a stale result would re-apply rules
+        // revoked in between.
+        startingAuthResult = null;
         FileStoreTable deltaTable = chainGroupReadTable.other();
         String deltaBranch = deltaTable.coreOptions().branch();
         String snapshotBranch = chainGroupReadTable.wrapped.coreOptions().branch();
@@ -241,7 +251,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         Map<BinaryRow, List<DataSplit>> deltaSplitsByPartition;
         if (deltaLatestId != null) {
             FileStoreTable pinnedDelta = deltaTable.copy(pinnedOptions(deltaLatestId));
-            DataTableScan pinnedDeltaScan = pinnedDelta.newScan();
+            DataTableScan pinnedDeltaScan = pinnedDelta.newScan().withoutAuthPartitionPushdown();
             applyPredicatesShardAndBucket(pinnedDeltaScan);
             deltaSplitsByPartition = groupByPartition(pinnedDeltaScan);
         } else {
@@ -256,7 +266,8 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         FileStoreTable pinnedSnapshot = null;
         if (snapshotLatestId != null) {
             pinnedSnapshot = chainGroupReadTable.wrapped.copy(pinnedOptions(snapshotLatestId));
-            DataTableScan partitionListingScan = pinnedSnapshot.newScan();
+            DataTableScan partitionListingScan =
+                    pinnedSnapshot.newScan().withoutAuthPartitionPushdown();
             for (BinaryRow partition : partitionListingScan.listPartitions()) {
                 Object groupKey = toGroupKey(partition);
                 BinaryRow existingLatest = latestChainPartitionPerGroup.get(groupKey);
@@ -275,7 +286,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         List<BinaryRow> latestPartitions = new ArrayList<>(latestChainPartitionPerGroup.values());
         Map<BinaryRow, List<DataSplit>> snapshotSplitsByPartition;
         if (!latestPartitions.isEmpty() && pinnedSnapshot != null) {
-            DataTableScan snapshotScan = pinnedSnapshot.newScan();
+            DataTableScan snapshotScan = pinnedSnapshot.newScan().withoutAuthPartitionPushdown();
             snapshotScan.withPartitionFilter(latestPartitions);
             applyPredicatesShardAndBucket(snapshotScan);
             snapshotSplitsByPartition = groupByPartition(snapshotScan);
@@ -316,7 +327,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
                 allSplits.size());
 
         startingDone = true;
-        return new DataFilePlan<>(allSplits);
+        return new DataFilePlan<>(reapplyStartingAuth(allSplits));
     }
 
     /**
@@ -476,14 +487,40 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         return latestId;
     }
 
-    /** Plans a scan and groups the resulting splits by partition. */
-    private static Map<BinaryRow, List<DataSplit>> groupByPartition(DataTableScan scan) {
+    /**
+     * Authorization is stripped here and kept for {@link #reapplyStartingAuth}; dropping it would
+     * silently discard the rules.
+     */
+    private Map<BinaryRow, List<DataSplit>> groupByPartition(DataTableScan scan) {
         Map<BinaryRow, List<DataSplit>> grouped = new LinkedHashMap<>();
         for (Split s : scan.plan().splits()) {
+            if (s instanceof QueryAuthSplit) {
+                QueryAuthSplit authSplit = (QueryAuthSplit) s;
+                TableQueryAuthResult next = authSplit.authResult();
+                // The delta and the snapshot scan authorize separately. Replacing one result with
+                // the other would widen what the reader sees.
+                checkArgument(
+                        startingAuthResult == null || startingAuthResult.equals(next),
+                        "Branch scans of the same chain table returned different authorization rules.");
+                startingAuthResult = next;
+                s = authSplit.split();
+            }
             DataSplit ds = (DataSplit) s;
             grouped.computeIfAbsent(ds.partition(), k -> new ArrayList<>()).add(ds);
         }
         return grouped;
+    }
+
+    /** Puts back the authorization removed by {@link #groupByPartition}. */
+    private List<Split> reapplyStartingAuth(List<Split> splits) {
+        if (startingAuthResult == null) {
+            return splits;
+        }
+        List<Split> wrapped = new ArrayList<>(splits.size());
+        for (Split split : splits) {
+            wrapped.add(new QueryAuthSplit(split, startingAuthResult));
+        }
+        return wrapped;
     }
 
     /**

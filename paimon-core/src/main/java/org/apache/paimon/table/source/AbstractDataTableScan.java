@@ -103,6 +103,9 @@ abstract class AbstractDataTableScan implements DataTableScan {
     // Whether the auth predicate has a non-partition part (enforced only at read time). Used by
     // AbstractBatchTableScan to disable limit push down; not pushed through withFilter.
     protected boolean authHasNonPartitionFilter;
+    private boolean authPartitionPushdown = true;
+    // Turning the pushdown off after a filter was pushed has to rebuild it, rules unchanged.
+    private boolean appliedAuthPartitionPushdown = true;
     // auth state, refreshed each plan(). The filter is pushed once, without the conjuncts on
     // masked columns, whose raw statistics a mask invalidates; the partition fields are
     // replaced on each push, as ManifestsReader#withPartitionFilter overwrites rather than ands.
@@ -160,10 +163,12 @@ abstract class AbstractDataTableScan implements DataTableScan {
     protected abstract TableScan.Plan planWithoutAuth();
 
     private void applyAuthFilter(@Nullable Predicate authPredicate) {
-        if (Objects.equals(authPredicate, appliedAuthPredicate)) {
+        if (Objects.equals(authPredicate, appliedAuthPredicate)
+                && authPartitionPushdown == appliedAuthPartitionPushdown) {
             return;
         }
         appliedAuthPredicate = authPredicate;
+        appliedAuthPartitionPushdown = authPartitionPushdown;
 
         PartitionPredicate authPartitionFilter = null;
         boolean hasNonPartitionPart = false;
@@ -183,11 +188,20 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
         // Push only the partition part, to a dedicated slot overwritten/cleared each plan() so a
         // changed/removed auth leaves no stale pruning. The full filter is enforced at read time.
-        snapshotReader.manifestsReader().withAuthPartitionFilter(authPartitionFilter);
+        snapshotReader
+                .manifestsReader()
+                .withAuthPartitionFilter(authPartitionPushdown ? authPartitionFilter : null);
         // A non-partition auth part is enforced only at read time, so limit push down is unsafe
         // (AbstractBatchTableScan reads this). Kept off SnapshotReader since it is not a pushed
-        // filter.
-        this.authHasNonPartitionFilter = hasNonPartitionPart;
+        // filter. Without the partition push down the whole rule is read time.
+        this.authHasNonPartitionFilter =
+                authPartitionPushdown ? hasNonPartitionPart : authPredicate != null;
+    }
+
+    @Override
+    public AbstractDataTableScan withoutAuthPartitionPushdown() {
+        this.authPartitionPushdown = false;
+        return this;
     }
 
     @Override
