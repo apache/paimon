@@ -39,6 +39,7 @@ import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.Splits;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChainPartitionProjector;
@@ -610,7 +611,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
             // fallbackRead unwraps and applies the rules itself, so it gets the wrapper untouched.
-            Split inner = QueryAuthSplit.unwrap(split);
+            Split inner = Splits.underlying(split);
             if (inner instanceof ChainSplit || inner instanceof DataSplit) {
                 return fallbackRead.createReader(split);
             }
@@ -640,7 +641,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                             "Branch scans of the same chain table returned different authorization rules.");
                     authResult = next;
                 }
-                dataSplits.add((DataSplit) QueryAuthSplit.unwrap(split));
+                dataSplits.add((DataSplit) Splits.underlying(split));
             }
             return dataSplits;
         }
