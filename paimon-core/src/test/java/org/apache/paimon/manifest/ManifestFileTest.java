@@ -1085,6 +1085,50 @@ public class ManifestFileTest {
     }
 
     @Test
+    void testReadExpireFileEntriesPushesFiltersIntoStreamingScan() {
+        List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next(), gen.next());
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
+
+        int[] exactFilterCalls = {0};
+        List<ExpireFileEntry> bucketRejected =
+                manifestFile.readExpireFileEntries(
+                        manifest.fileName(),
+                        new BucketFilter(false, null, bucket -> false, null),
+                        entry -> {
+                            exactFilterCalls[0]++;
+                            return true;
+                        });
+        assertThat(bucketRejected).isEmpty();
+        assertThat(exactFilterCalls[0]).isZero();
+
+        String selectedFile = entries.get(1).fileName();
+        ProjectedManifestEntry[] reusableView = {null};
+        List<ExpireFileEntry> selected =
+                manifestFile.readExpireFileEntries(
+                        manifest.fileName(),
+                        null,
+                        entry -> {
+                            if (reusableView[0] == null) {
+                                reusableView[0] = entry;
+                            } else {
+                                assertThat(entry).isSameAs(reusableView[0]);
+                            }
+                            exactFilterCalls[0]++;
+                            return entry.fileName().equals(selectedFile);
+                        });
+
+        assertThat(exactFilterCalls[0]).isEqualTo(entries.size());
+        assertThat(selected)
+                .containsExactly(
+                        ExpireFileEntry.from(
+                                entries.stream()
+                                        .filter(entry -> entry.fileName().equals(selectedFile))
+                                        .findFirst()
+                                        .orElseThrow(AssertionError::new)));
+    }
+
+    @Test
     void testScanProjectedManifestCreatesDistinctEntryWrappers() throws Exception {
         List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next(), gen.next());
         ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
