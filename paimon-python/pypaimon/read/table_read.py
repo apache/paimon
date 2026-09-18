@@ -354,9 +354,12 @@ class TableRead:
 
     @staticmethod
     def _batches_to_arrow(batches, schema, allow_type_cast: bool = False):
-        batches = [TableRead._try_to_pad_batch_by_schema(
-            batch, schema, allow_type_cast=allow_type_cast)
-                   for batch in batches if batch.num_rows > 0]
+        batches = [
+            TableRead._try_to_pad_batch_by_schema(
+                batch, schema, allow_type_cast=allow_type_cast)
+            for batch in batches
+            if batch.num_rows > 0
+        ]
         if not batches:
             return pyarrow.Table.from_arrays(
                 [pyarrow.array([], type=field.type) for field in schema],
