@@ -23,8 +23,10 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.GenericVariantBuilderHelper;
 import org.apache.paimon.data.variant.VariantMetadataUtils;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReaderContext;
@@ -38,6 +40,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -50,7 +53,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.TimeZone;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -592,6 +598,62 @@ public class VariantShreddingReadTest {
                                         .build()));
         assertThatThrownBy(() -> readRows(format, strictReadType))
                 .hasMessageContaining("Invalid cast 99999999999 to INT");
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "null",
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"ts\",\"type\":\"TIMESTAMP(6) WITH LOCAL TIME ZONE\"}]}}]}"
+            })
+    public void testReadTimestampInRequestedZone(String shreddingSchema) throws Exception {
+        // The extraction carries the zone the query runs in; a shredded typed_value and an
+        // unshredded value must both convert with it rather than with the JVM default.
+        Options options = new Options();
+        if (!shreddingSchema.equals("null")) {
+            options.set("parquet.variant.shreddingSchema", shreddingSchema);
+        }
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+        Map<String, Object> values = new HashMap<>();
+        values.put("ts", 1700000000500000L); // 2023-11-14 22:13:20.5 UTC
+        writeRows(
+                format.createWriterFactory(writeType),
+                GenericRow.of(
+                        GenericVariantBuilderHelper.build(
+                                RowType.of(
+                                        new DataType[] {DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE()},
+                                        new String[] {"ts"}),
+                                values)));
+
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.STRING(), "$.ts", true, "Asia/Shanghai")
+                                        .field(DataTypes.DATE(), "$.ts", true, "Asia/Shanghai")
+                                        .field(DataTypes.TIMESTAMP(), "$.ts", true, "UTC")
+                                        .build()));
+        TimeZone original = TimeZone.getDefault();
+        try {
+            for (String jvmZone : new String[] {"UTC", "America/Los_Angeles"}) {
+                TimeZone.setDefault(TimeZone.getTimeZone(jvmZone));
+                List<InternalRow> result = readRows(format, readType);
+                assertThat(result.get(0).getRow(0, 3))
+                        .as("JVM zone %s", jvmZone)
+                        .isEqualTo(
+                                GenericRow.of(
+                                        BinaryString.fromString("2023-11-15 06:13:20.5"),
+                                        19676,
+                                        Timestamp.fromMicros(1700000000500000L)));
+            }
+        } finally {
+            TimeZone.setDefault(original);
+        }
     }
 
     protected List<InternalRow> readRows(ParquetFileFormat format, RowType rowType)
