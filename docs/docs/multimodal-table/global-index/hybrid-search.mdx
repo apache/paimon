@@ -405,4 +405,7 @@ result, or `withFilter` on the Java builder) is applied to every route before
 its own top-k, so vector and full-text candidates are drawn from the same
 filtered row set before the ranker merges them. Full-text routes follow the same
 rules as a standalone full-text search; see
-[Full-Text Row Filters](./full-text#row-filters).
+[Full-Text Row Filters](./full-text#row-filters). In particular, under
+`scalar-index.search-mode=fast` a full-text route whose filter columns have no
+scalar index contributes no candidates, so the fused result comes from the
+other routes only.
