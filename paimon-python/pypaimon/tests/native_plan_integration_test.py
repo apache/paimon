@@ -30,7 +30,7 @@ from pypaimon.read.native_plan import (
     native_method_available,
     native_read, native_reader_available,
 )
-from pypaimon.table.row.blob import BlobDescriptor
+from pypaimon.table.row.blob import BlobDescriptor, BlobRef
 from pypaimon.utils.range import Range
 
 
@@ -476,13 +476,56 @@ class NativePlanIntegrationTest(unittest.TestCase):
                 side_effect=AssertionError('Python reader was used')):
             table_result = builder.new_read().to_arrow(
                 plan.splits(), parallelism=1, blob_parallelism=3)
-            batches = list(builder.new_read().to_arrow_batch_reader(
-                plan.splits(), blob_parallelism=2))
+            batch_table = builder.new_read().to_arrow_batch_reader(
+                plan.splits(), blob_parallelism=2).read_all()
 
         expected = {'id': [1, 2, 3], 'img': payloads}
+        self.assertEqual(table_result.schema, schema)
+        self.assertEqual(batch_table.schema, schema)
         self.assertEqual(table_result.to_pydict(), expected)
-        self.assertEqual(pa.Table.from_batches(batches).to_pydict(), expected)
+        self.assertEqual(batch_table.to_pydict(), expected)
         self.assertTrue(builder.explain().native_planned)
+
+    @unittest.skipUnless(native_blob_parallelism_available(),
+                         "pypaimon-rust native BLOB parallelism API not installed")
+    def test_native_read_pruning_limit_defers_blob_payload_io(self):
+        schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', pa.large_binary()),
+        ])
+        self.cat.create_table('default.native_blob_limit_t',
+                              Schema.from_pyarrow_schema(schema, options={
+                                  'row-tracking.enabled': 'true',
+                                  'data-evolution.enabled': 'true',
+                              }), False)
+        table = self.cat.get_table('default.native_blob_limit_t')
+        write = table.new_batch_write_builder().new_write()
+        write.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'payload': [b'a', b'bb', b'ccc'],
+        }, schema=schema))
+        table.new_batch_write_builder().new_commit().commit(write.prepare_commit())
+        write.close()
+
+        native_table = table.copy({'read.native.enabled': 'true'})
+        builder = native_table.new_read_builder().with_limit(1)
+        plan = builder.new_scan().plan()
+        fetched = []
+        original_to_data = BlobRef.to_data
+
+        def tracked_to_data(blob):
+            fetched.append(blob)
+            return original_to_data(blob)
+
+        with patch.object(BlobRef, 'to_data', tracked_to_data), patch(
+                'pypaimon.read.native_plan.native_read',
+                return_value=[]) as native:
+            result = builder.new_read().to_arrow(
+                plan.splits(), parallelism=1)
+
+        native.assert_not_called()
+        self.assertEqual(result.to_pydict(), {'id': [1], 'payload': [b'a']})
+        self.assertEqual(len(fetched), 1)
 
     @unittest.skipUnless(_has_native_row_ranges(),
                          "pypaimon_rust row-range API not installed")
@@ -675,6 +718,22 @@ class NativePlanIntegrationTest(unittest.TestCase):
         c.close()
 
         self._assert_matches('pt_t')
+
+        native_table = t.copy({
+            'scan.native-plan.enabled': 'true',
+            'read.native.enabled': 'true',
+        })
+        builder = native_table.new_read_builder()
+        plan = builder.new_scan().plan()
+        with patch('pypaimon.read.native_plan.native_read',
+                   wraps=native_read) as read:
+            rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+        read.assert_not_called()
+        self.assertEqual(sorted(rows, key=lambda row: row['k']), [
+            {'k': 1, 'p': 'a/b'},
+            {'k': 2, 'p': 'a/b'},
+            {'k': 3, 'p': 'c'},
+        ])
 
     def test_explain_reflects_native_plan(self):
         self.cat.create_table(

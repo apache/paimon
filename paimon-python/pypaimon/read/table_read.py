@@ -253,7 +253,7 @@ class TableRead:
 
     @staticmethod
     def _try_to_pad_batch_by_schema(batch: pyarrow.RecordBatch, target_schema):
-        if batch.schema.names == target_schema.names:
+        if batch.schema.equals(target_schema, check_metadata=True):
             return batch
 
         columns = []
@@ -262,6 +262,8 @@ class TableRead:
         for field in target_schema:
             if field.name in batch.schema.names:
                 col = batch.column(field.name)
+                if col.type != field.type:
+                    col = col.cast(field.type)
             else:
                 col = pyarrow.nulls(num_rows, type=field.type)
             columns.append(col)
@@ -288,8 +290,8 @@ class TableRead:
                 and a ``limit`` set, the returned rows are an arbitrary
                 subset of the requested size, since which splits fill the row
                 quota first is non-deterministic. Data-evolution reads with
-                deferred BLOB resolution run serially when a limit may discard
-                rows, so payloads are not materialized from discarded splits.
+                deferred BLOB resolution falls back to the Python reader when
+                a limit may discard rows, so discarded payloads are not read.
             blob_parallelism: maximum concurrent blob range reads within each
                 split reader. ``None`` or ``1`` (default) reads blobs serially;
                 ``>= 2`` enables concurrent ranged reads. On the
@@ -360,6 +362,8 @@ class TableRead:
             return None
         if not splits:
             return []
+        if self._deferred_blob_limit_may_prune(splits):
+            return None
         try:
             from pypaimon.read.native_plan import (
                 native_blob_parallelism_available, native_read)
@@ -600,9 +604,9 @@ class TableRead:
         return max(1, cls._MAX_TOTAL_BLOB_WORKERS // workers)
 
     def _should_run_parallel(
-        self,
-        splits: List[Split],
-        effective: int,
+            self,
+            splits: List[Split],
+            effective: int,
     ) -> bool:
         """Decide whether to take the parallel read path.
 
@@ -610,13 +614,14 @@ class TableRead:
         overhead, no behavior change). A single split is never
         parallelized since there is nothing to fan out across.
         """
-        deferred_limit_may_prune = (
-            self.limit is not None
-            and self._deferred_blob_fields
-            and not self._limit_covers_all_splits(splits)
-        )
+        deferred_limit_may_prune = self._deferred_blob_limit_may_prune(splits)
         return (effective >= 2 and len(splits) >= 2
                 and not deferred_limit_may_prune)
+
+    def _deferred_blob_limit_may_prune(self, splits: List[Split]) -> bool:
+        return (self.limit is not None
+                and self._deferred_blob_fields
+                and not self._limit_covers_all_splits(splits))
 
     def _limit_covers_all_splits(self, splits: List[Split]) -> bool:
         """Return whether split metadata proves that LIMIT cannot drop rows."""

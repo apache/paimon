@@ -682,6 +682,7 @@ class NativePlanTest(unittest.TestCase):
         )
         split = Mock(
             partition=Mock(values=['a/b']), bucket=0, files=[data_file])
+        split._native_split = object()
 
         _restore_python_partition_paths(table, [split])
 
@@ -689,6 +690,7 @@ class NativePlanTest(unittest.TestCase):
             data_file.file_path,
             '/warehouse/t/p=a/b/bucket-0/data.parquet',
         )
+        self.assertIsNone(split._native_split)
 
     def test_partition_path_keeps_existing_rust_path(self):
         table = Mock(partition_keys=['p'])

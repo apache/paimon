@@ -272,6 +272,9 @@ def _restore_python_partition_paths(table, splits: List[Split]) -> None:
         for data_file, python_path in candidates:
             if data_file.file_name in bucket_files[bucket_path]:
                 data_file.file_path = python_path
+                # The retained Rust split still points at its canonical path.
+                # Invalidate it so native reading cannot bypass this repair.
+                split._native_split = None
 
 
 def _native_read_builder(table):
