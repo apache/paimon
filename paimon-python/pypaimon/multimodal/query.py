@@ -532,7 +532,32 @@ class VectorQuery(_PreFilterQuery):
         super().__init__(
             table, result_factory=self._execute_vector, pre_filter=pre_filter)
 
+    def to_arrow(self, *, execution="local", concurrency=None, ray_remote_args=None):
+        """Execute a vector query locally or on Ray workers, returning an Arrow table.
+
+        Ray execution supports data-evolution tables. ``concurrency`` bounds
+        in-flight tasks (defaults to 4); ``ray_remote_args`` configures their
+        resources and retries. Refinement and result lookup run on the driver.
+        """
+        if execution == "local":
+            if concurrency is not None or ray_remote_args is not None:
+                raise ValueError("Ray options require execution='ray'.")
+            return super().to_arrow()
+        if execution != "ray":
+            raise ValueError("execution must be 'local' or 'ray'.")
+
+        from pypaimon.ray.vector_search import _execute_vector_search
+
+        query = self._for_execution()
+        result = _execute_vector_search(
+            self._vector_search_builder(query),
+            concurrency=concurrency, ray_remote_args=ray_remote_args)
+        return query._read_global_index_result(result)
+
     def _execute_vector(self, query):
+        return self._vector_search_builder(query).execute_local()
+
+    def _vector_search_builder(self, query):
         limit = query._limit if query._limit is not None else 10
         builder = (
             query._table.new_vector_search_builder()
@@ -543,7 +568,7 @@ class VectorQuery(_PreFilterQuery):
         )
         if query._pre_filter is not None:
             builder = builder.with_filter(query._pre_filter)
-        return builder.execute_local()
+        return builder
 
 
 class TextQuery(_PreFilterQuery):
