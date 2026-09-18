@@ -28,7 +28,6 @@ import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
-import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.globalindex.OffsetGlobalIndexReader;
@@ -217,6 +216,13 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
      * support). {@code null} means "cannot decide", never "no rows match".
      */
     @Nullable
+    /**
+     * Rows of the indexed splits that satisfy {@link #filter} according to the scalar global
+     * indexes, or {@code null} when no index can evaluate it. The set is exact: an index answer
+     * that may be a superset (see {@link FilteredRowIdReader#isExact}) is refined from the data,
+     * because a superset ranked by the ANN would push matching rows out of the top-k where the
+     * engine-side filter cannot bring them back.
+     */
     private RoaringNavigableMap64 scalarMatchedRows(List<IndexVectorSearchSplit> splits) {
         if (filter == null) {
             return null;
@@ -224,8 +230,10 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
 
         Set<IndexFileMeta> scalarIndexFiles =
                 new TreeSet<>(Comparator.comparing(IndexFileMeta::fileName));
+        RoaringNavigableMap64 splitRows = new RoaringNavigableMap64();
         for (IndexVectorSearchSplit split : splits) {
             scalarIndexFiles.addAll(split.scalarIndexFiles());
+            splitRows.addRange(new Range(split.rowRangeStart(), split.rowRangeEnd()));
         }
 
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
@@ -236,11 +244,17 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         }
 
         try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
-            Optional<GlobalIndexResult> result = scanner.scan(filter);
-            if (!result.isPresent()) {
+            Optional<GlobalIndexEvaluator.Evaluation> evaluation = scanner.scanWithCoverage(filter);
+            if (!evaluation.isPresent()) {
                 return null;
             }
-            return result.get().results();
+            RoaringNavigableMap64 matched = evaluation.get().result().results();
+            if (FilteredRowIdReader.isExact(table.rowType(), filter, evaluation.get())) {
+                return matched;
+            }
+            RoaringNavigableMap64 candidates = RoaringNavigableMap64.and(matched, splitRows);
+            return new FilteredRowIdReader(table, planSnapshot, partitionFilter, filter)
+                    .matchingRowIds(candidates);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
