@@ -150,6 +150,7 @@ public class FileIndexEvaluatorTest {
                 null,
                 null,
                 null,
+                null,
                 DataFileMeta.forAppend(
                         "file",
                         0,
@@ -185,7 +186,8 @@ public class FileIndexEvaluatorTest {
                         rowRange,
                         null,
                         fileWithRowCount(100),
-                        null);
+                        null,
+                        0L);
 
         assertThat(result).isInstanceOf(BitmapIndexResult.class);
         RoaringBitmap32 bitmap = ((BitmapIndexResult) result).get();
@@ -208,7 +210,8 @@ public class FileIndexEvaluatorTest {
                         rowRange,
                         null,
                         fileWithRowCount(100),
-                        null);
+                        null,
+                        0L);
 
         assertThat(result).isInstanceOf(BitmapIndexResult.class);
         assertThat(((BitmapIndexResult) result).get())
@@ -230,7 +233,8 @@ public class FileIndexEvaluatorTest {
                         rowRange,
                         null,
                         fileWithRowCount(100),
-                        null);
+                        null,
+                        0L);
 
         assertThat(result).isInstanceOf(BitmapIndexResult.class);
         assertThat(result.remain()).isFalse();
@@ -250,7 +254,8 @@ public class FileIndexEvaluatorTest {
                         null,
                         null,
                         fileWithRowCount(100),
-                        null);
+                        null,
+                        0L);
 
         assertThat(result).isSameAs(FileIndexResult.REMAIN);
     }

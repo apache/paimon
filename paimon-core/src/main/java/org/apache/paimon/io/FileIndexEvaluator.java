@@ -56,7 +56,16 @@ public class FileIndexEvaluator {
             @Nullable DeletionVector dv)
             throws IOException {
         return evaluate(
-                fileIO, dataSchema, dataFilter, topN, limit, null, dataFilePathFactory, file, dv, 0L);
+                fileIO,
+                dataSchema,
+                dataFilter,
+                topN,
+                limit,
+                null,
+                dataFilePathFactory,
+                file,
+                dv,
+                0L);
     }
 
     /**

@@ -413,7 +413,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                             fileRowRange,
                             dataFilePathFactory,
                             file,
-                            deletionVector);
+                            deletionVector,
+                            0L);
             if (!fileIndexResult.remain()) {
                 return new EmptyFileRecordReader<>();
             }

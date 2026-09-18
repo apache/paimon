@@ -382,7 +382,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                         dataFilePathFactory,
                                         readRanges,
                                         readRowType,
-                                        deletionVector));
+                                        deletionVector,
+                                        fileRowRange));
             }
             return ConcatRecordReader.create(suppliers);
         }
@@ -406,7 +407,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 dataFilePathFactory,
                 rowRanges,
                 readRowType,
-                deletionVector);
+                deletionVector,
+                fileRowRange);
     }
 
     private RecordReader<InternalRow> createUnionReader(
@@ -416,7 +418,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             DataFilePathFactory dataFilePathFactory,
             List<Range> rowRanges,
             RowType readRowType,
-            @Nullable DeletionVectorWithRange deletionVector)
+            @Nullable DeletionVectorWithRange deletionVector,
+            @Nullable RowRange fileRowRange)
             throws IOException {
 
         long rowCount = fieldsFiles.get(0).rowCount();
@@ -465,7 +468,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     formatBuilder,
                     rowRanges,
                     readRowType,
-                    deletionVector);
+                    deletionVector,
+                    fileRowRange);
         }
 
         // Build the per-bunch readers from the planned partial read row types.
@@ -524,7 +528,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             Builder formatBuilder,
             List<Range> rowRanges,
             RowType readRowType,
-            @Nullable DeletionVectorWithRange deletionVector)
+            @Nullable DeletionVectorWithRange deletionVector,
+            @Nullable RowRange fileRowRange)
             throws IOException {
         DataFileMeta firstFile = bunch.files().get(0);
         // Use the physical schema: the full table schema may declare columns this file never wrote.
@@ -542,7 +547,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 mapping,
                 rowRanges,
                 readRowType,
-                deletionVector);
+                deletionVector,
+                fileRowRange);
     }
 
     private boolean nestedFieldEnabledFor(List<DataFileMeta> files) {
@@ -765,8 +771,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                 null,
                                 0L);
             } else {
-                DeletionVector dv =
-                        deletionVector == null ? null : deletionVector.deletionVector;
+                DeletionVector dv = deletionVector == null ? null : deletionVector.deletionVector;
                 long fileOffset =
                         dv == null || dv.isEmpty()
                                 ? 0L
@@ -853,7 +858,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                             fileRowRange,
                             dataFilePathFactory,
                             file,
-                            null);
+                            null,
+                            0L);
             if (!fileIndexResult.remain()) {
                 return new EmptyFileRecordReader<>();
             }
