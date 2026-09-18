@@ -97,8 +97,8 @@ public class DLFAuthProvider implements AuthProvider {
             Instant now = Instant.now();
             String host = extractHost(uri);
             Map<String, String> signHeaders =
-                    signer.signRequestHeaders(
-                            restAuthParameter, now, token.getSecurityToken(), host);
+                    signer.signHeaders(
+                            restAuthParameter.data(), now, token.getSecurityToken(), host);
             String authorization =
                     signer.authorization(restAuthParameter, token, host, signHeaders);
             Map<String, String> headersWithAuth = new HashMap<>(baseHeader);

@@ -46,6 +46,9 @@ import static org.apache.paimon.rest.RESTUtil.decodeString;
  * Content-MD5} headers with HMAC-SHA1, this signer hashes a canonical request and signs it with a
  * key derived from the date, the region and the product, the way the POP gateway does.
  *
+ * <p>{@link #authorization} also puts the API name in the headers it is handed, because a POP
+ * gateway may route by that header and it has to be signed with the rest.
+ *
  * <p>Reference: https://github.com/aliyun/alibabacloud-gateway/tree/master/alibabacloud-gateway-pop
  */
 public class DLFOpenApiV4Signer implements DLFRequestSigner {
@@ -127,27 +130,6 @@ public class DLFOpenApiV4Signer implements DLFRequestSigner {
         return headers;
     }
 
-    /** Adds the signed {@code x-acs-action}, which POP gateways may require to route the call. */
-    @Override
-    public Map<String, String> signRequestHeaders(
-            RESTAuthParameter restAuthParameter,
-            Instant now,
-            @Nullable String securityToken,
-            String host) {
-        if (restAuthParameter == null) {
-            throw new IllegalArgumentException("Parameter 'restAuthParameter' cannot be null");
-        }
-        Map<String, String> headers =
-                signHeaders(restAuthParameter.data(), now, securityToken, host);
-        String action =
-                DLFOpenApiActions.resolve(
-                        restAuthParameter.method(), restAuthParameter.resourcePath());
-        if (action != null) {
-            headers.put(X_ACS_ACTION, action);
-        }
-        return headers;
-    }
-
     /** Generates a unique nonce: UUID + timestamp + thread ID. */
     private static String generateUniqueNonce() {
         return UUID.randomUUID().toString()
@@ -173,6 +155,15 @@ public class DLFOpenApiV4Signer implements DLFRequestSigner {
         }
         if (signHeaders == null) {
             throw new IllegalArgumentException("Parameter 'signHeaders' cannot be null");
+        }
+
+        // POP gateways may route by this header, so it is added to the headers the caller sends
+        // and signed with them; the request names no API only when none is registered for it.
+        String action =
+                DLFOpenApiActions.resolve(
+                        restAuthParameter.method(), restAuthParameter.resourcePath());
+        if (action != null) {
+            signHeaders.put(X_ACS_ACTION, action);
         }
 
         CanonicalHeadersResult canonicalHeadersResult = buildCanonicalHeaders(signHeaders);

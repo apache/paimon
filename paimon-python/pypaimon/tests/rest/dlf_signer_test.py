@@ -551,27 +551,31 @@ class DLFSignerTest(unittest.TestCase):
         body = '{"identifier":{"database":"db","object":"t"}}'
         rest_param = RESTAuthParameter("POST", "/v1/clg-paimon-1/databases/db/tables", body, {})
 
-        headers = signer.sign_request_headers(rest_param, now, None, host)
+        headers = signer.sign_headers(body, now, None, host)
         headers["x-acs-signature-nonce"] = "fixed-nonce-for-test"
+        authorization = signer.authorization(rest_param, token, host, headers)
 
+        # signing adds the action to the headers the caller then sends
         self.assertEqual("CreateTable", headers["x-acs-action"])
         self.assertEqual(
             "ACS4-HMAC-SHA256 Credential=TestAKId/20250416/cn-hangzhou/DlfNext/aliyun_v4_request,"
             "SignedHeaders=content-type;host;x-acs-action;x-acs-content-sha256;"
             "x-acs-date;x-acs-signature-nonce;x-acs-version,"
             "Signature=420206b5263536e6bc271a7a32582b4a820e23c8c58ae692b708c69f9d19e51d",
-            signer.authorization(rest_param, token, host, headers))
+            authorization)
 
-    def test_openapi_v4_omits_action_for_unregistered_path(self):
+    def test_openapi_v4_unregistered_path_is_signed_without_an_action(self):
         signer = DLFOpenApiV4Signer("cn-hangzhou")
+        token = DLFToken("TestAKId", "TestAKSecret", None, None)
         host = "dlfnext.cn-hangzhou.aliyuncs.com"
         now = datetime(2025, 4, 16, 3, 44, 46, tzinfo=timezone.utc)
         rest_param = RESTAuthParameter("GET", "/v1/clg-paimon-1/tables", "", {})
+        headers = signer.sign_headers(None, now, None, host)
 
-        headers = signer.sign_request_headers(rest_param, now, None, host)
+        authorization = signer.authorization(rest_param, token, host, headers)
 
         self.assertNotIn("x-acs-action", headers)
-        self.assertEqual(set(signer.sign_headers(None, now, None, host)), set(headers))
+        self.assertNotIn("x-acs-action", authorization)
 
     def test_auth_provider_sends_signed_action(self):
         provider = DLFAuthProvider(

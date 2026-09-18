@@ -60,17 +60,6 @@ class DLFRequestSigner(ABC):
         """
         pass
 
-    def sign_request_headers(
-            self,
-            rest_auth_parameter: RESTAuthParameter,
-            now: datetime,
-            security_token: Optional[str],
-            host: str
-    ) -> Dict[str, str]:
-        """Signature headers for a request whose method and path the signer may need; by
-        default only the body is used, as in sign_headers()."""
-        return self.sign_headers(rest_auth_parameter.data, now, security_token, host)
-
     @abstractmethod
     def authorization(
             self,
@@ -600,22 +589,6 @@ class DLFOpenApiV4Signer(DLFRequestSigner):
 
         return headers
 
-    def sign_request_headers(
-            self,
-            rest_auth_parameter: RESTAuthParameter,
-            now: datetime,
-            security_token: Optional[str],
-            host: str
-    ) -> Dict[str, str]:
-        """Adds the signed x-acs-action, which POP gateways may require to route the call."""
-        if rest_auth_parameter is None:
-            raise ValueError("Parameter 'rest_auth_parameter' cannot be None")
-        headers = self.sign_headers(rest_auth_parameter.data, now, security_token, host)
-        action = resolve_action(rest_auth_parameter.method, rest_auth_parameter.path)
-        if action is not None:
-            headers[self.X_ACS_ACTION] = action
-        return headers
-
     def authorization(
             self,
             rest_auth_parameter: RESTAuthParameter,
@@ -633,6 +606,12 @@ class DLFOpenApiV4Signer(DLFRequestSigner):
             raise ValueError("Parameter 'sign_headers' cannot be None")
 
         try:
+            # POP gateways may route by this header, so it is added to the headers the caller
+            # sends and signed with them; it is absent only when no API is registered for it.
+            action = resolve_action(rest_auth_parameter.method, rest_auth_parameter.path)
+            if action is not None:
+                sign_headers[self.X_ACS_ACTION] = action
+
             canonical = self._build_canonical_headers(sign_headers)
             canonical_query_string = self._build_canonical_query_string(
                 rest_auth_parameter.parameters
