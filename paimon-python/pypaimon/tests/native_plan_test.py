@@ -50,6 +50,7 @@ def _scan(native_enabled, file_scanner):
     scan = TableScan.__new__(TableScan)
     scan.table = Mock()
     scan.table.options.native_plan_enabled.return_value = native_enabled
+    scan.table.options.native_read_enabled.return_value = False
     scan.table.options.options.contains_key.return_value = False   # no time-travel
     scan.table.options.options.contains.return_value = False       # no incremental
     scan.table.options.merge_engine.return_value = None            # not first-row
@@ -145,9 +146,13 @@ class NativePlanTest(unittest.TestCase):
                     self.assertIsNone(_resolved_schema_file_io_options(table))
 
     def test_switch_defaults_off(self):
-        self.assertFalse(CoreOptions(Options({})).native_plan_enabled())
+        defaults = CoreOptions(Options({}))
+        self.assertFalse(defaults.native_plan_enabled())
+        self.assertFalse(defaults.native_read_enabled())
         self.assertTrue(
             CoreOptions(Options({"scan.native-plan.enabled": "true"})).native_plan_enabled())
+        self.assertTrue(
+            CoreOptions(Options({"read.native.enabled": "true"})).native_read_enabled())
 
     def test_catalogless_standard_file_io_options_are_preserved(self):
         from pypaimon.catalog.catalog_environment import CatalogEnvironment
@@ -172,6 +177,19 @@ class NativePlanTest(unittest.TestCase):
         scan = _scan(native_enabled=False, file_scanner=fs)
         self.assertIs(scan.plan(), sentinel)
         fs.scan.assert_called_once_with()
+
+    def test_native_read_switch_also_requests_native_plan(self):
+        fs = Mock(partition_key_predicate=None)
+        scan = _scan(native_enabled=False, file_scanner=fs)
+        scan.table.options.native_read_enabled.return_value = True
+        expected = Plan([], 1)
+        with patch('pypaimon.read.native_plan.native_reader_available',
+                   return_value=True), \
+                patch('pypaimon.read.native_plan.native_plan',
+                      return_value=expected) as np:
+            self.assertEqual(scan.plan(), expected)
+        np.assert_called_once()
+        fs.scan.assert_not_called()
 
     def test_plan_routes_to_native_and_prunes_partitions(self):
         # Native planner returns every partition; the predicate keeps only [2026, 7].
@@ -664,6 +682,7 @@ class NativePlanTest(unittest.TestCase):
         )
         split = Mock(
             partition=Mock(values=['a/b']), bucket=0, files=[data_file])
+        split._native_split = object()
 
         _restore_python_partition_paths(table, [split])
 
@@ -671,6 +690,7 @@ class NativePlanTest(unittest.TestCase):
             data_file.file_path,
             '/warehouse/t/p=a/b/bucket-0/data.parquet',
         )
+        self.assertIsNone(split._native_split)
 
     def test_partition_path_keeps_existing_rust_path(self):
         table = Mock(partition_keys=['p'])
@@ -762,11 +782,13 @@ class NativePlanTest(unittest.TestCase):
         with patch.dict(sys.modules,
                         {'pypaimon_rust': fake_mod, 'pypaimon_rust.datafusion': fake_df}), \
                 patch('pypaimon.read.native_plan._catalog_options', return_value={}), \
-                patch('pypaimon.read.native_plan.deserialize_split_v1',
-                      return_value='decoded') as des:
+                patch('pypaimon.read.native_plan.deserialize_split_v1') as des:
+            decoded = Mock()
+            des.return_value = decoded
             result = native_plan(table, row_ranges=[(1, 2)])
 
-        self.assertEqual(result.splits(), ['decoded'])
+        self.assertEqual(result.splits(), [decoded])
+        self.assertIs(decoded._native_split, split)
         self.assertEqual(result.snapshot_id, 3)
         rt.new_read_builder.assert_called_once_with({
             CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(): '1024',
