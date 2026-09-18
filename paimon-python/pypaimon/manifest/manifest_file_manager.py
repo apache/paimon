@@ -345,7 +345,7 @@ class ManifestFileManager:
     def _sidecar_settings(self):
         return Settings.from_options(self.table.options)
 
-    def write(self, file_name, entries: List[ManifestEntry]):
+    def write(self, file_name, entries: List[ManifestEntry]) -> ManifestFileMeta:
         buf = BytesIO()
         fastavro.writer(
             buf, MANIFEST_ENTRY_SCHEMA, self._to_avro_records(entries),
@@ -444,7 +444,7 @@ class ManifestFileManager:
         for extra_file in manifest.extra_files or []:
             self.file_io.delete_quietly(f"{self.manifest_path}/{extra_file}")
 
-    def _flush(self, file_name: str, avro_bytes: bytes, entries) -> ManifestFileMeta:
+    def _flush(self, file_name: str, avro_bytes: bytes, entries: List[ManifestEntry]) -> ManifestFileMeta:
         manifest_path = f"{self.manifest_path}/{file_name}"
         sidecar_file_name = None
         try:
