@@ -233,11 +233,31 @@ def test_non_dictionary_encodings(tmp_path, encoding, kind):
     table = pa.table({'value': pa.array(values, type=kind)})
     pq.write_table(table, path, column_encoding=encoding, use_dictionary=False,
                    write_page_index=True, data_page_size=1024, write_batch_size=64)
+    runs = [(8000, 8100)]
     with pa.OSFile(path, 'rb') as source:
-        reader = page_module.ParquetPageIndexReader.create(
+        page_reader = page_module.ParquetPageIndexReader.create(
             source, pq.ParquetFile(source), ['value'], [0], 71)
-        actual = pa.Table.from_batches(list(reader.read_row_group(0, [(8000, 8100)])))
-        assert actual.equals(table.slice(8000, 101))
+        use_pages = page_reader.read_row_group(0, runs) is not None
+    fields = PyarrowFieldParser.to_paimon_schema(table.schema)
+    reader = reader_module.FormatPyArrowReader(
+        LocalFileIO(str(tmp_path), Options({})), 'parquet', path, fields, None,
+        row_ranges=runs, batch_size=71, options=PAGE_INDEX_OPTIONS)
+    try:
+        with patch.object(page_module.ParquetPageIndexReader, '_column_payload',
+                          autospec=True,
+                          side_effect=page_module.ParquetPageIndexReader._column_payload
+                          ) as read_pages:
+            batches = []
+            while True:
+                batch = reader.read_arrow_batch()
+                if batch is None:
+                    break
+                batches.append(batch)
+        assert pa.Table.from_batches(batches).equals(table.slice(8000, 101))
+        if use_pages:
+            assert read_pages.called
+    finally:
+        reader.close()
 
 
 def test_page_header_row_count_must_agree_with_index(fixture):
