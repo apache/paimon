@@ -100,6 +100,10 @@ public class BTreePostingListTest {
         assertThatThrownBy(() -> BTreePostingList.serialize(rowIds(1, 3, 2)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("strictly increasing");
+
+        assertThatThrownBy(() -> BTreePostingList.serialize(rowIds(1, 1)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("strictly increasing");
     }
 
     @Test
@@ -112,18 +116,61 @@ public class BTreePostingListTest {
                 .hasMessageContaining("Unknown BTree posting list type");
     }
 
+    @Test
+    public void testRejectsInvalidDeltaList() {
+        MemorySliceOutput invalidCount = new MemorySliceOutput(3);
+        invalidCount.writeByte(BTreePostingList.DELTA_LIST);
+        invalidCount.writeVarLenInt(1);
+        invalidCount.writeVarLenLong(0);
+        assertThatThrownBy(
+                        () ->
+                                BTreePostingList.deserialize(
+                                        invalidCount.toSlice(), Integer.MAX_VALUE))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Invalid delta BTree posting list length");
+
+        MemorySliceOutput zeroDelta = new MemorySliceOutput(4);
+        zeroDelta.writeByte(BTreePostingList.DELTA_LIST);
+        zeroDelta.writeVarLenInt(2);
+        zeroDelta.writeVarLenLong(1);
+        zeroDelta.writeVarLenLong(0);
+        assertThatThrownBy(
+                        () -> BTreePostingList.deserialize(zeroDelta.toSlice(), Integer.MAX_VALUE))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Invalid non-positive BTree row id delta");
+    }
+
+    @Test
+    public void testRejectsEmptyRoaring() throws Exception {
+        byte[] emptyBitmap = new RoaringNavigableMap64().serialize();
+        MemorySliceOutput output = new MemorySliceOutput(emptyBitmap.length + 1);
+        output.writeByte(BTreePostingList.ROARING);
+        output.writeBytes(emptyBitmap);
+
+        assertThatThrownBy(() -> BTreePostingList.deserialize(output.toSlice(), Integer.MAX_VALUE))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Invalid empty Roaring BTree posting list");
+    }
+
     private static void assertEncodingAndRoundTrip(LongArrayList rowIds, int expectedEncoding)
             throws Exception {
         byte[] serialized = BTreePostingList.serialize(rowIds);
         assertThat(serialized[0]).isEqualTo((byte) expectedEncoding);
-        assertThat(BTreePostingList.deserialize(MemorySlice.wrap(serialized), Integer.MAX_VALUE))
+        MemorySlice paddedSlice = paddedSlice(serialized);
+        assertThat(BTreePostingList.deserialize(paddedSlice, Integer.MAX_VALUE))
                 .containsExactly(rowIds.toArray());
 
         RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
-        BTreePostingList.addTo(MemorySlice.wrap(serialized), bitmap);
+        BTreePostingList.addTo(paddedSlice, bitmap);
         List<Long> actual = new ArrayList<>();
         bitmap.iterator().forEachRemaining(actual::add);
         assertThat(actual).containsExactlyElementsOf(asList(rowIds));
+    }
+
+    private static MemorySlice paddedSlice(byte[] serialized) {
+        byte[] framed = new byte[serialized.length + 4];
+        System.arraycopy(serialized, 0, framed, 2, serialized.length);
+        return MemorySlice.wrap(framed).slice(2, serialized.length);
     }
 
     private static void assertSmallest(LongArrayList rowIds) throws Exception {

@@ -161,7 +161,18 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
     }
 
     public void deserialize(byte[] rbmBytes) throws IOException {
-        try (ByteArrayInputStream bis = new ByteArrayInputStream(rbmBytes);
+        deserialize(rbmBytes, 0, rbmBytes.length);
+    }
+
+    /** Deserializes a bitmap from a region of the given byte array without copying that region. */
+    public void deserialize(byte[] rbmBytes, int offset, int length) throws IOException {
+        Preconditions.checkArgument(
+                offset >= 0 && length >= 0 && offset <= rbmBytes.length - length,
+                "Invalid bitmap byte range [%s, %s) for array length %s.",
+                offset,
+                (long) offset + length,
+                rbmBytes.length);
+        try (ByteArrayInputStream bis = new ByteArrayInputStream(rbmBytes, offset, length);
                 DataInputStream dis = new DataInputStream(bis)) {
             roaring64NavigableMap.deserializePortable(dis);
         }

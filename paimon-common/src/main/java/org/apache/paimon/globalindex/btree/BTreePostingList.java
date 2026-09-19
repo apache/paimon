@@ -52,19 +52,21 @@ final class BTreePostingList {
         if (rowIds.size() == 1) {
             long rowId = rowIds.get(0);
             checkNonNegative(rowId);
-            MemorySliceOutput output = new MemorySliceOutput(10);
+            MemorySliceOutput output = new MemorySliceOutput(1 + varLenSize(rowId));
             output.writeByte(SINGLE);
             output.writeVarLenLong(rowId);
-            return output.toSlice().copyBytes();
+            return output.toSlice().getHeapMemory();
         }
 
-        EncodingCandidates candidates = serializeDeltaListAndEstimateRoaring(rowIds);
-        if (candidates.roaringLowerBound >= candidates.deltaList.length) {
-            return candidates.deltaList;
+        EncodingSizes sizes = estimateEncodingSizes(rowIds);
+        if (sizes.roaringLowerBound >= sizes.deltaList) {
+            return serializeDeltaList(rowIds, sizes.deltaList);
         }
 
         byte[] roaring = serializeRoaring(rowIds);
-        return roaring.length < candidates.deltaList.length ? roaring : candidates.deltaList;
+        return roaring.length < sizes.deltaList
+                ? roaring
+                : serializeDeltaList(rowIds, sizes.deltaList);
     }
 
     static void addTo(MemorySlice slice, RoaringNavigableMap64 target) throws IOException {
@@ -101,13 +103,11 @@ final class BTreePostingList {
         }
     }
 
-    private static EncodingCandidates serializeDeltaListAndEstimateRoaring(LongArrayList rowIds) {
-        MemorySliceOutput output = new MemorySliceOutput(rowIds.size() + 10);
-        output.writeByte(DELTA_LIST);
-        output.writeVarLenInt(rowIds.size());
+    private static EncodingSizes estimateEncodingSizes(LongArrayList rowIds) {
+        int deltaListSize = 1 + varLenSize(rowIds.size());
         long previous = rowIds.get(0);
         checkNonNegative(previous);
-        output.writeVarLenLong(previous);
+        deltaListSize += varLenSize(previous);
 
         long roaringLowerBound = 1L + Long.BYTES + Integer.BYTES + Integer.BYTES;
         long currentHigh = previous >>> 32;
@@ -117,7 +117,7 @@ final class BTreePostingList {
         for (int i = 1; i < rowIds.size(); i++) {
             long current = rowIds.get(i);
             checkIncreasing(current, previous);
-            output.writeVarLenLong(current - previous);
+            deltaListSize += varLenSize(current - previous);
 
             long high = current >>> 32;
             long container = current >>> 16;
@@ -140,7 +140,26 @@ final class BTreePostingList {
             previous = current;
         }
         roaringLowerBound += containerLowerBound(containerCardinality, containerRuns);
-        return new EncodingCandidates(output.toSlice().copyBytes(), roaringLowerBound);
+        return new EncodingSizes(deltaListSize, roaringLowerBound);
+    }
+
+    private static byte[] serializeDeltaList(LongArrayList rowIds, int serializedSize) {
+        MemorySliceOutput output = new MemorySliceOutput(serializedSize);
+        output.writeByte(DELTA_LIST);
+        output.writeVarLenInt(rowIds.size());
+        long previous = rowIds.get(0);
+        output.writeVarLenLong(previous);
+        for (int i = 1; i < rowIds.size(); i++) {
+            long current = rowIds.get(i);
+            output.writeVarLenLong(current - previous);
+            previous = current;
+        }
+        checkState(
+                output.size() == serializedSize,
+                "Unexpected delta BTree posting list size: %s instead of %s",
+                output.size(),
+                serializedSize);
+        return output.toSlice().getHeapMemory();
     }
 
     private static long containerLowerBound(int cardinality, int runs) {
@@ -234,13 +253,28 @@ final class BTreePostingList {
 
     private static RoaringNavigableMap64 readRoaring(MemorySliceInput input) throws IOException {
         RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
-        bitmap.deserialize(input.readSlice(input.available()).copyBytes());
+        MemorySlice payload = input.readSlice(input.available());
+        byte[] heapMemory = payload.getHeapMemory();
+        if (heapMemory == null) {
+            bitmap.deserialize(payload.copyBytes());
+        } else {
+            bitmap.deserialize(heapMemory, payload.offset(), payload.length());
+        }
         checkState(!bitmap.isEmpty(), "Invalid empty Roaring BTree posting list.");
         return bitmap;
     }
 
     private static long[] first(RoaringNavigableMap64 bitmap, int maxRowIds) {
         return bitmap.toArray(maxRowIds);
+    }
+
+    private static int varLenSize(long value) {
+        int size = 1;
+        while ((value & ~0x7FL) != 0) {
+            value >>>= 7;
+            size++;
+        }
+        return size;
     }
 
     private static void checkNonNegative(long rowId) {
@@ -261,11 +295,11 @@ final class BTreePostingList {
         }
     }
 
-    private static class EncodingCandidates {
-        private final byte[] deltaList;
+    private static class EncodingSizes {
+        private final int deltaList;
         private final long roaringLowerBound;
 
-        private EncodingCandidates(byte[] deltaList, long roaringLowerBound) {
+        private EncodingSizes(int deltaList, long roaringLowerBound) {
             this.deltaList = deltaList;
             this.roaringLowerBound = roaringLowerBound;
         }
