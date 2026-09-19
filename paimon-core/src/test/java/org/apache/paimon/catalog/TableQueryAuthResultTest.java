@@ -29,7 +29,6 @@ import org.apache.paimon.predicate.NestedFieldTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.UpperTransform;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -252,13 +251,23 @@ public class TableQueryAuthResultTest {
     }
 
     private static RowType infoRowType(String... nestedFields) {
-        DataType[] types = new DataType[nestedFields.length];
-        for (int i = 0; i < types.length; i++) {
-            types[i] = DataTypes.STRING();
+        org.apache.paimon.types.DataField[] fields =
+                new org.apache.paimon.types.DataField[nestedFields.length];
+        for (int i = 0; i < fields.length; i++) {
+            int id;
+            if ("secret".equals(nestedFields[i])) {
+                id = 2;
+            } else if ("region".equals(nestedFields[i])) {
+                id = 3;
+            } else {
+                id = i + 2;
+            }
+            fields[i] =
+                    new org.apache.paimon.types.DataField(id, nestedFields[i], DataTypes.STRING());
         }
         return RowType.of(
-                new DataType[] {DataTypes.INT(), RowType.of(types, nestedFields)},
-                new String[] {"pk", "info"});
+                new org.apache.paimon.types.DataField(0, "pk", DataTypes.INT()),
+                new org.apache.paimon.types.DataField(1, "info", RowType.of(fields)));
     }
 
     private static Predicate rowFilterOnInfoSecret(RowType rowType) {
@@ -267,19 +276,26 @@ public class TableQueryAuthResultTest {
                 .equal(
                         new NestedFieldTransform(
                                 new FieldRef(1, "info", info), Collections.singletonList("secret")),
-                        BinaryString.fromString("x"));
+                        org.apache.paimon.data.BinaryString.fromString("x"));
     }
 
+    /**
+     * A row filter on a nested field must not silently follow column pruning onto a different
+     * field. Remapping resolves the components by name, so a pruned-away leaf fails closed rather
+     * than letting the policy address whatever now sits at that position.
+     */
     @Test
     void testNestedRowFilterDoesNotDriftWhenTheLeafIsPruned() {
         Predicate filter = rowFilterOnInfoSecret(infoRowType("secret", "region"));
 
+        // the projection kept "info" but dropped "info.secret"
         RowType pruned = infoRowType("region");
         assertThatThrownBy(() -> TableQueryAuthResult.remapPredicate(filter, pruned))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("secret");
     }
 
+    /** Remapping onto a reordered row type must keep addressing the same nested field. */
     @Test
     void testNestedRowFilterFollowsTheFieldWhenPositionsShift() {
         Predicate filter = rowFilterOnInfoSecret(infoRowType("secret", "region"));

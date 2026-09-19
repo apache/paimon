@@ -23,11 +23,13 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.Optional;
 
@@ -36,6 +38,26 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link NestedFieldTransform}. */
 class NestedFieldTransformTest {
+
+    // Serialized by the NestedFieldTransform implementation at PR head e55ed4a, before fieldIds
+    // existed. Keep this fixture to verify Java serialization compatibility across the change.
+    private static final String LEGACY_SERIALIZED_TRANSFORM =
+            "rO0ABXNyADBvcmcuYXBhY2hlLnBhaW1vbi5wcmVkaWNhdGUuTmVzdGVkRmllbGRUcmFuc2Zvcm0AAAAAAAAAAQIABUwACGZpZWxk"
+                    + "UmVmdAAmTG9yZy9hcGFjaGUvcGFpbW9uL3ByZWRpY2F0ZS9GaWVsZFJlZjtMAARuYW1ldAASTGphdmEvbGFuZy9TdHJpbmc7TAAK"
+                    + "b3V0cHV0VHlwZXQAIkxvcmcvYXBhY2hlL3BhaW1vbi90eXBlcy9EYXRhVHlwZTtMAARwYXRodAAQTGphdmEvdXRpbC9MaXN0O1sA"
+                    + "CXBvc2l0aW9uc3QAAltJeHBzcgAkb3JnLmFwYWNoZS5wYWltb24ucHJlZGljYXRlLkZpZWxkUmVmAAAAAAAAAAECAANJAAVpbmRl"
+                    + "eEwABG5hbWVxAH4AAkwABHR5cGVxAH4AA3hwAAAAAHQABGluZm9zcgAfb3JnLmFwYWNoZS5wYWltb24udHlwZXMuUm93VHlwZQAA"
+                    + "AAAAAAABAgABTAAGZmllbGRzcQB+AAR4cgAgb3JnLmFwYWNoZS5wYWltb24udHlwZXMuRGF0YVR5cGUAAAAAAAAAAQIAAloACmlz"
+                    + "TnVsbGFibGVMAAh0eXBlUm9vdHQAJkxvcmcvYXBhY2hlL3BhaW1vbi90eXBlcy9EYXRhVHlwZVJvb3Q7eHABfnIAJG9yZy5hcGFj"
+                    + "aGUucGFpbW9uLnR5cGVzLkRhdGFUeXBlUm9vdAAAAAAAAAAAEgAAeHIADmphdmEubGFuZy5FbnVtAAAAAAAAAAASAAB4cHQAA1JP"
+                    + "V3NyACZqYXZhLnV0aWwuQ29sbGVjdGlvbnMkVW5tb2RpZmlhYmxlTGlzdPwPJTG17I4QAgABTAAEbGlzdHEAfgAEeHIALGphdmEu"
+                    + "dXRpbC5Db2xsZWN0aW9ucyRVbm1vZGlmaWFibGVDb2xsZWN0aW9uGUIAgMte9x4CAAFMAAFjdAAWTGphdmEvdXRpbC9Db2xsZWN0"
+                    + "aW9uO3hwc3IAE2phdmEudXRpbC5BcnJheUxpc3R4gdIdmcdhnQMAAUkABHNpemV4cAAAAAJ3BAAAAAJzcgAhb3JnLmFwYWNoZS5w"
+                    + "YWltb24udHlwZXMuRGF0YUZpZWxkAAAAAAAAAAECAAVJAAJpZEwADGRlZmF1bHRWYWx1ZXEAfgACTAALZGVzY3JpcHRpb25xAH4A"
+                    + "AkwABG5hbWVxAH4AAkwABHR5cGVxAH4AA3hwAAAAAnBwdAAGc2VjcmV0c3IAI29yZy5hcGFjaGUucGFpbW9uLnR5cGVzLlZhckNo"
+                    + "YXJUeXBlAAAAAAAAAAECAAFJAAZsZW5ndGh4cQB+AAsBfnEAfgAOdAAHVkFSQ0hBUn////9zcQB+ABgAAAADcHB0AAZyZWdpb25x"
+                    + "AH4AHHhxAH4AF3QAC2luZm8uc2VjcmV0cQB+ABxzcQB+ABJzcQB+ABYAAAABdwQAAAABcQB+ABp4cQB+ACN1cgACW0lNumAmduqy"
+                    + "pQIAAHhwAAAAAQAAAAA=";
 
     // user STRUCT<id BIGINT, addr STRUCT<city STRING, zip STRING>>
     private static final RowType ADDR_TYPE =
@@ -204,6 +226,61 @@ class NestedFieldTransformTest {
     }
 
     @Test
+    public void testLegacyJavaRoundTripRestoresNestedIdentity() throws Exception {
+        NestedFieldTransform legacy =
+                InstantiationUtil.deserializeObject(
+                        Base64.getDecoder().decode(LEGACY_SERIALIZED_TRANSFORM),
+                        getClass().getClassLoader());
+        assertThat(legacy.fieldName()).isEqualTo("info.secret");
+        assertThat(
+                        legacy.transform(
+                                GenericRow.of(
+                                        GenericRow.of(
+                                                BinaryString.fromString("x"),
+                                                BinaryString.fromString("US")))))
+                .isEqualTo(BinaryString.fromString("x"));
+
+        RowType reAdded =
+                RowType.of(
+                        new org.apache.paimon.types.DataField(7, "secret", DataTypes.STRING()),
+                        new org.apache.paimon.types.DataField(3, "region", DataTypes.STRING()));
+        assertThatThrownBy(
+                        () ->
+                                legacy.copyWithNewInputs(
+                                        Collections.singletonList(
+                                                new FieldRef(0, "info", reAdded))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("changed identity")
+                .hasMessageContaining("2")
+                .hasMessageContaining("7");
+    }
+
+    @Test
+    public void testJavaRoundTripKeepsNestedIdentity() throws Exception {
+        NestedFieldTransform original =
+                new NestedFieldTransform(USER_REF, Arrays.asList("addr", "city"));
+        NestedFieldTransform copy =
+                InstantiationUtil.deserializeObject(
+                        InstantiationUtil.serializeObject(original), getClass().getClassLoader());
+        RowType reAddedAddr =
+                RowType.of(
+                        new org.apache.paimon.types.DataField(7, "city", DataTypes.STRING()),
+                        new org.apache.paimon.types.DataField(1, "zip", DataTypes.STRING()));
+        RowType reAddedUser =
+                RowType.of(
+                        new org.apache.paimon.types.DataField(0, "id", DataTypes.BIGINT()),
+                        new org.apache.paimon.types.DataField(1, "addr", reAddedAddr));
+
+        assertThatThrownBy(
+                        () ->
+                                copy.copyWithNewInputs(
+                                        Collections.singletonList(
+                                                new FieldRef(1, "user", reAddedUser))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("changed identity");
+    }
+
+    @Test
     public void testRejectsPathThroughNonRowType() {
         FieldRef arrayRef = new FieldRef(0, "tags", DataTypes.ARRAY(DataTypes.STRING()));
         assertThatThrownBy(() -> new NestedFieldTransform(arrayRef, Collections.singletonList("x")))
@@ -246,25 +323,46 @@ class NestedFieldTransformTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    public void testRemapRejectsReAddedFieldOfSameName() {
+        RowType original =
+                RowType.of(
+                        new org.apache.paimon.types.DataField(2, "secret", DataTypes.STRING()),
+                        new org.apache.paimon.types.DataField(3, "region", DataTypes.STRING()));
+        NestedFieldTransform transform =
+                new NestedFieldTransform(
+                        new FieldRef(0, "info", original), Collections.singletonList("secret"));
+        RowType reAdded =
+                RowType.of(
+                        new org.apache.paimon.types.DataField(7, "secret", DataTypes.STRING()),
+                        new org.apache.paimon.types.DataField(3, "region", DataTypes.STRING()));
+
+        assertThatThrownBy(
+                        () ->
+                                transform.copyWithNewInputs(
+                                        Collections.singletonList(
+                                                new FieldRef(0, "info", reAdded))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("changed identity")
+                .hasMessageContaining("2")
+                .hasMessageContaining("7");
+    }
+
     /** Remapping onto a reordered row type must keep addressing the same field. */
     @Test
     public void testRemapFollowsTheFieldWhenPositionsShift() {
         RowType full =
                 RowType.of(
-                        new org.apache.paimon.types.DataType[] {
-                            DataTypes.STRING(), DataTypes.STRING()
-                        },
-                        new String[] {"secret", "region"});
+                        new org.apache.paimon.types.DataField(2, "secret", DataTypes.STRING()),
+                        new org.apache.paimon.types.DataField(3, "region", DataTypes.STRING()));
         NestedFieldTransform onSecret =
                 new NestedFieldTransform(
                         new FieldRef(0, "info", full), Collections.singletonList("secret"));
 
         RowType reordered =
                 RowType.of(
-                        new org.apache.paimon.types.DataType[] {
-                            DataTypes.STRING(), DataTypes.STRING()
-                        },
-                        new String[] {"region", "secret"});
+                        new org.apache.paimon.types.DataField(3, "region", DataTypes.STRING()),
+                        new org.apache.paimon.types.DataField(2, "secret", DataTypes.STRING()));
         Transform remapped =
                 onSecret.copyWithNewInputs(
                         Collections.singletonList(new FieldRef(0, "info", reordered)));

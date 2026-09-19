@@ -19,6 +19,7 @@
 package org.apache.paimon.predicate;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
@@ -72,6 +73,9 @@ public class NestedFieldTransform implements Transform {
     /** {@link #path} resolved to positions against {@code fieldRef}'s row type. */
     private final int[] positions;
 
+    /** Stable field ids of every component in {@link #path}. */
+    private final int[] fieldIds;
+
     private final String name;
     private final DataType outputType;
 
@@ -79,10 +83,18 @@ public class NestedFieldTransform implements Transform {
     public NestedFieldTransform(
             @JsonProperty(FIELD_FIELD_REF) FieldRef fieldRef,
             @JsonProperty(FIELD_PATH) List<String> path) {
+        this(fieldRef, path, null);
+    }
+
+    private NestedFieldTransform(FieldRef fieldRef, List<String> path, int[] expectedFieldIds) {
         checkArgument(path != null && !path.isEmpty(), "Nested field path must not be empty.");
+        checkArgument(
+                expectedFieldIds == null || expectedFieldIds.length == path.size(),
+                "Nested field path and field ids must have the same size.");
         this.fieldRef = fieldRef;
         this.path = Collections.unmodifiableList(new ArrayList<>(path));
         this.positions = new int[this.path.size()];
+        this.fieldIds = new int[this.path.size()];
 
         StringBuilder nameBuilder = new StringBuilder(fieldRef.name());
         DataType current = fieldRef.type();
@@ -100,9 +112,20 @@ public class NestedFieldTransform implements Transform {
                     "Nested field '%s' does not contain a field named '%s'.",
                     nameBuilder,
                     component);
+            DataField field = rowType.getFields().get(position);
+            if (expectedFieldIds != null) {
+                checkArgument(
+                        field.id() == expectedFieldIds[i],
+                        "Nested field '%s.%s' changed identity from field id %s to %s.",
+                        nameBuilder,
+                        component,
+                        expectedFieldIds[i],
+                        field.id());
+            }
             positions[i] = position;
+            fieldIds[i] = field.id();
             nameBuilder.append('.').append(component);
-            current = rowType.getTypeAt(position);
+            current = field.type();
         }
         this.name = nameBuilder.toString();
         this.outputType = current;
@@ -172,7 +195,11 @@ public class NestedFieldTransform implements Transform {
     @Override
     public Transform copyWithNewInputs(List<Object> inputs) {
         checkArgument(inputs.size() == 1);
-        return new NestedFieldTransform((FieldRef) inputs.get(0), path);
+        return new NestedFieldTransform((FieldRef) inputs.get(0), path, fieldIds);
+    }
+
+    private Object readResolve() {
+        return fieldIds == null ? new NestedFieldTransform(fieldRef, path) : this;
     }
 
     @Override
