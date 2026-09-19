@@ -18,7 +18,9 @@
 import struct
 import unittest
 import zlib
+from unittest import mock
 
+import pypaimon.table.row.video_keyframe_index as keyframe_index_module
 from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
@@ -43,6 +45,41 @@ class VideoKeyframeIndexTest(unittest.TestCase):
         header = index.serialize()[:index.HEADER.size]
         with self.assertRaises(ValueError):
             VideoKeyframeIndex.deserialize(header + zlib.compress(struct.pack('<qq', 0, 1)))
+
+    def test_valid_large_index_uses_bounded_input_chunks(self):
+        count = 100_000
+        entries = b''.join(
+            VideoKeyframeIndex.ENTRY.pack(value, value)
+            for value in range(count)
+        )
+        data = VideoKeyframeIndex.HEADER.pack(
+            VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, count
+        ) + zlib.compress(entries)
+        real_decompressobj = zlib.decompressobj
+        input_sizes = []
+
+        class TrackingDecompressor:
+
+            def __init__(self):
+                self._delegate = real_decompressobj()
+
+            def decompress(self, value, max_length=0):
+                input_sizes.append(len(value))
+                return self._delegate.decompress(value, max_length)
+
+            def __getattr__(self, name):
+                return getattr(self._delegate, name)
+
+        with mock.patch.object(
+                keyframe_index_module.zlib,
+                'decompressobj',
+                side_effect=TrackingDecompressor):
+            VideoKeyframeIndex.validate(data)
+
+        self.assertGreater(len(data), VideoKeyframeIndex._CHUNK_SIZE)
+        self.assertLessEqual(
+            max(input_sizes), VideoKeyframeIndex._CHUNK_SIZE
+        )
 
 if __name__ == '__main__':
     unittest.main()
