@@ -18,6 +18,9 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.data.GenericRow
+import org.apache.paimon.disk.IOManagerImpl
+
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.paimon.shims.memstream.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
@@ -210,6 +213,73 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
           checkAnswer(currentResult(), expertResult4)
         } finally {
           readStream.stop()
+        }
+    }
+  }
+
+  test("Paimon CDC Source: Spark reads exposed event metadata as a regular column") {
+    withTempDirs {
+      (checkpointDir, ioManagerDir) =>
+        val tableName = "T"
+        spark.sql(s"""
+                     |CREATE TABLE $tableName (id INT, data INT, event_ts BIGINT)
+                     |TBLPROPERTIES (
+                     |  'primary-key'='id',
+                     |  'bucket'='1',
+                     |  'changelog-producer' = 'lookup',
+                     |  'sequence.field' = 'event_ts',
+                     |  'changelog-producer.expose-field-as-metadata' = 'event_ts',
+                     |  'changelog-producer.metadata-field-prefix' = '__event__')
+                     |""".stripMargin)
+
+        val table = loadTable(tableName)
+        val ioManager = new IOManagerImpl(ioManagerDir.getCanonicalPath)
+        val write = table.newWrite(commitUser).withIOManager(ioManager)
+        val commit = table.newCommit(commitUser)
+        try {
+          // Write only the physical columns, as a Flink writer would. Spark exposes the
+          // generated metadata field when reading the table, but it is not an input column.
+          write.write(GenericRow.of(1, 10, 50L))
+          commit.commit(0, write.prepareCommit(true, 0))
+
+          // Spark exposes the generated field as a regular column. No Flink metadata alias is
+          // needed to read it.
+          checkAnswer(
+            spark.sql(s"SELECT id, data, event_ts, __event__event_ts FROM $tableName"),
+            Row(1, 10, 50L, 50L) :: Nil)
+
+          val location = table.location().toString
+          val readStream = spark.readStream
+            .format("paimon")
+            .option("read.changelog", "true")
+            .load(location)
+            .writeStream
+            .format("memory")
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .queryName("mem_table")
+            .outputMode("append")
+            .start()
+
+          val currentResult = () => spark.sql("SELECT * FROM mem_table")
+          try {
+            readStream.processAllAvailable()
+            checkAnswer(currentResult(), Row("+I", 1, 10, 50L, 50L) :: Nil)
+
+            write.write(GenericRow.of(1, 20, 100L))
+            commit.commit(1, write.prepareCommit(true, 1))
+            readStream.processAllAvailable()
+            checkAnswer(
+              currentResult(),
+              Row("+I", 1, 10, 50L, 50L) ::
+                Row("-U", 1, 10, 50L, 100L) ::
+                Row("+U", 1, 20, 100L, 100L) :: Nil)
+          } finally {
+            readStream.stop()
+          }
+        } finally {
+          write.close()
+          commit.close()
+          ioManager.close()
         }
     }
   }
