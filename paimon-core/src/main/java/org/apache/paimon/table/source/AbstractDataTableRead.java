@@ -23,6 +23,8 @@ import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.RowRange;
+import org.apache.paimon.reader.RangeSkipReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
@@ -39,6 +41,7 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     private RowType readType;
     protected boolean executeFilter = false;
     private Predicate predicate;
+    @Nullable protected RowRange rowRange;
     private final TableSchema schema;
 
     // reader-level filtering sees raw values, so it stays off for auth-enabled tables,
@@ -65,7 +68,19 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
 
     public abstract void applyReadType(RowType readType);
 
-    public abstract RecordReader<InternalRow> reader(Split split) throws IOException;
+    /**
+     * Create the underlying reader for a split with an optional {@link RowRange}.
+     *
+     * <p>Subclasses forward {@code rowRange} to the chosen {@link
+     * org.apache.paimon.operation.SplitRead#withRowRange} before {@code createReader(split)}.
+     */
+    public abstract RecordReader<InternalRow> reader(Split split, @Nullable RowRange rowRange)
+            throws IOException;
+
+    /** Backward-compatible entry: read the whole split (no row range). */
+    public RecordReader<InternalRow> reader(Split split) throws IOException {
+        return reader(split, null);
+    }
 
     @Override
     public TableRead withIOManager(IOManager ioManager) {
@@ -119,8 +134,15 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
 
     @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        return createReader(split, null);
+    }
+
+    @Override
+    public RecordReader<InternalRow> createReader(Split split, @Nullable RowRange rowRange)
+            throws IOException {
+        this.rowRange = rowRange;
         QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
-        return createDataReader(queryAuthContext.split(), queryAuthContext.authResult());
+        return createDataReader(queryAuthContext.split(), queryAuthContext.authResult(), rowRange);
     }
 
     protected final QueryAuthContext unwrapQueryAuthSplit(Split split) {
@@ -133,13 +155,28 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
 
     protected final RecordReader<InternalRow> createDataReader(
             Split split, @Nullable TableQueryAuthResult authResult) throws IOException {
+        return createDataReader(split, authResult, null);
+    }
+
+    protected final RecordReader<InternalRow> createDataReader(
+            Split split, @Nullable TableQueryAuthResult authResult, @Nullable RowRange rowRange)
+            throws IOException {
+        // A TableRead can be reused for multiple splits. Authentication may have expanded an
+        // explicitly configured physical projection for the previous split, so restore it before
+        // applying the current split's authorization dependencies. Without an explicit projection,
+        // the underlying reader must retain its own default read type.
+        if (readType != null) {
+            applyReadType(readType);
+        }
+        // rowRange slices the *filtered* effective-row stream, so RangeSkipReader must run AFTER
+        // every filter / auth layer. When there is no outer filter / auth layer, forward rowRange
+        // to the inner reader so it can push it down (parquet selection / per-file
+        // RangeSkipReader); otherwise forward null here and wrap RangeSkipReader outside the
+        // filter / auth output.
+        boolean outerWrap = authResult != null || (executeFilter && predicate != null);
+        RowRange innerRange = outerWrap ? null : rowRange;
         if (authResult == null && !(executeFilter && predicate != null)) {
-            // Restore an explicit projection after a previous split needed authorization columns.
-            // Without a projection, preserve the underlying reader's default read type.
-            if (readType != null) {
-                applyReadType(readType);
-            }
-            return reader(split);
+            return reader(split, innerRange);
         }
         ReadTransform transform =
                 ReadTransform.create(
@@ -152,7 +189,11 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         if (readType != null || !transform.readType().equals(currentReadType())) {
             applyReadType(transform.readType());
         }
-        return transform.apply(reader(split));
+        RecordReader<InternalRow> reader = transform.apply(reader(split, innerRange));
+        if (rowRange != null && outerWrap) {
+            reader = new RangeSkipReader<>(reader, rowRange.startInclusive(), rowRange.count());
+        }
+        return reader;
     }
 
     /** Split with auth context. */

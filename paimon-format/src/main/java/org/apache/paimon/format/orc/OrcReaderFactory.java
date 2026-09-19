@@ -106,6 +106,13 @@ public class OrcReaderFactory implements FormatReaderFactory {
     // ------------------------------------------------------------------------
 
     @Override
+    public boolean supportsRowRangeSkip() {
+        // ORC has no page-level row-range filtering, but the selection bitmap is still applied
+        // downstream by ApplyBitmapIndexRecordReader, so a ranged read yields the exact range.
+        return true;
+    }
+
+    @Override
     public FileRecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
             throws IOException {
         int poolSize =
