@@ -553,4 +553,49 @@ class FullTextSearchTest extends PaimonSparkTestBase {
       assert(mixed.subsetOf(Set(3, 5)))
     }
   }
+
+  test("full-text search - candidate-only index answers are excluded unless refine-from-data") {
+    withTable("T") {
+      createRankedTable()
+      // A BTree answers LIKE '%zeta%' with every non-null row; that superset must not be ranked.
+      spark
+        .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'content', index_type => 'btree')")
+        .collect()
+
+      val excluded = spark
+        .sql(s"""
+                |SELECT id
+                |FROM full_text_search('T', 'content', '$rankedQuery', 1)
+                |WHERE content LIKE '%zeta%'
+                |""".stripMargin)
+        .collect()
+      assert(excluded.isEmpty)
+
+      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('global-index.filter.refine-from-data' = 'true')")
+      val refined = spark
+        .sql(s"""
+                |SELECT id
+                |FROM full_text_search('T', 'content', '$rankedQuery', 1)
+                |WHERE content LIKE '%zeta%'
+                |""".stripMargin)
+        .collect()
+        .map(_.getInt(0))
+        .toSeq
+      assert(refined == Seq(5))
+
+      // Exact operators on the same index work either way.
+      spark.sql(
+        "ALTER TABLE T SET TBLPROPERTIES ('global-index.filter.refine-from-data' = 'false')")
+      val exact = spark
+        .sql(s"""
+                |SELECT id
+                |FROM full_text_search('T', 'content', '$rankedQuery', 1)
+                |WHERE content = 'paimon zeta'
+                |""".stripMargin)
+        .collect()
+        .map(_.getInt(0))
+        .toSeq
+      assert(exact == Seq(5))
+    }
+  }
 }

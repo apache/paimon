@@ -36,13 +36,7 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.Contains;
-import org.apache.paimon.predicate.EndsWith;
 import org.apache.paimon.predicate.FullTextSearch;
-import org.apache.paimon.predicate.LeafFunction;
-import org.apache.paimon.predicate.LeafPredicate;
-import org.apache.paimon.predicate.Like;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
@@ -68,7 +62,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
-import static org.apache.paimon.predicate.PredicateVisitor.collectFieldIds;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Implementation for {@link FullTextRead}. */
@@ -183,7 +176,8 @@ public class DataEvolutionFullTextRead implements FullTextRead {
      *       index. When the index answer may be a superset (a conjunct it could not evaluate was
      *       dropped, or a {@code contains} / {@code endsWith} / {@code like} leaf, which BTree
      *       answers with every non-null row), the candidates are refined by reading their filter
-     *       columns.
+     *       columns if {@code global-index.filter.refine-from-data} allows it, and excluded
+     *       otherwise.
      *   <li>Rows whose filter columns are not covered follow {@code scalar-index.search-mode}:
      *       excluded in {@code fast}, otherwise decided by reading their filter columns.
      * </ul>
@@ -237,10 +231,17 @@ public class DataEvolutionFullTextRead implements FullTextRead {
                 RoaringNavigableMap64 fromIndex =
                         RoaringNavigableMap64.and(
                                 evaluation.get().result().results(), decidedByIndex);
-                if (!isExact(evaluation.get()) && !fromIndex.isEmpty()) {
-                    fromIndex =
-                            new FilteredRowIdReader(table, planSnapshot, partitionFilter, filter)
-                                    .matchingRowIds(fromIndex);
+                if (!FilteredRowIdReader.isExact(table.rowType(), filter, evaluation.get())
+                        && !fromIndex.isEmpty()) {
+                    if (table.coreOptions().globalIndexFilterRefineFromData()) {
+                        fromIndex =
+                                new FilteredRowIdReader(
+                                                table, planSnapshot, partitionFilter, filter)
+                                        .matchingRowIds(fromIndex);
+                    } else {
+                        FilteredRowIdReader.warnCandidatesExcluded(LOG, table, filter);
+                        fromIndex = new RoaringNavigableMap64();
+                    }
                 }
                 matched.or(fromIndex);
             } else {
@@ -268,37 +269,6 @@ public class DataEvolutionFullTextRead implements FullTextRead {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-    }
-
-    /**
-     * Whether an index evaluation is an exact match set. The global index contract only promises
-     * candidates: a conjunct no index could evaluate is dropped, and BTree answers substring
-     * predicates with every non-null row. Both cases are refined from the data.
-     */
-    private boolean isExact(GlobalIndexEvaluator.Evaluation evaluation) {
-        Set<Integer> filterFieldIds = collectFieldIds(table.rowType(), filter);
-        if (!evaluation.contributingFieldIds().containsAll(filterFieldIds)) {
-            return false;
-        }
-        return !hasCandidateOnlyLeaf(filter);
-    }
-
-    private static boolean hasCandidateOnlyLeaf(Predicate predicate) {
-        if (predicate instanceof CompoundPredicate) {
-            for (Predicate child : ((CompoundPredicate) predicate).children()) {
-                if (hasCandidateOnlyLeaf(child)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        if (predicate instanceof LeafPredicate) {
-            LeafFunction function = ((LeafPredicate) predicate).function();
-            return function instanceof Contains
-                    || function instanceof EndsWith
-                    || function instanceof Like;
-        }
-        return false;
     }
 
     private void warnUnindexedFilter() {
