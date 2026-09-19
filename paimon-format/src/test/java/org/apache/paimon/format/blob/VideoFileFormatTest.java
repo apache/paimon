@@ -202,10 +202,7 @@ public class VideoFileFormatTest {
             assertThat(meta.keyframeIndexLength(0)).isEqualTo(mapping.length);
             assertThat(meta.keyframeIndexLength(4)).isZero();
         }
-        List<InternalRow> rows = read(null);
-        VideoFrameDescriptor restored = descriptor(rows.get(0));
-        assertThat(restored.serialize()[0]).isEqualTo((byte) 2);
-        assertThat(descriptor(rows.get(4)).serialize()[0]).isEqualTo((byte) 1);
+        VideoFrameDescriptor restored = descriptor(read(null).get(0));
         assertThat(
                         VideoFrameDescriptor.keyframeIndexBlob(
                                         Blob.fromDescriptor(

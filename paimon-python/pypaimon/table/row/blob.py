@@ -234,8 +234,7 @@ class VideoFrameDescriptor(BlobDescriptor):
 
     def __init__(
             self, uri: str, offset: int, length: int, frame_index: int,
-            keyframe_index_offset: int = -1,
-            keyframe_index_length: int = 0):
+            keyframe_index_offset: int, keyframe_index_length: int):
         if isinstance(frame_index, bool) or not isinstance(frame_index, int):
             raise TypeError("Video frame index must be an int.")
         if frame_index < 0:
@@ -252,6 +251,7 @@ class VideoFrameDescriptor(BlobDescriptor):
         self._frame_index = frame_index
         self._keyframe_index_offset = keyframe_index_offset
         self._keyframe_index_length = keyframe_index_length
+        self._frame_version = self.CURRENT_VERSION
 
     @property
     def frame_index(self) -> int:
@@ -273,17 +273,15 @@ class VideoFrameDescriptor(BlobDescriptor):
         )
 
     def serialize(self) -> bytes:
-        version = (
-            1 if self._keyframe_index_length == 0 else self.CURRENT_VERSION)
         uri_bytes = self.uri.encode('utf-8')
         data = (
-            struct.pack('<BQI', version, self.MAGIC, len(uri_bytes))
+            struct.pack('<BQI', self._frame_version, self.MAGIC, len(uri_bytes))
             + uri_bytes
             + struct.pack(
                 '<qqq', self.offset, self.length, self.frame_index
             )
         )
-        if version >= 2:
+        if self._frame_version >= 2:
             data += struct.pack(
                 '<qq',
                 self._keyframe_index_offset,
@@ -333,7 +331,7 @@ class VideoFrameDescriptor(BlobDescriptor):
             keyframe_index_offset, keyframe_index_length = struct.unpack(
                 '<qq', raw[uri_end + 24:uri_end + 40])
         try:
-            return cls(
+            descriptor = cls(
                 uri,
                 offset,
                 length,
@@ -341,6 +339,8 @@ class VideoFrameDescriptor(BlobDescriptor):
                 keyframe_index_offset,
                 keyframe_index_length,
             )
+            descriptor._frame_version = version
+            return descriptor
         except ValueError as error:
             raise ValueError(
                 "Invalid VideoFrameDescriptor data: %s" % error
