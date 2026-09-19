@@ -104,8 +104,7 @@ class VideoFormatTest(unittest.TestCase):
 
     def test_cross_language_descriptor_fixtures(self):
         v1 = self._fixture_bytes(self.DESCRIPTOR_V1_FIXTURE)
-        unindexed = VideoFrameDescriptor(
-            "s3://bucket/视频.mp4", 7, 99, 42, -1, 0)
+        unindexed = VideoFrameDescriptor("s3://bucket/视频.mp4", 7, 99, 42)
         self.assertEqual(v1, unindexed.serialize())
         restored = BlobDescriptor.deserialize(v1)
         self.assertEqual(unindexed, restored)

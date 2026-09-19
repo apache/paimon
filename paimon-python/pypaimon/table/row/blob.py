@@ -234,7 +234,8 @@ class VideoFrameDescriptor(BlobDescriptor):
 
     def __init__(
             self, uri: str, offset: int, length: int, frame_index: int,
-            keyframe_index_offset: int, keyframe_index_length: int):
+            keyframe_index_offset: int = -1,
+            keyframe_index_length: int = 0):
         if isinstance(frame_index, bool) or not isinstance(frame_index, int):
             raise TypeError("Video frame index must be an int.")
         if frame_index < 0:

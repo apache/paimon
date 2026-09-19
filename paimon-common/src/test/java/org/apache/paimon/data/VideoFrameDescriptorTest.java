@@ -59,8 +59,7 @@ public class VideoFrameDescriptorTest {
 
     @Test
     public void testCrossLanguageWireFixtures() throws Exception {
-        VideoFrameDescriptor unindexed =
-                new VideoFrameDescriptor("s3://bucket/视频.mp4", 7, 99, 42, -1, 0);
+        VideoFrameDescriptor unindexed = new VideoFrameDescriptor("s3://bucket/视频.mp4", 7, 99, 42);
         byte[] v1 = fixture("video-frame-descriptor-v1.hex");
         assertThat(unindexed.serialize()).isEqualTo(v1);
         BlobDescriptor restored = BlobDescriptor.deserialize(v1);

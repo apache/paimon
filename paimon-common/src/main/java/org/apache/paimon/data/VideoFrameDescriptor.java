@@ -44,6 +44,10 @@ public class VideoFrameDescriptor extends BlobDescriptor {
     private final long keyframeIndexOffset;
     private final long keyframeIndexLength;
 
+    public VideoFrameDescriptor(String uri, long offset, long length, long frameIndex) {
+        this(uri, offset, length, frameIndex, -1, 0);
+    }
+
     public VideoFrameDescriptor(
             String uri,
             long offset,
