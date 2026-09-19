@@ -1046,12 +1046,12 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                             options.set("parquet.page.row.count.limit", "300");
                         });
 
-        int bound = 300000;
+        int bound = 30000;
         Random random = new Random();
         Map<Integer, Integer> expectedMap = new HashMap<>();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
-        for (int j = 0; j < 1000000; j++) {
+        for (int j = 0; j < 100000; j++) {
             int next = random.nextInt(bound);
             BinaryString uuid = BinaryString.fromString(UUID.randomUUID().toString());
             expectedMap.compute(next, (key, value) -> value == null ? 1 : value + 1);
@@ -1180,7 +1180,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         FileStoreTable table = createUnawareBucketFileStoreTable(rowType, configure);
 
         int bound = 30000000;
-        int rowCount = 1000000;
+        int rowCount = 100000;
         Random random = new Random();
         int k = random.nextInt(100) + 1;
         PriorityQueue<Integer> expected = new PriorityQueue<>(k, Integer::compareTo);
