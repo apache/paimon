@@ -183,7 +183,7 @@ class VideoFormatWriter(BlobFormatWriter):
         if descriptor is None:
             return b''
         mapping = Blob.from_descriptor(blob.uri_reader, descriptor).to_data()
-        VideoKeyframeIndex.deserialize(mapping)
+        VideoKeyframeIndex.validate(mapping)
         return mapping
 
     def _write_video_payload(self, blob: BlobRef) -> int:

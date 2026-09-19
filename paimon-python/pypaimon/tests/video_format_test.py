@@ -18,7 +18,9 @@
 import io
 import struct
 import tempfile
+import tracemalloc
 import unittest
+import zlib
 from pathlib import Path
 
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
@@ -303,6 +305,37 @@ class VideoFormatTest(unittest.TestCase):
             writer.add_element(
                 GenericRow([blob], [self.field], RowKind.INSERT)
             )
+
+    def test_rejects_compressed_invalid_index_without_expanding_it(self):
+        count = 500_000
+        entry = VideoKeyframeIndex.ENTRY.pack(0, 0)
+        mapping = VideoKeyframeIndex.HEADER.pack(
+            VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, count
+        ) + zlib.compress(entry * count)
+        video = b"video"
+        source = self.root / "compressed-invalid-index.mp4"
+        source.write_bytes(video + mapping)
+        descriptor = VideoFrameDescriptor(
+            source.as_uri(), 0, len(video), 0, len(video), len(mapping)
+        )
+        blob = Blob.from_descriptor(
+            self.file_io.uri_reader_factory.create(descriptor.uri), descriptor
+        )
+        writer = VideoFormatWriter(io.BytesIO())
+
+        self.assertLess(len(mapping), 20_000)
+        tracemalloc.start()
+        try:
+            with self.assertRaisesRegex(
+                    ValueError,
+                    "Keyframe ordinals must be strictly increasing"):
+                writer.add_element(
+                    GenericRow([blob], [self.field], RowKind.INSERT)
+                )
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 1_000_000)
 
     def test_rejects_inconsistent_keyframe_indexes_for_same_payload(self):
         video = b"video"

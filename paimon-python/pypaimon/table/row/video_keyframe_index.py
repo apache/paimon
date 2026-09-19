@@ -52,7 +52,16 @@ class VideoKeyframeIndex:
         ) + zlib.compress(entries)
 
     @classmethod
+    def validate(cls, data):
+        for _ in cls._iter_keyframes(data):
+            pass
+
+    @classmethod
     def deserialize(cls, data):
+        return cls(cls._iter_keyframes(data))
+
+    @classmethod
+    def _iter_keyframes(cls, data):
         if not isinstance(data, (bytes, bytearray)):
             raise TypeError("VideoKeyframeIndex expects bytes.")
         if len(data) <= cls.HEADER.size:
@@ -65,12 +74,33 @@ class VideoKeyframeIndex:
             raise ValueError("Invalid video keyframe index header.")
         try:
             decoder = zlib.decompressobj()
-            expected = count * cls.ENTRY.size
-            entries = decoder.decompress(data[cls.HEADER.size:], expected + 1)
-            if (len(entries) != expected or not decoder.eof
+            pending = data[cls.HEADER.size:]
+            previous_index, previous_pts = -1, None
+            for position in range(count):
+                entry = decoder.decompress(pending, cls.ENTRY.size)
+                pending = decoder.unconsumed_tail
+                if len(entry) != cls.ENTRY.size:
+                    raise ValueError("Invalid video keyframe index entries.")
+                index, pts = cls.ENTRY.unpack(entry)
+                if position == 0 and index != 0:
+                    raise ValueError(
+                        "Video keyframe index requires an initial keyframe."
+                    )
+                if index <= previous_index:
+                    raise ValueError(
+                        "Keyframe ordinals must be strictly increasing."
+                    )
+                if previous_pts is not None and pts <= previous_pts:
+                    raise ValueError(
+                        "Keyframe timestamps must be strictly increasing."
+                    )
+                previous_index, previous_pts = index, pts
+                yield index, pts
+            extra = decoder.decompress(pending, 1)
+            if (extra or not decoder.eof
                     or decoder.unused_data or decoder.unconsumed_tail):
                 raise ValueError("Invalid video keyframe index entries.")
-            keyframes = list(cls.ENTRY.iter_unpack(entries))
         except (struct.error, zlib.error) as error:
-            raise ValueError("Invalid video keyframe index payload.") from error
-        return cls(keyframes)
+            raise ValueError(
+                "Invalid video keyframe index payload."
+            ) from error
