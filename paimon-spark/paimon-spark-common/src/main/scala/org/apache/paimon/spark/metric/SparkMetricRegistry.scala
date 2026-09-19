@@ -50,10 +50,16 @@ case class SparkMetricRegistry() extends MetricRegistry {
             gauge[Long](metrics, ScanMetrics.LAST_SCANNED_SNAPSHOT_ID)),
           PaimonScannedManifestsTaskMetric(
             gauge[Long](metrics, ScanMetrics.LAST_SCANNED_MANIFESTS)),
+          PaimonSkippedManifestsTaskMetric(
+            gauge[Long](metrics, ScanMetrics.LAST_SCAN_SKIPPED_MANIFESTS)),
           PaimonSkippedTableFilesTaskMetric(
             gauge[Long](metrics, ScanMetrics.LAST_SCAN_SKIPPED_TABLE_FILES)),
           PaimonResultedTableFilesTaskMetric(
-            gauge[Long](metrics, ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES))
+            gauge[Long](metrics, ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES)),
+          PaimonResultedTableFilesSizeTaskMetric(
+            gauge[Long](metrics, ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES_SIZE)),
+          PaimonResultedRecordCountTaskMetric(
+            gauge[Long](metrics, ScanMetrics.LAST_SCAN_RESULTED_RECORD_COUNT))
         )
       case None =>
         Array.empty

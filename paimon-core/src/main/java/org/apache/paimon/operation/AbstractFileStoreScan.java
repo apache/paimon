@@ -322,11 +322,15 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                     manifestsResult.allManifests.stream()
                             .mapToLong(f -> f.numAddedFiles() - f.numDeletedFiles())
                             .sum();
+            // The size and record count of what will be read are not folded here: a DELTA plan
+            // holds both ADD and DELETE entries, and whether the DELETE entries get read depends
+            // on the consumer. SnapshotReaderImpl reports them once it has made that choice.
             scanMetrics.reportScan(
                     new ScanStats(
                             scanDuration,
                             snapshot == null ? 0 : snapshot.id(),
                             manifests.size(),
+                            manifestsResult.allManifests.size() - manifests.size(),
                             allDataFiles - result.size(),
                             result.size()));
         }

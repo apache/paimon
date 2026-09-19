@@ -176,7 +176,10 @@ abstract class PaimonBaseScan(table: InnerTable)
         PaimonPlanningDurationMetric(),
         PaimonScannedSnapshotIdMetric(),
         PaimonScannedManifestsMetric(),
-        PaimonSkippedTableFilesMetric()
+        PaimonSkippedManifestsMetric(),
+        PaimonSkippedTableFilesMetric(),
+        PaimonResultedTableFilesSizeMetric(),
+        PaimonResultedRecordCountMetric()
       )
   }
 

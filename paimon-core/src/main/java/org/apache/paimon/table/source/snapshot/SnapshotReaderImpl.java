@@ -104,6 +104,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     private boolean hasNonPartitionFilter;
     private RecordComparator lazyPartitionComparator;
     private CacheMetrics dvMetaCacheMetrics;
+    @Nullable private ScanMetrics scanMetrics;
 
     public SnapshotReaderImpl(
             FileStoreScan scan,
@@ -322,10 +323,32 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public SnapshotReader withMetricRegistry(MetricRegistry registry) {
-        ScanMetrics scanMetrics = new ScanMetrics(registry, tableName);
+        scanMetrics = new ScanMetrics(registry, tableName);
         dvMetaCacheMetrics = scanMetrics.getDvMetaCacheMetrics();
         scan.withMetrics(scanMetrics);
         return this;
+    }
+
+    /**
+     * Reports the size and record count of the data files this reader is about to hand out. Which
+     * entries of a plan are read is decided here, not in the scan: a normal read takes the ADD
+     * entries, a change read also reads the DELETE entries as its before files. Reporting from the
+     * reader keeps the metrics tied to what actually gets read.
+     */
+    @SafeVarargs
+    private final void reportResultedFiles(List<ManifestEntry>... readEntries) {
+        if (scanMetrics == null) {
+            return;
+        }
+        long tableFilesSize = 0L;
+        long recordCount = 0L;
+        for (List<ManifestEntry> entries : readEntries) {
+            for (ManifestEntry entry : entries) {
+                tableFilesSize += entry.file().fileSize();
+                recordCount += entry.file().rowCount();
+            }
+        }
+        scanMetrics.reportResultedFiles(tableFilesSize, recordCount);
     }
 
     @Override
@@ -394,8 +417,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
         FileStoreScan.Plan plan = scan.plan();
         @Nullable Snapshot snapshot = plan.snapshot();
 
-        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> grouped =
-                groupByPartFiles(plan.files(FileKind.ADD));
+        // a normal read only takes the ADD entries, even from a DELTA plan
+        List<ManifestEntry> addFiles = plan.files(FileKind.ADD);
+        reportResultedFiles(addFiles);
+        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> grouped = groupByPartFiles(addFiles);
         if (options.scanPlanSortPartition()) {
             Map<BinaryRow, Map<Integer, List<ManifestEntry>>> sorted = new LinkedHashMap<>();
             grouped.entrySet().stream()
@@ -492,10 +517,15 @@ public class SnapshotReaderImpl implements SnapshotReader {
         withMode(ScanMode.DELTA);
         FileStoreScan.Plan plan = scan.plan();
 
+        List<ManifestEntry> beforeEntries = plan.files(FileKind.DELETE);
+        List<ManifestEntry> afterEntries = plan.files(FileKind.ADD);
+        // both sides are read: the DELETE entries are the before files of the change
+        reportResultedFiles(beforeEntries, afterEntries);
+
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles =
-                groupByPartFiles(plan.files(FileKind.DELETE));
+                groupByPartFiles(beforeEntries);
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> afterFiles =
-                groupByPartFiles(plan.files(FileKind.ADD));
+                groupByPartFiles(afterEntries);
         LazyField<Snapshot> beforeSnapshot =
                 new LazyField<>(() -> snapshotManager.snapshot(plan.snapshot().id() - 1));
         return toIncrementalPlan(
@@ -604,10 +634,15 @@ public class SnapshotReaderImpl implements SnapshotReader {
     public Plan readIncrementalDiff(Snapshot before) {
         withMode(ScanMode.ALL);
         FileStoreScan.Plan plan = scan.plan();
+        List<ManifestEntry> afterEntries = plan.files(FileKind.ADD);
+        List<ManifestEntry> beforeEntries = scan.withSnapshot(before).plan().files(FileKind.ADD);
+        // two independent scans; the ADD entries of both snapshots are read to compute the diff
+        reportResultedFiles(beforeEntries, afterEntries);
+
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> afterFiles =
-                groupByPartFiles(plan.files(FileKind.ADD));
+                groupByPartFiles(afterEntries);
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles =
-                groupByPartFiles(scan.withSnapshot(before).plan().files(FileKind.ADD));
+                groupByPartFiles(beforeEntries);
         TimeTravelUtil.checkRescaleBucketForIncrementalDiffQuery(
                 tableSchema, before, beforeFiles, plan.snapshot(), afterFiles);
         return toIncrementalPlan(

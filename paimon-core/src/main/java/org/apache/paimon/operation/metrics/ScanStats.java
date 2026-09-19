@@ -26,6 +26,7 @@ public class ScanStats {
     private final long duration;
     private final long scannedSnapshotId;
     private final long scannedManifests;
+    private final long skippedManifests;
     private final long skippedTableFiles;
     private final long resultedTableFiles;
 
@@ -33,11 +34,13 @@ public class ScanStats {
             long duration,
             long scannedSnapshotId,
             long scannedManifests,
+            long skippedManifests,
             long skippedTableFiles,
             long resultedTableFiles) {
         this.duration = duration;
         this.scannedSnapshotId = scannedSnapshotId;
         this.scannedManifests = scannedManifests;
+        this.skippedManifests = skippedManifests;
         this.skippedTableFiles = skippedTableFiles;
         this.resultedTableFiles = resultedTableFiles;
     }
@@ -50,6 +53,11 @@ public class ScanStats {
     @VisibleForTesting
     protected long getScannedManifests() {
         return scannedManifests;
+    }
+
+    @VisibleForTesting
+    protected long getSkippedManifests() {
+        return skippedManifests;
     }
 
     @VisibleForTesting
