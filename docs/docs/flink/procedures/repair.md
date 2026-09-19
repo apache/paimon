@@ -125,7 +125,7 @@ CALL [catalog.]sys.remove_unexisting_files('identifier', 'dryRun', 'parallelism'
 CALL sys.remove_unexisting_files(`table` => 'mydb.myt');
 
 -- only check what files will be removed, but not really remove them (dry run)
-CALL sys.remove_unexisting_files(`table` => 'mydb.myt', `dry_run` = true);
+CALL sys.remove_unexisting_files(`table` => 'mydb.myt', `dry_run` => true);
 ```
 
 ## remove_unexisting_manifests
@@ -139,18 +139,18 @@ Note that user is on his own risk using this procedure, which may cause data los
 **Syntax**
 
 ```sql
--- Use named argument
-CALL [catalog.]sys.remove_unexisting_files(`table` => 'identifier');
+-- Use indexed argument
+CALL [catalog.]sys.remove_unexisting_manifests('identifier');
 ```
 
 **Example**
 
 ```sql
 -- remove unexisting manifest file in the table `mydb.myt`
-CALL sys.remove_unexisting_manifests(`table` => 'mydb.myt');
+CALL sys.remove_unexisting_manifests('mydb.myt');
 
 -- remove unexisting manifest file in the branch table `mydb.myt$branch_rt`
-CALL sys.remove_unexisting_manifests(`table` => 'mydb.myt$branch_rt');
+CALL sys.remove_unexisting_manifests('mydb.myt$branch_rt');
 ```
 
 ## repair

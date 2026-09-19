@@ -38,7 +38,7 @@ To expire snapshots. Argument:
 
 - `retain_min`: the minimum number of completed snapshots to retain.
 
-- `order_than`: timestamp before which snapshots will be removed.
+- `older_than`: timestamp before which snapshots will be removed.
 
 - `max_deletes`: the maximum number of snapshots that can be deleted at once.
 
@@ -95,7 +95,7 @@ To expire changelogs. Argument:
 
 - `retain_min`: the minimum number of completed changelogs to retain.
 
-- `order_than`: timestamp before which changelogs will be removed.
+- `older_than`: timestamp before which changelogs will be removed.
 
 - `max_deletes`: the maximum number of changelogs that can be deleted at once.
 
@@ -110,8 +110,7 @@ CALL [catalog.]sys.expire_changelogs(
     retain_max => 'retain_max',
     retain_min => 'retain_min',
     older_than => 'older_than',
-    max_deletes => 'max_deletes');
-
+    max_deletes => 'max_deletes',
     delete_all => 'delete_all');
 
 -- Use indexed argument
