@@ -304,6 +304,49 @@ class VideoFormatTest(unittest.TestCase):
                 GenericRow([blob], [self.field], RowKind.INSERT)
             )
 
+    def test_rejects_inconsistent_keyframe_indexes_for_same_payload(self):
+        video = b"video"
+        first_index = VideoKeyframeIndex([
+            (0, 0), (12, 36000)
+        ]).serialize()
+        second_index = VideoKeyframeIndex([
+            (0, 0), (6, 18000)
+        ]).serialize()
+        source = self.root / "inconsistent-index.mp4"
+        source.write_bytes(video + first_index + second_index)
+
+        def frame(frame_index, index_offset=-1, index_length=0):
+            descriptor = VideoFrameDescriptor(
+                source.as_uri(), 0, len(video), frame_index,
+                index_offset, index_length
+            )
+            return Blob.from_descriptor(
+                self.file_io.uri_reader_factory.create(descriptor.uri),
+                descriptor,
+            )
+
+        unindexed = frame(0)
+        first = frame(1, len(video), len(first_index))
+        second = frame(
+            2, len(video) + len(first_index), len(second_index)
+        )
+        for values in (
+            (unindexed, first),
+            (first, unindexed),
+            (first, second),
+        ):
+            with self.subTest(values=values):
+                writer = VideoFormatWriter(io.BytesIO())
+                writer.add_element(
+                    GenericRow([values[0]], [self.field], RowKind.INSERT)
+                )
+                with self.assertRaisesRegex(ValueError, "same payload"):
+                    writer.add_element(
+                        GenericRow(
+                            [values[1]], [self.field], RowKind.INSERT
+                        )
+                    )
+
     def test_selection_keeps_logical_frame_positions(self):
         target = (self.root / "selection.video").as_uri()
         writer = VideoFormatWriter(self.file_io.new_output_stream(target))

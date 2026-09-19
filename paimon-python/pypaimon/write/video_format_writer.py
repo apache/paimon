@@ -53,6 +53,7 @@ class VideoFormatWriter(BlobFormatWriter):
         self._physical_lengths = []
         self._keyframe_indexes = []
         self._physical_videos = {}
+        self._physical_video_keyframe_indexes = {}
         self._run_lengths = []
         self._run_references = []
         self._run_first_frames = []
@@ -91,6 +92,7 @@ class VideoFormatWriter(BlobFormatWriter):
                 "VideoFrameDescriptor."
             )
         payload = frame.payload_descriptor
+        keyframe_index_descriptor = frame.keyframe_index_descriptor
         ordinal = self._physical_videos.get(payload)
         if ordinal is None:
             keyframe_index = self._keyframe_index(value, frame)
@@ -100,6 +102,14 @@ class VideoFormatWriter(BlobFormatWriter):
             self._keyframe_indexes.append(keyframe_index)
             self._keyframe_index_bytes += len(keyframe_index)
             self._physical_videos[payload] = ordinal
+            self._physical_video_keyframe_indexes[
+                payload] = keyframe_index_descriptor
+        elif (self._physical_video_keyframe_indexes[payload]
+              != keyframe_index_descriptor):
+            raise ValueError(
+                "Video frames for the same payload must use the same "
+                "keyframe index."
+            )
         self._append(ordinal, frame.frame_index)
 
     def reach_target_size(self, target_size: int) -> bool:

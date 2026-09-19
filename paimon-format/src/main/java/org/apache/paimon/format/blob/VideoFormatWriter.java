@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.StreamUtils.intToLittleEndian;
@@ -66,6 +67,7 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
     private final LongArrayList runReferences;
     private final LongArrayList runFirstFrames;
     private final Map<BlobDescriptor, Integer> physicalVideos;
+    private final Map<BlobDescriptor, BlobDescriptor> physicalVideoKeyframeIndexes;
 
     private long currentRunLength;
     private long currentRunReference;
@@ -97,6 +99,7 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
         this.runReferences = new LongArrayList(16);
         this.runFirstFrames = new LongArrayList(16);
         this.physicalVideos = new HashMap<>();
+        this.physicalVideoKeyframeIndexes = new HashMap<>();
     }
 
     @Override
@@ -128,6 +131,7 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
                 "Video fields require an exact BlobRef containing a VideoFrameDescriptor.");
 
         BlobDescriptor payload = frame.payloadDescriptor();
+        BlobDescriptor keyframeIndexDescriptor = frame.keyframeIndexDescriptor();
         Integer ordinal = physicalVideos.get(payload);
         if (ordinal == null) {
             long length = payloadWriter.write(element);
@@ -145,6 +149,12 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
             keyframeIndexes.add(mapping);
             keyframeIndexBytes += mapping.length;
             physicalVideos.put(payload, ordinal);
+            physicalVideoKeyframeIndexes.put(payload, keyframeIndexDescriptor);
+        } else {
+            checkArgument(
+                    Objects.equals(
+                            physicalVideoKeyframeIndexes.get(payload), keyframeIndexDescriptor),
+                    "Video frames for the same payload must use the same keyframe index.");
         }
         append(ordinal, frame.frameIndex());
     }

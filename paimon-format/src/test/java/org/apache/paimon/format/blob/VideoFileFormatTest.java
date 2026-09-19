@@ -238,6 +238,53 @@ public class VideoFileFormatTest {
     }
 
     @Test
+    public void testRejectInconsistentKeyframeIndexesForSamePayload() throws IOException {
+        byte[] video = "video".getBytes(StandardCharsets.UTF_8);
+        byte[] firstIndex = fromHex(KEYFRAME_INDEX_HEX);
+        byte[] secondIndex =
+                fromHex("0149464b4f4544495602000000789c636040056c503ac00d42030004ea009d");
+        java.nio.file.Path source = tempPath.resolve("inconsistent-index.mp4");
+        byte[] sourceBytes = new byte[video.length + firstIndex.length + secondIndex.length];
+        int offset = put(sourceBytes, 0, video);
+        offset = put(sourceBytes, offset, firstIndex);
+        put(sourceBytes, offset, secondIndex);
+        Files.write(source, sourceBytes);
+        String uri = new Path(source.toUri()).toString();
+        org.apache.paimon.utils.UriReader reader =
+                org.apache.paimon.utils.UriReader.fromFile(fileIO);
+        Blob unindexed =
+                Blob.fromDescriptor(
+                        reader, new VideoFrameDescriptor(uri, 0, video.length, 0, -1, 0));
+        Blob first =
+                Blob.fromDescriptor(
+                        reader,
+                        new VideoFrameDescriptor(
+                                uri, 0, video.length, 1, video.length, firstIndex.length));
+        Blob second =
+                Blob.fromDescriptor(
+                        reader,
+                        new VideoFrameDescriptor(
+                                uri,
+                                0,
+                                video.length,
+                                2,
+                                video.length + firstIndex.length,
+                                secondIndex.length));
+
+        assertThatThrownBy(() -> write(unindexed, first))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("same payload");
+        fileIO.delete(file, false);
+        assertThatThrownBy(() -> write(first, unindexed))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("same payload");
+        fileIO.delete(file, false);
+        assertThatThrownBy(() -> write(first, second))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("same payload");
+    }
+
+    @Test
     public void testSelectionKeepsLogicalRowPositions() throws IOException {
         byte[] bytes = "first-mp4".getBytes();
         write(
