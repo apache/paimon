@@ -414,7 +414,13 @@ the ordinary BLOB entry header, length trailer, or per-entry CRC:
 +----------------------------+
 | ...                        |
 +----------------------------+
+| Keyframe Index 1           |  Compressed keyframe indices and PTS, or empty for scan fallback
++----------------------------+
+| Keyframe Index 2           |
++----------------------------+
 | Physical Length Index      |  Delta-Varint video lengths
++----------------------------+
+| Keyframe-Index Length Index |  Delta-Varint keyframe-index lengths
 +----------------------------+
 | Run Length Index           |  Delta-Varint logical row counts
 +----------------------------+
@@ -423,6 +429,7 @@ the ordinary BLOB entry header, length trailer, or per-entry CRC:
 | Run First-Frame Index      |  Delta-Varint frame ordinals
 +----------------------------+
 | Physical Index Length      |  4 bytes (Little Endian)
+| Keyframe Length-Index Size |  4 bytes (Little Endian)
 | Run-Length Index Length    |  4 bytes (Little Endian)
 | Run-Reference Index Length |  4 bytes (Little Endian)
 | First-Frame Index Length   |  4 bytes (Little Endian)
@@ -435,20 +442,32 @@ The run arrays have equal element counts. A non-negative run reference is an ord
 physical length index. For logical row `r` in a run beginning at logical row `s`, the returned
 `VideoFrameDescriptor` identifies the referenced raw video range and frame ordinal
 `run_first_frame + (r - s)`. `-1` is a NULL run and `-2` is a data-evolution placeholder run.
-Non-negative runs have fixed frame stride one in version 1; a discontinuity starts another run.
+Non-negative runs have fixed frame stride one; a discontinuity starts another run. Version 2 may
+store one sparse keyframe index per physical video. Version 1 remains readable and omits the
+keyframe-index blocks and their length index.
+
+A supplied keyframe-index block has a 13-byte little-endian header: version (`1`, uint8), magic
+(`0x564944454F4B4649`, uint64), and entry count (uint32).
+It is followed by zlib-compressed pairs of displayed frame ordinal and PTS (two int64 values).
+The index always describes the first video stream. PTS uses that stream's time base,
+read from the original container rather than stored again.
+Only keyframes have entries. An indexed decoder can select a decode start and count decoded
+frames in presentation order to reach the target; it does not infer ordinals from average FPS.
 
 The serialized `VideoFrameDescriptor` stored in an Arrow/data-file cell has its own versioned
 wire layout. All numeric values are little endian:
 
 | Field | Size | Description |
 | --- | ---: | --- |
-| Version | 1 byte | Descriptor version, currently `1` |
+| Version | 1 byte | Descriptor version, currently `2` |
 | Magic | 8 bytes | `0x564944454F46524D` (`VIDEOFRM`) |
 | URI length | 4 bytes | UTF-8 URI byte length |
 | URI | variable | URI of the containing `.video` file |
 | Offset | 8 bytes | Start of the complete encoded-video payload |
 | Length | 8 bytes | Encoded-video payload length |
 | Frame index | 8 bytes | Zero-based presentation-order frame ordinal |
+| Keyframe-index offset | 8 bytes | Version 2 only: index offset in the `.video` file |
+| Keyframe-index length | 8 bytes | Version 2 only: index length |
 
 Descriptor bytes are independently versioned from the `.video` container. Java and Python share
 canonical descriptor and container fixtures to keep both implementations byte-compatible.

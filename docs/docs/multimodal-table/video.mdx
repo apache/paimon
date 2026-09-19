@@ -83,10 +83,26 @@ to write complete videos and their logical frame rows.
 
 Each logical value is a `VideoFrameDescriptor`: its URI range identifies one complete encoded
 video and its frame ordinal selects a frame inside that video. On write, a `.video` data region
-concatenates raw video payloads without ordinary BLOB entry wrappers. Four embedded delta-varint
-indexes record physical video lengths, logical run lengths, run-to-video references, and the first
-frame ordinal of each run. Consecutive frames therefore need one run entry rather than one index
-entry per row. NULL and data-evolution placeholders use negative run references.
+concatenates raw video payloads without ordinary BLOB entry wrappers. Four delta-varint indexes map
+rows to videos and frame ordinals; consecutive frames share a run, and negative references represent
+NULL or data-evolution placeholders. Version 2 carries optional sparse keyframe indexes.
+
+<pre>
+.video (version 2, in file order)
+├─ Complete encoded videos A, B, ...
+├─ <strong>NEW: Keyframe index blocks A, B, ...</strong>
+│  └─ Compressed keyframe indices and PTS values
+├─ Metadata indexes
+│  ├─ Video payload lengths
+│  ├─ <strong>NEW: Keyframe index block lengths</strong>
+│  └─ Run lengths, video references, and starting frame indices
+└─ Footer: five 4-byte index sizes, 4-byte magic, and 1-byte version
+</pre>
+
+The length index has one entry per video; zero selects the scan fallback. Writers validate and copy
+an index supplied by the source descriptor without decoding the video to create one. The index
+describes the first video stream; its stream index and PTS time base remain in the container. See the
+[file format specification](../concepts/spec/fileformat#video) for the binary layout.
 
 ## Reuse, Rolling, and Compaction
 
@@ -102,9 +118,10 @@ together. The resulting file group remains row-aligned and a single large episod
 configured target.
 
 When BLOB compaction is enabled, it byte-copies the complete encoded-video ranges into a new self-contained `.video` pack
-and rebuilds the embedded indexes; it does not decode or re-encode frames. The aligned normal data
+and rebuilds the embedded indexes; it does not decode or re-encode frames. Persisted keyframe indexes
+are copied into the new pack. The aligned normal data
 file contains only application columns such as `episode_id`, state, and action. Paimon stores the
-frame mapping in the `.video` descriptor/index path.
+keyframe index in the `.video` descriptor/index path.
 `blob-compaction.enabled` defaults to `false`; ordinary normal-file compaction can
 leave the video packs unchanged. See [Data Evolution Maintenance](./data-evolution-maintenance#ordinary-compaction).
 
@@ -115,8 +132,7 @@ leave the video packs unchanged. See [Data Evolution Maintenance](./data-evoluti
   `.blob`.
 - Non-null writes must be exact descriptor-backed `BlobRef` values containing a
   `VideoFrameDescriptor`. Inline bytes and ordinary `BlobDescriptor` values are rejected.
-- Version 1 addresses frames by zero-based presentation-order ordinal with stride one. It does not
-  store PTS values or parse codec/container metadata.
+- Version 1 remains readable but has no persisted keyframe index.
 - A `BlobConsumer` callback is not supported for the video field.
 
 ## Read Frames

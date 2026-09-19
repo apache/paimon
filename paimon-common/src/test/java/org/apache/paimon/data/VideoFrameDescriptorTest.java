@@ -36,7 +36,7 @@ public class VideoFrameDescriptorTest {
     @Test
     public void testRoundTripAndPayloadIdentity() {
         VideoFrameDescriptor frame =
-                new VideoFrameDescriptor("oss://bucket/source.mp4", 17, 103, 42);
+                new VideoFrameDescriptor("oss://bucket/source.mp4", 17, 103, 42, -1, 0);
 
         assertThat(VideoFrameDescriptor.isVideoFrameDescriptor(frame.serialize())).isTrue();
         assertThat(BlobDescriptor.isBlobDescriptor(frame.serialize())).isFalse();
@@ -46,34 +46,37 @@ public class VideoFrameDescriptorTest {
                 .isEqualTo(new BlobDescriptor("oss://bucket/source.mp4", 17, 103));
 
         VideoFrameDescriptor next =
-                new VideoFrameDescriptor("oss://bucket/source.mp4", 17, 103, 43);
+                new VideoFrameDescriptor("oss://bucket/source.mp4", 17, 103, 43, -1, 0);
         assertThat(next).isNotEqualTo(frame);
         assertThat(next.payloadDescriptor()).isEqualTo(frame.payloadDescriptor());
+
+        VideoFrameDescriptor indexed =
+                new VideoFrameDescriptor("oss://bucket/source.mp4", 17, 103, 42, 120, 8);
+        assertThat(VideoFrameDescriptor.deserialize(indexed.serialize())).isEqualTo(indexed);
+        assertThat(indexed.keyframeIndexDescriptor())
+                .isEqualTo(new BlobDescriptor("oss://bucket/source.mp4", 120, 8));
     }
 
     @Test
-    public void testCrossLanguageWireFixture() throws Exception {
-        VideoFrameDescriptor expected = new VideoFrameDescriptor("s3://bucket/视频.mp4", 7, 99, 42);
-        byte[] fixture =
-                fromHex(
-                        new String(
-                                        IOUtils.readFully(
-                                                VideoFrameDescriptorTest.class
-                                                        .getClassLoader()
-                                                        .getResourceAsStream(
-                                                                "org/apache/paimon/data/video-frame-descriptor-v1.hex"),
-                                                true),
-                                        StandardCharsets.UTF_8)
-                                .trim());
+    public void testCrossLanguageWireFixtures() throws Exception {
+        VideoFrameDescriptor unindexed =
+                new VideoFrameDescriptor("s3://bucket/视频.mp4", 7, 99, 42, -1, 0);
+        byte[] v1 = fixture("video-frame-descriptor-v1.hex");
+        BlobDescriptor restored = BlobDescriptor.deserialize(v1);
+        assertThat(restored).isEqualTo(unindexed);
+        assertThat(restored.serialize()).isEqualTo(v1);
+        assertThat(BlobDescriptor.isSerializedDescriptor(v1)).isTrue();
 
-        assertThat(expected.serialize()).isEqualTo(fixture);
-        assertThat(BlobDescriptor.deserialize(fixture)).isEqualTo(expected);
-        assertThat(BlobDescriptor.isSerializedDescriptor(fixture)).isTrue();
+        VideoFrameDescriptor indexed =
+                new VideoFrameDescriptor("s3://bucket/视频.mp4", 7, 99, 42, 106, 8);
+        byte[] v2 = fixture("video-frame-descriptor-v2.hex");
+        assertThat(indexed.serialize()).isEqualTo(v2);
+        assertThat(BlobDescriptor.deserialize(v2)).isEqualTo(indexed);
     }
 
     @Test
     public void testBlobFromBytesPreservesFrameDescriptor() {
-        VideoFrameDescriptor expected = new VideoFrameDescriptor("file:/video.mp4", 0, 9, 7);
+        VideoFrameDescriptor expected = new VideoFrameDescriptor("file:/video.mp4", 0, 9, 7, -1, 0);
         Blob blob = Blob.fromBytes(expected.serialize(), null, null);
 
         assertThat(blob).isInstanceOf(BlobRef.class);
@@ -82,13 +85,14 @@ public class VideoFrameDescriptorTest {
 
     @Test
     public void testRejectInvalidPayload() {
-        VideoFrameDescriptor descriptor = new VideoFrameDescriptor("file:/video.mp4", 0, 9, 7);
+        VideoFrameDescriptor descriptor =
+                new VideoFrameDescriptor("file:/video.mp4", 0, 9, 7, -1, 0);
         byte[] trailing = Arrays.copyOf(descriptor.serialize(), descriptor.serialize().length + 1);
 
         assertThatThrownBy(() -> VideoFrameDescriptor.deserialize(trailing))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("trailing bytes");
-        assertThatThrownBy(() -> new VideoFrameDescriptor("file:/video.mp4", 0, 9, -1))
+        assertThatThrownBy(() -> new VideoFrameDescriptor("file:/video.mp4", 0, 9, -1, -1, 0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("non-negative");
 
@@ -128,5 +132,18 @@ public class VideoFrameDescriptorTest {
                                     + Character.digit(hex.charAt(offset + 1), 16));
         }
         return bytes;
+    }
+
+    private static byte[] fixture(String name) throws Exception {
+        return fromHex(
+                new String(
+                                IOUtils.readFully(
+                                        VideoFrameDescriptorTest.class
+                                                .getClassLoader()
+                                                .getResourceAsStream(
+                                                        "org/apache/paimon/data/" + name),
+                                        true),
+                                StandardCharsets.UTF_8)
+                        .trim());
     }
 }

@@ -33,8 +33,11 @@ import org.apache.paimon.utils.DeltaVarintCompressor;
 import org.apache.paimon.utils.LongArrayList;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.StreamUtils.intToLittleEndian;
@@ -48,24 +51,29 @@ import static org.apache.paimon.utils.StreamUtils.intToLittleEndian;
  */
 public class VideoFormatWriter implements FileAwareFormatWriter {
 
-    public static final byte VERSION = 1;
+    public static final byte VERSION = 2;
+    public static final byte V1_VERSION = 1;
     public static final int MAGIC_NUMBER = 0x4F454449; // "IDEO" in little endian
     public static final long NULL_REFERENCE = -1L;
     public static final long PLACEHOLDER_REFERENCE = -2L;
-    public static final int FILE_FOOTER_LENGTH = Integer.BYTES * 5 + Byte.BYTES;
+    public static final int FILE_FOOTER_LENGTH = Integer.BYTES * 6 + Byte.BYTES;
+    public static final int V1_FILE_FOOTER_LENGTH = Integer.BYTES * 5 + Byte.BYTES;
 
     private final PositionOutputStream out;
     private final RawVideoPayloadWriter payloadWriter;
     private final LongArrayList physicalVideoLengths;
+    private final List<byte[]> keyframeIndexes;
     private final LongArrayList runLengths;
     private final LongArrayList runReferences;
     private final LongArrayList runFirstFrames;
     private final Map<BlobDescriptor, Integer> physicalVideos;
+    private final Map<BlobDescriptor, BlobDescriptor> physicalVideoKeyframeIndexes;
 
     private long currentRunLength;
     private long currentRunReference;
     private long currentRunFirstFrame;
     private long currentRunLastFrame;
+    private long keyframeIndexBytes;
     private boolean closed;
 
     public VideoFormatWriter(
@@ -86,10 +94,12 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
                         blobFetchMetricReporter,
                         copyBufferSize);
         this.physicalVideoLengths = new LongArrayList(16);
+        this.keyframeIndexes = new ArrayList<>();
         this.runLengths = new LongArrayList(16);
         this.runReferences = new LongArrayList(16);
         this.runFirstFrames = new LongArrayList(16);
         this.physicalVideos = new HashMap<>();
+        this.physicalVideoKeyframeIndexes = new HashMap<>();
     }
 
     @Override
@@ -121,6 +131,7 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
                 "Video fields require an exact BlobRef containing a VideoFrameDescriptor.");
 
         BlobDescriptor payload = frame.payloadDescriptor();
+        BlobDescriptor keyframeIndexDescriptor = frame.keyframeIndexDescriptor();
         Integer ordinal = physicalVideos.get(payload);
         if (ordinal == null) {
             long length = payloadWriter.write(element);
@@ -130,14 +141,27 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
             }
             ordinal = physicalVideoLengths.size();
             physicalVideoLengths.add(length);
+            Blob keyframeIndex = VideoFrameDescriptor.keyframeIndexBlob(blob);
+            byte[] mapping = keyframeIndex == null ? new byte[0] : keyframeIndex.toData();
+            if (mapping.length > 0) {
+                VideoKeyframeIndex.validate(mapping);
+            }
+            keyframeIndexes.add(mapping);
+            keyframeIndexBytes += mapping.length;
             physicalVideos.put(payload, ordinal);
+            physicalVideoKeyframeIndexes.put(payload, keyframeIndexDescriptor);
+        } else {
+            checkArgument(
+                    Objects.equals(
+                            physicalVideoKeyframeIndexes.get(payload), keyframeIndexDescriptor),
+                    "Video frames for the same payload must use the same keyframe index.");
         }
         append(ordinal, frame.frameIndex());
     }
 
     @Override
     public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
-        return out.getPos() >= targetSize;
+        return keyframeIndexBytes >= targetSize || out.getPos() >= targetSize - keyframeIndexBytes;
     }
 
     @Override
@@ -148,20 +172,37 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
         flushRun();
         payloadWriter.close();
 
+        boolean hasKeyframeIndexes = keyframeIndexes.stream().anyMatch(index -> index.length > 0);
+        byte version = hasKeyframeIndexes ? VERSION : V1_VERSION;
+        if (hasKeyframeIndexes) {
+            for (byte[] mapping : keyframeIndexes) {
+                out.write(mapping);
+            }
+        }
         byte[] physicalIndex = DeltaVarintCompressor.compressLongArrayList(physicalVideoLengths);
+        LongArrayList keyframeIndexLengths = new LongArrayList(keyframeIndexes.size());
+        keyframeIndexes.forEach(mapping -> keyframeIndexLengths.add(mapping.length));
+        byte[] keyframeLengthIndex =
+                DeltaVarintCompressor.compressLongArrayList(keyframeIndexLengths);
         byte[] runLengthIndex = DeltaVarintCompressor.compressLongArrayList(runLengths);
         byte[] runReferenceIndex = DeltaVarintCompressor.compressLongArrayList(runReferences);
         byte[] firstFrameIndex = DeltaVarintCompressor.compressLongArrayList(runFirstFrames);
         out.write(physicalIndex);
+        if (hasKeyframeIndexes) {
+            out.write(keyframeLengthIndex);
+        }
         out.write(runLengthIndex);
         out.write(runReferenceIndex);
         out.write(firstFrameIndex);
         out.write(intToLittleEndian(physicalIndex.length));
+        if (hasKeyframeIndexes) {
+            out.write(intToLittleEndian(keyframeLengthIndex.length));
+        }
         out.write(intToLittleEndian(runLengthIndex.length));
         out.write(intToLittleEndian(runReferenceIndex.length));
         out.write(intToLittleEndian(firstFrameIndex.length));
         out.write(intToLittleEndian(MAGIC_NUMBER));
-        out.write(VERSION);
+        out.write(version);
         closed = true;
     }
 
