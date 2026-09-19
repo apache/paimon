@@ -108,7 +108,8 @@ public class BTreeGlobalIndexer implements SortedGlobalIndexer {
                 keySerializer,
                 (int) blockSize,
                 bloomFilterBuilder,
-                BlockCompressionFactory.create(compressOptions));
+                BlockCompressionFactory.create(compressOptions),
+                options.get(BTreeIndexOptions.BTREE_INDEX_FILE_VERSION));
     }
 
     @Override

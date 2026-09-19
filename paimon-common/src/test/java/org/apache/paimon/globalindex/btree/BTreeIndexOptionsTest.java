@@ -26,6 +26,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 class BTreeIndexOptionsTest {
 
     @Test
+    void testDefaultFileVersionRemainsVersion1() {
+        assertThat(BTreeIndexOptions.BTREE_INDEX_FILE_VERSION.defaultValue())
+                .isEqualTo(BTreeFileFooter.VERSION_1);
+    }
+
+    @Test
     void testDefaultRecordsPerRange() {
         assertThat(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE.defaultValue())
                 .isEqualTo(10_000_000L);

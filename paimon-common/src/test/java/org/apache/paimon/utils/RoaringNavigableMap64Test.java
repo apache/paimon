@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link RoaringNavigableMap64}. */
 public class RoaringNavigableMap64Test {
@@ -123,6 +124,31 @@ public class RoaringNavigableMap64Test {
         assertThat(values).hasSize(101);
         assertThat(values.get(0)).isEqualTo(start);
         assertThat(values.get(100)).isEqualTo(end);
+    }
+
+    @Test
+    public void testToArrayWithLimit() {
+        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(1, 3, 5);
+
+        assertThat(bitmap.toArray(0)).isEmpty();
+        assertThat(bitmap.toArray(2)).containsExactly(1, 3);
+        assertThat(bitmap.toArray(Integer.MAX_VALUE)).containsExactly(1, 3, 5);
+    }
+
+    @Test
+    public void testDeserializeByteArrayRegion() throws Exception {
+        RoaringNavigableMap64 expected = RoaringNavigableMap64.bitmapOf(1, 3, 1L << 33);
+        byte[] serialized = expected.serialize();
+        byte[] framed = new byte[serialized.length + 4];
+        System.arraycopy(serialized, 0, framed, 2, serialized.length);
+
+        RoaringNavigableMap64 actual = new RoaringNavigableMap64();
+        actual.deserialize(framed, 2, serialized.length);
+        assertThat(actual).isEqualTo(expected);
+
+        assertThatThrownBy(() -> actual.deserialize(framed, 2, framed.length))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid bitmap byte range");
     }
 
     @Test
