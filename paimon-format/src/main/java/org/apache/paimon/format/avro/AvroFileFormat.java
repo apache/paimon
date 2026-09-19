@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.avro;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
@@ -67,6 +68,11 @@ public class AvroFileFormat extends FileFormat {
 
     private final Options options;
     private final int zstdLevel;
+    /** Bounds enforced by {@code DataFileWriter#setSyncInterval}. */
+    private static final long MIN_SYNC_INTERVAL = 32;
+
+    private static final long MAX_SYNC_INTERVAL = 1 << 30;
+
     @Nullable private final MemorySize blockSize;
 
     public AvroFileFormat(FormatContext context) {
@@ -114,7 +120,7 @@ public class AvroFileFormat extends FileFormat {
         }
         writer.setCodec(createCodecFactory(compression));
         if (blockSize != null) {
-            writer.setSyncInterval(Math.toIntExact(blockSize.getBytes()));
+            writer.setSyncInterval(avroSyncInterval(blockSize));
         }
         writer.setFlushOnEveryBlock(false);
         writer.create(schema, new CloseShieldOutputStream(out));
@@ -133,6 +139,21 @@ public class AvroFileFormat extends FileFormat {
         for (DataType dataType : fieldTypes) {
             AvroSchemaConverter.convertToSchema(dataType, new HashMap<>());
         }
+    }
+
+    /**
+     * Avro only accepts a sync interval between 32 bytes and 1 GiB; check it here so a bad {@code
+     * file.block-size} fails with the option name instead of inside the writer on an executor.
+     */
+    static int avroSyncInterval(MemorySize blockSize) {
+        long bytes = blockSize.getBytes();
+        if (bytes < MIN_SYNC_INTERVAL || bytes > MAX_SYNC_INTERVAL) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "%s for avro must be between 32 bytes and 1 gb, but was %s bytes.",
+                            CoreOptions.FILE_BLOCK_SIZE.key(), bytes));
+        }
+        return (int) bytes;
     }
 
     private CodecFactory createCodecFactory(String compression) {
