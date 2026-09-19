@@ -83,6 +83,24 @@ write_builder = table.new_batch_write_builder().overwrite()
 write_builder = table.new_batch_write_builder().overwrite({'dt': '2024-01-01'})
 ```
 
+### Parquet Page Indexes
+
+Set the table option `parquet.write-page-index.enabled` to `true` to write
+Parquet ColumnIndex and OffsetIndex metadata with Python writers. It defaults
+to `false`, preserving the existing write behavior. Enabling it requires
+PyArrow 13 or later; unsupported versions fail before creating data files.
+
+This option applies to Parquet data and changelog files, MAP shared-shredding,
+row-id updates, and Parquet format tables. Other formats ignore it. It controls
+Python writes only, independently of read-side index filtering; Java and Rust
+writers keep their existing behavior.
+
+Only newly written files are affected. Disabling the option does not remove
+indexes from existing files. PyArrow moves page-level statistics from page
+headers into the page index when enabled, so validate reader compatibility and
+workload performance before enabling it. Readers must support page indexes to
+benefit; enabling this option alone does not speed up PyArrow reads.
+
 ### Manifest Merging
 
 `manifest.merge.skip-on-write-only` defaults to `false` in both Python and Java,
