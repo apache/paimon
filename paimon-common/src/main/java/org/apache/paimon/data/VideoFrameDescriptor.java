@@ -43,7 +43,6 @@ public class VideoFrameDescriptor extends BlobDescriptor {
     private final long frameIndex;
     private final long keyframeIndexOffset;
     private final long keyframeIndexLength;
-    private byte version;
 
     public VideoFrameDescriptor(
             String uri,
@@ -64,7 +63,6 @@ public class VideoFrameDescriptor extends BlobDescriptor {
         this.frameIndex = frameIndex;
         this.keyframeIndexOffset = keyframeIndexOffset;
         this.keyframeIndexLength = keyframeIndexLength;
-        this.version = CURRENT_VERSION;
     }
 
     public long frameIndex() {
@@ -111,6 +109,7 @@ public class VideoFrameDescriptor extends BlobDescriptor {
 
     @Override
     public byte[] serialize() {
+        byte version = keyframeIndexLength == 0 ? 1 : CURRENT_VERSION;
         byte[] uriBytes = uri().getBytes(StandardCharsets.UTF_8);
         int fixedLength = version == 1 ? V1_FIXED_LENGTH : V2_FIXED_LENGTH;
         ByteBuffer buffer =
@@ -180,11 +179,8 @@ public class VideoFrameDescriptor extends BlobDescriptor {
         if (frameIndex < 0) {
             throw invalidPayload("negative frame index: " + frameIndex);
         }
-        VideoFrameDescriptor descriptor =
-                new VideoFrameDescriptor(
-                        uri, offset, length, frameIndex, keyframeIndexOffset, keyframeIndexLength);
-        descriptor.version = version;
-        return descriptor;
+        return new VideoFrameDescriptor(
+                uri, offset, length, frameIndex, keyframeIndexOffset, keyframeIndexLength);
     }
 
     public static boolean isVideoFrameDescriptor(byte[] bytes) {

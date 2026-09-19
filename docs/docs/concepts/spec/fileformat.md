@@ -459,7 +459,7 @@ wire layout. All numeric values are little endian:
 
 | Field | Size | Description |
 | --- | ---: | --- |
-| Version | 1 byte | Descriptor version, currently `2` |
+| Version | 1 byte | `1` without a keyframe index; `2` with one |
 | Magic | 8 bytes | `0x564944454F46524D` (`VIDEOFRM`) |
 | URI length | 4 bytes | UTF-8 URI byte length |
 | URI | variable | URI of the containing `.video` file |

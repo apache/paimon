@@ -251,7 +251,6 @@ class VideoFrameDescriptor(BlobDescriptor):
         self._frame_index = frame_index
         self._keyframe_index_offset = keyframe_index_offset
         self._keyframe_index_length = keyframe_index_length
-        self._frame_version = self.CURRENT_VERSION
 
     @property
     def frame_index(self) -> int:
@@ -273,15 +272,17 @@ class VideoFrameDescriptor(BlobDescriptor):
         )
 
     def serialize(self) -> bytes:
+        version = (
+            1 if self._keyframe_index_length == 0 else self.CURRENT_VERSION)
         uri_bytes = self.uri.encode('utf-8')
         data = (
-            struct.pack('<BQI', self._frame_version, self.MAGIC, len(uri_bytes))
+            struct.pack('<BQI', version, self.MAGIC, len(uri_bytes))
             + uri_bytes
             + struct.pack(
                 '<qqq', self.offset, self.length, self.frame_index
             )
         )
-        if self._frame_version >= 2:
+        if version >= 2:
             data += struct.pack(
                 '<qq',
                 self._keyframe_index_offset,
@@ -331,7 +332,7 @@ class VideoFrameDescriptor(BlobDescriptor):
             keyframe_index_offset, keyframe_index_length = struct.unpack(
                 '<qq', raw[uri_end + 24:uri_end + 40])
         try:
-            descriptor = cls(
+            return cls(
                 uri,
                 offset,
                 length,
@@ -339,8 +340,6 @@ class VideoFrameDescriptor(BlobDescriptor):
                 keyframe_index_offset,
                 keyframe_index_length,
             )
-            descriptor._frame_version = version
-            return descriptor
         except ValueError as error:
             raise ValueError(
                 "Invalid VideoFrameDescriptor data: %s" % error
