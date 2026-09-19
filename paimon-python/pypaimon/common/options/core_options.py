@@ -1133,8 +1133,8 @@ class CoreOptions:
         .boolean_type()
         .default_value(False)
         .with_description(
-            "Enable PyPaimon Parquet OffsetIndex reads for contiguous row windows. "
-            "Uses the same key as Java, but defaults to false in Python (true in Java). "
+            "Enable Parquet page-index pruning. PyPaimon currently uses OffsetIndex "
+            "metadata for contiguous row windows. "
             "Requires existing offset indexes; nested fields use common leaf row boundaries. "
             "Unsupported or expensive selections use the ordinary reader. "
             "Does not enable ColumnIndex predicate filtering."

@@ -294,7 +294,7 @@ def test_page_index_switch_bypasses_metadata_processing_when_disabled(fixture, v
 
 
 @pytest.mark.parametrize('nested', [False, True])
-def test_table_copy_can_enable_and_disable_page_index_reads(tmp_path, nested):
+def test_table_option_and_copy_control_page_index_reads(tmp_path, nested):
     from pypaimon import CatalogFactory, Schema
 
     catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
@@ -303,7 +303,11 @@ def test_table_copy_can_enable_and_disable_page_index_reads(tmp_path, nested):
     if nested:
         data = data.append_column('record', pa.array([{'value': i} for i in range(N)]))
     catalog.create_table('default.indexed', Schema.from_pyarrow_schema(
-        data.schema, options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'}), False)
+        data.schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'parquet.filter.columnindex.enabled': 'true',
+        }), False)
     table = catalog.get_table('default.indexed')
     write_parquet = table.file_io.write_parquet
 
@@ -323,17 +327,19 @@ def test_table_copy_can_enable_and_disable_page_index_reads(tmp_path, nested):
         commit.close()
 
     table = catalog.get_table('default.indexed')
-    for value in ('true', 'false', 'true'):
-        copied = table.copy({'parquet.filter.columnindex.enabled': value})
-        builder = copied.new_read_builder().with_projection(['id', '_ROW_ID'])
+    for candidate, enabled in (
+            (table, True),
+            (table.copy({'parquet.filter.columnindex.enabled': 'false'}), False),
+            (table.copy({'parquet.filter.columnindex.enabled': 'true'}), True)):
+        builder = candidate.new_read_builder().with_projection(['id', '_ROW_ID'])
         builder.with_filter(builder.new_predicate_builder().between('_ROW_ID', 4500, 4540))
         with patch.object(page_module.ParquetPageIndexReader, 'create',
                           wraps=page_module.ParquetPageIndexReader.create) as create:
             actual = builder.new_read().to_arrow(builder.new_scan().plan().splits())
-        assert create.called == (value == 'true')
+        assert create.called == enabled
         assert actual.to_pydict() == {'id': list(range(4500, 4541)), '_ROW_ID': list(range(4500, 4541))}
-    assert not table.options.parquet_column_index_enabled()
-    assert not catalog.get_table('default.indexed').options.parquet_column_index_enabled()
+    assert table.options.parquet_column_index_enabled()
+    assert catalog.get_table('default.indexed').options.parquet_column_index_enabled()
 
 
 @pytest.fixture
