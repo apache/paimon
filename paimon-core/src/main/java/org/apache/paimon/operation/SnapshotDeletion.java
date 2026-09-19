@@ -70,8 +70,8 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
     }
 
     @Override
-    public List<Path> planDeletedInDeltaManifest(
-            Snapshot snapshot, Predicate<ExpireFileEntry> skipper) {
+    public List<Path> dataFilesToDelete(
+            DataFileDeletionPlan plan, Predicate<ExpireFileEntry> skipper) {
         Predicate<ExpireFileEntry> enriched = skipper;
         if (changelogDecoupled && !produceChangelog) {
             // Skip clean the 'APPEND' data files.If we do not have the file source information
@@ -83,7 +83,7 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
                                     || (manifestEntry.fileSource().orElse(FileSource.APPEND)
                                             == FileSource.APPEND);
         }
-        return super.planDeletedInDeltaManifest(snapshot, enriched);
+        return super.dataFilesToDelete(plan, enriched);
     }
 
     @Override
