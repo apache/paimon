@@ -352,6 +352,37 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
     }
   }
 
+  test("primary-key vector search rejects a non-convertible residual filter") {
+    withTable("T") {
+      createVectorTable(columns = "id INT, threshold INT, embedding ARRAY<FLOAT>")
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (1, 100, array(1.0f, 0.0f)),
+                  |  (2, 100, array(2.0f, 0.0f)),
+                  |  (3, 100, array(3.0f, 0.0f)),
+                  |  (4, 100, array(4.0f, 0.0f)),
+                  |  (5, 1, array(5.0f, 0.0f)),
+                  |  (6, 1, array(6.0f, 0.0f))
+                  |""".stripMargin)
+
+      // `id > threshold` is a column-to-column comparison, which SparkV2FilterConverter cannot
+      // convert to a Paimon predicate, so it stays a Spark residual applied above the vector
+      // search. The two nearest rows (1, 2) fail it; the two nearest rows that satisfy it are
+      // (5, 6), but they rank outside the returned top-2, so Spark post-filtering the top-2 would
+      // silently return nothing. Rejecting the query is consistent with the Flink procedure.
+      val error = intercept[Exception] {
+        spark
+          .sql("""
+                 |SELECT id
+                 |FROM vector_search('T', 'embedding', array(0.0f, 0.0f), 2)
+                 |WHERE id > threshold
+                 |""".stripMargin)
+          .collect()
+      }
+      assert(error.getMessage.contains("cannot be pushed down"), error.getMessage)
+    }
+  }
+
   test("deduplicate updates and deletes primary-key vector results") {
     withTable("T") {
       createVectorTable()
