@@ -292,7 +292,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
             }
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
-                rowRangeIndex = RowRangeIndex.create(result.results().toRangeList());
+                rowRangeIndex = RowRangeIndex.fromBitmap(result.results());
                 if (result instanceof ScoredGlobalIndexResult) {
                     scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
                 }
