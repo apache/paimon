@@ -25,6 +25,15 @@ import org.apache.paimon.options.MemorySize;
 /** Options for BTree index. */
 public class BTreeIndexOptions {
 
+    public static final ConfigOption<Integer> BTREE_INDEX_FILE_VERSION =
+            ConfigOptions.key("btree-index.file-version")
+                    .intType()
+                    .defaultValue(BTreeFileFooter.DEFAULT_WRITE_VERSION)
+                    .withDescription(
+                            "The BTree index file version to write. Version 1 is the default for "
+                                    + "reader compatibility; version 2 enables adaptive posting "
+                                    + "list encoding and requires all readers to support it.");
+
     public static final ConfigOption<String> BTREE_INDEX_COMPRESSION =
             ConfigOptions.key("btree-index.compression")
                     .stringType()
