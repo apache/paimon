@@ -18,6 +18,7 @@
 import os
 import unittest
 from concurrent.futures import CancelledError
+from contextlib import contextmanager
 from copy import deepcopy
 from io import BytesIO
 from itertools import product
@@ -442,30 +443,142 @@ class ManifestSidecarScanTest(existing.ManifestEntryIdentifierTest):
         return ManifestEntry(kind, self._create_file_meta('unused').min_key, 0, 1,
                              replace(self._create_file_meta(name), first_row_id=first, row_count=count))
 
-    def test_enabling_sidecar_reads_does_not_change_python_writes(self):
+    def write_meta(self, name, entries):
         manager = self.manifest_file_manager
-        entries = [self.entry('data.parquet', 100)]
-        self.assertTrue(self.table.options.manifest_sidecar_enabled())
-        self.assertIsNone(manager.write('plain-writer', entries))
-        self.assertFalse(Path(manager.manifest_path, 'plain-writer' + SUFFIX).exists())
-        for meta in manager.rolling_write(entries, 1, 'rolling-writer'):
+        return manager.write(name, entries)
+
+    def test_explicit_disable_keeps_writes_plain_when_manifest_sort_is_enabled(self):
+        self.table.options.options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, False)
+        manager = self.manifest_file_manager
+        entries = [self.entry('file-%d.parquet' % i, i * 100) for i in range(3)]
+        metas = [manager.write('plain', entries)] + manager.rolling_write(entries, 1, 'plain-rolling')
+        for meta in metas:
             self.assertIsNone(meta.extra_files)
             self.assertFalse(Path(manager.manifest_path, meta.file_name + SUFFIX).exists())
+            self.assertTrue(manager.read(meta.file_name))
 
-    def write_meta(self, name, entries):
-        # Emulate an externally published sidecar; production Python writes are unchanged.
+    @staticmethod
+    def failing_sidecar_output(original, target, phase, error):
+        @contextmanager
+        def output(path):
+            with original(path) as stream:
+                if path.endswith(target) and phase == 'write':
+                    wrapped = Mock(wraps=stream)
+
+                    def partial_write(data):
+                        stream.write(data[:3])
+                        raise error
+
+                    wrapped.write.side_effect = partial_write
+                    yield wrapped
+                else:
+                    yield stream
+            if path.endswith(target) and phase == 'close':
+                raise error
+        return output
+
+    def test_sidecar_write_and_close_failures_do_not_publish_references(self):
         manager = self.manifest_file_manager
-        manager.write(name, entries)
-        path = Path(manager.manifest_path, name)
-        avro_bytes = path.read_bytes()
-        meta = manager._build_meta(name, entries, len(avro_bytes))
-        settings = Settings.from_options(self.table.options)
-        if settings.enabled:
-            data = manifest_sidecar.build_from_entries(avro_bytes, entries, settings)
-            sidecar_path = path.with_name(name + SUFFIX)
-            sidecar_path.write_bytes(data)
-            meta = replace(meta, extra_files=[sidecar_path.name])
-        return meta
+        kept = manager.write('kept', [self.entry('kept.parquet', 100)])
+        original = manager.file_io.new_output_stream
+        for phase in ('write', 'close'):
+            for error in (OSError('failed'), InterruptedError('cancelled'), KeyboardInterrupt()):
+                with self.subTest(phase=phase, error=type(error).__name__):
+                    stream = self.failing_sidecar_output(original, 'failed' + SUFFIX, phase, error)
+                    expected = type(error) if isinstance(error, (InterruptedError, KeyboardInterrupt)) else RuntimeError
+                    with patch.object(manager.file_io, 'new_output_stream', side_effect=stream), \
+                            patch.object(manager, '_build_meta', wraps=manager._build_meta) as publish:
+                        with self.assertRaises(expected):
+                            manager.write('failed', [self.entry('new.parquet', 200)])
+                        publish.assert_not_called()
+                    self.assertFalse(Path(manager.manifest_path, 'failed').exists())
+                    self.assertFalse(Path(manager.manifest_path, 'failed' + SUFFIX).exists())
+                    self.assertTrue(Path(manager.manifest_path, kept.file_name).exists())
+                    self.assertTrue(Path(manager.manifest_path, sidecar_file_name(kept)).exists())
+
+    def test_later_rolling_failure_cleans_completed_manifest_sidecar_pairs(self):
+        manager = self.manifest_file_manager
+        manager.write('kept', [self.entry('kept.parquet', 100)])
+        before = {p.name for p in Path(manager.manifest_path).iterdir()}
+        original = manager.file_io.new_output_stream
+        stream = self.failing_sidecar_output(
+            original, 'rolling-failed-1' + SUFFIX, 'close', OSError('second sidecar close failed'))
+        with patch.object(manager.file_io, 'new_output_stream', side_effect=stream):
+            with self.assertRaises(RuntimeError):
+                manager.rolling_write([self.entry('data-%d.parquet' % i, i * 100) for i in range(3)],
+                                      1, 'rolling-failed')
+        self.assertEqual({p.name for p in Path(manager.manifest_path).iterdir()}, before)
+
+    def test_commit_cleanup_removes_only_owned_manifest_sidecar_pairs(self):
+        from pypaimon.write.file_store_commit import FileStoreCommit
+
+        manager = self.manifest_file_manager
+        lists = ManifestListManager(self.table)
+        kept = manager.write('kept', [self.entry('kept.parquet', 100)])
+        delta = manager.write('delta', [self.entry('delta.parquet', 200)])
+        changelog = manager.write('changelog', [self.entry('changelog.parquet', 300)])
+        merged = manager.write('merged', [self.entry('merged.parquet', 400)])
+        lists.write('delta-list', [delta])
+        lists.write('changelog-list', [changelog])
+        lists.write('base-list', [kept, merged])
+        committer = SimpleNamespace(table=self.table, manifest_file_manager=manager, manifest_list_manager=lists)
+        FileStoreCommit._clean_up_reuse_tmp_manifests(committer, 'delta-list', 'changelog-list')
+        FileStoreCommit._clean_up_no_reuse_tmp_manifests(committer, 'base-list', [merged])
+        self.assertEqual({p.name for p in Path(manager.manifest_path).iterdir()},
+                         {kept.file_name, sidecar_file_name(kept)})
+
+    def test_invalid_row_id_ranges_keep_coarse_and_block_coverage_unknown(self):
+        for first, count in ((-1, 1), (100, 0), (MAX_ROW_ID, 2)):
+            with self.subTest(first=first, count=count):
+                manager = self.manifest_file_manager
+                meta = manager.write('invalid-%s-%s' % (first, count), [self.entry('data.parquet', first, count)])
+                self.assertIsNone(meta.min_row_id)
+                self.assertIsNone(meta.max_row_id)
+                data = Path(manager.manifest_path, sidecar_file_name(meta)).read_bytes()
+                self.assertEqual(len(select(data, meta, [Range(50, 50)]).blocks), 1)
+
+    def test_sidecars_do_not_depend_on_manifest_target_sizes(self):
+        for i, target in enumerate(('1 bytes', '1 gb', '9223372036854775807 bytes')):
+            with self.subTest(target=target):
+                self.table.options.options.set(CoreOptions.MANIFEST_TARGET_FILE_SIZE, target)
+                entry = self.entry('file.parquet', 100)
+                meta = self.write_meta(f'budget-{i}', [entry])
+                self.assertEqual(
+                    [e.file.file_name for e in self.manifest_file_manager.read(meta.file_name)],
+                    [entry.file.file_name])
+                self.assertIsNotNone(sidecar_file_name(meta))
+
+    def test_payloads_follow_table_metadata(self):
+        import pyarrow as pa
+
+        for partitioned, data_evolution, bucket in product((False, True), (False, True), (-1, 4)):
+            with self.subTest(partitioned=partitioned, data_evolution=data_evolution, bucket=bucket):
+                name = f'default.sidecar_settings_{partitioned}_{data_evolution}_{bucket + 1}'
+                schema = Schema.from_pyarrow_schema(
+                    pa.schema([('id', pa.int32()), ('value', pa.string())]),
+                    partition_keys=['id'] if partitioned else [],
+                    options={'manifest.sidecar.enabled': 'true',
+                             'data-evolution.enabled': str(data_evolution).lower(), 'bucket': str(bucket)})
+                self.catalog.create_table(name, schema, False)
+                self.table = self.catalog.get_table(name)
+                manager = ManifestFileManager(self.table)
+                entry = replace(self.entry('file.parquet', 100), bucket=1, total_buckets=4,
+                                partition=GenericRow([7] if partitioned else [], self.table.partition_keys_fields))
+                metadata = manager.write('settings', [entry])
+                with manager.file_io.new_input_stream(
+                        manager.manifest_path + '/' + sidecar_file_name(metadata)) as stream:
+                    data = stream.read()
+                encoded = manifest_sidecar._Buffer(data)
+                encoded.take(4)
+                encoded.uint()
+                encoded.take(encoded.uint())
+                self.assertEqual(encoded.uint(), 1)
+                selected = select(data, metadata, None, bucket_filter=lambda bucket, total: bucket == 99)
+                self.assertEqual(len(selected.blocks), 1 if bucket == -1 else 0)
+                self.assertEqual(
+                    len(select(data, metadata, [Range(99, 99)]).blocks),
+                    0 if data_evolution else 1)
+                self.assertEqual([e.file.file_name for e in manager.read(metadata.file_name)], ['file.parquet'])
 
     def test_bucket_point_lookup_with_rescale_and_delete_entries(self):
         self.table.options.options.set(CoreOptions.DATA_EVOLUTION_ENABLED, False)
@@ -609,6 +722,10 @@ class ManifestSidecarScanTest(existing.ManifestEntryIdentifierTest):
                 self.assertEqual(len(actual), 1)
                 self.assertEqual([call[0][0] for call in opened.call_args_list],
                                  [str(Path(manager.manifest_path, written.file_name))])
+        manager.delete(indexed)
+        self.assertFalse(other_path.exists())
+        self.assertFalse(explicit_path.exists())
+        self.assertFalse(Path(manager.manifest_path, written.file_name).exists())
 
     def test_manifest_list_index_reference_compatibility(self):
         indexed = self.write_meta('indexed', [self.entry('data.parquet', 100)])
@@ -799,3 +916,49 @@ class ManifestSidecarScanTest(existing.ManifestEntryIdentifierTest):
                 self.assertEqual([call[0][0] for call in opened.call_args_list], [index_path, body_path])
         if stream is not None:
             self.assertTrue(stream.closed)
+
+    def test_rolling_merge_limits_and_abort_cleanup(self):
+        entries = [self.entry('file-%d' % i, i * 1000) for i in range(300)]
+        manager = self.manifest_file_manager
+        metas = manager.rolling_write(entries, 300, 'rolling')
+        self.assertGreater(len(metas), 1)
+        for meta in metas:
+            actual = manager.read(meta.file_name)
+            data = Path(manager.manifest_path, meta.file_name + SUFFIX).read_bytes()
+            for e in actual:
+                self.assertTrue(intersects(data, meta, [Range(e.file.first_row_id, e.file.first_row_id)], Settings()))
+            gap = actual[0].file.first_row_id + 10
+            self.assertFalse(intersects(data, meta, [Range(gap, gap)], Settings()))
+        from pypaimon.manifest.manifest_file_merger import ManifestFileMerger
+        merger = ManifestFileMerger(manager, 1000000, 2)
+        outputs, new_files = merger.merge(metas)
+        self.assertTrue(new_files)
+        self.assertEqual(
+            sorted(e.file.file_name for meta in outputs for e in manager.read(meta.file_name)),
+            sorted(e.file.file_name for e in entries))
+        for meta in outputs:
+            self.assertTrue(Path(manager.manifest_path, meta.file_name + SUFFIX).exists())
+        for meta in metas:
+            self.assertIsNotNone(sidecar_file_name(meta))
+            manager.delete(meta)
+            self.assertFalse(Path(manager.manifest_path, meta.file_name + SUFFIX).exists())
+        original = self.table.file_io.new_output_stream
+
+        def fail(path):
+            if path.endswith(SUFFIX):
+                raise OSError('sidecar write failed')
+            return original(path)
+        with patch.object(self.table.file_io, 'new_output_stream', side_effect=fail):
+            with self.assertRaises(RuntimeError):
+                manager.write('failed', entries[:1])
+        self.assertFalse(Path(manager.manifest_path, 'failed').exists())
+        self.assertFalse(Path(manager.manifest_path, 'failed' + SUFFIX).exists())
+        unknown = manager.write('unknown', [self.entry('legacy', None)])
+        self.assertIsNotNone(sidecar_file_name(unknown))
+        data = Path(manager.manifest_path, sidecar_file_name(unknown)).read_bytes()
+        self.assertEqual(len(select(data, unknown, [Range(100, 100)]).blocks), 1)
+        huge = manager.write('huge', [self.entry('one', 0, MAX_ROW_ID),
+                                      self.entry('two', MAX_ROW_ID, 1)])
+        self.assertIsNotNone(sidecar_file_name(huge))
+        data = Path(manager.manifest_path, sidecar_file_name(huge)).read_bytes()
+        self.assertEqual(len(select(data, huge, [Range(50, 50)]).blocks), 1)
