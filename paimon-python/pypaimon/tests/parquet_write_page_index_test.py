@@ -175,3 +175,66 @@ def test_format_overwrite_checks_support_before_deleting(tmp_path):
         with pytest.raises(ValueError, match='PyArrow >= 13'):
             FormatTableWrite(table, overwrite=True).write_arrow(_data())
     assert {path: path.read_bytes() for path in tmp_path.rglob('*.parquet')} == paths
+
+
+def _vector_table(tmp_path, file_format, setting):
+    data = pa.Table.from_pydict({
+        'id': [1, 2],
+        'embedding': [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+    }, schema=pa.schema([
+        ('id', pa.int64()),
+        ('embedding', pa.list_(pa.float32(), 3)),
+    ]))
+    options = {
+        'file.format': file_format,
+        'vector.file.format': 'parquet',
+        'row-tracking.enabled': 'true',
+        'data-evolution.enabled': 'true',
+    }
+    if setting is not None:
+        options[OPTION] = setting
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    catalog.create_table('default.vectors', Schema.from_pyarrow_schema(
+        data.schema, options=options), False)
+    return catalog.get_table('default.vectors'), data
+
+
+@pytest.mark.parametrize('file_format', ['parquet', 'orc'])
+@pytest.mark.parametrize('setting', [None, 'false', 'true'])
+def test_vector_parquet_indexes_and_round_trip(tmp_path, file_format, setting):
+    if setting == 'true' and not HAS_PAGE_INDEX:
+        pytest.skip('Writing page indexes requires PyArrow >= 13')
+    if file_format == 'orc':
+        pytest.importorskip('pyarrow.orc')
+    table, data = _vector_table(tmp_path, file_format, setting)
+    _write(table, 'buffered', data)
+    paths = list(tmp_path.rglob('*.parquet'))
+    assert len(list(tmp_path.rglob('*.vector.parquet'))) == 1
+    assert len(paths) == (2 if file_format == 'parquet' else 1)
+    for path in paths:
+        metadata = pq.read_metadata(str(path))
+        if HAS_PAGE_INDEX:
+            for i in range(metadata.num_row_groups):
+                for j in range(metadata.num_columns):
+                    column = metadata.row_group(i).column(j)
+                    assert column.has_column_index == (setting == 'true')
+                    assert column.has_offset_index == (setting == 'true')
+    reader = table.new_read_builder()
+    actual = reader.new_read().to_arrow(reader.new_scan().plan().splits())
+    assert actual.to_pydict() == data.to_pydict()
+
+
+def test_vector_parquet_rejects_unsupported_arrow_before_output(tmp_path):
+    table, data = _vector_table(tmp_path, 'orc', 'true')
+    with patch.object(pa, '__version__', '12.0.1'), \
+            patch.object(table.file_io, 'write_parquet',
+                         wraps=table.file_io.write_parquet) as write_parquet, \
+            patch.object(table.file_io, 'write_orc',
+                         wraps=table.file_io.write_orc) as write_orc:
+        with pytest.raises(ValueError, match=r'parquet.write-page-index.enabled.*PyArrow >= 13'):
+            _write(table, 'buffered', data)
+        write_parquet.assert_not_called()
+        write_orc.assert_not_called()
+    assert not list(tmp_path.rglob('*.parquet'))
+    assert not list(tmp_path.rglob('*.orc'))
