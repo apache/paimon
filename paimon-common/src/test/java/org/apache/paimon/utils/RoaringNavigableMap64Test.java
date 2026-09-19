@@ -126,6 +126,15 @@ public class RoaringNavigableMap64Test {
     }
 
     @Test
+    public void testToArrayWithLimit() {
+        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(1, 3, 5);
+
+        assertThat(bitmap.toArray(0)).isEmpty();
+        assertThat(bitmap.toArray(2)).containsExactly(1, 3);
+        assertThat(bitmap.toArray(Integer.MAX_VALUE)).containsExactly(1, 3, 5);
+    }
+
+    @Test
     public void testToRangeListAcrossHighBitmapBoundary() {
         RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
         long start = (1L << 32) - 2;

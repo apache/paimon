@@ -134,14 +134,43 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
     }
 
     @TestTemplate
-    public void testTopNOnlyDeserializesRemainingRowIds() {
+    public void testVersion1TopNOnlyDeserializesRemainingRowIds() throws Exception {
         MemorySliceOutput output = new MemorySliceOutput(16);
         output.writeVarLenInt(3);
         output.writeVarLenLong(10);
         output.writeVarLenLong(20);
 
-        assertThat(BTreeIndexReader.deserializeRowIds(output.toSlice(), 2))
+        assertThat(BTreeIndexReader.deserializeVersion1RowIds(output.toSlice(), 2))
                 .containsExactly(10L, 20L);
+    }
+
+    @TestTemplate
+    public void testReadsVersion1File() throws Exception {
+        assertReadsFileVersion(BTreeFileFooter.VERSION_1);
+    }
+
+    @TestTemplate
+    public void testReadsVersion2File() throws Exception {
+        assertReadsFileVersion(BTreeFileFooter.VERSION_2);
+    }
+
+    private void assertReadsFileVersion(int fileVersion) throws Exception {
+        BTreeIndexWriter versionedWriter =
+                new BTreeIndexWriter(fileWriter, keySerializer, 64 * 1024, null, null, fileVersion);
+        GlobalIndexIOMeta written = writeData(data, versionedWriter);
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        Object literal = data.get(dataNum / 2).getKey();
+
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(
+                        fileReader,
+                        Collections.singletonList(written),
+                        dataNum,
+                        newDirectExecutorService())) {
+            assertResult(
+                    reader.visitEqual(ref, literal).join().get(),
+                    filter(value -> comparator.compare(value, literal) == 0));
+        }
     }
 
     private Object[] valuesByRowId() {
