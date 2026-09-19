@@ -225,7 +225,9 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
      * can emit the right number of NULL-filled rows.
      *
      * <p>If Deletion-Vector is enabled, we always keep the oldest normal file for each group as the
-     * anchor file to lookup corresponding Deletion Files.
+     * anchor file to lookup corresponding Deletion Files. Without deletion vectors, the anchor is
+     * still kept when all other kept files are blob/vector-store files: dedicated files never span
+     * the group's full row-id range, so the reader needs the anchor to see every row.
      */
     private List<ManifestEntry> pruneByReadType(List<ManifestEntry> group) {
         if (readType == null || group.size() <= 1) {
@@ -280,6 +282,19 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         }
         if (anchor != null && !kept.contains(anchor)) {
             kept.add(anchor);
+        }
+        // Blob and vector-store files never span the full row-id range of their group, so a
+        // group whose kept files are all dedicated files would let the reader derive the
+        // logical range from sub-ranges and silently drop the rows outside them. Keep the
+        // full-range anchor normal file in that case, like the deletion-vector path does.
+        if (anchor == null
+                && !kept.isEmpty()
+                && kept.stream()
+                        .allMatch(
+                                e ->
+                                        isBlobFile(e.file().fileName())
+                                                || isVectorStoreFile(e.file().fileName()))) {
+            kept.add(retrieveAnchorFile(group, ManifestEntry::file));
         }
         // Group must contribute at least one file so the reader sees rowCount and can NULL-fill
         // missing columns for the projection's rows. The representative must be a full-range
