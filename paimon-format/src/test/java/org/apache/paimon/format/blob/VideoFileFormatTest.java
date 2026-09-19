@@ -60,6 +60,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Tests for {@link VideoFileFormat}. */
 public class VideoFileFormatTest {
 
+    private static final String KEYFRAME_INDEX_HEX =
+            "0149464b4f4544495602000000789c636040053c507a410f84060009b40139";
+
     @TempDir java.nio.file.Path tempPath;
 
     private FileIO fileIO;
@@ -122,17 +125,7 @@ public class VideoFileFormatTest {
 
     @Test
     public void testCrossLanguageV1Fixture() throws IOException {
-        byte[] fixture =
-                fromHex(
-                        new String(
-                                        IOUtils.readFully(
-                                                VideoFileFormatTest.class
-                                                        .getClassLoader()
-                                                        .getResourceAsStream(
-                                                                "org/apache/paimon/format/blob/video-v1.hex"),
-                                                true),
-                                        StandardCharsets.UTF_8)
-                                .trim());
+        byte[] fixture = fixture("video-v1.hex");
 
         Blob a2 = sourceFrame("a.mp4", "abc".getBytes(StandardCharsets.UTF_8), 2);
         Blob a3 = sourceFrame("a.mp4", "abc".getBytes(StandardCharsets.UTF_8), 3);
@@ -152,6 +145,96 @@ public class VideoFileFormatTest {
             assertThat(meta.frameIndex(5)).isEqualTo(8);
             assertThat(meta.frameIndex(6)).isEqualTo(10);
         }
+    }
+
+    @Test
+    public void testCrossLanguageV2Fixture() throws IOException {
+        byte[] fixture = fixture("video-v2.hex");
+        byte[] video = "abc".getBytes(StandardCharsets.UTF_8);
+        byte[] mapping = fromHex(KEYFRAME_INDEX_HEX);
+        java.nio.file.Path source = tempPath.resolve("indexed.mp4");
+        byte[] sourceBytes = new byte[video.length + mapping.length];
+        System.arraycopy(video, 0, sourceBytes, 0, video.length);
+        System.arraycopy(mapping, 0, sourceBytes, video.length, mapping.length);
+        Files.write(source, sourceBytes);
+        VideoFrameDescriptor descriptor =
+                new VideoFrameDescriptor(
+                        new Path(source.toUri()).toString(),
+                        0,
+                        video.length,
+                        2,
+                        video.length,
+                        mapping.length);
+        Blob a2 =
+                Blob.fromDescriptor(org.apache.paimon.utils.UriReader.fromFile(fileIO), descriptor);
+        Blob a3 =
+                Blob.fromDescriptor(
+                        org.apache.paimon.utils.UriReader.fromFile(fileIO),
+                        new VideoFrameDescriptor(
+                                descriptor.uri(),
+                                0,
+                                video.length,
+                                3,
+                                video.length,
+                                mapping.length));
+        Blob b7 = sourceFrame("b.mp4", "WXYZ".getBytes(StandardCharsets.UTF_8), 7);
+        Blob b8 = sourceFrame("b.mp4", "WXYZ".getBytes(StandardCharsets.UTF_8), 8);
+        Blob a10 =
+                Blob.fromDescriptor(
+                        org.apache.paimon.utils.UriReader.fromFile(fileIO),
+                        new VideoFrameDescriptor(
+                                descriptor.uri(),
+                                0,
+                                video.length,
+                                10,
+                                video.length,
+                                mapping.length));
+
+        write(a2, a3, null, BlobPlaceholder.INSTANCE, b7, b8, a10);
+
+        assertThat(Files.readAllBytes(java.nio.file.Paths.get(file.toUri()))).isEqualTo(fixture);
+        try (SeekableInputStream in = fileIO.newInputStream(file)) {
+            VideoFileMeta meta = new VideoFileMeta(in, fixture.length, null);
+            assertThat(meta.recordNumber()).isEqualTo(7);
+            assertThat(meta.physicalVideoNumber()).isEqualTo(2);
+            assertThat(meta.videoLength(0)).isEqualTo(video.length);
+            assertThat(meta.keyframeIndexOffset(0)).isEqualTo(7);
+            assertThat(meta.keyframeIndexLength(0)).isEqualTo(mapping.length);
+            assertThat(meta.keyframeIndexLength(4)).isZero();
+        }
+        VideoFrameDescriptor restored = descriptor(read(null).get(0));
+        assertThat(
+                        VideoFrameDescriptor.keyframeIndexBlob(
+                                        Blob.fromDescriptor(
+                                                org.apache.paimon.utils.UriReader.fromFile(fileIO),
+                                                restored))
+                                .toData())
+                .isEqualTo(mapping);
+    }
+
+    @Test
+    public void testRejectInvalidKeyframeIndex() throws IOException {
+        byte[] video = "video".getBytes(StandardCharsets.UTF_8);
+        byte[] mapping = "mapping".getBytes(StandardCharsets.UTF_8);
+        java.nio.file.Path source = tempPath.resolve("invalid-index.mp4");
+        byte[] sourceBytes = new byte[video.length + mapping.length];
+        System.arraycopy(video, 0, sourceBytes, 0, video.length);
+        System.arraycopy(mapping, 0, sourceBytes, video.length, mapping.length);
+        Files.write(source, sourceBytes);
+        Blob frame =
+                Blob.fromDescriptor(
+                        org.apache.paimon.utils.UriReader.fromFile(fileIO),
+                        new VideoFrameDescriptor(
+                                new Path(source.toUri()).toString(),
+                                0,
+                                video.length,
+                                0,
+                                video.length,
+                                mapping.length));
+
+        assertThatThrownBy(() -> write(frame))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid video keyframe index");
     }
 
     @Test
@@ -233,7 +316,7 @@ public class VideoFileFormatTest {
                                 + runLengthIndex.length
                                 + runReferenceIndex.length
                                 + firstFrameIndex.length
-                                + VideoFormatWriter.FILE_FOOTER_LENGTH];
+                                + VideoFormatWriter.V1_FILE_FOOTER_LENGTH];
         int position = 0;
         position = put(bytes, position, physicalIndex);
         position = put(bytes, position, runLengthIndex);
@@ -244,7 +327,7 @@ public class VideoFileFormatTest {
         position = putInt(bytes, position, runReferenceIndex.length);
         position = putInt(bytes, position, firstFrameIndex.length);
         position = putInt(bytes, position, VideoFormatWriter.MAGIC_NUMBER);
-        bytes[position] = VideoFormatWriter.VERSION;
+        bytes[position] = VideoFormatWriter.V1_VERSION;
         Files.write(java.nio.file.Paths.get(file.toUri()), bytes);
 
         assertThatThrownBy(
@@ -265,7 +348,7 @@ public class VideoFileFormatTest {
         }
         VideoFrameDescriptor descriptor =
                 new VideoFrameDescriptor(
-                        new Path(source.toUri()).toString(), 0, bytes.length, frameIndex);
+                        new Path(source.toUri()).toString(), 0, bytes.length, frameIndex, -1, 0);
         return Blob.fromDescriptor(org.apache.paimon.utils.UriReader.fromFile(fileIO), descriptor);
     }
 
@@ -317,5 +400,18 @@ public class VideoFileFormatTest {
                                     + Character.digit(hex.charAt(offset + 1), 16));
         }
         return bytes;
+    }
+
+    private static byte[] fixture(String name) throws IOException {
+        return fromHex(
+                new String(
+                                IOUtils.readFully(
+                                        VideoFileFormatTest.class
+                                                .getClassLoader()
+                                                .getResourceAsStream(
+                                                        "org/apache/paimon/format/blob/" + name),
+                                        true),
+                                StandardCharsets.UTF_8)
+                        .trim());
     }
 }

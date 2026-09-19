@@ -426,7 +426,8 @@ class LeRobotValidationTest(unittest.TestCase):
                     "frame_index": index, "timestamp": index / 10,
                     "task_index": 0,
                     "camera": pmm.VideoFrameDescriptor(
-                        "file:///shared.video", 0, 5, index + 3).serialize(),
+                        "file:///shared.video", 0, 5, index + 3, -1, 0
+                    ).serialize(),
                 } for index in indices], schema=self.schema).select(columns)
 
         for backend, batch in (("torchcodec", True), (None, True),
@@ -543,7 +544,8 @@ class LeRobotValidationTest(unittest.TestCase):
             ) as decode_batch:
                 result = collator([{
                     "video": pmm.VideoFrameDescriptor(
-                        "file:///episode.mp4", 0, len(payload), index).serialize(),
+                        "file:///episode.mp4", 0, len(payload), index, -1, 0
+                    ).serialize(),
                 } for index in indices])
                 decode_batch.assert_called_once_with(indices=[1, 5, 9, 9])
             actual = torch.stack([row["frame"] for row in result])
@@ -1197,7 +1199,7 @@ class LeRobotValidationTest(unittest.TestCase):
 
         key = "camera"
         feature = {key: {"dtype": "video", "shape": [4, 5, 3]}}
-        rows = {i: {key: VideoFrameDescriptor("a.video", 0, 1, i).serialize()}
+        rows = {i: {key: VideoFrameDescriptor("a.video", 0, 1, i, -1, 0).serialize()}
                 for i in range(2)}
         plans = [{"windows": {key: [1, 0, 0]}}] * 2
         pixels = torch.arange(120).reshape(2, 4, 5, 3).to(torch.uint8)
@@ -1241,8 +1243,8 @@ class LeRobotValidationTest(unittest.TestCase):
 
             decoder.get_frames_at.reset_mock()
             separate = dict(rows)
-            separate[2] = {key: VideoFrameDescriptor("b.video", 0, 1, 0).serialize()}
-            separate[3] = {key: VideoFrameDescriptor("b.video", 0, 1, 1).serialize()}
+            separate[2] = {key: VideoFrameDescriptor("b.video", 0, 1, 0, -1, 0).serialize()}
+            separate[3] = {key: VideoFrameDescriptor("b.video", 0, 1, 1, -1, 0).serialize()}
             interleaved = [{"windows": {key: window}}
                            for window in ([1, 0, 0], [2, 3], [0, 1], [3, 2, 2])]
             result = _decode_video_windows(
@@ -1260,7 +1262,7 @@ class LeRobotValidationTest(unittest.TestCase):
 
             open_decoder.reset_mock()
             mixed = dict(rows)
-            mixed[1] = {key: VideoFrameDescriptor("b.video", 0, 1, 0).serialize()}
+            mixed[1] = {key: VideoFrameDescriptor("b.video", 0, 1, 0, -1, 0).serialize()}
             self.assertEqual({}, _decode_video_windows(
                 plans, mixed, [collator], feature, True))
             open_decoder.assert_not_called()

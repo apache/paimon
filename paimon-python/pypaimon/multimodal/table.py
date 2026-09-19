@@ -758,6 +758,8 @@ def _video_frame_descriptors(payload, count, first_frame):
             payload.offset,
             payload.length,
             first_frame + index,
+            -1,
+            0,
         ).serialize()
         for index in range(count)
     ]

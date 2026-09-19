@@ -1455,7 +1455,7 @@ class BlobTest(unittest.TestCase):
         self.assertIsNone(BlobDescriptor.parse_if_serialized(v1_shaped_inline))
         self.assertIsNone(BlobDescriptor.parse_if_serialized(b"tiny"))
 
-        video = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2)
+        video = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2, -1, 0)
         video_bytes = video.serialize()
         self.assertEqual(video_bytes, BlobDescriptor.deserialize(video_bytes).serialize())
         self.assertEqual(video, BlobDescriptor.parse_if_serialized(video_bytes))
@@ -1642,7 +1642,7 @@ class BlobTest(unittest.TestCase):
             pa.RecordBatch.from_arrays(
                 [pa.array([v1], type=pa.large_binary())], names=["payload"]))
 
-        video_bytes = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2).serialize()
+        video_bytes = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2, -1, 0).serialize()
         writer._validate_inline_stored_fields_input(
             pa.RecordBatch.from_arrays(
                 [pa.array([video_bytes], type=pa.large_binary())], names=["payload"]))

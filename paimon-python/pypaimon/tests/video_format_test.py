@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import io
 import struct
 import tempfile
 import unittest
@@ -34,21 +35,32 @@ from pypaimon.table.row.blob import (
 )
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
+from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 from pypaimon.write.video_format_writer import VideoFormatWriter
 
 
 class VideoFormatTest(unittest.TestCase):
 
     REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-    DESCRIPTOR_FIXTURE = (
+    DESCRIPTOR_V1_FIXTURE = (
         REPOSITORY_ROOT
         / "paimon-common/src/test/resources/org/apache/paimon/data/"
         "video-frame-descriptor-v1.hex"
+    )
+    DESCRIPTOR_V2_FIXTURE = (
+        REPOSITORY_ROOT
+        / "paimon-common/src/test/resources/org/apache/paimon/data/"
+        "video-frame-descriptor-v2.hex"
     )
     VIDEO_FIXTURE = (
         REPOSITORY_ROOT
         / "paimon-format/src/test/resources/org/apache/paimon/format/blob/"
         "video-v1.hex"
+    )
+    VIDEO_V2_FIXTURE = (
+        REPOSITORY_ROOT
+        / "paimon-format/src/test/resources/org/apache/paimon/format/blob/"
+        "video-v2.hex"
     )
 
     def setUp(self):
@@ -61,7 +73,7 @@ class VideoFormatTest(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_descriptor_round_trip_preserves_payload_and_frame(self):
-        descriptor = VideoFrameDescriptor("s3://bucket/a.video", 7, 99, 42)
+        descriptor = VideoFrameDescriptor("s3://bucket/a.video", 7, 99, 42, -1, 0)
         serialized = descriptor.serialize()
 
         self.assertTrue(
@@ -80,14 +92,29 @@ class VideoFormatTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "trailing bytes"):
             VideoFrameDescriptor.deserialize(serialized + b"x")
         with self.assertRaisesRegex(ValueError, "non-negative"):
-            VideoFrameDescriptor("x", 0, 1, -1)
+            VideoFrameDescriptor("x", 0, 1, -1, -1, 0)
 
-    def test_cross_language_descriptor_fixture(self):
-        fixture = self._fixture_bytes(self.DESCRIPTOR_FIXTURE)
-        expected = VideoFrameDescriptor("s3://bucket/视频.mp4", 7, 99, 42)
+        indexed = VideoFrameDescriptor("s3://bucket/a.video", 7, 99, 42, 106, 8)
+        restored = VideoFrameDescriptor.deserialize(indexed.serialize())
+        self.assertEqual(indexed, restored)
+        self.assertEqual(
+            BlobDescriptor("s3://bucket/a.video", 106, 8),
+            restored.keyframe_index_descriptor,
+        )
 
-        self.assertEqual(fixture, expected.serialize())
-        self.assertEqual(expected, BlobDescriptor.deserialize(fixture))
+    def test_cross_language_descriptor_fixtures(self):
+        v1 = self._fixture_bytes(self.DESCRIPTOR_V1_FIXTURE)
+        unindexed = VideoFrameDescriptor(
+            "s3://bucket/视频.mp4", 7, 99, 42, -1, 0)
+        restored = BlobDescriptor.deserialize(v1)
+        self.assertEqual(unindexed, restored)
+        self.assertEqual(v1, restored.serialize())
+
+        v2 = self._fixture_bytes(self.DESCRIPTOR_V2_FIXTURE)
+        indexed = VideoFrameDescriptor(
+            "s3://bucket/视频.mp4", 7, 99, 42, 106, 8)
+        self.assertEqual(v2, indexed.serialize())
+        self.assertEqual(indexed, BlobDescriptor.deserialize(v2))
 
     def test_pack_raw_videos_and_map_frame_runs(self):
         first_bytes = b"first-mp4"
@@ -114,12 +141,12 @@ class VideoFormatTest(unittest.TestCase):
         with self.file_io.new_input_stream(target) as stream:
             meta = VideoFileMeta(stream, len(stored))
         self.assertEqual(6, meta.record_count)
-        self.assertEqual((0, len(first_bytes), 0), meta.frame(0))
-        self.assertEqual((0, len(first_bytes), 1), meta.frame(1))
+        self.assertEqual((0, len(first_bytes), 0, -1, 0), meta.frame(0))
+        self.assertEqual((0, len(first_bytes), 1, -1, 0), meta.frame(1))
         self.assertEqual(
-            (len(first_bytes), len(second_bytes), 7), meta.frame(2)
+            (len(first_bytes), len(second_bytes), 7, -1, 0), meta.frame(2)
         )
-        self.assertEqual((0, len(first_bytes), 4), meta.frame(3))
+        self.assertEqual((0, len(first_bytes), 4, -1, 0), meta.frame(3))
         self.assertIsNone(meta.frame(4))
         self.assertIs(Blob.PLACE_HOLDER, meta.frame(5))
 
@@ -140,13 +167,13 @@ class VideoFormatTest(unittest.TestCase):
         with self.file_io.new_input_stream(target) as stream:
             meta = VideoFileMeta(stream, len(fixture))
         self.assertEqual(7, meta.record_count)
-        self.assertEqual((0, 3, 2), meta.frame(0))
-        self.assertEqual((0, 3, 3), meta.frame(1))
+        self.assertEqual((0, 3, 2, -1, 0), meta.frame(0))
+        self.assertEqual((0, 3, 3, -1, 0), meta.frame(1))
         self.assertIsNone(meta.frame(2))
         self.assertIs(Blob.PLACE_HOLDER, meta.frame(3))
-        self.assertEqual((3, 4, 7), meta.frame(4))
-        self.assertEqual((3, 4, 8), meta.frame(5))
-        self.assertEqual((0, 3, 10), meta.frame(6))
+        self.assertEqual((3, 4, 7, -1, 0), meta.frame(4))
+        self.assertEqual((3, 4, 8, -1, 0), meta.frame(5))
+        self.assertEqual((0, 3, 10, -1, 0), meta.frame(6))
 
         written_target = (self.root / "written.video").as_uri()
         writer = VideoFormatWriter(
@@ -166,6 +193,116 @@ class VideoFormatTest(unittest.TestCase):
             writer.add_element(GenericRow([value], [self.field], RowKind.INSERT))
         writer.close()
         self.assertEqual(fixture, (self.root / "written.video").read_bytes())
+
+    def test_cross_language_video_v2_fixture(self):
+        fixture = self._fixture_bytes(self.VIDEO_V2_FIXTURE)
+        encoded = VideoKeyframeIndex([(0, 0), (12, 36000)]).serialize()
+        video = b"abc"
+        source_path = self.root / "indexed.mp4"
+        source_path.write_bytes(video + encoded)
+
+        def indexed_frame(frame_index):
+            descriptor = VideoFrameDescriptor(
+                source_path.as_uri(), 0, len(video), frame_index,
+                len(video), len(encoded)
+            )
+            return Blob.from_descriptor(
+                self.file_io.uri_reader_factory.create(descriptor.uri),
+                descriptor,
+            )
+        target = (self.root / "indexed.video").as_uri()
+
+        writer = VideoFormatWriter(self.file_io.new_output_stream(target))
+        values = (
+            indexed_frame(2),
+            indexed_frame(3),
+            None,
+            Blob.PLACE_HOLDER,
+            self._source_frame("b.mp4", b"WXYZ", 7),
+            self._source_frame("b.mp4", b"WXYZ", 8),
+            indexed_frame(10),
+        )
+        for value in values:
+            writer.add_element(GenericRow([value], [self.field], RowKind.INSERT))
+        writer.close()
+
+        stored = (self.root / "indexed.video").read_bytes()
+        self.assertEqual(fixture, stored)
+        with self.file_io.new_input_stream(target) as stream:
+            meta = VideoFileMeta(stream, len(stored))
+        self.assertEqual(
+            (0, len(video), 2, 7, len(encoded)), meta.frame(0)
+        )
+        self.assertEqual((3, 4, 7, -1, 0), meta.frame(4))
+        serialized = self._read(target, row_indices=[0])[0]
+        value = VideoFrameDescriptor.deserialize(serialized)
+        self.assertEqual(2, value.frame_index)
+        mapping_descriptor = value.keyframe_index_descriptor
+        self.assertEqual(
+            encoded,
+            Blob.from_file(
+                self.file_io,
+                mapping_descriptor.uri,
+                mapping_descriptor.offset,
+                mapping_descriptor.length,
+            ).to_data(),
+        )
+
+        rewritten = (self.root / "rewritten.video").as_uri()
+        writer = VideoFormatWriter(self.file_io.new_output_stream(rewritten))
+        writer.add_element(GenericRow([
+            Blob.from_bytes(serialized, file_io=self.file_io)
+        ], [self.field], RowKind.INSERT))
+        writer.close()
+        rewritten_value = VideoFrameDescriptor.deserialize(
+            self._read(rewritten)[0]
+        )
+        rewritten_index = rewritten_value.keyframe_index_descriptor
+        self.assertEqual(
+            encoded,
+            Blob.from_file(
+                self.file_io,
+                rewritten_index.uri,
+                rewritten_index.offset,
+                rewritten_index.length,
+            ).to_data(),
+        )
+
+    def test_target_size_counts_buffered_keyframe_index(self):
+        mapping = VideoKeyframeIndex([(0, 0)]).serialize()
+        video = b"video"
+        source = self.root / "target-size.mp4"
+        source.write_bytes(video + mapping)
+        descriptor = VideoFrameDescriptor(
+            source.as_uri(), 0, len(video), 0, len(video), len(mapping)
+        )
+        blob = Blob.from_descriptor(
+            self.file_io.uri_reader_factory.create(descriptor.uri), descriptor
+        )
+        writer = VideoFormatWriter(io.BytesIO())
+
+        writer.add_element(GenericRow([blob], [self.field], RowKind.INSERT))
+
+        self.assertFalse(writer.reach_target_size(len(video) + len(mapping) + 1))
+        self.assertTrue(writer.reach_target_size(len(video) + len(mapping)))
+
+    def test_rejects_invalid_keyframe_index(self):
+        video = b"video"
+        mapping = b"mapping"
+        source = self.root / "invalid-index.mp4"
+        source.write_bytes(video + mapping)
+        descriptor = VideoFrameDescriptor(
+            source.as_uri(), 0, len(video), 0, len(video), len(mapping)
+        )
+        blob = Blob.from_descriptor(
+            self.file_io.uri_reader_factory.create(descriptor.uri), descriptor
+        )
+        writer = VideoFormatWriter(io.BytesIO())
+
+        with self.assertRaisesRegex(ValueError, "Invalid video keyframe index"):
+            writer.add_element(
+                GenericRow([blob], [self.field], RowKind.INSERT)
+            )
 
     def test_selection_keeps_logical_frame_positions(self):
         target = (self.root / "selection.video").as_uri()
@@ -243,7 +380,7 @@ class VideoFormatTest(unittest.TestCase):
                 '<IIIIIB',
                 *(len(index) for index in indexes),
                 VideoFormatWriter.FOOTER_MAGIC_NUMBER,
-                VideoFormatWriter.VERSION,
+                VideoFormatWriter.V1_VERSION,
             )
         )
 
@@ -282,7 +419,7 @@ class VideoFormatTest(unittest.TestCase):
         source = self._source_blob(name, data)
         payload = source.to_descriptor()
         descriptor = VideoFrameDescriptor(
-            payload.uri, payload.offset, payload.length, frame_index
+            payload.uri, payload.offset, payload.length, frame_index, -1, 0
         )
         return Blob.from_descriptor(
             self.file_io.uri_reader_factory.create(descriptor.uri), descriptor

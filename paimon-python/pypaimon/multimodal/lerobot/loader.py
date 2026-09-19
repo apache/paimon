@@ -424,6 +424,8 @@ def _video_frame_descriptors(
                 timestamp_type,
                 name,
             ),
+            -1,
+            0,
         ).serialize()
         for unused_frame_index, timestamp in video_rows
     ]

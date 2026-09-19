@@ -24,15 +24,18 @@ from pypaimon.table.row.blob import (
     BlobRef,
     VideoFrameDescriptor,
 )
+from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
 class VideoFormatWriter(BlobFormatWriter):
     """Pack complete encoded videos and an embedded logical frame-run index."""
 
-    VERSION = 1
+    VERSION = 2
+    V1_VERSION = 1
     FOOTER_MAGIC_NUMBER = 0x4F454449
-    FOOTER_SIZE = 21
+    FOOTER_SIZE = 25
+    V1_FOOTER_SIZE = 21
     NULL_REFERENCE = -1
     PLACE_HOLDER_REFERENCE = -2
 
@@ -48,6 +51,7 @@ class VideoFormatWriter(BlobFormatWriter):
             copy_buffer_size=copy_buffer_size,
         )
         self._physical_lengths = []
+        self._keyframe_indexes = []
         self._physical_videos = {}
         self._run_lengths = []
         self._run_references = []
@@ -56,6 +60,7 @@ class VideoFormatWriter(BlobFormatWriter):
         self._current_run_reference = None
         self._current_run_first_frame = 0
         self._current_run_last_frame = 0
+        self._keyframe_index_bytes = 0
         self._closed = False
 
     def add_element(self, row) -> None:
@@ -88,11 +93,17 @@ class VideoFormatWriter(BlobFormatWriter):
         payload = frame.payload_descriptor
         ordinal = self._physical_videos.get(payload)
         if ordinal is None:
+            keyframe_index = self._keyframe_index(value, frame)
             length = self._write_video_payload(value)
             ordinal = len(self._physical_lengths)
             self._physical_lengths.append(length)
+            self._keyframe_indexes.append(keyframe_index)
+            self._keyframe_index_bytes += len(keyframe_index)
             self._physical_videos[payload] = ordinal
         self._append(ordinal, frame.frame_index)
+
+    def reach_target_size(self, target_size: int) -> bool:
+        return self.position + self._keyframe_index_bytes >= target_size
 
     @property
     def physical_video_count(self) -> int:
@@ -106,7 +117,15 @@ class VideoFormatWriter(BlobFormatWriter):
         if self._closed:
             return
         self._flush_run()
+        version = (
+            self.VERSION if any(self._keyframe_indexes) else self.V1_VERSION)
+        if version >= 2:
+            for keyframe_index in self._keyframe_indexes:
+                self.output_stream.write(keyframe_index)
         physical_index = DeltaVarintCompressor.compress(self._physical_lengths)
+        keyframe_length_index = DeltaVarintCompressor.compress(
+            [len(mapping) for mapping in self._keyframe_indexes]
+        )
         run_length_index = DeltaVarintCompressor.compress(self._run_lengths)
         run_reference_index = DeltaVarintCompressor.compress(
             self._run_references
@@ -114,27 +133,48 @@ class VideoFormatWriter(BlobFormatWriter):
         first_frame_index = DeltaVarintCompressor.compress(
             self._run_first_frames
         )
-        for index in (
-            physical_index,
-            run_length_index,
-            run_reference_index,
-            first_frame_index,
-        ):
+        indexes = [physical_index]
+        if version >= 2:
+            indexes.append(keyframe_length_index)
+        indexes.extend((run_length_index, run_reference_index, first_frame_index))
+        for index in indexes:
             self.output_stream.write(index)
-        self.output_stream.write(struct.pack(
-            '<IIIIIB',
-            len(physical_index),
-            len(run_length_index),
-            len(run_reference_index),
-            len(first_frame_index),
-            self.FOOTER_MAGIC_NUMBER,
-            self.VERSION,
-        ))
+        if version == self.V1_VERSION:
+            footer = struct.pack(
+                '<IIIIIB',
+                len(physical_index),
+                len(run_length_index),
+                len(run_reference_index),
+                len(first_frame_index),
+                self.FOOTER_MAGIC_NUMBER,
+                version,
+            )
+        else:
+            footer = struct.pack(
+                '<IIIIIIB',
+                len(physical_index),
+                len(keyframe_length_index),
+                len(run_length_index),
+                len(run_reference_index),
+                len(first_frame_index),
+                self.FOOTER_MAGIC_NUMBER,
+                version,
+            )
+        self.output_stream.write(footer)
         if hasattr(self.output_stream, 'flush'):
             self.output_stream.flush()
         if hasattr(self.output_stream, 'close'):
             self.output_stream.close()
         self._closed = True
+
+    @staticmethod
+    def _keyframe_index(blob, frame):
+        descriptor = frame.keyframe_index_descriptor
+        if descriptor is None:
+            return b''
+        mapping = Blob.from_descriptor(blob.uri_reader, descriptor).to_data()
+        VideoKeyframeIndex.deserialize(mapping)
+        return mapping
 
     def _write_video_payload(self, blob: BlobRef) -> int:
         start = self.position

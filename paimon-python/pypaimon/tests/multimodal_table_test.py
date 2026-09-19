@@ -339,7 +339,7 @@ class MultimodalTableTest(unittest.TestCase):
 
         payload = Blob.from_local(video_path).to_descriptor()
         valid = VideoFrameDescriptor(
-            payload.uri, payload.offset, payload.length, 0
+            payload.uri, payload.offset, payload.length, 0, -1, 0
         ).serialize()
         with self.assertRaisesRegex(ValueError, "VideoFrameDescriptor"):
             table.add_batches([
