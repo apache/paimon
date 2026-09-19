@@ -403,6 +403,19 @@ public class ParquetFileReader implements Closeable {
             }
         }
 
+        // Row IDs rule out groups without reading their dictionaries or bloom filters. Keep the
+        // missing-row-offset check above: selection is unsafe without those original offsets.
+        if (selection != null) {
+            blocks =
+                    blocks.stream()
+                            .filter(
+                                    it ->
+                                            selection.intersects(
+                                                    it.getRowIndexOffset(),
+                                                    it.getRowIndexOffset() + it.getRowCount()))
+                            .collect(Collectors.toList());
+        }
+
         if (FilterCompat.isFilteringRequired(recordFilter)) {
             // set up data filters based on configured levels
             List<RowGroupFilter.FilterLevel> levels = new ArrayList<>();
@@ -419,17 +432,6 @@ public class ParquetFileReader implements Closeable {
                 levels.add(BLOOMFILTER);
             }
             blocks = RowGroupFilter.filterRowGroups(levels, recordFilter, blocks, this);
-        }
-
-        if (selection != null) {
-            blocks =
-                    blocks.stream()
-                            .filter(
-                                    it ->
-                                            selection.intersects(
-                                                    it.getRowIndexOffset(),
-                                                    it.getRowIndexOffset() + it.getRowCount()))
-                            .collect(Collectors.toList());
         }
 
         return blocks;

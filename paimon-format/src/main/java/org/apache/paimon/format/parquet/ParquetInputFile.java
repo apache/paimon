@@ -20,6 +20,8 @@ package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.VectoredReadable;
 
 import org.apache.parquet.io.InputFile;
 
@@ -54,7 +56,12 @@ public class ParquetInputFile implements InputFile {
 
     @Override
     public ParquetInputStream newStream() throws IOException {
-        return new ParquetInputStream(fileIO.newInputStream(path));
+        boolean cacheTail = length >= 0 && fileIO.isObjectStore();
+        SeekableInputStream stream = fileIO.newInputStream(path, length);
+        if (cacheTail && stream instanceof VectoredReadable) {
+            stream = new ParquetTailInputStream(stream, length);
+        }
+        return new ParquetInputStream(stream);
     }
 
     @Override

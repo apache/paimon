@@ -59,6 +59,11 @@ public abstract class PluginFileIO implements FileIO, HadoopOptionsProvider {
     }
 
     @Override
+    public SeekableInputStream newInputStream(Path path, long fileSize) throws IOException {
+        return wrap(() -> fileIO(path).newInputStream(path, fileSize));
+    }
+
+    @Override
     public PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException {
         return wrap(() -> fileIO(path).newOutputStream(path, overwrite));
     }
