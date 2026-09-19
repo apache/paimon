@@ -43,7 +43,7 @@ from pypaimon.read.native_plan import (
 )
 from pypaimon.read.plan import Plan
 from pypaimon.read.table_scan import TableScan
-from pypaimon.schema.data_types import AtomicType, DataField, MapType, RowType
+from pypaimon.schema.data_types import AtomicType, DataField, MapType, MultisetType, RowType
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.utils.range import Range
@@ -111,15 +111,18 @@ class NativePlanTest(unittest.TestCase):
             version_patcher.start()
             self.addCleanup(version_patcher.stop)
 
-    def test_resolved_schema_json_uses_canonical_nested_map_types(self):
-        schema = TableSchema(id=7, highest_field_id=1, time_millis=0, fields=[
+    def test_resolved_schema_json_uses_canonical_nested_collection_types(self):
+        schema = TableSchema(id=7, highest_field_id=3, time_millis=0, fields=[
             DataField(0, 'attributes', MapType(False, AtomicType('STRING', False), RowType(True, [
-                DataField(1, 'counts', MapType(True, AtomicType('STRING', False), AtomicType('INT', False)))
+                DataField(1, 'counts', MapType(True, AtomicType('STRING', False), AtomicType('INT', False))),
+                DataField(2, 'tags', MultisetType(False, AtomicType('STRING', False))),
+                DataField(3, 'groups', MultisetType(True, MapType(
+                    False, AtomicType('STRING', False), AtomicType('INT'))))
             ])))
         ])
         table = SimpleNamespace(table_schema=schema, options=CoreOptions(Options({})))
         self.assertEqual(json.loads(_resolved_schema_json(table)), {
-            'version': 3, 'id': 7, 'highestFieldId': 1, 'timeMillis': 0,
+            'version': 3, 'id': 7, 'highestFieldId': 3, 'timeMillis': 0,
             'partitionKeys': [], 'primaryKeys': [], 'comment': None,
             'options': {'source.split.target-size': '134217728',
                         'source.split.open-file-cost': '4194304',
@@ -129,7 +132,13 @@ class NativePlanTest(unittest.TestCase):
                 'value': {'type': 'ROW', 'nullable': True, 'fields': [
                     {'id': 1, 'name': 'counts', 'type': {
                         'type': 'MAP', 'nullable': True,
-                        'key': 'STRING NOT NULL', 'value': 'INT NOT NULL'}}]}}}],
+                        'key': 'STRING NOT NULL', 'value': 'INT NOT NULL'}},
+                    {'id': 2, 'name': 'tags', 'type': {
+                        'type': 'MULTISET NOT NULL', 'nullable': False, 'element': 'STRING NOT NULL'}},
+                    {'id': 3, 'name': 'groups', 'type': {
+                        'type': 'MULTISET', 'nullable': True, 'element': {
+                            'type': 'MAP NOT NULL', 'nullable': False,
+                            'key': 'STRING NOT NULL', 'value': 'INT'}}}]}}}],
         })
 
     def test_resolved_schema_keeps_custom_io_and_rest_on_catalog_path(self):

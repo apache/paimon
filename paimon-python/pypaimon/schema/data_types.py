@@ -220,8 +220,7 @@ class MultisetType(DataType):
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "type": "MULTISET{}{}".format('<' + str(self.element) + '>' if self.element else '',
-                                          " NOT NULL" if not self.nullable else ""),
+            "type": "MULTISET" + (" NOT NULL" if not self.nullable else ""),
             "element": self.element.to_dict() if self.element else None,
             "nullable": self.nullable,
         }

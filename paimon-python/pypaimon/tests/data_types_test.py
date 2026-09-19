@@ -88,6 +88,33 @@ class DataTypesTest(unittest.TestCase):
                 paimon_type,
             )
 
+    @parameterized.expand([
+        (nullable, element_nullable)
+        for nullable in (True, False)
+        for element_nullable in (True, False)
+    ])
+    def test_multiset_json_uses_canonical_type(self, nullable, element_nullable):
+        element = "INT" + ("" if element_nullable else " NOT NULL")
+        data_type = MultisetType(nullable, AtomicType("INT", element_nullable))
+        self.assertEqual(data_type.to_dict(), {
+            "type": "MULTISET" + ("" if nullable else " NOT NULL"),
+            "element": element, "nullable": nullable,
+        })
+        self.assertEqual(MultisetType.from_dict(data_type.to_dict()), data_type)
+        self.assertEqual(str(data_type), "MULTISET<{}>{}".format(
+            element, "" if nullable else " NOT NULL"))
+
+    @parameterized.expand([(True,), (False,)])
+    def test_legacy_multiset_json(self, nullable):
+        legacy = {
+            "type": "MULTISET<INT>" + ("" if nullable else " NOT NULL"),
+            "element": "INT", "nullable": nullable,
+        }
+        expected = MultisetType(nullable, AtomicType("INT"))
+        self.assertEqual(MultisetType.from_dict(legacy), expected)
+        legacy.pop("nullable")
+        self.assertEqual(MultisetType.from_dict(legacy), expected)
+
     def test_map_type(self):
         self.assertEqual(str(MapType(True, AtomicType("STRING"), AtomicType("TIMESTAMP(6)"))),
                          "MAP<STRING, TIMESTAMP(6)>")
