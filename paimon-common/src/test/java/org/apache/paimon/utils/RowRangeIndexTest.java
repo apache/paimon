@@ -21,11 +21,51 @@ package org.apache.paimon.utils;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.stream.LongStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link RowRangeIndex}. */
 class RowRangeIndexTest {
+
+    @Test
+    void testFromBitmapPreservesRangeQueriesAndOwnership() {
+        for (long[] values :
+                new long[][] {
+                    {},
+                    {0},
+                    {0, 1, 2, 9, 11, 12},
+                    {Integer.MAX_VALUE, (1L << 32) - 1, 1L << 32, Long.MAX_VALUE},
+                    {-2, -1, 0, 1, Long.MAX_VALUE},
+                    {Long.MIN_VALUE, -2, -1},
+                    LongStream.range(0, 10000).toArray()
+                }) {
+            RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(values);
+            RowRangeIndex expected = RowRangeIndex.create(bitmap.toRangeList());
+            RowRangeIndex actual = RowRangeIndex.fromBitmap(bitmap);
+            assertThat(actual.ranges()).isEqualTo(expected.ranges());
+            long[] bounds = {
+                Long.MIN_VALUE, -2, -1, 0, 1, 3, 8, 9, 10, 11, 13, 9999, 1L << 32, Long.MAX_VALUE
+            };
+            for (long start : bounds) {
+                for (long end : bounds) {
+                    if (start <= end) {
+                        Range range = new Range(start, end);
+                        assertThat(actual.intersects(start, end))
+                                .isEqualTo(expected.intersects(start, end));
+                        assertThat(actual.intersectedRanges(start, end))
+                                .isEqualTo(expected.intersectedRanges(start, end));
+                        assertThat(actual.contains(range)).isEqualTo(expected.contains(range));
+                        assertThat(actual.containsExactly(range))
+                                .isEqualTo(expected.containsExactly(range));
+                    }
+                }
+            }
+            bitmap.add(20000);
+            assertThat(actual.ranges()).isEqualTo(expected.ranges());
+            assertThat(actual.intersects(20000, 20000)).isFalse();
+        }
+    }
 
     @Test
     void testContains() {
