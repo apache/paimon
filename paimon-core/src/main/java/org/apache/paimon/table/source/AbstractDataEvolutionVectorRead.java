@@ -217,19 +217,16 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     }
 
     /**
-     * Row ids the scalar index reports as matching {@link #filter}, or {@code null} when the index
-     * cannot evaluate the predicate (no scalar index files, or a function the reader does not
-     * support). {@code null} means "cannot decide", never "no rows match".
+     * Rows of the indexed splits that satisfy {@link #filter} according to the scalar global
+     * indexes, or {@code null} when no index can evaluate the predicate (no scalar index files, or
+     * a function the reader does not support); {@code null} means "cannot decide", never "no rows
+     * match". The set is exact: an index answer that may be a superset (see {@link
+     * FilteredRowIdReader#isExact}) is refined from the data when {@code
+     * global-index.filter.refine-from-data} allows it and excluded otherwise, because a superset
+     * ranked by the ANN would push matching rows out of the top-k where the engine-side filter
+     * cannot bring them back.
      */
     @Nullable
-    /**
-     * Rows of the indexed splits that satisfy {@link #filter} according to the scalar global
-     * indexes, or {@code null} when no index can evaluate it. The set is exact: an index answer
-     * that may be a superset (see {@link FilteredRowIdReader#isExact}) is refined from the data
-     * when {@code global-index.filter.refine-from-data} allows it and excluded otherwise, because a
-     * superset ranked by the ANN would push matching rows out of the top-k where the engine-side
-     * filter cannot bring them back.
-     */
     private RoaringNavigableMap64 scalarMatchedRows(List<IndexVectorSearchSplit> splits) {
         if (filter == null) {
             return null;
