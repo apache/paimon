@@ -44,6 +44,7 @@ import org.apache.paimon.management.LabelManagement;
 import org.apache.paimon.management.PermissionManagement;
 import org.apache.paimon.management.PolicyManagement;
 import org.apache.paimon.management.SemanticViewManagement;
+import org.apache.paimon.management.TreeManagement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -166,6 +167,11 @@ public class RESTCatalog implements Catalog {
         return new RESTSemanticViewManagement(api);
     }
 
+    @Experimental
+    public TreeManagement treeManagement() {
+        return new RESTTreeManagement(api);
+    }
+
     @Override
     public List<String> listDatabases() {
         return api.listDatabases();
@@ -218,6 +224,7 @@ public class RESTCatalog implements Catalog {
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
         checkNotSystemDatabase(name);
+        DatabaseIdentifier.checkNoReference(name, "dropDatabase");
         try {
             if (!cascade && !this.listTables(name).isEmpty()) {
                 throw new DatabaseNotEmptyException(name);
@@ -527,6 +534,17 @@ public class RESTCatalog implements Catalog {
             Snapshot snapshot,
             List<PartitionStatistics> statistics)
             throws TableNotExistException {
+        // CatalogSnapshotCommit supplies the physical storage branch. The database suffix
+        // already selects the write target; keep the logical table name on the wire.
+        if (DatabaseIdentifier.parse(identifier.getDatabaseName()).getReference() != null
+                && identifier.getBranchName() != null) {
+            identifier =
+                    new Identifier(
+                            identifier.getDatabaseName(),
+                            identifier.getTableName(),
+                            null,
+                            identifier.getSystemTableName());
+        }
         try {
             return api.commitSnapshot(
                     identifier, tableUuid, baseSnapshotUuid, snapshot, statistics);

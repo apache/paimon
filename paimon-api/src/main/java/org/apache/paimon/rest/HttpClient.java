@@ -115,12 +115,20 @@ public class HttpClient implements RESTClient {
 
     @Override
     public <T extends RESTResponse> T delete(String path, RESTAuthFunction restAuthFunction) {
-        return delete(path, null, restAuthFunction);
+        return delete(path, null, null, restAuthFunction);
     }
 
     @Override
     public <T extends RESTResponse> T delete(
             String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
+        return delete(path, body, null, restAuthFunction);
+    }
+
+    public <T extends RESTResponse> T delete(
+            String path,
+            RESTRequest body,
+            Class<T> responseType,
+            RESTAuthFunction restAuthFunction) {
         HttpDelete httpDelete = HttpClientUtils.newHttpDelete(getRequestUrl(path, null));
         String encodedBody = RESTUtil.encodedBody(body);
         if (encodedBody != null) {
@@ -128,7 +136,7 @@ public class HttpClient implements RESTClient {
         }
         Header[] authHeaders = getHeaders(path, "DELETE", encodedBody, restAuthFunction);
         httpDelete.setHeaders(authHeaders);
-        return exec(httpDelete, null);
+        return exec(httpDelete, responseType);
     }
 
     @VisibleForTesting

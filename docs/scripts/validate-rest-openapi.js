@@ -225,6 +225,19 @@ function requireExactEnum(contract, schemaName, expectedValues) {
 
 function validateCatalogOpenApi() {
   const contract = validateCommon('rest-catalog-open-api.yaml');
+  contract.checkSpec(
+    !Object.keys(contract.spec.paths).some((path) => /\/trees\/\{[^}]+\}\/(tables|table-details)/.test(path)),
+    'Database reference access must reuse ordinary table paths',
+  );
+  const databaseParameter = contract.spec.components.parameters.Database;
+  contract.checkSpec(
+    databaseParameter.examples.branch.value === 'training$branch_experiment' &&
+      databaseParameter.examples.tag.value === 'training$tag_train_v1',
+    'Database reference examples must use the reserved branch and tag suffixes',
+  );
+  ['getDatabase', 'listTables', 'getTable', 'commitTable', 'getSchema', 'listSchemas'].forEach(
+    (operationId) => contract.requireResponses(operationId, ['404', '409', '501']),
+  );
   [
     'getConfig',
     'createDatabase',

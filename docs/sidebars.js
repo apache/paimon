@@ -44,6 +44,7 @@ const sidebars = {
           "concepts/rest/tables",
           "concepts/rest/pvfs",
           "concepts/rest/rest-api",
+          "concepts/rest/database-versioning",
           "concepts/rest/management-api"
         ]
       },

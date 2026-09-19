@@ -39,6 +39,7 @@ import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
+import org.apache.paimon.rest.exceptions.MergeConflictException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
@@ -47,12 +48,14 @@ import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.AuthTableQueryRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
+import org.apache.paimon.rest.requests.CreateDatabaseReferenceRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
+import org.apache.paimon.rest.requests.DeleteDatabaseReferenceRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.DropPolicyRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
@@ -60,6 +63,7 @@ import org.apache.paimon.rest.requests.GrantPermissionRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
+import org.apache.paimon.rest.requests.MergeDatabaseBranchRequest;
 import org.apache.paimon.rest.requests.PolicyRequest;
 import org.apache.paimon.rest.requests.RegisterTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -75,6 +79,7 @@ import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreatePartitionsResponse;
+import org.apache.paimon.rest.responses.DatabaseReferenceResponse;
 import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -90,6 +95,7 @@ import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListConsumersResponse;
+import org.apache.paimon.rest.responses.ListDatabaseReferencesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
@@ -193,6 +199,8 @@ public class RESTApi {
     public static final String FUNCTION_NAME_PATTERN = "functionNamePattern";
     public static final String PARTITION_NAME_PATTERN = "partitionNamePattern";
     public static final String TAG_NAME_PREFIX = "tagNamePrefix";
+
+    private static final String REFERENCE_TYPE = "type";
 
     public static final long TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000L;
 
@@ -312,6 +320,7 @@ public class RESTApi {
      *     this database
      */
     public void createDatabase(String name, Map<String, String> properties) {
+        DatabaseIdentifier.checkNoReference(name, "createDatabase");
         CreateDatabaseRequest request = new CreateDatabaseRequest(name, properties);
         client.post(resourcePaths.databases(), request, restAuthFunction);
     }
@@ -339,6 +348,7 @@ public class RESTApi {
      *     this database
      */
     public void dropDatabase(String name) {
+        DatabaseIdentifier.checkNoReference(name, "dropDatabase");
         client.delete(resourcePaths.database(name), restAuthFunction);
     }
 
@@ -353,11 +363,107 @@ public class RESTApi {
      *     this database
      */
     public void alterDatabase(String name, List<String> removals, Map<String, String> updates) {
+        DatabaseIdentifier.checkNoReference(name, "alterDatabase");
         client.post(
                 resourcePaths.database(name),
                 new AlterDatabaseRequest(removals, updates),
                 AlterDatabaseResponse.class,
                 restAuthFunction);
+    }
+
+    /** List one page of database-level branches and immutable tags. */
+    @Experimental
+    public PagedList<DatabaseReference> listDatabaseReferencesPaged(
+            String databaseName,
+            @Nullable DatabaseReferenceType type,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        Map<String, String> queryParams = buildPagedQueryParams(maxResults, pageToken);
+        if (type != null) {
+            queryParams.put(REFERENCE_TYPE, type.queryValue());
+        }
+        ListDatabaseReferencesResponse response =
+                client.get(
+                        resourcePaths.databaseTrees(databaseName),
+                        queryParams,
+                        ListDatabaseReferencesResponse.class,
+                        restAuthFunction);
+        List<DatabaseReference> references = response.getReferences();
+        return new PagedList<>(
+                references == null ? emptyList() : references, response.getNextPageToken());
+    }
+
+    /** Get one database-level branch or immutable tag. */
+    @Experimental
+    public DatabaseReference getDatabaseReference(String databaseName, String referenceName) {
+        DatabaseReferenceResponse response =
+                client.get(
+                        resourcePaths.databaseTree(databaseName, referenceName),
+                        DatabaseReferenceResponse.class,
+                        restAuthFunction);
+        return checkNotNull(response.getReference(), "Reference response must contain reference");
+    }
+
+    /** Create a database-level branch or immutable tag from an existing reference. */
+    @Experimental
+    public DatabaseReference createDatabaseReference(
+            String databaseName,
+            String referenceName,
+            DatabaseReferenceType type,
+            DatabaseReference source) {
+        DatabaseReferenceResponse response =
+                client.post(
+                        resourcePaths.databaseTrees(databaseName),
+                        new CreateDatabaseReferenceRequest(referenceName, type, source),
+                        DatabaseReferenceResponse.class,
+                        restAuthFunction);
+        return checkNotNull(response.getReference(), "Reference response must contain reference");
+    }
+
+    /** Merge a branch or immutable tag into a database-level branch, failing on conflicts. */
+    @Experimental
+    public DatabaseReference mergeDatabaseBranch(
+            String databaseName, String targetBranch, DatabaseReference source) {
+        return mergeDatabaseBranch(databaseName, targetBranch, source, null, null);
+    }
+
+    /** Merge a branch or immutable tag using default and per-table merge modes. */
+    @Experimental
+    public DatabaseReference mergeDatabaseBranch(
+            String databaseName,
+            String targetBranch,
+            DatabaseReference source,
+            @Nullable MergeMode defaultMergeMode,
+            @Nullable List<TableMergeMode> tableMergeModes) {
+        try {
+            DatabaseReferenceResponse response =
+                    client.post(
+                            resourcePaths.mergeDatabaseBranch(databaseName, targetBranch),
+                            new MergeDatabaseBranchRequest(
+                                    source, defaultMergeMode, tableMergeModes),
+                            DatabaseReferenceResponse.class,
+                            restAuthFunction);
+            return checkNotNull(
+                    response.getReference(), "Reference response must contain reference");
+        } catch (AlreadyExistsException e) {
+            throw new MergeConflictException(
+                    e, e.resourceType(), e.resourceName(), "%s", e.getMessage());
+        }
+    }
+
+    /** Delete one database-level branch or immutable tag. */
+    @Experimental
+    public DatabaseReference deleteDatabaseReference(
+            String databaseName,
+            String referenceName,
+            @Nullable DatabaseReferenceType expectedType) {
+        DatabaseReferenceResponse response =
+                client.delete(
+                        resourcePaths.databaseTree(databaseName, referenceName),
+                        new DeleteDatabaseReferenceRequest(expectedType),
+                        DatabaseReferenceResponse.class,
+                        restAuthFunction);
+        return checkNotNull(response.getReference(), "Reference response must contain reference");
     }
 
     /**
@@ -811,6 +917,7 @@ public class RESTApi {
      *     creating table
      */
     public void createTable(Identifier identifier, Schema schema) {
+        DatabaseIdentifier.checkTableName(identifier.getDatabaseName(), identifier.getObjectName());
         CreateTableRequest request = new CreateTableRequest(identifier, schema);
         client.post(resourcePaths.tables(identifier.getDatabaseName()), request, restAuthFunction);
     }
@@ -826,6 +933,8 @@ public class RESTApi {
      *     renaming table
      */
     public void renameTable(Identifier fromTable, Identifier toTable) {
+        DatabaseIdentifier.checkNoReference(fromTable.getDatabaseName(), "renameTable");
+        DatabaseIdentifier.checkNoReference(toTable.getDatabaseName(), "renameTable");
         RenameTableRequest request = new RenameTableRequest(fromTable, toTable);
         client.post(resourcePaths.renameTable(), request, restAuthFunction);
     }
@@ -1925,6 +2034,8 @@ public class RESTApi {
      *     views
      */
     public void renameView(Identifier fromView, Identifier toView) {
+        DatabaseIdentifier.checkNoReference(fromView.getDatabaseName(), "renameView");
+        DatabaseIdentifier.checkNoReference(toView.getDatabaseName(), "renameView");
         RenameTableRequest request = new RenameTableRequest(fromView, toView);
         client.post(resourcePaths.renameView(), request, restAuthFunction);
     }
