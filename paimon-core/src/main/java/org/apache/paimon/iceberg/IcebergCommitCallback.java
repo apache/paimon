@@ -71,6 +71,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DataFilePathFactories;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
@@ -430,19 +431,40 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             Path baseMetadataPath = pathFactory.toMetadataPath(snapshotId - 1);
 
             if (table.fileIO().exists(baseMetadataPath)) {
-                createMetadataWithBase(
-                        fileChangesCollector,
-                        indexFiles.stream()
-                                .filter(
-                                        index ->
-                                                index.indexFile()
-                                                        .indexType()
-                                                        .equals(DELETION_VECTORS_INDEX))
-                                .collect(Collectors.toList()),
-                        snapshot,
-                        baseMetadataPath,
-                        abandonedLastColumnId,
-                        abandonedNextRowId);
+                try {
+                    createMetadataWithBase(
+                            fileChangesCollector,
+                            indexFiles.stream()
+                                    .filter(
+                                            index ->
+                                                    index.indexFile()
+                                                            .indexType()
+                                                            .equals(DELETION_VECTORS_INDEX))
+                                    .collect(Collectors.toList()),
+                            snapshot,
+                            baseMetadataPath,
+                            abandonedLastColumnId,
+                            abandonedNextRowId);
+                } catch (RuntimeException e) {
+                    if (!ExceptionUtils.findThrowable(e, FileNotFoundException.class).isPresent()) {
+                        throw e;
+                    }
+                    // The base metadata file itself exists, but a manifest or manifest list it
+                    // transitively references (from its historical snapshot chain) has already
+                    // been pruned by unrelated, later retention cleanup, so the base is unusable
+                    // even though it exists. Rebuild from scratch instead of crashing permanently
+                    // on every retry: this loses that snapshot's Iceberg-side history/lineage,
+                    // the same tradeoff already accepted when the base file is simply absent.
+                    LOG.warn(
+                            "Failed to read base Iceberg metadata {} for table {} because a file "
+                                    + "it references is missing. Falling back to recreating "
+                                    + "metadata from scratch.",
+                            baseMetadataPath,
+                            table.fullName(),
+                            e);
+                    createMetadataWithoutBase(
+                            snapshotId, abandonedUuid, abandonedLastColumnId, abandonedNextRowId);
+                }
             } else {
                 createMetadataWithoutBase(
                         snapshotId, abandonedUuid, abandonedLastColumnId, abandonedNextRowId);
@@ -1600,10 +1622,18 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     }
 
     private void expireAllBefore(long snapshotId) throws IOException {
+        long earliestMetadataId = earliestMetadataIdToDelete(snapshotId);
+        if (earliestMetadataId <= 0) {
+            // Nothing should be deleted -- either delete-after-commit is disabled (every
+            // version retained forever) or there aren't enough versions yet. Deleting any
+            // manifest here could gut a JSON version that's being kept.
+            return;
+        }
+
         Set<String> expiredManifestLists = new HashSet<>();
         Set<String> expiredManifestFileMetas = new HashSet<>();
         Iterator<Path> it =
-                pathFactory.getAllMetadataPathBefore(table.fileIO(), snapshotId).iterator();
+                pathFactory.getAllMetadataPathBefore(table.fileIO(), earliestMetadataId).iterator();
 
         while (it.hasNext()) {
             Path path = it.next();
@@ -1639,21 +1669,33 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     }
 
     private void deleteApplicableMetadataFiles(long snapshotId) throws IOException {
-        Options options = new Options(table.options());
-        if (options.get(IcebergOptions.METADATA_DELETE_AFTER_COMMIT)) {
-            long earliestMetadataId =
-                    snapshotId - options.get(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX);
-            if (earliestMetadataId > 0) {
-                Iterator<Path> it =
-                        pathFactory
-                                .getAllMetadataPathBefore(table.fileIO(), earliestMetadataId)
-                                .iterator();
-                while (it.hasNext()) {
-                    Path path = it.next();
-                    table.fileIO().deleteQuietly(path);
-                }
+        long earliestMetadataId = earliestMetadataIdToDelete(snapshotId);
+        if (earliestMetadataId > 0) {
+            Iterator<Path> it =
+                    pathFactory
+                            .getAllMetadataPathBefore(table.fileIO(), earliestMetadataId)
+                            .iterator();
+            while (it.hasNext()) {
+                Path path = it.next();
+                table.fileIO().deleteQuietly(path);
             }
         }
+    }
+
+    /**
+     * The oldest metadata version id that should still be deleted, or -1 if nothing should be
+     * deleted (metadata.iceberg.delete-after-commit.enabled is false, meaning every version is
+     * retained forever). Shared by {@link #expireAllBefore} (manifest/manifest-list cleanup) and
+     * {@link #deleteApplicableMetadataFiles} (JSON cleanup) so the two never disagree about what
+     * counts as "still retained" -- a JSON version that survives must never have the manifests it
+     * references deleted out from under it.
+     */
+    private long earliestMetadataIdToDelete(long snapshotId) {
+        Options options = new Options(table.options());
+        if (!options.get(IcebergOptions.METADATA_DELETE_AFTER_COMMIT)) {
+            return -1;
+        }
+        return snapshotId - options.get(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX);
     }
 
     @Override
