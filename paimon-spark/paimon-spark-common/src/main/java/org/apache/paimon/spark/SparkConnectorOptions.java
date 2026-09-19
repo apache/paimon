@@ -109,6 +109,24 @@ public class SparkConnectorOptions {
                             "Wait time in milliseconds between retry attempts for Spark V1 UPDATE "
                                     + "on data-evolution tables after row-id range update conflicts.");
 
+    public static final ConfigOption<String> STREAM_WRITE_COMMIT_USER =
+            key("write.stream.commit-user")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The commit user of a Structured Streaming write. Paimon skips a "
+                                    + "micro-batch that a previous run of the same query already "
+                                    + "committed under this user, which is what makes a replayed "
+                                    + "micro-batch idempotent. By default it is derived from the "
+                                    + "query id that Spark persists in the checkpoint, so it is "
+                                    + "kept while a query resumes from its checkpoint and is new "
+                                    + "when the checkpoint is; set it explicitly only if a query "
+                                    + "has to keep its identity across a new checkpoint. It is "
+                                    + "the identity of one streaming writer and must be unique to "
+                                    + "it: set it as an option of the writer or as a session "
+                                    + "conf, never as a table property, which every writer of the "
+                                    + "table would share.");
+
     public static final ConfigOption<Integer> MAX_FILES_PER_TRIGGER =
             key("read.stream.maxFilesPerTrigger")
                     .intType()
