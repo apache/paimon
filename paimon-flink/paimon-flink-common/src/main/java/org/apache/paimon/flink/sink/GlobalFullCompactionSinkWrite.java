@@ -213,7 +213,7 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
                             commitIdentifier);
                 }
                 writtenBuckets.headMap(commitIdentifier, true).clear();
-                commitIdentifiersToCheck.headSet(commitIdentifier).clear();
+                commitIdentifiersToCheck.headSet(commitIdentifier, true).clear();
                 return true;
             }
         }
