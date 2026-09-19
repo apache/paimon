@@ -18,6 +18,7 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectSerializerTestBase;
 
@@ -84,6 +85,19 @@ public class ManifestFileMetaSerializerTest extends ObjectSerializerTestBase<Man
                 assertThat(meta).isNotEqualTo(original);
             }
         }
+    }
+
+    @Test
+    void testOldRowWithoutExtraFilesField() {
+        ManifestFileMeta meta = object();
+        ManifestFileMetaSerializer serializer = new ManifestFileMetaSerializer();
+        GenericRow current = (GenericRow) serializer.toRow(meta);
+        GenericRow legacy = new GenericRow(current.getFieldCount() - 1);
+        for (int field = 0; field < legacy.getFieldCount(); field++) {
+            legacy.setField(field, current.getField(field));
+        }
+        assertThat(serializer.fromRow(legacy)).isEqualTo(meta);
+        assertThat(serializer.fromRow(legacy).extraFiles()).isNull();
     }
 
     @Override
