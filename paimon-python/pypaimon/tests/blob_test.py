@@ -28,7 +28,7 @@ import unittest
 import zlib
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pyarrow as pa
 
@@ -76,6 +76,29 @@ class MockFileIO:
         if not isinstance(path, (str, type(None))):
             path = str(path)
         return self._file_io.new_input_stream(path)
+
+
+class CountingBlobFileIO(LocalFileIO):
+    def __init__(self, root):
+        super().__init__(root, Options({}))
+        self.stat_count = 0
+        self.streams = []
+
+    def get_file_size(self, path):
+        self.stat_count += 1
+        return super().get_file_size(path)
+
+    def new_input_stream(self, path):
+        stream = MagicMock(wraps=super().new_input_stream(path))
+        stream.__enter__.return_value = stream
+        stream.__exit__.side_effect = lambda *args: stream.close()
+        self.streams.append(stream)
+        return stream
+
+    def counts(self):
+        return (self.stat_count, len(self.streams),
+                sum(stream.read.call_count for stream in self.streams),
+                sum(stream.close.call_count for stream in self.streams))
 
 
 def _to_url(path):
@@ -1794,27 +1817,18 @@ class BlobEndToEndTest(unittest.TestCase):
             reader.close()
 
     def test_blob_readers_reuse_index_by_path(self):
-        from pypaimon.read.reader.format_blob_reader import _BLOB_INDEX_CACHE
+        from pypaimon.read.reader.format_blob_reader import _BLOB_INDEX_CACHE, _BLOB_INDEX_CACHE_LOCK
 
         field = DataField(0, "blob_field", AtomicType("BLOB"))
         path = os.path.join(self.temp_dir, "cached-index.blob")
-        file_io = LocalFileIO(self.temp_dir, Options({}))
+        file_io = CountingBlobFileIO(self.temp_dir)
         self._write_single_blob(path, field, b"cached-value")
-        _BLOB_INDEX_CACHE.clear()
-        input_streams = []
-        new_input_stream = file_io.new_input_stream
-
-        def counting_input_stream(file_path):
-            stream = Mock(wraps=new_input_stream(file_path))
-            input_streams.append(stream)
-            return stream
+        with _BLOB_INDEX_CACHE_LOCK:
+            _BLOB_INDEX_CACHE.clear()
+        results = []
 
         try:
             with patch.object(
-                    file_io,
-                    "new_input_stream",
-                    side_effect=counting_input_stream,
-            ), patch.object(
                     DeltaVarintCompressor,
                     "decompress",
                     wraps=DeltaVarintCompressor.decompress,
@@ -1827,42 +1841,201 @@ class BlobEndToEndTest(unittest.TestCase):
                         [field],
                         None,
                         True,
+                        file_size=os.path.getsize(path),
                     )
-                    reader.close()
+                    try:
+                        results.append(reader.read_arrow_batch().column(0).to_pylist())
+                    finally:
+                        reader.close()
+                        reader.close()
+                    self.assertEqual((0, 1, 2, 1), file_io.counts())
 
                 self.assertEqual(1, decompress.call_count)
-                self.assertEqual(
-                    [2, 0],
-                    [stream.read.call_count for stream in input_streams],
-                )
+                self.assertEqual(results[0], results[1])
+                descriptor = BlobDescriptor.deserialize(results[0][0])
+                self.assertEqual((path, 4, len(b"cached-value")),
+                                 (descriptor.uri, descriptor.offset, descriptor.length))
         finally:
-            _BLOB_INDEX_CACHE.clear()
+            with _BLOB_INDEX_CACHE_LOCK:
+                _BLOB_INDEX_CACHE.clear()
+
+    def test_blob_cached_index_keeps_payload_reads(self):
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = os.path.join(self.temp_dir, "cached-payload.blob")
+        file_io = CountingBlobFileIO(self.temp_dir)
+        self._write_single_blob(path, field, b"payload")
+        for descriptor, parallelism in [(True, 1), (False, 1), (False, 4)]:
+            with self.subTest(descriptor=descriptor, parallelism=parallelism):
+                previous_opens = len(file_io.streams)
+                reader = FormatBlobReader(
+                    file_io, path, [field.name], [field], None, descriptor,
+                    blob_parallelism=parallelism, file_size=os.path.getsize(path))
+                try:
+                    values = reader.read_arrow_batch().column(0).to_pylist()
+                    if not descriptor:
+                        self.assertEqual([b"payload"], values)
+                        self.assertEqual(previous_opens + 1, len(file_io.streams))
+                finally:
+                    reader.close()
+                    reader.close()
+        self.assertEqual(0, file_io.stat_count)
+        self.assertTrue(all(stream._mock_wraps.closed for stream in file_io.streams))
+        self.assertTrue(all(stream.close.call_count == 1 for stream in file_io.streams))
+
+    def test_blob_cached_index_reader_isolation(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = os.path.join(self.temp_dir, "cached-selection.blob")
+        file_io = CountingBlobFileIO(self.temp_dir)
+        with open(path, 'wb') as output:
+            writer = BlobFormatWriter(output)
+            for value in [BlobData(b"first"), None, Blob.PLACE_HOLDER, BlobData(b"last")]:
+                writer.add_element(GenericRow([value], [field], RowKind.INSERT))
+            writer.close()
+        readers = []
+        try:
+            for indices in ([3, 1, 0], [0, 3]):
+                readers.append(FormatBlobReader(
+                    file_io, path, [field.name], [field], None, False,
+                    row_indices=indices, file_size=os.path.getsize(path)))
+            self.assertIsNot(readers[0]._input_stream, readers[1]._input_stream)
+            self.assertEqual([b"last", None, b"first"],
+                             readers[0].read_arrow_batch().column(0).to_pylist())
+            readers[0].blob_lengths[0] = -1
+            readers[0].blob_offsets[0] = -1
+            readers[0].close()
+            self.assertEqual([b"first", b"last"],
+                             readers[1].read_arrow_batch().column(0).to_pylist())
+            previous = file_io.counts()
+            unselected = FormatBlobReader(
+                file_io, path, [field.name], [field], None, True,
+                file_size=os.path.getsize(path))
+            readers.append(unselected)
+            unselected.blob_lengths[3] = -1
+            unselected.blob_offsets[3] = -1
+            descriptor_reader = FormatBlobReader(
+                file_io, path, [field.name], [field], None, True,
+                row_indices=[3, 1, 2], file_size=os.path.getsize(path))
+            readers.append(descriptor_reader)
+            values = descriptor_reader.read_values_at([0, 1, 2])
+            self.assertEqual((len(b"first") + 16 + 4, len(b"last")),
+                             (values[0].to_descriptor().offset, values[0].to_descriptor().length))
+            self.assertIsNone(values[1])
+            self.assertIs(Blob.PLACE_HOLDER, values[2])
+            with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
+                descriptor_reader.read_arrow_batch()
+            with self.assertRaises(IndexError):
+                FormatBlobReader(
+                    file_io, path, [field.name], [field], None, True,
+                    row_indices=[4], file_size=os.path.getsize(path))
+            self.assertEqual(previous, file_io.counts())
+        finally:
+            for reader in readers:
+                reader.close()
+                reader.close()
+        self.assertTrue(all(stream._mock_wraps.closed for stream in file_io.streams))
+
+    def test_blob_cached_nested_layout_reads(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        for data_type, value in [
+            (ArrayType(True, AtomicType("BLOB")), [BlobData(b"a"), None, BlobData(b"bc")]),
+            (MapType(True, AtomicType("STRING"), AtomicType("BLOB")),
+             [("a", BlobData(b"a")), ("n", None), ("b", BlobData(b"bc"))]),
+        ]:
+            field = DataField(0, "blob_field", data_type)
+            path = os.path.join(self.temp_dir, type(data_type).__name__ + ".blob")
+            file_io = CountingBlobFileIO(self.temp_dir)
+            with open(path, 'wb') as output:
+                writer = BlobFormatWriter(output)
+                writer.add_element(GenericRow([value], [field], RowKind.INSERT))
+                writer.close()
+            for descriptor, parallelism in [(True, 1), (False, 1), (False, 4)]:
+                results = []
+                for _ in range(2):
+                    previous = len(file_io.streams)
+                    reader = FormatBlobReader(
+                        file_io, path, [field.name], [field], None, descriptor,
+                        blob_parallelism=parallelism, file_size=os.path.getsize(path))
+                    try:
+                        self.assertEqual(previous + 1, len(file_io.streams))
+                        results.append(reader.read_arrow_batch().column(0)[0].as_py())
+                    finally:
+                        reader.close()
+                        reader.close()
+                self.assertEqual(results[0], results[1])
+                values = list(dict(results[0]).values()) if isinstance(data_type, MapType) else results[0]
+                if descriptor:
+                    self.assertEqual([1, None, 2], [
+                        BlobDescriptor.deserialize(item).length if item is not None else None for item in values])
+                else:
+                    self.assertEqual([b"a", None, b"bc"], values)
+            self.assertEqual(0, file_io.stat_count)
+            self.assertTrue(all(stream._mock_wraps.closed for stream in file_io.streams))
+
+    def test_blob_index_failures_close_stream(self):
+        from pypaimon.read.reader.format_blob_reader import _BLOB_INDEX_CACHE
+
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        for failure in ('version', 'header', 'index', 'read', 'row_indices'):
+            with self.subTest(failure=failure):
+                path = os.path.join(self.temp_dir, failure + ".blob")
+                self._write_single_blob(path, field, b"value")
+                file_io = CountingBlobFileIO(self.temp_dir)
+                file_size = os.path.getsize(path)
+                if failure == 'version':
+                    with open(path, 'r+b') as output:
+                        output.seek(-1, os.SEEK_END)
+                        output.write(b'\x63')
+                elif failure == 'header':
+                    file_size += 3
+                original_open = file_io.new_input_stream
+
+                def open_stream(file_path):
+                    stream = original_open(file_path)
+                    if failure == 'read':
+                        stream.read.side_effect = IOError("injected read failure")
+                    elif failure == 'index':
+                        read = stream._mock_wraps.read
+                        stream.read.side_effect = lambda size: read(size) if size == 5 else read(size)[:-1]
+                    return stream
+
+                with patch.object(file_io, 'new_input_stream', side_effect=open_stream):
+                    with self.assertRaises(IndexError if failure == 'row_indices' else IOError):
+                        FormatBlobReader(
+                            file_io, path, [field.name], [field], None, True,
+                            row_indices=[1] if failure == 'row_indices' else None,
+                            file_size=file_size)
+                self.assertEqual(1, len(file_io.streams))
+                self.assertTrue(file_io.streams[0]._mock_wraps.closed)
+                self.assertEqual(1, file_io.streams[0].close.call_count)
+                if failure != 'row_indices':
+                    self.assertNotIn(path, _BLOB_INDEX_CACHE)
 
     def test_blob_reader_falls_back_to_file_size_lookup(self):
         field = DataField(0, "blob_field", AtomicType("BLOB"))
         path = os.path.join(self.temp_dir, "fallback-size.blob")
-        file_io = LocalFileIO(self.temp_dir, Options({}))
         self._write_single_blob(path, field, b"value")
 
         for file_size in [None, 0, -1]:
-            with self.subTest(file_size=file_size):
-                counting_file_io = MockFileIO(file_io)
-                reader = FormatBlobReader(
-                    counting_file_io,
-                    path,
-                    [field.name],
-                    [field],
-                    None,
-                    False,
-                    file_size=file_size,
-                )
-                try:
-                    self.assertEqual(
-                        [b"value"],
-                        reader.read_arrow_batch().column(0).to_pylist())
-                    self.assertEqual(1, counting_file_io.file_size_calls)
-                finally:
-                    reader.close()
+            for descriptor in (False, True):
+                with self.subTest(file_size=file_size, descriptor=descriptor):
+                    file_io = CountingBlobFileIO(self.temp_dir)
+                    reader = FormatBlobReader(
+                        file_io, path, [field.name], [field], None, descriptor,
+                        file_size=file_size)
+                    try:
+                        values = reader.read_arrow_batch().column(0).to_pylist()
+                        if descriptor:
+                            self.assertEqual(BlobDescriptor(path, 4, 5).serialize(), values[0])
+                            self.assertEqual((1, 0, 0, 0), file_io.counts())
+                        else:
+                            self.assertEqual([b"value"], values)
+                            self.assertEqual(1, file_io.stat_count)
+                            self.assertEqual(1, len(file_io.streams))
+                    finally:
+                        reader.close()
 
     def test_split_read_passes_blob_file_size(self):
         from pypaimon.read.split import DataSplit
