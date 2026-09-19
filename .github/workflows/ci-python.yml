@@ -382,6 +382,7 @@ jobs:
             python -c "import ray; print(f'Ray version: {ray.__version__}')"
             python -c "from packaging.version import parse; import ray; assert parse(ray.__version__) == parse('$ray_version'), f'Expected Ray $ray_version, got {ray.__version__}'"
             tests="pypaimon/tests/ray_data_test.py::RayDataTest pypaimon/tests/ray_range_join_test.py::RayRangeJoinTest pypaimon/tests/ray_vector_search_test.py::test_raw_search_matches_exact_top_k"
+            tests="$tests pypaimon/tests/ray_batch_vector_search_test.py::test_raw_batch_shares_split_tasks"
             if [ "$ray_version" = "2.50.1" ]; then
               tests="$tests pypaimon/tests/ray_update_by_row_id_test.py::RayUpdateByRowIdTest::test_empty_dataset_after_transform_is_noop"
             fi

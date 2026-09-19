@@ -102,9 +102,9 @@ matches = (
 
 ## Distributed Vector Search
 
-Use `execution="ray"` to execute a single vector query across Ray workers and
-return an Arrow table to the driver. This supports data-evolution tables;
-primary-key tables, batch vector queries, and hybrid queries are not supported
+Use `execution="ray"` to execute vector queries across Ray workers and return
+Arrow results to the driver. This supports single and batch vector queries on
+data-evolution tables; primary-key tables and hybrid queries are not supported
 by this execution mode.
 
 Install the same PyPaimon and index dependencies on the driver and workers:
@@ -138,8 +138,27 @@ neighbors = (
 the number of in-flight Ray tasks, with a default of 4. `ray_remote_args` supplies
 Ray task options, including resources and retry settings; `num_returns` is
 managed by PyPaimon. These two arguments require `execution="ray"`.
-Query vectors must contain finite values. If stored vectors produce NaN scores,
-Ray execution fails because NaN cannot be ranked consistently across tasks.
+Single-vector Ray queries require finite query values and fail if stored
+vectors produce NaN scores.
+
+Batch queries use the same execution options and return one Arrow table per
+input vector, in input order:
+
+```python
+batch_neighbors = (
+    docs.search_vectors([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], column="embedding")
+    .select(["id", "content"])
+    .limit(10)
+    .to_arrow(execution="ray", concurrency=4)
+)
+```
+
+Each batch task handles all query vectors for one split: index workers reuse
+an open shard across bounded query blocks, and raw workers stream each data
+split once with a separate top-k for each query. Batch refinement and the shared
+final row lookup run on the driver. The entire batch uses one read snapshot.
+Candidate traffic and result memory grow with the number of query vectors;
+split large query collections into smaller batches when necessary.
 
 The driver fixes one read snapshot and plans the query. Workers search individual
 index shards and, when required by the table's search mode, scan unindexed data.

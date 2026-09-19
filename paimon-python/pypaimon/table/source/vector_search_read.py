@@ -755,22 +755,25 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
     def _score_raw_splits(self, table_read, splits, metric):
         from pypaimon.read.table_read import _ClosableArrowBatchReader
 
-        heaps = [[] for _ in self._query_vectors]
         reader, batches = table_read._new_arrow_batch_reader(splits)
         # Close the underlying iterator as well if scoring fails mid-batch.
         with _ClosableArrowBatchReader(reader, batches) as batch_reader:
-            for batch in batch_reader:
-                row_ids = batch.column(SpecialFields.ROW_ID.name).to_pylist()
-                vectors = batch.column(self._vector_column.name)
-                for start, query_index, scores in _iter_arrow_batch_scores(
-                    vectors, self._query_vectors, metric
-                ):
-                    heap = heaps[query_index]
-                    block_row_ids = row_ids[start:start + len(scores)]
-                    for row_id, score in zip(block_row_ids, scores):
-                        if score is not None:
-                            _offer_score(heap, self._limit, row_id, score)
-                del batch, row_ids, vectors
+            return self._score_raw_batch_queries(batch_reader, metric)
+
+    def _score_raw_batch_queries(self, batches, metric):
+        heaps = [[] for _ in self._query_vectors]
+        for batch in batches:
+            row_ids = batch.column(SpecialFields.ROW_ID.name).to_pylist()
+            vectors = batch.column(self._vector_column.name)
+            for start, query_index, scores in _iter_arrow_batch_scores(
+                vectors, self._query_vectors, metric
+            ):
+                heap = heaps[query_index]
+                block_row_ids = row_ids[start:start + len(scores)]
+                for row_id, score in zip(block_row_ids, scores):
+                    if score is not None:
+                        _offer_score(heap, self._limit, row_id, score)
+            del batch, row_ids, vectors
         return [_scored_result(heap) for heap in heaps]
 
 
