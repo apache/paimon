@@ -105,6 +105,19 @@ pip3 install dist/*.tar.gz
 
 The command will install the package and core dependencies to your local Python environment.
 
+# Parquet page-index reads
+
+For row-tracking tables with a Parquet OffsetIndex, PyPaimon can read a
+contiguous `_ROW_ID` range without decoding the full row group. Enable it
+with the table option:
+
+```python
+indexed_table = table.copy({"parquet.filter.columnindex.enabled": "true"})
+```
+
+Unsupported reads use the normal path. Reading fewer bytes may require more
+object-store requests.
+
 # Native scan planning
 
 PyPaimon can plan splits with the optional `pypaimon-rust` package while retaining
