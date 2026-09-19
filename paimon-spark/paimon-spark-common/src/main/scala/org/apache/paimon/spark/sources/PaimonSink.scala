@@ -21,6 +21,7 @@ package org.apache.paimon.spark.sources
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.{InsertInto, Overwrite, SparkConnectorOptions}
 import org.apache.paimon.spark.commands.{SchemaEvolutionHelper, WriteIntoPaimonTable}
+import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.internal.Logging
@@ -78,13 +79,25 @@ class PaimonSink(
     }
   }
 
-  // Like the read side, which takes its 'read.stream.*' options from the table, so that a
-  // 'spark.paimon.<key>' session conf works the same as an option of the writer.
+  /**
+   * The commit user is the identity of one streaming writer, so it is taken only from sources
+   * scoped to the query: the options of the writer, or the session conf of the query. A table
+   * property is deliberately not one of them: it would give every writer of the table the same
+   * identity, and the batches of one would be dropped as replays of another's.
+   */
   private def configuredCommitUser: Option[String] = {
+    val key = SparkConnectorOptions.STREAM_WRITE_COMMIT_USER.key
     val fromWriter = options.get(SparkConnectorOptions.STREAM_WRITE_COMMIT_USER)
-    val fromTable =
-      Options.fromMap(originTable.options()).get(SparkConnectorOptions.STREAM_WRITE_COMMIT_USER)
-    Seq(fromWriter, fromTable).find(user => user != null && user.nonEmpty)
+    val fromSession =
+      sqlContext.sparkSession.sessionState.conf
+        .getConfString(s"${OptionUtils.PAIMON_OPTION_PREFIX}$key", null)
+    if (fromWriter == null && fromSession == null && originTable.options().containsKey(key)) {
+      logWarning(
+        s"'$key' is set as a property of table ${originTable.name()} and is ignored there: it is " +
+          "the identity of one streaming writer, and every writer of the table would share it. " +
+          "Set it as an option of the writer or as a session conf instead.")
+    }
+    Seq(fromWriter, fromSession).find(user => user != null && user.nonEmpty)
   }
 
   // Spark hands the sink its options case-insensitively, but keeps whatever case the user wrote.

@@ -121,7 +121,11 @@ public class SparkConnectorOptions {
                                     + "query id that Spark persists in the checkpoint, so it is "
                                     + "kept while a query resumes from its checkpoint and is new "
                                     + "when the checkpoint is; set it explicitly only if a query "
-                                    + "has to keep its identity across a new checkpoint.");
+                                    + "has to keep its identity across a new checkpoint. It is "
+                                    + "the identity of one streaming writer and must be unique to "
+                                    + "it: set it as an option of the writer or as a session "
+                                    + "conf, never as a table property, which every writer of the "
+                                    + "table would share.");
 
     public static final ConfigOption<Integer> MAX_FILES_PER_TRIGGER =
             key("read.stream.maxFilesPerTrigger")

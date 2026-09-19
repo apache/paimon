@@ -36,7 +36,7 @@ import scala.collection.JavaConverters._
 
 object OptionUtils extends SQLConfHelper with Logging {
 
-  private val PAIMON_OPTION_PREFIX = "spark.paimon."
+  val PAIMON_OPTION_PREFIX = "spark.paimon."
   private val SPARK_CATALOG_PREFIX = "spark.sql.catalog."
   private val PAIMON_SPARK_SESSION_EXTENSIONS =
     "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions"

@@ -83,7 +83,9 @@ id that Spark persists in the checkpoint, which is new when a checkpoint is recr
 when a query resumes from one, and independent of how the location is spelled. Set
 `write.stream.commit-user` to pin it explicitly, either as an option of the writer or as a
 `spark.paimon.write.stream.commit-user` session conf, which is only needed if a query has to keep
-its identity across a new checkpoint:
+its identity across a new checkpoint. It is the identity of one streaming writer and must be unique
+to it: it is not read from table properties, which every writer of the table would share, and two
+queries given the same identity would each drop the other's batches as replays.
 
 ```scala
 val stream = df

@@ -442,6 +442,82 @@ class PaimonSinkIdempotencyTest extends PaimonSparkTestBase with StreamTest {
     }
   }
 
+  test("Paimon Sink: a table property must not make two queries share a commit user") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        dir =>
+          // A commit user is the identity of one streaming writer. A table property applies to
+          // every writer of the table, so two unrelated queries would be taken for one another:
+          // the second one's batches carry identifiers the first one has already published,
+          // and would be dropped as replays.
+          spark.sql(
+            "CREATE TABLE T (a INT, b STRING) TBLPROPERTIES ('write.stream.commit-user' = 'job')")
+          val location = loadTable("T").location().toString
+
+          val inputA = MemoryStream[(Int, String)]
+          val queryA = inputA
+            .toDS()
+            .toDF("a", "b")
+            .writeStream
+            .option("checkpointLocation", new File(dir, "a").getCanonicalPath)
+            .format("paimon")
+            .start(location)
+          try {
+            inputA.addData((1, "a"))
+            queryA.processAllAvailable()
+            inputA.addData((2, "b"))
+            queryA.processAllAvailable()
+          } finally {
+            queryA.stop()
+          }
+
+          val inputB = MemoryStream[(Int, String)]
+          val dfB = inputB.toDS().toDF("a", "b")
+          inputB.addData((3, "c"))
+          runToCompletion(
+            dfB.writeStream
+              .option("checkpointLocation", new File(dir, "b").getCanonicalPath)
+              .format("paimon")
+              .start(location))
+
+          checkAnswer(
+            spark.sql("SELECT * FROM T ORDER BY a"),
+            Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil)
+          assert(
+            latestCommitUser("T").startsWith("spark-query-"),
+            s"the table property must be ignored in favour of the query's own identity, " +
+              s"but the commit user is '${latestCommitUser("T")}'"
+          )
+      }
+    }
+  }
+
+  test("Paimon Sink: an option of the writer takes precedence over the session conf") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql("CREATE TABLE T (a INT, b STRING)")
+          val location = loadTable("T").location().toString
+
+          withSQLConf("spark.paimon.write.stream.commit-user" -> "from-conf") {
+            val inputData = MemoryStream[(Int, String)]
+            inputData.addData((1, "a"))
+            runToCompletion(
+              inputData
+                .toDS()
+                .toDF("a", "b")
+                .writeStream
+                .option("checkpointLocation", checkpointDir.getCanonicalPath)
+                .option("write.stream.commit-user", "from-writer")
+                .format("paimon")
+                .start(location))
+          }
+
+          assert(latestCommitUser("T") == "from-writer")
+      }
+    }
+  }
+
   test("Paimon Sink: addBatch with a repeated batchId must be a no-op") {
     withTempDir {
       checkpointDir =>

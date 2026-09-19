@@ -531,12 +531,18 @@ case class PaimonSparkWriter(
           // conflict with. And this committer is closed right after the batch, so maintenance
           // cannot be left to an executor that is about to be shut down, nor a failure to a
           // commit that never comes.
-          tableCommit
+          val committed = tableCommit
             .checkFilesExistence(false)
             .checkAppendFiles(false)
             .inlineMaintenance(true)
             .filterAndCommit(
               Collections.singletonMap(Long.box(identifier), commitMessages.toList.asJava))
+          if (committed == 0) {
+            // Expected for a replay; the only trace of a misconfigured identity otherwise.
+            logInfo(
+              s"Micro-batch $identifier was already committed to ${table.name()} under commit " +
+                s"user '${commitUser.get}' and is skipped as a replay.")
+          }
         case None =>
           tableCommit.commit(commitMessages.toList.asJava)
       }
