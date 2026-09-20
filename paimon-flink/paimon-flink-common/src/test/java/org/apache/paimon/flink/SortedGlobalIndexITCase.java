@@ -116,12 +116,14 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
     @Test
     public void testMultiValueIndex() throws Exception {
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        // This test verifies index and coverage semantics, not cost-based fallback.
         sql(
                 "CREATE TABLE T_MULTIVALUE (id INT, tags ARRAY<STRING>) WITH ("
                         + "'bucket' = '-1', "
                         + "'global-index.enabled' = 'true', "
                         + "'row-tracking.enabled' = 'true', "
                         + "'data-evolution.enabled' = 'true', "
+                        + "'data-evolution.scalar-index.max-selection-ratio' = '1.0', "
                         + "'global-index.column-update-action' = 'IGNORE'"
                         + ")");
         sql(

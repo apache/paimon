@@ -55,6 +55,7 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
 
     @Override
     protected Schema schemaDefault() {
+        // This suite verifies index and coverage semantics, not cost-based fallback.
         return Schema.newBuilder()
                 .column("id", DataTypes.INT())
                 .column("tags", DataTypes.ARRAY(DataTypes.INT()))
@@ -62,6 +63,7 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
                 .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
                 .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
                 .option(CoreOptions.GLOBAL_INDEX_ENABLED.key(), "true")
+                .option(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO.key(), "1.0")
                 .build();
     }
 
