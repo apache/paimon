@@ -42,35 +42,30 @@ import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, Data
  */
 object CheckUnpushableSearchFilter extends Rule[LogicalPlan] with PredicateHelper {
 
-  override def apply(plan: LogicalPlan): LogicalPlan = {
-    if (!OptionUtils.searchResidualFilterFailEnabled()) {
-      plan
-    } else {
-      plan.transformDown {
-        case filter @ Filter(condition, child) if condition.resolved =>
-          relationTableAndOutput(child).foreach {
-            case (table, output) =>
-              searchInnerTable(table).foreach {
-                innerTable =>
-                  val converter = SparkV2FilterConverter(innerTable.rowType())
-                  val dataColumns = AttributeSet(
-                    output.filterNot(
-                      attr =>
-                        PaimonMetadataColumn.VECTOR_SEARCH_META_COLUMN_NAMES.contains(attr.name)))
-                  val residuals = splitConjunctivePredicates(condition).filter {
-                    predicate =>
-                      predicate.references.nonEmpty &&
-                      predicate.references.intersect(dataColumns).nonEmpty &&
-                      translateFilterV2(predicate).flatMap(converter.convert(_)).isEmpty
-                  }
-                  if (residuals.nonEmpty) {
-                    PaimonTableValuedFunctions.failUnpushableSearchFilter(residuals.map(_.sql))
-                  }
+  override def apply(plan: LogicalPlan): LogicalPlan = plan.transformDown {
+    case filter @ Filter(condition, child) if condition.resolved =>
+      relationTableAndOutput(child).foreach {
+        case (table, output) =>
+          searchInnerTable(table).foreach {
+            innerTable =>
+              val converter = SparkV2FilterConverter(innerTable.rowType())
+              val dataColumns = AttributeSet(
+                output.filterNot(
+                  attr => PaimonMetadataColumn.VECTOR_SEARCH_META_COLUMN_NAMES.contains(attr.name)))
+              val residuals = splitConjunctivePredicates(condition).filter {
+                predicate =>
+                  predicate.references.nonEmpty &&
+                  predicate.references.intersect(dataColumns).nonEmpty &&
+                  translateFilterV2(predicate).flatMap(converter.convert(_)).isEmpty
+              }
+              // Read the option only once a search TVF actually carries a non-pushable residual, so
+              // a misconfigured value fails just that query rather than every query in the session.
+              if (residuals.nonEmpty && OptionUtils.searchResidualFilterFailEnabled()) {
+                PaimonTableValuedFunctions.failUnpushableSearchFilter(residuals.map(_.sql))
               }
           }
-          filter
       }
-    }
+      filter
   }
 
   private def relationTableAndOutput(plan: LogicalPlan): Option[(Table, Seq[Attribute])] =

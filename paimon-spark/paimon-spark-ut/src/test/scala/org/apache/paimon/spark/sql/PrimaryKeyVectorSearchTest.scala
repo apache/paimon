@@ -370,7 +370,7 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
       // search. The two nearest rows (1, 2) fail it; the two nearest rows that satisfy it are
       // (5, 6), but they rank outside the returned top-2, so post-filtering the top-2 returns
       // nothing. Fail mode rejects the query rather than returning a silently short result.
-      withSQLConf("spark.paimon.search.residual-filter" -> "fail") {
+      withSparkSQLConf("spark.paimon.search.residual-filter" -> "fail") {
         val error = intercept[Exception] {
           spark
             .sql("""
@@ -437,7 +437,7 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
       // `threshold = 100` is convertible, so it is pushed into Paimon and never a genuine residual.
       // Even a Spark-side recheck copy of it converts, so fail mode must not reject it. The two
       // nearest rows (1, 2) both satisfy it, so the result is (1, 2) either way.
-      withSQLConf("spark.paimon.search.residual-filter" -> "fail") {
+      withSparkSQLConf("spark.paimon.search.residual-filter" -> "fail") {
         val result = spark
           .sql("""
                  |SELECT id

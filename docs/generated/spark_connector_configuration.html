@@ -93,6 +93,12 @@ under the License.
             <td>Whether to verify SparkSession is initialized with required configurations.</td>
         </tr>
         <tr>
+            <td><h5>search.residual-filter</h5></td>
+            <td style="word-wrap: break-word;">post-filter</td>
+            <td><p>Enum</p></td>
+            <td>How a vector / hybrid / full-text search handles a WHERE conjunct on searched-table columns that cannot be pushed into Paimon. Such a residual is applied by Spark above the already-truncated top-K, so it can only drop rows and may return fewer than K.<br /><br />Possible values:<ul><li>"post-filter": Apply the residual above the top-K result. The result is a subset of the top-K and may be shorter than K.</li><li>"fail": Reject the query with a clear error, matching the Flink vector_search procedure, so a silently short result never ships.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>source.split.target-size-with-column-pruning</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
