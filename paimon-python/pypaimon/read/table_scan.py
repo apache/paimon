@@ -104,7 +104,31 @@ class TableScan:
         if auth_result is not None:
             prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         plan = self.file_scanner.scan()
+        self._attach_snapshot_to_splits(plan)
         return wrap_plan_with_auth(auth_result, plan)
+
+    @staticmethod
+    def _attach_snapshot_to_splits(plan):
+        """Keep Python-planned DataSplits self-contained like Java/Rust ones.
+
+        Several Python split generators historically left ``snapshot_id`` on
+        Plan only. Stable cross-language serialization needs it on DataSplit,
+        and index wrappers delegate to their underlying split.
+        """
+        snapshot_id = getattr(plan, 'snapshot_id', None)
+        splits = getattr(plan, 'splits', None)
+        if snapshot_id is None or not callable(splits):
+            return
+        for split in splits():
+            current = split
+            seen = set()
+            while callable(getattr(current, 'data_split', None)):
+                if id(current) in seen:
+                    break
+                seen.add(id(current))
+                current = current.data_split()
+            if hasattr(current, 'snapshot_id'):
+                current.snapshot_id = snapshot_id
 
     def _native_requested(self) -> bool:
         if self.table.options.native_plan_enabled():

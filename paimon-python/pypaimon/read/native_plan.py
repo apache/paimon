@@ -32,7 +32,8 @@ from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.plan import Plan
 from pypaimon.read.split import Split
-from pypaimon.read.split_serializer import deserialize_split_v1
+from pypaimon.read.split_serializer import (
+    deserialize_split_v1, serialize_split_v1)
 
 
 def native_runtime_available() -> bool:
@@ -54,6 +55,25 @@ def native_reader_available() -> bool:
     return (native_runtime_available()
             and native_method_available('ReadBuilder', 'new_read')
             and native_method_available('TableRead', 'read'))
+
+
+def native_split_bridge_available() -> bool:
+    """Whether Rust accepts Java-compatible split bytes from Python plans."""
+    return native_reader_available() and native_method_available(
+        'Split', 'deserialize')
+
+
+def native_split_from_python(split):
+    """Convert a Python-planned DataSplit/IndexedSplit for the Rust reader.
+
+    Vector scores intentionally stay on the Python IndexedSplit. Rust needs
+    only its row ranges to perform the physical read.
+    """
+    if not native_split_bridge_available():
+        return None
+    from pypaimon_rust.datafusion import Split as NativeSplit
+    return NativeSplit.deserialize(
+        serialize_split_v1(split, include_scores=False))
 
 
 def native_family_search_modes_available() -> bool:

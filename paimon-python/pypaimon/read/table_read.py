@@ -34,7 +34,8 @@ from pypaimon.read.push_down_utils import predicate_field_names
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.reader.auth_masking_reader import (
     AuthFilterReader, AuthMaskingReader, ColumnProjectReader,
-    RecordReaderToBatchAdapter, BatchToRecordReaderAdapter)
+    RecordReaderToBatchAdapter, BatchToRecordReaderAdapter,
+    apply_auth_masking, compile_auth_masking_rules)
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.limited_record_reader import LimitedRecordBatchReader
 from pypaimon.read.split import Split
@@ -59,6 +60,7 @@ _NATIVE_READ_FILE_FORMATS = frozenset({
 _NATIVE_READ_FILE_SUFFIXES = tuple(
     '.%s' % file_format for file_format in _NATIVE_READ_FILE_FORMATS)
 _NATIVE_BLOB_FILE_SUFFIX = '.blob'
+_DEFAULT_NATIVE_LIMIT = object()
 
 
 class _ClosableArrowBatchReader:
@@ -422,29 +424,65 @@ class TableRead:
         if self._deferred_blob_limit_may_prune(splits):
             return None
         try:
-            from pypaimon.read.native_plan import native_read
+            from pypaimon.read.native_plan import (
+                native_read, native_split_from_python)
         except Exception as e:
             logger.warning(
                 "Native read failed, falling back to the Python reader: %s", e)
             return None
         rust_splits = []
         split_weights = []
-        for split in splits:
+        auth_result = None
+        saw_plain_split = False
+        python_splits = []
+        for original_split in splits:
+            split = original_split
             if isinstance(split, QueryAuthSplit):
-                return None
+                if saw_plain_split:
+                    return None
+                if auth_result is None:
+                    auth_result = split.auth_result
+                elif auth_result is not split.auth_result:
+                    return None
+                split = split.split
+            else:
+                saw_plain_split = True
+                if auth_result is not None:
+                    return None
+            python_splits.append(split)
+
+        auth_state = self._native_auth_state(auth_result)
+        if auth_result is not None and auth_state is None:
+            return None
+        for split in python_splits:
             if not self._native_split_files_supported(split):
                 return None
             rust_split = getattr(split, '_native_split', None)
             if rust_split is None:
-                return None
+                try:
+                    rust_split = native_split_from_python(split)
+                except Exception as e:
+                    logger.warning(
+                        "Native split conversion failed, falling back to the "
+                        "Python reader: %s", e)
+                    return None
+                if rust_split is None:
+                    return None
             rust_splits.append(rust_split)
             split_weights.append(self._native_split_weight(split))
         if (parallelism is not None
                 and self._should_run_parallel(splits, parallelism)):
-            if streaming:
+            if streaming or auth_state is not None:
                 groups = self._native_split_groups(
                     rust_splits, parallelism, split_weights)
-                read_kwargs = self._native_read_kwargs(blob_parallelism)
+                read_kwargs = self._native_read_kwargs(
+                    blob_parallelism,
+                    projection=(auth_state['projection']
+                                if auth_state is not None else None),
+                    limit=(None if auth_state is not None
+                           and auth_state['filter_fn'] is not None
+                           else _DEFAULT_NATIVE_LIMIT),
+                )
                 readers = []
                 try:
                     for group in groups:
@@ -466,7 +504,8 @@ class TableRead:
                         "Native read failed, falling back to the Python reader: %s", e)
                     return None
                 batches = self._native_batches_parallel_streaming(readers)
-                return self._convert_native_batches(batches, schema)
+                return self._convert_native_batches(
+                    batches, schema, auth_state=auth_state)
             try:
                 return self._native_batches_parallel(
                     native_read, rust_splits, schema, parallelism,
@@ -476,19 +515,72 @@ class TableRead:
                     "Native read failed, falling back to the Python reader: %s", e)
                 return None
         try:
-            read_kwargs = self._native_read_kwargs(blob_parallelism)
+            read_kwargs = self._native_read_kwargs(
+                blob_parallelism,
+                projection=(auth_state['projection']
+                            if auth_state is not None else None),
+                limit=(None if auth_state is not None
+                       and auth_state['filter_fn'] is not None
+                       else _DEFAULT_NATIVE_LIMIT),
+            )
             batches = native_read(self.table, rust_splits, **read_kwargs)
         except Exception as e:
             logger.warning(
                 "Native read failed, falling back to the Python reader: %s", e)
             return None
-        return self._convert_native_batches(batches, schema)
+        return self._convert_native_batches(
+            batches, schema, auth_state=auth_state)
 
-    def _native_read_kwargs(self, blob_parallelism=None):
+    def _native_auth_state(self, auth_result):
+        if auth_result is None:
+            return None
+        # The native nested path flattens projected values before Python sees
+        # the batch. Query-auth expressions are defined over table fields, so
+        # retain the established Python reader for this combination.
+        if self.nested_name_paths or self._has_map_key_projection():
+            return None
+        extra_fields = auth_result.get_extra_fields_for_filter(
+            self.read_type, self.table.fields)
+        effective_fields = list(self.read_type)
+        names = {field.name for field in effective_fields}
+        for field in extra_fields:
+            if field.name not in names:
+                effective_fields.append(field)
+                names.add(field.name)
+        filter_fn = auth_result.extract_row_filter()
+        if filter_fn is not None:
+            auth_fields = self._auth_filter_field_names(
+                auth_result, effective_fields)
+            configured_blob_fields = (
+                self.table.options.blob_descriptor_fields()
+                | self.table.options.blob_view_fields()
+            )
+            blob_fields = {
+                field.name for field in effective_fields
+                if getattr(field.type, 'type', '').upper() == 'BLOB'
+            }
+            if auth_fields & (configured_blob_fields | blob_fields):
+                return None
+        masking_rules = compile_auth_masking_rules(
+            auth_result.column_masking or {}, effective_fields)
+        return {
+            'filter_fn': filter_fn,
+            'masking_rules': masking_rules,
+            'projection': [field.name for field in effective_fields],
+        }
+
+    def _native_read_kwargs(
+            self,
+            blob_parallelism=None,
+            projection=None,
+            limit=_DEFAULT_NATIVE_LIMIT):
+        if limit is _DEFAULT_NATIVE_LIMIT:
+            limit = self.limit
         kwargs = {
             'predicate': self.predicate,
-            'limit': self.limit,
-            'projection': [field.name for field in self.read_type],
+            'limit': limit,
+            'projection': (projection if projection is not None else
+                           [field.name for field in self.read_type]),
         }
         if blob_parallelism is not None:
             kwargs['blob_parallelism'] = blob_parallelism
@@ -712,18 +804,37 @@ class TableRead:
                 return False
         return True
 
-    def _convert_native_batches(self, batches, schema):
-        """Apply PyPaimon's exact output limit lazily to native batches."""
+    def _convert_native_batches(self, batches, schema, auth_state=None):
+        """Finalize native batches with Python-equivalent semantic ordering.
+
+        Query authorization is intentionally applied here, across all native
+        readers: filter first, then the shared LIMIT, then masking and output
+        projection. This prevents unauthorized rows from consuming the limit
+        and prevents filter-only dependency columns from leaking to callers.
+        """
         remaining = self.limit
         try:
             for batch in batches:
                 if batch.num_rows == 0:
                     continue
+                batch = self._prepare_native_batch(batch, schema)
+                if auth_state is not None:
+                    filter_fn = auth_state['filter_fn']
+                    if filter_fn is not None:
+                        batch = batch.filter(filter_fn(batch))
+                        if batch.num_rows == 0:
+                            continue
                 if remaining is not None and batch.num_rows > remaining:
                     batch = batch.slice(0, remaining)
-                batch = self._prepare_native_batch(batch, schema)
-                batch = self._project_batch_to_output(batch)
-                yield self._try_to_pad_batch_by_schema(batch, schema)
+                if auth_state is not None:
+                    if auth_state['masking_rules']:
+                        batch = apply_auth_masking(
+                            batch, auth_state['masking_rules'])
+                    batch = self._project_native_auth_batch(batch)
+                else:
+                    batch = self._project_batch_to_output(batch)
+                yield self._try_to_pad_batch_by_schema(
+                    batch, schema, allow_type_cast=auth_state is not None)
                 if remaining is not None:
                     remaining -= batch.num_rows
                     if remaining <= 0:
@@ -732,6 +843,17 @@ class TableRead:
             close = getattr(batches, 'close', None)
             if close is not None:
                 close()
+
+    def _project_native_auth_batch(self, batch):
+        names = list(self._output_column_names)
+        if self.include_row_kind and ROW_KIND_COLUMN in batch.schema.names:
+            names.insert(0, ROW_KIND_COLUMN)
+        missing = [name for name in names if name not in batch.schema.names]
+        if missing:
+            raise ValueError(
+                "Native query-auth read omitted output fields: %s"
+                % ', '.join(missing))
+        return batch.select(names)
 
     def _prepare_native_batch(self, batch, schema):
         if self.include_row_kind and 'rowkind' in batch.schema.names:

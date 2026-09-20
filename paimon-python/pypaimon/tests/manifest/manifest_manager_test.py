@@ -478,6 +478,7 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
                 value_stats_cols=None, external_path=None,
                 first_row_id=0,
                 write_cols=["id", "_ROW_ID", "_SEQUENCE_NUMBER"],
+                column_max_sequence_numbers=[12, 50, 50],
             ),
         )
         manager.write("dirty-manifest.avro", [entry])
@@ -486,6 +487,8 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
         self.assertEqual(len(entries), 1)
         self.assertEqual(
             entries[0].file.write_cols, ["id", "_ROW_ID", "_SEQUENCE_NUMBER"])
+        self.assertEqual(
+            entries[0].file.column_max_sequence_numbers, [12, 50, 50])
 
         read_stats = entries[0].file.value_stats
         stats_field_names = [f.name for f in read_stats.min_values.fields]
