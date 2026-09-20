@@ -21,7 +21,9 @@ import bisect
 import json
 import math
 import operator
+import pickle
 import sys
+import zlib
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -709,6 +711,22 @@ class _PaimonLeRobotMetadata:
         self.episodes = episodes
         self.tasks = tasks
         self.subtasks = subtasks
+        self._compress_episodes = False
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        if state.get("_compress_episodes", False):
+            # Keep worker-startup payloads small without changing Dataset state.
+            state["episodes"] = zlib.compress(
+                pickle.dumps(self.episodes, protocol=pickle.HIGHEST_PROTOCOL),
+                level=1)
+            state["_episodes_zlib"] = True
+        return state
+
+    def __setstate__(self, state):
+        if state.pop("_episodes_zlib", False):
+            state["episodes"] = pickle.loads(zlib.decompress(state["episodes"]))
+        self.__dict__.update(state)
 
     def __getattr__(self, name):
         info = self.__dict__.get("info", {})
@@ -822,6 +840,7 @@ def _load_dataset(table, tag_name):
     metadata = _PaimonLeRobotMetadata(
         str(table.identifier), tag_name, info, stats, episodes, tasks,
         subtasks)
+    metadata._compress_episodes = True
     return frames, metadata
 
 
