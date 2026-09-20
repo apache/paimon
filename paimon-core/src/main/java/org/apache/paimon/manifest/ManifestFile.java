@@ -221,14 +221,26 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
      * materialized with the complete manifest schema.
      */
     public CloseableIterator<ProjectedManifestEntry> scan(String fileName, Projection projection) {
+        return scan(fileName, projection, null, null);
+    }
+
+    /**
+     * Scans projected manifest entries and prunes partitions and buckets before materializing the
+     * nested data file row.
+     */
+    public CloseableIterator<ProjectedManifestEntry> scan(
+            String fileName,
+            Projection projection,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable BucketFilter bucketFilter) {
         try {
             CloseableIterator<InternalRow> rows =
                     createManifestIterator(
                             fileIO,
                             pathFactory.toPath(fileName),
                             projection.projectedType(),
-                            null,
-                            null);
+                            partitionFilter,
+                            bucketFilter);
             return new CloseableIterator<ProjectedManifestEntry>() {
 
                 @Override
@@ -504,6 +516,11 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             this.cache = cache;
             this.sidecarCache = sidecarCache;
             this.options = options;
+        }
+
+        /** Returns whether a manifest of this size is eligible for the configured cache. */
+        public boolean isCacheable(long fileSize) {
+            return cache != null && fileSize <= cache.maxElementSize();
         }
 
         public ManifestFile create() {
