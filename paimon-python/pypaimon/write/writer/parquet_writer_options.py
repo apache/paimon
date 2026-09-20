@@ -21,10 +21,11 @@ from pypaimon.common.options.core_options import CoreOptions
 
 
 def create_parquet_writer_options(options: CoreOptions):
-    if not options.parquet_write_page_index_enabled():
-        # Older PyArrow versions do not accept even write_page_index=False.
-        return {}
-    if int(pa.__version__.split('.')[0]) < 13:
+    enabled = options.parquet_write_page_index_enabled()
+    if int(pa.__version__.split('.')[0]) >= 13:
+        return {'write_page_index': True if enabled is None else enabled}
+    if enabled:
         raise ValueError(
             "parquet.write-page-index.enabled requires PyArrow >= 13, got {}".format(pa.__version__))
-    return {'write_page_index': True}
+    # Older PyArrow versions do not accept even write_page_index=False.
+    return {}

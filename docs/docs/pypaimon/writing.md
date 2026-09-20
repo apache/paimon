@@ -85,13 +85,13 @@ write_builder = table.new_batch_write_builder().overwrite({'dt': '2024-01-01'})
 
 ### Parquet Page Indexes
 
-Set `parquet.write-page-index.enabled=true` to write page indexes with Python
-Parquet writers (default: `false`). Requires PyArrow >= 13; enabling it on older
-versions fails before creating files.
+Python Parquet writers write page indexes by default on PyArrow >= 13; older
+versions omit them. Set `parquet.write-page-index.enabled=false` to disable them,
+or `true` to require them. Explicit `true` on PyArrow < 13 fails before creating files.
 
-This affects new files only, independently of read-side filtering. Page-level
-statistics move from page headers into the index, so verify reader compatibility
-before enabling. PyArrow reads do not currently use these indexes.
+This affects new files only, independently of read-side filtering. When enabled,
+page-level statistics move from page headers into the index. Check reader
+compatibility when upgrading; PyArrow reads do not currently use these indexes.
 
 ### Manifest Merging
 

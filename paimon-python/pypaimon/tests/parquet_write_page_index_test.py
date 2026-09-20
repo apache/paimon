@@ -98,8 +98,8 @@ def test_written_indexes_and_round_trip(tmp_path, mode, setting):
             for i in range(metadata.num_row_groups):
                 for j in range(metadata.num_columns):
                     column = metadata.row_group(i).column(j)
-                    assert column.has_column_index == (setting == 'true')
-                    assert column.has_offset_index == (setting == 'true')
+                    assert column.has_column_index == (setting != 'false')
+                    assert column.has_offset_index == (setting != 'false')
         if mode != 'shared_shredding':
             actual = pq.read_table(str(path)).select(data.column_names)
             assert actual.to_pydict() == data.to_pydict()
@@ -131,14 +131,24 @@ def test_unsupported_arrow_rejected_before_output(tmp_path, mode):
 
 
 @pytest.mark.parametrize('setting', [None, 'false'])
-def test_disabled_omits_new_arrow_argument(tmp_path, setting):
+@pytest.mark.parametrize('arrow_version', ['6.0.1', '12.0.1'])
+def test_legacy_arrow_omits_new_argument(tmp_path, setting, arrow_version):
     table = _table(tmp_path, 'buffered', setting)
     original = table.file_io.write_parquet
-    with patch.object(pa, '__version__', '6.0.1'), \
+    with patch.object(pa, '__version__', arrow_version), \
             patch.object(table.file_io, 'write_parquet', wraps=original) as write:
         _write(table, 'buffered', _data())
     assert write.called
     assert 'write_page_index' not in write.call_args[1]
+
+
+def test_explicit_false_passed_to_supported_arrow(tmp_path):
+    if not HAS_PAGE_INDEX:
+        pytest.skip('Writing page indexes requires PyArrow >= 13')
+    table = _table(tmp_path, 'buffered', 'false')
+    with patch.object(table.file_io, 'write_parquet', wraps=table.file_io.write_parquet) as write:
+        _write(table, 'buffered', _data())
+    assert write.call_args[1]['write_page_index'] is False
 
 
 @pytest.mark.parametrize('mode', ['buffered', 'format_table'])
@@ -218,8 +228,8 @@ def test_vector_parquet_indexes_and_round_trip(tmp_path, file_format, setting):
             for i in range(metadata.num_row_groups):
                 for j in range(metadata.num_columns):
                     column = metadata.row_group(i).column(j)
-                    assert column.has_column_index == (setting == 'true')
-                    assert column.has_offset_index == (setting == 'true')
+                    assert column.has_column_index == (setting != 'false')
+                    assert column.has_offset_index == (setting != 'false')
     reader = table.new_read_builder()
     actual = reader.new_read().to_arrow(reader.new_scan().plan().splits())
     assert actual.to_pydict() == data.to_pydict()
