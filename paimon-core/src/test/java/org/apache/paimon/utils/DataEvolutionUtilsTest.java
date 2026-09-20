@@ -367,21 +367,19 @@ public class DataEvolutionUtilsTest {
     public void testFieldMaxSequenceNumberFallsBackForMissingOrMalformedArray() {
         DataFileMeta legacy = dataFile("legacy.parquet", 10, null);
         DataFileMeta malformed =
-                dataFile("malformed.parquet", 10, null)
-                        .withColumnMaxSequenceNumbers(new long[] {5L});
+                dataFile("malformed.parquet", 10, null).withWriteColsSequences(new long[] {5L});
         DataFileMeta valid =
-                dataFile("valid.parquet", 10, null)
-                        .withColumnMaxSequenceNumbers(new long[] {5L, 8L});
+                dataFile("valid.parquet", 10, null).withWriteColsSequences(new long[] {5L, 8L});
 
         assertThat(
                         DataEvolutionUtils.fieldMaxSequenceNumber(
-                                legacy, legacy.columnMaxSequenceNumbers(), 0, 2))
+                                legacy, legacy.writeColsSequences(), 0, 2))
                 .isEqualTo(10L);
         assertThat(
                         DataEvolutionUtils.fieldMaxSequenceNumber(
-                                malformed, malformed.columnMaxSequenceNumbers(), 0, 2))
+                                malformed, malformed.writeColsSequences(), 0, 2))
                 .isEqualTo(10L);
-        long[] validSequences = valid.columnMaxSequenceNumbers();
+        long[] validSequences = valid.writeColsSequences();
         assertThat(DataEvolutionUtils.fieldMaxSequenceNumber(valid, validSequences, 0, 2))
                 .isEqualTo(5L);
         assertThat(DataEvolutionUtils.fieldMaxSequenceNumber(valid, validSequences, 1, 2))

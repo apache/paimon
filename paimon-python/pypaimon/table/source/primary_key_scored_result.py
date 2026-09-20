@@ -54,7 +54,8 @@ class PrimaryKeyScoredResult(GlobalIndexSplitResult):
         self._positions = tuple(positions)
         if len(set(_position_key(position) for position in positions)) != len(positions):
             raise ValueError("Primary-key search result contains duplicate physical positions.")
-        self._splits = tuple(_materialize(source_splits, positions))
+        self._splits = tuple(_materialize(
+            source_splits, positions, snapshot_id))
 
     @property
     def snapshot_id(self):
@@ -69,7 +70,7 @@ class PrimaryKeyScoredResult(GlobalIndexSplitResult):
         return self._splits
 
 
-def _materialize(source_splits, positions):
+def _materialize(source_splits, positions, snapshot_id):
     sources = {}
     for split in source_splits:
         partition_bytes = _partition_bytes(split.partition)
@@ -96,7 +97,9 @@ def _materialize(source_splits, positions):
         deletion_files = None
         if split.data_deletion_files is not None:
             deletion_files = [split.data_deletion_files[file_index]]
-        single = DataSplit([data_file], split.partition, split.bucket, False, deletion_files)
+        single = DataSplit(
+            [data_file], split.partition, split.bucket, False, deletion_files,
+            snapshot_id=snapshot_id)
         ordered = sorted(scores_by_position)
         yield IndexedSplit(single, _ranges(ordered),
                            [scores_by_position[position] for position in ordered])

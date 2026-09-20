@@ -40,21 +40,22 @@ public class ManifestEntrySerializerTest extends ObjectSerializerTestBase<Manife
     @Test
     void testWriteColsLegacySerializer() throws IOException {
         ManifestEntry expected = gen.next();
-        ManifestEntry withColumnSequences =
+        ManifestEntry withWriteColsSequences =
                 ManifestEntry.create(
                         expected.kind(),
                         expected.partition(),
                         expected.bucket(),
                         expected.totalBuckets(),
-                        expected.file().withColumnMaxSequenceNumbers(new long[] {3L, 42L}));
+                        expected.file().withWriteColsSequences(new long[] {3L, 42L}));
         ManifestEntryWriteColsLegacySerializer serializer =
                 new ManifestEntryWriteColsLegacySerializer();
 
         ManifestEntry actual =
-                serializer.deserializeFromBytes(serializer.serializeToBytes(withColumnSequences));
+                serializer.deserializeFromBytes(
+                        serializer.serializeToBytes(withWriteColsSequences));
 
         assertThat(actual).isEqualTo(expected);
-        assertThat(actual.file().columnMaxSequenceNumbers()).isNull();
+        assertThat(actual.file().writeColsSequences()).isNull();
     }
 
     @Override

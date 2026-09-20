@@ -119,6 +119,8 @@ def _chunks(table, seed, chunk_size=3, shard=None, predicate=None, projection=No
                 plan = scan.plan()
         else:
             plan = scan.plan()
+        assert all(
+            split.snapshot_id == plan.snapshot_id for split in plan.splits())
         chunks = []
         for split in plan.splits():
             if table.options.options.contains_key('incremental-between-timestamp'):

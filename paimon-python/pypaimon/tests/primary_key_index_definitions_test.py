@@ -182,6 +182,7 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
         ])
 
         self.assertEqual(7, result.snapshot_id)
+        self.assertEqual(7, result.splits[0].snapshot_id)
         self.assertEqual([(1, 2), (4, 4)],
                          [(r.from_, r.to) for r in result.splits[0].row_ranges()])
         self.assertEqual([0.9, 0.8, 0.7], result.splits[0].scores())

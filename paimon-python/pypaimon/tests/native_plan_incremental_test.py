@@ -140,14 +140,14 @@ def test_timestamp_windows_preserve_append_events_and_end_snapshot(
     plan, rows = _read(history, native, window)
     assert plan.snapshot_id == snapshot_id
     assert sorted((row['k'], row['v']) for row in rows) == expected
-    if native:
-        assert all(split.snapshot_id == snapshot_id for split in plan.splits())
+    assert all(split.snapshot_id == snapshot_id for split in plan.splits())
 
 
 def test_predicate_can_select_an_earlier_event(native, history):
     predicate = history.new_read_builder().new_predicate_builder().equal('v', 'intermediate')
     plan, rows = _read(history, native, (100, 200), predicate=predicate, with_stats=True)
     assert plan.snapshot_id == 3
+    assert all(split.snapshot_id == plan.snapshot_id for split in plan.splits())
     assert rows == [{'k': 1, 'v': 'intermediate'}]
 
 

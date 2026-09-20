@@ -75,7 +75,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
                                 1L,
                                 Arrays.asList("a", "b"),
                                 null)
-                        .withColumnMaxSequenceNumbers(new long[] {3L, 5L});
+                        .withWriteColsSequences(new long[] {3L, 5L});
         IndexFileMeta indexFile =
                 new IndexFileMeta(
                         "index-type", "index-file", 100L, 10L, (GlobalIndexMeta) null, null);

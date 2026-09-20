@@ -624,7 +624,7 @@ public class ManifestFileTest {
     }
 
     @Test
-    void testLegacyAvroReaderSkipsColumnSequenceNumbers() throws Exception {
+    void testLegacyAvroReaderSkipsWriteColsSequences() throws Exception {
         ManifestEntry expected = gen.next();
         ManifestEntry source =
                 ManifestEntry.create(
@@ -632,7 +632,7 @@ public class ManifestFileTest {
                         expected.partition(),
                         expected.bucket(),
                         expected.totalBuckets(),
-                        expected.file().withColumnMaxSequenceNumbers(new long[] {3L, 42L}));
+                        expected.file().withWriteColsSequences(new long[] {3L, 42L}));
         List<DataField> legacyManifestFields =
                 ManifestEntry.MANIFEST_ROW_TYPE.getFields().stream()
                         .map(
@@ -664,7 +664,7 @@ public class ManifestFileTest {
         }
 
         assertThat(actual).isEqualTo(expected);
-        assertThat(actual.file().columnMaxSequenceNumbers()).isNull();
+        assertThat(actual.file().writeColsSequences()).isNull();
     }
 
     @ParameterizedTest

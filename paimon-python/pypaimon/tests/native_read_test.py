@@ -21,6 +21,7 @@ from unittest.mock import Mock, patch
 import pyarrow as pa
 import pytest
 
+from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import AtomicType, DataField
 
@@ -153,6 +154,57 @@ def test_native_read_falls_back_for_transformed_python_split():
     with patch('pypaimon.read.native_plan.native_read') as native:
         assert read._try_native_batches([split], schema) is None
 
+    native.assert_not_called()
+
+
+def test_native_read_bridges_python_planned_split():
+    read = _table_read()
+    schema = pa.schema([('id', pa.int32())])
+    split = _Split()
+    converted = object()
+
+    with patch(
+            'pypaimon.read.native_plan.native_split_from_python',
+            return_value=converted) as bridge, patch(
+                'pypaimon.read.native_plan.native_read',
+                return_value=[_id_batch([1])]) as native:
+        result = list(read._try_native_batches([split], schema))
+
+    assert result[0].column('id').to_pylist() == [1]
+    bridge.assert_called_once_with(split)
+    native.assert_called_once_with(
+        read.table,
+        [converted],
+        predicate=None,
+        limit=None,
+        projection=['id'],
+    )
+
+
+def test_native_split_bridge_failure_falls_back_before_starting_reader():
+    read = _table_read()
+    split = _Split()
+    with patch(
+            'pypaimon.read.native_plan.native_split_from_python',
+            side_effect=ValueError('not serializable')), patch(
+                'pypaimon.read.native_plan.native_read') as native:
+        assert read._try_native_batches(
+            [split], pa.schema([('id', pa.int32())])) is None
+    native.assert_not_called()
+
+
+def test_native_query_auth_falls_back_to_python_reader():
+    read = _table_read()
+    split = _Split()
+    split._native_split = object()
+    wrapped = QueryAuthSplit(split, object())
+
+    with patch(
+            'pypaimon.read.native_plan.native_split_from_python') as convert, patch(
+            'pypaimon.read.native_plan.native_read') as native:
+        assert read._try_native_batches(
+            [wrapped], pa.schema([('id', pa.int32())])) is None
+    convert.assert_not_called()
     native.assert_not_called()
 
 

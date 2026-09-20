@@ -66,7 +66,9 @@ def _mock_entry(partition_values, bucket, file_name, row_count, file_size=1024):
     return entry
 
 
-def _make_generator(seed, chunk_size, table=None, deletion_files_map=None):
+def _make_generator(
+        seed, chunk_size, table=None, deletion_files_map=None,
+        snapshot_id=None):
     if table is None:
         table = _mock_table()
     return AppendChunkShuffleSplitGenerator(
@@ -76,6 +78,7 @@ def _make_generator(seed, chunk_size, table=None, deletion_files_map=None):
         deletion_files_map=deletion_files_map,
         seed=seed,
         chunk_size=chunk_size,
+        snapshot_id=snapshot_id,
     )
 
 
@@ -233,12 +236,13 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
     def test_chunk_truncates_inside_file(self):
         # one file of 250 rows, chunk_size 100 → 3 chunks: 100, 100, 50
         entries = [_mock_entry([], 0, 'f1', 250)]
-        gen = _make_generator(seed=1, chunk_size=100)
+        gen = _make_generator(seed=1, chunk_size=100, snapshot_id=7)
         splits = gen.create_splits(entries)
         self.assertEqual(len(splits), 3)
         # All three chunks slice the same file → all SlicedSplit
         for s in splits:
             self.assertIsInstance(s, SlicedSplit)
+            self.assertEqual(s.snapshot_id, 7)
         # union of (start, end) intervals must cover [0, 250)
         intervals = sorted(s.shard_file_idx_map()['f1'] for s in splits)
         self.assertEqual(intervals, [(0, 100), (100, 200), (200, 250)])
