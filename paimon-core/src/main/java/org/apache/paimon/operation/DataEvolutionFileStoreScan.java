@@ -40,6 +40,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -225,7 +226,9 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
      * can emit the right number of NULL-filled rows.
      *
      * <p>If Deletion-Vector is enabled, we always keep the oldest normal file for each group as the
-     * anchor file to lookup corresponding Deletion Files.
+     * anchor file to lookup corresponding Deletion Files. Without deletion vectors, the anchor is
+     * still kept when all other kept files are blob/vector-store files: dedicated files never span
+     * the group's full row-id range, so the reader needs the anchor to see every row.
      */
     private List<ManifestEntry> pruneByReadType(List<ManifestEntry> group) {
         if (readType == null || group.size() <= 1) {
@@ -248,7 +251,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 readType,
                 filterFieldIds,
                 deletionVectorsEnabled,
-                this::fileFieldIdsForEntry);
+                this::fileFieldIdsForEntry,
+                rowRangeIndex);
     }
 
     @VisibleForTesting
@@ -257,7 +261,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             RowType readType,
             Set<Integer> filterFieldIds,
             boolean deletionVectorsEnabled,
-            Function<ManifestEntry, Set<Integer>> fileFieldIds) {
+            Function<ManifestEntry, Set<Integer>> fileFieldIds,
+            @Nullable RowRangeIndex rowRangeIndex) {
         ManifestEntry anchor =
                 deletionVectorsEnabled ? retrieveAnchorFile(group, ManifestEntry::file) : null;
         Set<Integer> readFieldIds = new HashSet<>();
@@ -281,6 +286,29 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         if (anchor != null && !kept.contains(anchor)) {
             kept.add(anchor);
         }
+        // Blob and vector-store files may each cover only a sub-range of their group. If the kept
+        // files are all dedicated files that together do not cover the requested rows (the whole
+        // group when there is no row-range pushdown), the reader would derive the range from those
+        // sub-ranges and drop the rows outside them, so keep the full-range anchor. When they
+        // already cover the requested rows, the anchor is unnecessary and would only read an extra
+        // file.
+        if (anchor == null
+                && !kept.isEmpty()
+                && kept.stream()
+                        .allMatch(
+                                e ->
+                                        isBlobFile(e.file().fileName())
+                                                || isVectorStoreFile(e.file().fileName()))) {
+            ManifestEntry fullRangeAnchor = retrieveAnchorFile(group, ManifestEntry::file);
+            Range fullRange = fullRangeAnchor.file().nonNullRowIdRange();
+            List<Range> requested =
+                    rowRangeIndex == null
+                            ? Collections.singletonList(fullRange)
+                            : rowRangeIndex.intersectedRanges(fullRange.from, fullRange.to);
+            if (!coversRanges(kept, requested)) {
+                kept.add(fullRangeAnchor);
+            }
+        }
         // Group must contribute at least one file so the reader sees rowCount and can NULL-fill
         // missing columns for the projection's rows. The representative must be a full-range
         // normal file: a blob or vector-store file covers only a sub-range of the group's row
@@ -288,6 +316,35 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         return kept.isEmpty()
                 ? Collections.singletonList(retrieveAnchorFile(group, ManifestEntry::file))
                 : kept;
+    }
+
+    /**
+     * Whether the row-id ranges of {@code entries} together cover every {@code target} range
+     * (inclusive), with no gap. Dedicated files are always within the group's full range, so
+     * covering the requested targets means the reader can derive the range from them without the
+     * anchor.
+     */
+    private static boolean coversRanges(List<ManifestEntry> entries, List<Range> targets) {
+        List<Range> ranges = new ArrayList<>();
+        for (ManifestEntry entry : entries) {
+            ranges.add(entry.file().nonNullRowIdRange());
+        }
+        ranges.sort((left, right) -> Long.compare(left.from, right.from));
+        for (Range target : targets) {
+            long cursor = target.from;
+            for (Range range : ranges) {
+                if (range.from > cursor) {
+                    break;
+                }
+                if (range.to >= cursor) {
+                    cursor = range.to + 1;
+                }
+            }
+            if (cursor <= target.to) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private Set<Integer> fileFieldIdsForEntry(ManifestEntry entry) {
