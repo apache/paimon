@@ -18,6 +18,8 @@
 
 package org.apache.paimon.append.dataevolution;
 
+import org.apache.paimon.io.DataInputDeserializer;
+import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
@@ -84,6 +86,28 @@ public class RowRangeMappingIndexTest {
         RowRangeMappingIndex absolute = relative.shiftNewStarts(100L);
         assertThat(absolute.map(new Range(10, 14))).hasValue(new Range(100, 104));
         assertThat(absolute.map(new Range(20, 24))).hasValue(new Range(105, 109));
+    }
+
+    @Test
+    public void testSerializeEffectiveMappingAfterMultipleShifts() throws Exception {
+        RowRangeMappingIndex original =
+                RowRangeMappingIndex.create(
+                                Arrays.asList(
+                                        RowRangeMappingIndex.mapping(10, 14, 0),
+                                        RowRangeMappingIndex.mapping(15, 19, 5),
+                                        RowRangeMappingIndex.mapping(30, 39, 10)))
+                        .shiftNewStarts(100)
+                        .shiftNewStarts(20);
+        DataOutputSerializer out = new DataOutputSerializer(128);
+        original.serialize(out);
+        RowRangeMappingIndex restored =
+                RowRangeMappingIndex.deserialize(new DataInputDeserializer(out.getCopyOfBuffer()));
+
+        assertThat(restored.map(new Range(12, 17))).hasValue(new Range(122, 127));
+        assertThat(restored.map(new Range(30, 39))).hasValue(new Range(130, 139));
+        assertThat(restored.map(new Range(19, 30))).isEmpty();
+        assertThat(restored.overlaps(new Range(20, 29))).isFalse();
+        assertThat(restored.shiftNewStarts(5).map(new Range(12, 17))).hasValue(new Range(127, 132));
     }
 
     @Test

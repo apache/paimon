@@ -53,6 +53,8 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -427,6 +429,23 @@ public class DataEvolutionRowIdReassigner {
         Pair<String, Long> deltaManifestList = manifestList.write(Collections.emptyList());
         RewrittenIndexManifest rewrittenIndexManifest = rewriteIndexManifest(assignment);
 
+        String planFile;
+        try {
+            planFile =
+                    new DataEvolutionRowIdReassignPlan(
+                                    assignment.snapshot.id(),
+                                    assignment.snapshot.id() + 1,
+                                    assignment.rowIdMappings)
+                            .write(table.fileIO(), table.store().pathFactory());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to persist row-id reassignment plan.", e);
+        }
+        Map<String, String> properties =
+                assignment.snapshot.properties() == null
+                        ? new HashMap<>()
+                        : new HashMap<>(assignment.snapshot.properties());
+        properties.put(DataEvolutionRowIdReassignPlan.PLAN_FILE_PROPERTY, planFile);
+
         boolean success;
         try (FileStoreCommitImpl commit =
                 (FileStoreCommitImpl) table.store().newCommit(commitUser, table)) {
@@ -438,7 +457,12 @@ public class DataEvolutionRowIdReassigner {
                             baseManifestList,
                             deltaManifestList,
                             rewrittenIndexManifest.indexManifest,
-                            assignment.nextRowId);
+                            assignment.nextRowId,
+                            properties);
+        }
+        if (!success) {
+            // Only clean a definitively rejected attempt. An exception may mean it committed.
+            table.fileIO().deleteQuietly(table.store().pathFactory().toManifestFilePath(planFile));
         }
         return new CommitAssignmentResult(
                 success, rewrittenDataManifests.fileCount, rewrittenIndexManifest.indexFileCount);

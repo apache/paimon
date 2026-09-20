@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassignPlan;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -381,6 +382,11 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         collectUnusedIndexManifests(snapshot, skippingSet, indexFiles, indexManifests);
         collectUnusedStatisticsManifests(snapshot, skippingSet, statistics);
 
+        String reassignPlan = DataEvolutionRowIdReassignPlan.planFile(snapshot);
+        if (reassignPlan != null && skippingSet.add(reassignPlan)) {
+            manifests.add(reassignPlan);
+        }
+
         List<Runnable> tasks = new ArrayList<>();
         for (String manifest : manifests) {
             tasks.add(() -> manifestFile.delete(manifest));
@@ -615,6 +621,11 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                     .map(IndexManifestEntry::indexFile)
                     .map(IndexFileMeta::fileName)
                     .forEach(skippingSet::add);
+        }
+
+        String reassignPlan = DataEvolutionRowIdReassignPlan.planFile(skippingSnapshot);
+        if (reassignPlan != null) {
+            skippingSet.add(reassignPlan);
         }
 
         // statistics
