@@ -245,7 +245,11 @@ def test_global_candidates_and_duplicate_precedence(table):
     index_file = IndexFileMeta("ivf-flat", "fake", 1, 2)
     splits = [IndexVectorSearchSplit(0, 1, [index_file]), IndexVectorSearchSplit(0, 3, [index_file])]
 
-    def completed(*args):
+    def completed(worker, context, items, *args):
+        if worker is search_module._search_batch_refine_split:
+            for ordinal, split in enumerate(items):
+                yield ordinal, worker(context, split)
+            return
         # First query must exclude exact nearest row 3; second query has its own candidates.
         # Duplicate row 0 must retain the earlier split's score for the second query.
         assert args[-1] is True

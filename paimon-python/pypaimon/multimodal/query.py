@@ -662,8 +662,8 @@ class BatchVectorQuery(_PreFilterQuery):
 
         Ray execution supports data-evolution tables. ``concurrency`` bounds
         in-flight tasks (defaults to 4); ``ray_remote_args`` configures their
-        resources and retries. Batch refinement and shared result lookup run
-        on the driver, using the same snapshot as all workers.
+        resources and retries. Shared result lookup runs on the driver,
+        using the same snapshot as all workers, including refinement tasks.
         """
         if execution == "local":
             if concurrency is not None or ray_remote_args is not None:
