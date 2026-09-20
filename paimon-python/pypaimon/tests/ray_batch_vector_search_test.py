@@ -245,7 +245,11 @@ def test_global_candidates_and_duplicate_precedence_ignore_completion_order(tabl
     index_file = IndexFileMeta("ivf-flat", "fake", 1, 2)
     splits = [IndexVectorSearchSplit(0, 1, [index_file]), IndexVectorSearchSplit(0, 3, [index_file])]
 
-    def completed(*args):
+    def completed(worker, context, items, *args):
+        if worker is search_module._search_batch_refine_split:
+            for ordinal, split in enumerate(items):
+                yield ordinal, worker(context, split)
+            return
         # First query must exclude exact nearest row 3; second query has its own candidates.
         # Duplicate row 0 must retain the earlier split's score for the second query.
         yield 1, ("l2", [{2: 8., 3: 7.}, {0: 100., 2: 8., 3: 7.}])

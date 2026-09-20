@@ -155,14 +155,16 @@ batch_neighbors = (
 
 Each batch task handles all query vectors for one split: index workers reuse
 an open shard across bounded query blocks, and raw workers stream each data
-split once with a separate top-k for each query. Batch refinement and the shared
-final row lookup run on the driver. The entire batch uses one read snapshot.
+split once with a separate top-k for each query. For refinement, the driver
+selects each query's global candidates, then workers stream their union once per
+read split, scoring each row only for the queries that selected it. Shared final
+row lookup runs on the driver. The entire batch uses one read snapshot.
 Candidate traffic and result memory grow with the number of query vectors;
 split large query collections into smaller batches when necessary.
 
 The driver fixes one read snapshot and plans the query. Workers search individual
 index shards and, when required by the table's search mode, scan unindexed data.
-They return candidate row IDs and scores. For single-vector queries with
+They return candidate row IDs and scores. For vector queries with
 refinement enabled, the driver first selects the global candidate set, then
 workers read and score those candidate vectors using the index's persisted
 metric. The driver merges their results and retains the local rules for
@@ -180,8 +182,8 @@ All workers must be able to access the table's storage. Local filesystem paths
 are suitable for a local Ray cluster; multiple nodes require shared storage.
 Each index task searches one shard, while its native index I/O settings still
 apply. Raw-scan parallelism is limited by the number of planned read splits,
-controlled by the table's `source.split.target-size` option. Single-vector
-refinement also uses planned read splits; workers return scores for merging.
+controlled by the table's `source.split.target-size` option. Refinement also
+uses planned read splits; workers return scores for merging.
 Final row lookup runs on the driver. Candidate traffic grows
 with the number of index shards and the configured refinement budget, so Ray
 execution is most useful when shard search or raw scanning outweighs scheduling
