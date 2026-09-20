@@ -33,10 +33,11 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 
-# Bound encoded data retained by the temporary column files, independently of
-# the number of requested rows and the size of the source row group.
+# Bound encoded page data retained by the temporary column files.
 _MAX_PAGE_BYTES = 32 * 1024 * 1024
+# Bound all serialized OffsetIndexes and their retained typed PageLocations.
 _MAX_INDEX_BYTES = 8 * 1024 * 1024
+_MAX_PAGE_LOCATIONS = 128 * 1024
 
 
 class _Compact:
@@ -104,6 +105,156 @@ class _Compact:
         raise ValueError("Unsupported Parquet compact type: {}".format(kind))
 
 
+class _OffsetIndexDecoder:
+    """Decode typed PageLocations without materializing generic Thrift trees."""
+
+    def __init__(self, data, max_locations):
+        self.parser = _Compact(data)
+        self.max_locations = max_locations
+        self.remaining_items = max_locations * 4
+
+    def decode(self):
+        locations = None
+        previous = 0
+        seen = set()
+        while True:
+            field = self._field(previous)
+            if field is None:
+                break
+            field_id, kind = field
+            if field_id in seen:
+                raise ValueError("Duplicate Parquet OffsetIndex field")
+            seen.add(field_id)
+            previous = field_id
+            if field_id == 1:
+                if kind != 9:
+                    raise ValueError("Invalid Parquet OffsetIndex page locations")
+                locations = self._locations()
+            else:
+                self._skip(kind)
+        if locations is None or self.parser.position != len(self.parser.data):
+            raise ValueError("Invalid Parquet OffsetIndex")
+        return locations
+
+    def _field(self, previous):
+        header = self.parser.take(1)[0]
+        if header == 0:
+            return None
+        delta, kind = header >> 4, header & 15
+        field = previous + delta if delta else self.parser.value(4)
+        if field <= 0:
+            raise ValueError("Invalid Parquet compact field")
+        return field, kind
+
+    def _collection(self):
+        header = self.parser.take(1)[0]
+        count, element = header >> 4, header & 15
+        if count == 15:
+            count = self.parser.unsigned()
+        if count > len(self.parser.data) - self.parser.position:
+            raise ValueError("Invalid Parquet compact collection size")
+        return count, element
+
+    def _locations(self):
+        count, element = self._collection()
+        if element != 12 or count > self.max_locations:
+            raise ValueError("Parquet OffsetIndex exceeds page-location budget")
+        self._consume(count)
+        return [self._location() for _ in range(count)]
+
+    def _location(self):
+        values = [None, None, None]
+        expected = (6, 5, 6)
+        previous = 0
+        seen = set()
+        while True:
+            field = self._field(previous)
+            if field is None:
+                break
+            field_id, kind = field
+            if field_id in seen:
+                raise ValueError("Duplicate Parquet PageLocation field")
+            seen.add(field_id)
+            previous = field_id
+            if 1 <= field_id <= 3:
+                if kind != expected[field_id - 1]:
+                    raise ValueError("Invalid Parquet PageLocation field type")
+                values[field_id - 1] = self.parser.value(kind)
+            else:
+                self._skip(kind)
+        if any(value is None for value in values):
+            raise ValueError("Missing Parquet PageLocation field")
+        offset, size, first_row = values
+        if offset < 0 or size <= 0 or first_row < 0:
+            raise ValueError("Invalid Parquet PageLocation")
+        return offset, size, first_row
+
+    def _consume(self, count):
+        if count > self.remaining_items:
+            raise ValueError("Parquet compact metadata exceeds object budget")
+        self.remaining_items -= count
+
+    def _skip_collection_value(self, kind, depth):
+        if kind in (1, 2):
+            actual = self.parser.take(1)[0]
+            if actual not in (1, 2):
+                raise ValueError("Invalid Parquet compact boolean")
+        else:
+            self._skip(kind, depth)
+
+    def _skip(self, kind, depth=0):
+        if depth > 64:
+            raise ValueError("Parquet metadata nesting exceeds 64 levels")
+        if kind in (1, 2):
+            return
+        if kind == 3:
+            self.parser.take(1)
+            return
+        if kind in (4, 5, 6):
+            self.parser.unsigned()
+            return
+        if kind == 7:
+            self.parser.take(8)
+            return
+        if kind == 8:
+            self.parser.take(self.parser.unsigned())
+            return
+        if kind in (9, 10):
+            count, element = self._collection()
+            self._consume(count)
+            for _ in range(count):
+                self._skip_collection_value(element, depth + 1)
+            return
+        if kind == 11:
+            count = self.parser.unsigned()
+            self._consume(count * 2)
+            if count:
+                kinds = self.parser.take(1)[0]
+                key_kind, value_kind = kinds >> 4, kinds & 15
+                for _ in range(count):
+                    self._skip_collection_value(key_kind, depth + 1)
+                    self._skip_collection_value(value_kind, depth + 1)
+            return
+        if kind == 12:
+            previous = 0
+            seen = set()
+            while True:
+                field = self._field(previous)
+                if field is None:
+                    return
+                field_id, field_kind = field
+                if field_id in seen:
+                    raise ValueError("Duplicate Parquet compact field")
+                seen.add(field_id)
+                previous = field_id
+                self._skip(field_kind, depth + 1)
+        raise ValueError("Unsupported Parquet compact type: {}".format(kind))
+
+
+def _decode_offset_index(data, max_locations):
+    return _OffsetIndexDecoder(data, max_locations).decode()
+
+
 def _unsigned(value):
     result = bytearray()
     while value >= 128:
@@ -160,6 +311,27 @@ def _read_exact(source, offset, length):
     if len(data) != length:
         raise OSError("Truncated Parquet page-index byte range")
     return data
+
+
+def _read_index_ranges(source, ranges):
+    groups = []
+    for key, offset, length in sorted(ranges, key=lambda item: item[1]):
+        if offset < 4 or length <= 0:
+            raise ValueError("Invalid Parquet page-index byte range")
+        end = offset + length
+        if groups and offset < groups[-1][1]:
+            raise ValueError("Overlapping Parquet page-index byte ranges")
+        if groups and offset == groups[-1][1]:
+            groups[-1][1] = end
+            groups[-1][2].append((key, offset, length))
+        else:
+            groups.append([offset, end, [(key, offset, length)]])
+    result = {}
+    for start, end, members in groups:
+        data = memoryview(_read_exact(source, start, end - start))
+        for key, offset, length in members:
+            result[key] = data[offset - start:offset - start + length]
+    return result
 
 
 class ParquetPageIndexReader:
@@ -241,32 +413,37 @@ class ParquetPageIndexReader:
         indexed = {}
         plans = []
         selected_bytes = 0
-        index_bytes = 0
         full_bytes = 0
+        index_ranges = []
         for index in sorted(physical_columns):
             chunk = chunks[index]
             index_size = _get(chunk, 5)
-            if index_size > _MAX_INDEX_BYTES:
-                return None
-            raw = _read_exact(self.source, _get(chunk, 4), index_size)
-            index_bytes += index_size
-            locations = _get(_Compact(raw).value(12), 1)[1]
+            index_ranges.append((index, _get(chunk, 4), index_size))
+        index_bytes = sum(length for _, _, length in index_ranges)
+        if index_bytes > _MAX_INDEX_BYTES:
+            return None
+        raw_indexes = _read_index_ranges(self.source, index_ranges)
+        remaining_locations = _MAX_PAGE_LOCATIONS
+        for index in sorted(physical_columns):
+            chunk = chunks[index]
+            locations = _decode_offset_index(raw_indexes[index], remaining_locations)
+            remaining_locations -= len(locations)
             column = _get(chunk, 3)
             data_offset = _get(column, 9)
             dictionary_offset = _get(column, 11, data_offset)
             chunk_end = dictionary_offset + _get(column, 7)
-            starts = [_get(page, 3) for page in locations]
+            starts = [page[2] for page in locations]
             if not starts or starts[0] != 0 or starts[-1] >= row_count:
                 raise ValueError("Invalid Parquet OffsetIndex row boundaries")
             previous_end = data_offset
             previous_row = -1
             for page in locations:
-                offset, size, first_row = (_get(page, field) for field in (1, 2, 3))
+                offset, size, first_row = page
                 if (offset < previous_end or size <= 0 or offset + size > chunk_end
                         or first_row <= previous_row):
                     raise ValueError("Invalid Parquet OffsetIndex page location")
                 previous_end, previous_row = offset + size, first_row
-            if _get(locations[0], 1) != data_offset or dictionary_offset > data_offset:
+            if locations[0][0] != data_offset or dictionary_offset > data_offset:
                 raise ValueError("Invalid Parquet OffsetIndex first page")
             indexed[index] = (column, dictionary_offset, data_offset - dictionary_offset,
                               locations, starts)
@@ -292,7 +469,7 @@ class ParquetPageIndexReader:
                 pages, infos = [], []
                 for position in selected:
                     page = locations[position]
-                    pages.append((_get(page, 1), _get(page, 2)))
+                    pages.append(page[:2])
                     next_row = starts[position + 1] if position + 1 < len(starts) else row_count
                     infos.append((starts[position], next_row - starts[position]))
                 selected_bytes += dictionary_size + sum(size for _, size in pages)

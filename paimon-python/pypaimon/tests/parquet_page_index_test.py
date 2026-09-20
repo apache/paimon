@@ -205,6 +205,27 @@ def test_corrupt_offset_index_is_not_silently_ignored(fixture):
         _read(fixture, row_ranges=[(0, 2)])
 
 
+def test_offset_index_page_locations_are_bounded_before_decoding():
+    count = page_module._MAX_PAGE_LOCATIONS + 1
+    encoded = b'\x19\xfc' + page_module._unsigned(count) + b'\x00' * count + b'\x00'
+    with pytest.raises(ValueError, match='page-location budget'):
+        page_module._decode_offset_index(encoded, page_module._MAX_PAGE_LOCATIONS)
+
+
+def test_wide_fallback_coalesces_offset_index_reads(tmp_path):
+    path = str(tmp_path / 'wide.parquet')
+    columns = ['column_%03d' % i for i in range(200)]
+    table = pa.table({name: range(16) for name in columns})
+    pq.write_table(table, path, write_page_index=True, use_dictionary=False,
+                   data_page_size=1024 * 1024)
+    with pa.OSFile(path, 'rb') as source:
+        reader = page_module.ParquetPageIndexReader.create(
+            source, pq.ParquetFile(source), columns, [0], 71)
+        with patch.object(page_module, '_read_exact', wraps=page_module._read_exact) as reads:
+            assert reader.read_row_group(0, [(0, 1)]) is None
+    assert reads.call_count == 1
+
+
 def test_index_io_errors_propagate_and_release_source(fixture):
     path, _, file_io, _ = fixture
     reader = reader_module.FormatPyArrowReader(
