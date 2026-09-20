@@ -46,6 +46,7 @@ from pypaimon.multimodal.source_utils import _SourceFileIO
 from pypaimon.multimodal.connection import MultimodalConnection
 from pypaimon.multimodal.lerobot import load_from_lerobot
 from pypaimon.multimodal.lerobot.dataset import (
+    _PaimonLeRobotMetadata,
     _PyAVVideoDecoder,
     _arrow_rows,
     _decode_video_frames,
@@ -148,6 +149,59 @@ def _catalog_metadata(connection, name):
 
 
 class LeRobotValidationTest(unittest.TestCase):
+
+    def test_episode_metadata_pickle_stays_small_and_usable(self):
+        try:
+            from datasets import Dataset
+        except ImportError:
+            self.skipTest("datasets is not installed")
+
+        rows = [{
+            "episode_index": index,
+            "dataset_from_index": index * 400,
+            "dataset_to_index": (index + 1) * 400,
+            "length": 400,
+            "tasks": ["pick", "place"],
+        } for index in range(50)]
+        episodes_arrow = pa.Table.from_pylist(rows)
+        fingerprint = "0123456789abcdef"
+        episodes = Dataset(episodes_arrow, fingerprint=fingerprint)
+        metadata = _PaimonLeRobotMetadata(
+            "robot", "tag", {"fps": 50}, None, episodes, ["pick", "place"],
+            None)
+        metadata._compress_episodes = True
+
+        payload = pickle.dumps(metadata)
+        self.assertLess(len(payload), len(pickle.dumps(episodes)) * 3 // 4)
+        restored = pickle.loads(payload)
+        self.assertIsInstance(restored.episodes, Dataset)
+        self.assertEqual(episodes[:], restored.episodes[:])
+        self.assertEqual(episodes.features, restored.episodes.features)
+        self.assertEqual(episodes._fingerprint, restored.episodes._fingerprint)
+        self.assertEqual("tag", restored.revision)
+        self.assertEqual(50, restored.fps)
+
+        episodes.set_format("numpy")
+        restored = pickle.loads(pickle.dumps(metadata))
+        self.assertEqual("numpy", restored.episodes.format["type"])
+        episodes.reset_format()
+
+        metadata.episodes = episodes.with_format("numpy")
+        restored = pickle.loads(pickle.dumps(metadata))
+        self.assertEqual("numpy", restored.episodes.format["type"])
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "episodes.arrow")
+            with pa.OSFile(path, "wb") as output:
+                with pa.ipc.new_stream(
+                        output, episodes.data.table.schema) as writer:
+                    writer.write_table(episodes.data.table)
+            metadata.episodes = Dataset.from_file(path)
+            restored = pickle.loads(pickle.dumps(metadata))
+            self.assertEqual(
+                metadata.episodes.cache_files,
+                restored.episodes.cache_files,
+            )
 
     def test_video_columns_decode_in_parallel(self):
         barrier = threading.Barrier(2)
@@ -3067,6 +3121,29 @@ class LeRobotImportTest(unittest.TestCase):
                 })
             dataset.save_episode()
         dataset.finalize()
+
+    def test_table_dataset_pickle_preserves_episode_metadata_and_reads(self):
+        import torch
+
+        self.connection.load_from_lerobot("worker_pickle", self.image_source)
+        table = self.connection.get_table("worker_pickle")
+        dataset = pmm.PaimonLeRobotDataset(table, return_uint8=True)
+        restored = pickle.loads(pickle.dumps(dataset))
+
+        self.assertEqual(dataset.meta.episodes[:], restored.meta.episodes[:])
+        self.assertEqual(
+            dataset.meta.episodes._fingerprint,
+            restored.meta.episodes._fingerprint,
+        )
+        for index in (0, 2, 4):
+            original = dataset[index]
+            reread = restored[index]
+            self.assertEqual(original.keys(), reread.keys())
+            for key in original:
+                if torch.is_tensor(original[key]):
+                    self.assertTrue(torch.equal(original[key], reread[key]))
+                else:
+                    self.assertEqual(original[key], reread[key])
 
     def test_import_infers_schema_and_preserves_episodes(self):
         import pandas as pd
