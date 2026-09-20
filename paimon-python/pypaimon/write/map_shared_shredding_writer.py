@@ -36,6 +36,7 @@ from pypaimon.schema.data_types import (
     VectorType,
 )
 from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.write.writer.parquet_writer_options import create_parquet_writer_options
 
 
 _FIELD_MAPPING = "__field_mapping"
@@ -88,6 +89,7 @@ class MapSharedShreddingWriter:
 
         self._validate_format("file.format", file_format)
         self._validate_format("changelog.file.format", changelog_format)
+        self._parquet_writer_options = create_parquet_writer_options(options)
         self._validate_compression("file.compression", options.file_compression())
         if options.bucket() == BucketMode.POSTPONE_BUCKET.value:
             raise ValueError(
@@ -158,7 +160,7 @@ class MapSharedShreddingWriter:
         # Bound scratch space for slot mappings/indices as well as logical values.
         slots = sum(c.num_columns for c in converters.values())
         batch_rows = max(1, min(1024, _CONVERSION_BYTES // max(1, slots * 16)))
-        kwargs = {'compression': compression}
+        kwargs = dict(self._parquet_writer_options, compression=compression)
         if compression.lower() == 'zstd':
             kwargs['compression_level'] = zstd_level
         try:

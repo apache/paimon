@@ -26,7 +26,7 @@ class SingleFileWriter:
     """Write one file incrementally; currently only Parquet is supported."""
 
     def __init__(self, file_io, path, schema, file_format, compression, zstd_level,
-                 stats_fields, stats_collector):
+                 stats_fields, stats_collector, parquet_options=None):
         if file_format != CoreOptions.FILE_FORMAT_PARQUET:
             raise NotImplementedError(
                 'SingleFileWriter only supports Parquet, got {}'.format(file_format))
@@ -41,7 +41,7 @@ class SingleFileWriter:
         self.row_count = 0
         self.column_stats = {}
 
-        kwargs = {'compression': compression}
+        kwargs = dict(parquet_options or {}, compression=compression)
         if compression.lower() == 'zstd':
             kwargs['compression_level'] = zstd_level
         try:
