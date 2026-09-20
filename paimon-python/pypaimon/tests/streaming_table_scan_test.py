@@ -51,6 +51,7 @@ def _create_mock_table(latest_snapshot_id: int = 5):
     table.options.data_evolution_enabled.return_value = False
     table.options.deletion_vectors_enabled.return_value = False
     table.options.changelog_producer.return_value = ChangelogProducer.NONE
+    table.options.native_plan_enabled.return_value = False
     table.field_names = ['col1', 'col2']
     table.trimmed_primary_keys = []
     table.partition_keys = []
@@ -92,6 +93,41 @@ class AsyncStreamingTableScanTest(unittest.TestCase):
 
         self.assertIsInstance(plan, Plan)
         self.assertEqual(scan.next_snapshot_id, 6)
+
+    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    @patch('pypaimon.read.native_plan.native_plan')
+    def test_delta_scan_uses_native_plan_with_projection(
+            self, native_plan, _manifest_files, _manifest_lists):
+        table, _ = _create_mock_table()
+        table.options.native_plan_enabled.return_value = True
+        native_plan.return_value = Plan([], snapshot_id=5)
+        scan = AsyncStreamingTableScan(table, predicate=Mock())
+        scan._read_type = [Mock(name='payload'), Mock(name='id')]
+        scan._read_type[0].name = 'payload'
+        scan._read_type[1].name = 'id'
+
+        plan = scan._create_delta_plan(_create_mock_snapshot(5))
+
+        self.assertIs(plan, native_plan.return_value)
+        self.assertEqual(native_plan.call_args.kwargs['incremental_range'], (4, 5))
+        self.assertEqual(
+            native_plan.call_args.kwargs['projection'], ['payload', 'id'])
+
+    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    @patch('pypaimon.read.native_plan.native_plan')
+    def test_bucket_filtered_delta_scan_keeps_python_planner(
+            self, native_plan, _manifest_files, manifest_lists):
+        table, _ = _create_mock_table()
+        table.options.native_plan_enabled.return_value = True
+        manifest_lists.return_value.read_delta.return_value = []
+        scan = AsyncStreamingTableScan(table, bucket_filter=lambda bucket: True)
+
+        plan = scan._create_delta_plan(_create_mock_snapshot(5))
+
+        self.assertEqual(plan.snapshot_id, 5)
+        native_plan.assert_not_called()
 
     @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
     @patch('pypaimon.read.streaming_table_scan.FileScanner')

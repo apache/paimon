@@ -305,26 +305,36 @@ def _native_read_builder(table):
     return builder
 
 
-def _configure_native_read_builder(builder, predicate, limit, projection):
-    if projection is not None:
+def _configure_native_read_builder(builder, predicate, limit, projection,
+                                   nested_projection=None,
+                                   include_row_kind=False):
+    if nested_projection is not None:
+        builder = builder.with_nested_projection(nested_projection)
+    elif projection is not None:
         builder = builder.with_projection(projection)
     if predicate is not None:
         builder = builder.with_filter(_predicate_to_native(predicate))
     if limit is not None:
         builder = builder.with_limit(limit)
+    if include_row_kind:
+        builder = builder.with_include_row_kind(True)
     return builder
 
 
 def native_read(table, splits, predicate: Optional[Predicate] = None,
                 limit: Optional[int] = None,
                 projection: Optional[List[str]] = None,
-                blob_parallelism: Optional[int] = None):
+                blob_parallelism: Optional[int] = None,
+                nested_projection: Optional[List[List[str]]] = None,
+                include_row_kind: bool = False):
     """Read Rust ``Split`` objects into PyArrow ``RecordBatch`` objects."""
     if not native_reader_available():
         raise RuntimeError(
             "read.native.enabled needs the pypaimon-rust native reader API")
     builder = _configure_native_read_builder(
-        _native_read_builder(table), predicate, limit, projection)
+        _native_read_builder(table), predicate, limit, projection,
+        nested_projection=nested_projection,
+        include_row_kind=include_row_kind)
     if blob_parallelism is not None:
         builder = builder.with_blob_parallelism(blob_parallelism)
     reader = builder.new_read()
