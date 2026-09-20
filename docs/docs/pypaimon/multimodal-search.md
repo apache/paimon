@@ -138,6 +138,12 @@ neighbors = (
 the number of in-flight Ray tasks, with a default of 4. `ray_remote_args` supplies
 Ray task options, including resources and retry settings; `num_returns` is
 managed by PyPaimon. These two arguments require `execution="ray"`.
+
+For single and batch vector queries, `to_pandas()` and `to_list()` accept the
+same `execution`, `concurrency`, and `ray_remote_args` arguments as `to_arrow()`.
+For example, use `query.to_pandas(execution="ray", concurrency=4)` to return a
+DataFrame, or one DataFrame per query for a batch. Result conversion runs on the
+driver after the search and lookup complete.
 Single-vector Ray queries require finite query values and fail if stored
 vectors produce NaN scores.
 
