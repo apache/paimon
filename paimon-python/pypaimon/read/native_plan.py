@@ -398,8 +398,9 @@ def native_plan(
             chunk_shuffle_shard if chunk_shuffle_shard is not None
             else (None, None)
         )
-        scan = scan.with_chunk_shuffle(
-            str(seed), chunk_size, shard_index, shard_count)
+        scan = scan.with_chunk_shuffle(str(seed), chunk_size)
+        if shard_index is not None:
+            scan = scan.with_chunk_shuffle_shard(shard_index, shard_count)
     rust_plan = scan.plan()
     rust_splits = rust_plan.splits()
     pfields = _partition_fields(table)
