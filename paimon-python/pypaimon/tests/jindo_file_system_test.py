@@ -127,6 +127,27 @@ class JindoConfigTest(unittest.TestCase):
         self.assertNotIn("fs.oss.provider.endpoint", config.values)
         self.assertNotIn("fs.oss.provider.format", config.values)
 
+    def test_endpoint_protocol_controls_https(self):
+        for endpoint, configured, expected in (
+                ("http://localhost:9000", None, "false"),
+                ("HTTPS://localhost:9000", None, "true"),
+                ("https://localhost:9000", False, "false"),
+                ("localhost:9000", True, "true")):
+            created_config = _RecordingConfig()
+            values = {OssOptions.OSS_ENDPOINT.key(): endpoint}
+            if configured is not None:
+                values["fs.oss.https.enable"] = configured
+            options = Options(values)
+            with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+                    mock.patch.object(
+                        jindo_module, "jutil",
+                        types.SimpleNamespace(
+                            Config=mock.Mock(return_value=created_config))):
+                config = jindo_module.build_jindo_config(options)
+
+            self.assertEqual(config.values["fs.oss.endpoint"], "localhost:9000")
+            self.assertEqual(config.values["fs.oss.https.enable"], expected)
+
     def test_forwards_native_options_to_jindo_oss_filesystem(self):
         created_config = _RecordingConfig()
         config_factory = mock.Mock(return_value=created_config)

@@ -92,7 +92,11 @@ def build_jindo_config(catalog_options: Options):
     if security_token:
         config.set("fs.oss.securityToken", security_token)
     if endpoint:
-        endpoint_clean = endpoint.replace('http://', '').replace('https://', '')
+        scheme, separator, endpoint_clean = endpoint.partition('://')
+        if not separator or scheme.lower() not in ('http', 'https'):
+            endpoint_clean = endpoint
+        elif not catalog_options.contains_key("fs.oss.https.enable"):
+            config.set("fs.oss.https.enable", str(scheme.lower() == 'https').lower())
         config.set("fs.oss.endpoint", endpoint_clean)
     if region:
         config.set("fs.oss.region", region)
