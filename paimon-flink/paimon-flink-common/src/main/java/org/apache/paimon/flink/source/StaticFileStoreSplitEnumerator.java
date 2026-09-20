@@ -148,7 +148,7 @@ public class StaticFileStoreSplitEnumerator
                 this.splitAssigner =
                         ((PreAssignSplitAssigner) splitAssigner)
                                 .ofDynamicPartitionPruning(
-                                        dynamicPartitionFilteringInfo.getPartitionRowProjection(),
+                                        dynamicPartitionFilteringInfo,
                                         ((DynamicFilteringEvent) sourceEvent).getData());
             } else {
                 this.splitAssigner =
@@ -156,7 +156,7 @@ public class StaticFileStoreSplitEnumerator
                                 .createDynamicPartitionPruningAssignerIfNeeded(
                                         subtaskId,
                                         splitAssigner,
-                                        dynamicPartitionFilteringInfo.getPartitionRowProjection(),
+                                        dynamicPartitionFilteringInfo,
                                         sourceEvent,
                                         LOG);
             }
