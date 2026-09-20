@@ -181,6 +181,9 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         return Collections.emptyList();
                     }
 
+                    // A broad field must not consume the budget needed by a selective sibling.
+                    GlobalIndexQueryContext fieldQueryContext = queryContext.fork();
+
                     // A field can be covered by its dedicated primary index and by one or more
                     // multi-column indexes that carry it as an extra field. These are alternative
                     // sources of matches, possibly over different row ranges, so union them. The
@@ -188,7 +191,9 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                     // tail was indexed while the evaluator silently ignored it.
                     List<GlobalIndexReader> allReaders = new ArrayList<>();
                     for (IndexMetaFileGroup indexGroup : groups) {
-                        allReaders.addAll(createReaders(indexFileReader, indexGroup, rowType));
+                        allReaders.addAll(
+                                createReaders(
+                                        indexFileReader, indexGroup, rowType, fieldQueryContext));
                     }
                     return Collections.singletonList(new UnionGlobalIndexReader(allReaders));
                 };
@@ -440,7 +445,10 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     }
 
     private Collection<GlobalIndexReader> createReaders(
-            GlobalIndexFileReader indexFileReadWrite, IndexMetaFileGroup group, RowType rowType) {
+            GlobalIndexFileReader indexFileReadWrite,
+            IndexMetaFileGroup group,
+            RowType rowType,
+            GlobalIndexQueryContext fieldQueryContext) {
         DataField indexField = group.indexField(rowType);
         List<DataField> extraFields = group.extraFields(rowType);
 
@@ -469,7 +477,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                                         globalMetas,
                                                         range.count(),
                                                         executor,
-                                                        queryContext),
+                                                        fieldQueryContext),
                                                 range.from,
                                                 range.to),
                                 executor));

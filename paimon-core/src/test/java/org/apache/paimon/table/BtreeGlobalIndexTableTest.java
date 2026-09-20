@@ -28,6 +28,7 @@ import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ScanResult;
+import org.apache.paimon.globalindex.btree.BTreeFileFooter;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
@@ -49,6 +50,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -252,6 +254,72 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
         assertThat(plan.splits()).allMatch(split -> !(split instanceof IndexedSplit));
         assertThat(readF1(readBuilder, plan)).hasSize(90);
+    }
+
+    @Test
+    public void testVersion1DecodedRowBudgetKeepsSelectiveAndBranch() throws Exception {
+        assertDecodedRowBudgetKeepsSelectiveAndBranch(BTreeFileFooter.VERSION_1);
+    }
+
+    @Test
+    public void testVersion2DecodedRowBudgetKeepsSelectiveAndBranch() throws Exception {
+        assertDecodedRowBudgetKeepsSelectiveAndBranch(BTreeFileFooter.VERSION_2);
+    }
+
+    @Test
+    public void testDecodedRowBudgetIsIndependentAcrossIndexedFields() throws Exception {
+        write(100L);
+        createIndex("f0");
+        createIndex("f1");
+
+        FileStoreTable base = (FileStoreTable) catalog.getTable(identifier());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.GLOBAL_INDEX_THREAD_NUM.key(), "1");
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO.key(), "1.0");
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_DECODED_ROW_IDS.key(), "10");
+        FileStoreTable table = base.copy(options);
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        List<Object> broadLiterals = new ArrayList<>();
+        for (int i = 0; i < 11; i++) {
+            broadLiterals.add(BinaryString.fromString("a" + i));
+        }
+        Predicate predicate =
+                PredicateBuilder.and(builder.in(1, broadLiterals), builder.equal(0, 1));
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).allMatch(IndexedSplit.class::isInstance);
+        assertThat(readF1(readBuilder, plan)).containsExactly("a1");
+    }
+
+    private void assertDecodedRowBudgetKeepsSelectiveAndBranch(int btreeFileVersion)
+            throws Exception {
+        writeSelectiveAndBroadRows(100, 90);
+        FileStoreTable base = (FileStoreTable) catalog.getTable(identifier());
+        FileStoreTable indexTable =
+                base.copy(
+                        Collections.singletonMap(
+                                BTreeIndexOptions.BTREE_INDEX_FILE_VERSION.key(),
+                                String.valueOf(btreeFileVersion)));
+        createIndex(indexTable, "f0");
+        createIndex(indexTable, "f1");
+
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "fast");
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO.key(), "1.0");
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_DECODED_ROW_IDS.key(), "10");
+        FileStoreTable table = base.copy(options);
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.equal(0, 1), builder.equal(1, BinaryString.fromString("wide")));
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).allMatch(IndexedSplit.class::isInstance);
+        assertThat(readF1(readBuilder, plan)).containsExactly("wide");
     }
 
     @Test
@@ -984,6 +1052,15 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
     private void createIndex(String fieldName, List<Range> rowRanges) throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        createIndex(table, fieldName, rowRanges);
+    }
+
+    private void createIndex(FileStoreTable table, String fieldName) throws Exception {
+        createIndex(table, fieldName, null);
+    }
+
+    private void createIndex(FileStoreTable table, String fieldName, List<Range> rowRanges)
+            throws Exception {
         SortedGlobalIndexScanner builder =
                 new SortedGlobalIndexScanner(table, "btree").withIndexField(fieldName);
         ScanResult<DataSplit> scanResult =
@@ -999,6 +1076,35 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                             table, "btree", fieldName, dataSplit, scanResult.scanSnapshotId()));
         }
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(commitMessages);
+        }
+    }
+
+    private void writeSelectiveAndBroadRows(int count, int broadCount) throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        RowType keyAndFlagType = table.rowType().project(Arrays.asList("f0", "f1"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(keyAndFlagType);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < count; i++) {
+                write.write(
+                        GenericRow.of(
+                                i, BinaryString.fromString(i < broadCount ? "wide" : "narrow")));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        long firstRowId = table.snapshotManager().latestSnapshot().nextRowId() - count;
+        RowType payloadType = table.rowType().project(Collections.singletonList("f2"));
+        builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(payloadType);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < count; i++) {
+                write.write(GenericRow.of(BinaryString.fromString("payload-" + i)));
+            }
+            List<CommitMessage> commitMessages = write.prepareCommit();
+            setFirstRowId(commitMessages, firstRowId);
             commit.commit(commitMessages);
         }
     }

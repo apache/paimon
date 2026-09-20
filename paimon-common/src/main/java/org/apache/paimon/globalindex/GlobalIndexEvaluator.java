@@ -52,10 +52,12 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 import java.util.function.IntFunction;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -163,7 +165,7 @@ public class GlobalIndexEvaluator implements Closeable {
         List<CompletableFuture<Optional<GlobalIndexResult>>> readerFutures =
                 new ArrayList<>(readers.size());
         for (GlobalIndexReader reader : readers) {
-            readerFutures.add(visitor.apply(reader));
+            readerFutures.add(declineAsUnsupported(() -> visitor.apply(reader)));
         }
 
         return CompletableFuture.allOf(readerFutures.toArray(new CompletableFuture[0]))
@@ -190,6 +192,44 @@ public class GlobalIndexEvaluator implements Closeable {
                                     result ->
                                             new Evaluation(result, Collections.singleton(fieldId)));
                         });
+    }
+
+    static <T> CompletableFuture<Optional<T>> declineAsUnsupported(
+            Supplier<CompletableFuture<Optional<T>>> visitor) {
+        CompletableFuture<Optional<T>> future;
+        try {
+            future = visitor.get();
+        } catch (RuntimeException e) {
+            if (GlobalIndexLookupDeclinedException.find(e) != null) {
+                return CompletableFuture.completedFuture(Optional.empty());
+            }
+            throw e;
+        }
+        return future.handle(
+                (result, throwable) -> {
+                    if (throwable == null) {
+                        return result;
+                    }
+                    if (GlobalIndexLookupDeclinedException.find(throwable) != null) {
+                        return Optional.empty();
+                    }
+                    throw propagate(throwable);
+                });
+    }
+
+    private static RuntimeException propagate(Throwable throwable) {
+        Throwable current = throwable;
+        while ((current instanceof CompletionException || current instanceof ExecutionException)
+                && current.getCause() != null) {
+            current = current.getCause();
+        }
+        if (current instanceof RuntimeException) {
+            return (RuntimeException) current;
+        }
+        if (current instanceof Error) {
+            throw (Error) current;
+        }
+        return new RuntimeException(current);
     }
 
     private CompletableFuture<Optional<Evaluation>> visitCompoundAsync(

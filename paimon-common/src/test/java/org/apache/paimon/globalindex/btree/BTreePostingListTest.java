@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.globalindex.GlobalIndexQueryContext;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.utils.LongArrayList;
@@ -42,6 +43,20 @@ public class BTreePostingListTest {
     @Test
     public void testChoosesRoaringForContiguousRows() throws Exception {
         assertEncodingAndRoundTrip(contiguous(0, 128), BTreePostingList.ROARING);
+    }
+
+    @Test
+    public void testRoaringUnionDoesNotChargeLogicalCardinalityAsDecodedRows() throws Exception {
+        LongArrayList rowIds = contiguous(0, 128);
+        byte[] serialized = BTreePostingList.serialize(rowIds);
+        assertThat(serialized[0]).isEqualTo((byte) BTreePostingList.ROARING);
+        GlobalIndexQueryContext context = new GlobalIndexQueryContext(1);
+        RoaringNavigableMap64 target = new RoaringNavigableMap64();
+
+        BTreePostingList.addTo(MemorySlice.wrap(serialized), target, context);
+
+        assertThat(target.getLongCardinality()).isEqualTo(128);
+        assertThat(context.decodedRowIds()).isZero();
     }
 
     @Test

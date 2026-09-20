@@ -20,7 +20,7 @@ package org.apache.paimon.globalindex;
 
 import java.util.concurrent.atomic.AtomicLong;
 
-/** Shared resource budget for all index readers participating in one query. */
+/** Resource budget for scalar index readers participating in one lookup scope. */
 public final class GlobalIndexQueryContext {
 
     private static final GlobalIndexQueryContext UNLIMITED =
@@ -40,6 +40,13 @@ public final class GlobalIndexQueryContext {
 
     public static GlobalIndexQueryContext unlimited() {
         return UNLIMITED;
+    }
+
+    /** Creates an independent lookup scope with the same limit. */
+    GlobalIndexQueryContext fork() {
+        return maxDecodedRowIds == Long.MAX_VALUE
+                ? UNLIMITED
+                : new GlobalIndexQueryContext(maxDecodedRowIds);
     }
 
     /** Reserves budget before row IDs are allocated or decoded. */

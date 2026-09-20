@@ -78,4 +78,18 @@ public class GlobalIndexQueryContextTest {
             executor.shutdownNow();
         }
     }
+
+    @Test
+    public void testForkHasIndependentBudget() {
+        GlobalIndexQueryContext template = new GlobalIndexQueryContext(2);
+        GlobalIndexQueryContext first = template.fork();
+        GlobalIndexQueryContext second = template.fork();
+
+        first.reserveDecodedRowIds(2);
+        second.reserveDecodedRowIds(2);
+
+        assertThat(template.decodedRowIds()).isZero();
+        assertThat(first.decodedRowIds()).isEqualTo(2);
+        assertThat(second.decodedRowIds()).isEqualTo(2);
+    }
 }

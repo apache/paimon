@@ -87,6 +87,23 @@ class GlobalIndexEvaluatorTest {
         return new StubGlobalIndexReader(result);
     }
 
+    private static GlobalIndexReader readerDeclining() {
+        return new StubGlobalIndexReader(null) {
+            @Override
+            public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
+                    FieldRef fieldRef, Object literal) {
+                return declinedFuture();
+            }
+        };
+    }
+
+    private static CompletableFuture<Optional<GlobalIndexResult>> declinedFuture() {
+        CompletableFuture<Optional<GlobalIndexResult>> future = new CompletableFuture<>();
+        future.completeExceptionally(
+                new GlobalIndexLookupDeclinedException("test budget exceeded"));
+        return future;
+    }
+
     @Test
     void testRangeFallbackAndOrBoundary() {
         AtomicInteger rangeCalls = new AtomicInteger();
@@ -246,6 +263,72 @@ class GlobalIndexEvaluatorTest {
 
         assertThat(result).isPresent();
         assertBitmapContainsExactly(result.get().results(), 3L, 4L, 5L);
+        evaluator.close();
+    }
+
+    @Test
+    void testAndKeepsSelectiveSiblingWhenAnotherLookupDeclines() {
+        RowType rowType = rowType();
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Collections.singletonList(
+                                        fieldId == 0
+                                                ? readerReturning(resultOf(42))
+                                                : readerDeclining()));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        Optional<GlobalIndexEvaluator.Evaluation> evaluation =
+                evaluator.evaluateWithContributingFields(
+                        PredicateBuilder.and(builder.equal(0, 42), builder.equal(1, 1)));
+
+        assertThat(evaluation).isPresent();
+        assertBitmapContainsExactly(evaluation.get().result().results(), 42L);
+        assertThat(evaluation.get().contributingFieldIds()).containsExactly(0);
+        evaluator.close();
+    }
+
+    @Test
+    void testOrFallsBackWhenOneLookupDeclines() {
+        RowType rowType = rowType();
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Collections.singletonList(
+                                        fieldId == 0
+                                                ? readerReturning(resultOf(42))
+                                                : readerDeclining()));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        assertThat(
+                        evaluator.evaluate(
+                                PredicateBuilder.or(builder.equal(0, 42), builder.equal(1, 1))))
+                .isEmpty();
+        evaluator.close();
+    }
+
+    @Test
+    void testNonBudgetLookupFailureStillPropagates() {
+        RowType rowType = rowType();
+        GlobalIndexReader reader =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
+                            FieldRef fieldRef, Object literal) {
+                        CompletableFuture<Optional<GlobalIndexResult>> future =
+                                new CompletableFuture<>();
+                        future.completeExceptionally(new IllegalStateException("expected"));
+                        return future;
+                    }
+                };
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(rowType, fieldId -> Collections.singletonList(reader));
+
+        assertThatThrownBy(() -> evaluator.evaluate(new PredicateBuilder(rowType).equal(0, 42)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("expected");
         evaluator.close();
     }
 
@@ -466,6 +549,53 @@ class GlobalIndexEvaluatorTest {
         assertBitmapContainsExactly(coarseCandidates[0], 2L, 3L, 4L);
         assertThat(coarseCalls).hasValue(1);
         assertThat(exactCalls).hasValue(1);
+        evaluator.close();
+    }
+
+    @Test
+    void testContainsDeclineKeepsExactSiblingCandidates() {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "text", DataTypes.STRING()),
+                                new DataField(1, "number", DataTypes.INT())));
+        ContainsRefiningGlobalIndexReader containsReader =
+                new StubContainsRefiningGlobalIndexReader() {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsCandidates(
+                            FieldRef fieldRef,
+                            List<Object> literals,
+                            GlobalIndexResult candidates) {
+                        return declinedFuture();
+                    }
+
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsConjunction(
+                            FieldRef fieldRef,
+                            List<Object> literals,
+                            GlobalIndexResult candidates) {
+                        return declinedFuture();
+                    }
+                };
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Collections.singletonList(
+                                        fieldId == 0
+                                                ? containsReader
+                                                : readerReturning(resultOf(2))));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        Optional<GlobalIndexEvaluator.Evaluation> evaluation =
+                evaluator.evaluateWithContributingFields(
+                        PredicateBuilder.and(
+                                builder.contains(0, BinaryString.fromString("needle")),
+                                builder.equal(1, 42)));
+
+        assertThat(evaluation).isPresent();
+        assertBitmapContainsExactly(evaluation.get().result().results(), 2L);
+        assertThat(evaluation.get().contributingFieldIds()).containsExactly(1);
         evaluator.close();
     }
 

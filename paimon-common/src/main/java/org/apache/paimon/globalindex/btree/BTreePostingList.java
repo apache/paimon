@@ -89,7 +89,7 @@ final class BTreePostingList {
                 return;
             case ROARING:
                 RoaringNavigableMap64 bitmap = readRoaring(input);
-                queryContext.reserveDecodedRowIds(bitmap.getLongCardinality());
+                // The bitmap stays compressed; logical cardinality is not decoded row work.
                 target.or(bitmap);
                 return;
             default:

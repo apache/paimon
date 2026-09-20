@@ -2692,10 +2692,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(10_000_000L)
                     .withDescription(
                             "Maximum number of row IDs that supporting scalar index readers may "
-                                    + "decode for one data evolution query. Exceeding the shared "
-                                    + "query budget abandons the complete index lookup and falls "
-                                    + "back to a normal data scan in all search modes. In fast mode, "
-                                    + "fallback may return matching rows outside current index coverage.");
+                                    + "decode for one indexed field in a data evolution query. "
+                                    + "A predicate branch which exceeds the budget is treated as "
+                                    + "unsupported, so safe AND siblings may still prune rows; the "
+                                    + "query falls back to a normal data scan when the remaining "
+                                    + "boolean expression cannot be evaluated safely. Compressed "
+                                    + "bitmap cardinality is not counted as decoded row IDs.");
 
     public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_FILE_PRUNING =
             key("data-evolution.merge-into.file-pruning")
