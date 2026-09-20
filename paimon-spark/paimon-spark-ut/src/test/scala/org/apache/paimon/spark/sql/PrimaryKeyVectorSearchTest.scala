@@ -352,6 +352,106 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
     }
   }
 
+  test("vector search fail mode rejects a non-convertible residual filter") {
+    withTable("T") {
+      createVectorTable(columns = "id INT, threshold INT, embedding ARRAY<FLOAT>")
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (1, 100, array(1.0f, 0.0f)),
+                  |  (2, 100, array(2.0f, 0.0f)),
+                  |  (3, 100, array(3.0f, 0.0f)),
+                  |  (4, 100, array(4.0f, 0.0f)),
+                  |  (5, 1, array(5.0f, 0.0f)),
+                  |  (6, 1, array(6.0f, 0.0f))
+                  |""".stripMargin)
+
+      // `id > threshold` is a column-to-column comparison, which SparkV2FilterConverter cannot
+      // convert to a Paimon predicate, so it stays a Spark residual applied above the vector
+      // search. The two nearest rows (1, 2) fail it; the two nearest rows that satisfy it are
+      // (5, 6), but they rank outside the returned top-2, so post-filtering the top-2 returns
+      // nothing. Fail mode rejects the query rather than returning a silently short result.
+      withSQLConf("spark.paimon.search.residual-filter" -> "fail") {
+        val error = intercept[Exception] {
+          spark
+            .sql("""
+                   |SELECT id
+                   |FROM vector_search('T', 'embedding', array(0.0f, 0.0f), 2)
+                   |WHERE id > threshold
+                   |""".stripMargin)
+            .collect()
+        }
+        assert(error.getMessage.contains("cannot be pushed down"), error.getMessage)
+      }
+    }
+  }
+
+  test("vector search post-filters a non-convertible residual filter by default") {
+    withTable("T") {
+      createVectorTable(columns = "id INT, threshold INT, embedding ARRAY<FLOAT>")
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (1, 100, array(1.0f, 0.0f)),
+                  |  (2, 100, array(2.0f, 0.0f)),
+                  |  (3, 100, array(3.0f, 0.0f)),
+                  |  (4, 100, array(4.0f, 0.0f)),
+                  |  (5, 1, array(5.0f, 0.0f)),
+                  |  (6, 1, array(6.0f, 0.0f))
+                  |""".stripMargin)
+
+      // The default post-filter mode applies the same `id > threshold` residual above the top-2
+      // (1, 2), which both fail it, so the result is a subset of the top-2 and comes back empty
+      // rather than the query being rejected.
+      val unfiltered = spark
+        .sql("SELECT id FROM vector_search('T', 'embedding', array(0.0f, 0.0f), 2)")
+        .collect()
+        .map(_.getInt(0))
+        .toSet
+      assert(unfiltered == Set(1, 2))
+      val filtered = spark
+        .sql("""
+               |SELECT id
+               |FROM vector_search('T', 'embedding', array(0.0f, 0.0f), 2)
+               |WHERE id > threshold
+               |""".stripMargin)
+        .collect()
+        .map(_.getInt(0))
+        .toSet
+      assert(filtered.subsetOf(unfiltered))
+      assert(filtered.isEmpty)
+    }
+  }
+
+  test("vector search fail mode keeps a pushable filter") {
+    withTable("T") {
+      createVectorTable(columns = "id INT, threshold INT, embedding ARRAY<FLOAT>")
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (1, 100, array(1.0f, 0.0f)),
+                  |  (2, 100, array(2.0f, 0.0f)),
+                  |  (3, 100, array(3.0f, 0.0f)),
+                  |  (4, 100, array(4.0f, 0.0f)),
+                  |  (5, 1, array(5.0f, 0.0f)),
+                  |  (6, 1, array(6.0f, 0.0f))
+                  |""".stripMargin)
+
+      // `threshold = 100` is convertible, so it is pushed into Paimon and never a genuine residual.
+      // Even a Spark-side recheck copy of it converts, so fail mode must not reject it. The two
+      // nearest rows (1, 2) both satisfy it, so the result is (1, 2) either way.
+      withSQLConf("spark.paimon.search.residual-filter" -> "fail") {
+        val result = spark
+          .sql("""
+                 |SELECT id
+                 |FROM vector_search('T', 'embedding', array(0.0f, 0.0f), 2)
+                 |WHERE threshold = 100
+                 |""".stripMargin)
+          .collect()
+          .map(_.getInt(0))
+          .toSet
+        assert(result == Set(1, 2))
+      }
+    }
+  }
+
   test("deduplicate updates and deletes primary-key vector results") {
     withTable("T") {
       createVectorTable()

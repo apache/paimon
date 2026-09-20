@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.catalyst.optimizer
 
 import org.apache.paimon.spark.catalyst.plans.logical.{LateralVectorSearch, PaimonTableValuedFunctions}
+import org.apache.paimon.spark.util.OptionUtils
 
 import org.apache.spark.sql.catalyst.expressions.{And, PredicateHelper}
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, LogicalPlan}
@@ -46,6 +47,16 @@ object PushDownLateralVectorSearchFilter extends Rule[LogicalPlan] with Predicat
               lvs.projectOutput,
               Seq(predicate))
             .isDefined
+      }
+
+      // A residual on searched-table columns that cannot be pushed into the search is applied above
+      // its top-K result and can silently drop matching rows. Under `fail` reject it; under the
+      // default `post-filter` keep it as a filter above the search, which may return fewer than K.
+      if (OptionUtils.searchResidualFilterFailEnabled()) {
+        val unpushable = stayUp.filter(_.references.intersect(lvs.searchFilterOutputSet).nonEmpty)
+        if (unpushable.nonEmpty) {
+          PaimonTableValuedFunctions.failUnpushableSearchFilter(unpushable.map(_.sql))
+        }
       }
 
       if (pushDownToLeft.isEmpty && pushDownToSearch.isEmpty) {

@@ -146,6 +146,19 @@ object OptionUtils extends SQLConfHelper with Logging {
     getOptionString(SparkConnectorOptions.SOURCE_SPLIT_TARGET_SIZE_WITH_COLUMN_PRUNING).toBoolean
   }
 
+  def searchResidualFilterFailEnabled(): Boolean = {
+    val option = SparkConnectorOptions.SEARCH_RESIDUAL_FILTER
+    val value = getOptionString(option)
+    val mode = SparkConnectorOptions.SearchResidualFilterMode
+      .values()
+      .find(_.toString.equalsIgnoreCase(value))
+      .getOrElse(
+        throw new IllegalArgumentException(
+          s"Invalid value '$value' for spark.paimon.${option.key()}. Valid values: " +
+            SparkConnectorOptions.SearchResidualFilterMode.values().mkString(", ") + "."))
+    mode == SparkConnectorOptions.SearchResidualFilterMode.FAIL
+  }
+
   def formatTableRepairCollectStatistics(): Boolean = {
     getOptionString(SparkConnectorOptions.FORMAT_TABLE_REPAIR_COLLECT_STATISTICS).toBoolean
   }

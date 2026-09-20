@@ -19,8 +19,11 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.description.DescribedEnum;
+import org.apache.paimon.options.description.InlineElement;
 
 import static org.apache.paimon.options.ConfigOptions.key;
+import static org.apache.paimon.options.description.TextElement.text;
 
 /** Options for spark connector. */
 public class SparkConnectorOptions {
@@ -180,4 +183,45 @@ public class SparkConnectorOptions {
                     .withDescription(
                             "Whether to adjust the target split size based on pruned (projected) columns. "
                                     + "If enabled, split size estimation uses only the columns actually being read.");
+
+    public static final ConfigOption<SearchResidualFilterMode> SEARCH_RESIDUAL_FILTER =
+            key("search.residual-filter")
+                    .enumType(SearchResidualFilterMode.class)
+                    .defaultValue(SearchResidualFilterMode.POST_FILTER)
+                    .withDescription(
+                            "How a vector / hybrid / full-text search handles a WHERE conjunct on "
+                                    + "searched-table columns that cannot be pushed into Paimon. Such a "
+                                    + "residual is applied by Spark above the already-truncated top-K, so it "
+                                    + "can only drop rows and may return fewer than K.");
+
+    /** How a search TVF handles a residual filter it cannot push into Paimon. */
+    public enum SearchResidualFilterMode implements DescribedEnum {
+        POST_FILTER(
+                "post-filter",
+                "Apply the residual above the top-K result. The result is a subset of the top-K "
+                        + "and may be shorter than K."),
+
+        FAIL(
+                "fail",
+                "Reject the query with a clear error, matching the Flink vector_search procedure, "
+                        + "so a silently short result never ships.");
+
+        private final String value;
+        private final String description;
+
+        SearchResidualFilterMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
 }
