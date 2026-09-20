@@ -159,25 +159,25 @@ public class DataEvolutionRowIdReassigner {
         CommittedAssignment committed =
                 commitAssignmentWithRetry(
                         optionalPlan.get(), latest, manifestFile, manifestList, commitUser);
-        Assignment assignment = committed.assignment;
+        DataEvolutionRowIdAssignment assignment = committed.assignment;
         CommitAssignmentResult commitResult = committed.commitResult;
         LOG.info(
                 "Reassigned row IDs for table {} from {} to {}, partitions={}, files={}, rows={}.",
                 table.name(),
-                assignment.firstAssignedRowId,
-                assignment.nextRowId,
-                assignment.rowIdMappings.size(),
+                assignment.firstAssignedRowId(),
+                assignment.nextRowId(),
+                assignment.rowIdMappings().size(),
                 commitResult.fileCount,
                 assignment.logicalRowCount());
 
         return new Result(
-                assignment.snapshot.id(),
-                assignment.snapshot.id() + 1,
+                committed.previousSnapshotId,
+                committed.previousSnapshotId + 1,
                 commitResult.fileCount,
                 assignment.logicalRowCount(),
                 commitResult.indexFileCount,
-                assignment.firstAssignedRowId,
-                assignment.nextRowId);
+                assignment.firstAssignedRowId(),
+                assignment.nextRowId());
     }
 
     private Optional<AssignmentPlan> planAssignment(List<ManifestFileMeta> manifestMetas) {
@@ -381,11 +381,17 @@ public class DataEvolutionRowIdReassigner {
                 latest = observedLatest;
             }
 
-            Assignment assignment = assignmentPlan.createAssignment(latest);
+            DataEvolutionRowIdAssignment assignment = assignmentPlan.createAssignment(latest);
             CommitAssignmentResult commitResult =
-                    commitAssignment(assignment, manifestFile, manifestList, commitUser);
+                    commitAssignment(
+                            latest,
+                            assignmentPlan.manifestMetasToRewrite,
+                            assignment,
+                            manifestFile,
+                            manifestList,
+                            commitUser);
             if (commitResult.success) {
-                return new CommittedAssignment(assignment, commitResult);
+                return new CommittedAssignment(latest.id(), assignment, commitResult);
             }
 
             if (System.currentTimeMillis() - startMillis > options.commitTimeout()
@@ -415,36 +421,33 @@ public class DataEvolutionRowIdReassigner {
     }
 
     private CommitAssignmentResult commitAssignment(
-            Assignment assignment,
+            Snapshot snapshot,
+            List<ManifestFileMeta> manifestMetasToRewrite,
+            DataEvolutionRowIdAssignment assignment,
             ManifestFile manifestFile,
             ManifestList manifestList,
             String commitUser) {
         RewrittenDataManifests rewrittenDataManifests =
-                writeManifestReplacements(assignment, manifestFile);
+                writeManifestReplacements(manifestMetasToRewrite, assignment, manifestFile);
         Pair<String, Long> baseManifestList =
                 writeBaseManifestList(
-                        manifestList.readDataManifests(assignment.snapshot),
+                        manifestList.readDataManifests(snapshot),
                         rewrittenDataManifests.manifestMetas,
                         manifestList);
         Pair<String, Long> deltaManifestList = manifestList.write(Collections.emptyList());
-        RewrittenIndexManifest rewrittenIndexManifest = rewriteIndexManifest(assignment);
+        RewrittenIndexManifest rewrittenIndexManifest = rewriteIndexManifest(snapshot, assignment);
 
         String planFile;
         try {
-            planFile =
-                    new DataEvolutionRowIdReassignPlan(
-                                    assignment.snapshot.id(),
-                                    assignment.snapshot.id() + 1,
-                                    assignment.rowIdMappings)
-                            .write(table.fileIO(), table.store().pathFactory());
+            planFile = assignment.write(table.fileIO(), table.store().pathFactory());
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to persist row-id reassignment plan.", e);
         }
         Map<String, String> properties =
-                assignment.snapshot.properties() == null
+                snapshot.properties() == null
                         ? new HashMap<>()
-                        : new HashMap<>(assignment.snapshot.properties());
-        properties.put(DataEvolutionRowIdReassignPlan.PLAN_FILE_PROPERTY, planFile);
+                        : new HashMap<>(snapshot.properties());
+        properties.put(DataEvolutionRowIdAssignment.PLAN_FILE_PROPERTY, planFile);
 
         boolean success;
         try (FileStoreCommitImpl commit =
@@ -452,12 +455,12 @@ public class DataEvolutionRowIdReassigner {
             beforeCommit.run();
             success =
                     commit.replaceManifestList(
-                            assignment.snapshot,
-                            assignment.snapshot.totalRecordCount(),
+                            snapshot,
+                            snapshot.totalRecordCount(),
                             baseManifestList,
                             deltaManifestList,
                             rewrittenIndexManifest.indexManifest,
-                            assignment.nextRowId,
+                            assignment.nextRowId(),
                             properties);
         }
         if (!success) {
@@ -653,13 +656,13 @@ public class DataEvolutionRowIdReassigner {
     }
 
     private RewrittenDataManifests writeManifestReplacements(
-            Assignment assignment, ManifestFile manifestFile) {
+            List<ManifestFileMeta> manifestMetasToRewrite,
+            DataEvolutionRowIdAssignment assignment,
+            ManifestFile manifestFile) {
         Integer parallelism = table.coreOptions().scanManifestParallelism();
-        List<RewrittenDataManifest> rewritten =
-                new ArrayList<>(assignment.manifestMetasToRewrite.size());
-        if (assignment.manifestMetasToRewrite.size() == 1
-                || (parallelism != null && parallelism == 1)) {
-            for (ManifestFileMeta manifestMeta : assignment.manifestMetasToRewrite) {
+        List<RewrittenDataManifest> rewritten = new ArrayList<>(manifestMetasToRewrite.size());
+        if (manifestMetasToRewrite.size() == 1 || (parallelism != null && parallelism == 1)) {
+            for (ManifestFileMeta manifestMeta : manifestMetasToRewrite) {
                 rewritten.add(rewriteDataManifest(assignment, manifestFile, manifestMeta));
             }
         } else {
@@ -672,7 +675,7 @@ public class DataEvolutionRowIdReassigner {
                                             manifestMeta));
             try (CloseableBatchIterator<RewrittenDataManifest> results =
                     sequentialBatchedExecuteCloseable(
-                            rewriter, assignment.manifestMetasToRewrite, parallelism)) {
+                            rewriter, manifestMetasToRewrite, parallelism)) {
                 while (results.hasNext()) {
                     rewritten.add(results.next());
                 }
@@ -689,7 +692,9 @@ public class DataEvolutionRowIdReassigner {
     }
 
     private RewrittenDataManifest rewriteDataManifest(
-            Assignment assignment, ManifestFile manifestFile, ManifestFileMeta manifestMeta) {
+            DataEvolutionRowIdAssignment assignment,
+            ManifestFile manifestFile,
+            ManifestFileMeta manifestMeta) {
         beforeManifestRewrite.accept(manifestMeta);
         ManifestEntrySerializer serializer = new ManifestEntrySerializer();
         ManifestAvroWriter writer = manifestFile.createAvroWriter();
@@ -702,7 +707,7 @@ public class DataEvolutionRowIdReassigner {
             while (entries.hasNext()) {
                 ProjectedManifestEntry entry = entries.next();
                 ManifestEntry output = entry;
-                RowRangeMappingIndex mapping = assignment.rowIdMappings.get(entry.partition());
+                RowRangeMappingIndex mapping = assignment.rowIdMappings().get(entry.partition());
                 if (mapping != null) {
                     Optional<Range> reassignedRange = mapping.map(entry.file().nonNullRowIdRange());
                     if (reassignedRange.isPresent()) {
@@ -750,14 +755,14 @@ public class DataEvolutionRowIdReassigner {
                 table.name());
     }
 
-    private RewrittenIndexManifest rewriteIndexManifest(Assignment assignment) {
-        if (assignment.snapshot.indexManifest() == null) {
+    private RewrittenIndexManifest rewriteIndexManifest(
+            Snapshot snapshot, DataEvolutionRowIdAssignment assignment) {
+        if (snapshot.indexManifest() == null) {
             return new RewrittenIndexManifest(null, 0);
         }
 
         IndexManifestFile indexManifestFile = table.store().indexManifestFileFactory().create();
-        List<IndexManifestEntry> indexEntries =
-                indexManifestFile.read(assignment.snapshot.indexManifest());
+        List<IndexManifestEntry> indexEntries = indexManifestFile.read(snapshot.indexManifest());
         if (indexEntries.isEmpty()) {
             return new RewrittenIndexManifest(null, 0);
         }
@@ -768,12 +773,12 @@ public class DataEvolutionRowIdReassigner {
             checkState(
                     entry.kind() == FileKind.ADD,
                     "Index manifest '%s' contains non-current entry %s.",
-                    assignment.snapshot.indexManifest(),
+                    snapshot.indexManifest(),
                     entry);
 
             IndexFileMeta indexFile = entry.indexFile();
             GlobalIndexMeta globalIndex = indexFile.globalIndexMeta();
-            RowRangeMappingIndex mappingIndex = assignment.rowIdMappings.get(entry.partition());
+            RowRangeMappingIndex mappingIndex = assignment.rowIdMappings().get(entry.partition());
             if (globalIndex == null || mappingIndex == null) {
                 rewritten.add(entry);
                 continue;
@@ -936,7 +941,7 @@ public class DataEvolutionRowIdReassigner {
             this.relativeRowIdMappings = relativeRowIdMappings;
         }
 
-        private Assignment createAssignment(Snapshot snapshot) {
+        private DataEvolutionRowIdAssignment createAssignment(Snapshot snapshot) {
             Long firstAssignedRowId = snapshot.nextRowId();
             checkState(
                     firstAssignedRowId != null,
@@ -948,38 +953,10 @@ public class DataEvolutionRowIdReassigner {
                 absoluteRowIdMappings.put(
                         mapping.getKey(), mapping.getValue().shiftNewStarts(firstAssignedRowId));
             }
-            return new Assignment(
-                    snapshot,
-                    manifestMetasToRewrite,
+            return new DataEvolutionRowIdAssignment(
                     absoluteRowIdMappings,
                     firstAssignedRowId,
                     Math.addExact(firstAssignedRowId, relativeRowIdMappings.totalOffset));
-        }
-    }
-
-    private static class Assignment {
-        private final Snapshot snapshot;
-        private final List<ManifestFileMeta> manifestMetasToRewrite;
-        private final Map<BinaryRow, RowRangeMappingIndex> rowIdMappings;
-        private final long firstAssignedRowId;
-        private final long nextRowId;
-
-        private Assignment(
-                Snapshot snapshot,
-                List<ManifestFileMeta> manifestMetasToRewrite,
-                Map<BinaryRow, RowRangeMappingIndex> rowIdMappings,
-                long firstAssignedRowId,
-                long nextRowId) {
-            this.snapshot = snapshot;
-            this.manifestMetasToRewrite =
-                    Collections.unmodifiableList(new ArrayList<>(manifestMetasToRewrite));
-            this.rowIdMappings = Collections.unmodifiableMap(new LinkedHashMap<>(rowIdMappings));
-            this.firstAssignedRowId = firstAssignedRowId;
-            this.nextRowId = nextRowId;
-        }
-
-        private long logicalRowCount() {
-            return nextRowId - firstAssignedRowId;
         }
     }
 
@@ -1010,10 +987,15 @@ public class DataEvolutionRowIdReassigner {
     }
 
     private static class CommittedAssignment {
-        private final Assignment assignment;
+        private final long previousSnapshotId;
+        private final DataEvolutionRowIdAssignment assignment;
         private final CommitAssignmentResult commitResult;
 
-        private CommittedAssignment(Assignment assignment, CommitAssignmentResult commitResult) {
+        private CommittedAssignment(
+                long previousSnapshotId,
+                DataEvolutionRowIdAssignment assignment,
+                CommitAssignmentResult commitResult) {
+            this.previousSnapshotId = previousSnapshotId;
             this.assignment = assignment;
             this.commitResult = commitResult;
         }

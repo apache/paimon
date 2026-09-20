@@ -656,24 +656,24 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         FileStoreTable table = createTableWithInterleavedPartitions();
         new DataEvolutionRowIdReassigner(table).reassign();
         Snapshot reassigned = table.snapshotManager().latestSnapshot();
-        assertThat(DataEvolutionRowIdReassignPlan.planFile(reassigned)).isNotNull();
+        assertThat(DataEvolutionRowIdAssignment.planFile(reassigned)).isNotNull();
 
         compactManifests(table);
         Snapshot compacted = table.snapshotManager().latestSnapshot();
         assertThat(compacted.id()).isGreaterThan(reassigned.id());
-        assertThat(DataEvolutionRowIdReassignPlan.planFile(compacted)).isNull();
+        assertThat(DataEvolutionRowIdAssignment.planFile(compacted)).isNull();
 
         try (FileStoreCommitImpl commit =
                 (FileStoreCommitImpl) table.store().newCommit("test-rollback-plan", table)) {
             assertThat(commit.rollbackToAsLatest(reassigned)).isTrue();
         }
-        assertThat(
-                        DataEvolutionRowIdReassignPlan.planFile(
-                                table.snapshotManager().latestSnapshot()))
+        assertThat(DataEvolutionRowIdAssignment.planFile(table.snapshotManager().latestSnapshot()))
                 .isNull();
-        assertThat(DataEvolutionRowIdReassignPlan.planFile(reassigned)).isNotNull();
-        DataEvolutionRowIdReassignPlan.read(
-                table.fileIO(), table.store().pathFactory(), reassigned);
+        assertThat(DataEvolutionRowIdAssignment.planFile(reassigned)).isNotNull();
+        DataEvolutionRowIdAssignment.read(
+                table.fileIO(),
+                table.store().pathFactory(),
+                DataEvolutionRowIdAssignment.planFile(reassigned));
     }
 
     @Test
@@ -684,7 +684,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         Path plan =
                 table.store()
                         .pathFactory()
-                        .toManifestFilePath(DataEvolutionRowIdReassignPlan.planFile(reassigned));
+                        .toManifestFilePath(DataEvolutionRowIdAssignment.planFile(reassigned));
         Path orphan = table.store().pathFactory().toManifestFilePath("row-id-reassign-plan-orphan");
         table.fileIO().newOutputStream(orphan, false).close();
 
@@ -694,9 +694,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
 
         table.createTag("reassign", reassigned.id());
         writeOneRow(table, "c", 100);
-        assertThat(
-                        DataEvolutionRowIdReassignPlan.planFile(
-                                table.snapshotManager().latestSnapshot()))
+        assertThat(DataEvolutionRowIdAssignment.planFile(table.snapshotManager().latestSnapshot()))
                 .isNull();
         table.newExpireSnapshots()
                 .config(ExpireConfig.builder().snapshotRetainMin(1).snapshotRetainMax(1).build())
@@ -718,7 +716,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 table.store()
                         .pathFactory()
                         .toManifestFilePath(
-                                DataEvolutionRowIdReassignPlan.planFile(
+                                DataEvolutionRowIdAssignment.planFile(
                                         table.snapshotManager().latestSnapshot()));
         writeOneRow(table, "c", 100);
         table.newExpireSnapshots()
@@ -735,15 +733,17 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         Path path =
                 table.store()
                         .pathFactory()
-                        .toManifestFilePath(DataEvolutionRowIdReassignPlan.planFile(snapshot));
+                        .toManifestFilePath(DataEvolutionRowIdAssignment.planFile(snapshot));
         byte[] bytes = IOUtils.readFully(table.fileIO().newInputStream(path), true);
         byte[] corrupted = bytes.clone();
         corrupted[corrupted.length - 1] ^= 1;
         overwritePlan(table, path, corrupted);
         assertThatThrownBy(
                         () ->
-                                DataEvolutionRowIdReassignPlan.read(
-                                        table.fileIO(), table.store().pathFactory(), snapshot))
+                                DataEvolutionRowIdAssignment.read(
+                                        table.fileIO(),
+                                        table.store().pathFactory(),
+                                        DataEvolutionRowIdAssignment.planFile(snapshot)))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("checksum");
 
@@ -752,43 +752,36 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         overwritePlan(table, path, corrupted);
         assertThatThrownBy(
                         () ->
-                                DataEvolutionRowIdReassignPlan.read(
-                                        table.fileIO(), table.store().pathFactory(), snapshot))
+                                DataEvolutionRowIdAssignment.read(
+                                        table.fileIO(),
+                                        table.store().pathFactory(),
+                                        DataEvolutionRowIdAssignment.planFile(snapshot)))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("version: 99");
-
-        // The target snapshot ID occupies bytes 12 through 19.
-        corrupted = bytes.clone();
-        corrupted[19] ^= 1;
-        overwritePlan(table, path, corrupted);
-        assertThatThrownBy(
-                        () ->
-                                DataEvolutionRowIdReassignPlan.read(
-                                        table.fileIO(), table.store().pathFactory(), snapshot))
-                .isInstanceOf(IOException.class)
-                .hasMessageContaining("belongs to snapshot");
 
         overwritePlan(table, path, Arrays.copyOf(bytes, bytes.length - 1));
         assertThatThrownBy(
                         () ->
-                                DataEvolutionRowIdReassignPlan.read(
-                                        table.fileIO(), table.store().pathFactory(), snapshot))
+                                DataEvolutionRowIdAssignment.read(
+                                        table.fileIO(),
+                                        table.store().pathFactory(),
+                                        DataEvolutionRowIdAssignment.planFile(snapshot)))
                 .isInstanceOf(IOException.class);
     }
 
     @Test
     public void testRemovingReassignMarkerPreservesOtherProperties() {
         Map<String, String> properties = new HashMap<>();
-        properties.put(DataEvolutionRowIdReassignPlan.PLAN_FILE_PROPERTY, "plan");
+        properties.put(DataEvolutionRowIdAssignment.PLAN_FILE_PROPERTY, "plan");
         properties.put("sequence.generation.max-sequence-number", "100");
-        assertThat(DataEvolutionRowIdReassignPlan.withoutPlan(properties))
+        assertThat(DataEvolutionRowIdAssignment.withoutPlan(properties))
                 .containsExactlyEntriesOf(
                         Collections.singletonMap("sequence.generation.max-sequence-number", "100"));
         assertThat(properties).hasSize(2);
         assertThat(
-                        DataEvolutionRowIdReassignPlan.withoutPlan(
+                        DataEvolutionRowIdAssignment.withoutPlan(
                                 Collections.singletonMap(
-                                        DataEvolutionRowIdReassignPlan.PLAN_FILE_PROPERTY, "plan")))
+                                        DataEvolutionRowIdAssignment.PLAN_FILE_PROPERTY, "plan")))
                 .isNull();
     }
 
@@ -800,24 +793,27 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
 
     private void assertPersistedPlan(FileStoreTable table) throws Exception {
         Snapshot snapshot = Snapshot.fromJson(table.snapshotManager().latestSnapshot().toJson());
-        DataEvolutionRowIdReassignPlan plan =
-                DataEvolutionRowIdReassignPlan.read(
-                        table.fileIO(), table.store().pathFactory(), snapshot);
-        assertThat(plan.snapshotId()).isEqualTo(snapshot.id());
-        assertThat(plan.sourceSnapshotId()).isEqualTo(snapshot.id() - 1);
+        DataEvolutionRowIdAssignment assignment =
+                DataEvolutionRowIdAssignment.read(
+                        table.fileIO(),
+                        table.store().pathFactory(),
+                        DataEvolutionRowIdAssignment.planFile(snapshot));
+        assertThat(assignment.firstAssignedRowId())
+                .isEqualTo(table.snapshotManager().snapshot(snapshot.id() - 1).nextRowId());
+        assertThat(assignment.nextRowId()).isEqualTo(snapshot.nextRowId());
         Map<String, ManifestEntry> previous = new HashMap<>();
         for (ManifestEntry entry :
-                table.store().newScan().withSnapshot(plan.sourceSnapshotId()).plan().files()) {
+                table.store().newScan().withSnapshot(snapshot.id() - 1).plan().files()) {
             previous.put(entry.file().fileName(), entry);
         }
         for (ManifestEntry entry : currentEntries(table)) {
             Range oldRange = previous.get(entry.file().fileName()).file().nonNullRowIdRange();
             Range newRange = entry.file().nonNullRowIdRange();
             if (oldRange.equals(newRange)) {
-                assertThat(plan.map(entry.partition(), oldRange)).isEmpty();
-                assertThat(plan.overlaps(entry.partition(), oldRange)).isFalse();
+                assertThat(assignment.map(entry.partition(), oldRange)).isEmpty();
+                assertThat(assignment.overlaps(entry.partition(), oldRange)).isFalse();
             } else {
-                assertThat(plan.map(entry.partition(), oldRange)).hasValue(newRange);
+                assertThat(assignment.map(entry.partition(), oldRange)).hasValue(newRange);
             }
         }
     }

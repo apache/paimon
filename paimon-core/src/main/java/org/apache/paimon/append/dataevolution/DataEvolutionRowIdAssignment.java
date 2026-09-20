@@ -47,8 +47,8 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.readCount;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
-/** The absolute row-id mappings applied by one committed reassignment snapshot. */
-public final class DataEvolutionRowIdReassignPlan {
+/** The row-id assignment used to rewrite metadata and persisted for subsequent commits. */
+public final class DataEvolutionRowIdAssignment {
 
     /** A snapshot-local marker and reference to the plan in the manifest directory. */
     public static final String PLAN_FILE_PROPERTY = "row-id-reassign.plan";
@@ -56,40 +56,49 @@ public final class DataEvolutionRowIdReassignPlan {
     private static final int VERSION = 1;
     private static final String FILE_PREFIX = "row-id-reassign-plan-";
 
-    private final long sourceSnapshotId;
-    private final long snapshotId;
-    private final Map<BinaryRow, RowRangeMappingIndex> mappings;
+    private final Map<BinaryRow, RowRangeMappingIndex> rowIdMappings;
+    private final long firstAssignedRowId;
+    private final long nextRowId;
 
-    DataEvolutionRowIdReassignPlan(
-            long sourceSnapshotId, long snapshotId, Map<BinaryRow, RowRangeMappingIndex> mappings) {
+    DataEvolutionRowIdAssignment(
+            Map<BinaryRow, RowRangeMappingIndex> rowIdMappings,
+            long firstAssignedRowId,
+            long nextRowId) {
+        checkArgument(!rowIdMappings.isEmpty(), "Reassignment mappings must not be empty.");
         checkArgument(
-                sourceSnapshotId >= Snapshot.FIRST_SNAPSHOT_ID
-                        && snapshotId == Math.addExact(sourceSnapshotId, 1L),
-                "Invalid reassignment snapshot transition %s -> %s.",
-                sourceSnapshotId,
-                snapshotId);
-        checkArgument(!mappings.isEmpty(), "Reassignment mappings must not be empty.");
-        this.sourceSnapshotId = sourceSnapshotId;
-        this.snapshotId = snapshotId;
-        this.mappings = Collections.unmodifiableMap(new LinkedHashMap<>(mappings));
+                firstAssignedRowId >= 0 && nextRowId > firstAssignedRowId,
+                "Invalid assigned row-id range [%s, %s).",
+                firstAssignedRowId,
+                nextRowId);
+        this.rowIdMappings = Collections.unmodifiableMap(new LinkedHashMap<>(rowIdMappings));
+        this.firstAssignedRowId = firstAssignedRowId;
+        this.nextRowId = nextRowId;
     }
 
-    public long sourceSnapshotId() {
-        return sourceSnapshotId;
+    Map<BinaryRow, RowRangeMappingIndex> rowIdMappings() {
+        return rowIdMappings;
     }
 
-    public long snapshotId() {
-        return snapshotId;
+    public long firstAssignedRowId() {
+        return firstAssignedRowId;
+    }
+
+    public long nextRowId() {
+        return nextRowId;
+    }
+
+    public long logicalRowCount() {
+        return nextRowId - firstAssignedRowId;
     }
 
     /** Returns a mapping only when the entire range maps to a contiguous range. */
     public Optional<Range> map(BinaryRow partition, Range range) {
-        RowRangeMappingIndex mapping = mappings.get(partition);
+        RowRangeMappingIndex mapping = rowIdMappings.get(partition);
         return mapping == null ? Optional.empty() : mapping.map(range);
     }
 
     public boolean overlaps(BinaryRow partition, Range range) {
-        RowRangeMappingIndex mapping = mappings.get(partition);
+        RowRangeMappingIndex mapping = rowIdMappings.get(partition);
         return mapping != null && mapping.overlaps(range);
     }
 
@@ -120,10 +129,10 @@ public final class DataEvolutionRowIdReassignPlan {
             DataOutputViewStreamWrapper payload =
                     new DataOutputViewStreamWrapper(new CheckedOutputStream(out, checksum));
             payload.writeInt(VERSION);
-            payload.writeLong(sourceSnapshotId);
-            payload.writeLong(snapshotId);
-            payload.writeInt(mappings.size());
-            for (Map.Entry<BinaryRow, RowRangeMappingIndex> entry : mappings.entrySet()) {
+            payload.writeLong(firstAssignedRowId);
+            payload.writeLong(nextRowId);
+            payload.writeInt(rowIdMappings.size());
+            for (Map.Entry<BinaryRow, RowRangeMappingIndex> entry : rowIdMappings.entrySet()) {
                 serializeBinaryRow(entry.getKey(), payload);
                 entry.getValue().serialize(payload);
             }
@@ -136,10 +145,8 @@ public final class DataEvolutionRowIdReassignPlan {
         return fileName;
     }
 
-    public static DataEvolutionRowIdReassignPlan read(
-            FileIO fileIO, FileStorePathFactory pathFactory, Snapshot snapshot) throws IOException {
-        String fileName = planFile(snapshot);
-        checkArgument(fileName != null, "Snapshot %s has no reassignment plan.", snapshot.id());
+    public static DataEvolutionRowIdAssignment read(
+            FileIO fileIO, FileStorePathFactory pathFactory, String fileName) throws IOException {
         try (DataInputViewStreamWrapper in =
                 new DataInputViewStreamWrapper(
                         new BufferedInputStream(
@@ -151,11 +158,8 @@ public final class DataEvolutionRowIdReassignPlan {
             if (version != VERSION) {
                 throw new IOException("Unsupported row-id reassignment plan version: " + version);
             }
-            long sourceSnapshotId = payload.readLong();
-            long snapshotId = payload.readLong();
-            if (snapshotId != snapshot.id()) {
-                throw new IOException("Row-id reassignment plan belongs to snapshot " + snapshotId);
-            }
+            long firstAssignedRowId = payload.readLong();
+            long nextRowId = payload.readLong();
             int partitions = readCount(payload, "reassignment partitions");
             Map<BinaryRow, RowRangeMappingIndex> mappings = new LinkedHashMap<>();
             for (int i = 0; i < partitions; i++) {
@@ -171,8 +175,8 @@ public final class DataEvolutionRowIdReassignPlan {
             if (in.read() != -1) {
                 throw new IOException("Unexpected trailing bytes in row-id reassignment plan.");
             }
-            return new DataEvolutionRowIdReassignPlan(sourceSnapshotId, snapshotId, mappings);
-        } catch (IllegalArgumentException | ArithmeticException e) {
+            return new DataEvolutionRowIdAssignment(mappings, firstAssignedRowId, nextRowId);
+        } catch (IllegalArgumentException e) {
             throw new IOException("Invalid row-id reassignment plan " + fileName, e);
         }
     }

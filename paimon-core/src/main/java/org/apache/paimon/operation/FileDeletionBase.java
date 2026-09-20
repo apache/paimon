@@ -19,7 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassignPlan;
+import org.apache.paimon.append.dataevolution.DataEvolutionRowIdAssignment;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -382,7 +382,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         collectUnusedIndexManifests(snapshot, skippingSet, indexFiles, indexManifests);
         collectUnusedStatisticsManifests(snapshot, skippingSet, statistics);
 
-        String reassignPlan = DataEvolutionRowIdReassignPlan.planFile(snapshot);
+        String reassignPlan = DataEvolutionRowIdAssignment.planFile(snapshot);
         if (reassignPlan != null && skippingSet.add(reassignPlan)) {
             manifests.add(reassignPlan);
         }
@@ -623,7 +623,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                     .forEach(skippingSet::add);
         }
 
-        String reassignPlan = DataEvolutionRowIdReassignPlan.planFile(skippingSnapshot);
+        String reassignPlan = DataEvolutionRowIdAssignment.planFile(skippingSnapshot);
         if (reassignPlan != null) {
             skippingSet.add(reassignPlan);
         }

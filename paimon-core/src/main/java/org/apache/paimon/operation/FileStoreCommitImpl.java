@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassignPlan;
+import org.apache.paimon.append.dataevolution.DataEvolutionRowIdAssignment;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -1402,7 +1402,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 deltaManifestList,
                 indexManifest,
                 nextRowId,
-                DataEvolutionRowIdReassignPlan.withoutPlan(latest.properties()));
+                DataEvolutionRowIdAssignment.withoutPlan(latest.properties()));
     }
 
     public boolean replaceManifestList(
@@ -1521,7 +1521,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null,
                         targetSnapshot.watermark(),
                         targetSnapshot.statistics(),
-                        DataEvolutionRowIdReassignPlan.withoutPlan(targetSnapshot.properties()),
+                        DataEvolutionRowIdAssignment.withoutPlan(targetSnapshot.properties()),
                         nextRowId,
                         null);
 
@@ -1671,7 +1671,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null,
                         latestSnapshot.watermark(),
                         latestSnapshot.statistics(),
-                        DataEvolutionRowIdReassignPlan.withoutPlan(latestSnapshot.properties()),
+                        DataEvolutionRowIdAssignment.withoutPlan(latestSnapshot.properties()),
                         latestSnapshot.nextRowId(),
                         null);
 
