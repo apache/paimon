@@ -219,6 +219,9 @@ class TableRead:
         table reads do not guarantee row order. Python fallback reads remain
         serial.
         """
+        # Cleanup ownership follows the uncapped concurrency decision. LIMIT
+        # may reduce the actual native worker count to one, but the returned
+        # PyArrow reader still does not close its suspended batch iterator.
         effective = self._resolve_parallelism(parallelism, len(splits))
         reader, batch_iterator = self._new_arrow_batch_reader(
             splits, blob_parallelism, parallelism)
@@ -237,6 +240,8 @@ class TableRead:
         ``from_batches``. Retain it explicitly for a parallel read so native
         split workers are stopped when a caller ends the read early.
         """
+        # Keep the explicit iterator cleanup chain even when LIMIT caps the
+        # native worker count inside _new_arrow_batch_reader to one.
         effective = self._resolve_parallelism(parallelism, len(splits))
         reader, batch_iterator = self._new_arrow_batch_reader(
             splits, blob_parallelism, parallelism)
@@ -255,7 +260,7 @@ class TableRead:
         schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
-        effective = self._resolve_parallelism(parallelism, len(splits))
+        effective = self._effective_parallelism(parallelism, len(splits))
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
         if self._should_run_parallel(splits, effective):
             effective_bp = self._cap_blob_parallelism(
@@ -330,8 +335,10 @@ class TableRead:
                 back to the table option; when that is also unset the read
                 auto-scales to ``min(number of splits, CPU count)``. ``1``
                 keeps reads serial; ``>= 2`` caps the thread pool that reads
-                splits concurrently and assembles the final table in input
-                order. Must be ``>= 1``. Note that with ``>= 2`` (or auto)
+                byte-balanced contiguous split groups concurrently and
+                assembles the final table in input order. An unfiltered row
+                limit caps this further to avoid speculative work. Must be
+                ``>= 1``. Note that with ``>= 2`` (or auto)
                 and a ``limit`` set, the returned rows are an arbitrary
                 subset of the requested size, since which splits fill the row
                 quota first is non-deterministic. Data-evolution reads with
@@ -346,7 +353,7 @@ class TableRead:
                 shrunk to stay within it.
         """
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
-        effective = self._resolve_parallelism(parallelism, len(splits))
+        effective = self._effective_parallelism(parallelism, len(splits))
         schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
@@ -423,6 +430,7 @@ class TableRead:
                 "Native read failed, falling back to the Python reader: %s", e)
             return None
         rust_splits = []
+        split_weights = []
         for split in splits:
             if isinstance(split, QueryAuthSplit):
                 return None
@@ -432,11 +440,12 @@ class TableRead:
             if rust_split is None:
                 return None
             rust_splits.append(rust_split)
+            split_weights.append(self._native_split_weight(split))
         if (parallelism is not None
                 and self._should_run_parallel(splits, parallelism)):
             if streaming:
                 groups = self._native_split_groups(
-                    rust_splits, parallelism)
+                    rust_splits, parallelism, split_weights)
                 read_kwargs = {
                     'predicate': self.predicate,
                     'limit': self.limit,
@@ -469,7 +478,7 @@ class TableRead:
             try:
                 return self._native_batches_parallel(
                     native_read, rust_splits, schema, parallelism,
-                    blob_parallelism)
+                    blob_parallelism, split_weights)
             except _NativeReadSetupError as e:
                 logger.warning(
                     "Native read failed, falling back to the Python reader: %s", e)
@@ -490,22 +499,71 @@ class TableRead:
         return self._convert_native_batches(batches, schema)
 
     @staticmethod
-    def _native_split_groups(rust_splits, effective):
+    def _native_split_weight(split):
+        """Estimate native split work from its physical data-file bytes."""
+        try:
+            sizes = [data_file.file_size for data_file in split.files]
+        except (AttributeError, TypeError):
+            return 1
+        if any(not isinstance(size, int) for size in sizes):
+            return 1
+        return max(1, sum(max(0, size) for size in sizes))
+
+    @staticmethod
+    def _native_split_groups(rust_splits, effective, weights=None):
         workers = min(effective, len(rust_splits))
-        base_size, larger_groups = divmod(len(rust_splits), workers)
+        if weights is None:
+            weights = [1] * len(rust_splits)
+        if len(weights) != len(rust_splits):
+            raise ValueError("split weights must match splits")
+        weights = [max(1, int(weight)) for weight in weights]
+
+        # Find the smallest possible maximum group weight for a contiguous
+        # partition. Keeping groups contiguous preserves split order when the
+        # non-streaming path flattens worker results.
+        low, high = max(weights), sum(weights)
+        while low < high:
+            capacity = (low + high) // 2
+            groups_needed = 1
+            current = 0
+            for weight in weights:
+                if current + weight > capacity:
+                    groups_needed += 1
+                    current = weight
+                else:
+                    current += weight
+            if groups_needed <= workers:
+                high = capacity
+            else:
+                low = capacity + 1
+
+        capacity = low
         groups = []
         offset = 0
         for index in range(workers):
-            size = base_size + (1 if index < larger_groups else 0)
-            groups.append(rust_splits[offset:offset + size])
-            offset += size
+            remaining_groups = workers - index
+            if remaining_groups == 1:
+                groups.append(rust_splits[offset:])
+                break
+            end = offset
+            group_weight = 0
+            max_end = len(rust_splits) - (remaining_groups - 1)
+            while end < max_end:
+                weight = weights[end]
+                if end > offset and group_weight + weight > capacity:
+                    break
+                group_weight += weight
+                end += 1
+            groups.append(rust_splits[offset:end])
+            offset = end
         return groups
 
     def _native_batches_parallel(
             self, native_read, rust_splits, schema, effective,
-            blob_parallelism):
+            blob_parallelism, split_weights=None):
         """Read contiguous split groups with independent Rust readers."""
-        groups = self._native_split_groups(rust_splits, effective)
+        groups = self._native_split_groups(
+            rust_splits, effective, split_weights)
         workers = len(groups)
 
         remaining_state = _RemainingRows(self.limit)
@@ -598,6 +656,22 @@ class TableRead:
                     raise value
         finally:
             stop.set()
+            # A worker may be blocked inside its first native next(), before
+            # it has produced a batch or observed stop. Close every reader to
+            # interrupt that in-flight Rust operation before waiting for the
+            # executor. Native close is idempotent because workers also close
+            # their own readers in read_group's finally block.
+            for reader in readers:
+                close = getattr(reader, 'close', None)
+                if close is not None:
+                    try:
+                        close()
+                    except Exception:
+                        logger.debug(
+                            "Failed to close a native reader while stopping "
+                            "parallel read",
+                            exc_info=True,
+                        )
             for future in futures:
                 future.cancel()
             executor.shutdown(wait=True)
@@ -748,6 +822,14 @@ class TableRead:
         if value < 1:
             raise ValueError(f"{source} must be >= 1, got {value}")
         return value
+
+    def _effective_parallelism(
+            self, runtime: Optional[int], num_splits: int) -> int:
+        """Resolve parallelism and bound speculative unfiltered LIMIT reads."""
+        effective = self._resolve_parallelism(runtime, num_splits)
+        if self.limit is None or (self.limit > 0 and self.predicate is not None):
+            return effective
+        return min(effective, max(1, self.limit))
 
     @staticmethod
     def _resolve_blob_parallelism(runtime: Optional[int]) -> int:
