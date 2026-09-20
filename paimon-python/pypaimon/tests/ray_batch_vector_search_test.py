@@ -237,7 +237,7 @@ def test_empty_snapshot_does_not_follow_first_commit(table, ray_cluster):
     assert [ids(result) for result in query.to_arrow(execution="ray")] == [[0]] * 3
 
 
-def test_global_candidates_and_duplicate_precedence_ignore_completion_order(table):
+def test_global_candidates_and_duplicate_precedence(table):
     add_rows(table, [[0., 1.], [10., 1.], [20., 1.], [1., 1.]])
     query = table.search_vectors([[1., 1.], [20., 1.]], options={"refine_factor": "2"}).limit(1)._for_execution()
     reader = query._batch_vector_search_builder(query).new_batch_vector_search_read()
@@ -248,8 +248,9 @@ def test_global_candidates_and_duplicate_precedence_ignore_completion_order(tabl
     def completed(*args):
         # First query must exclude exact nearest row 3; second query has its own candidates.
         # Duplicate row 0 must retain the earlier split's score for the second query.
-        yield 1, ("l2", [{2: 8., 3: 7.}, {0: 100., 2: 8., 3: 7.}])
+        assert args[-1] is True
         yield 0, ("l2", [{0: 10., 1: 9.}, {0: 1., 1: 9.}])
+        yield 1, ("l2", [{2: 8., 3: 7.}, {0: 100., 2: 8., 3: 7.}])
 
     with patch.object(search_module, "_map_tasks", completed):
         results = distributed._read_batch(splits, query._table._read_snapshot)
@@ -272,7 +273,7 @@ def test_metric_mismatch_in_empty_shard_closes_tasks(table):
 
     with patch.object(search_module, "_map_tasks", completed), \
             pytest.raises(ValueError, match="different metrics"):
-        distributed._search_index_splits([None, None], QUERIES, 1, [], batch=True)
+        list(distributed._search_index_splits([None, None], QUERIES, 1, [], batch=True))
     assert closed == [True]
 
 
