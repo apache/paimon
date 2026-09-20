@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import inspect
+import io
 import json
 import subprocess
 import sys
@@ -25,7 +26,7 @@ import pyarrow as pa
 import pytest
 
 import pypaimon.multimodal as pmm
-from pypaimon.sample import robomind_agilex as agilex
+from pypaimon.benchmark.act import robomind_agilex as agilex
 
 
 h5py = pytest.importorskip("h5py")
@@ -54,9 +55,11 @@ def _write_episode(
         for index, hdf5_path in enumerate(_IMAGE_PATHS):
             dataset = h5.create_dataset(hdf5_path, (frames,), dtype=variable)
             for frame_index in range(frames):
-                payload = "%s:%s:%s" % (name, index, frame_index)
-                dataset[frame_index] = np.frombuffer(
-                    payload.encode("utf-8"), dtype=np.uint8)
+                from PIL import Image
+                buffer = io.BytesIO()
+                Image.new("RGB", (12, 8),
+                          (offset % 256, index, frame_index)).save(buffer, format="PNG")
+                dataset[frame_index] = np.frombuffer(buffer.getvalue(), dtype=np.uint8)
     return path
 
 
@@ -108,10 +111,10 @@ def _logical_rows(warehouse, table_name, schema):
             ("episode_id", "ascending"),
             ("frame_index", "ascending"),
         ]
-    elif "episode_id" in schema.names:
-        sort_keys = [("episode_id", "ascending")]
+    elif "episode_index" in schema.names:
+        sort_keys = [("episode_index", "ascending")]
     else:
-        sort_keys = [("statistics_version", "ascending")]
+        sort_keys = [("feature", "ascending"), ("split", "ascending")]
     return rows.sort_by(sort_keys)
 
 
@@ -141,10 +144,11 @@ def test_shared_transform_streams_complete_agilex_business_schema(
     frames = pa.Table.from_batches(batches)
     assert frames["episode_id"].to_pylist() == ["train-a"] * 3
     assert frames["frame_index"].to_pylist() == [0, 1, 2]
-    assert frames["observation_images_rgb_front"][0].as_py() == (
-        b"train-a:0:0")
-    assert frames["observation_images_depth_wrist_right"][2].as_py() == (
-        b"train-a:5:2")
+    with h5py.File(paths[0], "r") as h5:
+        assert frames["observation_images_rgb_front"][0].as_py() == (
+            h5[_IMAGE_PATHS[0]][0].tobytes())
+        assert frames["observation_images_depth_wrist_right"][2].as_py() == (
+            h5[_IMAGE_PATHS[-1]][2].tobytes())
     assert frames["action_joint_position_left"][1].as_py() == [
         float(value) for value in range(1207, 1214)
     ]
@@ -171,7 +175,7 @@ def test_episode_transform_accepts_published_shape_without_language(tmp_path):
 
     assert len(batches) == 1
     assert batches[0]["instruction"].to_pylist() == [None]
-    assert batches[0]["instruction_embedding"].to_pylist() == [None]
+    assert json.loads(batches[0]["metadata"][0].as_py())["instruction_embedding"] is None
 
 
 def test_discover_rejects_duplicate_episode_ids(tmp_path):
@@ -255,7 +259,7 @@ def test_local_ingest_and_backfill_materialize_only_canonical_action(
     completed = subprocess.run(
         [
             sys.executable,
-            "-m", "pypaimon.sample.robomind_agilex",
+            "-m", "pypaimon.benchmark.act.robomind_agilex",
             "--input", str(root),
             "--warehouse", str(warehouse),
             "--batch-size", "2",
@@ -288,9 +292,9 @@ def test_local_ingest_and_backfill_materialize_only_canonical_action(
     episodes, episode_rows = _read(
         warehouse, agilex.EPISODES_TABLE, agilex.episode_schema().names)
     frames, frame_rows = _read(warehouse, agilex.FRAMES_TABLE)
-    stats, stats_rows = _read(warehouse, agilex.FEATURE_STATS_TABLE)
+    stats, stats_rows = _read(warehouse, agilex.STAT_TABLE)
     assert episode_rows.num_rows == 4
-    assert set(episode_rows["split"].to_pylist()) == {"train", "val"}
+    assert set(episode_rows["split"].to_pylist()) == {"train", "eval"}
     assert set(episode_rows["success"].to_pylist()) == {True, False}
     for table in (episodes, frames, stats):
         options = table.raw_table.table_schema.options
@@ -325,20 +329,21 @@ def test_local_ingest_and_backfill_materialize_only_canonical_action(
 
     assert stats_rows.num_rows == 1
     stats_row = stats_rows.to_pylist()[0]
-    assert stats_row["statistics_version"] == "synthetic-actions@1"
-    assert stats_row["source_snapshot_id"] == backfill["frames_snapshot_id"]
-    assert stats_row["source_split"] == "train"
-    assert stats_row["frame_count"] == 6
-    assert stats_row["standard_deviation_floor"] == 0.01
+    assert stats_row["source_tag"] == "synthetic-actions@1"
+    assert stats_row["split"] == "train"
+    values = json.loads(stats_row["stats"])
+    assert values["source_snapshot_id"] == backfill["frames_snapshot_id"]
+    assert values["act"]["count"] == 6
+    assert values["act"]["std_floor"] == 0.01
     expected_mean = np.concatenate([
         np.arange(1212, 1219),
         np.arange(1312, 1319),
     ])
     expected_std = np.full(14, np.sqrt(173.0 / 3.0))
     np.testing.assert_allclose(
-        stats_row["action_mean"], expected_mean, rtol=0, atol=1e-12)
+        values["act"]["mean"], expected_mean, rtol=0, atol=1e-12)
     np.testing.assert_allclose(
-        stats_row["action_std"], expected_std, rtol=1e-12, atol=1e-12)
+        values["act"]["std"], expected_std, rtol=1e-12, atol=1e-12)
 
     refreshed_snapshot = agilex.refresh_action_statistics(
         warehouse, statistics_version="synthetic-actions-refresh@1")
@@ -410,7 +415,7 @@ def test_ray_ingest_matches_local_schema_rows_and_backfill(
     for table_name, schema in (
             (agilex.EPISODES_TABLE, agilex.episode_schema()),
             (agilex.FRAMES_TABLE, agilex.backfilled_frame_schema()),
-            (agilex.FEATURE_STATS_TABLE, agilex.feature_stats_schema())):
+            (agilex.STAT_TABLE, agilex.stat_schema())):
         local_table, _ = _read(local_warehouse, table_name)
         ray_table, _ = _read(ray_warehouse, table_name)
         assert local_table.raw_table.table_schema.options == (
@@ -553,11 +558,11 @@ def test_stream_action_statistics_are_stable_and_order_independent(monkeypatch):
     expected_std = values.astype(np.float64).std(axis=0)
 
     for actual in (forward, reverse):
-        assert actual["frame_count"] == frame_count
+        assert actual["count"] == frame_count
         np.testing.assert_allclose(
-            actual["action_mean"], expected_mean, rtol=0, atol=1e-9)
+            actual["mean"], expected_mean, rtol=0, atol=1e-9)
         np.testing.assert_allclose(
-            actual["action_std"], expected_std, rtol=0, atol=1e-9)
+            actual["std"], expected_std, rtol=0, atol=1e-9)
 
 
 def test_canonical_action_update_skips_empty_planned_split(monkeypatch):
@@ -615,3 +620,136 @@ def test_canonical_action_update_reuses_one_row_id_updater(monkeypatch):
     assert captured[0]["_ROW_ID"].to_pylist() == [0]
     assert captured[1]["_ROW_ID"].to_pylist() == [1]
     builder.new_commit.return_value.commit.assert_called_once_with(["message"])
+
+
+def test_episode_contract_preserves_source_and_allocates_global_ranges(
+        agilex_input):
+    root, _ = agilex_input
+    schema = agilex.episode_schema()
+    assert schema.names == [
+        "episode_index", "frame_count", "dataset_from_index",
+        "dataset_to_index", "split", "success", "quality_status",
+        "instruction", "task_index", "source_episode_key", "stats", "metadata",
+    ]
+    for name in ("episode_index", "frame_count", "dataset_from_index",
+                 "dataset_to_index"):
+        assert schema.field(name) == pa.field(name, pa.int64(), nullable=False)
+    episodes = agilex.discover_episodes(root)
+    episode_transform = agilex.RoboMindAgileXEpisodeTransform(episodes)
+    frame_transform = agilex.RoboMindAgileXFrameTransform(episodes)
+    end = 0
+    for episode_index, episode in enumerate(episodes):
+        source = pmm.Hdf5File(path=episode.path.as_uri())
+        with h5py.File(episode.path, "r") as h5:
+            row = list(episode_transform(h5, source))[0].to_pylist()[0]
+            frames = pa.Table.from_batches(list(frame_transform(h5, source)))
+        assert row["episode_index"] == episode_index
+        assert row["dataset_from_index"] == end
+        end += row["frame_count"]
+        assert row["dataset_to_index"] == end
+        assert frames["index"].to_pylist() == list(range(end - 3, end))
+        assert frames["episode_index"].to_pylist() == [episode_index] * 3
+        assert row["split"] in ("train", "eval")
+        assert row["quality_status"] == 0
+        assert row["source_episode_key"] == episode.episode_id
+        assert row["task_index"] is None and row["stats"] is None
+        metadata = json.loads(row["metadata"])
+        assert metadata["source"]["uri"] == episode.path.as_uri()
+        assert metadata["source_key"] == episode.source_key
+        assert metadata["hdf5"] == {"compress": True, "sim": False}
+        assert len(metadata["instruction_embedding"]) == 768
+
+
+def test_pipeline_publishes_contract_info_and_fixed_member_tags(
+        agilex_input, tmp_path):
+    root, _ = agilex_input
+    assert agilex.info_schema().names == [
+        "group_id", "robot", "storage_mode", "fps", "total_episodes",
+        "total_frames", "total_tasks", "features", "quality_statuses",
+        "tag", "tables", "metadata",
+    ]
+    warehouse = tmp_path / "contract"
+    agilex.run_local_pipeline(root, warehouse, statistics_version="train-v1")
+    connection = pmm.connect(database=agilex.DEFAULT_DATABASE,
+                             options={"warehouse": str(warehouse)})
+    rows = connection.get_table(agilex.INFO_TABLE).scan(
+        tag_name="train-v1").to_list()
+    assert len(rows) == 1
+    info = rows[0]
+    assert info["robot"] == {"type": "robomind_agilex", "instance_id": None}
+    assert info["storage_mode"] == "frame" and info["fps"] is None
+    assert (info["total_episodes"], info["total_frames"]) == (4, 12)
+    assert info["total_tasks"] is None
+    assert dict(info["quality_statuses"]) == {0: "valid", 1: "review", 2: "invalid"}
+    tables = dict(info["tables"])
+    assert set(tables) == {"episode", "frame", "stat"}
+    assert set(connection.catalog.list_tables(agilex.DEFAULT_DATABASE)) == {
+        "agilex__info", "agilex__episode", "agilex__frame", "agilex__stat",
+    }
+    stat_rows = connection.get_table(tables["stat"]).scan(tag_name="train-v1").to_list()
+    assert len(stat_rows) == 1
+    stat = json.loads(stat_rows[0]["stats"])
+    assert stat["count"] == 6
+    assert stat["act"]["count"] == 6  # ACT uses successful train episodes only.
+    assert stat["act"]["std_floor"] == 0.01
+    assert stat_rows[0]["feature"] == "action"
+    assert stat_rows[0]["source_tag"] == "train-v1"
+    for name in tables.values():
+        connection.get_table(name).scan(tag_name="train-v1").to_list()
+    features = json.loads(info["features"])
+    assert set(features) == set(agilex.backfilled_frame_schema().names)
+    assert features["action"]["shape"] == [14]
+    assert features["observation_images_rgb_front"]["dtype"] == "image"
+    assert features["observation_images_rgb_front"]["shape"] == [8, 12, 3]
+    assert json.loads(info["metadata"])["source"]["format"] == "robomind_hdf5"
+    original_info = info
+    original_frames = connection.get_table(tables["frame"]).scan(
+        tag_name="train-v1").to_arrow()
+    agilex.backfill_canonical_action(warehouse, statistics_version="train-v2")
+    assert connection.get_table(agilex.INFO_TABLE).scan(
+        tag_name="train-v1").to_list() == [original_info]
+    assert connection.get_table(tables["frame"]).scan(
+        tag_name="train-v1").to_arrow().equals(original_frames)
+    assert len(connection.get_table(agilex.INFO_TABLE).scan().to_list()) == 1
+    assert connection.get_table(agilex.INFO_TABLE).scan(
+        tag_name="train-v2").to_list()[0]["group_id"] == info["group_id"]
+    with pytest.raises(ValueError, match="already published"):
+        agilex.backfill_canonical_action(warehouse, statistics_version="train-v1")
+
+
+def test_publish_rejects_stale_normalization_before_exposing_info(
+        agilex_input, tmp_path):
+    root, _ = agilex_input
+    warehouse = tmp_path / "stale-statistics"
+    agilex.ingest_local(root, warehouse)
+    agilex.materialize_canonical_action(warehouse)
+    agilex.refresh_action_statistics(warehouse, statistics_version="pending")
+    agilex.materialize_canonical_action(warehouse)
+    with pytest.raises(ValueError, match="statistics.*snapshot"):
+        agilex.publish_contract(warehouse, tag="pending")
+    connection = pmm.connect(database=agilex.DEFAULT_DATABASE,
+                             options={"warehouse": str(warehouse)})
+    assert agilex.INFO_TABLE not in connection.catalog.list_tables(agilex.DEFAULT_DATABASE)
+
+
+def test_stat_keeps_raw_train_moments_and_act_success_scope(agilex_input, tmp_path):
+    from pypaimon.benchmark.act.paimon import statistics_row
+
+    root, paths = agilex_input
+    _write_episode(tmp_path, "train", "failed-train", 1000, status="failed_episodes")
+    for path in paths[:2]:
+        with h5py.File(path, "r+") as h5:
+            h5["master/joint_position_left"][:, 0] = 1.0
+    warehouse = tmp_path / "combined-stat"
+    agilex.run_local_pipeline(root, warehouse, statistics_version="combined")
+    connection = pmm.connect(database=agilex.DEFAULT_DATABASE,
+                             options={"warehouse": str(warehouse)})
+    rows = connection.get_table(agilex.STAT_TABLE).scan(tag_name="combined").to_list()
+    assert len(rows) == 1
+    stats = json.loads(rows[0]["stats"])
+    assert stats["count"] == 9
+    assert stats["std"][0] > 0
+    assert stats["act"]["count"] == 6
+    assert stats["act"]["mean"][0] == 1.0
+    assert stats["act"]["std"][0] == 0.0  # Storage keeps the raw moment.
+    assert statistics_row(connection, "combined")["action_std"][0] == 0.01

@@ -18,6 +18,8 @@
 
 import argparse
 import hashlib
+import io
+import uuid
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -29,9 +31,10 @@ import pypaimon.multimodal as pmm
 
 
 DEFAULT_DATABASE = "robomind"
-EPISODES_TABLE = "episodes_agilex"
-FRAMES_TABLE = "frames_agilex"
-FEATURE_STATS_TABLE = "feature_stats_agilex"
+INFO_TABLE = "agilex__info"
+STAT_TABLE = "agilex__stat"
+EPISODES_TABLE = "agilex__episode"
+FRAMES_TABLE = "agilex__frame"
 DEFAULT_STATISTICS_VERSION = "robomind-agilex-joint-position@1"
 
 TABLE_OPTIONS = {
@@ -90,13 +93,16 @@ _STANDARD_DEVIATION_FLOOR = 1e-2
 
 @dataclass(frozen=True)
 class EpisodeSource:
-    """RoboMIND metadata derived without opening the HDF5 source."""
+    """Source identity and stable frame range allocated during discovery."""
 
     path: Path
     source_key: str
     episode_id: str
     split: str
     success: bool
+    episode_index: int
+    dataset_from_index: int
+    frame_count: int
 
 
 @dataclass(frozen=True)
@@ -136,18 +142,53 @@ class RayPipelineResult:
     backfill: BackfillResult
 
 
-def episode_schema():
-    """Return the shared AgileX episode business schema."""
+def info_schema():
+    """One typed group description per published Tag."""
     return pa.schema([
-        pa.field("episode_id", pa.string(), nullable=False),
-        pa.field("source_key", pa.string(), nullable=False),
+        pa.field("group_id", pa.string(), nullable=False),
+        pa.field("robot", pa.struct([
+            pa.field("type", pa.string(), nullable=False),
+            pa.field("instance_id", pa.string()),
+        ]), nullable=False),
+        pa.field("storage_mode", pa.string(), nullable=False),
+        pa.field("fps", pa.float64()),
+        pa.field("total_episodes", pa.int64(), nullable=False),
+        pa.field("total_frames", pa.int64(), nullable=False),
+        pa.field("total_tasks", pa.int64()),
+        pa.field("features", pa.string(), nullable=False),
+        pa.field("quality_statuses", pa.map_(pa.int32(), pa.string()), nullable=False),
+        pa.field("tag", pa.string(), nullable=False),
+        pa.field("tables", pa.map_(pa.string(), pa.string()), nullable=False),
+        pa.field("metadata", pa.string()),
+    ])
+
+
+def stat_schema():
+    """Feature moments and optional ACT normalization metadata in one table."""
+    return pa.schema([
+        pa.field("feature", pa.string(), nullable=False),
         pa.field("split", pa.string(), nullable=False),
-        pa.field("success", pa.bool_(), nullable=False),
+        pa.field("source_table", pa.string(), nullable=False),
+        pa.field("source_tag", pa.string(), nullable=False),
+        pa.field("stats", pa.string(), nullable=False),
+    ])
+
+
+def episode_schema():
+    """Return the contract episode schema; source-specific values stay in metadata."""
+    return pa.schema([
+        pa.field("episode_index", pa.int64(), nullable=False),
+        pa.field("frame_count", pa.int64(), nullable=False),
+        pa.field("dataset_from_index", pa.int64(), nullable=False),
+        pa.field("dataset_to_index", pa.int64(), nullable=False),
+        pa.field("split", pa.string(), nullable=False),
+        pa.field("success", pa.bool_()),
+        pa.field("quality_status", pa.int32(), nullable=False),
         pa.field("instruction", pa.string()),
-        pa.field("instruction_embedding", pa.list_(pa.float32(), 768)),
-        pa.field("frame_count", pa.int32(), nullable=False),
-        pa.field("hdf5_compress", pa.bool_()),
-        pa.field("hdf5_sim", pa.bool_()),
+        pa.field("task_index", pa.int64()),
+        pa.field("source_episode_key", pa.string()),
+        pa.field("stats", pa.string()),
+        pa.field("metadata", pa.string()),
     ])
 
 
@@ -155,7 +196,11 @@ def frame_schema():
     """Return the shared AgileX frame schema before canonical backfill."""
     fields = [
         pa.field("episode_id", pa.string(), nullable=False),
-        pa.field("frame_index", pa.int32(), nullable=False),
+        pa.field("frame_index", pa.int64(), nullable=False),
+        pa.field("episode_index", pa.int64(), nullable=False),
+        pa.field("index", pa.int64(), nullable=False),
+        pa.field("timestamp_ns", pa.int64()),
+        pa.field("quality_status", pa.int32(), nullable=False),
     ]
     fields.extend(
         pa.field(name, pa.large_binary(), nullable=False)
@@ -173,24 +218,14 @@ def backfilled_frame_schema():
     return frame_schema().append(pa.field(_ACTION_COLUMN, _ACTION_VECTOR_TYPE))
 
 
-def feature_stats_schema():
-    """Return the versioned normalization-statistics schema."""
-    return pa.schema([
-        pa.field("statistics_version", pa.string(), nullable=False),
-        pa.field("source_table", pa.string(), nullable=False),
-        pa.field("source_snapshot_id", pa.int64(), nullable=False),
-        pa.field("source_split", pa.string(), nullable=False),
-        pa.field("split_manifest_sha256", pa.string(), nullable=False),
-        pa.field("feature_name", pa.string(), nullable=False),
-        pa.field("frame_count", pa.int64(), nullable=False),
-        pa.field("action_mean", pa.list_(pa.float64(), 14), nullable=False),
-        pa.field("action_std", pa.list_(pa.float64(), 14), nullable=False),
-        pa.field("standard_deviation_floor", pa.float64(), nullable=False),
-    ])
-
-
 def discover_episodes(input_root):
-    """Discover RoboMIND episode paths without reading HDF5 contents."""
+    """Allocate identities from sorted source paths and HDF5 row counts.
+
+    This importer creates a new group from complete episodes. It refuses an
+    existing destination; these initial IDs must never be recomputed for an
+    append or an update of an already published group.
+    """
+    import h5py
     root = Path(input_root).expanduser().resolve()
     if not root.is_dir():
         raise ValueError("RoboMIND input root does not exist: %s" % root)
@@ -200,6 +235,7 @@ def discover_episodes(input_root):
 
     episodes = []
     episode_ids = set()
+    global_index = 0
     for path in paths:
         resolved_path = path.resolve()
         try:
@@ -218,13 +254,19 @@ def discover_episodes(input_root):
         if episode_id in episode_ids:
             raise ValueError("Duplicate RoboMIND episode_id %r." % episode_id)
         episode_ids.add(episode_id)
+        with h5py.File(resolved_path, "r") as h5:
+            frame_count = int(h5["puppet/joint_position_left"].shape[0])
         episodes.append(EpisodeSource(
             path=resolved_path,
             source_key=source_key,
             episode_id=episode_id,
-            split=split,
+            split="eval" if split == "val" else split,
             success=status == "success_episodes",
+            episode_index=len(episodes),
+            dataset_from_index=global_index,
+            frame_count=frame_count,
         ))
+        global_index += frame_count
     return episodes
 
 
@@ -257,6 +299,8 @@ class RoboMindAgileXEpisodeTransform(_RoboMindAgileXTransform):
     def __call__(self, h5, source):
         episode = self._source(source)
         frame_count = _validate_source(h5, episode.source_key)
+        if frame_count != episode.frame_count:
+            raise ValueError("Source frame count changed after discovery.")
         yield self._episode_batch(h5, episode, frame_count)
 
     @staticmethod
@@ -264,15 +308,26 @@ class RoboMindAgileXEpisodeTransform(_RoboMindAgileXTransform):
         instruction = _instruction(h5, episode.source_key)
         embedding = _instruction_embedding(h5, episode.source_key)
         return pa.RecordBatch.from_pydict({
-            "episode_id": [episode.episode_id],
-            "source_key": [episode.source_key],
+            "episode_index": [episode.episode_index],
+            "dataset_from_index": [episode.dataset_from_index],
+            "dataset_to_index": [episode.dataset_from_index + frame_count],
+            "source_episode_key": [episode.episode_id],
+            "quality_status": [0],
+            "task_index": [None],
+            "stats": [None],
             "split": [episode.split],
             "success": [episode.success],
             "instruction": [instruction],
-            "instruction_embedding": [embedding],
             "frame_count": [frame_count],
-            "hdf5_compress": [_optional_bool(h5.attrs.get("compress"))],
-            "hdf5_sim": [_optional_bool(h5.attrs.get("sim"))],
+            "metadata": [json.dumps({
+                "source": {"uri": episode.path.as_uri()},
+                "source_key": episode.source_key,
+                "instruction_embedding": embedding,
+                "hdf5": {
+                    "compress": _optional_bool(h5.attrs.get("compress")),
+                    "sim": _optional_bool(h5.attrs.get("sim")),
+                },
+            })],
         }, schema=episode_schema())
 
 
@@ -286,12 +341,20 @@ class RoboMindAgileXFrameTransform(_RoboMindAgileXTransform):
     def __call__(self, h5, source):
         episode = self._source(source)
         frame_count = _validate_source(h5, episode.source_key)
+        if frame_count != episode.frame_count:
+            raise ValueError("Source frame count changed after discovery.")
         for begin in range(0, frame_count, self.batch_size):
             end = min(begin + self.batch_size, frame_count)
             count = end - begin
             columns = {
                 "episode_id": [episode.episode_id] * count,
-                "frame_index": np.arange(begin, end, dtype=np.int32),
+                "frame_index": np.arange(begin, end, dtype=np.int64),
+                "episode_index": [episode.episode_index] * count,
+                "index": np.arange(episode.dataset_from_index + begin,
+                                   episode.dataset_from_index + end,
+                                   dtype=np.int64),
+                "timestamp_ns": [None] * count,
+                "quality_status": [0] * count,
             }
             for name, hdf5_path in IMAGE_FIELDS:
                 columns[name] = [
@@ -500,7 +563,8 @@ def backfill_canonical_action(
         *,
         database=DEFAULT_DATABASE,
         statistics_version=DEFAULT_STATISTICS_VERSION):
-    """Run the independently recoverable action and statistics stages."""
+    """Materialize action, compute statistics, and publish a new group Tag."""
+    _reject_published_tag(warehouse, database, statistics_version)
     row_count, frames_snapshot_id = materialize_canonical_action(
         warehouse, database=database)
     statistics_snapshot_id = refresh_action_statistics(
@@ -508,6 +572,7 @@ def backfill_canonical_action(
         database=database,
         statistics_version=statistics_version,
     )
+    publish_contract(warehouse, database=database, tag=statistics_version)
     return BackfillResult(
         row_count=row_count,
         frames_snapshot_id=frames_snapshot_id,
@@ -530,6 +595,7 @@ def backfill_canonical_action_ray(
             "Ray backfill requires ray; install pypaimon[ray].")
     _require_ray_250(ray)
 
+    _reject_published_tag(warehouse, database, statistics_version)
     row_count, frames_snapshot_id = _materialize_canonical_action_ray(
         warehouse,
         database=database,
@@ -540,6 +606,7 @@ def backfill_canonical_action_ray(
         database=database,
         statistics_version=statistics_version,
     )
+    publish_contract(warehouse, database=database, tag=statistics_version)
     return BackfillResult(
         row_count=row_count,
         frames_snapshot_id=frames_snapshot_id,
@@ -639,40 +706,139 @@ def refresh_action_statistics(
         raise ValueError("Canonical action column does not exist.")
 
     episode_rows = _read_raw(
-        episodes_table.raw_table, ["episode_id", "split", "success"])
+        episodes_table.raw_table, ["source_episode_key", "split", "success", "quality_status"])
     train_episode_ids = sorted(
-        row["episode_id"]
+        row["source_episode_key"]
         for row in episode_rows.to_pylist()
-        if row["split"] == "train" and row["success"]
+        if row["split"] == "train" and row["success"] and row["quality_status"] == 0
     )
     frames_snapshot_id = _snapshot_id(frames_table)
+    train_ids = [row["source_episode_key"] for row in episode_rows.to_pylist()
+                 if row["split"] == "train" and row["quality_status"] == 0]
     statistics = _stream_action_statistics(
-        frames_table.raw_table, train_episode_ids)
-
-    split_manifest_sha256 = hashlib.sha256(
-        "".join("%s\n" % value for value in train_episode_ids)
-        .encode("utf-8")
-    ).hexdigest()
+        frames_table.raw_table, train_ids, valid_only=True)
+    act = _stream_action_statistics(
+        frames_table.raw_table, train_episode_ids, valid_only=True)
+    statistics["source_snapshot_id"] = frames_snapshot_id
+    statistics["act"] = {
+        "count": act["count"], "mean": act["mean"], "std": act["std"],
+        "std_floor": _STANDARD_DEVIATION_FLOOR,
+        "episode_filter": "success = true AND quality_status = 0",
+        "split_manifest_sha256": hashlib.sha256(
+            "".join("%s\n" % value for value in train_episode_ids)
+            .encode("utf-8")).hexdigest(),
+    }
     stats_table = connection.create_table(
-        FEATURE_STATS_TABLE,
-        schema=feature_stats_schema(),
-        options=TABLE_OPTIONS,
-        ignore_if_exists=True,
-    )
-    stats_table.add(pa.Table.from_pylist([{
-        "statistics_version": statistics_version,
-        "source_table": "%s.%s" % (database, FRAMES_TABLE),
-        "source_snapshot_id": frames_snapshot_id,
-        "source_split": "train",
-        "split_manifest_sha256": split_manifest_sha256,
-        "feature_name": _ACTION_COLUMN,
-        "frame_count": statistics["frame_count"],
-        "action_mean": statistics["action_mean"],
-        "action_std": statistics["action_std"],
-        "standard_deviation_floor": statistics[
-            "standard_deviation_floor"],
-    }], schema=feature_stats_schema()))
+        STAT_TABLE, schema=stat_schema(), options=TABLE_OPTIONS, ignore_if_exists=True)
+    stats_table.overwrite(pa.Table.from_pylist([{
+        "feature": _ACTION_COLUMN,
+        "split": "train",
+        "source_table": frames_table.identifier,
+        "source_tag": statistics_version,
+        "stats": json.dumps(statistics),
+    }], schema=stat_schema()))
     return _snapshot_id(stats_table)
+
+
+def _reject_published_tag(warehouse, database, tag):
+    if not isinstance(tag, str) or not tag.strip() or any(
+            char in tag for char in ("/", "\\", "\0")):
+        raise ValueError("statistics_version must be a non-empty valid Tag name.")
+    connection = pmm.connect(database=database, options={"warehouse": str(warehouse)})
+    existing_tables = connection.catalog.list_tables(database)
+    for name in (INFO_TABLE, EPISODES_TABLE, FRAMES_TABLE,
+                 STAT_TABLE):
+        if name in existing_tables:
+            member = connection.get_table(name)
+            if member.raw_table.tag_manager().tag_exists(tag):
+                raise ValueError(
+                    "Group Tag %r is already published or partially published; "
+                    "use a new Tag name." % tag)
+
+
+def _frame_features(frames):
+    """Describe the actual wide-table schema and encoded image dimensions."""
+    from PIL import Image
+
+    image_names = [name for name, _ in IMAGE_FIELDS]
+    image_row = frames.scan().select(image_names).limit(1).to_list()[0]
+    features = {}
+    for field in backfilled_frame_schema():
+        spec = {"dtype": "float64", "shape": [7], "names": None}
+        if field.name in image_names:
+            with Image.open(io.BytesIO(image_row[field.name])) as image:
+                channels = len(image.getbands())
+                spec = {"dtype": "image",
+                        "shape": [image.height, image.width, channels],
+                        "names": ["height", "width", "channels"]}
+        elif field.name == _ACTION_COLUMN:
+            spec = {"dtype": "float32", "shape": [14], "names": None}
+        elif not pa.types.is_fixed_size_list(field.type):
+            dtype = ("string" if pa.types.is_string(field.type)
+                     else "int32" if pa.types.is_int32(field.type) else "int64")
+            spec = {"dtype": dtype, "shape": [1], "names": None}
+        features[field.name] = spec
+    return features
+
+
+def publish_contract(warehouse, *, database=DEFAULT_DATABASE, tag):
+    """Publish member Tags first and expose the single info row last.
+
+    The benchmark is a single-writer workflow. Independent table APIs do not
+    provide a cross-table transaction; failed publication has no readable info
+    Tag and existing Tags remain untouched. After a partial publication,
+    rerun backfill with a new Tag name; never move already created member Tags.
+    """
+    _reject_published_tag(warehouse, database, tag)
+    connection = pmm.connect(database=database, options={"warehouse": str(warehouse)})
+    episodes = connection.get_table(EPISODES_TABLE)
+    frames = connection.get_table(FRAMES_TABLE)
+    rows = episodes.scan().to_list()
+    if STAT_TABLE not in connection.catalog.list_tables(database):
+        raise ValueError("ACT statistics are missing for the frame snapshot.")
+    stat = connection.get_table(STAT_TABLE)
+    normalization = stat.scan().where(
+        "feature = 'action' AND split = 'train' AND source_tag = '%s'"
+        % tag.replace("'", "''")).to_list()
+    if (len(normalization) != 1
+            or json.loads(normalization[0]["stats"])["source_snapshot_id"] != _snapshot_id(frames)):
+        raise ValueError("ACT statistics must uniquely match the current frame snapshot.")
+    features = _frame_features(frames)
+    tables = {
+        "episode": episodes.identifier, "frame": frames.identifier,
+        "stat": stat.identifier,
+    }
+    info = connection.create_table(INFO_TABLE, schema=info_schema(),
+                                   options=TABLE_OPTIONS, ignore_if_exists=True)
+    previous = (info.scan().to_list()
+                if info.raw_table.snapshot_manager().get_latest_snapshot() else [])
+    info_row = {
+        "group_id": previous[0]["group_id"] if previous else str(uuid.uuid4()),
+        "robot": {"type": "robomind_agilex", "instance_id": None},
+        "storage_mode": "frame", "fps": None,
+        "total_episodes": len(rows),
+        "total_frames": sum(row["frame_count"] for row in rows),
+        "total_tasks": None, "features": json.dumps(features),
+        "quality_statuses": {0: "valid", 1: "review", 2: "invalid"},
+        "tag": tag, "tables": tables,
+        "metadata": json.dumps({
+            "source": {"format": "robomind_hdf5", "dataset": "RoboMIND",
+                       "adapter": "benchmark.act.robomind_agilex"},
+            "action": {"source": "master joint position left then right",
+                       "semantics": "demonstration supervision; receipt by the robot is not verified"},
+        }),
+    }
+    for name in tables.values():
+        member = connection.get_table(name)
+        snapshot_id = _snapshot_id(member)
+        existing = member.raw_table.tag_manager().get(tag)
+        if existing is not None:
+            if existing.id != snapshot_id:
+                raise ValueError("Member Tag %r points to a different snapshot." % tag)
+        else:
+            member.raw_table.create_tag(tag, snapshot_id=snapshot_id)
+    info.overwrite(pa.Table.from_pylist([info_row], schema=info_schema()))
+    connection.get_table(INFO_TABLE).raw_table.create_tag(tag)
 
 
 def _create_tables(warehouse, database):
@@ -745,7 +911,7 @@ def _update_canonical_action_batches(table):
     return row_count
 
 
-def _stream_action_statistics(table, train_episode_ids):
+def _stream_action_statistics(table, train_episode_ids, *, valid_only=False):
     """Accumulate fixed-size count, running mean, and M2 on the driver."""
     train_ids = set(train_episode_ids)
     if not train_ids:
@@ -753,10 +919,16 @@ def _stream_action_statistics(table, train_episode_ids):
     count = 0
     mean = np.zeros(14, dtype=np.float64)
     m2 = np.zeros(14, dtype=np.float64)
-    for source in _iter_raw(table, ["episode_id", _ACTION_COLUMN]):
+    minimum = np.full(14, np.inf)
+    maximum = np.full(14, -np.inf)
+    columns = ["episode_id", _ACTION_COLUMN]
+    if valid_only:
+        columns.append("quality_status")
+    for source in _iter_raw(table, columns):
+        quality = source["quality_status"].to_pylist() if valid_only else None
         selected = [
             index for index, value in enumerate(source["episode_id"].to_pylist())
-            if value in train_ids
+            if value in train_ids and (quality is None or quality[index] == 0)
         ]
         if not selected:
             continue
@@ -764,6 +936,10 @@ def _stream_action_statistics(table, train_episode_ids):
             source[_ACTION_COLUMN].take(pa.array(selected)).to_pylist(),
             dtype=np.float64,
         )
+        if not np.isfinite(action).all():
+            raise ValueError("Valid action contains NaN or Inf.")
+        minimum = np.minimum(minimum, action.min(axis=0))
+        maximum = np.maximum(maximum, action.max(axis=0))
         batch_count = len(action)
         batch_mean = action.mean(axis=0)
         batch_m2 = np.square(action - batch_mean).sum(axis=0)
@@ -778,13 +954,9 @@ def _stream_action_statistics(table, train_episode_ids):
     if count == 0:
         raise ValueError("No frame rows belong to the train episodes.")
     variance = np.maximum(m2 / count, 0.0)
-    return {
-        "frame_count": count,
-        "action_mean": mean.tolist(),
-        "action_std": np.maximum(
-            np.sqrt(variance), _STANDARD_DEVIATION_FLOOR).tolist(),
-        "standard_deviation_floor": _STANDARD_DEVIATION_FLOOR,
-    }
+    return {"count": count, "min": minimum.tolist(),
+            "max": maximum.tolist(), "mean": mean.tolist(),
+            "std": np.sqrt(variance).tolist()}
 
 
 def _iter_raw(table, columns):
