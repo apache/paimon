@@ -75,6 +75,7 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
     public BinaryRow deserialize(DataInputView source) throws IOException {
         BinaryRow row = new BinaryRow(numFields);
         int length = source.readInt();
+        checkLength(length);
         byte[] bytes = new byte[length];
         source.readFully(bytes);
         row.pointTo(MemorySegment.wrap(bytes), 0, length);
@@ -88,6 +89,7 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
                 "Reuse BinaryRow should have no segments or only one segment and offset start at 0.");
 
         int length = source.readInt();
+        checkLength(length);
         if (segments == null || segments[0].size() < length) {
             // Need a larger buffer
             segments = new MemorySegment[] {MemorySegment.wrap(new byte[length])};
@@ -103,6 +105,20 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
     @Override
     public int getArity() {
         return numFields;
+    }
+
+    /**
+     * A serialized row of {@code numFields} fields is at least its fixed-length part: the null bits
+     * plus one 8-byte word per field. A shorter length leaves fields outside the buffer, and
+     * reading them is an unchecked {@code UNSAFE} access that returns whatever lies beyond it.
+     */
+    private void checkLength(int length) throws IOException {
+        if (length < fixedLengthPartSize) {
+            throw new IOException(
+                    String.format(
+                            "Read an invalid row length %d, a row of %d fields needs at least %d bytes.",
+                            length, numFields, fixedLengthPartSize));
+        }
     }
 
     @Override
