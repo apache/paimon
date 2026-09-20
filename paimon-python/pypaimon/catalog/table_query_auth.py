@@ -284,21 +284,34 @@ class TableQueryAuthResult:
                     "nested field '{}'; the second copy would be raw."
                     .format(path[0], '.'.join(path)))
 
-    def get_extra_fields_for_filter(
+    def get_extra_fields(
             self,
             read_fields: List[DataField],
             table_fields: List[DataField],
     ) -> List[DataField]:
-        if not self.filter:
+        """Columns the rules read that the projection does not carry: every filter operand,
+        and the inputs of every mask whose target is readable. A mask whose target stays
+        outside the projection is inert and widens nothing."""
+        if not self.has_restrictions:
             return []
-        read_field_names = {f.name for f in read_fields}
-        extra = []
-        for json_str in self.filter:
-            referenced = extract_referenced_fields(json_str)
-            for name in referenced:
-                if name not in read_field_names:
-                    field = next((f for f in table_fields if f.name == name), None)
-                    if field:
-                        extra.append(field)
-                        read_field_names.add(name)
-        return extra
+        projected = {f.name for f in read_fields}
+        masking = self.parsed_column_masking()
+        readable = set(projected)
+        pending = list(readable)
+        needed = set()
+        for operand in self.filter_field_names():
+            needed.add(operand)
+            if operand not in readable:
+                readable.add(operand)
+                pending.append(operand)
+        while pending:
+            transform = masking.get(pending.pop())
+            if transform is None:
+                continue
+            for name in _collect_all_field_refs_from_transform(transform):
+                needed.add(name)
+                if name not in readable:
+                    readable.add(name)
+                    pending.append(name)
+        by_name = {f.name: f for f in table_fields}
+        return [by_name[name] for name in sorted(needed - projected) if name in by_name]
