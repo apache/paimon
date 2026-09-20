@@ -19,6 +19,7 @@
 package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexQueryContext;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.SortedFileGlobalIndexReader;
@@ -55,6 +56,7 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     private final GlobalIndexFileReader fileReader;
     private final Comparator<Object> comparator;
     private final long totalRowCount;
+    private final GlobalIndexQueryContext queryContext;
     @Nullable private final Pair<Object, Object> fullRangeBounds;
 
     public LazyFilteredBTreeReader(
@@ -65,12 +67,33 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
             long fallbackScanMaxSize,
             long totalRowCount,
             ExecutorService executor) {
+        this(
+                files,
+                keySerializer,
+                fileReader,
+                cacheManager,
+                fallbackScanMaxSize,
+                totalRowCount,
+                executor,
+                GlobalIndexQueryContext.unlimited());
+    }
+
+    public LazyFilteredBTreeReader(
+            List<GlobalIndexIOMeta> files,
+            KeySerializer keySerializer,
+            GlobalIndexFileReader fileReader,
+            CacheManager cacheManager,
+            long fallbackScanMaxSize,
+            long totalRowCount,
+            ExecutorService executor,
+            GlobalIndexQueryContext queryContext) {
         super(files, keySerializer, fallbackScanMaxSize, totalRowCount, executor);
         this.cacheManager = cacheManager;
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
         this.comparator = keySerializer.createComparator();
         this.totalRowCount = totalRowCount;
+        this.queryContext = queryContext;
         this.fullRangeBounds = fullRangeBounds(files);
     }
 
@@ -263,7 +286,8 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     @Override
     protected BTreeIndexReader openReader(GlobalIndexIOMeta meta) {
         try {
-            return new BTreeIndexReader(keySerializer, fileReader, meta, cacheManager);
+            return new BTreeIndexReader(
+                    keySerializer, fileReader, meta, cacheManager, queryContext);
         } catch (IOException e) {
             throw new RuntimeException("Can't create BTree index reader for " + meta.filePath(), e);
         }

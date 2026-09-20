@@ -44,6 +44,15 @@ public interface GlobalIndexer {
             long totalRowCount,
             ExecutorService executor);
 
+    default GlobalIndexReader createReader(
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> files,
+            long totalRowCount,
+            ExecutorService executor,
+            GlobalIndexQueryContext queryContext) {
+        return createReader(fileReader, files, totalRowCount, executor);
+    }
+
     static GlobalIndexer create(String type, DataField indexField, Options options) {
         GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);
         return globalIndexerFactory.create(indexField, options);

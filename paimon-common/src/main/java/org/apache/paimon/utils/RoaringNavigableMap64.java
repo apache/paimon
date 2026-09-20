@@ -31,6 +31,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /** A compressed bitmap for 64-bit integer aggregated by tree. */
 public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
@@ -184,12 +185,29 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
      * <p>This is useful for interoperability with APIs that expect List&lt;Range&gt;.
      */
     public List<Range> toRangeList() {
+        return tryToRangeList(Integer.MAX_VALUE)
+                .orElseThrow(
+                        () ->
+                                new IllegalStateException(
+                                        "Bitmap contains more ranges than a Java List can hold."));
+    }
+
+    /**
+     * Converts this bitmap to contiguous ranges, returning empty when the result would exceed
+     * {@code maxRangeCount}.
+     *
+     * <p>The conversion stops as soon as the limit is exceeded. This lets callers abandon a highly
+     * fragmented row selection without first materializing every singleton range.
+     */
+    public Optional<List<Range>> tryToRangeList(int maxRangeCount) {
+        Preconditions.checkArgument(
+                maxRangeCount > 0, "Maximum range count must be greater than 0.");
         long cardinality = roaring64NavigableMap.getLongCardinality();
         if (!shouldUseSelectRanges(cardinality)) {
-            return toRangeListByIterator();
+            return toRangeListByIterator(maxRangeCount);
         }
 
-        return toRangeListBySelect(cardinality);
+        return toRangeListBySelect(cardinality, maxRangeCount);
     }
 
     private boolean shouldUseSelectRanges(long cardinality) {
@@ -218,11 +236,11 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         return isNext(roaring64NavigableMap.select(index), roaring64NavigableMap.select(index + 1));
     }
 
-    private List<Range> toRangeListByIterator() {
+    private Optional<List<Range>> toRangeListByIterator(int maxRangeCount) {
         List<Range> ranges = new ArrayList<>();
         LongIterator iterator = roaring64NavigableMap.getLongIterator();
         if (!iterator.hasNext()) {
-            return ranges;
+            return Optional.of(ranges);
         }
 
         long rangeStart = iterator.next();
@@ -233,18 +251,24 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
                 rangeEnd = current;
             } else {
                 ranges.add(new Range(rangeStart, rangeEnd));
+                if (ranges.size() >= maxRangeCount) {
+                    return Optional.empty();
+                }
                 rangeStart = current;
                 rangeEnd = current;
             }
         }
         ranges.add(new Range(rangeStart, rangeEnd));
-        return ranges;
+        return Optional.of(ranges);
     }
 
-    private List<Range> toRangeListBySelect(long cardinality) {
+    private Optional<List<Range>> toRangeListBySelect(long cardinality, int maxRangeCount) {
         List<Range> ranges = new ArrayList<>();
         long rangeStartIndex = 0;
         while (rangeStartIndex < cardinality) {
+            if (ranges.size() >= maxRangeCount) {
+                return Optional.empty();
+            }
             long rangeStart = roaring64NavigableMap.select(rangeStartIndex);
             long rangeEndIndex = findRangeEndIndex(rangeStartIndex, cardinality, rangeStart);
             long rangeOffset = rangeEndIndex - rangeStartIndex;
@@ -252,7 +276,7 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
             rangeStartIndex = rangeEndIndex + 1;
         }
 
-        return ranges;
+        return Optional.of(ranges);
     }
 
     private long findRangeEndIndex(long rangeStartIndex, long cardinality, long rangeStart) {

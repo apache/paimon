@@ -75,6 +75,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
     private boolean rowIdFilterDeferred;
     private RowRangeIndex pushedRowRangeIndex;
     private GlobalIndexResult globalIndexResult;
+    private List<Range> evaluatedGlobalIndexRanges;
 
     public DataEvolutionBatchScan(FileStoreTable wrapped, AppendBatchTableScan batchScan) {
         this.table = wrapped;
@@ -292,7 +293,11 @@ public class DataEvolutionBatchScan implements DataTableScan {
             }
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
-                rowRangeIndex = RowRangeIndex.create(result.results().toRangeList());
+                List<Range> ranges = evaluatedGlobalIndexRanges;
+                if (ranges == null) {
+                    ranges = result.results().toRangeList();
+                }
+                rowRangeIndex = RowRangeIndex.create(ranges);
                 if (result instanceof ScoredGlobalIndexResult) {
                     scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
                 }
@@ -369,6 +374,9 @@ public class DataEvolutionBatchScan implements DataTableScan {
                                                 result.get().contributingFieldIds()));
                 long coverageDuration = System.nanoTime() - coverageStart;
                 long totalDuration = System.nanoTime() - totalStart;
+                if (!acceptGlobalIndexResult(finalResult, scanner, options)) {
+                    return Optional.empty();
+                }
                 LOG.info(
                         "Scan table '{}' with global index. searchMode='{}', total={} ms, metadata={} ms, lookup={} ms, coverage={} ms.",
                         table.name(),
@@ -382,7 +390,51 @@ public class DataEvolutionBatchScan implements DataTableScan {
             return Optional.empty();
         } catch (IOException e) {
             throw new RuntimeException(e);
+        } catch (RuntimeException e) {
+            GlobalIndexLookupDeclinedException declined =
+                    GlobalIndexLookupDeclinedException.find(e);
+            if (declined == null) {
+                throw e;
+            }
+            LOG.info(
+                    "Fall back to a full data scan for table '{}' because the global index "
+                            + "lookup declined: {}",
+                    table.name(),
+                    declined.getMessage());
+            return Optional.empty();
         }
+    }
+
+    private boolean acceptGlobalIndexResult(
+            GlobalIndexResult result,
+            DataEvolutionGlobalIndexScanner scanner,
+            CoreOptions options) {
+        long candidateRows = result.results().getLongCardinality();
+        long rowIdCount = scanner.rowIdCount();
+        double maxSelectionRatio = options.dataEvolutionScalarIndexMaxSelectionRatio();
+        if (rowIdCount > 0 && (double) candidateRows / rowIdCount > maxSelectionRatio) {
+            LOG.info(
+                    "Fall back to a full data scan for table '{}' because the global index "
+                            + "selected {} of {} row ids, exceeding maxSelectionRatio={}.",
+                    table.name(),
+                    candidateRows,
+                    rowIdCount,
+                    maxSelectionRatio);
+            return false;
+        }
+
+        int maxSelectionRanges = options.dataEvolutionScalarIndexMaxSelectionRanges();
+        Optional<List<Range>> ranges = result.results().tryToRangeList(maxSelectionRanges);
+        if (!ranges.isPresent()) {
+            LOG.info(
+                    "Fall back to a full data scan for table '{}' because the global index "
+                            + "produced more than {} disjoint row-id ranges.",
+                    table.name(),
+                    maxSelectionRanges);
+            return false;
+        }
+        evaluatedGlobalIndexRanges = ranges.get();
+        return true;
     }
 
     private Optional<GlobalIndexResult> evalGlobalIndexTopN() {

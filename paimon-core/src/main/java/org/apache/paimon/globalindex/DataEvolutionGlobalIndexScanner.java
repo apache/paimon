@@ -80,6 +80,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     private final IndexPathFactory indexPathFactory;
     private final DataEvolutionGlobalIndexCoverage coverage;
     private final FileStoreTable table;
+    private final long rowIdCount;
+    private final GlobalIndexQueryContext queryContext;
 
     private DataEvolutionGlobalIndexScanner(
             FileStoreTable table,
@@ -113,6 +115,11 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             Collection<IndexFileMeta> coverageIndexFiles,
             Collection<IndexFileMeta> indexFiles) {
         this.table = table;
+        this.rowIdCount =
+                snapshot == null || snapshot.nextRowId() == null ? -1L : snapshot.nextRowId();
+        this.queryContext =
+                new GlobalIndexQueryContext(
+                        table.coreOptions().dataEvolutionScalarIndexMaxDecodedRowIds());
         this.options = options;
         this.rowType = rowType;
         this.executor =
@@ -372,6 +379,10 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         return globalIndexEvaluator.evaluate(predicate);
     }
 
+    long rowIdCount() {
+        return rowIdCount;
+    }
+
     public Optional<GlobalIndexEvaluator.Evaluation> scanWithCoverage(Predicate predicate) {
         return globalIndexEvaluator.evaluateWithContributingFields(predicate);
     }
@@ -445,7 +456,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                                         indexFileReadWrite,
                                                         globalMetas,
                                                         range.count(),
-                                                        executor),
+                                                        executor,
+                                                        queryContext),
                                                 range.from,
                                                 range.to),
                                 executor));

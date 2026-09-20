@@ -170,6 +170,26 @@ public class RoaringNavigableMap64Test {
     }
 
     @Test
+    public void testTryToRangeListHonorsRangeLimit() {
+        RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        bitmap.add(1);
+        bitmap.add(3);
+        bitmap.add(5);
+
+        assertThat(bitmap.tryToRangeList(2)).isEmpty();
+        assertThat(bitmap.tryToRangeList(3).get())
+                .containsExactly(new Range(1, 1), new Range(3, 3), new Range(5, 5));
+    }
+
+    @Test
+    public void testTryToRangeListCountsRangesInsteadOfRows() {
+        RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        bitmap.addRange(new Range(0, 1_000_000));
+
+        assertThat(bitmap.tryToRangeList(1).get()).containsExactly(new Range(0, 1_000_000));
+    }
+
+    @Test
     public void testToRangeListDoesNotMergeUnsignedWrapAround() {
         RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
         bitmap.add(Long.MAX_VALUE);

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.globalindex.GlobalIndexQueryContext;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
 import org.apache.paimon.memory.MemorySliceOutput;
@@ -70,17 +71,26 @@ final class BTreePostingList {
     }
 
     static void addTo(MemorySlice slice, RoaringNavigableMap64 target) throws IOException {
+        addTo(slice, target, GlobalIndexQueryContext.unlimited());
+    }
+
+    static void addTo(
+            MemorySlice slice, RoaringNavigableMap64 target, GlobalIndexQueryContext queryContext)
+            throws IOException {
         MemorySliceInput input = slice.toInput();
         int type = input.readUnsignedByte();
         switch (type) {
             case SINGLE:
+                queryContext.reserveDecodedRowIds(1);
                 target.add(input.readVarLenLong());
                 return;
             case DELTA_LIST:
-                addDeltaList(input, target);
+                addDeltaList(input, target, queryContext);
                 return;
             case ROARING:
-                target.or(readRoaring(input));
+                RoaringNavigableMap64 bitmap = readRoaring(input);
+                queryContext.reserveDecodedRowIds(bitmap.getLongCardinality());
+                target.or(bitmap);
                 return;
             default:
                 throw new IllegalStateException("Unknown BTree posting list type: " + type);
@@ -88,16 +98,24 @@ final class BTreePostingList {
     }
 
     static long[] deserialize(MemorySlice slice, int maxRowIds) throws IOException {
+        return deserialize(slice, maxRowIds, GlobalIndexQueryContext.unlimited());
+    }
+
+    static long[] deserialize(
+            MemorySlice slice, int maxRowIds, GlobalIndexQueryContext queryContext)
+            throws IOException {
         checkArgument(maxRowIds >= 0, "Max row id count must not be negative.");
         MemorySliceInput input = slice.toInput();
         int type = input.readUnsignedByte();
         switch (type) {
             case SINGLE:
-                return maxRowIds == 0 ? new long[0] : new long[] {input.readVarLenLong()};
+                int resultLength = Math.min(1, maxRowIds);
+                queryContext.reserveDecodedRowIds(resultLength);
+                return resultLength == 0 ? new long[0] : new long[] {input.readVarLenLong()};
             case DELTA_LIST:
-                return deserializeDeltaList(input, maxRowIds);
+                return deserializeDeltaList(input, maxRowIds, queryContext);
             case ROARING:
-                return first(readRoaring(input), maxRowIds);
+                return first(readRoaring(input), maxRowIds, queryContext);
             default:
                 throw new IllegalStateException("Unknown BTree posting list type: " + type);
         }
@@ -210,8 +228,12 @@ final class BTreePostingList {
         }
     }
 
-    private static void addDeltaList(MemorySliceInput input, RoaringNavigableMap64 target) {
+    private static void addDeltaList(
+            MemorySliceInput input,
+            RoaringNavigableMap64 target,
+            GlobalIndexQueryContext queryContext) {
         int count = readDeltaCount(input);
+        queryContext.reserveDecodedRowIds(count);
         long rowId = input.readVarLenLong();
         target.add(rowId);
         for (int i = 1; i < count; i++) {
@@ -220,9 +242,11 @@ final class BTreePostingList {
         }
     }
 
-    private static long[] deserializeDeltaList(MemorySliceInput input, int maxRowIds) {
+    private static long[] deserializeDeltaList(
+            MemorySliceInput input, int maxRowIds, GlobalIndexQueryContext queryContext) {
         int count = readDeltaCount(input);
         int resultLength = Math.min(count, maxRowIds);
+        queryContext.reserveDecodedRowIds(resultLength);
         if (resultLength == 0) {
             return new long[0];
         }
@@ -264,7 +288,9 @@ final class BTreePostingList {
         return bitmap;
     }
 
-    private static long[] first(RoaringNavigableMap64 bitmap, int maxRowIds) {
+    private static long[] first(
+            RoaringNavigableMap64 bitmap, int maxRowIds, GlobalIndexQueryContext queryContext) {
+        queryContext.reserveDecodedRowIds(Math.min(bitmap.getLongCardinality(), maxRowIds));
         return bitmap.toArray(maxRowIds);
     }
 

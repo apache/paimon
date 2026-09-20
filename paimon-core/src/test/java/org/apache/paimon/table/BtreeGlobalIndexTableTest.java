@@ -64,7 +64,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
@@ -154,6 +156,105 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testBroadBTreeResultFallsBackToFullDataEvolutionScan() throws Exception {
+        write(100L);
+        createIndex("f0");
+
+        FileStoreTable base = (FileStoreTable) catalog.getTable(identifier());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full");
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO.key(), "0.1");
+        FileStoreTable table = base.copy(options);
+        Predicate predicate = new PredicateBuilder(table.rowType()).lessThan(0, 90);
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).allMatch(split -> !(split instanceof IndexedSplit));
+        assertThat(readF1(readBuilder, plan)).hasSize(90);
+    }
+
+    @Test
+    public void testSelectiveBTreeResultKeepsIndexedDataEvolutionScan() throws Exception {
+        write(100L);
+        createIndex("f0");
+
+        FileStoreTable base = (FileStoreTable) catalog.getTable(identifier());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full");
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO.key(), "0.1");
+        FileStoreTable table = base.copy(options);
+        Predicate predicate = new PredicateBuilder(table.rowType()).lessThan(0, 10);
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).allMatch(split -> split instanceof IndexedSplit);
+        assertThat(readF1(readBuilder, plan)).hasSize(10);
+    }
+
+    @Test
+    public void testFragmentedBTreeResultFallsBackToFullDataEvolutionScan() throws Exception {
+        write(20L);
+        createIndex("f0");
+
+        FileStoreTable base = (FileStoreTable) catalog.getTable(identifier());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full");
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO.key(), "1.0");
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key(), "2");
+        FileStoreTable table = base.copy(options);
+        Predicate predicate = new PredicateBuilder(table.rowType()).in(0, Arrays.asList(1, 3, 5));
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).allMatch(split -> !(split instanceof IndexedSplit));
+        assertThat(readF1(readBuilder, plan)).containsExactly("a1", "a3", "a5");
+    }
+
+    @Test
+    public void testFastSearchModeBroadResultFallsBackToDataScan() throws Exception {
+        write(50L);
+        createIndex("f0");
+        appendRows(50, 100);
+
+        FileStoreTable base = (FileStoreTable) catalog.getTable(identifier());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "fast");
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO.key(), "0.1");
+        FileStoreTable table = base.copy(options);
+        Predicate predicate = new PredicateBuilder(table.rowType()).lessThan(0, 90);
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).allMatch(split -> !(split instanceof IndexedSplit));
+        // Cost fallback is a normal scan, so it returns true matches outside FAST index coverage.
+        assertThat(readF1(readBuilder, plan)).hasSize(90);
+    }
+
+    @Test
+    public void testFastSearchModeDecodedRowBudgetFallsBackToDataScan() throws Exception {
+        write(100L);
+        createIndex("f0");
+
+        FileStoreTable base = (FileStoreTable) catalog.getTable(identifier());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "fast");
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO.key(), "1.0");
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_DECODED_ROW_IDS.key(), "10");
+        FileStoreTable table = base.copy(options);
+        Predicate predicate = new PredicateBuilder(table.rowType()).lessThan(0, 90);
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).allMatch(split -> !(split instanceof IndexedSplit));
+        assertThat(readF1(readBuilder, plan)).hasSize(90);
+    }
+
+    @Test
     public void testAllMatchSkipsIndexFilesAndPreservesCoverage() throws Exception {
         createTableDefault();
         appendDogRows(0, 20);
@@ -186,7 +287,11 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         PredicateBuilder builder = new PredicateBuilder(table.rowType());
         Predicate allMatch = builder.equal(1, BinaryString.fromString("dog"));
         for (String mode : Arrays.asList("fast", "full", "detail")) {
-            FileStoreTable configured = tableWithSearchMode(table, mode);
+            Map<String, String> options = new HashMap<>();
+            options.put(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), mode);
+            // This test verifies index coverage semantics. Cost fallback is covered separately.
+            options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO.key(), "1.0");
+            FileStoreTable configured = table.copy(options);
             assertThat(readF1(configured, allMatch))
                     .containsExactlyElementsOf(
                             Collections.nCopies(mode.equals("fast") ? 20 : 25, "dog"));

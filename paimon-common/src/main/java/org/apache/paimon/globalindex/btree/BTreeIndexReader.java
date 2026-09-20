@@ -21,6 +21,7 @@ package org.apache.paimon.globalindex.btree;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexQueryContext;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.SortedFileMetaSelector;
@@ -69,8 +70,10 @@ public class BTreeIndexReader implements Closeable {
     private final Comparator<Object> comparator;
     private final int fileVersion;
     private final LazyField<RoaringNavigableMap64> nullBitmap;
+    private final LazyField<Long> nullRowCount;
     private final Object minKey;
     private final Object maxKey;
+    private final GlobalIndexQueryContext queryContext;
 
     /** A key and its local row ids stored in one btree entry. */
     public static class KeyRowIds {
@@ -143,8 +146,24 @@ public class BTreeIndexReader implements Closeable {
             GlobalIndexIOMeta globalIndexIOMeta,
             CacheManager cacheManager)
             throws IOException {
+        this(
+                keySerializer,
+                fileReader,
+                globalIndexIOMeta,
+                cacheManager,
+                GlobalIndexQueryContext.unlimited());
+    }
+
+    public BTreeIndexReader(
+            KeySerializer keySerializer,
+            GlobalIndexFileReader fileReader,
+            GlobalIndexIOMeta globalIndexIOMeta,
+            CacheManager cacheManager,
+            GlobalIndexQueryContext queryContext)
+            throws IOException {
         this.keySerializer = keySerializer;
         this.comparator = keySerializer.createComparator();
+        this.queryContext = queryContext;
         SortedIndexFileMeta indexMeta =
                 SortedIndexFileMeta.deserialize(globalIndexIOMeta.metadata());
         if (indexMeta.getFirstKey() != null) {
@@ -172,6 +191,10 @@ public class BTreeIndexReader implements Closeable {
             // prepare nullBitmap and SstFileReader
             this.nullBitmap =
                     new LazyField<>(() -> readNullBitmap(blockCache, footer.getNullBitmapHandle()));
+            // Roaring64NavigableMap initializes cardinality metadata lazily and is not safe for
+            // concurrent initialization. Cache it through LazyField before exposing the bitmap to
+            // concurrent queries.
+            this.nullRowCount = new LazyField<>(() -> this.nullBitmap.get().getLongCardinality());
             FileBasedBloomFilter bloomFilter =
                     FileBasedBloomFilter.create(
                             input, filePath, cacheManager, footer.getBloomFilterHandle());
@@ -272,7 +295,12 @@ public class BTreeIndexReader implements Closeable {
     }
 
     public Optional<GlobalIndexResult> visitIsNull() {
-        return createResult(nullBitmap::get);
+        return createResult(
+                () -> {
+                    long count = nullRowCount.get();
+                    queryContext.reserveDecodedRowIds(count);
+                    return nullBitmap.get();
+                });
     }
 
     public Optional<GlobalIndexResult> visitStartsWith(Object literal) {
@@ -445,7 +473,7 @@ public class BTreeIndexReader implements Closeable {
     }
 
     private int addNullRows(List<KeyRowIds> result, int remaining) {
-        int count = (int) Math.min(nullBitmap.get().getLongCardinality(), remaining);
+        int count = (int) Math.min(nullRowCount.get(), remaining);
         long[] rowIds = new long[count];
         int position = 0;
         for (long rowId : nullBitmap.get()) {
@@ -536,32 +564,44 @@ public class BTreeIndexReader implements Closeable {
     }
 
     private long[] deserializeRowIds(MemorySlice slice) throws IOException {
-        return deserializeRowIds(slice, Integer.MAX_VALUE);
+        return deserializeRowIds(slice, Integer.MAX_VALUE, queryContext);
     }
 
     private long[] deserializeRowIds(MemorySlice slice, int maxRowIds) throws IOException {
+        return deserializeRowIds(slice, maxRowIds, GlobalIndexQueryContext.unlimited());
+    }
+
+    private long[] deserializeRowIds(
+            MemorySlice slice, int maxRowIds, GlobalIndexQueryContext context) throws IOException {
         return fileVersion == BTreeFileFooter.VERSION_1
-                ? deserializeVersion1RowIds(slice, maxRowIds)
-                : BTreePostingList.deserialize(slice, maxRowIds);
+                ? deserializeVersion1RowIds(slice, maxRowIds, context)
+                : BTreePostingList.deserialize(slice, maxRowIds, context);
     }
 
     private void addRowIdsTo(MemorySlice slice, RoaringNavigableMap64 target) throws IOException {
         if (fileVersion == BTreeFileFooter.VERSION_1) {
             MemorySliceInput input = slice.toInput();
             int count = readVersion1Count(input);
+            queryContext.reserveDecodedRowIds(count);
             for (int i = 0; i < count; i++) {
                 target.add(input.readVarLenLong());
             }
         } else {
-            BTreePostingList.addTo(slice, target);
+            BTreePostingList.addTo(slice, target, queryContext);
         }
     }
 
     static long[] deserializeVersion1RowIds(MemorySlice slice, int maxRowIds) {
+        return deserializeVersion1RowIds(slice, maxRowIds, GlobalIndexQueryContext.unlimited());
+    }
+
+    private static long[] deserializeVersion1RowIds(
+            MemorySlice slice, int maxRowIds, GlobalIndexQueryContext queryContext) {
         Preconditions.checkArgument(maxRowIds >= 0, "Max row id count must not be negative.");
         MemorySliceInput input = slice.toInput();
         int count = readVersion1Count(input);
         int resultLength = Math.min(count, maxRowIds);
+        queryContext.reserveDecodedRowIds(resultLength);
         long[] result = new long[resultLength];
         for (int i = 0; i < resultLength; i++) {
             result[i] = input.readVarLenLong();

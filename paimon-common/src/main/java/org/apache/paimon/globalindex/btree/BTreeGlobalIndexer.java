@@ -22,6 +22,7 @@ import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
+import org.apache.paimon.globalindex.GlobalIndexQueryContext;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.KeySerializer;
@@ -118,6 +119,17 @@ public class BTreeGlobalIndexer implements SortedGlobalIndexer {
             List<GlobalIndexIOMeta> files,
             long totalRowCount,
             ExecutorService executor) {
+        return createReader(
+                fileReader, files, totalRowCount, executor, GlobalIndexQueryContext.unlimited());
+    }
+
+    @Override
+    public GlobalIndexReader createReader(
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> files,
+            long totalRowCount,
+            ExecutorService executor,
+            GlobalIndexQueryContext queryContext) {
         return new LazyFilteredBTreeReader(
                 files,
                 keySerializer,
@@ -125,6 +137,7 @@ public class BTreeGlobalIndexer implements SortedGlobalIndexer {
                 cacheManager.get(),
                 fallbackScanMaxSize,
                 totalRowCount,
-                executor);
+                executor,
+                queryContext);
     }
 }

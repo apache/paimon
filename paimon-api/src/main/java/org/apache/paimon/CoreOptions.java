@@ -2664,6 +2664,39 @@ public class CoreOptions implements Serializable {
                                     + "selected row count is no more than "
                                     + "data-evolution.row-sidecar.max-selected-rows.");
 
+    public static final ConfigOption<Double> DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO =
+            key("data-evolution.scalar-index.max-selection-ratio")
+                    .doubleType()
+                    .defaultValue(0.2d)
+                    .withDescription(
+                            "Maximum candidate row ratio for using a scalar global index "
+                                    + "to read a data evolution table. Broader results fall "
+                                    + "back to a normal data scan in all search modes. The "
+                                    + "value must be in (0, 1]. In fast mode, fallback may "
+                                    + "return matching rows outside current index coverage.");
+
+    public static final ConfigOption<Integer> DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES =
+            key("data-evolution.scalar-index.max-selection-ranges")
+                    .intType()
+                    .defaultValue(100_000)
+                    .withDescription(
+                            "Maximum number of disjoint row-id ranges produced by a scalar "
+                                    + "global index for a data evolution table. More fragmented "
+                                    + "results fall back to a normal data scan in all search modes. "
+                                    + "In fast mode, fallback may return matching rows outside "
+                                    + "current index coverage.");
+
+    public static final ConfigOption<Long> DATA_EVOLUTION_SCALAR_INDEX_MAX_DECODED_ROW_IDS =
+            key("data-evolution.scalar-index.max-decoded-row-ids")
+                    .longType()
+                    .defaultValue(10_000_000L)
+                    .withDescription(
+                            "Maximum number of row IDs that supporting scalar index readers may "
+                                    + "decode for one data evolution query. Exceeding the shared "
+                                    + "query budget abandons the complete index lookup and falls "
+                                    + "back to a normal data scan in all search modes. In fast mode, "
+                                    + "fallback may return matching rows outside current index coverage.");
+
     public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_FILE_PRUNING =
             key("data-evolution.merge-into.file-pruning")
                     .booleanType()
@@ -4596,6 +4629,33 @@ public class CoreOptions implements Serializable {
                 "The option %s must be in (0, 1].",
                 DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTION_RATIO.key());
         return maxSelectionRatio;
+    }
+
+    public double dataEvolutionScalarIndexMaxSelectionRatio() {
+        double maxSelectionRatio = options.get(DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO);
+        checkArgument(
+                maxSelectionRatio > 0 && maxSelectionRatio <= 1,
+                "The option %s must be in (0, 1].",
+                DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO.key());
+        return maxSelectionRatio;
+    }
+
+    public int dataEvolutionScalarIndexMaxSelectionRanges() {
+        int maxSelectionRanges = options.get(DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES);
+        checkArgument(
+                maxSelectionRanges > 0,
+                "The option %s must be greater than 0.",
+                DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key());
+        return maxSelectionRanges;
+    }
+
+    public long dataEvolutionScalarIndexMaxDecodedRowIds() {
+        long maxDecodedRowIds = options.get(DATA_EVOLUTION_SCALAR_INDEX_MAX_DECODED_ROW_IDS);
+        checkArgument(
+                maxDecodedRowIds > 0,
+                "The option %s must be greater than 0.",
+                DATA_EVOLUTION_SCALAR_INDEX_MAX_DECODED_ROW_IDS.key());
+        return maxDecodedRowIds;
     }
 
     public boolean dataEvolutionMergeIntoFilePruning() {

@@ -20,6 +20,8 @@ package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexLookupDeclinedException;
+import org.apache.paimon.globalindex.GlobalIndexQueryContext;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.memory.MemorySlice;
@@ -28,12 +30,14 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
@@ -41,6 +45,7 @@ import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link BTreeIndexReader} to read a single file. */
 @ExtendWith(ParameterizedTestExtension.class)
@@ -195,6 +200,38 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
         }
         assertThat(BTreeFileFooter.readFooter(MemorySlice.wrap(footerBytes).toInput()).getVersion())
                 .isEqualTo(expectedFileVersion);
+    }
+
+    @TestTemplate
+    public void testDecodedRowIdBudgetDeclinesCompleteLookup() throws Exception {
+        assertDecodedRowIdBudgetDeclinesCompleteLookup(BTreeFileFooter.VERSION_1);
+    }
+
+    @TestTemplate
+    public void testVersion2DecodedRowIdBudgetDeclinesCompleteLookup() throws Exception {
+        options.set(BTreeIndexOptions.BTREE_INDEX_FILE_VERSION, BTreeFileFooter.VERSION_2);
+        assertDecodedRowIdBudgetDeclinesCompleteLookup(BTreeFileFooter.VERSION_2);
+    }
+
+    private void assertDecodedRowIdBudgetDeclinesCompleteLookup(int expectedFileVersion)
+            throws Exception {
+        GlobalIndexIOMeta written = writeData(data);
+        assertFileVersion(written, expectedFileVersion);
+        GlobalIndexQueryContext queryContext = new GlobalIndexQueryContext(1);
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        List<Object> literals =
+                data.stream().map(Pair::getKey).distinct().limit(2).collect(Collectors.toList());
+
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(
+                        fileReader,
+                        Collections.singletonList(written),
+                        dataNum,
+                        newDirectExecutorService(),
+                        queryContext)) {
+            assertThatThrownBy(() -> reader.visitIn(ref, literals).join())
+                    .hasRootCauseInstanceOf(GlobalIndexLookupDeclinedException.class);
+        }
     }
 
     private Object[] valuesByRowId() {
