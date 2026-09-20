@@ -63,6 +63,15 @@ filter the rows read from the search result. Both `pre_filter` and `where()`
 accept SQL-like predicate strings. For full-text search, `pre_filter` must only
 reference partition columns.
 
+For data-evolution vector search, a scalar index may return candidates rather than exact
+matches, for example for BTree string-prefix or substring predicates, or when
+part of a conjunction is unsupported. Such index candidates are excluded with
+a warning by default, so the result can contain fewer than the requested rows.
+Set the table option `global-index.filter.refine-from-data=true` to verify those
+candidates before vector top-k selection. This reads the filter columns at the
+search snapshot and may scan every candidate row; exact index matches need no
+extra read. This applies to single and batch vector queries, locally and on Ray.
+
 Each execution of `search`, `search_vectors`, or `search_hybrid` reads one
 snapshot across candidate search, filtering, reranking, and result lookup.
 Concurrent commits become visible on the next execution, including when reusing

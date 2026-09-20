@@ -239,16 +239,16 @@ class BTreeIndexReader:
         return GlobalIndexResult.create(result)
 
     def visit_starts_with(self, literal: object) -> Optional[GlobalIndexResult]:
-        return GlobalIndexResult.create(self._all_non_null_rows())
+        return GlobalIndexResult.create(self._all_non_null_rows(), is_exact=False)
 
     def visit_ends_with(self, literal: object) -> Optional[GlobalIndexResult]:
-        return GlobalIndexResult.create(self._all_non_null_rows())
+        return GlobalIndexResult.create(self._all_non_null_rows(), is_exact=False)
 
     def visit_contains(self, literal: object) -> Optional[GlobalIndexResult]:
-        return GlobalIndexResult.create(self._all_non_null_rows())
+        return GlobalIndexResult.create(self._all_non_null_rows(), is_exact=False)
 
     def visit_like(self, literal: object) -> Optional[GlobalIndexResult]:
-        return GlobalIndexResult.create(self._all_non_null_rows())
+        return GlobalIndexResult.create(self._all_non_null_rows(), is_exact=False)
 
     def visit_between(self, min_v: object, max_v: object) -> Optional[GlobalIndexResult]:
         return GlobalIndexResult.create(

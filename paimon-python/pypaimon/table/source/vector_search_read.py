@@ -17,6 +17,7 @@
 
 """Vector search read to read index files."""
 
+import logging
 from abc import ABC, abstractmethod
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -181,11 +182,43 @@ class AbstractVectorSearchReadImpl:
             return RoaringBitmap64()
         try:
             result = scanner.scan(self._filter)
-            if result is None:
-                return RoaringBitmap64()
-            return result.results()
         finally:
             scanner.close()
+        if result is not None and result.is_exact():
+            return result.results()
+        if not self._table.options.global_index_filter_refine_from_data():
+            logging.getLogger(__name__).warning(
+                "Scalar index candidates are excluded because the row filter %s cannot be "
+                "evaluated exactly. Set global-index.filter.refine-from-data=true to verify "
+                "candidates against the data; otherwise vector search may return fewer rows.",
+                self._filter)
+            return RoaringBitmap64()
+
+        candidates = RoaringBitmap64()
+        for split in splits:
+            candidates.add_range(split.row_range_start, split.row_range_end)
+        if result is not None:
+            candidates = RoaringBitmap64.and_(candidates, result.results())
+        return self._matching_candidate_rows(candidates, snapshot)
+
+    def _matching_candidate_rows(self, candidates, snapshot):
+        from pypaimon.read.table_read import _ClosableArrowBatchReader
+
+        matched = RoaringBitmap64()
+        if candidates.is_empty():
+            return matched
+        table = global_index_live_row_filter.table_at_snapshot(self._table, snapshot)
+        builder = (table.new_read_builder().with_filter(self._filter)
+                   .with_projection([SpecialFields.ROW_ID.name]))
+        if self._partition_filter is not None:
+            builder = builder.with_partition_filter(self._partition_filter)
+        splits = builder.new_scan().with_row_ranges(candidates.to_range_list()).plan().splits()
+        reader, batches = builder.new_read()._new_arrow_batch_reader(splits)
+        with _ClosableArrowBatchReader(reader, batches) as batch_reader:
+            for batch in batch_reader:
+                for row_id in batch.column(SpecialFields.ROW_ID.name).to_pylist():
+                    matched.add(row_id)
+        return matched
 
     def _pre_filter(self, splits, snapshot=None):
         # Backwards-compatible helper used by older tests/callers.

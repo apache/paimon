@@ -956,6 +956,15 @@ class CoreOptions:
         )
     )
 
+    GLOBAL_INDEX_FILTER_REFINE_FROM_DATA: ConfigOption[bool] = (
+        ConfigOptions.key("global-index.filter.refine-from-data")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether vector search may read filter columns to verify candidate-only scalar index matches. "
+            "When false, inexact index candidates are excluded from the search.")
+    )
+
     GLOBAL_INDEX_THREAD_NUM: ConfigOption[int] = (
         ConfigOptions.key("global-index.thread-num")
         .int_type()
@@ -1741,6 +1750,9 @@ class CoreOptions:
 
     def global_index_thread_num(self) -> Optional[int]:
         return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)
+
+    def global_index_filter_refine_from_data(self) -> bool:
+        return self.options.get(CoreOptions.GLOBAL_INDEX_FILTER_REFINE_FROM_DATA)
 
     def global_index_row_count_per_shard(self) -> int:
         return self.options.get(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
