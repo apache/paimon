@@ -41,12 +41,14 @@ class AbstractSplitGenerator(ABC):
         table,
         target_split_size: int,
         open_file_cost: int,
-        deletion_files_map: Optional[Dict] = None
+        deletion_files_map: Optional[Dict] = None,
+        snapshot_id: Optional[int] = None,
     ):
         self.table = table
         self.target_split_size = target_split_size
         self.open_file_cost = open_file_cost
         self.deletion_files_map = deletion_files_map or {}
+        self.snapshot_id = snapshot_id
         self.default_part_value = table.options.options.get(
             CoreOptions.PARTITION_DEFAULT_NAME, "__DEFAULT_PARTITION__")
         
@@ -123,7 +125,8 @@ class AbstractSplitGenerator(ABC):
                     partition=file_entries[0].partition,
                     bucket=file_entries[0].bucket,
                     raw_convertible=raw_convertible,
-                    data_deletion_files=data_deletion_files
+                    data_deletion_files=data_deletion_files,
+                    snapshot_id=self.snapshot_id,
                 )
                 splits.append(split)
         return splits

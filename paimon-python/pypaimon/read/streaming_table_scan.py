@@ -448,20 +448,21 @@ class AsyncStreamingTableScan:
                 self.table,
                 target_split_size,
                 open_file_cost,
-                deletion_files_map={}
+                deletion_files_map={},
+                snapshot_id=snapshot_id,
             )
         else:
             split_generator = AppendTableSplitGenerator(
                 self.table,
                 target_split_size,
                 open_file_cost,
-                deletion_files_map={}
+                deletion_files_map={},
+                snapshot_id=snapshot_id,
             )
 
         splits = split_generator.create_splits(entries)
         for split in splits:
             split.is_streaming = True
-            split.snapshot_id = snapshot_id
         return Plan(splits, snapshot_id=snapshot_id)
 
     def _should_use_diff_catch_up(self) -> bool:

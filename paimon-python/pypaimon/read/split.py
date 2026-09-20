@@ -89,7 +89,8 @@ class DataSplit(Split):
         self._bucket = bucket
         self.raw_convertible = raw_convertible
         self.data_deletion_files = data_deletion_files
-        # Scanned snapshot; None unless populated (e.g. by the native planner).
+        # Scanned snapshot, supplied by planners so this split can be
+        # serialized independently from its enclosing Plan.
         self.snapshot_id = snapshot_id
         self.is_streaming = is_streaming
         # Retained when decoding SplitSerializer v1 so a cross-language
