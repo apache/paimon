@@ -40,7 +40,6 @@ from pypaimon.read.split import Split
 from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       MergeFileSplitRead, RawFileSplitRead,
                                       SplitRead, deferred_blob_field_names)
-from pypaimon.schema.arrow_schema import arrow_types_compatible, cast_arrow_array
 from pypaimon.schema.data_types import (
     DataField, MapType, PyarrowFieldParser, is_map_blob_type)
 from pypaimon.table.row.offset_row import OffsetRow
@@ -305,11 +304,11 @@ class TableRead:
             if field.name in batch.schema.names:
                 col = batch.column(field.name)
                 if col.type != field.type:
-                    if not allow_type_cast and not arrow_types_compatible(col.type, field.type):
+                    if not allow_type_cast:
                         raise TypeError(
                             "Batch field '%s' has type %s, expected %s" % (
                                 field.name, col.type, field.type))
-                    col = cast_arrow_array(col, field.type)
+                    col = col.cast(field.type)
             else:
                 col = pyarrow.nulls(num_rows, type=field.type)
             columns.append(col)

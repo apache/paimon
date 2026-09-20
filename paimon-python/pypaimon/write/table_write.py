@@ -19,10 +19,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import pyarrow as pa
 
+from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
 from pypaimon.schema.data_types import PyarrowFieldParser
-from pypaimon.schema.arrow_schema import (
-    arrow_schemas_compatible, schema_with_source_string_layout,
-)
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import BlobConsumer
 from pypaimon.write.row_utils import (
@@ -56,13 +54,13 @@ class TableWrite:
         )
 
     def write_arrow(self, table: pa.Table):
-        self._validate_pyarrow_schema(table.schema)
+        table = self._prepare_arrow_data(table)
         batches_iterator = table.to_batches()
         for batch in batches_iterator:
             self.write_arrow_batch(batch)
 
     def write_arrow_batch(self, data: pa.RecordBatch):
-        self._validate_pyarrow_schema(data.schema)
+        data = self._prepare_arrow_data(data)
 
         for partition, bucket, row_indices in \
                 self.row_key_extractor.extract_partition_bucket_groups(data):
@@ -144,7 +142,7 @@ class TableWrite:
         if not isinstance(self.row_key_extractor, DynamicBucketRowKeyExtractor):
             if bucket_mode == BucketMode.HASH_DYNAMIC:
                 raise RuntimeError("Dynamic bucket extractor is not configured")
-        self._validate_pyarrow_schema(data.schema)
+        data = self._prepare_arrow_data(data)
         if bucket_mode == BucketMode.HASH_DYNAMIC:
             if key_hashes is None:
                 partition = self.row_key_extractor.notify_precomputed_bucket_batch(
@@ -216,26 +214,6 @@ class TableWrite:
             pa_schema = self._write_cols_pyarrow_schema(write_cols)
         else:
             pa_schema = self.table_pyarrow_schema
-        # Preserve Arrow-backed pandas string offsets without changing the
-        # existing target-driven pandas conversion or named-index behavior.
-        index_levels = {'__index_level_%d__' % i: i for i in range(dataframe.index.nlevels)}
-        # Explicit index names take precedence over Arrow's generated names.
-        index_levels.update({name: i for i, name in enumerate(dataframe.index.names) if name is not None})
-        source_fields = []
-        for field in pa_schema:
-            if field.name in dataframe.columns:
-                values = dataframe[field.name]
-            elif field.name in index_levels:
-                values = dataframe.index.get_level_values(index_levels[field.name])
-            else:
-                continue  # from_pandas reports missing fields below.
-            dtype = getattr(values, 'dtype', None)
-            arrow_type = getattr(dtype, 'pyarrow_dtype', None)
-            if arrow_type is None and str(getattr(dtype, 'storage', '')).startswith('pyarrow'):
-                arrow_type = pa.array(values).type  # pandas ArrowStringArray
-            if arrow_type is not None:
-                source_fields.append(field.with_type(arrow_type))
-        pa_schema = schema_with_source_string_layout(pa_schema, pa.schema(source_fields))
         record_batch = pa.RecordBatch.from_pandas(dataframe, schema=pa_schema)
         return self.write_arrow_batch(record_batch)
 
@@ -366,6 +344,10 @@ class TableWrite:
         release = getattr(self.row_key_extractor, "release_prepared", None)
         if release is not None:
             release()
+
+    def _prepare_arrow_data(self, data):
+        self._validate_pyarrow_schema(data.schema)
+        return normalize_arrow_strings(data)
 
     def _validate_pyarrow_schema(self, data_schema: pa.Schema):
         if self._is_compatible_pyarrow_schema(data_schema, self.table_pyarrow_schema):

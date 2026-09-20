@@ -25,7 +25,6 @@ from pypaimon.data.map_shared_shredding import \
     assemble_normal_map_selected_keys
 from pypaimon.read.reader.field_indices import blob_field_indices, vector_field_indices
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
-from pypaimon.schema.arrow_schema import cast_arrow_array
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 
 
@@ -76,7 +75,7 @@ class NestedLeafBatchReader(RecordBatchReader):
                     column = _struct_field(column, name)
             target_type = self._schema.field(i).type
             if column.type != target_type:
-                column = cast_arrow_array(column, target_type, safe=False)
+                column = column.cast(target_type, safe=False)
             arrays.append(column)
         return pa.RecordBatch.from_arrays(arrays, schema=self._schema)
 

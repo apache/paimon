@@ -19,11 +19,6 @@ from typing import Callable, List, Optional
 
 import pyarrow as pa
 
-from pypaimon.schema.arrow_schema import (
-    merge_arrow_schemas,
-    arrow_schemas_compatible,
-)
-
 
 class WriteBuffer:
     """Accumulates Arrow tables, concatenating them only when asked.
@@ -55,29 +50,17 @@ class WriteBuffer:
 
     def append(self, data: pa.Table) -> None:
         # ``concat_tables`` rejects any schema difference while ``TableWrite``
-        # admits a few. Only string offsets can be widened here; reject other
-        # differences (nullability, binary vs fixed_size_binary) in
+        # admits a few (differing nullability, ``binary`` vs
+        # ``fixed_size_binary``). Reject here so those keep failing in
         # ``write``, which aborts, instead of in ``prepare_commit``, which does
         # not. ``Schema.equals`` ignores metadata, and so does concat.
         if self._schema is None:
             self._schema = data.schema
         elif not data.schema.equals(self._schema):
-            if not arrow_schemas_compatible(data.schema, self._schema):
-                raise ValueError(
-                    "Cannot buffer a batch whose schema differs from the batches "
-                    f"already buffered.\nBuffered schema is: {self._schema}\n"
-                    f"Incoming schema is: {data.schema}")
-            # Mixed string layouts need one physical schema for concat. Widen
-            # offsets instead of narrowing large arrays to the 2 GiB limit.
-            schema = merge_arrow_schemas(self._schema, data.schema)
-            if not schema.equals(self._schema):
-                appended = [table.cast(schema, safe=True) for table in self._appended]
-                table = self._table.cast(schema, safe=True) if self._table is not None else None
-                self._appended, self._table, self._schema = appended, table, schema
-                self.nbytes = sum(item.nbytes for item in appended)
-                if table is not None:
-                    self.nbytes += table.nbytes
-            data = data.cast(schema, safe=True)
+            raise ValueError(
+                "Cannot buffer a batch whose schema differs from the batches "
+                f"already buffered.\nBuffered schema is: {self._schema}\n"
+                f"Incoming schema is: {data.schema}")
         self._appended.append(data)
         self.nbytes += data.nbytes
         self.num_rows += data.num_rows

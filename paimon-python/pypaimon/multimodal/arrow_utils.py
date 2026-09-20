@@ -17,7 +17,7 @@
 """Shared Arrow schema validation for multimodal format importers."""
 
 import pyarrow as pa
-from pypaimon.schema.arrow_schema import prepare_arrow_input
+import pyarrow.compute as pc
 
 
 def strict_arrow_table(
@@ -26,7 +26,7 @@ def strict_arrow_table(
         source_path,
         batch_index,
         format_name):
-    """Validate one Arrow batch against the target table schema.
+    """Validate one Arrow batch against the exact target table schema.
 
     Reject missing, extra, or reordered columns, validate nested nullability,
     and apply only Arrow safe casts before returning a ``pyarrow.Table``.
@@ -61,8 +61,84 @@ def strict_arrow_table(
             % (format_name, batch_index, source_path, table.column_names,
                target_schema.names))
     try:
-        return prepare_arrow_input(table, target_schema, validate_nullability=True)
+        _validate_nested_nullability(table, target_schema)
+        if table.schema.equals(target_schema, check_metadata=False):
+            return table
+        casted = table.cast(target_schema, safe=True)
+        _validate_nested_nullability(casted, target_schema)
+        return casted
     except (ValueError, TypeError, NotImplementedError) as error:
         raise ValueError(
             "%s batch %d from %s cannot be converted to the table schema: %s"
             % (format_name, batch_index, source_path, error)) from error
+
+
+def _validate_nested_nullability(table, schema):
+    for field, column in zip(schema, table.columns):
+        for chunk in column.chunks:
+            _validate_array_nullability(chunk, field, field.name)
+
+
+def _validate_array_nullability(array, field, path):
+    if not field.nullable and array.null_count:
+        raise ValueError(
+            "non-nullable field %s contains %d null value(s)"
+            % (path, array.null_count))
+
+    target_type = field.type
+    source_type = array.type
+    if (pa.types.is_list(target_type)
+            or pa.types.is_large_list(target_type)
+            or pa.types.is_fixed_size_list(target_type)):
+        if not (pa.types.is_list(source_type)
+                or pa.types.is_large_list(source_type)
+                or pa.types.is_fixed_size_list(source_type)):
+            return
+        _validate_array_nullability(
+            pc.list_flatten(array),
+            target_type.value_field,
+            "%s.%s" % (path, target_type.value_field.name),
+        )
+        return
+
+    if pa.types.is_map(target_type):
+        if not pa.types.is_map(source_type):
+            return
+        start = array.offsets[0].as_py()
+        stop = array.offsets[-1].as_py()
+        length = stop - start
+        offsets = pc.subtract(
+            array.offsets,
+            pa.scalar(start, type=array.offsets.type),
+        )
+        entries = pa.StructArray.from_arrays(
+            [array.keys.slice(start, length),
+             array.items.slice(start, length)],
+            fields=[source_type.key_field, source_type.item_field],
+        )
+        logical_entries = pc.list_flatten(pa.ListArray.from_arrays(
+            offsets,
+            entries,
+            mask=pc.is_null(array),
+        ))
+        _validate_array_nullability(
+            logical_entries.field(0), target_type.key_field,
+            "%s.%s" % (path, target_type.key_field.name))
+        _validate_array_nullability(
+            logical_entries.field(1), target_type.item_field,
+            "%s.%s" % (path, target_type.item_field.name))
+        return
+
+    if pa.types.is_struct(target_type):
+        if not pa.types.is_struct(source_type):
+            return
+        parent_valid = pc.is_valid(array) if array.null_count else None
+        for index, child_field in enumerate(target_type):
+            child = array.field(index)
+            if parent_valid is not None:
+                child = pc.filter(child, parent_valid)
+            _validate_array_nullability(
+                child,
+                child_field,
+                "%s.%s" % (path, child_field.name),
+            )

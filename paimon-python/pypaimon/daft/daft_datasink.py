@@ -28,8 +28,6 @@ from daft.io.sink import DataSink, WriteResult
 from daft.recordbatch.micropartition import MicroPartition
 from daft.schema import Schema
 
-from pypaimon.schema.arrow_schema import prepare_arrow_input
-
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -252,7 +250,9 @@ class PaimonDataSink(DataSink[list[Any]]):
     def _align_batch_to_target_schema(self, batch: pa.RecordBatch) -> pa.RecordBatch:
         if batch.schema.names != self._target_schema.names:
             batch = batch.select(self._target_schema.names)
-        return prepare_arrow_input(batch, self._target_schema)
+        if batch.schema != self._target_schema:
+            batch = batch.cast(self._target_schema)
+        return batch
 
     def write(self, micropartitions: Iterator[MicroPartition]) -> Iterator[WriteResult[list[Any]]]:
         table_write = self._write_builder.new_write()
@@ -424,7 +424,9 @@ class PaimonCommitDataSink(PaimonDataSink):
 def _series_to_arrow_table(columns, schema: pa.Schema) -> pa.Table:
     arrays = [column.to_arrow() for column in columns]
     table = pa.Table.from_arrays(arrays, names=schema.names)
-    return prepare_arrow_input(table, schema)
+    if table.schema != schema:
+        table = table.cast(schema)
+    return table
 
 
 def make_fixed_bucket_udf(table: FileStoreTable):

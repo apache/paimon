@@ -62,61 +62,9 @@ class TableWriteTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'consistent'):
                     writer._validate_pyarrow_schema(schema)
 
-    @parameterized.expand([(False,), (True,)])
-    def test_write_pandas_preserves_arrow_strings_and_index_policy(self, named_index):
-        import pandas as pd
-
-        if not hasattr(pd, 'ArrowDtype'):
-            self.skipTest('Arrow-backed pandas requires pandas >= 1.5')
-        writer = object.__new__(TableWrite)
-        writer.file_store_write = Mock(write_cols=None)
-        writer.table_pyarrow_schema = pa.schema([
-            ('id', pa.int64()), ('text', pa.string()),
-        ])
-        writer.write_arrow_batch = Mock()
-        frame = pd.DataFrame({'text': pd.array(['中文', None], dtype=pd.ArrowDtype(pa.large_string()))})
-        if named_index:
-            frame.index = pd.Index([3, 4], name='id')
-        else:
-            frame['id'] = [3, 4]
-            frame.index = pd.Index([object(), object()])
-        # Unused columns and index levels must not enter schema inference.
-        frame['unused'] = [object(), object()]
-        writer.write_pandas(frame)
-        batch = writer.write_arrow_batch.call_args[0][0]
-        self.assertEqual(batch.schema.names, ['id', 'text'])
-        self.assertEqual(batch.column('text').type, pa.large_string())
-        self.assertEqual(batch.to_pydict(), {'id': [3, 4], 'text': ['中文', None]})
-
-    @parameterized.expand([(False, False), (False, True), (True, False), (True, True)])
-    def test_write_pandas_preserves_generated_index_string_layout(self, multi_index, string_dtype):
-        import pandas as pd
-
-        if not hasattr(pd, 'ArrowDtype'):
-            self.skipTest('Arrow-backed pandas requires pandas >= 1.5')
-        dtype = pd.StringDtype(storage='pyarrow') if string_dtype else pd.ArrowDtype(pa.large_string())
-        labels = pd.array(['中文', '任务'], dtype=dtype)
-        if multi_index:
-            index = pd.MultiIndex.from_arrays([[1, 2], labels], names=['id', None])
-            expected_schema = pa.schema([('id', pa.int64()), ('__index_level_1__', pa.string())])
-        else:
-            index = pd.Index(labels)
-            expected_schema = pa.schema([('__index_level_0__', pa.string())])
-        frame = pd.DataFrame(index=index)
-        writer = object.__new__(TableWrite)
-        writer.file_store_write = Mock(write_cols=None)
-        writer.table_pyarrow_schema = expected_schema
-        writer.write_arrow_batch = Mock()
-        writer.write_pandas(frame)
-        batch = writer.write_arrow_batch.call_args[0][0]
-        text_column = batch.column(expected_schema.names[-1])
-        self.assertEqual(text_column.type, pa.array(labels).type)
-        self.assertEqual(text_column.to_pylist(), ['中文', '任务'])
-        self.assertEqual(batch.schema.names, expected_schema.names)
-
-    @parameterized.expand([(False,), (True,)])
-    def test_mixed_string_layouts_roundtrip(self, primary_key):
-        name = 'default.mixed_strings_' + str(primary_key)
+    @parameterized.expand([('append', False, '-1'), ('primary', True, '1'), ('postpone', True, '-2')])
+    def test_large_string_input_roundtrip(self, mode, primary_key, bucket):
+        name = 'default.large_strings_' + mode
 
         def arrow_schema(string_type):
             return pa.schema([
@@ -131,10 +79,11 @@ class TableWriteTest(unittest.TestCase):
         self.catalog.create_table(name, Schema.from_pyarrow_schema(
             arrow_schema(pa.large_string()),
             primary_keys=['id'] if primary_key else [],
-            options={'bucket': '1' if primary_key else '-1'},
+            options={'bucket': bucket},
         ), False)
         table = self.catalog.get_table(name)
-        builder = table.new_batch_write_builder()
+        builder = (table.new_postpone_fixed_bucket_write_builder()
+                   if mode == 'postpone' else table.new_batch_write_builder())
         write, commit = builder.new_write(), builder.new_commit()
         expected = []
         try:

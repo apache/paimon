@@ -118,16 +118,16 @@ class PostponeFixedBucketBatchTableWrite(BatchTableWrite):
         )
 
     def write_arrow(self, table: pa.Table):
+        table = self._prepare_arrow_data(table)
         if not self._buffer_input(table):
             return super().write_arrow(table)
-        self._validate_pyarrow_schema(table.schema)
         self._pending_inputs.extend(
             ("batch", batch) for batch in table.to_batches())
 
     def write_arrow_batch(self, data: pa.RecordBatch):
+        data = self._prepare_arrow_data(data)
         if not self._buffer_input(data):
             return super().write_arrow_batch(data)
-        self._validate_pyarrow_schema(data.schema)
         self._pending_inputs.append(("batch", data))
 
     def write_row(self, row):

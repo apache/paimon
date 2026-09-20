@@ -15,148 +15,125 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import glob
+import os
+import tempfile
 import unittest
+from unittest.mock import Mock
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 from parameterized import parameterized
 
-from pypaimon.schema.arrow_schema import (
-    arrow_schemas_compatible, arrow_types_compatible, cast_arrow_array, prepare_arrow_input,
-)
-from pypaimon.read.table_read import TableRead
+from pypaimon import CatalogFactory, Schema
+from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
+from pypaimon.write.table_write import TableWrite
 
 
 class ArrowSchemaTest(unittest.TestCase):
-    def test_layout_compatibility_does_not_allow_value_conversion(self):
-        self.assertTrue(arrow_types_compatible(pa.list_(pa.large_string()), pa.list_(pa.string())))
-        for source, target in [
-                (pa.int32(), pa.int64()),
-                (pa.binary(), pa.large_binary()),
-                (pa.large_list(pa.string()), pa.list_(pa.string())),
-                (pa.list_(pa.string(), 2), pa.list_(pa.string(), 3)),
-                (pa.string(), pa.binary())]:
-            with self.subTest(source=source, target=target):
-                self.assertFalse(arrow_types_compatible(source, target))
-        # Legacy writer policies are opt-in and never apply to BLOB.
-        self.assertTrue(arrow_schemas_compatible(
-            pa.schema([pa.field('b', pa.binary(), nullable=False)]),
-            pa.schema([('b', pa.binary(4))]), check_top_level_nullability=False, allow_binary_compatibility=True))
-        self.assertFalse(arrow_schemas_compatible(
-            pa.schema([('b', pa.binary())]), pa.schema([('b', pa.large_binary())]),
-            allow_binary_compatibility=True))
+    def test_compatibility_keeps_non_string_contracts(self):
+        target = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('text', pa.struct([pa.field('value', pa.string(), nullable=False)])),
+            ('blob', pa.large_binary()),
+        ])
+        source = target.set(1, pa.field('text', pa.struct([
+            pa.field('value', pa.large_string(), nullable=False),
+        ])))
+        self.assertTrue(arrow_schemas_compatible(source, target))
+        for invalid in [
+            source.set(0, pa.field('id', pa.int64(), nullable=False)),
+            source.set(1, pa.field('text', pa.struct([('value', pa.large_string())]))),
+            source.set(2, pa.field('blob', pa.binary())),
+            pa.schema(list(reversed(list(source)))),
+        ]:
+            self.assertFalse(arrow_schemas_compatible(invalid, target))
 
     @parameterized.expand([(False,), (True,)])
-    def test_safe_value_conversion_preserves_nested_string_layout(self, record_batch):
-        source_type = pa.struct([
-            pa.field('text', pa.large_string()),
-            pa.field('number', pa.int64()),
-        ])
-        target_type = pa.struct([
-            pa.field('text', pa.string(), metadata={b'description': b'label'}),
-            pa.field('number', pa.int32()),
-        ])
-        source = pa.table({'nested': pa.array([
-            {'text': '任务', 'number': 10}, None,
-        ], type=source_type)})
-        if record_batch:
-            source = source.to_batches()[0]
-        target = pa.schema([('nested', target_type)], metadata={b'contract': b'target'})
-        converted = prepare_arrow_input(source, target)
-        self.assertIsInstance(converted, type(source))
-        self.assertEqual(converted.to_pylist(), source.to_pylist())
-        self.assertEqual(converted.schema.metadata, target.metadata)
-        result_type = converted.schema.field('nested').type
-        self.assertEqual(result_type.field('text').type, pa.large_string())
-        self.assertEqual(result_type.field('text').metadata, target_type.field('text').metadata)
-        self.assertEqual(result_type.field('number').type, pa.int32())
-        with self.assertRaises(pa.ArrowInvalid):
-            prepare_arrow_input(pa.table({'number': [2 ** 40]}), pa.schema([('number', pa.int32())]))
+    def test_map_sorting_contract_is_preserved(self, sorted_keys):
+        small = pa.schema([('v', pa.map_(pa.string(), pa.string(), keys_sorted=sorted_keys))])
+        large = pa.schema([('v', pa.map_(pa.large_string(), pa.large_string(), keys_sorted=sorted_keys))])
+        different_sorting = pa.schema([('v', pa.map_(pa.string(), pa.string(), keys_sorted=not sorted_keys))])
+        self.assertTrue(arrow_schemas_compatible(small, large))
+        self.assertFalse(arrow_schemas_compatible(large, different_sorting))
 
-    def test_unchanged_layout_reuses_buffers(self):
-        source = pa.table({'text': pa.array(['a', None, '中文'], type=pa.large_string())})
-        target = pa.schema([('text', pa.string())])
-        self.assertIs(prepare_arrow_input(source, target), source)
-        narrowed = cast_arrow_array(source['text'], pa.string())
-        self.assertEqual(narrowed.type, pa.string())
-        self.assertEqual(narrowed.to_pylist(), source['text'].to_pylist())
+    @parameterized.expand([(False, False), (False, True), (True, False), (True, True)])
+    def test_normalization_preserves_schema_and_other_buffers(self, record_batch, empty):
+        schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False),
+            pa.field('text', pa.large_string(), metadata={b'description': b'label'}),
+            ('blob', pa.large_binary()),
+            ('bytes', pa.binary(1)),
+        ], metadata={b'source': b'input'})
+        values = [[], [], [], []] if empty else [[1, 2], ['中文', None], [b'blob', None], [b'x', b'y']]
+        arrays = [pa.array(items, type=field.type) for items, field in zip(values, schema)]
+        factory = pa.RecordBatch if record_batch else pa.Table
+        source = factory.from_arrays(arrays, schema=schema)
+        result = normalize_arrow_strings(source)
+        self.assertIsInstance(result, factory)
+        self.assertEqual(result.schema, schema.set(1, schema[1].with_type(pa.string())))
+        self.assertEqual(result.schema.metadata, schema.metadata)
+        self.assertEqual(result.schema[1].metadata, schema[1].metadata)
+        self.assertEqual(result.to_pydict(), source.to_pydict())
+        self.assertIs(normalize_arrow_strings(result), result)
+        if not empty:
+            blob = result.column(2) if record_batch else result.column(2).chunk(0)
+            self.assertEqual(blob.buffers()[2].address, arrays[2].buffers()[2].address)
 
-    def test_nested_nullability_validates_only_visible_values(self):
-        source_type = pa.struct([pa.field('text', pa.large_string(), nullable=False)])
-        target_type = pa.struct([pa.field('text', pa.string(), nullable=False)])
-        target = pa.schema([('nested', target_type)])
-        valid = pa.table({'nested': pa.array([None, {'text': 'ok'}], type=source_type)})
-        self.assertEqual(prepare_arrow_input(valid, target, validate_nullability=True).to_pylist(), valid.to_pylist())
-        invalid = pa.table({'nested': pa.array([{'text': None}], type=source_type)})
-        with self.assertRaisesRegex(ValueError, 'non-nullable field nested.text'):
-            prepare_arrow_input(invalid, target, validate_nullability=True)
+    @parameterized.expand([('table',), ('batch',), ('bucket',), ('postpone',), ('postpone_batch',)])
+    def test_core_writes_canonical_strings(self, entry):
+        with tempfile.TemporaryDirectory() as directory:
+            source_schema = pa.schema([
+                pa.field('id', pa.int64(), nullable=False), ('text', pa.large_string()),
+            ])
+            catalog = CatalogFactory.create({'warehouse': directory})
+            catalog.create_database('default', False)
+            catalog.create_table('default.strings', Schema.from_pyarrow_schema(
+                source_schema, primary_keys=['id'] if entry.startswith('postpone') else [],
+                options={'bucket': '-2' if entry.startswith('postpone') else '1', 'file.format': 'parquet'},
+            ), False)
+            table = catalog.get_table('default.strings')
+            builder = (table.new_postpone_fixed_bucket_write_builder()
+                       if entry.startswith('postpone') else table.new_batch_write_builder())
+            writer, commit = builder.new_write(), builder.new_commit()
+            expected = {'id': [1, 2], 'text': ['中文', None]}
+            source = pa.Table.from_pydict(expected, schema=source_schema)
+            try:
+                if entry in ('batch', 'postpone_batch'):
+                    writer.write_arrow_batch(source.to_batches()[0])
+                elif entry == 'bucket':
+                    writer.write_arrow_batch_to_bucket(source.to_batches()[0], 0)
+                else:
+                    writer.write_arrow(source)
+                commit.commit(writer.prepare_commit())
+            except Exception:
+                writer.abort()
+                raise
+            finally:
+                writer.close()
+                commit.close()
+            files = glob.glob(os.path.join(directory, '**', '*.parquet'), recursive=True)
+            self.assertTrue(files)
+            for path in files:
+                self.assertEqual(pq.read_schema(path).field('text').type, pa.string())
+            reader = table.new_read_builder()
+            result = reader.new_read().to_arrow(reader.new_scan().plan().splits())
+            actual = result.to_pydict()
+            self.assertEqual(sorted(zip(actual['id'], actual['text'])), [(1, '中文'), (2, None)])
 
-    def test_nested_nullability_matches_projected_fields_by_name(self):
-        source_type = pa.struct([
-            pa.field('unused', pa.string()),
-            pa.field('text', pa.large_string(), nullable=False),
-        ])
-        target_type = pa.struct([pa.field('text', pa.string(), nullable=False)])
-        source = pa.table({'nested': pa.array([
-            {'unused': None, 'text': 'ok'}, None,
-        ], type=source_type)})
-        result = prepare_arrow_input(source, pa.schema([('nested', target_type)]), validate_nullability=True)
-        self.assertEqual(result.to_pylist(), [{'nested': {'text': 'ok'}}, {'nested': None}])
-        self.assertEqual(result.schema.field('nested').type.field('text').type, pa.large_string())
-
-    def test_missing_nested_field_reports_conversion_error(self):
-        source = pa.table({'nested': pa.array([{'text': 'ok'}], type=pa.struct([('text', pa.large_string())]))})
-        target = pa.schema([('nested', pa.struct([
-            ('text', pa.string()), pa.field('required', pa.int32(), nullable=False),
-        ]))])
-        with self.assertRaises((ValueError, TypeError)):
-            prepare_arrow_input(source, target, validate_nullability=True)
-
-    def test_numeric_evolution_still_truncates_with_string_layout_change(self):
-        source = pa.array([{'text': '中文', 'number': 1.9}], type=pa.struct([
-            ('text', pa.large_string()), ('number', pa.float64()),
-        ]))
-        target = pa.struct([('text', pa.string()), ('number', pa.int32())])
-        result = cast_arrow_array(source, target, safe=False)
-        self.assertEqual(result.type, target)
-        self.assertEqual(result.to_pylist(), [{'text': '中文', 'number': 1}])
-
-    def test_native_output_accepts_string_layout_only(self):
-        batch = pa.record_batch([pa.array(['中文', None], type=pa.large_string())], names=['value'])
-        target = pa.schema([('value', pa.string())])
-        result = TableRead._try_to_pad_batch_by_schema(batch, target)
-        self.assertEqual(result.schema, target)
-        self.assertEqual(result.to_pylist(), batch.to_pylist())
-        for source_type, target_type, values in [
-                (pa.binary(), pa.large_binary(), [b'blob']),
-                (pa.int64(), pa.int32(), [1])]:
-            with self.subTest(source=source_type, target=target_type):
-                batch = pa.record_batch([pa.array(values, type=source_type)], names=['value'])
-                with self.assertRaises(TypeError):
-                    TableRead._try_to_pad_batch_by_schema(batch, pa.schema([('value', target_type)]))
-
-    def test_evolved_map_read_aligns_key_and_value_layouts(self):
-        from pypaimon.read.reader.data_file_batch_reader import DataFileBatchReader
-        from pypaimon.schema.data_types import PyarrowFieldParser
-
-        source = pa.array([[('任务', '值')], None, []], type=pa.map_(pa.large_string(), pa.large_string()))
-        logical = PyarrowFieldParser.to_paimon_type(source.type, True)
-        reader = object.__new__(DataFileBatchReader)
-        result = reader._align_array_by_id(source, logical, logical)
-        self.assertEqual(result.type, pa.map_(pa.string(), pa.string()))
-        self.assertEqual(result.to_pylist(), source.to_pylist())
-
-    @parameterized.expand([(False,), (True,)])
-    def test_safe_conversion_enforces_top_level_not_null(self, record_batch):
-        target = pa.schema([pa.field('text', pa.string(), nullable=False)])
-        for values in [['ok'], [None]]:
-            source = pa.table({'text': pa.array(values, type=pa.large_string())})
-            if record_batch:
-                source = source.to_batches()[0]
-            if values[0] is None:
-                with self.assertRaises((ValueError, TypeError)):
-                    prepare_arrow_input(source, target)
-            else:
-                converted = prepare_arrow_input(source, target)
-                self.assertFalse(converted.schema.field('text').nullable)
-                self.assertEqual(converted.column('text').type, pa.large_string())
-                self.assertEqual(converted.to_pylist(), source.to_pylist())
+    @unittest.skipUnless(int(pa.__version__.split('.')[0]) == 6, 'Arrow 6 lacks struct cast kernels')
+    def test_unsupported_nested_cast_fails_before_routing(self):
+        writer = object.__new__(TableWrite)
+        writer.file_store_write = Mock(write_cols=None)
+        writer.row_key_extractor = Mock()
+        writer.table_pyarrow_schema = pa.schema([('nested', pa.struct([('text', pa.string())]))])
+        source = pa.Table.from_pydict(
+            {'nested': [{'text': '中文'}]},
+            schema=pa.schema([('nested', pa.struct([('text', pa.large_string())]))]),
+        )
+        with self.assertRaisesRegex(ValueError, 'Cannot convert large_string input to string'):
+            writer.write_arrow(source)
+        with self.assertRaisesRegex(ValueError, 'Cannot convert large_string input to string'):
+            writer.write_arrow_batch(source.to_batches()[0])
+        writer.row_key_extractor.extract_partition_bucket_groups.assert_not_called()
+        writer.file_store_write.write.assert_not_called()
