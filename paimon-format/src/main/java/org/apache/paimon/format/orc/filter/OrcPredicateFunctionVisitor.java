@@ -174,6 +174,13 @@ public class OrcPredicateFunctionVisitor
 
     @Override
     public Optional<OrcFilters.Predicate> visitIn(FieldRef fieldRef, List<Object> literals) {
+        if (literals.isEmpty()) {
+            // An IN predicate builder can legitimately produce an empty (always-false) leaf, but
+            // Hive's SearchArgument.Builder.in(...) rejects an empty set outright. Decline the
+            // pushdown; residual evaluation upstream still applies the correct semantics.
+            return Optional.empty();
+        }
+
         PredicateLeaf.Type colType = toOrcType(fieldRef.type());
         if (colType == null) {
             return Optional.empty();
