@@ -52,6 +52,9 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         case o @ PaimonDynamicPartitionOverwrite(r, d) if o.resolved =>
           PaimonDynamicPartitionOverwriteCommand(r, d, o.query, o.writeOptions, o.isByName)
 
+        case a: V2WriteCommand if PaimonFormatOutputResolver.isLegacyFormatWrite(a) =>
+          PaimonFormatOutputResolver.resolve(a)
+
         case a @ PaimonV2WriteCommand(table)
             if a.query.getTagValue(PAIMON_WRITE_RESOLVED).isEmpty =>
           val options = Options.fromMap(writeOptions(a).asJava)
