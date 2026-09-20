@@ -26,10 +26,10 @@ from typing import Callable, List, Optional, Set
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import DataField
-from pypaimon.table.special_fields import SpecialFields
 
 
 class StreamReadBuilder:
@@ -115,6 +115,8 @@ class StreamReadBuilder:
 
     def new_streaming_scan(self) -> AsyncStreamingTableScan:
         """Create a new AsyncStreamingTableScan with this builder's settings."""
+        projection = self._projection_builder()
+        projection._validate_map_key_filter()
         scan = AsyncStreamingTableScan(
             table=self.table,
             predicate=self._predicate,
@@ -122,30 +124,38 @@ class StreamReadBuilder:
             bucket_filter=self._bucket_filter,
             consumer_id=self._consumer_id
         )
-        scan._read_type = self.read_type()
+        scan._read_type = projection._scan_read_type()
         return scan
 
     def new_read(self) -> TableRead:
         """Create a new TableRead with this builder's settings."""
+        projection = self._projection_builder()
+        projection._validate_map_key_filter()
         return TableRead(
             table=self.table,
             predicate=self._predicate,
-            read_type=self.read_type(),
+            read_type=projection.read_type(),
+            nested_name_paths=projection._nested_name_paths(),
             include_row_kind=self._include_row_kind
         )
 
     def new_predicate_builder(self) -> PredicateBuilder:
         """Create a PredicateBuilder for building filter predicates."""
-        return PredicateBuilder(self.read_type())
+        return self._projection_builder().new_predicate_builder()
 
     def read_type(self) -> List[DataField]:
         """Get the read schema fields, applying projection if set."""
-        table_fields = self.table.fields
+        return self._projection_builder().read_type()
 
-        if not self._projection:
-            return table_fields
-        else:
-            if self.table.options.row_tracking_enabled():
-                table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
-            field_map = {field.name: field for field in table_fields}
-            return [field_map[name] for name in self._projection if name in field_map]
+    def _nested_name_paths(self) -> Optional[List[List[str]]]:
+        """Return nested paths resolved with the batch read-builder rules."""
+        return self._projection_builder()._nested_name_paths()
+
+    def _projection_builder(self) -> ReadBuilder:
+        """Share projection and validation semantics with batch reads."""
+        builder = ReadBuilder(self.table)
+        if self._projection is not None:
+            builder.with_projection(self._projection)
+        if self._predicate is not None:
+            builder.with_filter(self._predicate)
+        return builder

@@ -18,6 +18,7 @@
 """Compare committed timestamp windows, including cross-snapshot change events."""
 
 import json
+import os
 from contextlib import ExitStack
 from unittest.mock import patch
 
@@ -321,19 +322,101 @@ def test_incremental_reader_preserves_all_physical_row_kinds(catalog, native):
         assert plan.snapshot_id == snapshot_id
         expected.append((str(kind), kind))
     builder = table.copy({'scan.native-plan.enabled': str(native).lower(),
+                          'read.native.enabled': str(native).lower(),
                           'incremental-between-timestamp': '0,400'}).new_read_builder()
     batch_scan = builder.new_scan()
     with ExitStack() as stack:
         if native:
             stack.enter_context(patch.object(batch_scan.file_scanner, 'scan',
                                              side_effect=AssertionError('native fallback')))
-        plan = batch_scan.plan()
+    plan = batch_scan.plan()
+    if native:
+        # The fixture rewrites Parquet bytes after commit to manufacture all
+        # four physical kinds. Refresh the opaque split's file-size metadata;
+        # real committed files already have matching manifest sizes.
+        from pypaimon_rust.datafusion import Split as NativeSplit
+        for split in plan.splits():
+            _, (state,) = split._native_split.__reduce__()
+            native_state = json.loads(bytes(state))
+            for native_file, data_file in zip(
+                    native_state['data_files'], split.files):
+                native_file['_FILE_SIZE'] = os.path.getsize(
+                    data_file.file_path)
+            split._native_split = NativeSplit(
+                json.dumps(native_state).encode())
     rows = list(builder.new_read().to_iterator(plan.splits()))
     assert sorted((row.get_field(1), row.get_row_kind().value) for row in rows) == expected
+    if native:
+        read = builder.new_read()
+        read.include_row_kind = True
+        with patch(
+                'pypaimon.read.table_read.TableRead._create_split_read',
+                side_effect=AssertionError('native row-kind read fell back')):
+            arrow = read.to_arrow(plan.splits(), parallelism=2)
+        assert sorted(zip(
+            arrow.column('v').to_pylist(),
+            arrow.column('_row_kind').to_pylist(),
+        )) == [('0', '+I'), ('1', '-U'), ('2', '+U'), ('3', '-D')]
     # Initial streaming bootstrap remains a merged snapshot, where the last -D removes the key.
     initial = scan._create_initial_plan(table.snapshot_manager().get_snapshot_by_id(4))
     assert all(not split.is_streaming for split in initial.splits())
     assert list(table.new_read_builder().new_read().to_iterator(initial.splits())) == []
+
+
+@pytest.mark.native_plan
+@pytest.mark.skipif(
+    not native_method_available('ReadBuilder', 'with_nested_projection'),
+    reason='pypaimon_rust nested native reader API required')
+def test_stream_read_builder_combines_native_nested_projection_and_row_kind(
+        catalog):
+    from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+
+    schema = pa.schema([
+        ('k', pa.int64()),
+        ('payload', pa.struct([
+            ('score', pa.int32()),
+            ('ignored', pa.string()),
+        ])),
+    ])
+    catalog.create_table(
+        'default.stream_nested',
+        Schema.from_pyarrow_schema(schema, options={'bucket': '-1'}),
+        False,
+    )
+    table = catalog.get_table('default.stream_nested')
+    write_builder = table.new_batch_write_builder()
+    writer, commit = write_builder.new_write(), write_builder.new_commit()
+    try:
+        writer.write_arrow(pa.Table.from_pylist([
+            {'k': 1, 'payload': {'score': 10, 'ignored': 'a'}},
+            {'k': 2, 'payload': None},
+        ], schema=schema))
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
+
+    native_table = table.copy({
+        'scan.native-plan.enabled': 'true',
+        'read.native.enabled': 'true',
+    })
+    builder = (native_table.new_stream_read_builder()
+               .with_projection(['payload.score', 'k'])
+               .with_include_row_kind())
+    # Use the same delta-plan primitive as the streaming loop without polling.
+    scan = builder.new_streaming_scan()
+    assert isinstance(scan, AsyncStreamingTableScan)
+    snapshot = native_table.snapshot_manager().get_latest_snapshot()
+    plan = scan._create_delta_plan(snapshot)
+    with patch(
+            'pypaimon.read.table_read.TableRead._create_split_read',
+            side_effect=AssertionError('streaming nested native read fell back')):
+        rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+
+    assert rows == [
+        {'_row_kind': '+I', 'payload_score': 10, 'k': 1},
+        {'_row_kind': '+I', 'payload_score': None, 'k': 2},
+    ]
 
 
 def test_streaming_reader_honors_explicit_split_deletion_vector(catalog, native, tmp_path):
