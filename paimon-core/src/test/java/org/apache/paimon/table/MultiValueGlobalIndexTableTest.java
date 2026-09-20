@@ -96,6 +96,14 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
                 .containsExactlyInAnyOrder(1, 2, 4, 5);
         assertThat(readIdsWithFallback(table, builder.isNull(1))).containsExactly(3);
 
+        FileStoreTable guarded =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO.key(),
+                                "0.2"));
+        assertThat(readIds(guarded, builder.arrayContains(1, BLUE), false))
+                .containsExactlyInAnyOrder(1, 2);
+
         write(table, GenericRow.of(6, array(RED)));
         table = getTableDefault();
 

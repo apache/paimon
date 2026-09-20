@@ -227,13 +227,13 @@ batch as ready for indexed queries.
 Global index files cover row-id ranges. If more rows are appended after an index is built, those
 new rows are not automatically covered by the existing index files. Build the global index again
 to create index files for newly uncovered data. The scalar, vector, and full-text families
-default to `fast`, which searches indexed row ranges.
+default to `fast`, which does not proactively scan uncovered row ranges.
 Choose a search mode deliberately when recently appended data must be included.
 Updates to already indexed rows also require the [update policy](#update-indexed-columns).
 
 | Mode | How coverage is checked | Use when |
 | --- | --- | --- |
-| `fast` | Search indexed coverage only. | The index is current, or partial coverage is acceptable. |
+| `fast` | Do not proactively scan gaps in index coverage. A query-specific fallback may still perform a regular data scan. | The index is current, or partial coverage is acceptable. |
 | `full` | Check row-ID coverage against snapshot `nextRowId`; scan raw data for detected gaps where supported. | Newly appended ranges need to be included. |
 | `detail` | Compare active data-file row-ID ranges with index coverage, then scan detected gaps where supported. | Coverage should be checked against current files, including partition filtering. |
 
@@ -283,6 +283,15 @@ Use `scalar-index.search-mode`, `vector-index.search-mode`, or
 `full-text-index.search-mode` for one index family. The legacy
 `global-index.search-mode` has no default and is used as a fallback when the corresponding
 family-specific option is not explicitly configured.
+
+For Data Evolution scalar batch scans, Paimon abandons an index-assisted read when
+the candidate set is too broad or too fragmented. This cost fallback is independent
+of the coverage mode. In `fast` mode it uses a regular data scan, which can return
+matching rows outside current index coverage. The candidate-ratio and row-range
+limits apply to BTree, Bitmap, Multivalue, and FM results. The decoded-row-ID limit
+is a reader-side work budget and currently applies to BTree posting lists; compressed
+bitmaps that stay compressed do not consume that budget. These limits do not apply
+to scalar pre-filters inside vector or full-text search.
 
 To temporarily disable global-index scan acceleration while keeping the index files, set:
 
@@ -458,5 +467,8 @@ These table options affect global index build and read behavior:
 | `global-index.build.max-shard` | `32` | Preferred maximum shard count for global index builds. |
 | `global-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building non-sorted global indexes. |
 | `global-index.thread-num` | `32` | Maximum number of concurrent threads for global index I/O. |
+| `data-evolution.scalar-index.max-selection-ratio` | `0.2` | Maximum candidate row-ID ratio for an index-assisted Data Evolution scalar batch scan, using the snapshot's allocated row-ID count as the denominator. Broader results fall back to a regular data scan. |
+| `data-evolution.scalar-index.max-selection-ranges` | `100000` | Maximum number of disjoint candidate row-ID ranges for an index-assisted Data Evolution scalar batch scan. More fragmented results fall back to a regular data scan. |
+| `data-evolution.scalar-index.max-decoded-row-ids` | `10000000` | Maximum row IDs a supporting scalar reader may decode for one indexed field. Currently enforced by BTree; compressed bitmaps that remain compressed are not counted. |
 | `visibility-callback.enabled` | `false` | Whether JVM batch or bounded-stream writers wait after commit for existing partition indexes to cover newly appended ranges. Does not hide the committed snapshot. |
 | `visibility-callback.timeout` | `30 min` | Maximum wait time for visibility callback. |

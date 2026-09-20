@@ -50,9 +50,12 @@ This guide covers Data Evolution append tables. Primary-key tables have a separa
 
 :::caution Index coverage affects results
 
-The default search mode is `fast`. If an index covers only part of the table,
-matching rows outside that coverage can be omitted. Creating a table or appending
-data does not build a global index. Read [Coverage and Freshness](./global-index/manage-indexes#coverage-and-freshness)
+The default search mode is `fast`. It does not proactively scan gaps in index
+coverage, so matching rows outside that coverage can be omitted. A query path may
+still fall back to a regular data scan when an index lookup is unavailable or too
+costly; in that case matching rows outside current index coverage can be returned.
+Creating a table or appending data does not build a global index. Read
+[Coverage and Freshness](./global-index/manage-indexes#coverage-and-freshness)
 before using indexed queries on changing data.
 
 :::

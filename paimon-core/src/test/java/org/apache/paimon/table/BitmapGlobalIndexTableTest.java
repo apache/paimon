@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -46,6 +47,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -60,7 +62,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -184,6 +188,30 @@ public class BitmapGlobalIndexTableTest extends DataEvolutionTestBase {
                                 BinaryString.fromString("a209"));
         rowIds = globalIndexScan(table, range);
         assertThat(rowIds.toRangeList()).containsExactly(new Range(200L, 209L));
+    }
+
+    @Test
+    public void testBroadBitmapResultFallsBackToDataScan() throws Exception {
+        write(100L);
+        createIndex("f0", null);
+
+        FileStoreTable base = (FileStoreTable) catalog.getTable(identifier());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO.key(), "0.1");
+        FileStoreTable table = base.copy(options);
+        Predicate predicate = new PredicateBuilder(table.rowType()).lessThan(0, 90);
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).noneMatch(IndexedSplit.class::isInstance);
+        List<Integer> values = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .executeFilter()
+                .createReader(plan)
+                .forEachRemaining(row -> values.add(row.getInt(0)));
+        assertThat(values).hasSize(90);
     }
 
     private void createIndex(String fieldName, List<Range> rowRanges) throws Exception {

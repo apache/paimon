@@ -2670,10 +2670,11 @@ public class CoreOptions implements Serializable {
                     .defaultValue(0.2d)
                     .withDescription(
                             "Maximum candidate row ratio for using a scalar global index "
-                                    + "to read a data evolution table. Broader results fall "
-                                    + "back to a normal data scan in all search modes. The "
-                                    + "value must be in (0, 1]. In fast mode, fallback may "
-                                    + "return matching rows outside current index coverage.");
+                                    + "to read a data evolution table, using the snapshot's "
+                                    + "allocated row-id count as the denominator. Broader results "
+                                    + "fall back to a normal data scan in all search modes. The "
+                                    + "value must be in (0, 1]. In fast mode, fallback may return "
+                                    + "matching rows outside current index coverage.");
 
     public static final ConfigOption<Integer> DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES =
             key("data-evolution.scalar-index.max-selection-ranges")
@@ -6107,7 +6108,10 @@ public class CoreOptions implements Serializable {
 
     /** Search mode for global index queries. */
     public enum GlobalIndexSearchMode implements DescribedEnum {
-        FAST("fast", "Only search indexed data."),
+        FAST(
+                "fast",
+                "Do not proactively scan data outside index coverage. Query-specific fallback "
+                        + "may still use a regular data scan."),
         FULL(
                 "full",
                 "Use snapshot next row id and global index coverage to detect missing row ids, "
