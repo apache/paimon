@@ -35,6 +35,9 @@ import pyarrow.parquet as pq
 
 # Bound encoded page data retained by the temporary column files.
 _MAX_PAGE_BYTES = 32 * 1024 * 1024
+# Bound the generic FileMetaData tree before creating Python objects for it.
+_MAX_FOOTER_BYTES = 1024 * 1024
+_MAX_FOOTER_COLUMN_CHUNKS = 1024
 # Bound all serialized OffsetIndexes and their retained typed PageLocations.
 _MAX_INDEX_BYTES = 8 * 1024 * 1024
 _MAX_PAGE_LOCATIONS = 128 * 1024
@@ -115,22 +118,22 @@ class _OffsetIndexDecoder:
     def __init__(self, data, max_locations):
         self.parser = _Compact(data)
         self.max_locations = max_locations
-        self.remaining_items = max_locations * 4
+        # PageLocations retain three fields each. Allow the standard optional
+        # per-page byte-count list plus a small amount of forward metadata.
+        self.remaining_items = max_locations * 6 + 16
 
     def decode(self):
         locations = None
         previous = 0
-        seen = set()
         while True:
             field = self._field(previous)
             if field is None:
                 break
             field_id, kind = field
-            if field_id in seen:
-                raise ValueError("Duplicate Parquet OffsetIndex field")
-            seen.add(field_id)
             previous = field_id
             if field_id == 1:
+                if locations is not None:
+                    raise ValueError("Duplicate Parquet OffsetIndex field")
                 if kind != 9:
                     raise ValueError("Invalid Parquet OffsetIndex page locations")
                 locations = self._locations()
@@ -148,6 +151,7 @@ class _OffsetIndexDecoder:
         field = previous + delta if delta else self.parser.value(4)
         if field <= 0:
             raise ValueError("Invalid Parquet compact field")
+        self._consume(1)
         return field, kind
 
     def _collection(self):
@@ -173,17 +177,15 @@ class _OffsetIndexDecoder:
         values = [None, None, None]
         expected = (6, 5, 6)
         previous = 0
-        seen = set()
         while True:
             field = self._field(previous)
             if field is None:
                 break
             field_id, kind = field
-            if field_id in seen:
-                raise ValueError("Duplicate Parquet PageLocation field")
-            seen.add(field_id)
             previous = field_id
             if 1 <= field_id <= 3:
+                if values[field_id - 1] is not None:
+                    raise ValueError("Duplicate Parquet PageLocation field")
                 if kind != expected[field_id - 1]:
                     raise ValueError("Invalid Parquet PageLocation field type")
                 values[field_id - 1] = self.parser.value(kind)
@@ -245,15 +247,11 @@ class _OffsetIndexDecoder:
             return
         if kind == 12:
             previous = 0
-            seen = set()
             while True:
                 field = self._field(previous)
                 if field is None:
                     return
                 field_id, field_kind = field
-                if field_id in seen:
-                    raise ValueError("Duplicate Parquet compact field")
-                seen.add(field_id)
                 previous = field_id
                 self._skip(field_kind, depth + 1)
         raise ValueError("Unsupported Parquet compact type: {}".format(kind))
@@ -365,10 +363,16 @@ class ParquetPageIndexReader:
                            "has_offset_index", False)
                    for group in row_groups for index in range(metadata.num_columns)):
             return None
+        if (metadata.serialized_size > _MAX_FOOTER_BYTES
+                or metadata.num_row_groups * metadata.num_columns
+                > _MAX_FOOTER_COLUMN_CHUNKS):
+            return None
         output = pa.BufferOutputStream()
         metadata.write_metadata_file(output)
         serialized = output.getvalue().to_pybytes()
         length = struct.unpack("<I", serialized[-8:-4])[0]
+        if length > _MAX_FOOTER_BYTES:
+            return None
         footer = _Compact(serialized[-8 - length:-8]).value(12)
         if 8 in footer or 9 in footer:
             return None  # Encrypted pages need the original file identity/AAD.

@@ -114,7 +114,8 @@ def test_ranges_projection_missing_fields_and_fallback_in_same_file(fixture):
 
 
 @pytest.mark.parametrize(
-    'mode', ['full', 'no_index', 'budget', 'location_budget', 'cache', 'scattered'])
+    'mode', ['full', 'no_index', 'budget', 'location_budget', 'footer_bytes',
+             'footer_chunks', 'cache', 'scattered'])
 def test_unsupported_or_expensive_reads_fall_back(fixture, mode):
     path, table, file_io, counter = fixture
     kwargs = {}
@@ -129,6 +130,10 @@ def test_unsupported_or_expensive_reads_fall_back(fixture, mode):
     with patch.object(page_module, '_MAX_PAGE_BYTES', 1 if mode == 'budget' else 32 * 1024 * 1024), \
             patch.object(page_module, '_MAX_PAGE_LOCATIONS',
                          1 if mode == 'location_budget' else 128 * 1024), \
+            patch.object(page_module, '_MAX_FOOTER_BYTES',
+                         1 if mode == 'footer_bytes' else 1024 * 1024), \
+            patch.object(page_module, '_MAX_FOOTER_COLUMN_CHUNKS',
+                         1 if mode == 'footer_chunks' else 1024), \
             patch.object(page_module.ParquetPageIndexReader, '_batches',
                          side_effect=AssertionError('must fall back')):
         result, _ = _read(fixture, **kwargs)
@@ -214,6 +219,27 @@ def test_offset_index_page_locations_are_bounded_before_decoding():
     with pytest.raises(page_module._PageIndexBudgetExceeded,
                        match='page-location budget'):
         page_module._decode_offset_index(encoded, page_module._MAX_PAGE_LOCATIONS)
+
+
+def test_offset_index_unknown_struct_fields_are_bounded():
+    location = {1: (6, 4), 2: (5, 1), 3: (6, 0)}
+    unknown = {field: (1, True) for field in range(1, 33)}
+    encoded = page_module._encode(
+        12, {1: (9, (12, [location])), 2: (12, unknown)})
+    with pytest.raises(page_module._PageIndexBudgetExceeded,
+                       match='object budget'):
+        page_module._decode_offset_index(encoded, 1)
+
+
+def test_fragmented_footer_falls_back_before_generic_decoding(fixture):
+    path = fixture[0]
+    with pa.OSFile(path, 'rb') as source:
+        parquet = pq.ParquetFile(source)
+        with patch.object(page_module, '_MAX_FOOTER_COLUMN_CHUNKS', 1), \
+                patch.object(page_module._Compact, 'value',
+                             side_effect=AssertionError('must not decode footer')):
+            assert page_module.ParquetPageIndexReader.create(
+                source, parquet, ['id'], [0], 71) is None
 
 
 def test_wide_fallback_coalesces_offset_index_reads(tmp_path):
