@@ -270,9 +270,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(rows, [{'k': 20, 'v': 'b'}])
         self.assertGreaterEqual(rust_read.call_count, 1)
 
-    @unittest.skipUnless(native_split_bridge_available(),
-                         "pypaimon-rust split bridge API not installed")
-    def test_query_auth_keeps_python_plan_and_uses_native_read(self):
+    def test_query_auth_uses_python_plan_and_reader(self):
         self.cat.create_table(
             'default.query_auth_native_read',
             Schema.from_pyarrow_schema(self.schema), False)
@@ -304,22 +302,15 @@ class NativePlanIntegrationTest(unittest.TestCase):
             for split in plan.splits()))
 
         with patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
-                side_effect=AssertionError('Python reader was used')), patch(
-                    'pypaimon.read.native_plan.native_read',
-                    wraps=native_read) as rust_read:
+                'pypaimon.read.native_plan.native_read',
+                wraps=native_read) as rust_read:
             rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
             streamed = builder.new_read().to_arrow_batch_reader(
                 plan.splits()).read_all().to_pylist()
 
         self.assertEqual(rows, [{'k': None}])
         self.assertEqual(streamed, rows)
-        self.assertGreaterEqual(rust_read.call_count, 1)
-        self.assertTrue(all(
-            call.kwargs['limit'] is None for call in rust_read.call_args_list))
-        self.assertTrue(all(
-            call.kwargs['projection'] == ['k', 'v']
-            for call in rust_read.call_args_list))
+        rust_read.assert_not_called()
 
     @unittest.skipUnless(native_reader_available(),
                          "pypaimon-rust native reader API not installed")

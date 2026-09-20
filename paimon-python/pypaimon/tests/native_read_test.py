@@ -15,14 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import json
 import threading
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
 import pytest
 
-from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import AtomicType, DataField
@@ -195,100 +193,19 @@ def test_native_split_bridge_failure_falls_back_before_starting_reader():
     native.assert_not_called()
 
 
-def _auth_filter(field_name='dept', value='eng'):
-    return json.dumps({
-        'kind': 'LEAF',
-        'transform': {
-            'name': 'FIELD_REF',
-            'fieldRef': {
-                'index': 0, 'name': field_name, 'type': 'STRING'},
-        },
-        'function': 'EQUAL',
-        'literals': [value],
-    })
-
-
-def test_native_query_auth_filters_before_limit_masks_and_hides_dependencies():
-    read = _table_read(limit=1)
-    dept = DataField(1, 'dept', AtomicType('STRING'))
-    read.table.fields = read.read_type + [dept]
+def test_native_query_auth_falls_back_to_python_reader():
+    read = _table_read()
     split = _Split()
     split._native_split = object()
-    auth = TableQueryAuthResult(
-        [_auth_filter()], {'id': json.dumps({'name': 'NULL'})})
-    wrapped = QueryAuthSplit(split, auth)
-    native_batch = pa.record_batch([
-        pa.array([1, 2, 3], type=pa.int32()),
-        pa.array(['sales', 'eng', 'eng']),
-    ], names=['id', 'dept'])
+    wrapped = QueryAuthSplit(split, object())
 
     with patch(
-            'pypaimon.read.native_plan.native_read',
-            return_value=[native_batch]) as native:
-        result = read.to_arrow([wrapped])
-
-    assert result.to_pydict() == {'id': [None]}
-    assert native.call_args.kwargs['projection'] == ['id', 'dept']
-    # Authorization must see all rows; the public limit is applied afterwards.
-    assert native.call_args.kwargs['limit'] is None
-
-
-def test_parallel_native_query_auth_filters_each_reader_centrally():
-    read = _table_read()
-    dept = DataField(1, 'dept', AtomicType('STRING'))
-    read.table.fields = read.read_type + [dept]
-    read._read_parallelism = 2
-    auth = TableQueryAuthResult([_auth_filter()], None)
-    splits = [_Split(), _Split()]
-    for index, split in enumerate(splits):
-        split._native_split = index
-    wrapped = [QueryAuthSplit(split, auth) for split in splits]
-
-    def read_group(table, group, **kwargs):
-        if group == [0]:
-            return [pa.record_batch([
-                pa.array([10], type=pa.int32()), pa.array(['sales'])],
-                names=['id', 'dept'])]
-        return [pa.record_batch([
-            pa.array([20, 21], type=pa.int32()), pa.array(['eng', 'eng'])],
-            names=['id', 'dept'])]
-
-    with patch(
-            'pypaimon.read.native_plan.native_read',
-            side_effect=read_group) as native:
-        result = read.to_arrow(wrapped, parallelism=2)
-
-    assert result.to_pydict() == {'id': [20, 21]}
-    assert native.call_count == 2
-    assert {call.kwargs['limit'] for call in native.call_args_list} == {None}
-
-
-def test_native_query_auth_falls_back_for_mixed_authorization_contexts():
-    read = _table_read()
-    read.table.fields = read.read_type
-    first, second = _Split(), _Split()
-    first._native_split = object()
-    second._native_split = object()
-    splits = [
-        QueryAuthSplit(first, TableQueryAuthResult(None, {'id': '{"name":"NULL"}'})),
-        QueryAuthSplit(second, TableQueryAuthResult(None, {'id': '{"name":"NULL"}'})),
-    ]
-
-    with patch('pypaimon.read.native_plan.native_read') as native:
+            'pypaimon.read.native_plan.native_split_from_python') as convert, patch(
+            'pypaimon.read.native_plan.native_read') as native:
         assert read._try_native_batches(
-            splits, pa.schema([('id', pa.int32())])) is None
+            [wrapped], pa.schema([('id', pa.int32())])) is None
+    convert.assert_not_called()
     native.assert_not_called()
-
-
-def test_native_query_auth_falls_back_when_filter_reads_blob_payload():
-    read = _blob_table_read()
-    read.table.fields = read.read_type
-    auth = Mock(filter=None, column_masking=None)
-    auth.get_extra_fields_for_filter.return_value = []
-    auth.extract_row_filter.return_value = lambda batch: pa.array(
-        [True] * batch.num_rows)
-
-    assert read._native_auth_state(auth) is None
 
 
 def test_native_read_uses_effective_parallelism_from_table_option():
