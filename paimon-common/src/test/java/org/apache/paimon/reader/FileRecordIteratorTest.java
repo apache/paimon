@@ -28,6 +28,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -196,7 +197,14 @@ public class FileRecordIteratorTest {
 
     @Test
     public void testSelectionSkip() throws IOException {
-        FileRecordIterator<Long> iterator = createIterator(Arrays.asList(0L, 1L, 2L, 3L, 4L, 5L));
+        int[] materialized = {0};
+        FileRecordIterator<Long> iterator =
+                createIterator(Arrays.asList(0L, 1L, 2L, 3L, 4L, 5L))
+                        .transform(
+                                value -> {
+                                    materialized[0]++;
+                                    return value;
+                                });
 
         RoaringBitmap32 selection = new RoaringBitmap32();
         selection.add(1);
@@ -206,11 +214,152 @@ public class FileRecordIteratorTest {
         FileRecordIterator<Long> selected = iterator.selection(selection);
         assertThat(selected.skip()).isTrue();
         assertThat(selected.returnedPosition()).isEqualTo(1L);
+        assertThat(materialized[0]).isZero();
         assertThat(selected.next()).isEqualTo(3L);
         assertThat(selected.returnedPosition()).isEqualTo(3L);
         assertThat(selected.skip()).isTrue();
         assertThat(selected.returnedPosition()).isEqualTo(5L);
         assertThat(selected.skip()).isFalse();
+        assertThat(materialized[0]).isEqualTo(2);
+    }
+
+    @Test
+    public void testSelectionSeeksWithoutWalkingPrefixesOrGaps() throws IOException {
+        int[] accesses = {0};
+        RoaringBitmap32 selection =
+                new RoaringBitmap32() {
+                    @Override
+                    public long nextValue(int fromValue) {
+                        accesses[0]++;
+                        return super.nextValue(fromValue);
+                    }
+
+                    @Override
+                    public Iterator<Integer> iterator() {
+                        Iterator<Integer> iterator = super.iterator();
+                        return new Iterator<Integer>() {
+                            @Override
+                            public boolean hasNext() {
+                                return iterator.hasNext();
+                            }
+
+                            @Override
+                            public Integer next() {
+                                accesses[0]++;
+                                return iterator.next();
+                            }
+                        };
+                    }
+                };
+        selection.flip(0, 100_000);
+        FileRecordIterator<Long> selected =
+                createPositionIterator(Arrays.asList(99_990L, 99_991L, 99_999L), new int[1])
+                        .selection(selection);
+        assertThat(collectAll(selected)).containsExactly(99_990L, 99_991L, 99_999L);
+        assertThat(accesses[0]).isLessThanOrEqualTo(4);
+
+        selection.clear();
+        selection.add(0);
+        selection.add(100_000);
+        accesses[0] = 0;
+        List<Long> positions = new ArrayList<>();
+        for (long i = 0; i < 1000; i++) {
+            positions.add(i);
+        }
+        int[] releases = {0};
+        selected = createPositionIterator(positions, releases).selection(selection);
+        assertThat(selected.skip()).isTrue();
+        assertThat(selected.returnedPosition()).isZero();
+        assertThat(selected.next()).isNull();
+        assertThat(accesses[0]).isLessThanOrEqualTo(3);
+        selected.releaseBatch();
+        assertThat(releases[0]).isOne();
+    }
+
+    @Test
+    public void testSelectionAcrossBatchesAndPositionGaps() throws IOException {
+        RoaringBitmap32 selection = new RoaringBitmap32();
+        selection.flip(0, 100_000);
+        selection.remove(99_992);
+        selection.remove(99_996);
+        // Each batch uses file-relative positions and the same selection. The underlying
+        // reader may already have skipped rows, for example through Parquet page pruning.
+        for (List<Long> positions :
+                Arrays.asList(
+                        Arrays.asList(99_990L, 99_992L, 99_994L),
+                        Arrays.asList(99_996L, 99_998L, 100_000L))) {
+            int[] released = {0};
+            FileRecordIterator<Long> selected =
+                    createPositionIterator(positions, released).selection(selection);
+            List<Long> expected = new ArrayList<>();
+            for (long position : positions) {
+                if (selection.contains((int) position)) {
+                    expected.add(position);
+                }
+            }
+            assertThat(collectAll(selected)).isEqualTo(expected);
+            selected.releaseBatch();
+            assertThat(released[0]).isOne();
+
+            selected = createPositionIterator(positions, released).selection(selection);
+            assertThat(selected.skip()).isTrue();
+            assertThat(selected.returnedPosition()).isEqualTo(expected.get(0));
+            assertThat(collectAll(selected)).isEqualTo(expected.subList(1, expected.size()));
+        }
+        assertThat(selection.getCardinality()).isEqualTo(99_998);
+    }
+
+    @Test
+    public void testSelectionAtMaximumPosition() throws IOException {
+        RoaringBitmap32 selection =
+                RoaringBitmap32.bitmapOf(Integer.MAX_VALUE, Integer.MIN_VALUE, -1);
+        FileRecordIterator<Long> selected =
+                createPositionIterator(
+                                Arrays.asList(
+                                        (long) Integer.MAX_VALUE - 1,
+                                        (long) Integer.MAX_VALUE,
+                                        1L << 31,
+                                        0xFFFFFFFFL,
+                                        1L << 32),
+                                new int[1])
+                        .selection(selection);
+        assertThat(selected.next()).isEqualTo((long) Integer.MAX_VALUE);
+        assertThat(selected.skip()).isTrue();
+        assertThat(selected.returnedPosition()).isEqualTo(1L << 31);
+        assertThat(selected.next()).isEqualTo(0xFFFFFFFFL);
+        assertThat(selected.next()).isNull();
+        assertThat(selected.skip()).isFalse();
+    }
+
+    private FileRecordIterator<Long> createPositionIterator(List<Long> positions, int[] released) {
+        return new FileRecordIterator<Long>() {
+            private int index = -1;
+
+            @Override
+            public long returnedPosition() {
+                return positions.get(index);
+            }
+
+            @Override
+            public Path filePath() {
+                return new Path("test-file.parquet");
+            }
+
+            @Override
+            public Long next() {
+                return skip() ? positions.get(index) : null;
+            }
+
+            @Override
+            public boolean skip() {
+                return ++index < positions.size();
+            }
+
+            @Override
+            public void releaseBatch() {
+                released[0]++;
+            }
+        };
     }
 
     @Test
