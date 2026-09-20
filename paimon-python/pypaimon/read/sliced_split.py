@@ -94,6 +94,10 @@ class SlicedSplit(Split):
         return getattr(self._data_split, 'is_streaming', False)
 
     @property
+    def snapshot_id(self):
+        return self._data_split.snapshot_id
+
+    @property
     def raw_convertible(self):
         return self._data_split.raw_convertible
 

@@ -18,6 +18,7 @@
 import datetime
 import importlib.util
 import io
+import json
 import os
 import pickle
 import tempfile
@@ -28,10 +29,12 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.read.native_plan import (
     native_family_search_modes_available, native_method_available, native_read,
-    native_reader_available,
+    native_reader_available, native_split_bridge_available,
+    native_split_from_python,
 )
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.blob import BlobDescriptor, BlobRef
@@ -202,6 +205,112 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(rows, [{'k': 2}, {'k': 3}])
         self.assertEqual(streamed, rows)
         self.assertTrue(builder.explain().native_planned)
+
+    @unittest.skipUnless(native_split_bridge_available(),
+                         "pypaimon-rust split bridge API not installed")
+    def test_native_read_bridges_python_planned_splits(self):
+        self.cat.create_table(
+            'default.python_plan_native_read',
+            Schema.from_pyarrow_schema(self.schema), False)
+        self._write('python_plan_native_read', [
+            {'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}, {'k': 3, 'v': 'c'}])
+        table = self.cat.get_table('default.python_plan_native_read').copy({
+            'read.native.enabled': 'true',
+        })
+        builder = table.new_read_builder().with_projection(['k'])
+        scan = builder.new_scan()
+        # Force the capability branch that motivates this bridge: Python owns
+        # planning, while Rust still performs the physical read.
+        with patch.object(scan, '_native_plan_supported', return_value=False):
+            plan = scan.plan()
+        self.assertTrue(plan.splits())
+        self.assertTrue(all(
+            getattr(split, '_native_split', None) is None
+            for split in plan.splits()))
+
+        with patch(
+                'pypaimon.read.native_plan.native_split_from_python',
+                wraps=native_split_from_python) as bridge, patch(
+                    'pypaimon.read.native_plan.native_read',
+                    wraps=native_read) as rust_read, patch(
+                        'pypaimon.read.table_read.TableRead._create_split_read',
+                        side_effect=AssertionError('Python reader was used')):
+            rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+
+        self.assertEqual(rows, [{'k': 1}, {'k': 2}, {'k': 3}])
+        self.assertEqual(bridge.call_count, len(plan.splits()))
+        self.assertGreaterEqual(rust_read.call_count, 1)
+
+    @unittest.skipUnless(native_split_bridge_available(),
+                         "pypaimon-rust split bridge API not installed")
+    def test_native_read_bridges_python_indexed_data_evolution_split(self):
+        self.cat.create_table(
+            'default.python_indexed_native_read',
+            Schema.from_pyarrow_schema(self.schema, options={
+                'data-evolution.enabled': 'true',
+                'row-tracking.enabled': 'true',
+            }), False)
+        self._write('python_indexed_native_read', [
+            {'k': 10, 'v': 'a'}, {'k': 20, 'v': 'b'}, {'k': 30, 'v': 'c'}])
+        table = self.cat.get_table('default.python_indexed_native_read').copy({
+            'read.native.enabled': 'true',
+        })
+        builder = table.new_read_builder()
+        scan = builder.new_scan().with_row_ranges([Range(1, 1)])
+        with patch.object(scan, '_native_plan_supported', return_value=False):
+            plan = scan.plan()
+
+        with patch(
+                'pypaimon.read.table_read.TableRead._create_split_read',
+                side_effect=AssertionError('Python reader was used')), patch(
+                    'pypaimon.read.native_plan.native_read',
+                    wraps=native_read) as rust_read:
+            rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+
+        self.assertEqual(rows, [{'k': 20, 'v': 'b'}])
+        self.assertGreaterEqual(rust_read.call_count, 1)
+
+    def test_query_auth_uses_python_plan_and_reader(self):
+        self.cat.create_table(
+            'default.query_auth_native_read',
+            Schema.from_pyarrow_schema(self.schema), False)
+        self._write('query_auth_native_read', [
+            {'k': 1, 'v': 'sales'},
+            {'k': 2, 'v': 'eng'},
+            {'k': 3, 'v': 'eng'},
+        ])
+        table = self.cat.get_table('default.query_auth_native_read').copy({
+            'read.native.enabled': 'true',
+        })
+        auth_filter = json.dumps({
+            'kind': 'LEAF',
+            'transform': {
+                'name': 'FIELD_REF',
+                'fieldRef': {'index': 1, 'name': 'v', 'type': 'STRING'},
+            },
+            'function': 'EQUAL',
+            'literals': ['eng'],
+        })
+        auth = TableQueryAuthResult(
+            [auth_filter], {'k': json.dumps({'name': 'NULL'})})
+        table.catalog_environment.table_query_auth = (
+            lambda options, identifier: lambda select: auth)
+        builder = table.new_read_builder().with_projection(['k']).with_limit(1)
+        plan = builder.new_scan().plan()
+        self.assertTrue(all(
+            split.__class__.__name__ == 'QueryAuthSplit'
+            for split in plan.splits()))
+
+        with patch(
+                'pypaimon.read.native_plan.native_read',
+                wraps=native_read) as rust_read:
+            rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+            streamed = builder.new_read().to_arrow_batch_reader(
+                plan.splits()).read_all().to_pylist()
+
+        self.assertEqual(rows, [{'k': None}])
+        self.assertEqual(streamed, rows)
+        rust_read.assert_not_called()
 
     @unittest.skipUnless(native_reader_available(),
                          "pypaimon-rust native reader API not installed")
@@ -1219,7 +1328,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         with patch('pypaimon.read.native_plan.native_read',
                    wraps=native_read) as read:
             rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
-        read.assert_not_called()
+        self.assertEqual(read.call_count, len(plan.splits()))
         self.assertEqual(sorted(rows, key=lambda row: row['k']), [
             {'k': 1, 'p': 'a/b'},
             {'k': 2, 'p': 'a/b'},

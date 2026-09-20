@@ -62,8 +62,10 @@ def test_signed_zero_key_ranges_keep_versions_in_one_split(type_name):
 
     table = SimpleNamespace(table_path='/tmp/interval-test', options=CoreOptions(Options({})))
     entries = [ManifestEntry(0, GenericRow([], []), 0, 1, file) for file in files]
-    splits = PrimaryKeyTableSplitGenerator(table, 1, 1).create_splits(entries)
+    splits = PrimaryKeyTableSplitGenerator(
+        table, 1, 1, snapshot_id=7).create_splits(entries)
     assert len(splits) == 1
+    assert splits[0].snapshot_id == 7
     assert sorted(file.file_name for file in splits[0].files) == ['broad', 'point']
     assert not splits[0].raw_convertible
 

@@ -421,8 +421,13 @@ class TableRead:
             return []
         if self._deferred_blob_limit_may_prune(splits):
             return None
+        # Query authorization has additional filtering, masking and projection
+        # semantics which are already implemented by the Python reader.
+        if any(isinstance(split, QueryAuthSplit) for split in splits):
+            return None
         try:
-            from pypaimon.read.native_plan import native_read
+            from pypaimon.read.native_plan import (
+                native_read, native_split_from_python)
         except Exception as e:
             logger.warning(
                 "Native read failed, falling back to the Python reader: %s", e)
@@ -430,13 +435,19 @@ class TableRead:
         rust_splits = []
         split_weights = []
         for split in splits:
-            if isinstance(split, QueryAuthSplit):
-                return None
             if not self._native_split_files_supported(split):
                 return None
             rust_split = getattr(split, '_native_split', None)
             if rust_split is None:
-                return None
+                try:
+                    rust_split = native_split_from_python(split)
+                except Exception as e:
+                    logger.warning(
+                        "Native split conversion failed, falling back to the "
+                        "Python reader: %s", e)
+                    return None
+                if rust_split is None:
+                    return None
             rust_splits.append(rust_split)
             split_weights.append(self._native_split_weight(split))
         if (parallelism is not None
@@ -713,15 +724,14 @@ class TableRead:
         return True
 
     def _convert_native_batches(self, batches, schema):
-        """Apply PyPaimon's exact output limit lazily to native batches."""
         remaining = self.limit
         try:
             for batch in batches:
                 if batch.num_rows == 0:
                     continue
+                batch = self._prepare_native_batch(batch, schema)
                 if remaining is not None and batch.num_rows > remaining:
                     batch = batch.slice(0, remaining)
-                batch = self._prepare_native_batch(batch, schema)
                 batch = self._project_batch_to_output(batch)
                 yield self._try_to_pad_batch_by_schema(batch, schema)
                 if remaining is not None:

@@ -376,6 +376,14 @@ class AsyncStreamingTableScan:
         if (not self.table.options.native_plan_enabled()
                 or self._bucket_filter is not None):
             return None
+        # Rust's full-snapshot scan currently has batch visibility semantics.
+        # For first-row and non-MOR deletion-vector tables it hides level-0
+        # files, while an initial streaming scan must include those files.
+        # Incremental scans already use Rust's streaming split mode and do not
+        # need this fallback.
+        if (incremental_range is None
+                and self.table.options.batch_scan_skip_level0()):
+            return None
         try:
             from pypaimon.read.native_plan import native_plan
             plan = native_plan(
@@ -440,20 +448,21 @@ class AsyncStreamingTableScan:
                 self.table,
                 target_split_size,
                 open_file_cost,
-                deletion_files_map={}
+                deletion_files_map={},
+                snapshot_id=snapshot_id,
             )
         else:
             split_generator = AppendTableSplitGenerator(
                 self.table,
                 target_split_size,
                 open_file_cost,
-                deletion_files_map={}
+                deletion_files_map={},
+                snapshot_id=snapshot_id,
             )
 
         splits = split_generator.create_splits(entries)
         for split in splits:
             split.is_streaming = True
-            split.snapshot_id = snapshot_id
         return Plan(splits, snapshot_id=snapshot_id)
 
     def _should_use_diff_catch_up(self) -> bool:

@@ -369,14 +369,14 @@ class TableScan:
                           else AppendChunkShuffleSplitGenerator)
         seed, chunk_size = fs.chunk_shuffle
         generator = generator_type(self.table, fs.target_split_size, fs.open_file_cost,
-                                   deletions, seed=seed, chunk_size=chunk_size)
+                                   deletions, seed=seed, chunk_size=chunk_size,
+                                   snapshot_id=snapshot_id)
         if fs.idx_of_this_subtask is not None:
             generator.with_shard(fs.idx_of_this_subtask, fs.number_of_para_subtasks)
         chunks = generator.create_splits(entries)
         for split in chunks:
             while callable(getattr(split, 'data_split', None)):
                 split = split.data_split()
-            split.snapshot_id = snapshot_id
             split.is_streaming = fs.is_streaming
         return chunks
 
