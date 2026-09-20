@@ -599,7 +599,7 @@ class TextQuery(_PreFilterQuery):
             .with_limit(limit)
         )
         if query._pre_filter is not None:
-            builder = builder.with_partition_filter(query._pre_filter)
+            builder = builder.with_filter(query._pre_filter)
         return builder.execute_local()
 
 

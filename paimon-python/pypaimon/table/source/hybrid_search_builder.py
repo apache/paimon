@@ -361,13 +361,6 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
             raise ValueError("Routes cannot be empty")
         if self._limit <= 0:
             raise ValueError("Limit must be positive, got: %s" % self._limit)
-        if self._filter is not None:
-            for route in self._routes:
-                if route.is_full_text():
-                    raise ValueError(
-                        "Hybrid search with full-text routes does not support "
-                        "non-partition filters because full-text indexes cannot "
-                        "apply row-id pre-filters before top-k ranking.")
 
     def _new_vector_search_builder(self, route):
         builder = (
@@ -391,6 +384,8 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         )
         if self._partition_filter is not None:
             builder.with_partition_filter(self._partition_filter)
+        if self._filter is not None:
+            builder.with_filter(self._filter)
         return builder
 
     def _rrf(self, route_results):
