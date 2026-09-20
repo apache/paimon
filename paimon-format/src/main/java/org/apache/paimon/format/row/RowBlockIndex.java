@@ -26,6 +26,8 @@ import org.apache.paimon.utils.VarLengthIntUtils;
 
 import java.io.IOException;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** Block index that maps row numbers to block locations. */
 class RowBlockIndex {
 
@@ -36,10 +38,60 @@ class RowBlockIndex {
 
     RowBlockIndex(
             long[] blockCompressedSizes, long[] blockUncompressedSizes, long[] blockRowStarts) {
+        checkArgument(
+                blockCompressedSizes.length == blockUncompressedSizes.length
+                        && blockCompressedSizes.length == blockRowStarts.length,
+                "Row file block index arrays disagree on the block count: %s compressed sizes, %s uncompressed sizes, %s row starts.",
+                blockCompressedSizes.length,
+                blockUncompressedSizes.length,
+                blockRowStarts.length);
         this.blockCompressedSizes = blockCompressedSizes;
         this.blockUncompressedSizes = blockUncompressedSizes;
         this.blockRowStarts = blockRowStarts;
         this.blockOffsets = computeOffsets(blockCompressedSizes);
+    }
+
+    /**
+     * Checks the index against the footer, which is the only place both are in hand. Blocks are
+     * written contiguously from position 0 and the index follows the last one, so the compressed
+     * sizes must sum to exactly {@code indexOffset} — see the row format spec. Row starts index the
+     * arrays of every later lookup and size the per-block selection array.
+     */
+    void validate(RowFileFooter footer) throws IOException {
+        if (blockCount() != footer.blockCount) {
+            throw new IOException(
+                    String.format(
+                            "Row file block index holds %d blocks, but the footer declares %d.",
+                            blockCount(), footer.blockCount));
+        }
+
+        long blocksEnd =
+                blockCount() == 0
+                        ? 0
+                        : blockOffset(blockCount() - 1) + blockCompressedSize(blockCount() - 1);
+        if (blocksEnd != footer.indexOffset) {
+            throw new IOException(
+                    String.format(
+                            "Row file blocks end at %d, but the footer puts the block index at %d.",
+                            blocksEnd, footer.indexOffset));
+        }
+
+        for (int i = 1; i < blockCount(); i++) {
+            if (blockRowStarts[i] < blockRowStarts[i - 1]) {
+                throw new IOException(
+                        String.format(
+                                "Row file block %d starts at row %d, before block %d at row %d.",
+                                i, blockRowStarts[i], i - 1, blockRowStarts[i - 1]));
+            }
+        }
+        if (blockCount() > 0 && blockRowStarts[blockCount() - 1] > footer.totalRowCount) {
+            throw new IOException(
+                    String.format(
+                            "Row file block %d starts at row %d, past the declared row count %d.",
+                            blockCount() - 1,
+                            blockRowStarts[blockCount() - 1],
+                            footer.totalRowCount));
+        }
     }
 
     int blockCount() {

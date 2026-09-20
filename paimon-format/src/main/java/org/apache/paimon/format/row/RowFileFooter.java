@@ -19,7 +19,6 @@
 package org.apache.paimon.format.row;
 
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.fs.SeekableInputStream;
 
 import java.io.IOException;
 
@@ -54,13 +53,6 @@ class RowFileFooter {
         out.write(buf);
     }
 
-    static RowFileFooter readFrom(SeekableInputStream in, long fileSize) throws IOException {
-        in.seek(fileSize - FOOTER_SIZE);
-        byte[] buf = new byte[FOOTER_SIZE];
-        readFully(in, buf);
-        return readFrom(buf, 0);
-    }
-
     static RowFileFooter readFrom(byte[] buf, int offset) throws IOException {
         int magic = readIntLE(buf, offset + 28);
         if (magic != MAGIC) {
@@ -82,14 +74,24 @@ class RowFileFooter {
         return new RowFileFooter(totalRowCount, blockCount, indexOffset, indexLength);
     }
 
-    private static void readFully(SeekableInputStream in, byte[] buf) throws IOException {
-        int off = 0;
-        while (off < buf.length) {
-            int read = in.read(buf, off, buf.length - off);
-            if (read < 0) {
-                throw new IOException("Unexpected end of file");
-            }
-            off += read;
+    /**
+     * Checks that the block index lies inside the file and ahead of the footer. The offsets come
+     * from the file itself, and they size the buffer the index is read into.
+     */
+    void validate(long fileSize) throws IOException {
+        if (indexOffset < 0
+                || indexLength < 0
+                || indexOffset + indexLength > fileSize - FOOTER_SIZE) {
+            throw new IOException(
+                    String.format(
+                            "Invalid row file block index location: offset %d, length %d, in a file of %d bytes.",
+                            indexOffset, indexLength, fileSize));
+        }
+        if (blockCount < 0) {
+            throw new IOException("Invalid row file block count: " + blockCount);
+        }
+        if (totalRowCount < 0) {
+            throw new IOException("Invalid row file row count: " + totalRowCount);
         }
     }
 
