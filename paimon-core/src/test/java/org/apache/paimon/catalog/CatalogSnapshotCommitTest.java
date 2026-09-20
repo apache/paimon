@@ -19,6 +19,8 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTCatalog;
 import org.apache.paimon.utils.SnapshotManagerTest;
 
 import org.junit.jupiter.api.Test;
@@ -54,6 +56,38 @@ public class CatalogSnapshotCommitTest {
         verify(catalog)
                 .commitSnapshot(
                         branchIdentifier,
+                        "table-uuid",
+                        "base-snapshot-uuid",
+                        snapshot,
+                        Collections.emptyList());
+    }
+
+    @Test
+    public void testWrappedRestCatalogKeepsLogicalIdentifier() throws Exception {
+        RESTCatalog rest = mock(RESTCatalog.class);
+        Catalog catalog = new CachingCatalog(rest, new Options());
+        Identifier identifier = Identifier.create("database", "table");
+        Snapshot snapshot = SnapshotManagerTest.createSnapshotWithMillis(2L, 1000L);
+        when(rest.commitSnapshot(
+                        identifier,
+                        "table-uuid",
+                        "base-snapshot-uuid",
+                        snapshot,
+                        Collections.emptyList()))
+                .thenReturn(true);
+
+        CatalogSnapshotCommit commit =
+                new CatalogSnapshotCommit(catalog, identifier, "table-uuid", "physical-main");
+        assertThat(
+                        commit.commit(
+                                "base-snapshot-uuid",
+                                snapshot,
+                                "physical-main",
+                                Collections.emptyList()))
+                .isTrue();
+        verify(rest)
+                .commitSnapshot(
+                        identifier,
                         "table-uuid",
                         "base-snapshot-uuid",
                         snapshot,

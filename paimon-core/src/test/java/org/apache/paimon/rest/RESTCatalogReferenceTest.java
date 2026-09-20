@@ -19,6 +19,7 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.CachingCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
@@ -152,12 +153,14 @@ class RESTCatalogReferenceTest {
         assertThat(server.getRequestCount()).isEqualTo(6);
     }
 
-    @Test
-    void testStorageCommitUsesLogicalTableAndExistingBody() throws Exception {
-        Identifier selected = Identifier.create(DATABASE + "$branch_experiment", "features");
+    @ParameterizedTest
+    @ValueSource(strings = {"", "$branch_main", "$branch_experiment"})
+    void testStorageCommitUsesLogicalTableAndExistingBody(String reference) throws Exception {
+        Identifier selected = Identifier.create(DATABASE + reference, "features");
+        String scope = DATABASE_PATH + reference.replace("$", "%24");
         enqueue(200, tableResponse(selected.getDatabaseName(), "physical-experiment", 2));
         FileStoreTable table = InstantiationUtil.clone((FileStoreTable) catalog.getTable(selected));
-        takeRequest("GET", DATABASE_PATH + "%24branch_experiment/tables/features");
+        takeRequest("GET", scope + "/tables/features");
 
         Snapshot snapshot = Snapshot.fromJson(SNAPSHOT_JSON);
         enqueue(200, "{\"success\":true}");
@@ -171,14 +174,138 @@ class RESTCatalogReferenceTest {
                                     emptyList()))
                     .isTrue();
         }
-        RecordedRequest request =
-                takeRequest("POST", DATABASE_PATH + "%24branch_experiment/tables/features/commit");
+        RecordedRequest request = takeRequest("POST", scope + "/tables/features/commit");
         CommitTableRequest body =
                 RESTApi.fromJson(request.getBody().readUtf8(), CommitTableRequest.class);
         assertThat(body.getTableId()).isEqualTo("table-id");
         assertThat(body.getBaseSnapshotUuid()).isEqualTo("snapshot-6");
         assertThat(body.getSnapshot()).isEqualTo(snapshot);
         assertThat(body.getStatistics()).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testStorageCommitPreservesExplicitTableBranch(boolean dynamicBranch) throws Exception {
+        Identifier selected =
+                Identifier.create(DATABASE, dynamicBranch ? "features" : "features$branch_dev");
+        enqueue(200, tableResponse(DATABASE, dynamicBranch ? "physical-main" : "dev", 2));
+        FileStoreTable table = InstantiationUtil.clone((FileStoreTable) catalog.getTable(selected));
+        takeRequest(
+                "GET",
+                DATABASE_PATH + "/tables/" + RESTUtil.encodeString(selected.getObjectName()));
+        if (dynamicBranch) {
+            table =
+                    InstantiationUtil.clone(
+                            table.copy(java.util.Collections.singletonMap(BRANCH.key(), "dev")));
+        }
+
+        enqueue(200, "{\"success\":true}");
+        try (SnapshotCommit commit =
+                table.catalogEnvironment().snapshotCommit(table.snapshotManager())) {
+            assertThat(
+                            commit.commit(
+                                    "snapshot-6",
+                                    Snapshot.fromJson(SNAPSHOT_JSON),
+                                    table.snapshotManager().branch(),
+                                    emptyList()))
+                    .isTrue();
+        }
+        takeRequest("POST", DATABASE_PATH + "/tables/features%24branch_dev/commit");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testMainAliasesInvalidateTogether(boolean explicitMain) throws Exception {
+        CachingCatalog cached = new CachingCatalog(catalog, new Options());
+        Identifier selected =
+                Identifier.create(DATABASE + (explicitMain ? "$branch_main" : ""), "features");
+        Identifier other =
+                Identifier.create(DATABASE + (explicitMain ? "" : "$branch_main"), "features");
+        String selectedPath =
+                DATABASE_PATH + (explicitMain ? "%24branch_main" : "") + "/tables/features";
+        for (Identifier identifier : new Identifier[] {selected, other}) {
+            enqueue(200, tableResponse(identifier.getDatabaseName(), "physical-main", 2));
+            cached.getTable(identifier);
+            takeRequest(
+                    "GET",
+                    new ResourcePaths("catalog/id")
+                            .table(identifier.getDatabaseName(), identifier.getObjectName()));
+        }
+
+        Identifier dev = Identifier.create(DATABASE + "$branch_dev", "features");
+        Identifier tag = Identifier.create(DATABASE + "$tag_baseline", "features");
+        enqueue(200, tableResponse(dev.getDatabaseName(), "physical-dev", 2));
+        FileStoreTable devTable = (FileStoreTable) cached.getTable(dev);
+        takeRequest("GET", DATABASE_PATH + "%24branch_dev/tables/features");
+        enqueue(200, tableResponse(tag.getDatabaseName(), "frozen-baseline", 2));
+        FileStoreTable tagTable = (FileStoreTable) cached.getTable(tag);
+        takeRequest("GET", DATABASE_PATH + "%24tag_baseline/tables/features");
+
+        enqueue(200, "");
+        cached.alterTable(
+                selected,
+                java.util.Collections.singletonList(SchemaChange.setOption("comment", "updated")),
+                false);
+        takeRequest("POST", selectedPath);
+        assertMainAliasesReload(cached, selected, other, 3);
+
+        // Forward is followed by explicit invalidation, which must refresh both main aliases.
+        cached.invalidateTable(selected);
+        assertMainAliasesReload(cached, selected, other, 4);
+
+        enqueue(200, "");
+        cached.dropTable(selected, false);
+        takeRequest("DELETE", selectedPath);
+        for (Identifier identifier : new Identifier[] {selected, other}) {
+            enqueue(404, "{\"code\":404,\"resourceType\":\"TABLE\",\"message\":\"missing\"}");
+            assertThatThrownBy(() -> cached.getTable(identifier))
+                    .isInstanceOf(Catalog.TableNotExistException.class);
+            takeRequest(
+                    "GET",
+                    new ResourcePaths("catalog/id")
+                            .table(identifier.getDatabaseName(), identifier.getObjectName()));
+        }
+        assertThat(cached.getTable(dev)).isSameAs(devTable);
+        assertThat(cached.getTable(tag)).isSameAs(tagTable);
+    }
+
+    @Test
+    void testStorageCommitAfterSwitchingBranchAndCopyingBack() throws Exception {
+        enqueue(200, tableResponse("main"));
+        FileStoreTable main = (FileStoreTable) catalog.getTable(TABLE);
+        takeRequest("GET", DATABASE_PATH + "/tables/features");
+        main.schemaManager().copyWithBranch("dev").createTable(schema("dev"));
+        FileStoreTable copied =
+                InstantiationUtil.clone(
+                        main.switchToBranch("dev")
+                                .copy(java.util.Collections.singletonMap(BRANCH.key(), "main")));
+
+        enqueue(200, "{\"success\":true}");
+        try (SnapshotCommit commit =
+                copied.catalogEnvironment().snapshotCommit(copied.snapshotManager())) {
+            assertThat(
+                            commit.commit(
+                                    "snapshot-6",
+                                    Snapshot.fromJson(SNAPSHOT_JSON),
+                                    copied.snapshotManager().branch(),
+                                    emptyList()))
+                    .isTrue();
+        }
+        takeRequest("POST", DATABASE_PATH + "/tables/features/commit");
+    }
+
+    private void assertMainAliasesReload(
+            CachingCatalog cached, Identifier selected, Identifier other, long schemaId)
+            throws Exception {
+        for (Identifier identifier : new Identifier[] {selected, other}) {
+            enqueue(200, tableResponse(identifier.getDatabaseName(), "physical-main", schemaId));
+            assertThat(((FileStoreTable) cached.getTable(identifier)).schema().id())
+                    .isEqualTo(schemaId);
+            takeRequest(
+                    "GET",
+                    new ResourcePaths("catalog/id")
+                            .table(identifier.getDatabaseName(), identifier.getObjectName()));
+        }
     }
 
     @Test

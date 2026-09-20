@@ -188,7 +188,9 @@ paths:
           $ref: "#/components/responses/ServerErrorResponse"
       description: >-
         Database reference suffixes are not allowed for database mutation. Use the /branches and /tags management
-        endpoints with the physical database name to manage references.
+        endpoints with the physical database name to manage references. The initial server rejects physical
+        database deletion with 400 while any non-main database branch or database tag exists, even
+        when main has no tables. Deletion does not implicitly cascade through references.
     post:
       tags:
         - database
@@ -361,8 +363,9 @@ paths:
         and return success without a body. A tag is not a valid source. This publishes source table
         versions on main; it does not combine target-only writes or perform three-way conflict
         resolution. Source must be a non-main branch. Pause writers and reload tables after success.
-        For the fixed-table MVP, validate the same table membership and a snapshot for every source
-        table before forwarding. Unsupported namespace changes return 501. Preserve retained tags
+        For the fixed-table MVP, validate matching logical table names and table identities, and a
+        snapshot for every source table, before changing target state. Same-name tables recreated
+        with different identities do not match. Unsupported namespace changes return 501. Preserve retained tags
         and keep source and main independently writable. No public multi-table transaction or atomic
         read view is promised; a success means all planned table updates completed.
       operationId: forwardDatabaseBranch
@@ -699,6 +702,9 @@ paths:
         suffix. Apply this operation to the selected branch; a tag returns 403. Identifiers in the
         body must retain the full database name including its suffix and agree with the path. Table
         IDs must match the resolved table. Missing references never fall back to the base database. A missing branch or tag of the selected type returns 404.
+        Create a new table identity and add its name only to the selected branch. New main tables
+        do not appear in existing branches or tags. Recreating a dropped name allocates a new
+        table identity. A fixed-table server returns 501 for unsupported namespace changes.
   /v1/{prefix}/databases/{database}/table-details:
     get:
       tags:
@@ -958,6 +964,9 @@ paths:
         suffix. Apply this operation to the selected branch; a tag returns 403. Identifiers in the
         body must retain the full database name including its suffix and agree with the path. Table
         IDs must match the resolved table. Missing references never fall back to the base database. A missing branch or tag of the selected type returns 404.
+        Remove the table only from the selected branch membership, including when the database
+        has no suffix and selects main. Preserve storage and metadata referenced by any other
+        branch or tag. Return 501 if the server cannot preserve those references.
   /v1/{prefix}/tables/rename:
     post:
       tags:

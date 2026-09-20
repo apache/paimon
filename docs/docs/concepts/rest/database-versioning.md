@@ -76,6 +76,8 @@ forward. Invalidate cached tables and load them again after publication.
 Branch-local table creation, deletion and rename require versioned namespace storage and can be
 deferred. Format Tables, Object Tables, external tables, views, functions and catalog permissions
 are outside this initial versioned-table scope. Unsupported scoped operations return `501`.
+These restrictions also apply to operations on main when they would affect retained references:
+the absence of a database suffix does not permit deleting storage used by a branch or tag.
 
 ## Branch management
 
@@ -147,8 +149,9 @@ that tag, then forward that branch.
 
 Forward extends table fast-forward to the database's tables. It publishes source versions on main
 and can replace target changes; it does not preserve independently changed target tables using
-three-way conflict resolution. The first fixed-table server requires matching membership and a
-snapshot for each source table, as native table fast-forward requires a populated source. An empty
+three-way conflict resolution. The first fixed-table server requires matching membership, including
+both logical names and table identities, and a snapshot for each source table, as native table
+fast-forward requires a populated source. An empty
 source table is a `400`; namespace changes the server cannot handle are a `501`. The server validates
 all tables before starting publication. Source `main` is invalid.
 
@@ -292,6 +295,32 @@ virtual database must never drop its physical database. Create, delete and forwa
 `/databases/training/branches` and `/databases/training/tags` instead. This does not prevent ordinary create/alter/drop **table**
 operations from modifying membership or metadata in a writable branch.
 
+The initial server rejects physical `DROP DATABASE` with `400` while any non-main database branch
+or database tag exists, even if main has no tables. Remove those references before dropping the
+database. The existing database deletion endpoint does not implicitly cascade through references.
+
+### Table creation, alteration and deletion
+
+Table operations keep their existing request and response structures. Namespace changes require
+server-side versioned membership; accepting a suffix in the client does not imply that the server
+implements them. A fixed-table server returns `501` for unsupported namespace changes.
+
+| Operation | Required server behavior |
+| --- | --- |
+| Create a table on a branch | Allocate a new table identity and storage, then add its logical name only to that branch after metadata is ready. Do not expose it on main as a side effect of physical creation. |
+| Create a table on main after branching | Add it only to main. Existing branches and tags retain their own membership; a later forward can fail with `501` because the table sets differ. |
+| Alter a table's schema or properties | Update the selected branch's backing table and recorded state. Other branches and existing tags retain their own definitions. |
+| Drop a table on any branch, including main | Remove only that branch's membership entry. Keep metadata and data required by other branches or tags; do not recursively delete the shared table path. Return `501` if the server cannot preserve those references. |
+| Recreate a dropped table with the same name | Allocate a new table identity. A same-name table retained on another branch is a different table and does not satisfy fixed-table forward validation. |
+| Create, alter or drop through a tag | Return `403`; tag membership and table definitions are immutable. |
+
+For example, if main and experiment initially contain `features` and `labels`, creating
+`training$branch_experiment.samples` adds `samples` only to experiment. Creating `training.metrics`
+later adds `metrics` only to main. The fixed-table forward operation cannot publish these different
+table sets; it rejects the operation before changing any target table.
+
+### Selector validation
+
 The markers `$branch_` and `$tag_` are case-sensitive reserved syntax. The base database must be
 nonblank, and the reference follows the name rules above. Missing names, multiple selectors, or
 invalid reference names are rejected rather than interpreted as literal database names. Other
@@ -300,8 +329,9 @@ any pre-existing physical database names containing the reserved markers before 
 lookup must not switch between literal and reference meanings based on which object exists.
 
 Caller-supplied table branch suffixes cannot be combined with a database selector. For example,
-`training$branch_a.features$branch_b` is rejected. Storage commits can supply a physical table branch
-internally; RESTCatalog removes that internal table suffix while preserving the database selector.
+`training$branch_a.features$branch_b` is rejected. REST storage commits preserve the original logical
+table identifier, including when bare main is mapped to a different physical backing branch after
+forward. Explicit Table branch identifiers on an unsuffixed database retain their table selector.
 
 ### Branch and tag behavior
 
@@ -356,8 +386,10 @@ restCatalog.getDatabase("training$tag_train_v1");
 the full database name through serialization and in table loaders; no extra reference fields are
 stored in RESTCatalog or RESTCatalogLoader. Subsequent snapshot reads, schema changes, commits,
 auth and token requests carry the same database name. Caches keyed by full table identifiers distinguish branches and tags. The two main aliases
-(`training` and `training$branch_main`) refer to the same state; mutations and forward must invalidate
-both aliases. A repeated cached getTable call is not a reload.
+(`training` and `training$branch_main`) refer to the same state. The REST catalog cache invalidates
+both aliases when a table is altered, dropped or explicitly invalidated through either name.
+After forward, invalidate each affected main table in every client cache before loading it again;
+invalidating either main alias clears both. A repeated cached getTable call is not a reload.
 
 SQL clients can pass the selector as a quoted database name, using their ordinary identifier
 quoting rules. For example:
@@ -477,7 +509,8 @@ before deleting a backing branch. Keep the data files referenced by every retain
 
 ### Execute forward
 
-1. Resolve the source branch and main. Validate the whole fixed-table membership and source snapshots.
+1. Resolve the source branch and main. Validate the whole fixed-table membership, including logical
+   names and table identities, and all source snapshots before changing target state.
 2. Resolve each source table version and prepare the corresponding main table state using native
    table snapshot/schema mechanisms.
 3. Preserve database tags before applying native fastForward: that operation can remove target

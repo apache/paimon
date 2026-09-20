@@ -534,17 +534,6 @@ public class RESTCatalog implements Catalog {
             Snapshot snapshot,
             List<PartitionStatistics> statistics)
             throws TableNotExistException {
-        // CatalogSnapshotCommit supplies the physical storage branch. The database suffix
-        // already selects the write target; keep the logical table name on the wire.
-        if (DatabaseIdentifier.parse(identifier.getDatabaseName()).getReference() != null
-                && identifier.getBranchName() != null) {
-            identifier =
-                    new Identifier(
-                            identifier.getDatabaseName(),
-                            identifier.getTableName(),
-                            null,
-                            identifier.getSystemTableName());
-        }
         try {
             return api.commitSnapshot(
                     identifier, tableUuid, baseSnapshotUuid, snapshot, statistics);
