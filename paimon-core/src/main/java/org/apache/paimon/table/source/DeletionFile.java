@@ -23,6 +23,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.utils.FunctionWithIOException;
+import org.apache.paimon.utils.SerializationUtils;
 
 import javax.annotation.Nullable;
 
@@ -140,8 +141,8 @@ public class DeletionFile implements Serializable {
             throws IOException {
         List<DeletionFile> files = null;
         if (in.readByte() == 1) {
-            int size = in.readInt();
-            files = new ArrayList<>(size);
+            int size = SerializationUtils.readCount(in, "DeletionFile");
+            files = new ArrayList<>(SerializationUtils.presizedCapacity(size));
             for (int i = 0; i < size; i++) {
                 files.add(deserialize.apply(in));
             }

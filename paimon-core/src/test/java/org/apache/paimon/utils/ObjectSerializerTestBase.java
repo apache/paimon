@@ -23,9 +23,13 @@ import org.apache.paimon.io.DataOutputSerializer;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.EOFException;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link ObjectSerializer}. */
 public abstract class ObjectSerializerTestBase<T> {
@@ -52,6 +56,41 @@ public abstract class ObjectSerializerTestBase<T> {
             T actual = serializer.deserialize(new DataInputDeserializer(out.getCopyOfBuffer()));
             checkResult(object, actual);
         }
+    }
+
+    @Test
+    public void testSerializeList() throws IOException {
+        ObjectSerializer<T> serializer = serializer();
+        // more records than deserializeList pre-sizes its list for: the bounded capacity must not
+        // become a bound on how many records are read. Only the count is checked, because a
+        // serializer is free to return a reused object from fromRow.
+        List<T> objects = new ArrayList<>();
+        for (int i = 0; i < 2000; i++) {
+            objects.add(object());
+        }
+        assertThat(serializer.deserializeList(serializer.serializeList(objects)))
+                .hasSameSizeAs(objects);
+    }
+
+    @Test
+    public void testDeserializeListWithNegativeCount() {
+        ObjectSerializer<T> serializer = serializer();
+        byte[] negativeCount = {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF};
+        assertThatThrownBy(
+                        () -> serializer.deserializeList(new DataInputDeserializer(negativeCount)))
+                .isInstanceOf(IOException.class)
+                .hasMessage(
+                        "Invalid " + serializer.getClass().getSimpleName() + " record count: -1");
+    }
+
+    @Test
+    public void testDeserializeListWithHugeCount() {
+        // Reading is where a count the remaining bytes cannot cover has to fail; pre-sizing the
+        // list for Integer.MAX_VALUE records threw OutOfMemoryError before the first read.
+        ObjectSerializer<T> serializer = serializer();
+        byte[] hugeCount = {0x7F, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF};
+        assertThatThrownBy(() -> serializer.deserializeList(new DataInputDeserializer(hugeCount)))
+                .isInstanceOf(EOFException.class);
     }
 
     protected abstract ObjectSerializer<T> serializer();

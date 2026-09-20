@@ -463,8 +463,9 @@ public class DataSplit implements Split {
             throw new RuntimeException("Cannot deserialize data split with before deletion files.");
         }
 
-        int fileNumber = in.readInt();
-        List<DataFileMeta> dataFiles = new ArrayList<>(fileNumber);
+        int fileNumber = SerializationUtils.readCount(in, "DataSplit");
+        List<DataFileMeta> dataFiles =
+                new ArrayList<>(SerializationUtils.presizedCapacity(fileNumber));
         for (int i = 0; i < fileNumber; i++) {
             dataFiles.add(dataFileSer.apply(in));
         }
