@@ -21,12 +21,13 @@ package org.apache.paimon.rest;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.management.TreeManagement;
+import org.apache.paimon.rest.responses.GetDatabaseTagResponse;
 
 import javax.annotation.Nullable;
 
 import java.util.List;
 
-/** REST implementation of tree management, bound to the configured REST catalog prefix. */
+/** Database branch and tag management using the REST catalog's configuration. */
 @Experimental
 public class RESTTreeManagement implements TreeManagement {
 
@@ -37,44 +38,50 @@ public class RESTTreeManagement implements TreeManagement {
     }
 
     @Override
-    public PagedList<DatabaseReference> listReferencesPaged(
+    public List<String> listBranches(String databaseName) {
+        return api.listDatabaseBranches(databaseName);
+    }
+
+    @Override
+    public void createBranch(String databaseName, String branch, @Nullable String fromTag) {
+        api.createDatabaseBranch(databaseName, branch, fromTag);
+    }
+
+    @Override
+    public void dropBranch(String databaseName, String branch) {
+        api.dropDatabaseBranch(databaseName, branch);
+    }
+
+    @Override
+    public void fastForward(String databaseName, String branch) {
+        api.fastForwardDatabase(databaseName, branch);
+    }
+
+    @Override
+    public void createTag(
             String databaseName,
-            @Nullable DatabaseReferenceType type,
+            String tagName,
+            @Nullable String fromBranch,
+            @Nullable String timeRetained) {
+        api.createDatabaseTag(databaseName, tagName, fromBranch, timeRetained);
+    }
+
+    @Override
+    public GetDatabaseTagResponse getTag(String databaseName, String tagName) {
+        return api.getDatabaseTag(databaseName, tagName);
+    }
+
+    @Override
+    public PagedList<String> listTagsPaged(
+            String databaseName,
             @Nullable Integer maxResults,
-            @Nullable String pageToken) {
-        return api.listDatabaseReferencesPaged(databaseName, type, maxResults, pageToken);
+            @Nullable String pageToken,
+            @Nullable String tagNamePrefix) {
+        return api.listDatabaseTagsPaged(databaseName, maxResults, pageToken, tagNamePrefix);
     }
 
     @Override
-    public DatabaseReference getReference(String databaseName, String referenceName) {
-        return api.getDatabaseReference(databaseName, referenceName);
-    }
-
-    @Override
-    public DatabaseReference createReference(
-            String databaseName,
-            String referenceName,
-            DatabaseReferenceType type,
-            DatabaseReference source) {
-        return api.createDatabaseReference(databaseName, referenceName, type, source);
-    }
-
-    @Override
-    public DatabaseReference mergeBranch(
-            String databaseName,
-            String targetBranch,
-            DatabaseReference source,
-            @Nullable MergeMode defaultMergeMode,
-            @Nullable List<TableMergeMode> tableMergeModes) {
-        return api.mergeDatabaseBranch(
-                databaseName, targetBranch, source, defaultMergeMode, tableMergeModes);
-    }
-
-    @Override
-    public DatabaseReference deleteReference(
-            String databaseName,
-            String referenceName,
-            @Nullable DatabaseReferenceType expectedType) {
-        return api.deleteDatabaseReference(databaseName, referenceName, expectedType);
+    public void deleteTag(String databaseName, String tagName) {
+        api.deleteDatabaseTag(databaseName, tagName);
     }
 }

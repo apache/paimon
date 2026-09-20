@@ -20,80 +20,55 @@ package org.apache.paimon.management;
 
 import org.apache.paimon.PagedList;
 import org.apache.paimon.annotation.Experimental;
-import org.apache.paimon.rest.DatabaseReference;
-import org.apache.paimon.rest.DatabaseReferenceType;
-import org.apache.paimon.rest.MergeMode;
-import org.apache.paimon.rest.TableMergeMode;
+import org.apache.paimon.rest.responses.GetDatabaseTagResponse;
 
 import javax.annotation.Nullable;
 
 import java.util.List;
 
-/** Control-plane contract for database-level writable branches and immutable tags. */
+/** Database-level extensions of Paimon's table branch and tag operations. */
 @Experimental
 public interface TreeManagement {
 
+    /** Lists branch names, using the same response as table branch listing. */
+    List<String> listBranches(String databaseName);
+
     /**
-     * Lists one page of references.
-     *
-     * @param type reference type to include; null includes branches and tags
-     * @param maxResults maximum page size; null or zero uses the server default
-     * @param pageToken opaque continuation token; null for the first page
+     * Creates a branch. Without fromTag, copies main's table schemas without data. With fromTag,
+     * copies the membership and table versions captured by that database tag.
      */
-    PagedList<DatabaseReference> listReferencesPaged(
+    void createBranch(String databaseName, String branch, @Nullable String fromTag);
+
+    /** Drops a database branch. The default main branch is protected. */
+    void dropBranch(String databaseName, String branch);
+
+    /**
+     * Forwards main to the named branch, extending the table fast-forward operation to the
+     * database's tables. The path names the source branch. This replaces target table state; it
+     * does not perform conflict resolution. Pause writers and reload tables after publication.
+     */
+    void fastForward(String databaseName, String branch);
+
+    /**
+     * Captures an immutable database tag from a branch. Null fromBranch selects main. There is no
+     * database-wide snapshot ID; each table contributes its own captured version.
+     */
+    void createTag(
             String databaseName,
-            @Nullable DatabaseReferenceType type,
+            String tagName,
+            @Nullable String fromBranch,
+            @Nullable String timeRetained);
+
+    /** Gets database tag metadata. Table versions are read through the tag-suffixed database. */
+    GetDatabaseTagResponse getTag(String databaseName, String tagName);
+
+    /** Lists tag names with the same pagination and prefix filter as table tag listing. */
+    PagedList<String> listTagsPaged(
+            String databaseName,
             @Nullable Integer maxResults,
-            @Nullable String pageToken);
+            @Nullable String pageToken,
+            @Nullable String tagNamePrefix);
 
-    /** Gets a named branch or tag. A missing reference is an error. */
-    DatabaseReference getReference(String databaseName, String referenceName);
-
-    /** Creates a branch or immutable tag from an existing reference in the same database. */
-    DatabaseReference createReference(
-            String databaseName,
-            String referenceName,
-            DatabaseReferenceType type,
-            DatabaseReference source);
-
-    /**
-     * Merges a branch or immutable tag into a target branch in the same database.
-     *
-     * <p>Table entries are merged relative to a common ancestor. Conflicting changes fail the merge
-     * without modifying the target; the source reference is never modified. A merge with no changes
-     * succeeds. The server automatically fast-forwards when possible.
-     */
-    default DatabaseReference mergeBranch(
-            String databaseName, String targetBranch, DatabaseReference source) {
-        return mergeBranch(databaseName, targetBranch, source, null, null);
-    }
-
-    /**
-     * Merges a branch or immutable tag using default and per-table merge modes.
-     *
-     * <p>Modes apply to source-side changes to complete table versions, including creation and
-     * deletion; table row data is not merged. Per-table modes override the default. Unresolved
-     * conflicts leave the target unchanged, and the source is never modified. A successful merge
-     * records the source as merged, including changes skipped by {@link MergeMode#DROP}.
-     *
-     * @param defaultMergeMode mode for tables without an override; null means {@link
-     *     MergeMode#NORMAL}
-     * @param tableMergeModes per-table overrides; null or empty uses the default for every table
-     */
-    DatabaseReference mergeBranch(
-            String databaseName,
-            String targetBranch,
-            DatabaseReference source,
-            @Nullable MergeMode defaultMergeMode,
-            @Nullable List<TableMergeMode> tableMergeModes);
-
-    /**
-     * Deletes and returns a named reference. A missing reference is an error.
-     *
-     * @param expectedType required type of the reference to delete; null omits the type check
-     */
-    DatabaseReference deleteReference(
-            String databaseName,
-            String referenceName,
-            @Nullable DatabaseReferenceType expectedType);
+    /** Deletes a database tag without deleting versions retained by another reference. */
+    void deleteTag(String databaseName, String tagName);
 }

@@ -24,7 +24,6 @@ import org.apache.paimon.management.TreeManagement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
-import org.apache.paimon.rest.exceptions.MergeConflictException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 
@@ -34,16 +33,11 @@ import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
 
-import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
-import static org.apache.paimon.rest.DatabaseReferenceType.BRANCH;
-import static org.apache.paimon.rest.DatabaseReferenceType.TAG;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER;
 import static org.apache.paimon.rest.RESTCatalogOptions.URI;
@@ -54,10 +48,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class RESTCatalogTreeManagementTest {
 
     private static final String DATABASE = "training db";
-    private static final String TREES_PATH = "/v1/catalog%2Fid/databases/training+db/trees";
-    private static final String MAIN_JSON = "{\"type\":\"BRANCH\",\"name\":\"main\"}";
-    private static final String BRANCH_JSON = "{\"type\":\"BRANCH\",\"name\":\"exp-1\"}";
-    private static final String TAG_JSON = "{\"type\":\"TAG\",\"name\":\"train-v1\"}";
+    private static final String DATABASE_PATH = "/v1/catalog%2Fid/databases/training+db";
 
     private MockWebServer server;
     private RESTCatalog catalog;
@@ -97,226 +88,116 @@ class RESTCatalogTreeManagementTest {
         }
     }
 
-    @ParameterizedTest
-    @EnumSource(DatabaseReferenceType.class)
-    void testBranchAndTagOperationsUseCatalogConfiguration(DatabaseReferenceType sourceType)
-            throws Exception {
-        DatabaseReference main = new DatabaseReference(BRANCH, "main");
-        DatabaseReference branch = new DatabaseReference(BRANCH, "exp-1");
-        DatabaseReference tag = new DatabaseReference(TAG, "train-v1");
+    @Test
+    void testBranchAndTagOperationsUseCatalogConfiguration() throws Exception {
+        enqueue(200, "{\"branches\":[\"main\",\"experiment\"]}");
+        assertThat(trees.listBranches(DATABASE)).containsExactly("main", "experiment");
+        takeRequest("GET", DATABASE_PATH + "/branches");
 
-        enqueue(200, "{\"reference\":" + MAIN_JSON + "}");
-        assertThat(trees.getReference(DATABASE, "main")).isEqualTo(main);
-        takeRequest("GET", TREES_PATH + "/main");
-
-        enqueue(200, "{\"reference\":" + BRANCH_JSON + "}");
-        assertThat(trees.createReference(DATABASE, "exp-1", BRANCH, main)).isEqualTo(branch);
-        RecordedRequest createBranch = takeRequest("POST", TREES_PATH);
+        enqueue(200, "");
+        trees.createTag(DATABASE, "baseline", null, null);
         assertBody(
-                createBranch,
-                "{\"name\":\"exp-1\",\"type\":\"BRANCH\",\"source\":" + MAIN_JSON + "}");
+                takeRequest("POST", DATABASE_PATH + "/tags"),
+                "{\"tagName\":\"baseline\",\"fromBranch\":null,\"timeRetained\":null}");
 
-        enqueue(200, "{\"reference\":" + TAG_JSON + "}");
-        assertThat(trees.createReference(DATABASE, "train-v1", TAG, branch)).isEqualTo(tag);
-        RecordedRequest createTag = takeRequest("POST", TREES_PATH);
+        enqueue(200, "");
+        trees.createBranch(DATABASE, "experiment", "baseline");
         assertBody(
-                createTag,
-                "{\"name\":\"train-v1\",\"type\":\"TAG\",\"source\":" + BRANCH_JSON + "}");
+                takeRequest("POST", DATABASE_PATH + "/branches"),
+                "{\"branch\":\"experiment\",\"fromTag\":\"baseline\"}");
 
-        enqueue(200, "{\"reference\":" + MAIN_JSON + "}");
-        DatabaseReference source = sourceType == BRANCH ? branch : tag;
-        assertThat(trees.mergeBranch(DATABASE, "main", source)).isEqualTo(main);
-        RecordedRequest merge = takeRequest("POST", TREES_PATH + "/main/merge");
-        assertBody(merge, "{\"source\":" + (sourceType == BRANCH ? BRANCH_JSON : TAG_JSON) + "}");
+        enqueue(200, "");
+        trees.createTag(DATABASE, "train-v1", "experiment", "7d");
+        assertBody(
+                takeRequest("POST", DATABASE_PATH + "/tags"),
+                "{\"tagName\":\"train-v1\",\"fromBranch\":\"experiment\",\"timeRetained\":\"7d\"}");
 
-        enqueue(200, "{\"reference\":" + BRANCH_JSON + "}");
-        assertThat(trees.deleteReference(DATABASE, "exp-1", BRANCH)).isEqualTo(branch);
-        RecordedRequest deleteBranch = takeRequest("DELETE", TREES_PATH + "/exp-1");
-        assertBody(deleteBranch, "{\"type\":\"BRANCH\"}");
+        enqueue(200, "{\"tagName\":\"train-v1\",\"fromBranch\":\"experiment\"}");
+        assertThat(trees.getTag(DATABASE, "train-v1").fromBranch()).isEqualTo("experiment");
+        takeRequest("GET", DATABASE_PATH + "/tags/train-v1");
 
-        enqueue(200, "{\"reference\":" + TAG_JSON + "}");
-        assertThat(trees.deleteReference(DATABASE, "train-v1", null)).isEqualTo(tag);
-        assertBody(takeRequest("DELETE", TREES_PATH + "/train-v1"), "{}");
-        assertThat(server.getRequestCount()).isEqualTo(7);
+        enqueue(200, "");
+        trees.fastForward(DATABASE, "experiment");
+        assertBody(takeRequest("POST", DATABASE_PATH + "/branches/experiment/forward"), "{}");
+
+        enqueue(200, "");
+        trees.dropBranch(DATABASE, "experiment");
+        assertThat(takeRequest("DELETE", DATABASE_PATH + "/branches/experiment").getBodySize())
+                .isZero();
+
+        enqueue(200, "");
+        trees.deleteTag(DATABASE, "train-v1");
+        assertThat(takeRequest("DELETE", DATABASE_PATH + "/tags/train-v1").getBodySize()).isZero();
+        assertThat(server.getRequestCount()).isEqualTo(9);
     }
 
     @Test
-    void testListPagesPreserveFilterAndTokens() throws Exception {
-        enqueue(200, "{\"references\":[" + TAG_JSON + "],\"nextPageToken\":\"next +/%?&\"}");
-        PagedList<DatabaseReference> page =
-                trees.listReferencesPaged(DATABASE, TAG, 10, "start +/%");
-        assertThat(page.getElements()).containsExactly(new DatabaseReference(TAG, "train-v1"));
+    void testTagPagesPreserveFilterAndTokens() throws Exception {
+        enqueue(200, "{\"tags\":[\"train-v1\"],\"nextPageToken\":\"next +/%?&\"}");
+        PagedList<String> page = trees.listTagsPaged(DATABASE, 10, "start +/%", "train-");
+        assertThat(page.getElements()).containsExactly("train-v1");
         assertThat(page.getNextPageToken()).isEqualTo("next +/%?&");
-        RecordedRequest paged = takeRequest("GET", TREES_PATH);
-        assertThat(paged.getRequestUrl().queryParameter("type")).isEqualTo("tag");
-        assertThat(paged.getRequestUrl().queryParameter("maxResults")).isEqualTo("10");
-        assertThat(paged.getRequestUrl().queryParameter("pageToken")).isEqualTo("start +/%");
+        RecordedRequest first = takeRequest("GET", DATABASE_PATH + "/tags");
+        assertThat(first.getRequestUrl().queryParameter("maxResults")).isEqualTo("10");
+        assertThat(first.getRequestUrl().queryParameter("pageToken")).isEqualTo("start +/%");
+        assertThat(first.getRequestUrl().queryParameter("tagNamePrefix")).isEqualTo("train-");
 
-        enqueue(200, "{\"references\":[" + MAIN_JSON + "],\"nextPageToken\":\"next +/%?&\"}");
-        enqueue(200, "{\"references\":[" + BRANCH_JSON + "]}");
-        PagedList<DatabaseReference> firstPage =
-                trees.listReferencesPaged(DATABASE, BRANCH, null, null);
-        assertThat(firstPage.getElements()).containsExactly(new DatabaseReference(BRANCH, "main"));
-        assertThat(firstPage.getNextPageToken()).isEqualTo("next +/%?&");
-        RecordedRequest first = takeRequest("GET", TREES_PATH);
-        assertThat(first.getRequestUrl().queryParameter("type")).isEqualTo("branch");
-        assertThat(first.getRequestUrl().queryParameter("pageToken")).isNull();
-        PagedList<DatabaseReference> secondPage =
-                trees.listReferencesPaged(DATABASE, BRANCH, null, firstPage.getNextPageToken());
-        assertThat(secondPage.getElements())
-                .containsExactly(new DatabaseReference(BRANCH, "exp-1"));
-        assertThat(secondPage.getNextPageToken()).isNull();
-        RecordedRequest second = takeRequest("GET", TREES_PATH);
-        assertThat(second.getRequestUrl().queryParameter("type")).isEqualTo("branch");
+        enqueue(200, "{\"tags\":[]}");
+        PagedList<String> last =
+                trees.listTagsPaged(DATABASE, null, page.getNextPageToken(), "train-");
+        assertThat(last.getElements()).isEmpty();
+        assertThat(last.getNextPageToken()).isNull();
+        RecordedRequest second = takeRequest("GET", DATABASE_PATH + "/tags");
         assertThat(second.getRequestUrl().queryParameter("pageToken")).isEqualTo("next +/%?&");
+        assertThat(second.getRequestUrl().queryParameter("tagNamePrefix")).isEqualTo("train-");
         assertThat(second.getRequestUrl().queryParameter("maxResults")).isNull();
     }
 
-    @ParameterizedTest
-    @EnumSource(DatabaseReferenceType.class)
-    void testMergeUsesCatalogConfiguration(DatabaseReferenceType sourceType) throws Exception {
-        enqueue(200, "{\"reference\":" + MAIN_JSON + "}");
-        DatabaseReference source = new DatabaseReference(sourceType, "experiment");
-
-        assertThat(trees.mergeBranch(DATABASE, "main", source))
-                .isEqualTo(new DatabaseReference(BRANCH, "main"));
-
-        RecordedRequest merge = takeRequest("POST", TREES_PATH + "/main/merge");
-        assertBody(
-                merge,
-                sourceType == BRANCH
-                        ? "{\"source\":{\"type\":\"BRANCH\",\"name\":\"experiment\"}}"
-                        : "{\"source\":{\"type\":\"TAG\",\"name\":\"experiment\"}}");
-        assertThat(server.getRequestCount()).isEqualTo(2);
-    }
-
-    @ParameterizedTest
-    @EnumSource(DatabaseReferenceType.class)
-    void testMergeModesUseCatalogConfiguration(DatabaseReferenceType sourceType) throws Exception {
-        enqueue(200, "{\"reference\":" + MAIN_JSON + "}");
-        DatabaseReference source = new DatabaseReference(sourceType, "experiment");
-
-        assertThat(
-                        trees.mergeBranch(
-                                DATABASE,
-                                "main",
-                                source,
-                                MergeMode.NORMAL,
-                                Arrays.asList(
-                                        new TableMergeMode("features", MergeMode.FORCE),
-                                        new TableMergeMode("scratch", MergeMode.DROP))))
-                .isEqualTo(new DatabaseReference(BRANCH, "main"));
-
-        assertBody(
-                takeRequest("POST", TREES_PATH + "/main/merge"),
-                "{\"source\":{\"type\":\""
-                        + sourceType.name()
-                        + "\",\"name\":\"experiment\"},"
-                        + "\"defaultMergeMode\":\"NORMAL\",\"tableMergeModes\":["
-                        + "{\"table\":\"features\",\"mergeMode\":\"FORCE\"},"
-                        + "{\"table\":\"scratch\",\"mergeMode\":\"DROP\"}]}");
-        assertThat(server.getRequestCount()).isEqualTo(2);
-    }
-
     @Test
-    void testMergeErrorsPreserveDetails() throws Exception {
-        DatabaseReference source = new DatabaseReference(BRANCH, "experiment");
+    void testErrorsKeepTableBranchAndTagConventions() throws Exception {
         server.enqueue(
                 new MockResponse()
                         .setResponseCode(409)
                         .setHeader("Content-Type", "application/json")
-                        .setHeader("x-request-id", "merge-request")
+                        .setHeader("x-request-id", "branch-request")
                         .setBody(
-                                "{\"message\":\"Conflicting changes to table features (100%)\","
-                                        + "\"resourceType\":\"TABLE\",\"resourceName\":\"training db.features\"}"));
-        assertThatThrownBy(() -> trees.mergeBranch(DATABASE, "main", source))
+                                "{\"resourceType\":\"BRANCH\",\"resourceName\":\"experiment\",\"message\":\"branch exists\"}"));
+        assertThatThrownBy(() -> trees.createBranch(DATABASE, "experiment", null))
+                .isExactlyInstanceOf(AlreadyExistsException.class)
+                .hasMessageContaining("branch exists")
+                .hasMessageContaining("branch-request");
+        takeRequest("POST", DATABASE_PATH + "/branches");
+
+        enqueue(
+                404,
+                "{\"code\":404,\"resourceType\":\"TAG\",\"resourceName\":\"baseline\",\"message\":\"tag missing\"}");
+        assertThatThrownBy(() -> trees.createBranch(DATABASE, "experiment", "baseline"))
                 .isInstanceOfSatisfying(
-                        MergeConflictException.class,
-                        conflict -> {
-                            assertThat(conflict.resourceType()).isEqualTo("TABLE");
-                            assertThat(conflict.resourceName()).isEqualTo("training db.features");
-                            assertThat(conflict.getCause())
-                                    .isInstanceOf(AlreadyExistsException.class)
-                                    .hasMessage(conflict.getMessage());
-                        })
-                .hasMessage("Conflicting changes to table features (100%) requestId:merge-request");
-        takeRequest("POST", TREES_PATH + "/main/merge");
+                        NoSuchResourceException.class,
+                        e -> {
+                            assertThat(e.resourceType()).isEqualTo("TAG");
+                            assertThat(e.resourceName()).isEqualTo("baseline");
+                        });
+        takeRequest("POST", DATABASE_PATH + "/branches");
 
-        enqueue(409, "{\"code\":409,\"message\":\"reference already exists\"}");
-        assertThatThrownBy(() -> trees.createReference(DATABASE, "existing", BRANCH, source))
-                .isExactlyInstanceOf(AlreadyExistsException.class);
-        takeRequest("POST", TREES_PATH);
-
-        enqueue(400, "{\"code\":400,\"message\":\"duplicate table merge mode\"}");
-        assertThatThrownBy(
-                        () ->
-                                trees.mergeBranch(
-                                        DATABASE,
-                                        "main",
-                                        source,
-                                        MergeMode.NORMAL,
-                                        Arrays.asList(
-                                                new TableMergeMode("features", MergeMode.FORCE),
-                                                new TableMergeMode("features", MergeMode.DROP))))
+        enqueue(400, "{\"code\":400,\"message\":\"source table has no snapshot\"}");
+        assertThatThrownBy(() -> trees.fastForward(DATABASE, "empty"))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessageContaining("duplicate table merge mode");
-        takeRequest("POST", TREES_PATH + "/main/merge");
+                .hasMessageContaining("no snapshot");
+        takeRequest("POST", DATABASE_PATH + "/branches/empty/forward");
 
-        enqueue(404, "{\"code\":404,\"message\":\"source reference missing\"}");
-        assertThatThrownBy(() -> trees.mergeBranch(DATABASE, "main", source))
+        enqueue(404, "{\"code\":404,\"message\":\"branch missing\"}");
+        assertThatThrownBy(() -> trees.fastForward(DATABASE, "missing"))
                 .isInstanceOf(NoSuchResourceException.class)
-                .hasMessageContaining("source reference missing");
-        takeRequest("POST", TREES_PATH + "/main/merge");
+                .hasMessageContaining("branch missing");
+        takeRequest("POST", DATABASE_PATH + "/branches/missing/forward");
 
-        enqueue(501, "{\"code\":501,\"message\":\"merge unsupported\"}");
-        assertThatThrownBy(() -> trees.mergeBranch(DATABASE, "main", source))
+        enqueue(501, "{\"code\":501,\"message\":\"forward unsupported\"}");
+        assertThatThrownBy(() -> trees.fastForward(DATABASE, "experiment"))
                 .isInstanceOf(NotImplementedException.class)
-                .hasMessageContaining("merge unsupported");
-        takeRequest("POST", TREES_PATH + "/main/merge");
+                .hasMessageContaining("forward unsupported");
+        takeRequest("POST", DATABASE_PATH + "/branches/experiment/forward");
         assertThat(server.getRequestCount()).isEqualTo(6);
-    }
-
-    @Test
-    void testListAllTypesAndEmptyReferences() throws Exception {
-        enqueue(200, "{\"references\":[" + MAIN_JSON + "," + TAG_JSON + "]}");
-        assertThat(trees.listReferencesPaged(DATABASE, null, null, null).getElements())
-                .containsExactly(
-                        new DatabaseReference(BRANCH, "main"),
-                        new DatabaseReference(TAG, "train-v1"));
-        assertThat(takeRequest("GET", TREES_PATH).getRequestUrl().query()).isNull();
-
-        enqueue(200, "{\"references\":[]}");
-        PagedList<DatabaseReference> emptyPage =
-                trees.listReferencesPaged(DATABASE, null, null, null);
-        assertThat(emptyPage.getElements()).isEmpty();
-        assertThat(emptyPage.getNextPageToken()).isNull();
-        takeRequest("GET", TREES_PATH);
-        assertThat(server.getRequestCount()).isEqualTo(3);
-    }
-
-    @Test
-    void testErrorsPropagate() {
-        enqueue(404, "{\"code\":404,\"message\":\"reference missing\"}");
-        assertThatThrownBy(() -> trees.getReference(DATABASE, "missing"))
-                .isInstanceOf(NoSuchResourceException.class)
-                .hasMessageContaining("reference missing");
-
-        enqueue(409, "{\"code\":409,\"message\":\"reference already exists\"}");
-        assertThatThrownBy(
-                        () ->
-                                trees.createReference(
-                                        DATABASE,
-                                        "exp-1",
-                                        BRANCH,
-                                        new DatabaseReference(BRANCH, "main")))
-                .isInstanceOf(AlreadyExistsException.class)
-                .hasMessageContaining("reference already exists");
-
-        enqueue(501, "{\"code\":501,\"message\":\"trees unsupported\"}");
-        assertThatThrownBy(() -> trees.listReferencesPaged(DATABASE, null, null, null))
-                .isInstanceOf(NotImplementedException.class)
-                .hasMessageContaining("trees unsupported");
-        assertThat(server.getRequestCount()).isEqualTo(4);
     }
 
     private void enqueue(int status, String body) {

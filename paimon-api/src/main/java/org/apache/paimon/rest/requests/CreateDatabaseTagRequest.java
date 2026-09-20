@@ -19,39 +19,56 @@
 package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.annotation.Experimental;
-import org.apache.paimon.rest.DatabaseReferenceType;
 import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import javax.annotation.Nullable;
 
 import java.beans.ConstructorProperties;
 
-/** Request for deleting a database reference, optionally checking its type. */
+/** Database extension of tag creation: capture a branch instead of one table snapshot ID. */
 @Experimental
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class DeleteDatabaseReferenceRequest implements RESTRequest {
+public class CreateDatabaseTagRequest implements RESTRequest {
 
-    private static final String FIELD_TYPE = "type";
+    private static final String FIELD_TAG_NAME = "tagName";
+    private static final String FIELD_FROM_BRANCH = "fromBranch";
+    private static final String FIELD_TIME_RETAINED = "timeRetained";
 
-    @Nullable private final DatabaseReferenceType type;
+    private final String tagName;
+    @Nullable private final String fromBranch;
+    @Nullable private final String timeRetained;
 
     @JsonCreator
-    @ConstructorProperties({FIELD_TYPE})
-    public DeleteDatabaseReferenceRequest(
-            @Nullable @JsonProperty(FIELD_TYPE) DatabaseReferenceType type) {
-        this.type = type;
+    @ConstructorProperties({FIELD_TAG_NAME, FIELD_FROM_BRANCH, FIELD_TIME_RETAINED})
+    public CreateDatabaseTagRequest(
+            @JsonProperty(FIELD_TAG_NAME) String tagName,
+            @Nullable @JsonProperty(FIELD_FROM_BRANCH) String fromBranch,
+            @Nullable @JsonProperty(FIELD_TIME_RETAINED) String timeRetained) {
+        this.tagName = tagName;
+        this.fromBranch = fromBranch;
+        this.timeRetained = timeRetained;
+    }
+
+    @JsonGetter(FIELD_TAG_NAME)
+    public String tagName() {
+        return tagName;
+    }
+
+    /** Null selects the database's main branch. */
+    @Nullable
+    @JsonGetter(FIELD_FROM_BRANCH)
+    public String fromBranch() {
+        return fromBranch;
     }
 
     @Nullable
-    @JsonGetter(FIELD_TYPE)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public DatabaseReferenceType getType() {
-        return type;
+    @JsonGetter(FIELD_TIME_RETAINED)
+    public String timeRetained() {
+        return timeRetained;
     }
 }

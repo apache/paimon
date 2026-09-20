@@ -91,7 +91,7 @@ paths:
           $ref: "#/components/responses/ServerErrorResponse"
       description: >-
         List physical databases. Branch and tag access names are not additional database entries;
-        discover references through /databases/{database}/trees.
+        discover database branches and tags through /databases/{database}/branches and /databases/{database}/tags.
     post:
       tags:
         - database
@@ -121,7 +121,7 @@ paths:
           $ref: "#/components/responses/ServerErrorResponse"
       description: >-
         Create a physical database. The reserved $branch_ and $tag_ suffix markers are not allowed;
-        create database references through /trees.
+        create database branches and tags through /branches and /tags.
   /v1/{prefix}/databases/{database}:
     get:
       tags:
@@ -157,8 +157,8 @@ paths:
       description: >-
         A database name with $branch_<name> or $tag_<name> selects an existing reference. Return
         metadata for the virtual database, retaining the full requested name. This lookup supports
-        engine namespace existence checks. Missing databases or references return 404; a reference
-        type mismatch returns 409. Never resolve a missing reference to the base database.
+        engine namespace existence checks. Missing databases or references return 404; a missing branch or tag of the selected
+        type also returns 404. Never resolve a missing reference to the base database.
     delete:
       tags:
         - database
@@ -187,7 +187,7 @@ paths:
         "500":
           $ref: "#/components/responses/ServerErrorResponse"
       description: >-
-        Database reference suffixes are not allowed for database mutation. Use the /trees management
+        Database reference suffixes are not allowed for database mutation. Use the /branches and /tags management
         endpoints with the physical database name to manage references.
     post:
       tags:
@@ -226,14 +226,14 @@ paths:
         "500":
           $ref: "#/components/responses/ServerErrorResponse"
       description: >-
-        Database reference suffixes are not allowed for database mutation. Use the /trees management
+        Database reference suffixes are not allowed for database mutation. Use the /branches and /tags management
         endpoints with the physical database name to manage references.
-  /v1/{prefix}/databases/{database}/trees:
+  /v1/{prefix}/databases/{database}/branches:
     get:
       tags:
-        - database-reference
-      summary: List database references
-      operationId: listDatabaseReferencesPaged
+        - branch
+      summary: List database branches
+      operationId: listDatabaseBranches
       parameters:
         - name: prefix
           in: path
@@ -245,30 +245,13 @@ paths:
           required: true
           schema:
             type: string
-        - name: type
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: [ "branch", "tag" ]
-        - name: maxResults
-          in: query
-          required: false
-          schema:
-            type: integer
-            format: int32
-        - name: pageToken
-          in: query
-          required: false
-          schema:
-            type: string
       responses:
         "200":
-          description: Database branches and immutable tags.
+          description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListDatabaseReferencesResponse'
+                $ref: '#/components/schemas/ListBranchesResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
@@ -277,159 +260,14 @@ paths:
           $ref: '#/components/responses/ServerErrorResponse'
     post:
       tags:
-        - database-reference
-      summary: Create database reference
-      operationId: createDatabaseReference
-      parameters:
-        - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateDatabaseReferenceRequest'
-      responses:
-        "200":
-          description: Created branch or immutable tag.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DatabaseReferenceResponse'
-        "401":
-          $ref: '#/components/responses/UnauthorizedErrorResponse'
-        "404":
-          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
-        "409":
-          description: Reference already exists.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          $ref: '#/components/responses/ServerErrorResponse'
-  /v1/{prefix}/databases/{database}/trees/{name}:
-    get:
-      tags:
-        - database-reference
-      summary: Get database reference
-      operationId: getDatabaseReference
-      parameters:
-        - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Named branch or immutable tag.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DatabaseReferenceResponse'
-        "401":
-          $ref: '#/components/responses/UnauthorizedErrorResponse'
-        "404":
-          description: Database or reference does not exist.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          $ref: '#/components/responses/ServerErrorResponse'
-    delete:
-      tags:
-        - database-reference
-      summary: Delete database reference
-      operationId: deleteDatabaseReference
-      parameters:
-        - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/DeleteDatabaseReferenceRequest'
-      responses:
-        "200":
-          description: Deleted branch or immutable tag.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DatabaseReferenceResponse'
-        "401":
-          $ref: '#/components/responses/UnauthorizedErrorResponse'
-        "404":
-          description: Database or reference does not exist.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "409":
-          description: Reference type does not match or the default branch is protected.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          $ref: '#/components/responses/ServerErrorResponse'
-  /v1/{prefix}/databases/{database}/trees/{name}/merge:
-    post:
-      tags:
-        - database-reference
-      summary: Merge a branch or tag into a database branch
+        - branch
+      summary: Create database branch
       description: >-
-        The target must be a branch. The source branch or tag is resolved in the same database
-        when the request is processed. Merge compares complete table versions with their merge
-        base, including schemas, properties, snapshots, and table creation or deletion; table row
-        data is not merged. Changes made only on the target are preserved. Source-side changes
-        use defaultMergeMode (NORMAL when omitted), overridden by tableMergeModes for individual
-        table names. NORMAL accepts one-sided or identical changes and rejects different changes
-        to the same table. FORCE accepts the source-side change even on conflict, including a
-        deletion. DROP skips all source-side changes to that table, even without a conflict, and
-        preserves its target state. Modes do not replace target-only changes with unchanged source
-        versions. The server checks for unresolved conflicts before publishing the result; a
-        conflict leaves the target unchanged, and the source reference is never modified.
-        Identical references or an already-merged source succeed without modifying the target.
-        When the target is an ancestor of the source, the server may fast-forward only if the
-        selected modes produce exactly the source state. Divergent histories use three-way merge;
-        no available merge base is a conflict. A successful merge must record the source as merged,
-        including changes skipped by DROP, even when the table contents remain unchanged. Repeating
-        a merge of the same source state does not reapply skipped changes. The server retains
-        ancestry and merge relationships to resolve subsequent merges.
-      operationId: mergeDatabaseBranch
+        Uses the table CreateBranchRequest. Without fromTag, create a branch with main's table
+        membership and schemas but no data. With fromTag, restore the membership and versions
+        captured by that database tag. Database must be a physical name without a selector.
+        Branch and tag names have separate namespaces. The server protects main.
+      operationId: createDatabaseBranch
       parameters:
         - name: prefix
           in: path
@@ -441,40 +279,298 @@ paths:
           required: true
           schema:
             type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
       requestBody:
-        required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MergeDatabaseBranchRequest'
+              $ref: '#/components/schemas/CreateBranchRequest'
       responses:
         "200":
-          description: Target branch after the merge, including when no changes were needed.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DatabaseReferenceResponse'
+          description: Success, no content
         "400":
           $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
-          description: Database, target branch, or source reference does not exist.
+          description:
+            Not Found
+            - DatabaseNotExistException, database does not exist
+            - TagNotExistException, the requested tag does not exist
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                DatabaseNotExist:
+                  value:
+                    code: 404
+                    resourceType: DATABASE
+                    resourceName: training
+                    message: Database does not exist
+                TagNotExist:
+                  $ref: '#/components/examples/TagNotExistError'
         "409":
-          description: Target is not a branch, no merge base is available, or table conflicts remain unresolved.
+          $ref: '#/components/responses/BranchAlreadyExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/branches/{branch}:
+    delete:
+      tags:
+        - branch
+      summary: Drop database branch
+      description: >-
+        Delete a database branch by name, with no request or response body. Deleting main is a
+        bad request. Retain any backing metadata and data still needed by database tags or other
+        branches. Database must be a physical name without a selector.
+      operationId: dropDatabaseBranch
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: branch
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success, no content
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/BranchNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/branches/{branch}/forward:
+    post:
+      tags:
+        - branch
+      summary: Forward main to a database branch
+      description: >-
+        Extends the table forward operation to the database's tables. The path names the source
+        branch; the physical database selects main as the target. Send an empty ForwardBranchRequest
+        and return success without a body. A tag is not a valid source. This publishes source table
+        versions on main; it does not combine target-only writes or perform three-way conflict
+        resolution. Source must be a non-main branch. Pause writers and reload tables after success.
+        For the fixed-table MVP, validate the same table membership and a snapshot for every source
+        table before forwarding. Unsupported namespace changes return 501. Preserve retained tags
+        and keep source and main independently writable. No public multi-table transaction or atomic
+        read view is promised; a success means all planned table updates completed.
+      operationId: forwardDatabaseBranch
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: branch
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForwardBranchRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/BranchNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+        "501":
+          $ref: '#/components/responses/ReferenceTableNotImplementedErrorResponse'
+  /v1/{prefix}/databases/{database}/tags:
+    get:
+      tags:
+        - tag
+      summary: List database tags
+      operationId: listDatabaseTagsPaged
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+        - name: tagNamePrefix
+          description: A prefix for tag names. All tags will be returned if not set or empty.
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTagsResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+    post:
+      tags:
+        - tag
+      summary: Create database tag
+      description: >-
+        Capture each table version from fromBranch (main when absent or null), using the table
+        tagName and timeRetained conventions. Each table has its own snapshot; there is no single
+        database snapshotId. Tags have database-wide names and freeze membership, schema, properties,
+        and data. Database must be a physical name without a selector. Pause writes while capturing.
+        Expiring a database tag must not remove versions still needed by a branch or another tag.
+      operationId: createDatabaseTag
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDatabaseTagRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          description:
+            Not Found
+            - DatabaseNotExistException, database does not exist
+            - BranchNotExistException, the requested source branch does not exist
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                DatabaseNotExist:
+                  value:
+                    code: 404
+                    resourceType: DATABASE
+                    resourceName: training
+                    message: Database does not exist
+                BranchNotExist:
+                  value:
+                    code: 404
+                    resourceType: BRANCH
+                    resourceName: experiment
+                    message: Source branch does not exist
+        "409":
+          $ref: '#/components/responses/TagAlreadyExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tags/{tag}:
+    get:
+      tags:
+        - tag
+      summary: Get database tag
+      description: >-
+        Get database tag metadata. fromBranch records its source but is not needed to read it:
+        load tables through database$tag_tagName using the ordinary table endpoints. Database
+        must be a physical name without a selector. Tag lookup remains valid after source deletion.
+      operationId: getDatabaseTag
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tag
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetDatabaseTagResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TagNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+    delete:
+      tags:
+        - tag
+      summary: Delete database tag
+      operationId: deleteDatabaseTag
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tag
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TagNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/register:
@@ -563,8 +659,7 @@ paths:
       description: >-
         The database path segment may select a database branch or immutable tag using its reserved
         suffix. Resolve the table through that reference. Tags expose captured membership and
-        metadata, never newer source state. Missing references never fall back to the base database. A
-        suffix whose type does not match the reference returns 409.
+        metadata, never newer source state. Missing references never fall back to the base database. A missing branch or tag of the selected type returns 404.
     post:
       tags:
         - table
@@ -601,10 +696,9 @@ paths:
           $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
       description: >-
         The database path segment may select a database branch or immutable tag using its reserved
-        suffix. Apply this operation to the selected branch; a tag returns 409. Identifiers in the
+        suffix. Apply this operation to the selected branch; a tag returns 403. Identifiers in the
         body must retain the full database name including its suffix and agree with the path. Table
-        IDs must match the resolved table. Missing references never fall back to the base database. A
-        suffix whose type does not match the reference returns 409.
+        IDs must match the resolved table. Missing references never fall back to the base database. A missing branch or tag of the selected type returns 404.
   /v1/{prefix}/databases/{database}/table-details:
     get:
       tags:
@@ -661,8 +755,7 @@ paths:
       description: >-
         The database path segment may select a database branch or immutable tag using its reserved
         suffix. Resolve the table through that reference. Tags expose captured membership and
-        metadata, never newer source state. Missing references never fall back to the base database. A
-        suffix whose type does not match the reference returns 409.
+        metadata, never newer source state. Missing references never fall back to the base database. A missing branch or tag of the selected type returns 404.
   /v1/{prefix}/tables:
     get:
       tags:
@@ -781,8 +874,7 @@ paths:
         suffix. Resolve the table through that reference. Tags expose captured membership and
         metadata, never newer source state. Return the requested database name including its suffix,
         the logical table name, and resolved schema, path and storage options. Internal branch aliases
-        may be carried in schema options. Missing references never fall back to the base database. A
-        suffix whose type does not match the reference returns 409.
+        may be carried in schema options. Missing references never fall back to the base database. A missing branch or tag of the selected type returns 404.
     post:
       tags:
         - table
@@ -824,10 +916,9 @@ paths:
           $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
       description: >-
         The database path segment may select a database branch or immutable tag using its reserved
-        suffix. Apply this operation to the selected branch; a tag returns 409. Identifiers in the
+        suffix. Apply this operation to the selected branch; a tag returns 403. Identifiers in the
         body must retain the full database name including its suffix and agree with the path. Table
-        IDs must match the resolved table. Missing references never fall back to the base database. A
-        suffix whose type does not match the reference returns 409.
+        IDs must match the resolved table. Missing references never fall back to the base database. A missing branch or tag of the selected type returns 404.
     delete:
       tags:
         - table
@@ -864,10 +955,9 @@ paths:
           $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
       description: >-
         The database path segment may select a database branch or immutable tag using its reserved
-        suffix. Apply this operation to the selected branch; a tag returns 409. Identifiers in the
+        suffix. Apply this operation to the selected branch; a tag returns 403. Identifiers in the
         body must retain the full database name including its suffix and agree with the path. Table
-        IDs must match the resolved table. Missing references never fall back to the base database. A
-        suffix whose type does not match the reference returns 409.
+        IDs must match the resolved table. Missing references never fall back to the base database. A missing branch or tag of the selected type returns 404.
   /v1/{prefix}/tables/rename:
     post:
       tags:
@@ -944,10 +1034,9 @@ paths:
           $ref: "#/components/responses/ReferenceTableNotImplementedErrorResponse"
       description: >-
         The database path segment may select a database branch or immutable tag using its reserved
-        suffix. Apply this operation to the selected branch; a tag returns 409. Identifiers in the
+        suffix. Apply this operation to the selected branch; a tag returns 403. Identifiers in the
         body must retain the full database name including its suffix and agree with the path. Table
-        IDs must match the resolved table. Missing references never fall back to the base database. A
-        suffix whose type does not match the reference returns 409.
+        IDs must match the resolved table. Missing references never fall back to the base database. A missing branch or tag of the selected type returns 404.
   /v1/{prefix}/databases/{database}/tables/{table}/rollback:
     post:
       tags:
@@ -1079,7 +1168,7 @@ paths:
         suffix. Resolve the table through that reference. Tags expose captured membership and
         metadata, never newer source state. Tag credentials must allow reading without permitting
         mutation of retained metadata or data. Missing references never fall back to the base
-        database. A suffix whose type does not match the reference returns 409.
+        database. A missing branch or tag of the selected type returns 404.
   /v1/{prefix}/databases/{database}/tables/{table}/auth:
     post:
       tags:
@@ -1127,8 +1216,7 @@ paths:
       description: >-
         The database path segment may select a database branch or immutable tag using its reserved
         suffix. Resolve the table through that reference. Tags expose captured membership and
-        metadata, never newer source state. Missing references never fall back to the base database. A
-        suffix whose type does not match the reference returns 409.
+        metadata, never newer source state. Missing references never fall back to the base database. A missing branch or tag of the selected type returns 404.
   /v1/{prefix}/databases/{database}/tables/{table}/snapshot:
     get:
       tags:
@@ -1172,8 +1260,7 @@ paths:
         The database path segment may select a database branch or immutable tag using its reserved
         suffix. Resolve the table through that reference. Tags expose captured membership and
         metadata, never newer source state. An existing empty table returns 404 with resourceType
-        SNAPSHOT. Missing references never fall back to the base database. A suffix whose type does
-        not match the reference returns 409.
+        SNAPSHOT. Missing references never fall back to the base database. A missing branch or tag of the selected type returns 404.
   /v1/{prefix}/databases/{database}/tables/{table}/snapshots/{version}:
     get:
       tags:
@@ -1223,8 +1310,7 @@ paths:
         suffix. Resolve the table through that reference. Tags expose captured membership and
         metadata, never newer source state. A database tag exposes only its pinned snapshot: LATEST
         and EARLIEST select it; other versions must resolve to it or return 404. Missing references
-        never fall back to the base database. A suffix whose type does not match the reference returns
-        409.
+        never fall back to the base database. A missing branch or tag of the selected type returns 404.
   /v1/{prefix}/databases/{database}/tables/{table}/snapshots:
     get:
       tags:
@@ -1278,8 +1364,7 @@ paths:
         suffix. Resolve the table through that reference. Tags expose captured membership and
         metadata, never newer source state. A database tag exposes only its pinned snapshot: LATEST
         and EARLIEST select it; other versions must resolve to it or return 404. Missing references
-        never fall back to the base database. A suffix whose type does not match the reference returns
-        409.
+        never fall back to the base database. A missing branch or tag of the selected type returns 404.
   /v1/{prefix}/databases/{database}/tables/{table}/schemas:
     parameters:
       - $ref: "#/components/parameters/Prefix"
@@ -1326,8 +1411,7 @@ paths:
         suffix. Resolve the table through that reference. Tags expose captured membership and
         metadata, never newer source state. For a database tag, LATEST selects the captured schema.
         History is limited to schemas retained for its captured data, excluding newer source schemas.
-        Missing references never fall back to the base database. A suffix whose type does not match
-        the reference returns 409.
+        Missing references never fall back to the base database. A missing branch or tag of the selected type returns 404.
   /v1/{prefix}/databases/{database}/tables/{table}/schemas/{version}:
     parameters:
       - $ref: "#/components/parameters/Prefix"
@@ -1365,8 +1449,7 @@ paths:
         suffix. Resolve the table through that reference. Tags expose captured membership and
         metadata, never newer source state. For a database tag, LATEST selects the captured schema.
         History is limited to schemas retained for its captured data, excluding newer source schemas.
-        Missing references never fall back to the base database. A suffix whose type does not match
-        the reference returns 409.
+        Missing references never fall back to the base database. A missing branch or tag of the selected type returns 404.
   /v1/{prefix}/databases/{database}/tables/{table}/partitions:
     get:
       tags:
@@ -2895,8 +2978,8 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
     ReferenceTableConflictErrorResponse:
       description: >-
-        The reference type does not match the suffix, the target is an immutable tag, the table already
-        exists, or the operation conflicts with the selected table state.
+        The table or column already exists within the selected branch. Tag writes return 403;
+        a missing branch or tag of the selected type returns 404.
       content:
         application/json:
           schema:
@@ -4283,96 +4366,37 @@ components:
             $ref: '#/components/schemas/Identifier'
         nextPageToken:
           type: string
-    DatabaseReference:
+    CreateDatabaseTagRequest:
       type: object
       required:
-        - type
-        - name
+        - tagName
       properties:
-        type:
-          type: string
-          enum: [ "BRANCH", "TAG" ]
-        name:
+        tagName:
           type: string
           pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-    CreateDatabaseReferenceRequest:
+        fromBranch:
+          type: [ string, "null" ]
+          description: Source database branch; absent or null selects main.
+        timeRetained:
+          type: [ string, "null" ]
+          description: Optional retention duration, using the table tag duration syntax.
+    GetDatabaseTagResponse:
       type: object
       required:
-        - name
-        - type
-        - source
+        - tagName
+        - fromBranch
       properties:
-        name:
+        tagName:
           type: string
-          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-        type:
+        fromBranch:
           type: string
-          enum: [ "BRANCH", "TAG" ]
-        source:
-          $ref: '#/components/schemas/DatabaseReference'
-    MergeMode:
-      type: string
-      enum: [ "NORMAL", "FORCE", "DROP" ]
-      description: >-
-        NORMAL performs three-way conflict detection. FORCE accepts source-side table changes
-        even on conflict. DROP skips all source-side changes to the table and preserves its
-        target state. Each mode operates on complete table versions, not individual rows.
-    TableMergeMode:
-      type: object
-      required:
-        - table
-        - mergeMode
-      properties:
-        table:
-          type: string
-          description: Exact table name within the database being merged.
-        mergeMode:
-          $ref: '#/components/schemas/MergeMode'
-    MergeDatabaseBranchRequest:
-      type: object
-      required:
-        - source
-      properties:
-        source:
-          $ref: '#/components/schemas/DatabaseReference'
-        defaultMergeMode:
-          description: Mode for tables without a per-table override. Defaults to NORMAL.
-          default: NORMAL
-          allOf:
-            - $ref: '#/components/schemas/MergeMode'
-        tableMergeModes:
-          type: array
-          description: >-
-            Per-table modes override defaultMergeMode. Omit or use an empty array to apply the
-            default to every table. Each table name may appear at most once; duplicates are a
-            bad request. Names without source-side changes have no effect.
-          items:
-            $ref: '#/components/schemas/TableMergeMode'
-    DeleteDatabaseReferenceRequest:
-      type: object
-      properties:
-        type:
-          type: string
-          description: Expected reference type. Omit to delete without checking the type.
-          enum: [ "BRANCH", "TAG" ]
-    DatabaseReferenceResponse:
-      type: object
-      required:
-        - reference
-      properties:
-        reference:
-          $ref: '#/components/schemas/DatabaseReference'
-    ListDatabaseReferencesResponse:
-      type: object
-      required:
-        - references
-      properties:
-        references:
-          type: array
-          items:
-            $ref: '#/components/schemas/DatabaseReference'
-        nextPageToken:
-          type: string
+          description: Source branch recorded at creation, even if subsequently deleted.
+        tagCreateTime:
+          type: [ integer, "null" ]
+          format: int64
+          description: Creation time as milliseconds since the Unix epoch.
+        tagTimeRetained:
+          type: [ string, "null" ]
     ConfigResponse:
       type: object
       properties:
@@ -4407,9 +4431,7 @@ components:
           type: string
     ForwardBranchRequest:
       type: object
-      properties:
-        branch:
-          type: string
+      description: Empty action request, shared by table and database forward operations.
     ListBranchesResponse:
       type: object
       properties:

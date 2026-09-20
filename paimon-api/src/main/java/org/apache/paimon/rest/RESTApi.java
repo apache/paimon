@@ -39,7 +39,6 @@ import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
-import org.apache.paimon.rest.exceptions.MergeConflictException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
@@ -48,14 +47,13 @@ import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.AuthTableQueryRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
-import org.apache.paimon.rest.requests.CreateDatabaseReferenceRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreateDatabaseTagRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
-import org.apache.paimon.rest.requests.DeleteDatabaseReferenceRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.DropPolicyRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
@@ -63,7 +61,6 @@ import org.apache.paimon.rest.requests.GrantPermissionRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
-import org.apache.paimon.rest.requests.MergeDatabaseBranchRequest;
 import org.apache.paimon.rest.requests.PolicyRequest;
 import org.apache.paimon.rest.requests.RegisterTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -79,10 +76,10 @@ import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreatePartitionsResponse;
-import org.apache.paimon.rest.responses.DatabaseReferenceResponse;
 import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetDatabaseTagResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetLabelResponse;
 import org.apache.paimon.rest.responses.GetSchemaResponse;
@@ -95,7 +92,6 @@ import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListConsumersResponse;
-import org.apache.paimon.rest.responses.ListDatabaseReferencesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
@@ -199,8 +195,6 @@ public class RESTApi {
     public static final String FUNCTION_NAME_PATTERN = "functionNamePattern";
     public static final String PARTITION_NAME_PATTERN = "partitionNamePattern";
     public static final String TAG_NAME_PREFIX = "tagNamePrefix";
-
-    private static final String REFERENCE_TYPE = "type";
 
     public static final long TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000L;
 
@@ -371,99 +365,86 @@ public class RESTApi {
                 restAuthFunction);
     }
 
-    /** List one page of database-level branches and immutable tags. */
+    /** Lists database branches using the table branch response. */
     @Experimental
-    public PagedList<DatabaseReference> listDatabaseReferencesPaged(
+    public List<String> listDatabaseBranches(String databaseName) {
+        ListBranchesResponse response =
+                client.get(
+                        resourcePaths.databaseBranches(databaseName),
+                        ListBranchesResponse.class,
+                        restAuthFunction);
+        return response.branches() == null ? emptyList() : response.branches();
+    }
+
+    /** Creates a schema-only branch, or restores the versions captured by fromTag. */
+    @Experimental
+    public void createDatabaseBranch(String databaseName, String branch, @Nullable String fromTag) {
+        client.post(
+                resourcePaths.databaseBranches(databaseName),
+                new CreateBranchRequest(branch, fromTag),
+                restAuthFunction);
+    }
+
+    /** Drops a database branch. */
+    @Experimental
+    public void dropDatabaseBranch(String databaseName, String branch) {
+        client.delete(resourcePaths.databaseBranch(databaseName, branch), restAuthFunction);
+    }
+
+    /** Forwards main to the source branch, using the table forward request. */
+    @Experimental
+    public void fastForwardDatabase(String databaseName, String branch) {
+        client.post(
+                resourcePaths.forwardDatabaseBranch(databaseName, branch),
+                new ForwardBranchRequest(),
+                restAuthFunction);
+    }
+
+    /** Captures the selected database branch; null fromBranch selects main. */
+    @Experimental
+    public void createDatabaseTag(
             String databaseName,
-            @Nullable DatabaseReferenceType type,
+            String tagName,
+            @Nullable String fromBranch,
+            @Nullable String timeRetained) {
+        client.post(
+                resourcePaths.databaseTags(databaseName),
+                new CreateDatabaseTagRequest(tagName, fromBranch, timeRetained),
+                restAuthFunction);
+    }
+
+    /** Gets database tag metadata, without a fictitious database-wide snapshot ID. */
+    @Experimental
+    public GetDatabaseTagResponse getDatabaseTag(String databaseName, String tagName) {
+        return client.get(
+                resourcePaths.databaseTag(databaseName, tagName),
+                GetDatabaseTagResponse.class,
+                restAuthFunction);
+    }
+
+    /** Lists database tag names with table tag pagination and prefix filtering. */
+    @Experimental
+    public PagedList<String> listDatabaseTagsPaged(
+            String databaseName,
             @Nullable Integer maxResults,
-            @Nullable String pageToken) {
-        Map<String, String> queryParams = buildPagedQueryParams(maxResults, pageToken);
-        if (type != null) {
-            queryParams.put(REFERENCE_TYPE, type.queryValue());
-        }
-        ListDatabaseReferencesResponse response =
+            @Nullable String pageToken,
+            @Nullable String tagNamePrefix) {
+        ListTagsResponse response =
                 client.get(
-                        resourcePaths.databaseTrees(databaseName),
-                        queryParams,
-                        ListDatabaseReferencesResponse.class,
+                        resourcePaths.databaseTags(databaseName),
+                        buildPagedQueryParams(
+                                maxResults, pageToken, Pair.of(TAG_NAME_PREFIX, tagNamePrefix)),
+                        ListTagsResponse.class,
                         restAuthFunction);
-        List<DatabaseReference> references = response.getReferences();
         return new PagedList<>(
-                references == null ? emptyList() : references, response.getNextPageToken());
+                response.tags() == null ? emptyList() : response.tags(),
+                response.getNextPageToken());
     }
 
-    /** Get one database-level branch or immutable tag. */
+    /** Deletes a database tag. */
     @Experimental
-    public DatabaseReference getDatabaseReference(String databaseName, String referenceName) {
-        DatabaseReferenceResponse response =
-                client.get(
-                        resourcePaths.databaseTree(databaseName, referenceName),
-                        DatabaseReferenceResponse.class,
-                        restAuthFunction);
-        return checkNotNull(response.getReference(), "Reference response must contain reference");
-    }
-
-    /** Create a database-level branch or immutable tag from an existing reference. */
-    @Experimental
-    public DatabaseReference createDatabaseReference(
-            String databaseName,
-            String referenceName,
-            DatabaseReferenceType type,
-            DatabaseReference source) {
-        DatabaseReferenceResponse response =
-                client.post(
-                        resourcePaths.databaseTrees(databaseName),
-                        new CreateDatabaseReferenceRequest(referenceName, type, source),
-                        DatabaseReferenceResponse.class,
-                        restAuthFunction);
-        return checkNotNull(response.getReference(), "Reference response must contain reference");
-    }
-
-    /** Merge a branch or immutable tag into a database-level branch, failing on conflicts. */
-    @Experimental
-    public DatabaseReference mergeDatabaseBranch(
-            String databaseName, String targetBranch, DatabaseReference source) {
-        return mergeDatabaseBranch(databaseName, targetBranch, source, null, null);
-    }
-
-    /** Merge a branch or immutable tag using default and per-table merge modes. */
-    @Experimental
-    public DatabaseReference mergeDatabaseBranch(
-            String databaseName,
-            String targetBranch,
-            DatabaseReference source,
-            @Nullable MergeMode defaultMergeMode,
-            @Nullable List<TableMergeMode> tableMergeModes) {
-        try {
-            DatabaseReferenceResponse response =
-                    client.post(
-                            resourcePaths.mergeDatabaseBranch(databaseName, targetBranch),
-                            new MergeDatabaseBranchRequest(
-                                    source, defaultMergeMode, tableMergeModes),
-                            DatabaseReferenceResponse.class,
-                            restAuthFunction);
-            return checkNotNull(
-                    response.getReference(), "Reference response must contain reference");
-        } catch (AlreadyExistsException e) {
-            throw new MergeConflictException(
-                    e, e.resourceType(), e.resourceName(), "%s", e.getMessage());
-        }
-    }
-
-    /** Delete one database-level branch or immutable tag. */
-    @Experimental
-    public DatabaseReference deleteDatabaseReference(
-            String databaseName,
-            String referenceName,
-            @Nullable DatabaseReferenceType expectedType) {
-        DatabaseReferenceResponse response =
-                client.delete(
-                        resourcePaths.databaseTree(databaseName, referenceName),
-                        new DeleteDatabaseReferenceRequest(expectedType),
-                        DatabaseReferenceResponse.class,
-                        restAuthFunction);
-        return checkNotNull(response.getReference(), "Reference response must contain reference");
+    public void deleteDatabaseTag(String databaseName, String tagName) {
+        client.delete(resourcePaths.databaseTag(databaseName, tagName), restAuthFunction);
     }
 
     /**

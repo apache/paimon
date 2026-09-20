@@ -36,7 +36,6 @@ public class ResourcePaths {
     protected static final String PARTITIONS = "partitions";
     protected static final String BRANCHES = "branches";
     protected static final String TAGS = "tags";
-    protected static final String TREES = "trees";
     protected static final String SNAPSHOTS = "snapshots";
     protected static final String CONSUMERS = "consumers";
     protected static final String SCHEMAS = "schemas";
@@ -148,23 +147,34 @@ public class ResourcePaths {
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName));
     }
 
-    /** Database-level branches and immutable tags. */
+    /** Database-level extension of table branch management. */
     @Experimental
-    public String databaseTrees(String databaseName) {
-        DatabaseIdentifier.checkNoReference(databaseName, "tree management");
-        return SLASH.join(database(databaseName), TREES);
+    public String databaseBranches(String databaseName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "database branch management");
+        return SLASH.join(database(databaseName), BRANCHES);
     }
 
-    /** One named database-level branch or immutable tag. */
     @Experimental
-    public String databaseTree(String databaseName, String referenceName) {
-        return SLASH.join(databaseTrees(databaseName), encodeString(referenceName));
+    public String databaseBranch(String databaseName, String branch) {
+        return SLASH.join(databaseBranches(databaseName), encodeString(branch));
     }
 
-    /** Action endpoint for merging a branch or tag into a database-level branch. */
+    /** The path names the source branch; main is the target. */
     @Experimental
-    public String mergeDatabaseBranch(String databaseName, String branch) {
-        return SLASH.join(databaseTree(databaseName, branch), "merge");
+    public String forwardDatabaseBranch(String databaseName, String branch) {
+        return SLASH.join(databaseBranch(databaseName, branch), "forward");
+    }
+
+    /** Database-level extension of table tag management. */
+    @Experimental
+    public String databaseTags(String databaseName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "database tag management");
+        return SLASH.join(database(databaseName), TAGS);
+    }
+
+    @Experimental
+    public String databaseTag(String databaseName, String tagName) {
+        return SLASH.join(databaseTags(databaseName), encodeString(tagName));
     }
 
     public String tables(String databaseName) {

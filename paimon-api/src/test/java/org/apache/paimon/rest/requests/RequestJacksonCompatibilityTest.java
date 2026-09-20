@@ -18,20 +18,14 @@
 
 package org.apache.paimon.rest.requests;
 
-import org.apache.paimon.rest.DatabaseReference;
-import org.apache.paimon.rest.DatabaseReferenceType;
-import org.apache.paimon.rest.MergeMode;
 import org.apache.paimon.rest.RESTApi;
 import org.apache.paimon.rest.RESTRequest;
-import org.apache.paimon.rest.TableMergeMode;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import java.beans.ConstructorProperties;
 import java.lang.reflect.Constructor;
@@ -165,6 +159,17 @@ public class RequestJacksonCompatibilityTest {
                             request -> assertThat(request.getSchemaId()).isEqualTo(44L),
                             "schemaId"),
                     requestCase(
+                            CreateDatabaseTagRequest.class,
+                            "{\"tagName\":\"train-v1\",\"fromBranch\":\"experiment\",\"timeRetained\":\"7d\"}",
+                            request -> {
+                                assertThat(request.tagName()).isEqualTo("train-v1");
+                                assertThat(request.fromBranch()).isEqualTo("experiment");
+                                assertThat(request.timeRetained()).isEqualTo("7d");
+                            },
+                            "tagName",
+                            "fromBranch",
+                            "timeRetained"),
+                    requestCase(
                             UpsertLabelRequest.class,
                             "{\"value\":\"identifier\"}",
                             request -> assertThat(request.getValue()).isEqualTo("identifier"),
@@ -177,15 +182,12 @@ public class RequestJacksonCompatibilityTest {
                             AlterTableRequest.class,
                             AlterViewRequest.class,
                             CommitTableRequest.class,
-                            CreateDatabaseReferenceRequest.class,
                             CreateFunctionRequest.class,
                             CreatePartitionsRequest.class,
                             CreateTableRequest.class,
                             CreateViewRequest.class,
-                            DeleteDatabaseReferenceRequest.class,
                             DropPolicyRequest.class,
                             GrantPermissionRequest.class,
-                            MergeDatabaseBranchRequest.class,
                             PolicyRequest.class,
                             RegisterTableRequest.class,
                             RenameTableRequest.class,
@@ -221,108 +223,15 @@ public class RequestJacksonCompatibilityTest {
     }
 
     @Test
-    void testCreateDatabaseReferenceRequestRoundTrips() throws Exception {
-        String json =
-                "{\"name\":\"exp-1\",\"type\":\"BRANCH\","
-                        + "\"source\":{\"type\":\"TAG\",\"name\":\"train-v1\"}}";
-        CreateDatabaseReferenceRequest request =
-                EXTERNAL_MAPPER.readValue(json, CreateDatabaseReferenceRequest.class);
-        CreateDatabaseReferenceRequest roundTrip =
-                RESTApi.fromJson(RESTApi.toJson(request), CreateDatabaseReferenceRequest.class);
-        assertThat(roundTrip.getName()).isEqualTo("exp-1");
-        assertThat(roundTrip.getType()).isEqualTo(DatabaseReferenceType.BRANCH);
-        assertThat(roundTrip.getSource())
-                .isEqualTo(new DatabaseReference(DatabaseReferenceType.TAG, "train-v1"));
-    }
-
-    @Test
-    void testDeleteDatabaseReferenceRequestRoundTrips() throws Exception {
-        DeleteDatabaseReferenceRequest request =
+    void testDatabaseTagRequestDefaultsRoundTrip() throws Exception {
+        CreateDatabaseTagRequest request =
                 EXTERNAL_MAPPER.readValue(
-                        "{\"type\":\"TAG\"}", DeleteDatabaseReferenceRequest.class);
-        assertThat(
-                        RESTApi.fromJson(
-                                        RESTApi.toJson(request),
-                                        DeleteDatabaseReferenceRequest.class)
-                                .getType())
-                .isEqualTo(DatabaseReferenceType.TAG);
-
-        DeleteDatabaseReferenceRequest withoutType =
-                EXTERNAL_MAPPER.readValue("{}", DeleteDatabaseReferenceRequest.class);
-        assertThat(RESTApi.toJson(withoutType)).isEqualTo("{}");
-        assertThat(RESTApi.fromJson("{}", DeleteDatabaseReferenceRequest.class).getType()).isNull();
-    }
-
-    @ParameterizedTest
-    @EnumSource(DatabaseReferenceType.class)
-    void testMergeDatabaseBranchRequestRoundTrips(DatabaseReferenceType sourceType)
-            throws Exception {
-        String json =
-                "{\"source\":{\"type\":\"" + sourceType.name() + "\",\"name\":\"experiment\"}}";
-        MergeDatabaseBranchRequest request =
-                EXTERNAL_MAPPER.readValue(json, MergeDatabaseBranchRequest.class);
-        MergeDatabaseBranchRequest roundTrip =
-                RESTApi.fromJson(RESTApi.toJson(request), MergeDatabaseBranchRequest.class);
-        assertThat(roundTrip.getSource())
-                .isEqualTo(new DatabaseReference(sourceType, "experiment"));
-        assertThat(roundTrip.getDefaultMergeMode()).isNull();
-        assertThat(roundTrip.getTableMergeModes()).isNull();
-        assertThat(RESTApi.fromJson(RESTApi.toJson(roundTrip), Map.class))
-                .isEqualTo(RESTApi.fromJson(json, Map.class));
-    }
-
-    @ParameterizedTest
-    @EnumSource(MergeMode.class)
-    void testMergeModesRoundTrip(MergeMode mode) throws Exception {
-        String json =
-                "{\"source\":{\"type\":\"BRANCH\",\"name\":\"experiment\"},"
-                        + "\"defaultMergeMode\":\""
-                        + mode.name()
-                        + "\","
-                        + "\"tableMergeModes\":[{\"table\":\"features.v2\",\"mergeMode\":\"FORCE\"},"
-                        + "{\"table\":\"scratch\",\"mergeMode\":\"DROP\"},"
-                        + "{\"table\":\"labels\",\"mergeMode\":\"NORMAL\"}]}";
-        MergeDatabaseBranchRequest request =
-                EXTERNAL_MAPPER.readValue(json, MergeDatabaseBranchRequest.class);
-        MergeDatabaseBranchRequest roundTrip =
-                RESTApi.fromJson(RESTApi.toJson(request), MergeDatabaseBranchRequest.class);
-        assertThat(roundTrip.getDefaultMergeMode()).isEqualTo(mode);
-        assertThat(roundTrip.getTableMergeModes())
-                .extracting(TableMergeMode::getTable)
-                .containsExactly("features.v2", "scratch", "labels");
-        assertThat(roundTrip.getTableMergeModes())
-                .extracting(TableMergeMode::getMergeMode)
-                .containsExactly(MergeMode.FORCE, MergeMode.DROP, MergeMode.NORMAL);
-        assertThat(RESTApi.fromJson(RESTApi.toJson(roundTrip), Map.class))
-                .isEqualTo(RESTApi.fromJson(json, Map.class));
-    }
-
-    @Test
-    void testMergeWithEmptyOverrides() throws Exception {
-        String json =
-                "{\"source\":{\"type\":\"TAG\",\"name\":\"train-v1\"},\"tableMergeModes\":[]}";
-        MergeDatabaseBranchRequest request =
-                EXTERNAL_MAPPER.readValue(json, MergeDatabaseBranchRequest.class);
-        MergeDatabaseBranchRequest roundTrip =
-                RESTApi.fromJson(RESTApi.toJson(request), MergeDatabaseBranchRequest.class);
-        assertThat(roundTrip.getDefaultMergeMode()).isNull();
-        assertThat(roundTrip.getTableMergeModes()).isEmpty();
-        assertThat(RESTApi.fromJson(RESTApi.toJson(roundTrip), Map.class))
-                .isEqualTo(RESTApi.fromJson(json, Map.class));
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-            strings = {
-                "\"defaultMergeMode\":\"UNKNOWN\"",
-                "\"tableMergeModes\":[{\"table\":\"features\",\"mergeMode\":\"UNKNOWN\"}]"
-            })
-    void testUnknownMergeModesAreRejected(String modes) {
-        String json = "{\"source\":{\"type\":\"BRANCH\",\"name\":\"experiment\"}," + modes + "}";
-        assertThatThrownBy(() -> EXTERNAL_MAPPER.readValue(json, MergeDatabaseBranchRequest.class))
-                .hasMessageContaining("UNKNOWN");
-        assertThatThrownBy(() -> RESTApi.fromJson(json, MergeDatabaseBranchRequest.class))
-                .hasMessageContaining("UNKNOWN");
+                        "{\"tagName\":\"train-v1\"}", CreateDatabaseTagRequest.class);
+        CreateDatabaseTagRequest roundTrip =
+                RESTApi.fromJson(RESTApi.toJson(request), CreateDatabaseTagRequest.class);
+        assertThat(roundTrip.tagName()).isEqualTo("train-v1");
+        assertThat(roundTrip.fromBranch()).isNull();
+        assertThat(roundTrip.timeRetained()).isNull();
     }
 
     @Test

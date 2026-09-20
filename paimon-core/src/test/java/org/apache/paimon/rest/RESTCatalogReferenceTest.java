@@ -275,7 +275,7 @@ class RESTCatalogReferenceTest {
         assertThatThrownBy(() -> catalog.getTable(selected))
                 .isInstanceOf(Catalog.TableNotExistException.class);
         takeRequest("GET", DATABASE_PATH + "%24tag_train_v1/tables/features");
-        enqueue(409, "{\"message\":\"tag is immutable\",\"code\":409}");
+        enqueue(403, "{\"message\":\"tag is immutable\",\"code\":403}");
         assertThatThrownBy(
                         () ->
                                 catalog.commitSnapshot(
@@ -284,10 +284,62 @@ class RESTCatalogReferenceTest {
                                         null,
                                         Snapshot.fromJson(SNAPSHOT_JSON),
                                         emptyList()))
-                .isInstanceOf(AlreadyExistsException.class)
+                .isInstanceOf(Catalog.TableNoPermissionException.class)
                 .hasMessageContaining("tag is immutable");
         takeRequest("POST", DATABASE_PATH + "%24tag_train_v1/tables/features/commit");
         assertThat(server.getRequestCount()).isEqualTo(3);
+    }
+
+    @Test
+    void testReferenceErrorsAreNotIgnoredByTableDdl() throws Exception {
+        Identifier selected = Identifier.create(DATABASE + "$branch_experiment", "features");
+        enqueue(
+                409,
+                "{\"code\":409,\"resourceType\":\"BRANCH\",\"message\":\"branch is not writable\"}");
+        assertThatThrownBy(() -> catalog.createTable(selected, schema("main"), true))
+                .isInstanceOf(AlreadyExistsException.class)
+                .hasMessageContaining("not writable");
+        takeRequest("POST", DATABASE_PATH + "%24branch_experiment/tables");
+
+        enqueue(409, "{\"code\":409,\"resourceType\":\"TABLE\",\"message\":\"table exists\"}");
+        catalog.createTable(selected, schema("main"), true);
+        takeRequest("POST", DATABASE_PATH + "%24branch_experiment/tables");
+
+        for (boolean ignore : new boolean[] {false, true}) {
+            enqueue(
+                    404,
+                    "{\"code\":404,\"resourceType\":\"BRANCH\",\"message\":\"branch missing\"}");
+            assertThatThrownBy(
+                            () ->
+                                    catalog.alterTable(
+                                            selected,
+                                            singletonList(SchemaChange.setOption("key", "value")),
+                                            ignore))
+                    .isInstanceOf(org.apache.paimon.rest.exceptions.NoSuchResourceException.class)
+                    .hasMessageContaining("branch missing");
+            takeRequest("POST", DATABASE_PATH + "%24branch_experiment/tables/features");
+        }
+    }
+
+    @Test
+    void testViewProbesAllowTableOnlyReferenceNamespaces() throws Exception {
+        String database = DATABASE + "$branch_experiment";
+        String databasePath = DATABASE_PATH + "%24branch_experiment";
+        for (int i = 0; i < 4; i++) {
+            enqueue(200, "{\"name\":\"training db$branch_experiment\",\"options\":{}}");
+        }
+        assertThat(catalog.listViews(database)).isEmpty();
+        assertThat(catalog.listViewsPaged(database, 10, null, null).getElements()).isEmpty();
+        assertThat(catalog.listViewDetailsPaged(database, 10, null, null).getElements()).isEmpty();
+        assertThatThrownBy(() -> catalog.getView(Identifier.create(database, "features")))
+                .isInstanceOf(Catalog.ViewNotExistException.class);
+        for (int i = 0; i < 4; i++) {
+            takeRequest("GET", databasePath);
+        }
+        enqueue(404, "{\"code\":404,\"resourceType\":\"BRANCH\",\"message\":\"branch missing\"}");
+        assertThatThrownBy(() -> catalog.listViews(database))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
+        takeRequest("GET", databasePath);
     }
 
     @Test
@@ -320,7 +372,7 @@ class RESTCatalogReferenceTest {
                 .isInstanceOf(UnsupportedOperationException.class);
         assertThatThrownBy(() -> catalog.dropDatabase(database, true, true))
                 .isInstanceOf(UnsupportedOperationException.class);
-        assertThatThrownBy(() -> catalog.treeManagement().getReference(database, "main"))
+        assertThatThrownBy(() -> catalog.treeManagement().listBranches(database))
                 .isInstanceOf(UnsupportedOperationException.class);
         assertThat(server.getRequestCount()).isEqualTo(1);
     }
@@ -347,7 +399,7 @@ class RESTCatalogReferenceTest {
         org.apache.paimon.fs.Path location =
                 new org.apache.paimon.fs.Path(tempDir.resolve("features").toUri());
         LocalFileIO fileIO = LocalFileIO.create();
-        for (String branch : new String[] {"main", "physical-experiment"}) {
+        for (String branch : new String[] {"main", "physical-experiment", "frozen-train-v1"}) {
             new FileSystemSchemaManager(fileIO, location, branch).createTable(schema(branch));
         }
         Map<String, Snapshot> snapshots = new ConcurrentHashMap<>();
@@ -381,7 +433,11 @@ class RESTCatalogReferenceTest {
                                 return response(500, "{}");
                             }
                             String branch =
-                                    reference.equals("main") ? "main" : "physical-experiment";
+                                    reference.equals("main")
+                                            ? "main"
+                                            : reference.equals("train_v1")
+                                                    ? "frozen-train-v1"
+                                                    : "physical-experiment";
                             if (request.getMethod().equals("GET") && parts.length == 3) {
                                 return response(
                                         200,
@@ -406,7 +462,7 @@ class RESTCatalogReferenceTest {
                                     && parts[3].equals("commit")) {
                                 if (reference.equals("train_v1")) {
                                     return response(
-                                            409, "{\"code\":409,\"message\":\"tag is immutable\"}");
+                                            403, "{\"code\":403,\"message\":\"tag is immutable\"}");
                                 }
                                 CommitTableRequest commit =
                                         RESTApi.fromJson(
@@ -434,6 +490,11 @@ class RESTCatalogReferenceTest {
         writeRows(main, 10);
         writeRows(experiment, 20);
         snapshots.put("train_v1", snapshots.get("experiment"));
+        // REST latest alone cannot constrain native metadata reads. Return frozen backing metadata.
+        fileIO.overwriteFileUtf8(
+                new SnapshotManager(fileIO, location, "frozen-train-v1", null, null)
+                        .snapshotPath(snapshots.get("train_v1").id()),
+                snapshots.get("train_v1").toJson());
         Identifier tag = Identifier.create(DATABASE + "$tag_train_v1", "features");
         assertThat(readRows(tag)).containsExactly(20);
 
@@ -446,6 +507,20 @@ class RESTCatalogReferenceTest {
         assertThat(readRows(tag)).containsExactly(20);
         assertThat(snapshots.get("train_v1").id()).isEqualTo(1);
         assertThat(snapshots.get("experiment").id()).isEqualTo(2);
+        new FileSystemSchemaManager(fileIO, location, "physical-experiment")
+                .commitChanges(SchemaChange.addColumn("later", DataTypes.INT()));
+        FileStoreTable frozen = (FileStoreTable) catalog.getTable(tag);
+        assertThat(frozen.copyWithLatestSchema().schema().id()).isZero();
+        assertThat(frozen.schemaManager().listAll()).hasSize(1);
+        assertThatThrownBy(
+                        () ->
+                                frozen.copy(
+                                                java.util.Collections.singletonMap(
+                                                        "scan.snapshot-id", "2"))
+                                        .newReadBuilder()
+                                        .newScan()
+                                        .plan())
+                .isInstanceOf(IllegalArgumentException.class);
         assertThat(unexpected).isEmpty();
     }
 

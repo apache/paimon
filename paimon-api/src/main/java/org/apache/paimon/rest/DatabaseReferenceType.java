@@ -20,16 +20,9 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.annotation.Experimental;
 
-import java.util.Locale;
-
 /** Types of database-level references supported by the REST catalog. */
 @Experimental
 public enum DatabaseReferenceType {
     BRANCH,
-    TAG;
-
-    /** Lowercase form used by the trees query parameters. */
-    public String queryValue() {
-        return name().toLowerCase(Locale.ROOT);
-    }
+    TAG
 }
