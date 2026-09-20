@@ -130,7 +130,11 @@ class GlobalIndexEvaluator:
             if child_result is None:
                 continue
             if compound_result is not None:
-                compound_result = compound_result.and_(child_result)
+                # Readers answer the same predicate: an exact result intersected
+                # with a candidate superset remains exact.
+                is_exact = compound_result.is_exact() or child_result.is_exact()
+                compound_result = GlobalIndexResult.create(
+                    compound_result.and_(child_result).results(), is_exact=is_exact)
             else:
                 compound_result = child_result
             if compound_result.is_empty():

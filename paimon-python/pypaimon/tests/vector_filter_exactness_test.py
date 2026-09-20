@@ -84,6 +84,39 @@ def test_exact_indexes_do_not_read_filter_columns(table, kind, predicate):
         assert query(table, predicate).to_list() == [{"id": 1}]
 
 
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("mode", ["full", "fast"])
+@pytest.mark.parametrize("refine", [False, True])
+def test_mixed_btree_and_bitmap_preserve_exact_matches(table, batch, mode, refine):
+    scalar_index(table, "btree")
+    scalar_index(table, "bitmap")
+    table.raw_table = table.raw_table.copy({
+        "vector-index.search-mode": mode, "global-index.filter.refine-from-data": str(refine).lower()})
+    with patch.object(AbstractVectorSearchReadImpl, "_matching_candidate_rows",
+                      side_effect=AssertionError("exact index recheck")):
+        result = query(table, "name LIKE '%zeta%'", batch).to_list()
+    expected = [{"id": 1}]
+    assert result == ([expected, expected] if batch else expected)
+
+
+@pytest.mark.parametrize("method", ["leaf", "and"])
+@pytest.mark.parametrize("first_exact, second_exact", [(False, False), (False, True), (True, False), (True, True)])
+def test_reader_intersection_and_predicate_conjunction_exactness(method, first_exact, second_exact):
+    results = [GlobalIndexResult.create(
+        GlobalIndexResult.from_range(Range(1, 2) if exact else Range(0, 3)).results(), is_exact=exact)
+        for exact in (first_exact, second_exact)]
+    readers = [StubGlobalIndexReader(result) for result in results]
+    leaves = [Predicate(method="equal", index=i, field=field, literals=[1]) for i, field in enumerate(("a", "b"))]
+    predicate = leaves[0] if method == "leaf" else Predicate(
+        method="and", index=None, field=None, literals=leaves)
+    with GlobalIndexEvaluator(_make_fields(), lambda field: readers + [StubGlobalIndexReader(None)]
+                              if method == "leaf" else [readers[field.id]]) as evaluator:
+        result = evaluator.evaluate(predicate)
+    assert list(result.results()) == ([1, 2] if first_exact or second_exact else [0, 1, 2, 3])
+    assert result.is_exact() == ((first_exact or second_exact) if method == "leaf" else (
+        first_exact and second_exact))
+
+
 @pytest.mark.parametrize("predicate", ["name LIKE '%zeta%'", "name >= 'a' AND name LIKE '%zeta%'"])
 def test_unsupported_leaf_and_same_field_conjunction_can_be_refined(table, predicate):
     scalar_index(table)
