@@ -31,6 +31,7 @@ from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.map_shared_shredding_writer import MapSharedShreddingWriter
 from pypaimon.write.writer.mosaic_writer_options import create_mosaic_writer_options
+from pypaimon.write.writer.parquet_writer_options import create_parquet_writer_options
 from pypaimon.write.writer.write_buffer import WriteBuffer
 
 
@@ -81,6 +82,13 @@ class DataWriter(ABC):
         self.changelog_file_format = (
             self.options.changelog_file_format()
             or self.file_format
+        )
+        self.parquet_writer_options = (
+            create_parquet_writer_options(self.options)
+            if self.file_format == CoreOptions.FILE_FORMAT_PARQUET
+            or (changelog_producer == ChangelogProducer.INPUT
+                and self.changelog_file_format == CoreOptions.FILE_FORMAT_PARQUET)
+            else {}
         )
         self.write_cols = write_cols
         self.blob_as_descriptor = self.options.blob_as_descriptor()
@@ -381,7 +389,9 @@ class DataWriter(ABC):
         if self._map_shared_shredding.is_active():
             return self._map_shared_shredding.write_parquet(
                 self.file_io, path, data, self.compression, self.zstd_level)
-        self.file_io.write_parquet(path, data, compression=self.compression, zstd_level=self.zstd_level)
+        self.file_io.write_parquet(
+            path, data, compression=self.compression, zstd_level=self.zstd_level,
+            **self.parquet_writer_options)
         return {}
 
     def _create_data_file_meta(self, file_name, file_path, row_count,

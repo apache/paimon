@@ -350,6 +350,17 @@ class CoreOptions:
     )
 
     # File format options
+    PARQUET_WRITE_PAGE_INDEX_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("parquet.write-page-index.enabled")
+        .boolean_type()
+        .no_default_value()
+        .with_description(
+            "Whether Python Parquet writers write page indexes. Enabled by default on PyArrow >= 13, "
+            "disabled on older versions. Explicit true requires PyArrow >= 13. "
+            "Only affects newly written files; independent of read-side index filtering."
+        )
+    )
+
     FILE_FORMAT: ConfigOption[str] = (
         ConfigOptions.key("file.format")
         .string_type()
@@ -1324,6 +1335,9 @@ class CoreOptions:
 
     def file_format(self, default=None):
         return self.options.get(CoreOptions.FILE_FORMAT, default)
+
+    def parquet_write_page_index_enabled(self) -> Optional[bool]:
+        return self.options.get(CoreOptions.PARQUET_WRITE_PAGE_INDEX_ENABLED)
 
     def file_compression(self, default=None):
         return self.options.get(CoreOptions.FILE_COMPRESSION, default)
