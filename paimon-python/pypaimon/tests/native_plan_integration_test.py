@@ -17,6 +17,7 @@
 
 import datetime
 import importlib.util
+import io
 import os
 import pickle
 import tempfile
@@ -51,6 +52,23 @@ def _has_native_row_ranges():
     except ImportError:
         return False
     return hasattr(ReadBuilder, 'with_row_ranges')
+
+
+def _mosaic_supports_nested_row():
+    if importlib.util.find_spec('mosaic') is None:
+        return False
+
+    import mosaic
+
+    schema = pa.schema([('nested', pa.struct([('value', pa.int32())]))])
+    table = pa.Table.from_pylist([{'nested': {'value': 1}}], schema=schema)
+    try:
+        mosaic.write_table(table, io.BytesIO())
+    except RuntimeError as error:
+        if 'unsupported DataType: Struct' in str(error):
+            return False
+        raise
+    return True
 
 
 @pytest.mark.native_plan
@@ -308,7 +326,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
              'top.with.dot': 'third'},
         ]
         formats = ['parquet', 'orc', 'avro', 'row']
-        if importlib.util.find_spec('mosaic') is not None:
+        if _mosaic_supports_nested_row():
             formats.append('mosaic')
         for file_format in formats:
             with self.subTest(file_format=file_format):
