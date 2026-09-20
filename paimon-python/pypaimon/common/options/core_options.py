@@ -240,7 +240,8 @@ class CoreOptions:
         .int_type()
         .default_value(-1)
         .with_description(
-            "In dynamic bucket mode, max buckets per partition. -1 means unlimited."
+            "In dynamic bucket mode, max buckets per partition. It must be -1 "
+            "or between 1 and 32768."
         )
     )
 

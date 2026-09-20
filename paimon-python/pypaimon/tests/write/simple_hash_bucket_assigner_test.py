@@ -56,6 +56,21 @@ class SimpleHashBucketAssignerTest(unittest.TestCase):
                 for b in buckets[100:]:
                     self.assertEqual(b, 0)
 
+    def test_maximum_bucket_id(self):
+        for max_buckets in [-1, 32768]:
+            with self.subTest(max_buckets=max_buckets):
+                assigner = SimpleHashBucketAssigner(
+                    32768, 32767, 1, max_buckets)
+                self.assertEqual(assigner.assign((), 1), 32767)
+                self.assertEqual(assigner.assign((), 1), 32767)
+
+    def test_rejects_bucket_count_above_java_short_range(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "'dynamic-bucket.max-buckets' must be -1 or between 1 and 32768",
+        ):
+            SimpleHashBucketAssigner(1, 0, 100, 40000)
+
     def test_register_each_bucket_once(self):
         for num_assigners, assign_id, max_buckets, expected in [
             (1, 0, 1, [0, 0, 0, 0, 0, 0]),

@@ -70,7 +70,7 @@ Do not configure `bucket-key` in this mode.
 | --- | --- |
 | `dynamic-bucket.target-row-num` | Target row count per bucket |
 | `dynamic-bucket.initial-buckets` | Initial bucket count |
-| `dynamic-bucket.max-buckets` | Maximum bucket count |
+| `dynamic-bucket.max-buckets` | Maximum bucket count; use `-1` or a value from `1` to `32768` |
 
 :::warning Concurrent writers
 

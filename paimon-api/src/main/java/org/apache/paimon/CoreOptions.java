@@ -1741,6 +1741,8 @@ public class CoreOptions implements Serializable {
                             "If the bucket is -1, for primary key table, is dynamic bucket mode, "
                                     + "this option controls the target row number for one bucket.");
 
+    public static final int MAX_DYNAMIC_BUCKETS = Short.MAX_VALUE + 1;
+
     @Immutable
     public static final ConfigOption<Integer> DYNAMIC_BUCKET_INITIAL_BUCKETS =
             key("dynamic-bucket.initial-buckets")
@@ -1755,7 +1757,9 @@ public class CoreOptions implements Serializable {
                     .defaultValue(-1)
                     .withDescription(
                             "Max buckets for a partition in dynamic bucket mode, It should "
-                                    + "either be equal to -1 (unlimited), or it must be greater than 0 (fixed upper bound).");
+                                    + "either be equal to -1 (unlimited), or it must be between 1 and "
+                                    + MAX_DYNAMIC_BUCKETS
+                                    + " (fixed upper bound).");
 
     public static final ConfigOption<Integer> DYNAMIC_BUCKET_ASSIGNER_PARALLELISM =
             key("dynamic-bucket.assigner-parallelism")

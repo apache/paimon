@@ -30,6 +30,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.apache.paimon.CoreOptions.MAX_DYNAMIC_BUCKETS;
+
 /** When we need to overwrite the table, we should use this to avoid loading index. */
 public class SimpleHashBucketAssigner implements BucketAssigner {
 
@@ -42,6 +44,7 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
 
     public SimpleHashBucketAssigner(
             int numAssigners, int assignId, long targetBucketRowNumber, int maxBucketsNum) {
+        PartitionIndex.validateMaxBuckets(maxBucketsNum);
         this.numAssigners = numAssigners;
         this.assignId = assignId;
         this.targetBucketRowNumber = targetBucketRowNumber;
@@ -120,12 +123,12 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
                         }
                         return l + 1;
                     });
-            hash2Bucket.put(hash, (short) currentBucket);
+            hash2Bucket.put(hash, PartitionIndex.toBucketShort(currentBucket));
             return currentBucket;
         }
 
         private boolean loadNewBucket() {
-            for (int i = 0; i < Short.MAX_VALUE; i++) {
+            for (int i = 0; i < MAX_DYNAMIC_BUCKETS; i++) {
                 if (isMyBucket(i) && !bucketInformation.containsKey(i)) {
                     // The new bucketId may still be larger than the upper bound
                     if (-1 == maxBucketsNum || i <= maxBucketsNum - 1) {

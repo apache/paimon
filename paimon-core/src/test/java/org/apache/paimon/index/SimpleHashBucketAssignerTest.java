@@ -86,6 +86,17 @@ public class SimpleHashBucketAssignerTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {-1, 32768})
+    public void testMaximumBucketId(int maxBucketsNum) {
+        SimpleHashBucketAssigner assigner =
+                new SimpleHashBucketAssigner(32768, 32767, 1, maxBucketsNum);
+        BinaryRow partition = BinaryRow.EMPTY_ROW;
+
+        assertThat(assigner.assign(partition, 1)).isEqualTo(Short.MAX_VALUE);
+        assertThat(assigner.assign(partition, 1)).isEqualTo(Short.MAX_VALUE);
+    }
+
     @Test
     public void testAssign() {
         SimpleHashBucketAssigner simpleHashBucketAssigner =
