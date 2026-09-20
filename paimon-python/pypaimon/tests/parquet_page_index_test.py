@@ -298,7 +298,7 @@ def test_missing_or_corrupt_parquet_still_raises(fixture, missing):
 
 
 @pytest.mark.parametrize('values,enabled', [
-    (None, False), ({}, False),
+    (None, False), ({}, True),
     ({'parquet.filter.columnindex.enabled': 'false'}, False),
     ({'parquet.filter.columnindex.enabled': False}, False),
     ({'parquet.filter.columnindex.enabled': 'true'}, True),

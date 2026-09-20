@@ -1131,7 +1131,7 @@ class CoreOptions:
     PARQUET_COLUMN_INDEX_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("parquet.filter.columnindex.enabled")
         .boolean_type()
-        .default_value(False)
+        .default_value(True)
         .with_description(
             "Enable Parquet page-index pruning. PyPaimon currently uses OffsetIndex "
             "metadata for contiguous row windows. "

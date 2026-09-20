@@ -108,11 +108,11 @@ The command will install the package and core dependencies to your local Python 
 # Parquet page-index reads
 
 For row-tracking tables with a Parquet OffsetIndex, PyPaimon can read a
-contiguous `_ROW_ID` range without decoding the full row group. Enable it
-with the table option:
+contiguous `_ROW_ID` range without decoding the full row group. This is enabled
+by default and can be disabled with the table option:
 
 ```python
-indexed_table = table.copy({"parquet.filter.columnindex.enabled": "true"})
+table = table.copy({"parquet.filter.columnindex.enabled": "false"})
 ```
 
 Unsupported reads use the normal path. Reading fewer bytes may require more
