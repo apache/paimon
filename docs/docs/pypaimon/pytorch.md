@@ -133,11 +133,57 @@ for batch in dataloader:
 converter supports non-null numeric, boolean, and numeric fixed-size-list
 columns. Use `to_tensor_fn` for other types or custom conversion.
 
-Omit `batch_size` to preserve native reader batches. Otherwise, batches are
-combined or sliced to the requested size. Use `DataLoader(batch_size=None)` to
-disable a second batching step. Batch streaming does not support `shuffle=True`.
+Without shuffle, omit `batch_size` to preserve native reader batches. Otherwise,
+batches are combined or sliced to the requested size. Use
+`DataLoader(batch_size=None)` to disable a second batching step.
 Numeric tensors may share read-only Arrow buffers; clone them before in-place
 mutation. Batch formats currently require `prefetch_concurrency=1`.
+
+### Shuffled Batch Streaming
+
+Set `shuffle=True` to mix rows across input batches while keeping values in
+Arrow until the final Tensor conversion. The same options work with
+`batch_format="pyarrow"` and custom `to_tensor_fn` converters:
+
+```python
+dataset = table_read.to_torch(
+    splits,
+    streaming=True,
+    batch_format="torch",
+    batch_size=256,
+    shuffle=True,
+    seed=42,
+    buffer_size=4096,
+    max_buffer_input_splits=4,
+)
+loader = DataLoader(dataset, batch_size=None, num_workers=2)
+
+for epoch in range(10):
+    dataset.set_epoch(epoch)
+    for batch in loader:
+        train(batch["features"], batch["label"])
+```
+
+Each worker retains at most `buffer_size` rows in a rolling shuffle buffer and
+replaces randomly selected slots with rows from incoming Arrow blocks. Input
+blocks contain at most `buffer_size` rows; gathering replacements, output
+batching, and each open format reader use additional memory. This is a row
+bound, not a byte bound. The buffer drains early if combining Arrow blocks
+would overflow a 32-bit offset. Without `batch_size`, output blocks contain at
+most `buffer_size` rows.
+
+`max_buffer_input_splits` bounds the number of interleaved split readers per
+worker; `1` reads splits in order. A binding limit keeps the existing ordered
+read path so it selects the same rows before shuffling. Filters and distributed
+worker/rank sharding also precede shuffle. Each selected row is emitted once.
+
+The shuffle is local to each worker's buffer, not a uniform permutation of the
+whole dataset. The same seed, epoch, input batches and worker/rank configuration
+reproduce the same order; `set_epoch()` also reaches persistent workers. Changing
+reader batching or worker configuration can change the order. Arrow and Tensor
+formats share the same shuffle path, while row-format split interleaving can
+produce a different order. The existing `prefetch_concurrency=1` requirement
+also applies to shuffled batches.
 
 ## Video frame descriptors
 

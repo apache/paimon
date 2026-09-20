@@ -1207,9 +1207,10 @@ class TableRead:
                 format.
             batch_format: ``"row"``, ``"pyarrow"``, or ``"torch"``. Batch
                 formats require streaming.
-            batch_size: Rows per batch; ``None`` preserves reader batches.
+            batch_size: Rows per batch; ``None`` preserves reader batches when
+                unshuffled, or emits shuffle blocks of at most buffer_size rows.
             to_tensor_fn: Optional RecordBatch converter for Torch batches.
-            shuffle: Whether to shuffle rows; supported only in row format.
+            shuffle: Whether to shuffle rows in a bounded buffer before output.
             auto_detect_rank: Whether streaming reads shard by DDP rank.
             sharding_rank: Explicit rank in the intended DDP process group.
             sharding_world_size: Explicit size of that process group.
@@ -1244,10 +1245,6 @@ class TableRead:
                 raise ValueError(
                     "batch_format=%r requires streaming=True" % batch_format
                 )
-            if shuffle:
-                raise ValueError(
-                    "shuffle=True only supports batch_format='row'"
-                )
             if batch_format == "pyarrow" and to_tensor_fn is not None:
                 raise ValueError("to_tensor_fn requires batch_format='torch'")
             if to_tensor_fn is not None and not callable(to_tensor_fn):
@@ -1263,8 +1260,13 @@ class TableRead:
 
             from pypaimon.read.datasource.torch_dataset import (
                 TorchBatchIterDataset,
+                TorchShuffledBatchIterDataset,
             )
-            return TorchBatchIterDataset(
+            dataset_type = TorchShuffledBatchIterDataset if shuffle else TorchBatchIterDataset
+            shuffle_options = (dict(seed=seed, buffer_size=buffer_size,
+                                    max_buffer_input_splits=max_buffer_input_splits)
+                               if shuffle else {})
+            return dataset_type(
                 self,
                 splits,
                 batch_format=batch_format,
@@ -1273,6 +1275,7 @@ class TableRead:
                 auto_detect_rank=auto_detect_rank,
                 sharding_rank=sharding_rank,
                 sharding_world_size=sharding_world_size,
+                **shuffle_options,
             )
 
         if shuffle:
