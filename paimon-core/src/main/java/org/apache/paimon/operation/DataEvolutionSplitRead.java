@@ -250,11 +250,16 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             } else {
                 suppliers.add(
                         () -> {
-                            if (skipByFileIndex(filters, needMergeFiles, dataFilePathFactory)) {
-                                return new EmptyFileRecordReader<>();
-                            }
                             DeletionVectorWithRange deletionVector =
                                     readDeletionVector(needMergeFiles, deletionVectorFactory);
+                            if (skipByFileIndex(
+                                    filters,
+                                    needMergeFiles,
+                                    dataFilePathFactory,
+                                    rowRanges,
+                                    deletionVector)) {
+                                return new EmptyFileRecordReader<>();
+                            }
                             return createUnionReader(
                                     needMergeFiles,
                                     partition,
@@ -836,12 +841,15 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     private boolean skipByFileIndex(
             @Nullable List<Predicate> filters,
             List<DataFileMeta> files,
-            DataFilePathFactory pathFactory)
+            DataFilePathFactory pathFactory,
+            List<Range> rowRanges,
+            @Nullable DeletionVectorWithRange deletionVector)
             throws IOException {
         if (!fileIndexReadEnabled || isNullOrEmpty(filters)) {
             return false;
         }
 
+        DeletionVector dv = deletionVector == null ? null : deletionVector.deletionVector;
         Set<Integer> claimedFieldIds = new HashSet<>();
         for (DataFileMeta file : files) {
             if (isBlobFile(file.fileName()) || isVectorStoreFile(file.fileName())) {
@@ -865,9 +873,22 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 continue;
             }
 
+            long fileOffset =
+                    dv == null || dv.isEmpty()
+                            ? 0L
+                            : deletionVectorOffset(
+                                    file.nonNullRowIdRange(), rowRanges, deletionVector);
             FileIndexResult result =
                     FileIndexEvaluator.evaluate(
-                            fileIO, dataSchema, dataFilters, null, null, pathFactory, file, null);
+                            fileIO,
+                            dataSchema,
+                            dataFilters,
+                            null,
+                            null,
+                            pathFactory,
+                            file,
+                            dv,
+                            fileOffset);
             if (!result.remain()) {
                 return true;
             }

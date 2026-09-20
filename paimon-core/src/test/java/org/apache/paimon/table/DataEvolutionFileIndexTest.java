@@ -541,6 +541,55 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         assertThat(query(table, equalF1(f1(50)))).isEmpty();
     }
 
+    @Test
+    public void testMergedGroupFileIndexComposesWithDeletionVector() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        FileStoreTable table = createTable("merged_bitmap_dv", options);
+        writeSplitColumns(table, ROW_COUNT, bitmapOptions("f1"), Collections.emptyMap());
+        writeSplitColumns(table, ROW_COUNT, bitmapOptions("f1"), Collections.emptyMap());
+
+        deleteRowsFrom(table, ROW_COUNT, 50);
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        DataSplit targetSplit =
+                latest.newReadBuilder().newScan().plan().splits().stream()
+                        .map(split -> (DataSplit) split)
+                        .filter(
+                                split ->
+                                        split.dataFiles().stream()
+                                                .anyMatch(
+                                                        file ->
+                                                                file.nonNullFirstRowId()
+                                                                        == ROW_COUNT))
+                        .findFirst()
+                        .orElseThrow(IllegalStateException::new);
+        DataFileMeta anchor =
+                retrieveAnchorFile(
+                        targetSplit.dataFiles().stream()
+                                .filter(file -> file.nonNullFirstRowId() == ROW_COUNT)
+                                .collect(Collectors.toList()),
+                        file -> file);
+        Path anchorPath =
+                latest.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(targetSplit.partition(), targetSplit.bucket())
+                        .toPath(anchor);
+        assertThat(latest.fileIO().delete(anchorPath, false)).isTrue();
+
+        // The deleted row is the only bitmap hit in the second merged group. The missing anchor
+        // file therefore proves that the group was skipped before any union reader opened it.
+        RowType readType =
+                rowTypeWithRowId(rowType()).project(SpecialFields.ROW_ID.name(), "f1", "f2");
+        List<InternalRow> rows = readWithFilter(table, equalF1(f1(50)), readType);
+        assertThat(rowIds(rows)).containsExactlyElementsOf(rowIds(0, ROW_COUNT));
+
+        FileStoreTable neighbour = createTable("merged_bitmap_dv_neighbour", options);
+        writeSplitColumns(neighbour, ROW_COUNT, bitmapOptions("f1"), Collections.emptyMap());
+        deleteRows(neighbour, 51);
+        assertRow(assertSingleRow(query(neighbour, equalF1(f1(50)))), 50);
+    }
+
     /** Commits a deletion vector for the anchor file of the only row id group of {@code table}. */
     private void deleteRows(FileStoreTable table, long... positions) throws Exception {
         FileStoreTable latest = getTable(identifier(table.name()));
@@ -552,17 +601,17 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     private void deleteRowsFrom(FileStoreTable table, long firstRowId, long... positions)
             throws Exception {
         FileStoreTable latest = getTable(identifier(table.name()));
-        DataFileMeta anchor =
+        List<DataFileMeta> group =
                 latest.newReadBuilder().newScan().plan().splits().stream()
                         .map(split -> (DataSplit) split)
                         .flatMap(split -> split.dataFiles().stream())
                         .filter(file -> file.nonNullFirstRowId() == firstRowId)
-                        .findFirst()
-                        .orElseThrow(
-                                () ->
-                                        new IllegalArgumentException(
-                                                "Cannot find data file with first row id "
-                                                        + firstRowId));
+                        .collect(Collectors.toList());
+        if (group.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Cannot find data file with first row id " + firstRowId);
+        }
+        DataFileMeta anchor = retrieveAnchorFile(group, file -> file);
         deleteRows(latest, anchor, positions);
     }
 
