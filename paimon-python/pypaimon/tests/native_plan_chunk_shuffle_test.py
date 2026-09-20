@@ -24,13 +24,19 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.read.native_plan import (
+    native_method_available,
+    native_reader_available,
+    native_runtime_available,
+)
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_delete import TableDeleteByRowId
 
 
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
-    not native_runtime_available(), reason='Rust planner required')]
+    not native_runtime_available()
+    or not native_method_available('TableScan', 'with_chunk_shuffle'),
+    reason='Rust native chunk planner required')]
 
 
 @pytest.fixture(params=['append', 'append-dv', 'de', 'de-dv'])
@@ -105,7 +111,10 @@ def chunk_table(request, tmp_path):
 def _chunks(table, seed, chunk_size=3, shard=None, predicate=None, projection=None):
     results = []
     for native in (False, True):
-        builder = table.copy({'scan.native-plan.enabled': str(native).lower()}).new_read_builder()
+        builder = table.copy({
+            'scan.native-plan.enabled': str(native).lower(),
+            'read.native.enabled': str(native).lower(),
+        }).new_read_builder()
         if predicate is not None:
             builder.with_filter(predicate)
         if projection is not None:
@@ -125,7 +134,15 @@ def _chunks(table, seed, chunk_size=3, shard=None, predicate=None, projection=No
         for split in plan.splits():
             if table.options.options.contains_key('incremental-between-timestamp'):
                 assert split.is_streaming
-            rows = builder.new_read().to_arrow([split]).to_pylist()
+            if native:
+                assert native_reader_available()
+                assert getattr(split, '_native_split', None) is not None
+                with patch(
+                        'pypaimon.read.table_read.TableRead._create_split_read',
+                        side_effect=AssertionError('Python reader was used')):
+                    rows = builder.new_read().to_arrow([split]).to_pylist()
+            else:
+                rows = builder.new_read().to_arrow([split]).to_pylist()
             assert 0 < len(rows) <= chunk_size
             assert split.merged_row_count() == len(rows)
             if rows and 'p' in rows[0]:

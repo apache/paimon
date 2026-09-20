@@ -144,6 +144,8 @@ class TableScan:
             return False
         if getattr(fs, 'chunk_shuffle', None) is not None:
             fs._validate_chunk_shuffle_compat()
+            if not native_method_available('TableScan', 'with_chunk_shuffle'):
+                return False
         # Positional append distribution needs the stable partition/file order
         # introduced in 0.4. Older bindings can assign different rows per call.
         if (not self.table.is_primary_key_table and not fs.data_evolution
@@ -272,6 +274,11 @@ class TableScan:
                     return Plan([])
                 extra_options['incremental_range'] = self._incremental_snapshot_range
             chunk_shuffle = fs.chunk_shuffle
+            if chunk_shuffle is not None:
+                extra_options['chunk_shuffle'] = chunk_shuffle
+                if fs.idx_of_this_subtask is not None:
+                    extra_options['chunk_shuffle_shard'] = (
+                        fs.idx_of_this_subtask, fs.number_of_para_subtasks)
             if has_distribution and fs.data_evolution and chunk_shuffle is None:
                 if fs.idx_of_this_subtask is not None:
                     extra_options['row_position_shard'] = (
@@ -318,9 +325,7 @@ class TableScan:
                     and plan.snapshot_id is not None):
                 snapshot = self.table.snapshot_manager().get_snapshot_by_id(plan.snapshot_id)
                 splits = fs._apply_primary_key_sorted_indexes(splits, snapshot)
-            if chunk_shuffle is not None:
-                splits = self._chunk_shuffle_splits(splits, plan.snapshot_id)
-            elif has_distribution:
+            if chunk_shuffle is None and has_distribution:
                 if self.table.is_primary_key_table:
                     splits = [s for s in splits
                               if s.bucket % fs.number_of_para_subtasks == fs.idx_of_this_subtask]
@@ -349,36 +354,6 @@ class TableScan:
             logger.warning(
                 "Native plan failed, falling back to the Python scanner: %s", e)
             return None
-
-    def _chunk_shuffle_splits(self, splits, snapshot_id):
-        """Reuse native file/DV planning with Python's stable chunk assignment."""
-        from pypaimon.manifest.schema.manifest_entry import ManifestEntry
-        from pypaimon.read.scanner.chunk_shuffle_split_generator import (
-            AppendChunkShuffleSplitGenerator, DataEvolutionChunkShuffleSplitGenerator,
-        )
-        fs = self.file_scanner
-        entries, deletions = [], {}
-        for split in splits:
-            key = (tuple(split.partition.values), split.bucket)
-            for index, file in enumerate(split.files):
-                entries.append(ManifestEntry(
-                    0, split.partition, split.bucket, self.table.total_buckets, file))
-                if split.data_deletion_files and split.data_deletion_files[index] is not None:
-                    deletions.setdefault(key, {})[file.file_name] = split.data_deletion_files[index]
-        generator_type = (DataEvolutionChunkShuffleSplitGenerator if fs.data_evolution
-                          else AppendChunkShuffleSplitGenerator)
-        seed, chunk_size = fs.chunk_shuffle
-        generator = generator_type(self.table, fs.target_split_size, fs.open_file_cost,
-                                   deletions, seed=seed, chunk_size=chunk_size,
-                                   snapshot_id=snapshot_id)
-        if fs.idx_of_this_subtask is not None:
-            generator.with_shard(fs.idx_of_this_subtask, fs.number_of_para_subtasks)
-        chunks = generator.create_splits(entries)
-        for split in chunks:
-            while callable(getattr(split, 'data_split', None)):
-                split = split.data_split()
-            split.is_streaming = fs.is_streaming
-        return chunks
 
     def plan_for_write(self) -> Plan:
         if self.__auth_query() is not None:
