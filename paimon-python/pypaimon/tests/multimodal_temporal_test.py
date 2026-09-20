@@ -19,6 +19,7 @@ import os
 import shutil
 import sys
 import tempfile
+import tracemalloc
 import unittest
 from datetime import datetime, timedelta
 from unittest import mock
@@ -376,7 +377,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         self.assertIsNone(rows[2]["average"])
         self.assertEqual(0, rows[2]["valid_count"])
 
-    def test_window_join_reuses_gathered_values(self):
+    def test_window_join_reuses_arrow_slices(self):
         source = temporal._WindowJoinRight.__new__(temporal._WindowJoinRight)
         source.by = ("group",)
         source._index = {(1,): (0, 3), (2,): (3, 4)}
@@ -425,14 +426,74 @@ class MultimodalTemporalTest(unittest.TestCase):
                 for (_, _, operation), array in zip(aggregations, arrays):
                     self.assertEqual(expected[operation].type, array.type)
                     self.assertEqual(expected[operation], array)
-                source_names = {name for _, name, _ in aggregations}
-                self.assertEqual(3 * len(source_names), take.call_count)
-                for name in source_names:
-                    gathered_indices = [
-                        call[0][1].to_pylist() for call in take.call_args_list
-                        if call[0][0].equals(values[name])
-                    ]
-                    self.assertEqual([[0, 1], [1, 2], [3]], gathered_indices)
+                take.assert_not_called()
+
+    def test_window_join_preserves_order_across_disjoint_ranges(self):
+        anchors = self._table("range_anchors", {
+            "episode_id": pa.int32(), "event_time": pa.int64(),
+        })
+        samples = self._table("range_samples", {
+            "episode_id": pa.int32(), "event_time": pa.int64(),
+            "label": pa.string(),
+        })
+        # Physical row IDs are neither contiguous nor ordered within a window.
+        samples.add([
+            {"episode_id": 1, "event_time": 12, "label": "late"},
+            {"episode_id": 2, "event_time": 2, "label": "other"},
+            {"episode_id": 1, "event_time": 2, "label": "first"},
+            {"episode_id": 1, "event_time": 6, "label": "excluded"},
+            {"episode_id": 1, "event_time": 2, "label": None},
+            {"episode_id": 1, "event_time": 2, "label": "last"},
+            {"episode_id": 1, "event_time": 1, "label": "early"},
+        ])
+        anchors.add([
+            {"episode_id": group, "event_time": time}
+            for group, time in [(1, 12), (1, 3), (2, 2), (1, 2),
+                                (1, 2), (3, 2), (1, 20)]
+        ])
+        query = pmm.join_window(
+            anchors.scan(), samples.scan().select("label"),
+            on="event_time", by="episode_id", preceding=1,
+            aggregations={
+                "first": ("label", "first"),
+                "last": ("label", "last"),
+                "count": ("label", "count"),
+            })
+        rows = query.to_list()
+        self.assertEqual([
+            ("late", "late", 1), ("first", "last", 2),
+            ("other", "other", 1), ("early", "last", 3),
+            ("early", "last", 3), (None, None, 0), (None, None, 0),
+        ], [(row["first"], row["last"], row["count"]) for row in rows])
+
+    def test_window_join_bounds_overlapping_window_memory(self):
+        size = 1024
+        source = temporal._WindowJoinRight.__new__(temporal._WindowJoinRight)
+        source.by = ("group",)
+        source._index = {(1,): (0, size)}
+        source._time_keys = np.arange(size, dtype=np.int64)
+        source._row_ids = pa.array(range(10000, 10000 + size), type=pa.int64())
+        source.time_type = pa.int64()
+        source._preceding_key = size - 1
+        source._following_key = 0
+        source.closed = "both"
+        source.aggregations = (("count", "value", "count"),)
+        values = pa.table({"value": pa.array(range(size), type=pa.int64())})
+        fetcher = mock.Mock(schema=values.schema)
+        fetcher.fetch.return_value = values
+        anchors = [{"group": 1, temporal._TIME_KEY: size - 1}] * 256
+
+        tracemalloc.start()
+        try:
+            arrays = source.build_arrays(anchors, fetcher)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+
+        self.assertEqual([size] * len(anchors), arrays[0].to_pylist())
+        fetcher.fetch.assert_called_once_with(list(range(10000, 10000 + size)))
+        # Per-window row-ID and position lists alone exceed this budget.
+        self.assertLess(peak, 4 * 1024 * 1024)
 
     def test_window_join_supports_asymmetric_timestamp_bounds(self):
         anchors = self._table("window_timestamp_anchors", {
