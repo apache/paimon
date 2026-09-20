@@ -21,7 +21,14 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.Contains;
+import org.apache.paimon.predicate.EndsWith;
+import org.apache.paimon.predicate.LeafFunction;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Like;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.reader.RecordReader;
@@ -31,6 +38,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import org.slf4j.Logger;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -39,6 +48,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import static org.apache.paimon.predicate.PredicateVisitor.collectFieldIds;
 
 /**
  * Evaluates a row predicate on the data for a given set of row ids and returns the ids that satisfy
@@ -62,6 +73,53 @@ class FilteredRowIdReader {
         this.planSnapshot = planSnapshot;
         this.partitionFilter = partitionFilter;
         this.filter = filter;
+    }
+
+    /**
+     * Whether a scalar global index evaluation of {@code filter} is an exact match set. The global
+     * index contract only promises candidates: {@link GlobalIndexEvaluator} drops a conjunct no
+     * index can evaluate, and BTree answers {@code contains} / {@code endsWith} / {@code like} with
+     * every non-null row. A search that ranks rows before the engine filters them must refine a
+     * non-exact answer through {@link #matchingRowIds} first.
+     */
+    static boolean isExact(
+            RowType rowType, Predicate filter, GlobalIndexEvaluator.Evaluation evaluation) {
+        Set<Integer> filterFieldIds = collectFieldIds(rowType, filter);
+        if (!evaluation.contributingFieldIds().containsAll(filterFieldIds)) {
+            return false;
+        }
+        return !hasCandidateOnlyLeaf(filter);
+    }
+
+    private static boolean hasCandidateOnlyLeaf(Predicate predicate) {
+        if (predicate instanceof CompoundPredicate) {
+            for (Predicate child : ((CompoundPredicate) predicate).children()) {
+                if (hasCandidateOnlyLeaf(child)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (predicate instanceof LeafPredicate) {
+            LeafFunction function = ((LeafPredicate) predicate).function();
+            return function instanceof Contains
+                    || function instanceof EndsWith
+                    || function instanceof Like;
+        }
+        return false;
+    }
+
+    /** Logs that a candidate-only index answer was dropped because refinement is disabled. */
+    static void warnCandidatesExcluded(Logger log, FileStoreTable table, Predicate filter) {
+        log.warn(
+                "The scalar global index can only answer the row filter {} on table {} with "
+                        + "candidates, and {} is false, so those rows are excluded from the "
+                        + "search; the result may hold fewer rows than requested. Set the option "
+                        + "to true to verify the candidates against the data, or build an index "
+                        + "that answers the predicate exactly.",
+                filter,
+                table.name(),
+                CoreOptions.GLOBAL_INDEX_FILTER_REFINE_FROM_DATA.key());
     }
 
     /** The subset of {@code rows} whose data satisfies the filter. */

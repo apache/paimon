@@ -56,10 +56,11 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import javax.annotation.Nullable;
 
@@ -801,14 +802,16 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                 .hasMessageContaining("does not support row filters");
     }
 
-    @ParameterizedTest(name = "scalar-index.search-mode={0}")
-    @ValueSource(strings = {"fast", "full"})
-    public void testFullTextSearchRefinesCandidateOnlyIndexResultsBeforeTopK(String scalarMode)
-            throws Exception {
+    @ParameterizedTest(name = "scalar-index.search-mode={0}, refine-from-data={1}")
+    @CsvSource({"fast, true", "full, true", "fast, false", "full, false"})
+    public void testFullTextSearchCandidateOnlyIndexResultsAreNeverRanked(
+            String scalarMode, boolean refine) throws Exception {
         // BTree answers contains / endsWith / like with every non-null row (a candidate superset).
         // Ranking that superset lets a non-matching, higher-scoring row take the single slot and
-        // the matching row is lost before any engine-side filter can run.
-        FileStoreTable table = createTable("full_text_candidate_only_" + scalarMode, scalarMode);
+        // the matching row is lost before any engine-side filter can run. With refinement the
+        // candidates are verified from the data; without it they are excluded.
+        FileStoreTable table =
+                createTable("full_text_candidate_only_" + scalarMode + refine, scalarMode, refine);
         writeDocuments(table, RANKED_DOCUMENTS);
         buildAndCommitIndex(table, RANKED_DOCUMENTS);
 
@@ -817,18 +820,26 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         Predicate endsWithZeta = builder.endsWith(1, BinaryString.fromString("zeta"));
         Predicate likeZeta = builder.like(1, BinaryString.fromString("%zeta"));
 
-        // Without a scalar index, full mode evaluates the predicate on the data: exact.
+        // Without a scalar index, full mode evaluates the predicate on the data regardless of
+        // the refine option: that read is governed by scalar-index.search-mode.
         if (scalarMode.equals("full")) {
             assertThat(searchWithFilter(table, containsZeta, 1).results()).containsExactly(5L);
         }
 
         buildAndCommitBTreeIndex(table, RANKED_DOCUMENTS);
-        assertThat(searchWithFilter(table, containsZeta, 1).results()).containsExactly(5L);
-        assertThat(searchWithFilter(table, endsWithZeta, 1).results()).containsExactly(5L);
-        assertThat(searchWithFilter(table, likeZeta, 1).results()).containsExactly(5L);
-        assertThat(searchWithFilter(table, containsZeta, 10).results()).containsExactly(5L);
+        for (Predicate candidateOnly : Arrays.asList(containsZeta, endsWithZeta, likeZeta)) {
+            for (int limit : new int[] {1, 10}) {
+                RoaringNavigableMap64 rows =
+                        searchWithFilter(table, candidateOnly, limit).results();
+                if (refine) {
+                    assertThat(rows).as("%s limit %s", candidateOnly, limit).containsExactly(5L);
+                } else {
+                    assertThat(rows).as("%s limit %s", candidateOnly, limit).isEmpty();
+                }
+            }
+        }
 
-        // Exact operators on the same btree stay exact.
+        // Exact operators on the same btree stay exact either way.
         assertThat(
                         searchWithFilter(
                                         table,
@@ -836,16 +847,24 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                                         1)
                                 .results())
                 .containsExactly(5L);
+        assertThat(
+                        searchWithFilter(
+                                        table,
+                                        builder.startsWith(1, BinaryString.fromString("paimon z")),
+                                        1)
+                                .results())
+                .containsExactly(5L);
     }
 
-    @ParameterizedTest(name = "scalar-index.search-mode={0}")
-    @ValueSource(strings = {"fast", "full"})
-    public void testFullTextSearchPartiallyIndexedConjunctionIsExactBeforeTopK(String scalarMode)
-            throws Exception {
+    @ParameterizedTest(name = "scalar-index.search-mode={0}, refine-from-data={1}")
+    @CsvSource({"fast, true", "full, true", "fast, false", "full, false"})
+    public void testFullTextSearchPartiallyIndexedConjunctionIsNeverRankedAsSuperset(
+            String scalarMode, boolean refine) throws Exception {
         // Only `id` is indexed. The evaluator drops the conjunct it cannot evaluate, which makes
-        // the index result a superset (every row with id >= 0); ranking that superset lets row 0
-        // take the single slot although only row 5 satisfies the whole predicate.
-        FileStoreTable table = createTable("full_text_partial_and_" + scalarMode, scalarMode);
+        // the index result a superset (every row with id >= 0); ranking that superset would let
+        // row 0 take the single slot although only row 5 satisfies the whole predicate.
+        FileStoreTable table =
+                createTable("full_text_partial_and_" + scalarMode + refine, scalarMode, refine);
         writeDocuments(table, RANKED_DOCUMENTS);
         buildAndCommitIndex(table, RANKED_DOCUMENTS);
         buildAndCommitIdBTreeIndex(table, RANKED_DOCUMENTS.length);
@@ -855,8 +874,15 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                 PredicateBuilder.and(
                         builder.greaterOrEqual(0, 0),
                         builder.equal(1, BinaryString.fromString("paimon zeta")));
-        assertThat(searchWithFilter(table, partiallyIndexed, 1).results()).containsExactly(5L);
-        assertThat(searchWithFilter(table, partiallyIndexed, 10).results()).containsExactly(5L);
+        for (int limit : new int[] {1, 10}) {
+            RoaringNavigableMap64 rows = searchWithFilter(table, partiallyIndexed, limit).results();
+            if (refine || scalarMode.equals("full")) {
+                // full mode decides rows whose filter column is unindexed from the data anyway
+                assertThat(rows).containsExactly(5L);
+            } else {
+                assertThat(rows).isEmpty();
+            }
+        }
     }
 
     private GlobalIndexResult searchWithFilter(
@@ -872,6 +898,11 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     private FileStoreTable createTable(String name, String scalarSearchMode) throws Exception {
+        return createTable(name, scalarSearchMode, true);
+    }
+
+    private FileStoreTable createTable(String name, String scalarSearchMode, boolean refine)
+            throws Exception {
         Identifier identifier = identifier(name);
         Schema schema =
                 Schema.newBuilder()
@@ -881,6 +912,9 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
                         .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
                         .option(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), scalarSearchMode)
+                        .option(
+                                CoreOptions.GLOBAL_INDEX_FILTER_REFINE_FROM_DATA.key(),
+                                Boolean.toString(refine))
                         .build();
         catalog.createTable(identifier, schema, false);
         return getTable(identifier);
