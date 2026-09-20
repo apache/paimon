@@ -566,4 +566,71 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
                                 + "even though the unrelated top-level `s.a` column does not")
                 .contains(1L);
     }
+
+    /**
+     * A declared top-level column whose name contains a dot (say {@code "s.a"}) can be entirely
+     * absent from a file - a Format Table's metastore schema need not match what a given file
+     * holds. The file below only has a nested {@code s -> a} (INT32); it holds no top-level {@code
+     * "s.a"} at all. A predicate built against the declared schema names that missing column as an
+     * ordinary (non-nested) {@code FieldRef("s.a")}, which {@code findFileColumn}'s fallback walk
+     * still descends into the unrelated nested group instead of reporting the column missing. Since
+     * a genuinely missing column always reads as null, {@code s.a IS NULL} must keep every row.
+     */
+    @Test
+    public void testMissingDottedTopLevelFieldIsTreatedAsNullNotAsANestedPath() throws IOException {
+        RowType innerActual = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"a"});
+        RowType actualFileType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), innerActual}, new String[] {"pk", "s"});
+
+        write(
+                fileFormat().createWriterFactory(actualFileType),
+                file,
+                GenericRow.of(1L, GenericRow.of(7)),
+                GenericRow.of(2L, GenericRow.of(8)));
+
+        // the declared/read schema has a top-level "s.a" that the file above does not hold at all
+        RowType declaredType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.BIGINT()},
+                        new String[] {"pk", "s.a"});
+        Predicate isNull = new PredicateBuilder(declaredType).isNull(1);
+
+        Assertions.assertThat(readPks(declaredType, isNull))
+                .as(
+                        "every row must survive: the declared top-level `s.a` does not exist in the file")
+                .containsExactlyInAnyOrder(1L, 2L);
+    }
+
+    /**
+     * Companion to {@link #testMissingDottedTopLevelFieldIsTreatedAsNullNotAsANestedPath()}: when a
+     * declared dotted top-level column is missing from the file AND there is no group at all under
+     * its first component (so there is no ambiguity to guard against), the predicate must still be
+     * pushed down and treat the column as null - the fix must not turn every dotted, missing column
+     * into a rejected pushdown, only the ones that collide with a real nested column.
+     */
+    @Test
+    public void testMissingDottedTopLevelFieldWithNoCollisionIsStillPushedDown()
+            throws IOException {
+        RowType actualFileType =
+                RowType.of(new DataType[] {DataTypes.BIGINT()}, new String[] {"pk"});
+
+        write(
+                fileFormat().createWriterFactory(actualFileType),
+                file,
+                GenericRow.of(1L),
+                GenericRow.of(2L));
+
+        // the declared/read schema has a top-level "x.y" that the file above has no trace of at
+        // all - no exact match, and no group "x" to even attempt a walk into
+        RowType declaredType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.BIGINT()},
+                        new String[] {"pk", "x.y"});
+        Predicate isNull = new PredicateBuilder(declaredType).isNull(1);
+
+        Assertions.assertThat(readPks(declaredType, isNull))
+                .as("every row must survive: `x.y` is simply absent, with nothing to collide with")
+                .containsExactlyInAnyOrder(1L, 2L);
+    }
 }

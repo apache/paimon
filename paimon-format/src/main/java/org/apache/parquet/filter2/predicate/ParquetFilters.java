@@ -607,10 +607,19 @@ public class ParquetFilters {
      * The file's column for {@code fieldRef}, or null when the file has no such column. A column
      * that exists but is not primitive cannot carry a predicate at all, so it is rejected outright.
      *
-     * <p>{@code fieldRef} names a nested field with dots ({@code addr.city}), which is resolved by
+     * <p>A {@code fieldRef} synthesized from a {@link NestedFieldTransform} (its index left at
+     * {@link #UNUSED_INDEX}) names a nested field with dots ({@code addr.city}), resolved by
      * descending the file's groups. A top-level column matching the whole name wins over that walk,
      * keeping flat columns spelled with dots resolving as they always did. parquet-mr identifies
      * columns by dot-joined path too, so it cannot tell the two apart either way.
+     *
+     * <p>An ordinary {@code fieldRef} - one naming an actual top-level field, index not {@link
+     * #UNUSED_INDEX} - never resolves through that walk: a Format Table's declared schema need not
+     * match what a given file holds, so a dotted top-level name with no exact match is a genuinely
+     * missing column, not license to reinterpret it as a path into an unrelated group. But the walk
+     * still runs as a collision check: whatever name is ultimately handed to {@code FilterApi} gets
+     * re-split by parquet-mr the same way, so if the walk would find a real column there, using the
+     * joined name is not safe either - the pushdown is refused outright rather than risking it.
      */
     @Nullable
     private static FileColumn findFileColumn(
@@ -625,6 +634,20 @@ public class ParquetFilters {
             return null;
         }
 
+        FileColumn walked = walkGroups(fileSchema, parts, caseSensitive);
+        if (fieldRef.index() == UNUSED_INDEX) {
+            return walked;
+        }
+        if (walked != null) {
+            throw new UnsupportedOperationException();
+        }
+        return null;
+    }
+
+    /** Descends {@code fileSchema} through {@code parts}, or null if any segment is missing. */
+    @Nullable
+    private static FileColumn walkGroups(
+            MessageType fileSchema, String[] parts, boolean caseSensitive) {
         StringBuilder resolved = new StringBuilder();
         GroupType parent = fileSchema;
         for (int i = 0; i < parts.length; i++) {
