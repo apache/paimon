@@ -24,6 +24,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional
 
 import pandas
 import pyarrow
+import pyarrow.compute as pyarrow_compute
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
@@ -414,9 +415,6 @@ class TableRead:
         """Return Rust-read batches, or ``None`` when this read must fall back."""
         if not self.table.options.native_read_enabled():
             return None
-        # These Python-only output controls do not yet have native equivalents.
-        if self.include_row_kind or self.nested_name_paths:
-            return None
         if self.table.options.file_format() not in _NATIVE_READ_FILE_FORMATS:
             return None
         if not splits:
@@ -446,13 +444,7 @@ class TableRead:
             if streaming:
                 groups = self._native_split_groups(
                     rust_splits, parallelism, split_weights)
-                read_kwargs = {
-                    'predicate': self.predicate,
-                    'limit': self.limit,
-                    'projection': [field.name for field in self.read_type],
-                }
-                if blob_parallelism is not None:
-                    read_kwargs['blob_parallelism'] = blob_parallelism
+                read_kwargs = self._native_read_kwargs(blob_parallelism)
                 readers = []
                 try:
                     for group in groups:
@@ -484,19 +476,27 @@ class TableRead:
                     "Native read failed, falling back to the Python reader: %s", e)
                 return None
         try:
-            read_kwargs = {
-                'predicate': self.predicate,
-                'limit': self.limit,
-                'projection': [field.name for field in self.read_type],
-            }
-            if blob_parallelism is not None:
-                read_kwargs['blob_parallelism'] = blob_parallelism
+            read_kwargs = self._native_read_kwargs(blob_parallelism)
             batches = native_read(self.table, rust_splits, **read_kwargs)
         except Exception as e:
             logger.warning(
                 "Native read failed, falling back to the Python reader: %s", e)
             return None
         return self._convert_native_batches(batches, schema)
+
+    def _native_read_kwargs(self, blob_parallelism=None):
+        kwargs = {
+            'predicate': self.predicate,
+            'limit': self.limit,
+            'projection': [field.name for field in self.read_type],
+        }
+        if blob_parallelism is not None:
+            kwargs['blob_parallelism'] = blob_parallelism
+        if self.nested_name_paths:
+            kwargs['nested_projection'] = self.nested_name_paths
+        if self.include_row_kind:
+            kwargs['include_row_kind'] = True
+        return kwargs
 
     @staticmethod
     def _native_split_weight(split):
@@ -682,13 +682,7 @@ class TableRead:
         if remaining_state.exhausted():
             return []
         try:
-            read_kwargs = {
-                'predicate': self.predicate,
-                'limit': self.limit,
-                'projection': [field.name for field in self.read_type],
-            }
-            if blob_parallelism is not None:
-                read_kwargs['blob_parallelism'] = blob_parallelism
+            read_kwargs = self._native_read_kwargs(blob_parallelism)
             batches = native_read(self.table, rust_splits, **read_kwargs)
         except Exception as e:
             raise _NativeReadSetupError(str(e)) from e
@@ -701,6 +695,7 @@ class TableRead:
                 break
             if allowed < batch.num_rows:
                 batch = batch.slice(0, allowed)
+            batch = self._prepare_native_batch(batch, schema)
             batch = self._project_batch_to_output(batch)
             result.append(self._try_to_pad_batch_by_schema(batch, schema))
             if remaining_state.exhausted():
@@ -726,6 +721,7 @@ class TableRead:
                     continue
                 if remaining is not None and batch.num_rows > remaining:
                     batch = batch.slice(0, remaining)
+                batch = self._prepare_native_batch(batch, schema)
                 batch = self._project_batch_to_output(batch)
                 yield self._try_to_pad_batch_by_schema(batch, schema)
                 if remaining is not None:
@@ -736,6 +732,54 @@ class TableRead:
             close = getattr(batches, 'close', None)
             if close is not None:
                 close()
+
+    def _prepare_native_batch(self, batch, schema):
+        if self.include_row_kind and 'rowkind' in batch.schema.names:
+            index = batch.schema.get_field_index('rowkind')
+            batch = batch.rename_columns([
+                ROW_KIND_COLUMN if position == index else name
+                for position, name in enumerate(batch.schema.names)
+            ])
+        if self.nested_name_paths:
+            batch = self._flatten_native_nested_batch(batch, schema)
+        return batch
+
+    def _flatten_native_nested_batch(self, batch, schema):
+        arrays = []
+        fields = []
+        if self.include_row_kind:
+            index = batch.schema.get_field_index(ROW_KIND_COLUMN)
+            if index < 0:
+                raise ValueError('Native row-kind read did not return rowkind')
+            arrays.append(batch.column(index))
+            fields.append(schema.field(ROW_KIND_COLUMN))
+
+        for path, output in zip(self.nested_name_paths, self.read_type):
+            index = batch.schema.get_field_index(path[0])
+            if index < 0:
+                raise ValueError(
+                    "Native nested read did not return top-level field %r"
+                    % path[0])
+            array = batch.column(index)
+            parent_nulls = []
+            for name in path[1:]:
+                if pyarrow.types.is_struct(array.type):
+                    parent_nulls.append(pyarrow_compute.is_null(array))
+                    array = array.field(name)
+                elif pyarrow.types.is_map(array.type):
+                    array = pyarrow_compute.map_lookup(array, name, 'first')
+                else:
+                    raise ValueError(
+                        "Native nested path %r cannot descend through %s"
+                        % (path, array.type))
+            for nulls in reversed(parent_nulls):
+                array = pyarrow_compute.if_else(
+                    nulls, pyarrow.scalar(None, type=array.type), array)
+            arrays.append(array)
+            fields.append(schema.field(output.name))
+
+        return pyarrow.RecordBatch.from_arrays(
+            arrays, schema=pyarrow.schema(fields))
 
     def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema,
                                blob_parallelism: int = 1) -> Iterator[pyarrow.RecordBatch]:
@@ -1452,11 +1496,14 @@ class TableRead:
     def _project_batch_to_output(self, batch: pyarrow.RecordBatch) -> pyarrow.RecordBatch:
         if not self._needs_output_projection():
             return batch
-        if batch.schema.names == self._output_column_names:
+        output_names = list(self._output_column_names)
+        if self.include_row_kind and ROW_KIND_COLUMN in batch.schema.names:
+            output_names.insert(0, ROW_KIND_COLUMN)
+        if batch.schema.names == output_names:
             return batch
         name_to_pos = {name: i for i, name in enumerate(batch.schema.names)}
-        arrays = [batch.column(name_to_pos[name]) for name in self._output_column_names]
-        fields = [batch.schema.field(name_to_pos[name]) for name in self._output_column_names]
+        arrays = [batch.column(name_to_pos[name]) for name in output_names]
+        fields = [batch.schema.field(name_to_pos[name]) for name in output_names]
         return pyarrow.RecordBatch.from_arrays(
             arrays, schema=pyarrow.schema(fields))
 
