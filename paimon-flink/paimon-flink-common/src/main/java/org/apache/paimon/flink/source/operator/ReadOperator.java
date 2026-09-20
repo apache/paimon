@@ -27,6 +27,7 @@ import org.apache.paimon.flink.source.RecordLimiter;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.Splits;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.RowType;
@@ -144,10 +145,14 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
 
         Split split = record.getValue();
         // update metric when reading a new split
+        // A shape this metric cannot read must not fail the read.
+        Split inner = Splits.underlying(split);
         long eventTime =
-                ((DataSplit) split)
-                        .earliestFileCreationEpochMillis()
-                        .orElse(FileStoreSourceReaderMetrics.UNDEFINED);
+                inner instanceof DataSplit
+                        ? ((DataSplit) inner)
+                                .earliestFileCreationEpochMillis()
+                                .orElse(FileStoreSourceReaderMetrics.UNDEFINED)
+                        : FileStoreSourceReaderMetrics.UNDEFINED;
         sourceReaderMetrics.recordSnapshotUpdate(eventTime);
         // update idleStartTime when reading a new split
         idleStartTime = FileStoreSourceReaderMetrics.ACTIVE;
@@ -156,7 +161,10 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
         try (CloseableIterator<InternalRow> iterator =
                 read.createReader(split).toCloseableIterator()) {
             while (!reachLimit() && iterator.hasNext()) {
-                emitEventTimeLag = System.currentTimeMillis() - eventTime;
+                emitEventTimeLag =
+                        eventTime == FileStoreSourceReaderMetrics.UNDEFINED
+                                ? FileStoreSourceReaderMetrics.UNDEFINED
+                                : System.currentTimeMillis() - eventTime;
 
                 // each Split is already counted as one input record,
                 // so we don't need to count the first record

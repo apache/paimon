@@ -18,11 +18,14 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.IncrementalSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
 
@@ -856,6 +859,56 @@ public class ContinuousFileSplitEnumeratorTest
         context.triggerAllActions();
         Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(1);
         Assertions.assertThat(enumerator.nextSnapshotId).isEqualTo(3);
+    }
+
+    @Test
+    public void testQueryAuthSplitAssignedLikeTheSplitItWraps() {
+        int parallelism = 3;
+        ContinuousFileSplitEnumerator enumerator = buildEnumerator(parallelism);
+
+        FileStoreSourceSplit plain = createSnapshotSplit(1, 2, Collections.emptyList());
+        FileStoreSourceSplit wrapped =
+                new FileStoreSourceSplit(
+                        plain.splitId(),
+                        new QueryAuthSplit(plain.split(), new TableQueryAuthResult(null, null)));
+
+        assertThat(enumerator.assignSuggestedTask(wrapped))
+                .isEqualTo(enumerator.assignSuggestedTask(plain));
+    }
+
+    @Test
+    public void testFallbackWrappedQueryAuthSplitAssignedLikeTheSplitItWraps() {
+        int parallelism = 3;
+        ContinuousFileSplitEnumerator enumerator = buildEnumerator(parallelism);
+
+        FileStoreSourceSplit plain = createSnapshotSplit(1, 2, Collections.emptyList());
+        FileStoreSourceSplit nested =
+                new FileStoreSourceSplit(
+                        plain.splitId(),
+                        FallbackReadFileStoreTable.toFallbackSplit(
+                                new QueryAuthSplit(
+                                        plain.split(), new TableQueryAuthResult(null, null)),
+                                true));
+
+        assertThat(nested.split()).isNotInstanceOf(DataSplit.class);
+        assertThat(enumerator.assignSuggestedTask(nested))
+                .isEqualTo(enumerator.assignSuggestedTask(plain));
+    }
+
+    @Test
+    public void testFallbackDataSplitAssignedLikeTheSplitItCopies() {
+        int parallelism = 3;
+        ContinuousFileSplitEnumerator enumerator = buildEnumerator(parallelism);
+
+        FileStoreSourceSplit plain = createSnapshotSplit(1, 2, Collections.emptyList());
+        FileStoreSourceSplit fallback =
+                new FileStoreSourceSplit(
+                        plain.splitId(),
+                        FallbackReadFileStoreTable.toFallbackSplit(plain.split(), true));
+
+        assertThat(fallback.split()).isInstanceOf(DataSplit.class);
+        assertThat(enumerator.assignSuggestedTask(fallback))
+                .isEqualTo(enumerator.assignSuggestedTask(plain));
     }
 
     @Test

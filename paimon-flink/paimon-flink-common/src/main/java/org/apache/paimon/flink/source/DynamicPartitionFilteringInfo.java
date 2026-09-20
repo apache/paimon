@@ -18,11 +18,20 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.Splits;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.table.connector.source.DynamicFilteringData;
+
 import java.io.Serializable;
+import java.util.Collections;
 import java.util.List;
 
 /** Manage dynamic partition filtering fields and table partition row. */
@@ -48,5 +57,25 @@ public class DynamicPartitionFilteringInfo implements Serializable {
         }
 
         return partitionRowProjection;
+    }
+
+    /**
+     * Whether {@code split} may still hold a row {@code dynamicFilteringData} asks for, answered
+     * from the partition the plan recorded rather than by opening the split.
+     *
+     * <p>A mask on a filtering field breaks that shortcut: the reader hands out a value other than
+     * the recorded one, so such a split is kept for the join to filter on the masked value.
+     */
+    public boolean mayMatch(DynamicFilteringData dynamicFilteringData, Split split) {
+        TableQueryAuthResult authResult = Splits.authResult(split);
+        if (authResult != null
+                && !Collections.disjoint(
+                        authResult.extractColumnMasking().keySet(),
+                        dynamicPartitionFilteringFields)) {
+            return true;
+        }
+        BinaryRow partition = ((DataSplit) Splits.underlying(split)).partition();
+        return dynamicFilteringData.contains(
+                new FlinkRowData(getPartitionRowProjection().apply(partition)));
     }
 }

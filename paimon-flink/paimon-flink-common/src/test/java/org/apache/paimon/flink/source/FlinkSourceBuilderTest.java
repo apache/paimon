@@ -22,22 +22,36 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.source.operator.MonitorSource;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IncrementalSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.flink.api.dag.Transformation;
+import org.apache.flink.runtime.plugable.SerializationDelegate;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.streaming.api.transformations.SourceTransformation;
+import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
+import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Path;
+import java.util.Collections;
 
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -203,5 +217,212 @@ public class FlinkSourceBuilderTest {
                                                 ((SourceTransformation<?, ?, ?>) transformation)
                                                         .getSource())
                                         .isInstanceOf(PaimonDataStreamSource.class));
+    }
+
+    @ValueSource(booleans = {false, true})
+    @ParameterizedTest
+    public void testOrderedShuffleRoutesQueryAuthSplitLikeTheSplitItWraps(
+            boolean shuffleBucketWithPartition) throws Exception {
+        Table table = createTable("ordered_shuffle_" + shuffleBucketWithPartition, false, 2, true);
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        DataStream<RowData> dataStream =
+                MonitorSource.buildSource(
+                        env,
+                        "source",
+                        InternalTypeInfo.of(toLogicalType(table.rowType())),
+                        table.newReadBuilder(),
+                        10,
+                        false,
+                        shuffleBucketWithPartition,
+                        false,
+                        null,
+                        true,
+                        null);
+
+        Transformation<?> input = dataStream.getTransformation().getInputs().get(0);
+        assertThat(input).isInstanceOf(PartitionTransformation.class);
+        @SuppressWarnings("unchecked")
+        StreamPartitioner<Split> partitioner =
+                ((PartitionTransformation<Split>) input).getPartitioner();
+        partitioner.setup(4);
+
+        DataSplit bucketOne = dataSplit(1);
+        DataSplit bucketThree = dataSplit(3);
+
+        assertThat(selectChannel(partitioner, withQueryAuth(bucketOne)))
+                .isEqualTo(selectChannel(partitioner, bucketOne));
+        assertThat(selectChannel(partitioner, withQueryAuth(bucketThree)))
+                .isEqualTo(selectChannel(partitioner, bucketThree));
+
+        assertThat(selectChannel(partitioner, withQueryAuth(bucketOne)))
+                .isNotEqualTo(selectChannel(partitioner, withQueryAuth(bucketThree)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testOrderedShuffleRoutesIncrementalSplitByPartitionAndBucket(
+            boolean shuffleBucketWithPartition) throws Exception {
+        Table table =
+                createTable("ordered_incremental_" + shuffleBucketWithPartition, false, 2, true);
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        DataStream<RowData> dataStream =
+                MonitorSource.buildSource(
+                        env,
+                        "source",
+                        InternalTypeInfo.of(toLogicalType(table.rowType())),
+                        table.newReadBuilder(),
+                        10,
+                        false,
+                        shuffleBucketWithPartition,
+                        false,
+                        null,
+                        true,
+                        null);
+
+        Transformation<?> input = dataStream.getTransformation().getInputs().get(0);
+        @SuppressWarnings("unchecked")
+        StreamPartitioner<Split> partitioner =
+                ((PartitionTransformation<Split>) input).getPartitioner();
+        partitioner.setup(4);
+
+        Split bucketOne = incrementalSplit(1);
+        Split bucketThree = incrementalSplit(3);
+
+        assertThat(selectChannel(partitioner, bucketOne))
+                .isEqualTo(selectChannel(partitioner, dataSplit(1)));
+        assertThat(selectChannel(partitioner, withQueryAuth(bucketOne)))
+                .isEqualTo(selectChannel(partitioner, bucketOne));
+        assertThat(selectChannel(partitioner, withQueryAuth(bucketThree)))
+                .isEqualTo(selectChannel(partitioner, bucketThree));
+
+        assertThat(selectChannel(partitioner, withQueryAuth(bucketOne)))
+                .isNotEqualTo(selectChannel(partitioner, withQueryAuth(bucketThree)));
+    }
+
+    @ValueSource(booleans = {false, true})
+    @ParameterizedTest
+    public void testOrderedShuffleRoutesFallbackWrappedQueryAuthSplitLikeTheSplitItWraps(
+            boolean shuffleBucketWithPartition) throws Exception {
+        Table table = createTable("ordered_nested_" + shuffleBucketWithPartition, false, 2, true);
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        DataStream<RowData> dataStream =
+                MonitorSource.buildSource(
+                        env,
+                        "source",
+                        InternalTypeInfo.of(toLogicalType(table.rowType())),
+                        table.newReadBuilder(),
+                        10,
+                        false,
+                        shuffleBucketWithPartition,
+                        false,
+                        null,
+                        true,
+                        null);
+
+        Transformation<?> input = dataStream.getTransformation().getInputs().get(0);
+        assertThat(input).isInstanceOf(PartitionTransformation.class);
+        @SuppressWarnings("unchecked")
+        StreamPartitioner<Split> partitioner =
+                ((PartitionTransformation<Split>) input).getPartitioner();
+        partitioner.setup(4);
+
+        DataSplit bucketOne = dataSplit(1);
+        DataSplit bucketThree = dataSplit(3);
+        Split nestedOne = withFallback(withQueryAuth(bucketOne));
+        Split nestedThree = withFallback(withQueryAuth(bucketThree));
+
+        assertThat(nestedOne).isNotInstanceOf(DataSplit.class);
+        assertThat(selectChannel(partitioner, nestedOne))
+                .isEqualTo(selectChannel(partitioner, bucketOne));
+        assertThat(selectChannel(partitioner, nestedThree))
+                .isEqualTo(selectChannel(partitioner, bucketThree));
+        assertThat(selectChannel(partitioner, nestedOne))
+                .isNotEqualTo(selectChannel(partitioner, nestedThree));
+
+        Split nestedIncrementalOne = withFallback(withQueryAuth(incrementalSplit(1)));
+        assertThat(selectChannel(partitioner, nestedIncrementalOne))
+                .isEqualTo(selectChannel(partitioner, bucketOne));
+    }
+
+    @ValueSource(booleans = {false, true})
+    @ParameterizedTest
+    public void testOrderedShuffleRoutesFallbackDataSplitLikeTheSplitItCopies(
+            boolean shuffleBucketWithPartition) throws Exception {
+        Table table = createTable("ordered_fallback_" + shuffleBucketWithPartition, false, 2, true);
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        DataStream<RowData> dataStream =
+                MonitorSource.buildSource(
+                        env,
+                        "source",
+                        InternalTypeInfo.of(toLogicalType(table.rowType())),
+                        table.newReadBuilder(),
+                        10,
+                        false,
+                        shuffleBucketWithPartition,
+                        false,
+                        null,
+                        true,
+                        null);
+
+        Transformation<?> input = dataStream.getTransformation().getInputs().get(0);
+        @SuppressWarnings("unchecked")
+        StreamPartitioner<Split> partitioner =
+                ((PartitionTransformation<Split>) input).getPartitioner();
+        partitioner.setup(4);
+
+        DataSplit bucketOne = dataSplit(1);
+        DataSplit bucketThree = dataSplit(3);
+        Split fallbackOne = withFallback(bucketOne);
+        Split fallbackThree = withFallback(bucketThree);
+
+        assertThat(fallbackOne).isInstanceOf(DataSplit.class);
+        assertThat(selectChannel(partitioner, fallbackOne))
+                .isEqualTo(selectChannel(partitioner, bucketOne));
+        assertThat(selectChannel(partitioner, fallbackThree))
+                .isEqualTo(selectChannel(partitioner, bucketThree));
+        assertThat(selectChannel(partitioner, fallbackOne))
+                .isNotEqualTo(selectChannel(partitioner, fallbackThree));
+    }
+
+    private static int selectChannel(StreamPartitioner<Split> partitioner, Split split) {
+        SerializationDelegate<StreamRecord<Split>> delegate = new SerializationDelegate<>(null);
+        delegate.setInstance(new StreamRecord<>(split));
+        return partitioner.selectChannel(delegate);
+    }
+
+    private static DataSplit dataSplit(int bucket) {
+        return DataSplit.builder()
+                .withSnapshot(1)
+                .withPartition(BinaryRow.EMPTY_ROW)
+                .withBucket(bucket)
+                .withDataFiles(Collections.emptyList())
+                .isStreaming(true)
+                .withBucketPath("/temp/xxx")
+                .build();
+    }
+
+    private static Split incrementalSplit(int bucket) {
+        return new IncrementalSplit(
+                1L,
+                BinaryRow.EMPTY_ROW,
+                bucket,
+                1,
+                Collections.emptyList(),
+                null,
+                Collections.emptyList(),
+                null,
+                true);
+    }
+
+    private static Split withQueryAuth(Split split) {
+        return new QueryAuthSplit(split, new TableQueryAuthResult(null, null));
+    }
+
+    private static Split withFallback(Split split) {
+        return FallbackReadFileStoreTable.toFallbackSplit(split, true);
     }
 }

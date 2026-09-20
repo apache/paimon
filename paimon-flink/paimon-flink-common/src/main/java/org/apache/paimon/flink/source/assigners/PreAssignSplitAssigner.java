@@ -18,11 +18,8 @@
 
 package org.apache.paimon.flink.source.assigners;
 
-import org.apache.paimon.codegen.Projection;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.flink.source.DynamicPartitionFilteringInfo;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.utils.BinPacking;
 import org.apache.paimon.utils.SerializableFunction;
 
@@ -92,13 +89,13 @@ public class PreAssignSplitAssigner implements SplitAssigner {
             int splitBatchSize,
             int parallelism,
             Collection<FileStoreSourceSplit> splits,
-            Projection partitionRowProjection,
+            DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo,
             DynamicFilteringData dynamicFilteringData) {
         this(
                 splitBatchSize,
                 parallelism,
                 splits,
-                partitionRowProjection,
+                dynamicPartitionFilteringInfo,
                 dynamicFilteringData,
                 split -> split.split().rowCount());
     }
@@ -107,14 +104,17 @@ public class PreAssignSplitAssigner implements SplitAssigner {
             int splitBatchSize,
             int parallelism,
             Collection<FileStoreSourceSplit> splits,
-            Projection partitionRowProjection,
+            DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo,
             DynamicFilteringData dynamicFilteringData,
             SerializableFunction<FileStoreSourceSplit, Long> weightFunc) {
         this(
                 splitBatchSize,
                 parallelism,
                 splits.stream()
-                        .filter(s -> filter(partitionRowProjection, dynamicFilteringData, s))
+                        .filter(
+                                s ->
+                                        dynamicPartitionFilteringInfo.mayMatch(
+                                                dynamicFilteringData, s.split()))
                         .collect(Collectors.toList()),
                 weightFunc);
     }
@@ -279,23 +279,14 @@ public class PreAssignSplitAssigner implements SplitAssigner {
     }
 
     public SplitAssigner ofDynamicPartitionPruning(
-            Projection partitionRowProjection, DynamicFilteringData dynamicFilteringData) {
+            DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo,
+            DynamicFilteringData dynamicFilteringData) {
         return new PreAssignSplitAssigner(
                 splitBatchSize,
                 parallelism,
                 splits,
-                partitionRowProjection,
+                dynamicPartitionFilteringInfo,
                 dynamicFilteringData,
                 weightFunc);
-    }
-
-    private static boolean filter(
-            Projection partitionRowProjection,
-            DynamicFilteringData dynamicFilteringData,
-            FileStoreSourceSplit sourceSplit) {
-        DataSplit dataSplit = (DataSplit) sourceSplit.split();
-        BinaryRow partition = dataSplit.partition();
-        FlinkRowData projected = new FlinkRowData(partitionRowProjection.apply(partition));
-        return dynamicFilteringData.contains(projected);
     }
 }

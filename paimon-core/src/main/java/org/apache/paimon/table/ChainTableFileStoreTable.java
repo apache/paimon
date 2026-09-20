@@ -29,8 +29,8 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
-import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.Splits;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
@@ -219,7 +219,7 @@ public class ChainTableFileStoreTable extends FallbackReadFileStoreTable {
                 return fallbackRead.createReader(split);
             }
             // Route on what the wrapper carries, so the wrapper still reaches the read.
-            Split inner = QueryAuthSplit.unwrap(split);
+            Split inner = Splits.underlying(split);
             if (inner instanceof ChainSplit || inner instanceof DataSplit) {
                 return chainGroupRead.createReader(split);
             }
