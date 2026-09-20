@@ -1612,6 +1612,28 @@ class ParquetFiltersTest {
         test(schema, new PredicateBuilder(rowType).equal(nested, 7L), (String) null, false);
     }
 
+    /**
+     * {@link PredicateBuilder#in(Transform, List)} on an empty list now builds a valid leaf instead
+     * of throwing, but {@code FilterApi}'s set predicates refuse an empty set. {@code visitIn} and
+     * {@code visitNotIn} must decline the pushdown for an empty literal list rather than pass an
+     * empty set through to parquet-mr.
+     */
+    @Test
+    public void testNestedInAndNotInWithEmptyLiteralsAreNotPushedDown() {
+        RowType inner = RowType.of(new DataType[] {new BigIntType()}, new String[] {"a"});
+        RowType rowType =
+                RowType.of(new DataType[] {new BigIntType(), inner}, new String[] {"pk", "s"});
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+
+        NestedFieldTransform nested =
+                new NestedFieldTransform(
+                        new FieldRef(1, "s", inner), Collections.singletonList("a"));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        test(schema, builder.in(nested, Collections.emptyList()), (String) null, false);
+        test(schema, builder.notIn(nested, Collections.emptyList()), (String) null, false);
+    }
+
     private FilterPredicate convert(MessageType schema, Predicate predicate) {
         FilterCompat.Filter filter =
                 ParquetFilters.convert(PredicateBuilder.splitAnd(predicate), schema, true);

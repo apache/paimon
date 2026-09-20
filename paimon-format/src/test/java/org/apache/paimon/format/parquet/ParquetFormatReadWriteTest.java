@@ -41,6 +41,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.NestedFieldTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -419,6 +420,39 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
         Assertions.assertThat(readPks(rowType, onQty))
                 .as("control: the row whose payload.qty equals 7 must survive the filter")
                 .contains(1L);
+    }
+
+    /**
+     * {@link PredicateBuilder#in(Transform, List)} on an empty literal list now builds a valid
+     * (always-false) leaf instead of throwing, but {@code FilterApi}'s set predicates refuse an
+     * empty set outright, so {@link org.apache.parquet.filter2.predicate.ParquetFilters}'s {@code
+     * visitIn} now declines the pushdown for an empty literal list instead of handing parquet-mr a
+     * set it will reject. Declining pushdown means this reader layer returns every row unfiltered;
+     * the always-false semantics of an empty IN are enforced by residual predicate evaluation
+     * upstream, not by parquet-level pruning, so they are out of scope for this test - what matters
+     * here is that opening the reader does not throw.
+     */
+    @Test
+    public void testNestedInWithEmptyLiteralsDoesNotCrashTheReader() throws IOException {
+        RowType rowType = nestedPayloadType();
+        writeTwoPayloadRows(rowType);
+        Predicate emptyIn =
+                new PredicateBuilder(rowType).in(payloadLeaf(rowType, "qty"), new ArrayList<>());
+        Assertions.assertThat(readPks(rowType, emptyIn))
+                .as("pushdown is declined, so every row must come back unfiltered - not crash")
+                .containsExactlyInAnyOrder(1L, 2L);
+    }
+
+    /** Same as {@link #testNestedInWithEmptyLiteralsDoesNotCrashTheReader()}, for NOT IN. */
+    @Test
+    public void testNestedNotInWithEmptyLiteralsDoesNotCrashTheReader() throws IOException {
+        RowType rowType = nestedPayloadType();
+        writeTwoPayloadRows(rowType);
+        Predicate emptyNotIn =
+                new PredicateBuilder(rowType).notIn(payloadLeaf(rowType, "qty"), new ArrayList<>());
+        Assertions.assertThat(readPks(rowType, emptyNotIn))
+                .as("NOT IN empty-set matches everything, and must not crash the read")
+                .containsExactlyInAnyOrder(1L, 2L);
     }
 
     /**

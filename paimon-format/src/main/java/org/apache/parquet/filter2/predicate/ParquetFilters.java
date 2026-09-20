@@ -240,6 +240,13 @@ public class ParquetFilters {
 
         @Override
         public FilterPredicate visitIn(FieldRef fieldRef, List<Object> literals) {
+            if (literals.isEmpty()) {
+                // An IN predicate builder can legitimately produce an empty (always-false) leaf,
+                // but parquet-mr's SetColumnFilterPredicate refuses an empty set outright. Leave
+                // this predicate out of the pushdown; residual evaluation upstream still applies
+                // the always-false semantics correctly.
+                throw new UnsupportedOperationException();
+            }
             Operators.Column<?> column = toParquetColumn(fieldRef);
             if (column instanceof Operators.LongColumn) {
                 return FilterApi.in(
@@ -267,6 +274,11 @@ public class ParquetFilters {
 
         @Override
         public FilterPredicate visitNotIn(FieldRef fieldRef, List<Object> literals) {
+            if (literals.isEmpty()) {
+                // Same as visitIn: an empty NOT IN is a legitimate always-true leaf, but parquet-mr
+                // refuses an empty set. Leave it out of the pushdown rather than crash the read.
+                throw new UnsupportedOperationException();
+            }
             Operators.Column<?> column = toParquetColumn(fieldRef);
             if (column instanceof Operators.LongColumn) {
                 return FilterApi.notIn(
