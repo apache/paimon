@@ -426,7 +426,7 @@ class TestSchemaConversion:
         sink._validate_input_schema(batch.schema)
         aligned = sink._align_batch_to_target_schema(batch)
 
-        assert aligned.schema == sink._target_schema
+        assert aligned.schema == pa.schema([("id", pa.int64()), ("dt", pa.large_string())])
         assert aligned.to_pydict() == {
             "id": [1, 2],
             "dt": ["101", "202"],
@@ -445,7 +445,7 @@ class TestSchemaConversion:
             sink._validate_input_schema(input_schema)
 
     def test_write_large_string_conversion(self, local_paimon_catalog):
-        """Test that large_string columns are converted to string for pypaimon."""
+        """Test that large_string input is accepted and reads back as STRING."""
         catalog, tmp_path = local_paimon_catalog
         pa_schema = pa.schema([("id", pa.int64()), ("text", pa.string())])
         paimon_schema = pypaimon.Schema.from_pyarrow_schema(pa_schema)

@@ -16,6 +16,8 @@
 # limitations under the License.
 ################################################################################
 
+import os
+import tempfile
 import unittest
 from unittest import mock
 
@@ -90,6 +92,26 @@ class TableUpdateByRowIdChunkedTest(unittest.TestCase):
                 SingleFileWriter(file_io, 'new.parquet', pa.schema([]), 'parquet',
                                  'zstd', 1, [], mock.Mock())
         file_io.delete_quietly.assert_called_once_with('new.parquet')
+
+    def test_single_file_writer_keeps_schema_across_string_layout_changes(self):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+        from pypaimon.common.options import Options
+
+        with tempfile.TemporaryDirectory() as directory:
+            file_io = LocalFileIO(directory, Options({}))
+            for first_type in (pa.string(), pa.large_string()):
+                path = os.path.join(directory, str(first_type) + '.parquet')
+                schema = pa.schema([('text', first_type)])
+                writer = SingleFileWriter(file_io, path, schema, 'parquet', 'zstd', 1, [], mock.Mock())
+                try:
+                    for dtype in (pa.string(), pa.large_string(), pa.string()):
+                        writer.write(pa.table({'text': pa.array(['中文', None], type=dtype)}))
+                finally:
+                    writer.close()
+                data = pq.read_table(path)
+                self.assertEqual(data.schema, schema)
+                self.assertEqual(data['text'].to_pylist(), ['中文', None] * 3)
+                self.assertEqual(pq.ParquetFile(path).metadata.num_row_groups, 3)
 
     @staticmethod
     def _updater():

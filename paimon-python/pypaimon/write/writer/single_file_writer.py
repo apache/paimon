@@ -20,6 +20,7 @@ from contextlib import suppress
 import pyarrow.parquet as pq
 
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 
 
 class SingleFileWriter:
@@ -30,6 +31,7 @@ class SingleFileWriter:
         if file_format != CoreOptions.FILE_FORMAT_PARQUET:
             raise NotImplementedError(
                 'SingleFileWriter only supports Parquet, got {}'.format(file_format))
+        self._schema = schema
         self._file_io = file_io
         self._path = path
         self._stats_fields = stats_fields
@@ -59,6 +61,10 @@ class SingleFileWriter:
             kwargs = {}
             if row_group_size is not None:
                 kwargs['row_group_size'] = row_group_size
+            # Parquet fixes its Arrow schema when the file opens. Layout
+            # compatibility does not allow changing that schema mid-file.
+            if data.schema != self._schema and arrow_schemas_compatible(data.schema, self._schema):
+                data = data.cast(self._schema, safe=True)
             self._writer.write_table(data, **kwargs)
             self.row_count += data.num_rows
             for field in self._stats_fields:

@@ -30,6 +30,7 @@ from pypaimon.data.map_shared_shredding import (
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+from pypaimon.schema.arrow_schema import cast_arrow_array
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         MapType, PyarrowFieldParser, RowType)
 from pypaimon.table.special_fields import SpecialFields
@@ -286,14 +287,16 @@ class DataFileBatchReader(RecordBatchReader):
                 array.offsets, aligned_values, mask=pc.is_null(array))
         if isinstance(target_type, MapType) and isinstance(file_type, MapType):
             array = _unslice(array)
+            aligned_keys = self._align_array_by_id(
+                array.keys, file_type.key, target_type.key)
             aligned_items = self._align_array_by_id(
                 array.items, file_type.value, target_type.value)
             # MapArray.from_arrays cannot carry a null mask (a null map would
             # collapse to an empty one), so rebuild from buffers, reusing the
-            # original validity/offset buffers and only swapping the value child.
+            # original validity/offset buffers and aligning both key and value layouts.
             target_pa = PyarrowFieldParser.from_paimon_type(target_type)
             entries = pa.StructArray.from_arrays(
-                [array.keys, aligned_items],
+                [aligned_keys, aligned_items],
                 fields=[target_pa.key_field, target_pa.item_field])
             return pa.Array.from_buffers(
                 target_pa, len(array), array.buffers()[:2], children=[entries])
@@ -306,7 +309,7 @@ class DataFileBatchReader(RecordBatchReader):
         # Leaf / non-nested: cast to the target type when it differs.
         target_pa_type = PyarrowFieldParser.from_paimon_type(target_type)
         if array.type != target_pa_type:
-            return array.cast(target_pa_type, safe=False)
+            return cast_arrow_array(array, target_pa_type, safe=False)
         return array
 
     def read_arrow_batch(self, start_idx=None, end_idx=None) -> Optional[RecordBatch]:
@@ -405,7 +408,7 @@ class DataFileBatchReader(RecordBatchReader):
             if target_field is None:
                 target_field = pa.field(name, array.type)
             elif array.type != target_field.type:
-                array = array.cast(target_field.type, safe=False)
+                array = cast_arrow_array(array, target_field.type, safe=False)
             out_arrays.append(array)
             out_fields.append(target_field)
         return pa.RecordBatch.from_arrays(out_arrays, schema=pa.schema(out_fields))

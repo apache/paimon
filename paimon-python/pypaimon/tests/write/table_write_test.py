@@ -37,6 +37,123 @@ from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
 
 class TableWriteTest(unittest.TestCase):
+    def test_large_string_compatibility_rejects_other_type_changes(self):
+        writer = object.__new__(TableWrite)
+        writer.file_store_write = Mock(write_cols=None)
+        writer.table_pyarrow_schema = pa.schema([
+            ('id', pa.int32()),
+            ('nested', pa.struct([pa.field('text', pa.string(), nullable=False)])),
+        ])
+        valid = pa.schema([
+            ('id', pa.int32()),
+            ('nested', pa.struct([pa.field('text', pa.large_string(), nullable=False)])),
+        ])
+        writer._validate_pyarrow_schema(valid)
+        invalid = [
+            valid.set(0, pa.field('id', pa.int64())),
+            pa.schema(list(reversed(list(valid)))),
+            valid.set(1, pa.field('nested', pa.struct([
+                pa.field('text', pa.large_string(), nullable=True)]))),
+            valid.set(1, pa.field('nested', pa.struct([
+                pa.field('renamed', pa.large_string(), nullable=False)]))),
+        ]
+        for schema in invalid:
+            with self.subTest(schema=schema):
+                with self.assertRaisesRegex(ValueError, 'consistent'):
+                    writer._validate_pyarrow_schema(schema)
+
+    @parameterized.expand([(False,), (True,)])
+    def test_write_pandas_preserves_arrow_strings_and_index_policy(self, named_index):
+        import pandas as pd
+
+        if not hasattr(pd, 'ArrowDtype'):
+            self.skipTest('Arrow-backed pandas requires pandas >= 1.5')
+        writer = object.__new__(TableWrite)
+        writer.file_store_write = Mock(write_cols=None)
+        writer.table_pyarrow_schema = pa.schema([
+            ('id', pa.int64()), ('text', pa.string()),
+        ])
+        writer.write_arrow_batch = Mock()
+        frame = pd.DataFrame({'text': pd.array(['中文', None], dtype=pd.ArrowDtype(pa.large_string()))})
+        if named_index:
+            frame.index = pd.Index([3, 4], name='id')
+        else:
+            frame['id'] = [3, 4]
+            frame.index = pd.Index([object(), object()])
+        # Unused columns and index levels must not enter schema inference.
+        frame['unused'] = [object(), object()]
+        writer.write_pandas(frame)
+        batch = writer.write_arrow_batch.call_args[0][0]
+        self.assertEqual(batch.schema.names, ['id', 'text'])
+        self.assertEqual(batch.column('text').type, pa.large_string())
+        self.assertEqual(batch.to_pydict(), {'id': [3, 4], 'text': ['中文', None]})
+
+    @parameterized.expand([(False, False), (False, True), (True, False), (True, True)])
+    def test_write_pandas_preserves_generated_index_string_layout(self, multi_index, string_dtype):
+        import pandas as pd
+
+        if not hasattr(pd, 'ArrowDtype'):
+            self.skipTest('Arrow-backed pandas requires pandas >= 1.5')
+        dtype = pd.StringDtype(storage='pyarrow') if string_dtype else pd.ArrowDtype(pa.large_string())
+        labels = pd.array(['中文', '任务'], dtype=dtype)
+        if multi_index:
+            index = pd.MultiIndex.from_arrays([[1, 2], labels], names=['id', None])
+            expected_schema = pa.schema([('id', pa.int64()), ('__index_level_1__', pa.string())])
+        else:
+            index = pd.Index(labels)
+            expected_schema = pa.schema([('__index_level_0__', pa.string())])
+        frame = pd.DataFrame(index=index)
+        writer = object.__new__(TableWrite)
+        writer.file_store_write = Mock(write_cols=None)
+        writer.table_pyarrow_schema = expected_schema
+        writer.write_arrow_batch = Mock()
+        writer.write_pandas(frame)
+        batch = writer.write_arrow_batch.call_args[0][0]
+        text_column = batch.column(expected_schema.names[-1])
+        self.assertEqual(text_column.type, pa.array(labels).type)
+        self.assertEqual(text_column.to_pylist(), ['中文', '任务'])
+        self.assertEqual(batch.schema.names, expected_schema.names)
+
+    @parameterized.expand([(False,), (True,)])
+    def test_mixed_string_layouts_roundtrip(self, primary_key):
+        name = 'default.mixed_strings_' + str(primary_key)
+
+        def arrow_schema(string_type):
+            return pa.schema([
+                pa.field('id', pa.int64(), nullable=False),
+                pa.field('text', string_type),
+                pa.field('nested', pa.struct([
+                    pa.field('labels', pa.list_(string_type)),
+                    pa.field('mapping', pa.map_(string_type, string_type)),
+                ])),
+            ])
+
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(
+            arrow_schema(pa.large_string()),
+            primary_keys=['id'] if primary_key else [],
+            options={'bucket': '1' if primary_key else '-1'},
+        ), False)
+        table = self.catalog.get_table(name)
+        builder = table.new_batch_write_builder()
+        write, commit = builder.new_write(), builder.new_commit()
+        expected = []
+        try:
+            for index, (dtype, text) in enumerate([
+                    (pa.string(), '抓笔'), (pa.large_string(), ''),
+                    (pa.string(), None), (pa.large_string(), 'x' * 100)]):
+                row = {'id': index, 'text': text, 'nested': {
+                    'labels': [text, None], 'mapping': [('任务', text)],
+                }}
+                expected.append(row)
+                write.write_arrow(pa.Table.from_pylist([row], schema=arrow_schema(dtype)))
+            commit.commit(write.prepare_commit())
+        finally:
+            write.close()
+            commit.close()
+        actual = self._read_sorted(table, [('id', 'ascending')])
+        self.assertEqual(actual.to_pylist(), expected)
+        self.assertEqual(actual.schema.remove_metadata(), arrow_schema(pa.string()))
+
     @classmethod
     def setUpClass(cls):
         cls.tempdir = tempfile.mkdtemp()

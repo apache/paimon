@@ -30,6 +30,7 @@ from pypaimon.multimodal.query import (
     TextQuery,
     VectorQuery,
 )
+from pypaimon.schema.arrow_schema import cast_arrow_array
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_type
 from pypaimon.table.data_evolution_merge_into import (
     WhenMatched,
@@ -778,7 +779,8 @@ def _video_frame_table(video, frames, video_column, first_frame, target_schema):
             arrays.append(pa.array(descriptor_values, type=field.type))
         else:
             arrays.append(frame_table[field.name])
-    return pa.Table.from_arrays(arrays, schema=target_schema)
+    fields = [field.with_type(array.type) for field, array in zip(target_schema, arrays)]
+    return pa.Table.from_arrays(arrays, schema=pa.schema(fields, metadata=target_schema.metadata))
 
 
 def _align_to_schema(
@@ -787,16 +789,16 @@ def _align_to_schema(
         column_mapping: Optional[Dict[str, str]] = None) -> pa.Table:
     column_mapping = column_mapping or {}
     arrays = []
+    fields = []
     for field in schema:
         source_name = column_mapping.get(field.name, field.name)
         if source_name in table.column_names:
-            array = table[source_name]
-            if array.type != field.type:
-                array = array.cast(field.type)
+            array = cast_arrow_array(table[source_name], field.type, preserve_string_layout=True)
         else:
             array = pa.nulls(table.num_rows, type=field.type)
         arrays.append(array)
-    return pa.Table.from_arrays(arrays, schema=schema)
+        fields.append(field.with_type(array.type))
+    return pa.Table.from_arrays(arrays, schema=pa.schema(fields, metadata=schema.metadata))
 
 
 def _normalize_merge_on(on, operation: str):

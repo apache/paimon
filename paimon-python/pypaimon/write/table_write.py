@@ -20,6 +20,9 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import pyarrow as pa
 
 from pypaimon.schema.data_types import PyarrowFieldParser
+from pypaimon.schema.arrow_schema import (
+    arrow_schemas_compatible, schema_with_source_string_layout,
+)
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import BlobConsumer
 from pypaimon.write.row_utils import (
@@ -213,6 +216,26 @@ class TableWrite:
             pa_schema = self._write_cols_pyarrow_schema(write_cols)
         else:
             pa_schema = self.table_pyarrow_schema
+        # Preserve Arrow-backed pandas string offsets without changing the
+        # existing target-driven pandas conversion or named-index behavior.
+        index_levels = {'__index_level_%d__' % i: i for i in range(dataframe.index.nlevels)}
+        # Explicit index names take precedence over Arrow's generated names.
+        index_levels.update({name: i for i, name in enumerate(dataframe.index.names) if name is not None})
+        source_fields = []
+        for field in pa_schema:
+            if field.name in dataframe.columns:
+                values = dataframe[field.name]
+            elif field.name in index_levels:
+                values = dataframe.index.get_level_values(index_levels[field.name])
+            else:
+                continue  # from_pandas reports missing fields below.
+            dtype = getattr(values, 'dtype', None)
+            arrow_type = getattr(dtype, 'pyarrow_dtype', None)
+            if arrow_type is None and str(getattr(dtype, 'storage', '')).startswith('pyarrow'):
+                arrow_type = pa.array(values).type  # pandas ArrowStringArray
+            if arrow_type is not None:
+                source_fields.append(field.with_type(arrow_type))
+        pa_schema = schema_with_source_string_layout(pa_schema, pa.schema(source_fields))
         record_batch = pa.RecordBatch.from_pandas(dataframe, schema=pa_schema)
         return self.write_arrow_batch(record_batch)
 
@@ -358,18 +381,8 @@ class TableWrite:
 
     def _is_compatible_pyarrow_schema(
             self, data_schema: pa.Schema, expected_schema: pa.Schema) -> bool:
-        # Allow compatible binary types: binary, fixed_size_binary[N] are interchangeable
-        if data_schema.names != expected_schema.names:
-            return False
-        for i in range(len(data_schema)):
-            input_type = data_schema.field(i).type
-            expected_type = expected_schema.field(i).type
-            if input_type == expected_type:
-                continue
-            if self._is_binary_family(input_type) and self._is_binary_family(expected_type):
-                continue
-            return False
-        return True
+        return arrow_schemas_compatible(
+            data_schema, expected_schema, check_top_level_nullability=False, allow_binary_compatibility=True)
 
     def _write_cols_pyarrow_schema(self, write_cols: List[str]) -> pa.Schema:
         table_fields = {
@@ -382,10 +395,6 @@ class TableWrite:
                          f"Input schema is: {data_schema} "
                          f"Table schema is: {self.table_pyarrow_schema} "
                          f"Write cols is: {self.file_store_write.write_cols}")
-
-    @staticmethod
-    def _is_binary_family(arrow_type) -> bool:
-        return pa.types.is_binary(arrow_type) or pa.types.is_fixed_size_binary(arrow_type)
 
 
 class BatchTableWrite(TableWrite):

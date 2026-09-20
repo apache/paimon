@@ -146,6 +146,63 @@ class _Harness(AppendOnlyDataWriter):
 
 class WriteBufferTest(unittest.TestCase):
 
+    def test_string_promotion_preserves_unaffected_fields_and_buffers(self):
+        def schema(text_type):
+            return pa.schema([
+                pa.field('changed', text_type),
+                pa.field('unchanged', pa.string()),
+                pa.field('nested', pa.struct([
+                    pa.field('changed', pa.list_(text_type)),
+                    pa.field('unchanged', pa.string()),
+                    pa.field('mapping', pa.map_(pa.string(), text_type)),
+                ])),
+            ])
+
+        row = {'changed': '长字符串', 'unchanged': 'unchanged', 'nested': {
+            'changed': ['value', None], 'unchanged': 'nested value',
+            'mapping': [('key', 'value')],
+        }}
+        small = pa.Table.from_pylist([row], schema=schema(pa.string()))
+        large = pa.Table.from_pylist([row], schema=schema(pa.large_string()))
+        for first, second in ((small, large), (large, small)):
+            with self.subTest(first=first.schema):
+                buffer = self._buffer()
+                buffer.append(first)
+                buffer.append(second)
+                result = buffer.materialize()
+                self.assertEqual(result.schema, large.schema)
+                self.assertEqual(result.to_pylist(), [row, row])
+                self.assertEqual(
+                    result.column('unchanged').chunk(0).buffers()[1].address,
+                    first.column('unchanged').chunk(0).buffers()[1].address)
+                self.assertEqual(
+                    result.column('nested').chunk(0).field('unchanged').buffers()[1].address,
+                    first.column('nested').chunk(0).field('unchanged').buffers()[1].address)
+
+    def test_mixed_string_layouts_promote_without_narrowing(self):
+        for materialize_first in (False, True):
+            with self.subTest(materialize_first=materialize_first):
+                buffer = self._buffer()
+                first = _table_with(_ANNOTATED_SCHEMA, 0, 2)
+                large_schema = _ANNOTATED_SCHEMA.set(
+                    1, _ANNOTATED_SCHEMA.field(1).with_type(pa.large_string()))
+                buffer.append(first)
+                if materialize_first:
+                    buffer.materialize()
+                buffer.append(_table_with(large_schema, 2, 2))
+                # Subsequent ordinary strings must work without narrowing the
+                # already buffered 64-bit offsets or repeatedly casting them.
+                buffer.append(_table_with(_ANNOTATED_SCHEMA, 4, 2))
+                size = buffer.nbytes
+                actual = buffer.materialize()
+                self.assertEqual(actual.schema, large_schema)
+                self.assertEqual(actual.schema.metadata, _ANNOTATED_SCHEMA.metadata)
+                self.assertEqual(actual.schema.field(0).metadata, {b'k': b'v'})
+                self.assertEqual(actual.column('id').to_pylist(), list(range(6)))
+                self.assertEqual(actual.column('name').to_pylist(),
+                                 ['n%d' % i for i in range(6)])
+                self.assertEqual(actual.nbytes, size)
+
     def _buffer(self):
         return WriteBuffer(lambda a, b: pa.concat_tables([a, b]))
 
