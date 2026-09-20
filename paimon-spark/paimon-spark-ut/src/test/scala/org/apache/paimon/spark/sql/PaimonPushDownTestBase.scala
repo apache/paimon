@@ -314,7 +314,8 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
                 |""".stripMargin)
 
           val q = "SELECT * FROM t WHERE dt = 1"
-          assert(!checkFilterExists(q))
+          // String-to-number storage casts do not implement Spark's ANSI semantics.
+          assert(checkFilterExists(q))
           checkAnswer(sql(q), Seq(Row(1, 100, "1")))
         }
       }

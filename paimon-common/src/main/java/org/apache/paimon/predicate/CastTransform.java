@@ -112,7 +112,8 @@ public class CastTransform implements Transform {
 
     @Override
     public Object transform(InternalRow row) {
-        return cast.cast(get(row, fieldRef.index(), fieldRef.type()));
+        Object value = get(row, fieldRef.index(), fieldRef.type());
+        return value == null ? null : cast.cast(value);
     }
 
     @Override
