@@ -447,6 +447,28 @@ matched_files = table.drop_global_index(
 
 </Tabs>
 
+## Data Evolution Scalar Query Cost Guards
+
+Data Evolution scalar batch scans use three layers of cost protection before they
+turn index RowIDs into data-file reads:
+
+1. The final candidate set is checked for selection ratio and disjoint range count.
+   Partition-filtered queries use the distinct RowIDs in the selected data files as
+   the ratio denominator; overlapping Data Evolution column groups are counted once.
+2. Readers enforce work-specific limits. Physical bytes read from BTree, Bitmap,
+   Multivalue, and FM index files share the same byte budget. BTree row-ID lists and
+   FM locate/null scans also charge decoded or scanned row-ID work. BTree and Bitmap
+   postings which remain compressed do not charge their logical cardinality.
+3. Each indexed field has a branch budget, and the query has an aggregate budget.
+   Work already performed remains charged after a branch declines, which keeps the
+   aggregate limit hard. An `AND` query may continue with an available indexed
+   sibling, while an `OR` query falls back unless every branch remains available.
+
+These guards apply to ordinary Data Evolution scalar batch scans in every scalar
+search mode. Vector and full-text scalar pre-filters currently remain unlimited,
+because those paths do not yet have a semantics-preserving fallback for a declined
+pre-filter. Their scalar predicates are never silently ignored.
+
 ## Shared Options
 
 These table options affect global index build and read behavior:
@@ -467,8 +489,11 @@ These table options affect global index build and read behavior:
 | `global-index.build.max-shard` | `32` | Preferred maximum shard count for global index builds. |
 | `global-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building non-sorted global indexes. |
 | `global-index.thread-num` | `32` | Maximum number of concurrent threads for global index I/O. |
-| `data-evolution.scalar-index.max-selection-ratio` | `0.2` | Maximum candidate row-ID ratio for an index-assisted Data Evolution scalar batch scan, using the snapshot's allocated row-ID count as the denominator. Broader results fall back to a regular data scan. |
+| `data-evolution.scalar-index.max-selection-ratio` | `0.2` | Maximum candidate row-ID ratio for an index-assisted Data Evolution scalar batch scan. Partition-filtered queries use the selected data RowIDs as the denominator; other queries use the snapshot's allocated row-ID count. Broader results fall back to a regular data scan. |
 | `data-evolution.scalar-index.max-selection-ranges` | `100000` | Maximum number of disjoint candidate row-ID ranges for an index-assisted Data Evolution scalar batch scan. More fragmented results fall back to a regular data scan. |
-| `data-evolution.scalar-index.max-decoded-row-ids` | `10000000` | Maximum row IDs a supporting scalar reader may decode for one indexed field. Currently enforced by BTree; compressed bitmaps that remain compressed are not counted. |
+| `data-evolution.scalar-index.max-decoded-row-ids` | `10000000` | Maximum decoded or scanned row-ID work for one indexed field. Enforced by BTree row lists and FM locate/null scans; compressed bitmaps which remain compressed are not charged by logical cardinality. |
+| `data-evolution.scalar-index.max-total-decoded-row-ids` | `20000000` | Aggregate decoded or scanned row-ID work across indexed fields in one scalar batch query. |
+| `data-evolution.scalar-index.max-read-bytes` | `256 mb` | Maximum physical index bytes read for one indexed field. Cached bytes are not charged. |
+| `data-evolution.scalar-index.max-total-read-bytes` | `512 mb` | Aggregate physical index bytes read across indexed fields in one scalar batch query. |
 | `visibility-callback.enabled` | `false` | Whether JVM batch or bounded-stream writers wait after commit for existing partition indexes to cover newly appended ranges. Does not hide the committed snapshot. |
 | `visibility-callback.timeout` | `30 min` | Maximum wait time for visibility callback. |

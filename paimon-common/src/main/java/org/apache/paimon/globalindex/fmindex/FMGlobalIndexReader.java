@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.ContainsRefiningGlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexQueryContext;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.predicate.FieldRef;
@@ -52,6 +53,7 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
     @Nullable private final FMIndexFile.PartitionMeta partition;
     private final int demandPageSize;
     private final double locateCostRatio;
+    private final GlobalIndexQueryContext queryContext;
 
     @Nullable private volatile Metadata metadata;
 
@@ -63,7 +65,8 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
             ContainerMetadataLoader containerLoader,
             FMIndexFile.PartitionMeta partition,
             int demandPageSize,
-            double locateCostRatio) {
+            double locateCostRatio,
+            GlobalIndexQueryContext queryContext) {
         this.fileReader = fileReader;
         this.file = file;
         this.executor = executor;
@@ -72,13 +75,15 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
         this.partition = partition;
         this.demandPageSize = readContext.effectiveDemandPageSize(demandPageSize);
         this.locateCostRatio = locateCostRatio;
+        this.queryContext = queryContext;
     }
 
     private FMGlobalIndexReader(
             ExecutorService executor,
             FMIndexReadContext readContext,
             int demandPageSize,
-            double locateCostRatio) {
+            double locateCostRatio,
+            GlobalIndexQueryContext queryContext) {
         this.fileReader = null;
         this.file = null;
         this.executor = executor;
@@ -87,14 +92,17 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
         this.partition = null;
         this.demandPageSize = readContext.effectiveDemandPageSize(demandPageSize);
         this.locateCostRatio = locateCostRatio;
+        this.queryContext = queryContext;
     }
 
     static FMGlobalIndexReader empty(
             ExecutorService executor,
             FMIndexReadContext readContext,
             int demandPageSize,
-            double locateCostRatio) {
-        return new FMGlobalIndexReader(executor, readContext, demandPageSize, locateCostRatio);
+            double locateCostRatio,
+            GlobalIndexQueryContext queryContext) {
+        return new FMGlobalIndexReader(
+                executor, readContext, demandPageSize, locateCostRatio, queryContext);
     }
 
     @Override
@@ -276,6 +284,7 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
     private RoaringNavigableMap64 locateRows(
             SeekableInputStream input, Metadata metadata, SearchInterval interval)
             throws IOException {
+        queryContext.reserveDecodedRowIds(interval.size());
         RoaringNavigableMap64 result = new RoaringNavigableMap64();
         for (int bwtRow = interval.lower; bwtRow < interval.upper; bwtRow++) {
             int textPosition = locate(input, metadata.directory, bwtRow);
@@ -592,6 +601,8 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
         RoaringNavigableMap64 result = new RoaringNavigableMap64();
         FMIndexFile.BitVectorMeta nullRows = metadata.directory.nullRows;
         for (FMIndexFile.BitBlockMeta meta : nullRows.blocks) {
+            // Null and empty-needle predicates inspect every row bit even when few rows match.
+            queryContext.reserveDecodedRowIds(meta.bitCount);
             FMIndexFile.BitBlock block = bitBlock(input, nullRows, meta);
             for (int local = 0; local < meta.bitCount; local++) {
                 if (block.get(local) == selectNulls) {

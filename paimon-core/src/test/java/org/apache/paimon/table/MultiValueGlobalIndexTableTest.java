@@ -43,7 +43,9 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -103,6 +105,11 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
                                 "0.2"));
         assertThat(readIds(guarded, builder.arrayContains(1, BLUE), false))
                 .containsExactlyInAnyOrder(1, 2);
+
+        Map<String, String> readBudgetOptions = new HashMap<>();
+        readBudgetOptions.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_READ_BYTES.key(), "1 b");
+        FileStoreTable readBudgetGuarded = table.copy(readBudgetOptions);
+        assertThat(readIds(readBudgetGuarded, containsRed, false)).containsExactlyInAnyOrder(1, 5);
 
         write(table, GenericRow.of(6, array(RED)));
         table = getTableDefault();

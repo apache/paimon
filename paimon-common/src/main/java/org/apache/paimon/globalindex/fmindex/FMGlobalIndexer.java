@@ -21,6 +21,7 @@ package org.apache.paimon.globalindex.fmindex;
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexQueryContext;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.UnionGlobalIndexReader;
@@ -104,6 +105,17 @@ public class FMGlobalIndexer implements GlobalIndexer {
             List<GlobalIndexIOMeta> files,
             long totalRowCount,
             ExecutorService executor) {
+        return createReader(
+                fileReader, files, totalRowCount, executor, GlobalIndexQueryContext.unlimited());
+    }
+
+    @Override
+    public GlobalIndexReader createReader(
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> files,
+            long totalRowCount,
+            ExecutorService executor,
+            GlobalIndexQueryContext queryContext) {
         checkArgument(totalRowCount >= 0, "FM index total row count must be non-negative.");
         if (files.isEmpty()) {
             checkArgument(
@@ -111,7 +123,7 @@ public class FMGlobalIndexer implements GlobalIndexer {
                     "FM index files are missing for %s source rows.",
                     totalRowCount);
             return FMGlobalIndexReader.empty(
-                    executor, readContext, demandPageSize, locateCostRatio);
+                    executor, readContext, demandPageSize, locateCostRatio, queryContext);
         }
         checkArgument(totalRowCount > 0, "FM index files cannot cover zero source rows.");
         FMGlobalIndexReader.FileSetRowCountValidator validator =
@@ -141,7 +153,8 @@ public class FMGlobalIndexer implements GlobalIndexer {
                                 container,
                                 partition,
                                 demandPageSize,
-                                locateCostRatio));
+                                locateCostRatio,
+                                queryContext));
             }
         }
         return readers.size() == 1 ? readers.get(0) : new UnionGlobalIndexReader(readers);

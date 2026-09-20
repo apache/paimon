@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -52,6 +53,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -353,7 +355,11 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 batchScan.snapshotReader().manifestsReader().partitionFilter();
         long totalStart = System.nanoTime();
         GlobalIndexQueryContext queryContext =
-                new GlobalIndexQueryContext(options.dataEvolutionScalarIndexMaxDecodedRowIds());
+                new GlobalIndexQueryContext(
+                        options.dataEvolutionScalarIndexMaxDecodedRowIds(),
+                        options.dataEvolutionScalarIndexMaxTotalDecodedRowIds(),
+                        options.dataEvolutionScalarIndexMaxReadBytes(),
+                        options.dataEvolutionScalarIndexMaxTotalReadBytes());
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
                 DataEvolutionGlobalIndexScanner.create(
                         table, partitionFilter, globalIndexFilter, queryContext);
@@ -377,7 +383,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
                                                 result.get().contributingFieldIds()));
                 long coverageDuration = System.nanoTime() - coverageStart;
                 long totalDuration = System.nanoTime() - totalStart;
-                if (!acceptGlobalIndexResult(finalResult, scanner, options)) {
+                if (!acceptGlobalIndexResult(finalResult, scanner, partitionFilter, options)) {
                     return Optional.empty();
                 }
                 LOG.info(
@@ -411,18 +417,13 @@ public class DataEvolutionBatchScan implements DataTableScan {
     private boolean acceptGlobalIndexResult(
             GlobalIndexResult result,
             DataEvolutionGlobalIndexScanner scanner,
+            @Nullable PartitionPredicate partitionFilter,
             CoreOptions options) {
         long candidateRows = result.results().getLongCardinality();
         long rowIdCount = scanner.rowIdCount();
         double maxSelectionRatio = options.dataEvolutionScalarIndexMaxSelectionRatio();
-        if (rowIdCount > 0 && (double) candidateRows / rowIdCount > maxSelectionRatio) {
-            LOG.info(
-                    "Fall back to a full data scan for table '{}' because the global index "
-                            + "selected {} of {} row ids, exceeding maxSelectionRatio={}.",
-                    table.name(),
-                    candidateRows,
-                    rowIdCount,
-                    maxSelectionRatio);
+        if (exceedsSelectionRatio(
+                candidateRows, rowIdCount, maxSelectionRatio, "snapshot row-id population")) {
             return false;
         }
 
@@ -436,8 +437,75 @@ public class DataEvolutionBatchScan implements DataTableScan {
                     maxSelectionRanges);
             return false;
         }
+
+        // The snapshot-wide row-id population understates selectivity after partition pruning.
+        // Only pay the extra manifest pass after the cheaper global and fragmentation checks pass.
+        // Merge row-id ranges so Data Evolution column groups are counted once.
+        if (partitionFilter != null && partitionFilter != PartitionPredicate.ALWAYS_TRUE) {
+            long scopedRowIdCount = selectedDataRowIdCount();
+            if (exceedsSelectionRatio(
+                    candidateRows,
+                    scopedRowIdCount,
+                    maxSelectionRatio,
+                    "partition-pruned row-id population")) {
+                return false;
+            }
+        }
+
         evaluatedGlobalIndexRanges = ranges.get();
         return true;
+    }
+
+    private boolean exceedsSelectionRatio(
+            long candidateRows,
+            long denominator,
+            double maxSelectionRatio,
+            String denominatorDescription) {
+        boolean exceeds =
+                denominator == 0
+                        ? candidateRows > 0
+                        : denominator > 0
+                                && (double) candidateRows / denominator > maxSelectionRatio;
+        if (exceeds) {
+            LOG.info(
+                    "Fall back to a full data scan for table '{}' because the global index "
+                            + "selected {} of {} row ids in the {}, exceeding "
+                            + "maxSelectionRatio={}.",
+                    table.name(),
+                    candidateRows,
+                    denominator,
+                    denominatorDescription,
+                    maxSelectionRatio);
+        }
+        return exceeds;
+    }
+
+    /** Counts distinct row IDs in files the regular scan would consider. */
+    private long selectedDataRowIdCount() {
+        List<Range> rowRanges = new ArrayList<>();
+        Iterator<ManifestEntry> entries = batchScan.snapshotReader().readFileIterator();
+        while (entries.hasNext()) {
+            DataFileMeta file = entries.next().file();
+            Long firstRowId = file.firstRowId();
+            long rowCount = file.rowCount();
+            if (firstRowId == null || rowCount <= 0) {
+                continue;
+            }
+            if (firstRowId > Long.MAX_VALUE - rowCount + 1) {
+                return Long.MAX_VALUE;
+            }
+            rowRanges.add(new Range(firstRowId, firstRowId + rowCount - 1));
+        }
+
+        long count = 0;
+        for (Range range : Range.sortAndMergeOverlap(rowRanges)) {
+            long rangeCount = range.count();
+            if (count > Long.MAX_VALUE - rangeCount) {
+                return Long.MAX_VALUE;
+            }
+            count += rangeCount;
+        }
+        return count;
     }
 
     private Optional<GlobalIndexResult> evalGlobalIndexTopN() {

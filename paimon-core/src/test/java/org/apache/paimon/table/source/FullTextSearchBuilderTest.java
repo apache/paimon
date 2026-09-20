@@ -444,7 +444,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     @Test
-    public void testScalarPreFilterDoesNotUseBatchScanRowIdBudget() throws Exception {
+    public void testScalarPreFilterDoesNotUseBatchScanBudgets() throws Exception {
         Identifier identifier = identifier("full_text_scalar_prefilter_row_id_budget");
         Schema schema =
                 Schema.newBuilder()
@@ -456,6 +456,14 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         .option(
                                 CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_DECODED_ROW_IDS.key(),
                                 "2")
+                        .option(
+                                CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_TOTAL_DECODED_ROW_IDS
+                                        .key(),
+                                "2")
+                        .option(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_READ_BYTES.key(), "1 b")
+                        .option(
+                                CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_TOTAL_READ_BYTES.key(),
+                                "1 b")
                         .build();
         catalog.createTable(identifier, schema, false);
         FileStoreTable table = getTable(identifier);

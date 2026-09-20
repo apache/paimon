@@ -214,6 +214,31 @@ public class BitmapGlobalIndexTableTest extends DataEvolutionTestBase {
         assertThat(values).hasSize(90);
     }
 
+    @Test
+    public void testBitmapReadByteBudgetFallsBackToDataScan() throws Exception {
+        write(100L);
+        createIndex("f0", null);
+
+        FileStoreTable base = (FileStoreTable) catalog.getTable(identifier());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO.key(), "1.0");
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_READ_BYTES.key(), "1 b");
+        FileStoreTable table = base.copy(options);
+        Predicate predicate = new PredicateBuilder(table.rowType()).equal(0, 1);
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).noneMatch(IndexedSplit.class::isInstance);
+        List<Integer> values = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .executeFilter()
+                .createReader(plan)
+                .forEachRemaining(row -> values.add(row.getInt(0)));
+        assertThat(values).containsExactly(1);
+    }
+
     private void createIndex(String fieldName, List<Range> rowRanges) throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
         DataField indexField = table.rowType().getField(fieldName);

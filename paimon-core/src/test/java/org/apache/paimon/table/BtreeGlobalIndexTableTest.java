@@ -40,6 +40,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -267,7 +268,58 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
-    public void testDecodedRowBudgetIsIndependentAcrossIndexedFields() throws Exception {
+    public void testVersion1ReadByteBudgetFallsBackToDataScan() throws Exception {
+        assertReadByteBudgetFallsBackToDataScan(BTreeFileFooter.VERSION_1);
+    }
+
+    @Test
+    public void testVersion2ReadByteBudgetFallsBackToDataScan() throws Exception {
+        assertReadByteBudgetFallsBackToDataScan(BTreeFileFooter.VERSION_2);
+    }
+
+    @Test
+    public void testSelectionRatioUsesPartitionPrunedRowIds() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.STRING())
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.STRING())
+                        .column("f2", DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.ROW_TRACKING_PARTITION_GROUP_ON_COMMIT.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build();
+        catalog.createTable(identifier(), schema, true);
+        FileStoreTable base = getTableDefault();
+        writePartitionColumnGroups(base, "p1", 0, 10);
+        writePartitionColumnGroups(base, "p2", 10, 100);
+        createIndex("f0");
+
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO.key(), "0.75");
+        FileStoreTable table = base.copy(options);
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.equal(0, BinaryString.fromString("p1")), builder.lessThan(1, 10));
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        // The result is only 10% of the snapshot, but 100% of the selected partition.
+        assertThat(plan.splits()).noneMatch(IndexedSplit.class::isInstance);
+        List<Integer> ids = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .executeFilter()
+                .createReader(plan)
+                .forEachRemaining(row -> ids.add(row.getInt(1)));
+        assertThat(ids).hasSize(10);
+    }
+
+    @Test
+    public void testQueryBudgetLeavesCapacityForSelectiveSibling() throws Exception {
         write(100L);
         createIndex("f0");
         createIndex("f1");
@@ -277,6 +329,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         options.put(CoreOptions.GLOBAL_INDEX_THREAD_NUM.key(), "1");
         options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO.key(), "1.0");
         options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_DECODED_ROW_IDS.key(), "10");
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_TOTAL_DECODED_ROW_IDS.key(), "11");
         FileStoreTable table = base.copy(options);
         PredicateBuilder builder = new PredicateBuilder(table.rowType());
         List<Object> broadLiterals = new ArrayList<>();
@@ -320,6 +373,29 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
         assertThat(plan.splits()).allMatch(IndexedSplit.class::isInstance);
         assertThat(readF1(readBuilder, plan)).containsExactly("wide");
+    }
+
+    private void assertReadByteBudgetFallsBackToDataScan(int btreeFileVersion) throws Exception {
+        write(100L);
+        FileStoreTable base = (FileStoreTable) catalog.getTable(identifier());
+        FileStoreTable indexTable =
+                base.copy(
+                        Collections.singletonMap(
+                                BTreeIndexOptions.BTREE_INDEX_FILE_VERSION.key(),
+                                String.valueOf(btreeFileVersion)));
+        createIndex(indexTable, "f0");
+
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO.key(), "1.0");
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_READ_BYTES.key(), "1 b");
+        FileStoreTable table = base.copy(options);
+        Predicate predicate = new PredicateBuilder(table.rowType()).equal(0, 1);
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).noneMatch(IndexedSplit.class::isInstance);
+        assertThat(readF1(readBuilder, plan)).containsExactly("a1");
     }
 
     @Test
@@ -1102,6 +1178,42 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                 BatchTableCommit commit = builder.newCommit()) {
             for (int i = 0; i < count; i++) {
                 write.write(GenericRow.of(BinaryString.fromString("payload-" + i)));
+            }
+            List<CommitMessage> commitMessages = write.prepareCommit();
+            setFirstRowId(commitMessages, firstRowId);
+            commit.commit(commitMessages);
+        }
+    }
+
+    private void writePartitionColumnGroups(
+            FileStoreTable table, String partition, int fromInclusive, int toExclusive)
+            throws Exception {
+        RowType keyAndValueType = table.rowType().project(Arrays.asList("pt", "f0", "f1"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(keyAndValueType);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = fromInclusive; i < toExclusive; i++) {
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString(partition),
+                                i,
+                                BinaryString.fromString("a" + i)));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        long firstRowId =
+                table.snapshotManager().latestSnapshot().nextRowId()
+                        - (toExclusive - fromInclusive);
+        RowType payloadType = table.rowType().project(Arrays.asList("pt", "f2"));
+        builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(payloadType);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = fromInclusive; i < toExclusive; i++) {
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString(partition),
+                                BinaryString.fromString("b" + i)));
             }
             List<CommitMessage> commitMessages = write.prepareCommit();
             setFirstRowId(commitMessages, firstRowId);

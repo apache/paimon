@@ -2670,11 +2670,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(0.2d)
                     .withDescription(
                             "Maximum candidate row ratio for using a scalar global index "
-                                    + "to read a data evolution table, using the snapshot's "
-                                    + "allocated row-id count as the denominator. Broader results "
-                                    + "fall back to a normal data scan in all search modes. The "
-                                    + "value must be in (0, 1]. In fast mode, fallback may return "
-                                    + "matching rows outside current index coverage.");
+                                    + "to read a data evolution table. The denominator is the "
+                                    + "partition-pruned row-id population for partition-filtered "
+                                    + "queries, or the snapshot's allocated row-id count "
+                                    + "otherwise. Broader results fall back to a normal data scan "
+                                    + "in all search modes. The value must be in (0, 1]. In fast "
+                                    + "mode, fallback may return matching rows outside current "
+                                    + "index coverage.");
 
     public static final ConfigOption<Integer> DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES =
             key("data-evolution.scalar-index.max-selection-ranges")
@@ -2693,12 +2695,43 @@ public class CoreOptions implements Serializable {
                     .defaultValue(10_000_000L)
                     .withDescription(
                             "Maximum number of row IDs that supporting scalar index readers may "
-                                    + "decode for one indexed field in a data evolution query. "
-                                    + "A predicate branch which exceeds the budget is treated as "
-                                    + "unsupported, so safe AND siblings may still prune rows; the "
-                                    + "query falls back to a normal data scan when the remaining "
-                                    + "boolean expression cannot be evaluated safely. Compressed "
-                                    + "bitmap cardinality is not counted as decoded row IDs.");
+                                    + "decode or scan for one indexed field in a data evolution "
+                                    + "query. A predicate branch which exceeds the budget is "
+                                    + "treated as unsupported, so safe AND siblings may still "
+                                    + "prune rows; the query falls back to a normal data scan when "
+                                    + "the remaining boolean expression cannot be evaluated "
+                                    + "safely. Compressed bitmap cardinality is not counted as "
+                                    + "decoded row IDs.");
+
+    public static final ConfigOption<Long> DATA_EVOLUTION_SCALAR_INDEX_MAX_TOTAL_DECODED_ROW_IDS =
+            key("data-evolution.scalar-index.max-total-decoded-row-ids")
+                    .longType()
+                    .defaultValue(20_000_000L)
+                    .withDescription(
+                            "Maximum number of row IDs that supporting scalar index readers may "
+                                    + "decode or scan across all indexed fields in one data "
+                                    + "evolution query. A field which exceeds the shared query "
+                                    + "budget is treated as unsupported, while work already "
+                                    + "performed stays charged to enforce a hard aggregate bound.");
+
+    public static final ConfigOption<MemorySize> DATA_EVOLUTION_SCALAR_INDEX_MAX_READ_BYTES =
+            key("data-evolution.scalar-index.max-read-bytes")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(256))
+                    .withDescription(
+                            "Maximum physical index bytes read for one indexed field in a data "
+                                    + "evolution scalar query. A field which exceeds the budget "
+                                    + "is treated as unsupported. Cached bytes are not charged.");
+
+    public static final ConfigOption<MemorySize> DATA_EVOLUTION_SCALAR_INDEX_MAX_TOTAL_READ_BYTES =
+            key("data-evolution.scalar-index.max-total-read-bytes")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(512))
+                    .withDescription(
+                            "Maximum physical index bytes read across all indexed fields in one "
+                                    + "data evolution scalar query. Bytes already read by a "
+                                    + "declined field stay charged to enforce a hard aggregate "
+                                    + "bound.");
 
     public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_FILE_PRUNING =
             key("data-evolution.merge-into.file-pruning")
@@ -4659,6 +4692,34 @@ public class CoreOptions implements Serializable {
                 "The option %s must be greater than 0.",
                 DATA_EVOLUTION_SCALAR_INDEX_MAX_DECODED_ROW_IDS.key());
         return maxDecodedRowIds;
+    }
+
+    public long dataEvolutionScalarIndexMaxTotalDecodedRowIds() {
+        long maxDecodedRowIds = options.get(DATA_EVOLUTION_SCALAR_INDEX_MAX_TOTAL_DECODED_ROW_IDS);
+        checkArgument(
+                maxDecodedRowIds > 0,
+                "The option %s must be greater than 0.",
+                DATA_EVOLUTION_SCALAR_INDEX_MAX_TOTAL_DECODED_ROW_IDS.key());
+        return maxDecodedRowIds;
+    }
+
+    public long dataEvolutionScalarIndexMaxReadBytes() {
+        long maxReadBytes = options.get(DATA_EVOLUTION_SCALAR_INDEX_MAX_READ_BYTES).getBytes();
+        checkArgument(
+                maxReadBytes > 0,
+                "The option %s must be greater than 0.",
+                DATA_EVOLUTION_SCALAR_INDEX_MAX_READ_BYTES.key());
+        return maxReadBytes;
+    }
+
+    public long dataEvolutionScalarIndexMaxTotalReadBytes() {
+        long maxReadBytes =
+                options.get(DATA_EVOLUTION_SCALAR_INDEX_MAX_TOTAL_READ_BYTES).getBytes();
+        checkArgument(
+                maxReadBytes > 0,
+                "The option %s must be greater than 0.",
+                DATA_EVOLUTION_SCALAR_INDEX_MAX_TOTAL_READ_BYTES.key());
+        return maxReadBytes;
     }
 
     public boolean dataEvolutionMergeIntoFilePruning() {

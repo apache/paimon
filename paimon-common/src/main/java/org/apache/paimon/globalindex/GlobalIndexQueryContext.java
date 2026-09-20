@@ -24,55 +24,181 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class GlobalIndexQueryContext {
 
     private static final GlobalIndexQueryContext UNLIMITED =
-            new GlobalIndexQueryContext(Long.MAX_VALUE);
+            new GlobalIndexQueryContext(
+                    Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE);
 
     private final long maxDecodedRowIds;
-    private final AtomicLong decodedRowIds;
+    private final long maxReadBytes;
+    private final SharedBudget sharedBudget;
+
+    private long decodedRowIds;
+    private long readBytes;
+    private boolean declined;
 
     public GlobalIndexQueryContext(long maxDecodedRowIds) {
-        if (maxDecodedRowIds <= 0) {
-            throw new IllegalArgumentException(
-                    "Maximum decoded row id count must be greater than 0.");
-        }
+        this(maxDecodedRowIds, Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE);
+    }
+
+    public GlobalIndexQueryContext(
+            long maxDecodedRowIds,
+            long maxTotalDecodedRowIds,
+            long maxReadBytes,
+            long maxTotalReadBytes) {
+        checkPositive(maxDecodedRowIds, "Maximum decoded row id count");
+        checkPositive(maxTotalDecodedRowIds, "Maximum total decoded row id count");
+        checkPositive(maxReadBytes, "Maximum index read bytes");
+        checkPositive(maxTotalReadBytes, "Maximum total index read bytes");
         this.maxDecodedRowIds = maxDecodedRowIds;
-        this.decodedRowIds = new AtomicLong();
+        this.maxReadBytes = maxReadBytes;
+        this.sharedBudget = new SharedBudget(maxTotalDecodedRowIds, maxTotalReadBytes);
+    }
+
+    private GlobalIndexQueryContext(
+            long maxDecodedRowIds, long maxReadBytes, SharedBudget sharedBudget) {
+        this.maxDecodedRowIds = maxDecodedRowIds;
+        this.maxReadBytes = maxReadBytes;
+        this.sharedBudget = sharedBudget;
     }
 
     public static GlobalIndexQueryContext unlimited() {
         return UNLIMITED;
     }
 
-    /** Creates an independent lookup scope with the same limit. */
+    /** Creates a field lookup scope with local limits and a shared query-level budget. */
     GlobalIndexQueryContext fork() {
         return maxDecodedRowIds == Long.MAX_VALUE
+                        && maxReadBytes == Long.MAX_VALUE
+                        && sharedBudget.isUnlimited()
                 ? UNLIMITED
-                : new GlobalIndexQueryContext(maxDecodedRowIds);
+                : new GlobalIndexQueryContext(maxDecodedRowIds, maxReadBytes, sharedBudget);
     }
 
     /** Reserves budget before row IDs are allocated or decoded. */
-    public void reserveDecodedRowIds(long count) {
+    public synchronized void reserveDecodedRowIds(long count) {
+        reserve(Resource.DECODED_ROW_IDS, count);
+    }
+
+    /** Reserves budget before index bytes are read from storage. */
+    public synchronized void reserveReadBytes(long count) {
+        reserve(Resource.READ_BYTES, count);
+    }
+
+    private void reserve(Resource resource, long count) {
         if (count < 0) {
-            throw new IllegalArgumentException("Decoded row id count must not be negative.");
+            throw new IllegalArgumentException(resource.description + " must not be negative.");
         }
-        if (count == 0 || maxDecodedRowIds == Long.MAX_VALUE) {
+        if (count == 0 || this == UNLIMITED) {
             return;
         }
+        if (declined) {
+            throw declined(resource, count, "lookup scope already declined");
+        }
 
-        while (true) {
-            long current = decodedRowIds.get();
-            if (count > maxDecodedRowIds - current) {
-                throw new GlobalIndexLookupDeclinedException(
-                        String.format(
-                                "Global index decoded row-id budget exceeded: used=%s, requested=%s, max=%s.",
-                                current, count, maxDecodedRowIds));
-            }
-            if (decodedRowIds.compareAndSet(current, current + count)) {
-                return;
-            }
+        long current = resource == Resource.DECODED_ROW_IDS ? decodedRowIds : readBytes;
+        long localLimit = resource == Resource.DECODED_ROW_IDS ? maxDecodedRowIds : maxReadBytes;
+        if (count > localLimit - current) {
+            declined = true;
+            throw declined(resource, count, "field limit=" + localLimit);
+        }
+
+        if (!sharedBudget.reserve(resource, count)) {
+            declined = true;
+            throw declined(resource, count, "query limit=" + sharedBudget.limit(resource));
+        }
+
+        if (resource == Resource.DECODED_ROW_IDS) {
+            decodedRowIds += count;
+        } else {
+            readBytes += count;
         }
     }
 
-    public long decodedRowIds() {
-        return decodedRowIds.get();
+    private GlobalIndexLookupDeclinedException declined(
+            Resource resource, long requested, String reason) {
+        return new GlobalIndexLookupDeclinedException(
+                String.format(
+                        "Global index %s budget exceeded: used=%s, requested=%s, %s.",
+                        resource.label,
+                        resource == Resource.DECODED_ROW_IDS ? decodedRowIds : readBytes,
+                        requested,
+                        reason));
+    }
+
+    public synchronized long decodedRowIds() {
+        return decodedRowIds;
+    }
+
+    public synchronized long readBytes() {
+        return readBytes;
+    }
+
+    long totalDecodedRowIds() {
+        return sharedBudget.used(Resource.DECODED_ROW_IDS);
+    }
+
+    long totalReadBytes() {
+        return sharedBudget.used(Resource.READ_BYTES);
+    }
+
+    private static void checkPositive(long value, String name) {
+        if (value <= 0) {
+            throw new IllegalArgumentException(name + " must be greater than 0.");
+        }
+    }
+
+    private enum Resource {
+        DECODED_ROW_IDS("decoded row-id", "Decoded row id count"),
+        READ_BYTES("read-byte", "Index read byte count");
+
+        private final String label;
+        private final String description;
+
+        Resource(String label, String description) {
+            this.label = label;
+            this.description = description;
+        }
+    }
+
+    private static final class SharedBudget {
+
+        private final long maxDecodedRowIds;
+        private final long maxReadBytes;
+        private final AtomicLong decodedRowIds = new AtomicLong();
+        private final AtomicLong readBytes = new AtomicLong();
+
+        private SharedBudget(long maxDecodedRowIds, long maxReadBytes) {
+            this.maxDecodedRowIds = maxDecodedRowIds;
+            this.maxReadBytes = maxReadBytes;
+        }
+
+        private boolean reserve(Resource resource, long count) {
+            AtomicLong used = counter(resource);
+            long limit = limit(resource);
+            while (true) {
+                long current = used.get();
+                if (count > limit - current) {
+                    return false;
+                }
+                if (used.compareAndSet(current, current + count)) {
+                    return true;
+                }
+            }
+        }
+
+        private long used(Resource resource) {
+            return counter(resource).get();
+        }
+
+        private long limit(Resource resource) {
+            return resource == Resource.DECODED_ROW_IDS ? maxDecodedRowIds : maxReadBytes;
+        }
+
+        private boolean isUnlimited() {
+            return maxDecodedRowIds == Long.MAX_VALUE && maxReadBytes == Long.MAX_VALUE;
+        }
+
+        private AtomicLong counter(Resource resource) {
+            return resource == Resource.DECODED_ROW_IDS ? decodedRowIds : readBytes;
+        }
     }
 }

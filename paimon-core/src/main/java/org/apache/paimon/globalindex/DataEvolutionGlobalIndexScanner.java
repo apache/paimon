@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
+import org.apache.paimon.globalindex.io.BudgetedGlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -35,6 +36,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -181,7 +183,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         return Collections.emptyList();
                     }
 
-                    // A broad field must not consume the budget needed by a selective sibling.
+                    // A field-local limit bounds how much one broad predicate can consume before
+                    // selective siblings use the shared query budget.
                     GlobalIndexQueryContext fieldQueryContext = queryContext.fork();
 
                     // A field can be covered by its dedicated primary index and by one or more
@@ -190,12 +193,30 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                     // previous primary-only choice made coverage planning believe the extra-field
                     // tail was indexed while the evaluator silently ignored it.
                     List<GlobalIndexReader> allReaders = new ArrayList<>();
-                    for (IndexMetaFileGroup indexGroup : groups) {
-                        allReaders.addAll(
-                                createReaders(
-                                        indexFileReader, indexGroup, rowType, fieldQueryContext));
+                    try {
+                        for (IndexMetaFileGroup indexGroup : groups) {
+                            allReaders.addAll(
+                                    createReaders(
+                                            indexFileReader,
+                                            indexGroup,
+                                            rowType,
+                                            fieldQueryContext));
+                        }
+                        return Collections.singletonList(new UnionGlobalIndexReader(allReaders));
+                    } catch (RuntimeException e) {
+                        allReaders.forEach(IOUtils::closeQuietly);
+                        GlobalIndexLookupDeclinedException declined =
+                                GlobalIndexLookupDeclinedException.find(e);
+                        if (declined == null) {
+                            throw e;
+                        }
+                        LOG.info(
+                                "Skip global index field '{}' for table '{}' because its lookup declined: {}",
+                                rowType.getField(fId).name(),
+                                table.name(),
+                                declined.getMessage());
+                        return Collections.emptyList();
                     }
-                    return Collections.singletonList(new UnionGlobalIndexReader(allReaders));
                 };
         this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
     }
@@ -449,61 +470,80 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             IndexMetaFileGroup group,
             RowType rowType,
             GlobalIndexQueryContext fieldQueryContext) {
+        GlobalIndexFileReader budgetedFileReader =
+                new BudgetedGlobalIndexFileReader(indexFileReadWrite, fieldQueryContext);
         DataField indexField = group.indexField(rowType);
         List<DataField> extraFields = group.extraFields(rowType);
 
         Set<GlobalIndexReader> readers = new HashSet<>();
-        for (Map.Entry<String, Map<Range, List<IndexFileMeta>>> entry : group.metas.entrySet()) {
-            String indexType = entry.getKey();
-            Map<Range, List<IndexFileMeta>> metas = entry.getValue();
-            GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(indexType);
-            GlobalIndexer globalIndexer =
-                    globalIndexerFactory.create(indexField, extraFields, options);
+        try {
+            for (Map.Entry<String, Map<Range, List<IndexFileMeta>>> entry :
+                    group.metas.entrySet()) {
+                String indexType = entry.getKey();
+                Map<Range, List<IndexFileMeta>> metas = entry.getValue();
+                GlobalIndexerFactory globalIndexerFactory =
+                        GlobalIndexerFactoryUtils.load(indexType);
+                GlobalIndexer globalIndexer =
+                        globalIndexerFactory.create(indexField, extraFields, options);
 
-            List<CompletableFuture<GlobalIndexReader>> futures = new ArrayList<>(metas.size());
-            for (Map.Entry<Range, List<IndexFileMeta>> rangeMetas : metas.entrySet()) {
-                Range range = rangeMetas.getKey();
-                List<IndexFileMeta> indexFileMetas = rangeMetas.getValue();
-                List<GlobalIndexIOMeta> globalMetas =
-                        indexFileMetas.stream()
-                                .map(this::toGlobalMeta)
-                                .collect(Collectors.toList());
-                futures.add(
-                        CompletableFuture.supplyAsync(
-                                () ->
-                                        new OffsetGlobalIndexReader(
-                                                globalIndexer.createReader(
-                                                        indexFileReadWrite,
-                                                        globalMetas,
-                                                        range.count(),
-                                                        executor,
-                                                        fieldQueryContext),
-                                                range.from,
-                                                range.to),
-                                executor));
-            }
+                List<CompletableFuture<GlobalIndexReader>> futures = new ArrayList<>(metas.size());
+                for (Map.Entry<Range, List<IndexFileMeta>> rangeMetas : metas.entrySet()) {
+                    Range range = rangeMetas.getKey();
+                    List<IndexFileMeta> indexFileMetas = rangeMetas.getValue();
+                    List<GlobalIndexIOMeta> globalMetas =
+                            indexFileMetas.stream()
+                                    .map(this::toGlobalMeta)
+                                    .collect(Collectors.toList());
+                    futures.add(
+                            CompletableFuture.supplyAsync(
+                                    () ->
+                                            new OffsetGlobalIndexReader(
+                                                    globalIndexer.createReader(
+                                                            budgetedFileReader,
+                                                            globalMetas,
+                                                            range.count(),
+                                                            executor,
+                                                            fieldQueryContext),
+                                                    range.from,
+                                                    range.to),
+                                    executor));
+                }
 
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-            List<GlobalIndexReader> unionReader = new ArrayList<>(futures.size() + 1);
-            for (CompletableFuture<GlobalIndexReader> future : futures) {
-                unionReader.add(future.join());
+                try {
+                    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+                } catch (RuntimeException e) {
+                    for (CompletableFuture<GlobalIndexReader> future : futures) {
+                        if (future.isDone()
+                                && !future.isCompletedExceptionally()
+                                && !future.isCancelled()) {
+                            IOUtils.closeQuietly(future.getNow(null));
+                        }
+                    }
+                    throw e;
+                }
+                List<GlobalIndexReader> unionReader = new ArrayList<>(futures.size() + 1);
+                for (CompletableFuture<GlobalIndexReader> future : futures) {
+                    unionReader.add(future.join());
+                }
+                readers.add(
+                        new UnionGlobalIndexReader(
+                                unionReader,
+                                duration ->
+                                        LOG.info(
+                                                "Global index lookup table='{}', type='{}', fields='{}', lookup={} ms.",
+                                                table.name(),
+                                                indexType,
+                                                group.fieldIds.stream()
+                                                        .map(rowType::getField)
+                                                        .map(DataField::name)
+                                                        .collect(Collectors.toList()),
+                                                duration / 1_000_000)));
             }
-            readers.add(
-                    new UnionGlobalIndexReader(
-                            unionReader,
-                            duration ->
-                                    LOG.info(
-                                            "Global index lookup table='{}', type='{}', fields='{}', lookup={} ms.",
-                                            table.name(),
-                                            indexType,
-                                            group.fieldIds.stream()
-                                                    .map(rowType::getField)
-                                                    .map(DataField::name)
-                                                    .collect(Collectors.toList()),
-                                            duration / 1_000_000)));
+            return readers;
+        } catch (RuntimeException e) {
+            readers.forEach(IOUtils::closeQuietly);
+            throw e;
         }
-
-        return readers;
     }
 
     private GlobalIndexIOMeta toGlobalMeta(IndexFileMeta meta) {

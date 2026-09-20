@@ -92,4 +92,50 @@ public class GlobalIndexQueryContextTest {
         assertThat(first.decodedRowIds()).isEqualTo(2);
         assertThat(second.decodedRowIds()).isEqualTo(2);
     }
+
+    @Test
+    public void testForksShareQueryBudget() {
+        GlobalIndexQueryContext template =
+                new GlobalIndexQueryContext(3, 4, Long.MAX_VALUE, Long.MAX_VALUE);
+        GlobalIndexQueryContext first = template.fork();
+        GlobalIndexQueryContext second = template.fork();
+
+        first.reserveDecodedRowIds(3);
+        second.reserveDecodedRowIds(1);
+
+        assertThat(template.totalDecodedRowIds()).isEqualTo(4);
+        assertThatThrownBy(() -> second.reserveDecodedRowIds(1))
+                .isInstanceOf(GlobalIndexLookupDeclinedException.class);
+        assertThat(template.totalDecodedRowIds()).isEqualTo(4);
+    }
+
+    @Test
+    public void testDeclinedFieldKeepsConsumedQueryWorkCharged() {
+        GlobalIndexQueryContext template = new GlobalIndexQueryContext(2, 3, 4, 6);
+        GlobalIndexQueryContext broad = template.fork();
+        GlobalIndexQueryContext selective = template.fork();
+
+        broad.reserveDecodedRowIds(2);
+        broad.reserveReadBytes(4);
+        assertThatThrownBy(() -> broad.reserveDecodedRowIds(1))
+                .isInstanceOf(GlobalIndexLookupDeclinedException.class);
+
+        assertThat(template.totalDecodedRowIds()).isEqualTo(2);
+        assertThat(template.totalReadBytes()).isEqualTo(4);
+        selective.reserveDecodedRowIds(1);
+        selective.reserveReadBytes(2);
+        assertThat(template.totalDecodedRowIds()).isEqualTo(3);
+        assertThat(template.totalReadBytes()).isEqualTo(6);
+    }
+
+    @Test
+    public void testUnlimitedFieldLimitStillHonorsQueryLimit() {
+        GlobalIndexQueryContext template =
+                new GlobalIndexQueryContext(Long.MAX_VALUE, 1, Long.MAX_VALUE, Long.MAX_VALUE);
+        GlobalIndexQueryContext field = template.fork();
+
+        field.reserveDecodedRowIds(1);
+        assertThatThrownBy(() -> field.reserveDecodedRowIds(1))
+                .isInstanceOf(GlobalIndexLookupDeclinedException.class);
+    }
 }

@@ -295,12 +295,7 @@ public class BTreeIndexReader implements Closeable {
     }
 
     public Optional<GlobalIndexResult> visitIsNull() {
-        return createResult(
-                () -> {
-                    long count = nullRowCount.get();
-                    queryContext.reserveDecodedRowIds(count);
-                    return nullBitmap.get();
-                });
+        return createResult(nullBitmap::get);
     }
 
     public Optional<GlobalIndexResult> visitStartsWith(Object literal) {

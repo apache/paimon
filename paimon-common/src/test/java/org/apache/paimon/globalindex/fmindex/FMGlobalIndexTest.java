@@ -28,6 +28,8 @@ import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.VectoredReadable;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexLookupDeclinedException;
+import org.apache.paimon.globalindex.GlobalIndexQueryContext;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexer;
@@ -285,6 +287,19 @@ public class FMGlobalIndexTest {
                             .join(),
                     0L,
                     4L);
+        }
+    }
+
+    @Test
+    public void testNullScanHonorsDecodedRowBudget() throws Exception {
+        List<GlobalIndexIOMeta> files = writeData(Arrays.asList(str("a"), null, str("b")), 0);
+        GlobalIndexQueryContext queryContext = new GlobalIndexQueryContext(2);
+
+        try (GlobalIndexReader reader =
+                indexer.createReader(
+                        fileReader, files, 3, newDirectExecutorService(), queryContext)) {
+            assertThatThrownBy(() -> reader.visitIsNull(fieldRef).join())
+                    .hasRootCauseInstanceOf(GlobalIndexLookupDeclinedException.class);
         }
     }
 
