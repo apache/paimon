@@ -43,10 +43,40 @@ public class BudgetedGlobalIndexFileReaderTest {
             new GlobalIndexIOMeta(new Path("file:///index"), DATA.length, null);
 
     @Test
+    public void testUnlimitedReadPreservesOriginalStream() throws Exception {
+        for (SeekableInputStream original :
+                new SeekableInputStream[] {
+                    new ByteArraySeekableStream(DATA), new VectoredByteArrayInput(DATA)
+                }) {
+            try (SeekableInputStream input =
+                    new BudgetedGlobalIndexFileReader(
+                                    ignored -> original, GlobalIndexQueryContext.unlimited())
+                            .getInputStream(META)) {
+                assertThat(input).isSameAs(original);
+                assertThat(input.read()).isEqualTo(1);
+            }
+        }
+    }
+
+    @Test
+    public void testSequentialStreamDoesNotAcquireVectoredCapability() throws Exception {
+        GlobalIndexQueryContext context =
+                new GlobalIndexQueryContext(Long.MAX_VALUE, Long.MAX_VALUE, 2, 2);
+        try (SeekableInputStream input =
+                new BudgetedGlobalIndexFileReader(
+                                ignored -> new ByteArraySeekableStream(DATA), context)
+                        .getInputStream(META)) {
+            assertThat(input).isNotInstanceOf(VectoredReadable.class);
+            assertThat(input.read(new byte[2])).isEqualTo(2);
+            assertThatThrownBy(input::read).isInstanceOf(GlobalIndexLookupDeclinedException.class);
+        }
+    }
+
+    @Test
     public void testSequentialAndPositionalReadsShareBudget() throws Exception {
         GlobalIndexQueryContext context =
                 new GlobalIndexQueryContext(Long.MAX_VALUE, Long.MAX_VALUE, 4, 4);
-        GlobalIndexFileReader delegate = ignored -> new ByteArraySeekableStream(DATA);
+        GlobalIndexFileReader delegate = ignored -> new VectoredByteArrayInput(DATA);
         SeekableInputStream input =
                 new BudgetedGlobalIndexFileReader(delegate, context).getInputStream(META);
 

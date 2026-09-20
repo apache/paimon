@@ -30,7 +30,6 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -183,7 +182,9 @@ final class ContainsRefinementEvaluator {
                                                 for (ContainsGroup group : groups.values()) {
                                                     exactFutures.add(
                                                             visitContainsConjunction(
-                                                                    group, refinedCandidates));
+                                                                    group,
+                                                                    refinedCandidates,
+                                                                    emptyResultFields));
                                                 }
                                                 return CompletableFuture.allOf(
                                                                 exactFutures.toArray(
@@ -257,7 +258,14 @@ final class ContainsRefinementEvaluator {
     }
 
     private CompletableFuture<Optional<GlobalIndexEvaluator.Evaluation>> visitContainsConjunction(
-            ContainsGroup group, @Nullable GlobalIndexResult candidates) {
+            ContainsGroup group,
+            @Nullable GlobalIndexResult candidates,
+            Set<Integer> candidateFields) {
+        // Exact results are restricted by every successful coarse lookup, even when one of
+        // those fields later declines exact verification. Keep those coverage dependencies
+        // so FULL/DETAIL can restore all rows excluded only by missing index coverage.
+        Set<Integer> contributingFields = new HashSet<>(candidateFields);
+        contributingFields.add(group.fieldId);
         List<CompletableFuture<Optional<GlobalIndexResult>>> futures =
                 new ArrayList<>(group.readers.size());
         for (GlobalIndexReader reader : group.readers) {
@@ -274,8 +282,7 @@ final class ContainsRefinementEvaluator {
                                 result.map(
                                         value ->
                                                 new GlobalIndexEvaluator.Evaluation(
-                                                        value,
-                                                        Collections.singleton(group.fieldId))));
+                                                        value, contributingFields)));
     }
 
     private CompletableFuture<Optional<GlobalIndexResult>> intersectReaderResults(

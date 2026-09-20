@@ -2719,19 +2719,20 @@ public class CoreOptions implements Serializable {
                     .memoryType()
                     .defaultValue(MemorySize.ofMebiBytes(256))
                     .withDescription(
-                            "Maximum physical index bytes read for one indexed field in a data "
+                            "Maximum index input bytes requested for one indexed field in a data "
                                     + "evolution scalar query. A field which exceeds the budget "
-                                    + "is treated as unsupported. Cached bytes are not charged.");
+                                    + "is treated as unsupported. Index-cache hits are not charged; "
+                                    + "filesystem read-ahead and vectored-read gaps are excluded.");
 
     public static final ConfigOption<MemorySize> DATA_EVOLUTION_SCALAR_INDEX_MAX_TOTAL_READ_BYTES =
             key("data-evolution.scalar-index.max-total-read-bytes")
                     .memoryType()
                     .defaultValue(MemorySize.ofMebiBytes(512))
                     .withDescription(
-                            "Maximum physical index bytes read across all indexed fields in one "
+                            "Maximum index input bytes requested across all indexed fields in one "
                                     + "data evolution scalar query. Bytes already read by a "
                                     + "declined field stay charged to enforce a hard aggregate "
-                                    + "bound.");
+                                    + "bound on requested bytes, not filesystem transfer bytes.");
 
     public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_FILE_PRUNING =
             key("data-evolution.merge-into.file-pruning")

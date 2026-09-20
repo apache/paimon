@@ -35,6 +35,8 @@ import org.apache.paimon.utils.SemaphoredDelegatingExecutor;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -552,8 +554,9 @@ class GlobalIndexEvaluatorTest {
         evaluator.close();
     }
 
-    @Test
-    void testContainsDeclineKeepsExactSiblingCandidates() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testContainsDeclineKeepsExactSiblingCandidates(boolean coarseSucceeds) {
         RowType rowType =
                 new RowType(
                         Arrays.asList(
@@ -566,7 +569,9 @@ class GlobalIndexEvaluatorTest {
                             FieldRef fieldRef,
                             List<Object> literals,
                             GlobalIndexResult candidates) {
-                        return declinedFuture();
+                        return coarseSucceeds
+                                ? CompletableFuture.completedFuture(Optional.of(resultOf(2)))
+                                : declinedFuture();
                     }
 
                     @Override
@@ -584,7 +589,7 @@ class GlobalIndexEvaluatorTest {
                                 Collections.singletonList(
                                         fieldId == 0
                                                 ? containsReader
-                                                : readerReturning(resultOf(2))));
+                                                : readerReturning(resultOf(2, 50))));
         PredicateBuilder builder = new PredicateBuilder(rowType);
 
         Optional<GlobalIndexEvaluator.Evaluation> evaluation =
@@ -594,8 +599,107 @@ class GlobalIndexEvaluatorTest {
                                 builder.equal(1, 42)));
 
         assertThat(evaluation).isPresent();
-        assertBitmapContainsExactly(evaluation.get().result().results(), 2L);
+        assertBitmapContainsExactly(evaluation.get().result().results(), 2L, 50L);
         assertThat(evaluation.get().contributingFieldIds()).containsExactly(1);
+        evaluator.close();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testContainsExactWithoutCoarseKeepsOwnCoverage(boolean emptyExactResult) {
+        RowType rowType = rowType();
+        ContainsRefiningGlobalIndexReader containsReader =
+                new StubContainsRefiningGlobalIndexReader() {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsCandidates(
+                            FieldRef fieldRef,
+                            List<Object> literals,
+                            GlobalIndexResult candidates) {
+                        return CompletableFuture.completedFuture(Optional.empty());
+                    }
+
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsConjunction(
+                            FieldRef fieldRef,
+                            List<Object> literals,
+                            GlobalIndexResult candidates) {
+                        return CompletableFuture.completedFuture(
+                                Optional.of(emptyExactResult ? resultOf() : resultOf(2)));
+                    }
+                };
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Collections.singletonList(
+                                        fieldId == 0
+                                                ? containsReader
+                                                : readerReturning(resultOf(2, 50))));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Optional<GlobalIndexEvaluator.Evaluation> evaluation =
+                evaluator.evaluateWithContributingFields(
+                        PredicateBuilder.and(
+                                builder.contains(0, BinaryString.fromString("needle")),
+                                builder.equal(1, 42)));
+
+        assertThat(evaluation).isPresent();
+        assertBitmapContainsExactly(
+                evaluation.get().result().results(),
+                emptyExactResult ? new long[0] : new long[] {2});
+        assertThat(evaluation.get().contributingFieldIds()).containsExactlyInAnyOrder(0, 1);
+        evaluator.close();
+    }
+
+    @Test
+    void testContainsExactDeclineKeepsCoarseCoverageDependencies() {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", DataTypes.STRING()),
+                                new DataField(1, "b", DataTypes.STRING())));
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Collections.singletonList(
+                                        new StubContainsRefiningGlobalIndexReader() {
+                                            @Override
+                                            public CompletableFuture<Optional<GlobalIndexResult>>
+                                                    visitContainsCandidates(
+                                                            FieldRef fieldRef,
+                                                            List<Object> literals,
+                                                            GlobalIndexResult candidates) {
+                                                return CompletableFuture.completedFuture(
+                                                        Optional.of(
+                                                                fieldId == 0
+                                                                        ? resultOf(1)
+                                                                        : resultOf(1, 50)));
+                                            }
+
+                                            @Override
+                                            public CompletableFuture<Optional<GlobalIndexResult>>
+                                                    visitContainsConjunction(
+                                                            FieldRef fieldRef,
+                                                            List<Object> literals,
+                                                            GlobalIndexResult candidates) {
+                                                return fieldId == 0
+                                                        ? declinedFuture()
+                                                        : CompletableFuture.completedFuture(
+                                                                Optional.of(candidates));
+                                            }
+                                        }));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Optional<GlobalIndexEvaluator.Evaluation> evaluation =
+                evaluator.evaluateWithContributingFields(
+                        PredicateBuilder.and(
+                                builder.contains(0, BinaryString.fromString("needle")),
+                                builder.contains(1, BinaryString.fromString("needle"))));
+
+        assertThat(evaluation).isPresent();
+        assertBitmapContainsExactly(evaluation.get().result().results(), 1L);
+        // b's exact pass is restricted by a's coarse coverage. FULL/DETAIL must restore
+        // unindexed rows of a even though only b's exact pass succeeded.
+        assertThat(evaluation.get().contributingFieldIds()).containsExactlyInAnyOrder(0, 1);
         evaluator.close();
     }
 

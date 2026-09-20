@@ -138,4 +138,59 @@ public class GlobalIndexQueryContextTest {
         assertThatThrownBy(() -> field.reserveDecodedRowIds(1))
                 .isInstanceOf(GlobalIndexLookupDeclinedException.class);
     }
+
+    @Test
+    public void testUnlimitedReservationsDoNotAccumulate() {
+        for (GlobalIndexQueryContext context :
+                new GlobalIndexQueryContext[] {
+                    GlobalIndexQueryContext.unlimited(),
+                    new GlobalIndexQueryContext(
+                            Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE)
+                }) {
+            context.reserveReadBytes(Long.MAX_VALUE);
+            context.reserveReadBytes(Long.MAX_VALUE);
+            context.reserveDecodedRowIds(Long.MAX_VALUE);
+            context.reserveDecodedRowIds(Long.MAX_VALUE);
+            assertThat(context.readBytes()).isZero();
+            assertThat(context.decodedRowIds()).isZero();
+            assertThatThrownBy(() -> context.reserveReadBytes(-1))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    public void testConcurrentForksDoNotExceedQueryBudget() throws Exception {
+        GlobalIndexQueryContext template = new GlobalIndexQueryContext(10, 50, 10, 50);
+        ExecutorService executor = Executors.newFixedThreadPool(8);
+        try {
+            List<Callable<Integer>> reservations = new ArrayList<>();
+            for (int i = 0; i < 8; i++) {
+                GlobalIndexQueryContext field = template.fork();
+                reservations.add(
+                        () -> {
+                            int accepted = 0;
+                            for (int attempt = 0; attempt < 10; attempt++) {
+                                try {
+                                    field.reserveReadBytes(1);
+                                    accepted++;
+                                } catch (GlobalIndexLookupDeclinedException e) {
+                                    break;
+                                }
+                            }
+                            assertThat(field.readBytes())
+                                    .isEqualTo(accepted)
+                                    .isLessThanOrEqualTo(10);
+                            return accepted;
+                        });
+            }
+            int accepted = 0;
+            for (Future<Integer> result : executor.invokeAll(reservations)) {
+                accepted += result.get();
+            }
+            assertThat(accepted).isEqualTo(50);
+            assertThat(template.totalReadBytes()).isEqualTo(50);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
 }

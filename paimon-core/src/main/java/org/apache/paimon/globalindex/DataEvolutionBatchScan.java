@@ -414,7 +414,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
         }
     }
 
-    private boolean acceptGlobalIndexResult(
+    @VisibleForTesting
+    boolean acceptGlobalIndexResult(
             GlobalIndexResult result,
             DataEvolutionGlobalIndexScanner scanner,
             @Nullable PartitionPredicate partitionFilter,
@@ -441,8 +442,11 @@ public class DataEvolutionBatchScan implements DataTableScan {
         // The snapshot-wide row-id population understates selectivity after partition pruning.
         // Only pay the extra manifest pass after the cheaper global and fragmentation checks pass.
         // Merge row-id ranges so Data Evolution column groups are counted once.
-        if (partitionFilter != null && partitionFilter != PartitionPredicate.ALWAYS_TRUE) {
-            long scopedRowIdCount = selectedDataRowIdCount();
+        if (candidateRows > 0
+                && maxSelectionRatio < 1
+                && partitionFilter != null
+                && partitionFilter != PartitionPredicate.ALWAYS_TRUE) {
+            long scopedRowIdCount = selectedDataRowIdCount(candidateRows, maxSelectionRatio);
             if (exceedsSelectionRatio(
                     candidateRows,
                     scopedRowIdCount,
@@ -480,8 +484,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return exceeds;
     }
 
-    /** Counts distinct row IDs in files the regular scan would consider. */
-    private long selectedDataRowIdCount() {
+    /** Counts distinct row IDs, stopping when a lower bound already accepts the selection. */
+    private long selectedDataRowIdCount(long candidateRows, double maxSelectionRatio) {
         List<Range> rowRanges = new ArrayList<>();
         Iterator<ManifestEntry> entries = batchScan.snapshotReader().readFileIterator();
         while (entries.hasNext()) {
@@ -490,6 +494,11 @@ public class DataEvolutionBatchScan implements DataTableScan {
             long rowCount = file.rowCount();
             if (firstRowId == null || rowCount <= 0) {
                 continue;
+            }
+            // A single file is a safe lower bound even when column groups overlap. Point
+            // lookups normally need only the first file, not all manifests and a range sort.
+            if ((double) candidateRows / rowCount <= maxSelectionRatio) {
+                return rowCount;
             }
             if (firstRowId > Long.MAX_VALUE - rowCount + 1) {
                 return Long.MAX_VALUE;

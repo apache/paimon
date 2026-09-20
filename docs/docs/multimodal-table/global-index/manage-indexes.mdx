@@ -289,7 +289,7 @@ the candidate set is too broad or too fragmented. This cost fallback is independ
 of the coverage mode. In `fast` mode it uses a regular data scan, which can return
 matching rows outside current index coverage. The candidate-ratio and row-range
 limits apply to BTree, Bitmap, Multivalue, and FM results. The decoded-row-ID limit
-is a reader-side work budget and currently applies to BTree posting lists; compressed
+is a reader-side work budget for BTree posting lists and FM locate/null scans; compressed
 bitmaps that stay compressed do not consume that budget. These limits do not apply
 to scalar pre-filters inside vector or full-text search.
 
@@ -455,8 +455,10 @@ turn index RowIDs into data-file reads:
 1. The final candidate set is checked for selection ratio and disjoint range count.
    Partition-filtered queries use the distinct RowIDs in the selected data files as
    the ratio denominator; overlapping Data Evolution column groups are counted once.
-2. Readers enforce work-specific limits. Physical bytes read from BTree, Bitmap,
-   Multivalue, and FM index files share the same byte budget. BTree row-ID lists and
+2. Readers enforce work-specific limits. Input bytes requested from BTree, Bitmap,
+   Multivalue, and FM index files share the same byte budget. Index-cache hits are
+   not charged, and filesystem read-ahead or gaps merged by vectored reads are not
+   included, so this is not a hard limit on storage transfer bytes. BTree row-ID lists and
    FM locate/null scans also charge decoded or scanned row-ID work. BTree and Bitmap
    postings which remain compressed do not charge their logical cardinality.
 3. Each indexed field has a branch budget, and the query has an aggregate budget.
@@ -493,7 +495,7 @@ These table options affect global index build and read behavior:
 | `data-evolution.scalar-index.max-selection-ranges` | `100000` | Maximum number of disjoint candidate row-ID ranges for an index-assisted Data Evolution scalar batch scan. More fragmented results fall back to a regular data scan. |
 | `data-evolution.scalar-index.max-decoded-row-ids` | `10000000` | Maximum decoded or scanned row-ID work for one indexed field. Enforced by BTree row lists and FM locate/null scans; compressed bitmaps which remain compressed are not charged by logical cardinality. |
 | `data-evolution.scalar-index.max-total-decoded-row-ids` | `20000000` | Aggregate decoded or scanned row-ID work across indexed fields in one scalar batch query. |
-| `data-evolution.scalar-index.max-read-bytes` | `256 mb` | Maximum physical index bytes read for one indexed field. Cached bytes are not charged. |
-| `data-evolution.scalar-index.max-total-read-bytes` | `512 mb` | Aggregate physical index bytes read across indexed fields in one scalar batch query. |
+| `data-evolution.scalar-index.max-read-bytes` | `256 mb` | Maximum index input bytes requested for one indexed field. Index-cache hits, filesystem read-ahead, and vectored-read gaps are not charged. |
+| `data-evolution.scalar-index.max-total-read-bytes` | `512 mb` | Aggregate index input bytes requested across indexed fields in one scalar batch query, not a hard limit on filesystem transfer bytes. |
 | `visibility-callback.enabled` | `false` | Whether JVM batch or bounded-stream writers wait after commit for existing partition indexes to cover newly appended ranges. Does not hide the committed snapshot. |
 | `visibility-callback.timeout` | `30 min` | Maximum wait time for visibility callback. |

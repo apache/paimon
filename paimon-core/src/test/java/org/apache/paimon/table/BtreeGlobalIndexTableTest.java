@@ -286,9 +286,8 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         .column("f1", DataTypes.STRING())
                         .column("f2", DataTypes.STRING())
                         .partitionKeys("pt")
-                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .options(schemaDefault().options())
                         .option(CoreOptions.ROW_TRACKING_PARTITION_GROUP_ON_COMMIT.key(), "true")
-                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
                         .build();
         catalog.createTable(identifier(), schema, true);
         FileStoreTable base = getTableDefault();
@@ -396,6 +395,49 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
         assertThat(plan.splits()).noneMatch(IndexedSplit.class::isInstance);
         assertThat(readF1(readBuilder, plan)).containsExactly("a1");
+    }
+
+    @Test
+    public void testContainsExactDeclinePreservesCoarseCoverage() throws Exception {
+        write(10L);
+        createIndex("f1");
+        appendRows(10, 100);
+        FileStoreTable base = getTableDefault();
+        ScanResult<DataSplit> scan =
+                new SortedGlobalIndexScanner(base, "bitmap").withIndexField("f2").scan().get();
+        List<CommitMessage> messages = new ArrayList<>();
+        for (DataSplit split : scan.entries()) {
+            messages.addAll(
+                    SortedGlobalIndexTestUtils.buildIndex(
+                            base, "bitmap", "f2", split, scan.scanSnapshotId()));
+        }
+        try (BatchTableCommit commit = base.newBatchWriteBuilder().newCommit()) {
+            commit.commit(messages);
+        }
+
+        List<String> expected = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            if (String.valueOf(i).contains("1")) {
+                expected.add("a" + i);
+            }
+        }
+        for (String mode : Arrays.asList("full", "detail")) {
+            Map<String, String> options = new HashMap<>();
+            options.put(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), mode);
+            options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO.key(), "1");
+            options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_DECODED_ROW_IDS.key(), "15");
+            FileStoreTable table = base.copy(options);
+            PredicateBuilder builder = new PredicateBuilder(table.rowType());
+            Predicate predicate =
+                    PredicateBuilder.and(
+                            builder.contains(1, BinaryString.fromString("1")),
+                            builder.contains(2, BinaryString.fromString("1")));
+            ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+            TableScan.Plan plan = readBuilder.newScan().plan();
+
+            assertThat(plan.splits()).isNotEmpty().allMatch(IndexedSplit.class::isInstance);
+            assertThat(readF1(readBuilder, plan)).containsExactlyInAnyOrderElementsOf(expected);
+        }
     }
 
     @Test

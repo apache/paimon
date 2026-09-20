@@ -64,22 +64,26 @@ public final class GlobalIndexQueryContext {
         return UNLIMITED;
     }
 
+    public boolean isUnlimited() {
+        return maxDecodedRowIds == Long.MAX_VALUE
+                && maxReadBytes == Long.MAX_VALUE
+                && sharedBudget.isUnlimited();
+    }
+
     /** Creates a field lookup scope with local limits and a shared query-level budget. */
     GlobalIndexQueryContext fork() {
-        return maxDecodedRowIds == Long.MAX_VALUE
-                        && maxReadBytes == Long.MAX_VALUE
-                        && sharedBudget.isUnlimited()
+        return isUnlimited()
                 ? UNLIMITED
                 : new GlobalIndexQueryContext(maxDecodedRowIds, maxReadBytes, sharedBudget);
     }
 
     /** Reserves budget before row IDs are allocated or decoded. */
-    public synchronized void reserveDecodedRowIds(long count) {
+    public void reserveDecodedRowIds(long count) {
         reserve(Resource.DECODED_ROW_IDS, count);
     }
 
     /** Reserves budget before index bytes are read from storage. */
-    public synchronized void reserveReadBytes(long count) {
+    public void reserveReadBytes(long count) {
         reserve(Resource.READ_BYTES, count);
     }
 
@@ -87,9 +91,14 @@ public final class GlobalIndexQueryContext {
         if (count < 0) {
             throw new IllegalArgumentException(resource.description + " must not be negative.");
         }
-        if (count == 0 || this == UNLIMITED) {
+        // In particular, do not lock the shared unlimited singleton across unrelated queries.
+        if (count == 0 || isUnlimited()) {
             return;
         }
+        reserveBounded(resource, count);
+    }
+
+    private synchronized void reserveBounded(Resource resource, long count) {
         if (declined) {
             throw declined(resource, count, "lookup scope already declined");
         }

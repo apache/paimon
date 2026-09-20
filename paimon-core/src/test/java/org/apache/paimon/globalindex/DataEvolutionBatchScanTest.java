@@ -18,9 +18,12 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.source.AppendBatchTableScan;
@@ -33,6 +36,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.RowRangeIndex;
 
 import org.junit.jupiter.api.Test;
@@ -43,6 +47,7 @@ import org.mockito.ArgumentCaptor;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 
@@ -58,6 +63,74 @@ import static org.mockito.Mockito.when;
 
 /** Tests for {@link DataEvolutionBatchScan}. */
 public class DataEvolutionBatchScanTest {
+
+    @Test
+    public void testEmptySelectionSkipsPartitionManifestPass() {
+        AppendBatchTableScan batchScan = mock(AppendBatchTableScan.class);
+        DataEvolutionGlobalIndexScanner scanner = mock(DataEvolutionGlobalIndexScanner.class);
+        when(scanner.rowIdCount()).thenReturn(100L);
+
+        assertThat(
+                        new DataEvolutionBatchScan(null, batchScan)
+                                .acceptGlobalIndexResult(
+                                        GlobalIndexResult.create(new RoaringNavigableMap64()),
+                                        scanner,
+                                        mock(PartitionPredicate.class),
+                                        new CoreOptions(Collections.emptyMap())))
+                .isTrue();
+        verify(batchScan, never()).snapshotReader();
+    }
+
+    @Test
+    public void testDisabledSelectionRatioSkipsPartitionManifestPass() {
+        AppendBatchTableScan batchScan = mock(AppendBatchTableScan.class);
+        DataEvolutionGlobalIndexScanner scanner = mock(DataEvolutionGlobalIndexScanner.class);
+        when(scanner.rowIdCount()).thenReturn(100L);
+        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+        rows.add(1);
+
+        assertThat(
+                        new DataEvolutionBatchScan(null, batchScan)
+                                .acceptGlobalIndexResult(
+                                        GlobalIndexResult.create(rows),
+                                        scanner,
+                                        mock(PartitionPredicate.class),
+                                        new CoreOptions(
+                                                Collections.singletonMap(
+                                                        CoreOptions
+                                                                .DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RATIO
+                                                                .key(),
+                                                        "1.0"))))
+                .isTrue();
+        verify(batchScan, never()).snapshotReader();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testSelectiveLookupStopsPartitionManifestPassEarly() {
+        AppendBatchTableScan batchScan = mock(AppendBatchTableScan.class);
+        SnapshotReader snapshotReader = mockSnapshotReader(batchScan);
+        Iterator<ManifestEntry> entries = mock(Iterator.class);
+        ManifestEntry entry = mock(ManifestEntry.class);
+        when(entry.file()).thenReturn(newAppendFile(0L, 100L, "file-0"));
+        when(entries.hasNext()).thenReturn(true, true, false);
+        when(entries.next()).thenReturn(entry);
+        when(snapshotReader.readFileIterator()).thenReturn(entries);
+        DataEvolutionGlobalIndexScanner scanner = mock(DataEvolutionGlobalIndexScanner.class);
+        when(scanner.rowIdCount()).thenReturn(1000L);
+        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+        rows.add(1);
+
+        assertThat(
+                        new DataEvolutionBatchScan(null, batchScan)
+                                .acceptGlobalIndexResult(
+                                        GlobalIndexResult.create(rows),
+                                        scanner,
+                                        mock(PartitionPredicate.class),
+                                        new CoreOptions(Collections.emptyMap())))
+                .isTrue();
+        verify(entries).next();
+    }
 
     @Test
     public void testWithFilterKeepsMixedOrWhenRowRangeExtractionFails() {

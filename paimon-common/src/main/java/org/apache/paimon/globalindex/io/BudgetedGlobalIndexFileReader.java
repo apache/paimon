@@ -42,13 +42,18 @@ public final class BudgetedGlobalIndexFileReader implements GlobalIndexFileReade
 
     @Override
     public SeekableInputStream getInputStream(GlobalIndexIOMeta meta) throws IOException {
-        return new BudgetedSeekableInputStream(delegate.getInputStream(meta), queryContext);
+        SeekableInputStream input = delegate.getInputStream(meta);
+        if (queryContext.isUnlimited()) {
+            return input;
+        }
+        return input instanceof VectoredReadable
+                ? new BudgetedVectoredInputStream(input, queryContext)
+                : new BudgetedSeekableInputStream(input, queryContext);
     }
 
-    private static final class BudgetedSeekableInputStream extends SeekableInputStreamWrapper
-            implements VectoredReadable {
+    private static class BudgetedSeekableInputStream extends SeekableInputStreamWrapper {
 
-        private final GlobalIndexQueryContext queryContext;
+        protected final GlobalIndexQueryContext queryContext;
 
         private BudgetedSeekableInputStream(
                 SeekableInputStream input, GlobalIndexQueryContext queryContext) {
@@ -67,59 +72,48 @@ public final class BudgetedGlobalIndexFileReader implements GlobalIndexFileReade
             queryContext.reserveReadBytes(length);
             return in.read(bytes, offset, length);
         }
+    }
+
+    private static final class BudgetedVectoredInputStream extends BudgetedSeekableInputStream
+            implements VectoredReadable {
+
+        private final VectoredReadable vectored;
+
+        private BudgetedVectoredInputStream(
+                SeekableInputStream input, GlobalIndexQueryContext queryContext) {
+            super(input, queryContext);
+            this.vectored = (VectoredReadable) input;
+        }
 
         @Override
         public int pread(long position, byte[] buffer, int offset, int length) throws IOException {
             queryContext.reserveReadBytes(length);
-            if (in instanceof VectoredReadable) {
-                return ((VectoredReadable) in).pread(position, buffer, offset, length);
-            }
-
-            synchronized (in) {
-                long originalPosition = in.getPos();
-                try {
-                    in.seek(position);
-                    return in.read(buffer, offset, length);
-                } finally {
-                    in.seek(originalPosition);
-                }
-            }
+            return vectored.pread(position, buffer, offset, length);
         }
 
         @Override
         public void readVectored(List<? extends FileRange> ranges) throws IOException {
-            if (!(in instanceof VectoredReadable)) {
-                VectoredReadable.super.readVectored(ranges);
-                return;
-            }
-
             long totalBytes = 0;
             for (FileRange range : ranges) {
                 totalBytes = Math.addExact(totalBytes, range.getLength());
             }
             queryContext.reserveReadBytes(totalBytes);
-            ((VectoredReadable) in).readVectored(ranges);
+            vectored.readVectored(ranges);
         }
 
         @Override
         public int minSeekForVectorReads() {
-            return in instanceof VectoredReadable
-                    ? ((VectoredReadable) in).minSeekForVectorReads()
-                    : VectoredReadable.super.minSeekForVectorReads();
+            return vectored.minSeekForVectorReads();
         }
 
         @Override
         public int batchSizeForVectorReads() {
-            return in instanceof VectoredReadable
-                    ? ((VectoredReadable) in).batchSizeForVectorReads()
-                    : VectoredReadable.super.batchSizeForVectorReads();
+            return vectored.batchSizeForVectorReads();
         }
 
         @Override
         public int parallelismForVectorReads() {
-            return in instanceof VectoredReadable
-                    ? ((VectoredReadable) in).parallelismForVectorReads()
-                    : VectoredReadable.super.parallelismForVectorReads();
+            return vectored.parallelismForVectorReads();
         }
     }
 }
