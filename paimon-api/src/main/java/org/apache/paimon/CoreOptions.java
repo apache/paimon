@@ -4785,6 +4785,10 @@ public class CoreOptions implements Serializable {
         return options.get(AGGREGATION_REMOVE_RECORD_ON_DELETE);
     }
 
+    public boolean partialUpdateRemoveRecordOnDelete() {
+        return options.get(PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE);
+    }
+
     public Optional<Long> commitLastSafeSnapshot() {
         return options.getOptional(COMMIT_LAST_SAFE_SNAPSHOT);
     }

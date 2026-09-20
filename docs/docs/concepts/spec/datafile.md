@@ -137,6 +137,13 @@ contains five columns:
 _SEQUENCE_NUMBER | _VALUE_KIND | a | b | c
 ```
 
+For a primary-key merge engine where `DELETE` removes the whole record, Paimon keeps the
+primary-key, sequence, record-level time, clustering, indexed, and non-null fields in data-file
+DELETE rows, and writes null for other nullable value fields. This applies to deduplicate tables,
+partial-update tables with `partial-update.remove-record-on-delete`, and aggregation tables with
+`aggregation.remove-record-on-delete`. The physical schema is unchanged. Changelog files are not
+projected by this optimization.
+
 ### Table w/o Primary key Data File
 
 An ordinary append table stores its declared value columns without the primary-key merge fields:
