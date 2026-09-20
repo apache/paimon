@@ -33,7 +33,6 @@ from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
 from pypaimon.read.native_plan import (
     _catalog_options,
-    _native_split_metadata_view,
     _predicate_to_native,
     _read_options,
     _resolved_schema_json,
@@ -141,30 +140,6 @@ class NativePlanTest(unittest.TestCase):
                             'type': 'MAP NOT NULL', 'nullable': False,
                             'key': 'STRING NOT NULL', 'value': 'INT'}}}]}}}],
         })
-
-    def test_native_split_metadata_view_preserves_file_ranges_and_exact_count(self):
-        class NativeSplit:
-            def serialize_metadata(self):
-                return b'metadata'
-
-            def file_row_ranges(self):
-                return {'f.parquet': (2, 5)}
-
-            def exact_merged_row_count(self):
-                return 3
-
-        base = Mock()
-        with patch(
-                'pypaimon.read.native_plan.deserialize_split_v1',
-                return_value=base) as deserialize:
-            view = _native_split_metadata_view(NativeSplit(), [], [])
-
-        from pypaimon.read.sliced_split import SlicedSplit
-        self.assertIsInstance(view, SlicedSplit)
-        self.assertIs(view.data_split(), base)
-        self.assertEqual(view.shard_file_idx_map(), {'f.parquet': (2, 5)})
-        self.assertEqual(view.merged_row_count(), 3)
-        deserialize.assert_called_once_with(b'metadata', [], [])
 
     def test_resolved_schema_keeps_custom_io_and_rest_on_catalog_path(self):
         from pypaimon.catalog.catalog_environment import CatalogEnvironment

@@ -277,7 +277,7 @@ class TableScan:
             if chunk_shuffle is not None:
                 extra_options['chunk_shuffle'] = chunk_shuffle
                 if fs.idx_of_this_subtask is not None:
-                    extra_options['chunk_shuffle_shard'] = (
+                    extra_options['shard'] = (
                         fs.idx_of_this_subtask, fs.number_of_para_subtasks)
             if has_distribution and fs.data_evolution and chunk_shuffle is None:
                 if fs.idx_of_this_subtask is not None:

@@ -170,34 +170,32 @@ class LiveRowRangeSlicerTest(unittest.TestCase):
         second = slicer.take(3)
 
         self.assertEqual(
-            (
-                first.start_inclusive,
-                first.end_exclusive,
-                first.live_row_count,
-            ),
-            (0, 6, 3),
+            (first.row_ranges, first.live_row_count),
+            ([Range(1, 2), Range(5, 5)], 3),
         )
         self.assertEqual(
-            (
-                second.start_inclusive,
-                second.end_exclusive,
-                second.live_row_count,
-            ),
-            (6, 10, 3),
+            (second.row_ranges, second.live_row_count),
+            ([Range(6, 8)], 3),
         )
-        self.assertEqual(first.to_closed_row_id_range(100), Range(100, 105))
+        self.assertEqual(
+            first.to_closed_row_id_ranges(100),
+            [Range(101, 102), Range(105, 105)],
+        )
         self.assertIsNone(slicer.take(3))
+
+        alternating = _LiveRowRangeSlicer(8, iter([1, 3, 5, 7]))
+        self.assertEqual(
+            alternating.take(3).row_ranges,
+            [Range(0, 0), Range(2, 2), Range(4, 4)],
+        )
+        self.assertEqual(alternating.take(3).row_ranges, [Range(6, 6)])
 
     def test_returns_smaller_tail_and_skips_fully_deleted_source(self):
         tail_slicer = _LiveRowRangeSlicer(6, iter([1, 4]))
         tail = tail_slicer.take(10)
         self.assertEqual(
-            (
-                tail.start_inclusive,
-                tail.end_exclusive,
-                tail.live_row_count,
-            ),
-            (0, 6, 4),
+            (tail.row_ranges, tail.live_row_count),
+            ([Range(0, 0), Range(2, 3), Range(5, 5)], 4),
         )
         self.assertIsNone(tail_slicer.take(1))
 
@@ -227,10 +225,12 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
         ]
         gen = _make_generator(seed=1, chunk_size=100)
         splits = gen.create_splits(entries)
-        # 3 chunks, each holding exactly one whole file → all DataSplit, no SlicedSplit
+        # Chunk output always uses IndexedSplit so row ranges carry the
+        # coordinate contract through stable split serialization.
         self.assertEqual(len(splits), 3)
         for s in splits:
-            self.assertIsInstance(s, DataSplit)
+            self.assertIsInstance(s, IndexedSplit)
+            self.assertEqual(s.row_ranges(), [Range(0, 99)])
             self.assertEqual(s.row_count, 100)
 
     def test_chunk_truncates_inside_file(self):
@@ -239,14 +239,17 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
         gen = _make_generator(seed=1, chunk_size=100, snapshot_id=7)
         splits = gen.create_splits(entries)
         self.assertEqual(len(splits), 3)
-        # All three chunks slice the same file → all SlicedSplit
+        # All three chunks carry split-local physical positions.
         for s in splits:
-            self.assertIsInstance(s, SlicedSplit)
+            self.assertIsInstance(s, IndexedSplit)
             self.assertEqual(s.snapshot_id, 7)
-        # union of (start, end) intervals must cover [0, 250)
-        intervals = sorted(s.shard_file_idx_map()['f1'] for s in splits)
-        self.assertEqual(intervals, [(0, 100), (100, 200), (200, 250)])
-        total = sum(end - start for start, end in intervals)
+        intervals = sorted(
+            (row_range.from_, row_range.to)
+            for split in splits
+            for row_range in split.row_ranges()
+        )
+        self.assertEqual(intervals, [(0, 99), (100, 199), (200, 249)])
+        total = sum(end - start + 1 for start, end in intervals)
         self.assertEqual(total, 250)
 
     def test_chunk_spans_multiple_files(self):
@@ -271,8 +274,8 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
         gen = _make_generator(seed=1, chunk_size=1000)
         splits = gen.create_splits(entries)
         self.assertEqual(len(splits), 1)
-        # No truncation — full files inside one chunk → DataSplit not SlicedSplit
-        self.assertIsInstance(splits[0], DataSplit)
+        self.assertIsInstance(splits[0], IndexedSplit)
+        self.assertEqual(splits[0].row_ranges(), [Range(0, 59)])
         self.assertEqual(_split_rows(splits[0]), 60)
 
     def test_deletion_vector_slices_by_live_rows_and_is_attached(self):
@@ -293,8 +296,12 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
             splits = gen.create_splits([entry])
 
         self.assertEqual(
-            sorted(s.shard_file_idx_map()['f1'] for s in splits),
-            [(0, 6), (6, 10)],
+            sorted(
+                (row_range.from_, row_range.to)
+                for split in splits
+                for row_range in split.row_ranges()
+            ),
+            [(1, 2), (5, 5), (6, 8)],
         )
         self.assertEqual(
             sorted(s.merged_row_count() for s in splits),
@@ -323,9 +330,9 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
             splits = gen.create_splits([entry])
 
         self.assertEqual(len(splits), 1)
-        self.assertIsInstance(splits[0], SlicedSplit)
-        self.assertEqual(splits[0].shard_file_idx_map(), {})
-        self.assertEqual(splits[0].row_count, 10)
+        self.assertIsInstance(splits[0], IndexedSplit)
+        self.assertEqual(splits[0].row_ranges(), [Range(1, 2), Range(5, 8)])
+        self.assertEqual(splits[0].row_count, 6)
         self.assertEqual(splits[0].merged_row_count(), 6)
         read.assert_called_once_with(gen.table.file_io, deletion_file)
 
@@ -371,10 +378,14 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
             splits = gen.create_splits(entries)
 
         self.assertEqual(len(splits), 1)
-        self.assertIsInstance(splits[0], DataSplit)
+        self.assertIsInstance(splits[0], IndexedSplit)
         self.assertEqual(
             [file.file_name for file in splits[0].files],
             ['f1', 'f2'],
+        )
+        self.assertEqual(
+            splits[0].row_ranges(),
+            [Range(0, 0), Range(2, 2), Range(4, 4), Range(6, 8)],
         )
         self.assertEqual(
             splits[0].data_deletion_files,
@@ -853,7 +864,10 @@ class DataEvolutionChunkShuffleAlgoTest(unittest.TestCase):
             for split in splits
             for row_range in split.row_ranges()
         )
-        self.assertEqual(ranges, [(100, 104), (105, 109)])
+        self.assertEqual(
+            ranges,
+            [(100, 100), (103, 104), (105, 106), (108, 108)],
+        )
         self.assertEqual(
             sorted(split.merged_row_count() for split in splits),
             [3, 3],
@@ -919,7 +933,8 @@ class DataEvolutionChunkShuffleAlgoTest(unittest.TestCase):
                 (row_range.from_, row_range.to)
                 for row_range in splits[0].row_ranges()
             ],
-            [(100, 104), (200, 205)],
+            [(100, 100), (102, 102), (104, 104),
+             (201, 201), (203, 204)],
         )
         self.assertEqual(
             [file.file_name for file in splits[0].files],

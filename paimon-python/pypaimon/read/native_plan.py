@@ -373,7 +373,7 @@ def native_plan(
         row_position_slice: Optional[Tuple[int, int]] = None,
         row_position_shard: Optional[Tuple[int, int]] = None,
         chunk_shuffle: Optional[Tuple[int, int]] = None,
-        chunk_shuffle_shard: Optional[Tuple[int, int]] = None) -> Plan:
+        shard: Optional[Tuple[int, int]] = None) -> Plan:
     """Plan with pypaimon_rust, preserving snapshot metadata.
 
     Native conversion or planning failures are handled by TableScan, which
@@ -394,20 +394,16 @@ def native_plan(
         scan = scan.with_row_position_shard(*row_position_shard)
     if chunk_shuffle is not None:
         seed, chunk_size = chunk_shuffle
-        shard_index, shard_count = (
-            chunk_shuffle_shard if chunk_shuffle_shard is not None
-            else (None, None)
-        )
         scan = scan.with_chunk_shuffle(str(seed), chunk_size)
-        if shard_index is not None:
-            scan = scan.with_chunk_shuffle_shard(shard_index, shard_count)
+    if shard is not None:
+        scan = scan.with_shard(*shard)
     rust_plan = scan.plan()
     rust_splits = rust_plan.splits()
     pfields = _partition_fields(table)
     # Trimmed primary keys decode per-file min/max keys (PK merge-on-read).
     kfields = table.trimmed_primary_keys_fields
     splits = [
-        _native_split_metadata_view(split, pfields, kfields)
+        deserialize_split_v1(split.serialize(), pfields, kfields)
         for split in rust_splits
     ]
     if table.options.native_read_enabled():
@@ -429,42 +425,3 @@ def native_plan(
         # table without snapshots. Let the Python scanner recover the metadata.
         raise RuntimeError("Native runtime cannot report an empty plan's snapshot")
     return Plan(splits, snapshot_id=snapshot_id)
-
-
-def _native_split_metadata_view(rust_split, partition_fields, key_fields):
-    """Build the Python metadata facade while retaining native-only ranges.
-
-    File-local ranges cannot be represented by Java SplitSerializer v1. They
-    remain authoritative on ``rust_split``; SlicedSplit is only the public
-    Python view used for row counts, paths and diagnostics.
-    """
-    serialize_metadata = (getattr(rust_split, 'serialize_metadata', None)
-                          if hasattr(type(rust_split), 'serialize_metadata')
-                          else None)
-    payload = (serialize_metadata() if callable(serialize_metadata)
-               else rust_split.serialize())
-    split = deserialize_split_v1(payload, partition_fields, key_fields)
-
-    exact_count_fn = (getattr(rust_split, 'exact_merged_row_count', None)
-                      if hasattr(type(rust_split), 'exact_merged_row_count')
-                      else None)
-    exact_count = exact_count_fn() if callable(exact_count_fn) else None
-    file_ranges_fn = (getattr(rust_split, 'file_row_ranges', None)
-                      if hasattr(type(rust_split), 'file_row_ranges')
-                      else None)
-    file_ranges = file_ranges_fn() if callable(file_ranges_fn) else None
-    if file_ranges is not None:
-        from pypaimon.read.sliced_split import SlicedSplit
-        split = SlicedSplit(
-            split, file_ranges, exact_merged_row_count=exact_count)
-    else:
-        from pypaimon.globalindex.indexed_split import IndexedSplit
-        if isinstance(split, IndexedSplit) and exact_count is not None:
-            split = IndexedSplit(
-                split.data_split(), split.row_ranges(), split.scores(),
-                exact_merged_row_count=exact_count)
-        elif exact_count is not None and split.merged_row_count() != exact_count:
-            from pypaimon.read.sliced_split import SlicedSplit
-            split = SlicedSplit(
-                split, {}, exact_merged_row_count=exact_count)
-    return split

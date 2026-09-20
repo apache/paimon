@@ -353,9 +353,6 @@ class SlicedDeletionVectorLimitTest(_DistributionFixture, unittest.TestCase):
             plan, _ = self._read(table, False, slice_=(2, 9))
             sliced = plan.splits()[0]
             self.assertIsNone(sliced.merged_row_count())
-            exact = SlicedSplit(sliced.data_split(), sliced.shard_file_idx_map(),
-                                exact_merged_row_count=int(expected_key == 2))
-            self.assertEqual(exact.merged_row_count(), int(expected_key == 2))
             _, actual = self._read(table, False, slice_=(2, 9), limit=1)
             self.assertEqual(actual, [rows[expected_key]])
 
