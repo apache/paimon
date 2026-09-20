@@ -38,9 +38,11 @@ _MAX_PAGE_BYTES = 32 * 1024 * 1024
 # Bound the generic FileMetaData tree before creating Python objects for it.
 _MAX_FOOTER_BYTES = 1024 * 1024
 _MAX_FOOTER_COLUMN_CHUNKS = 1024
+_MAX_FOOTER_ITEMS = 64 * 1024
 # Bound all serialized OffsetIndexes and their retained typed PageLocations.
 _MAX_INDEX_BYTES = 8 * 1024 * 1024
 _MAX_PAGE_LOCATIONS = 128 * 1024
+_MAX_PAGE_HEADER_ITEMS = 4096
 
 
 class _PageIndexBudgetExceeded(Exception):
@@ -50,9 +52,17 @@ class _PageIndexBudgetExceeded(Exception):
 class _Compact:
     """Thrift compact values used by Parquet metadata (no generated bindings)."""
 
-    def __init__(self, data):
+    def __init__(self, data, max_items=None):
         self.data = memoryview(data)
         self.position = 0
+        self.remaining_items = max_items
+
+    def consume(self, count):
+        if self.remaining_items is not None:
+            if count > self.remaining_items:
+                raise _PageIndexBudgetExceeded(
+                    "Parquet compact metadata exceeds object budget")
+            self.remaining_items -= count
 
     def take(self, size):
         end = self.position + size
@@ -92,6 +102,7 @@ class _Compact:
                 count = self.unsigned()
             if count > len(self.data) - self.position:
                 raise ValueError("Invalid Parquet compact collection size")
+            self.consume(count)
             return element, [
                 self.value(self.take(1)[0] if element in (1, 2) else element, depth + 1)
                 for _ in range(count)
@@ -107,41 +118,18 @@ class _Compact:
                 field = previous + delta if delta else self.value(4)
                 if field in fields:
                     raise ValueError("Duplicate Parquet compact field")
+                self.consume(1)
                 fields[field] = field_kind, self.value(field_kind, depth + 1)
                 previous = field
         raise ValueError("Unsupported Parquet compact type: {}".format(kind))
 
 
-class _OffsetIndexDecoder:
-    """Decode typed PageLocations without materializing generic Thrift trees."""
+class _BoundedCompactDecoder:
+    """Skip unknown compact fields without materializing object trees."""
 
-    def __init__(self, data, max_locations):
+    def __init__(self, data, max_items):
         self.parser = _Compact(data)
-        self.max_locations = max_locations
-        # PageLocations retain three fields each. Allow the standard optional
-        # per-page byte-count list plus a small amount of forward metadata.
-        self.remaining_items = max_locations * 6 + 16
-
-    def decode(self):
-        locations = None
-        previous = 0
-        while True:
-            field = self._field(previous)
-            if field is None:
-                break
-            field_id, kind = field
-            previous = field_id
-            if field_id == 1:
-                if locations is not None:
-                    raise ValueError("Duplicate Parquet OffsetIndex field")
-                if kind != 9:
-                    raise ValueError("Invalid Parquet OffsetIndex page locations")
-                locations = self._locations()
-            else:
-                self._skip(kind)
-        if locations is None or self.parser.position != len(self.parser.data):
-            raise ValueError("Invalid Parquet OffsetIndex")
-        return locations
+        self.remaining_items = max_items
 
     def _field(self, previous):
         header = self.parser.take(1)[0]
@@ -162,41 +150,6 @@ class _OffsetIndexDecoder:
         if count > len(self.parser.data) - self.parser.position:
             raise ValueError("Invalid Parquet compact collection size")
         return count, element
-
-    def _locations(self):
-        count, element = self._collection()
-        if element != 12:
-            raise ValueError("Invalid Parquet OffsetIndex page locations")
-        if count > self.max_locations:
-            raise _PageIndexBudgetExceeded(
-                "Parquet OffsetIndex exceeds page-location budget")
-        self._consume(count)
-        return [self._location() for _ in range(count)]
-
-    def _location(self):
-        values = [None, None, None]
-        expected = (6, 5, 6)
-        previous = 0
-        while True:
-            field = self._field(previous)
-            if field is None:
-                break
-            field_id, kind = field
-            previous = field_id
-            if 1 <= field_id <= 3:
-                if values[field_id - 1] is not None:
-                    raise ValueError("Duplicate Parquet PageLocation field")
-                if kind != expected[field_id - 1]:
-                    raise ValueError("Invalid Parquet PageLocation field type")
-                values[field_id - 1] = self.parser.value(kind)
-            else:
-                self._skip(kind)
-        if any(value is None for value in values):
-            raise ValueError("Missing Parquet PageLocation field")
-        offset, size, first_row = values
-        if offset < 0 or size <= 0 or first_row < 0:
-            raise ValueError("Invalid Parquet PageLocation")
-        return offset, size, first_row
 
     def _consume(self, count):
         if count > self.remaining_items:
@@ -257,8 +210,136 @@ class _OffsetIndexDecoder:
         raise ValueError("Unsupported Parquet compact type: {}".format(kind))
 
 
+class _OffsetIndexDecoder(_BoundedCompactDecoder):
+    """Decode typed PageLocations without materializing generic Thrift trees."""
+
+    def __init__(self, data, max_locations):
+        # PageLocations retain three fields each. Allow the standard optional
+        # per-page byte-count list plus a small amount of forward metadata.
+        super().__init__(data, max_locations * 6 + 16)
+        self.max_locations = max_locations
+
+    def decode(self):
+        locations = None
+        previous = 0
+        while True:
+            field = self._field(previous)
+            if field is None:
+                break
+            field_id, kind = field
+            previous = field_id
+            if field_id == 1:
+                if locations is not None:
+                    raise ValueError("Duplicate Parquet OffsetIndex field")
+                if kind != 9:
+                    raise ValueError("Invalid Parquet OffsetIndex page locations")
+                locations = self._locations()
+            else:
+                self._skip(kind)
+        if locations is None or self.parser.position != len(self.parser.data):
+            raise ValueError("Invalid Parquet OffsetIndex")
+        return locations
+
+    def _locations(self):
+        count, element = self._collection()
+        if element != 12:
+            raise ValueError("Invalid Parquet OffsetIndex page locations")
+        if count > self.max_locations:
+            raise _PageIndexBudgetExceeded(
+                "Parquet OffsetIndex exceeds page-location budget")
+        self._consume(count)
+        return [self._location() for _ in range(count)]
+
+    def _location(self):
+        values = [None, None, None]
+        expected = (6, 5, 6)
+        previous = 0
+        while True:
+            field = self._field(previous)
+            if field is None:
+                break
+            field_id, kind = field
+            previous = field_id
+            if 1 <= field_id <= 3:
+                if values[field_id - 1] is not None:
+                    raise ValueError("Duplicate Parquet PageLocation field")
+                if kind != expected[field_id - 1]:
+                    raise ValueError("Invalid Parquet PageLocation field type")
+                values[field_id - 1] = self.parser.value(kind)
+            else:
+                self._skip(kind)
+        if any(value is None for value in values):
+            raise ValueError("Missing Parquet PageLocation field")
+        offset, size, first_row = values
+        if offset < 0 or size <= 0 or first_row < 0:
+            raise ValueError("Invalid Parquet PageLocation")
+        return offset, size, first_row
+
+
+class _PageHeaderDecoder(_BoundedCompactDecoder):
+    """Decode only PageHeader fields required to validate selected pages."""
+
+    _NESTED_FIELDS = {5: (1,), 7: (1,), 8: (1, 3)}
+
+    def __init__(self, data):
+        super().__init__(data, _MAX_PAGE_HEADER_ITEMS)
+
+    def decode(self):
+        result = {}
+        previous = 0
+        while True:
+            field = self._field(previous)
+            if field is None:
+                break
+            field_id, kind = field
+            previous = field_id
+            if field_id in (1, 2, 3):
+                if field_id in result:
+                    raise ValueError("Duplicate Parquet PageHeader field")
+                if kind != 5:
+                    raise ValueError("Invalid Parquet PageHeader field type")
+                result[field_id] = kind, self.parser.value(kind)
+            elif field_id in self._NESTED_FIELDS:
+                if field_id in result:
+                    raise ValueError("Duplicate Parquet PageHeader field")
+                if kind != 12:
+                    raise ValueError("Invalid Parquet PageHeader field type")
+                result[field_id] = kind, self._integer_struct(
+                    self._NESTED_FIELDS[field_id])
+            else:
+                self._skip(kind)
+        if any(field not in result for field in (1, 2, 3)):
+            raise ValueError("Missing Parquet PageHeader field")
+        return result, self.parser.position
+
+    def _integer_struct(self, required):
+        result = {}
+        previous = 0
+        while True:
+            field = self._field(previous)
+            if field is None:
+                break
+            field_id, kind = field
+            previous = field_id
+            if field_id in required:
+                if field_id in result:
+                    raise ValueError("Duplicate Parquet page header field")
+                if kind != 5:
+                    raise ValueError("Invalid Parquet page header field type")
+                result[field_id] = kind, self.parser.value(kind)
+            else:
+                self._skip(kind)
+        if any(field not in result for field in required):
+            raise ValueError("Missing Parquet page header field")
+        return result
+
+
 def _decode_offset_index(data, max_locations):
     return _OffsetIndexDecoder(data, max_locations).decode()
+
+
+def _decode_page_header(data):
+    return _PageHeaderDecoder(data).decode()
 
 
 def _unsigned(value):
@@ -373,7 +454,11 @@ class ParquetPageIndexReader:
         length = struct.unpack("<I", serialized[-8:-4])[0]
         if length > _MAX_FOOTER_BYTES:
             return None
-        footer = _Compact(serialized[-8 - length:-8]).value(12)
+        try:
+            footer = _Compact(
+                serialized[-8 - length:-8], _MAX_FOOTER_ITEMS).value(12)
+        except _PageIndexBudgetExceeded:
+            return None
         if 8 in footer or 9 in footer:
             return None  # Encrypted pages need the original file identity/AAD.
         elements = _get(footer, 2)[1]
@@ -493,7 +578,23 @@ class ParquetPageIndexReader:
         if (selected_bytes + index_bytes >= full_bytes
                 or selected_bytes > _MAX_PAGE_BYTES):
             return None
-        return self._batches(plans, runs)
+        batches = self._batches(plans, runs)
+        try:
+            first = next(batches)
+        except _PageIndexBudgetExceeded:
+            batches.close()
+            return None
+
+        def prepared_batches():
+            try:
+                yield first
+                yield from batches
+            finally:
+                batches.close()
+
+        # Every selected PageHeader is decoded while preparing the first batch,
+        # so a budget fallback cannot duplicate rows already returned to callers.
+        return prepared_batches()
 
     def _column_payload(self, plan):
         index, column, dictionary_offset, dictionary_size, pages, infos = plan
@@ -512,9 +613,9 @@ class ParquetPageIndexReader:
         num_values = 0
         repeated = self.metadata.schema.column(index).max_repetition_level > 0
         for position, (_, length) in enumerate(ranges):
-            parser = _Compact(memoryview(payload)[cursor:cursor + length])
-            header = parser.value(12)
-            if parser.position + _get(header, 3) != length:
+            header, header_size = _decode_page_header(
+                memoryview(payload)[cursor:cursor + length])
+            if header_size + _get(header, 3) != length:
                 raise ValueError("Parquet page size disagrees with OffsetIndex")
             if dictionary_size and position == 0:
                 if _get(header, 1) != 2 or 7 not in header:
@@ -536,7 +637,7 @@ class ParquetPageIndexReader:
                 if actual != expected or values < expected:
                     raise ValueError("Parquet page rows disagree with OffsetIndex")
                 num_values += values
-            uncompressed_size += parser.position + _get(header, 2)
+            uncompressed_size += header_size + _get(header, 2)
             cursor += length
 
         patched_column = {key: value for key, value in column.items() if key <= 8}

@@ -115,7 +115,7 @@ def test_ranges_projection_missing_fields_and_fallback_in_same_file(fixture):
 
 @pytest.mark.parametrize(
     'mode', ['full', 'no_index', 'budget', 'location_budget', 'footer_bytes',
-             'footer_chunks', 'cache', 'scattered'])
+             'footer_chunks', 'footer_items', 'cache', 'scattered'])
 def test_unsupported_or_expensive_reads_fall_back(fixture, mode):
     path, table, file_io, counter = fixture
     kwargs = {}
@@ -134,6 +134,8 @@ def test_unsupported_or_expensive_reads_fall_back(fixture, mode):
                          1 if mode == 'footer_bytes' else 1024 * 1024), \
             patch.object(page_module, '_MAX_FOOTER_COLUMN_CHUNKS',
                          1 if mode == 'footer_chunks' else 1024), \
+            patch.object(page_module, '_MAX_FOOTER_ITEMS',
+                         1 if mode == 'footer_items' else 64 * 1024), \
             patch.object(page_module.ParquetPageIndexReader, '_batches',
                          side_effect=AssertionError('must fall back')):
         result, _ = _read(fixture, **kwargs)
@@ -229,6 +231,42 @@ def test_offset_index_unknown_struct_fields_are_bounded():
     with pytest.raises(page_module._PageIndexBudgetExceeded,
                        match='object budget'):
         page_module._decode_offset_index(encoded, 1)
+
+
+def test_page_header_unknown_struct_fields_are_bounded():
+    unknown = {field: (1, True) for field in range(1, 4097)}
+    encoded = page_module._encode(
+        12, {1: (5, 0), 2: (5, 1), 3: (5, 1), 9: (12, unknown)})
+    with pytest.raises(page_module._PageIndexBudgetExceeded,
+                       match='object budget'):
+        page_module._decode_page_header(encoded)
+
+
+def test_page_header_decoder_skips_unknown_fields_and_rejects_missing_fields():
+    encoded = page_module._encode(
+        12, {1: (5, 0), 2: (5, 11), 3: (5, 7),
+             5: (12, {1: (5, 3), 9: (9, (5, [1, 2]))}),
+             9: (12, {1: (1, True)})})
+    header, size = page_module._decode_page_header(encoded)
+    assert size == len(encoded)
+    assert page_module._get(header, 1) == 0
+    assert page_module._get(header, 2) == 11
+    assert page_module._get(header, 3) == 7
+    assert page_module._get(page_module._get(header, 5), 1) == 3
+    with pytest.raises(ValueError, match='Missing Parquet PageHeader field'):
+        page_module._decode_page_header(
+            page_module._encode(12, {1: (5, 0), 2: (5, 1)}))
+
+
+def test_page_header_budget_falls_back(fixture):
+    runs = [(4500, 4540)]
+    baseline, _ = _read(fixture, baseline=True, row_ranges=runs)
+    reader_module._reset_file_format_dataset_cache()
+    with patch.object(
+            page_module, '_decode_page_header',
+            side_effect=page_module._PageIndexBudgetExceeded('test budget')):
+        result, _ = _read(fixture, row_ranges=runs)
+    assert result.equals(baseline)
 
 
 def test_fragmented_footer_falls_back_before_generic_decoding(fixture):
