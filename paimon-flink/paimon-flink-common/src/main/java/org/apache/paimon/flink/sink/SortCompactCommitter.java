@@ -79,10 +79,10 @@ public class SortCompactCommitter extends StoreCommitter {
         try {
             super.commit(rewritten);
         } catch (IOException | InterruptedException e) {
-            maybeAbortAfterFailedCommit(writtenMessages, rewritten, snapshotIdBeforeCommit, e);
+            maybeAbortAfterFailedCommit(rewritten, snapshotIdBeforeCommit, e);
             throw e;
         } catch (RuntimeException e) {
-            maybeAbortAfterFailedCommit(writtenMessages, rewritten, snapshotIdBeforeCommit, e);
+            maybeAbortAfterFailedCommit(rewritten, snapshotIdBeforeCommit, e);
             throw e;
         }
     }
@@ -127,7 +127,7 @@ public class SortCompactCommitter extends StoreCommitter {
         try {
             committed = commit.filterAndCommitMultiple(rewritten, checkAppendFiles);
         } catch (RuntimeException e) {
-            maybeAbortAfterFailedCommit(writtenMessages, rewritten, snapshotIdBeforeCommit, e);
+            maybeAbortAfterFailedCommit(rewritten, snapshotIdBeforeCommit, e);
             throw e;
         }
         calcNumBytesAndRecordsOut(rewritten);
@@ -154,8 +154,7 @@ public class SortCompactCommitter extends StoreCommitter {
         try {
             committed = commit.filterAndCommitMultiple(rewritten, checkAppendFiles);
         } catch (RuntimeException e) {
-            maybeAbortAfterFailedCommit(
-                    Collections.emptyList(), rewritten, snapshotIdBeforeCommit, e);
+            maybeAbortAfterFailedCommit(rewritten, snapshotIdBeforeCommit, e);
             throw e;
         }
         calcNumBytesAndRecordsOut(rewritten);
@@ -225,7 +224,6 @@ public class SortCompactCommitter extends StoreCommitter {
     }
 
     private void maybeAbortAfterFailedCommit(
-            List<CommitMessage> writtenMessages,
             List<ManifestCommittable> rewrittenCommittables,
             long snapshotIdBeforeCommit,
             Exception cause) {
@@ -233,15 +231,10 @@ public class SortCompactCommitter extends StoreCommitter {
         if (rewriter.isBatchCompactCommitSucceeded(snapshotIdBeforeCommit, compactMessages)) {
             return;
         }
-        // Abort both the original written messages and the rewritten compact messages. The
-        // rewritten compact messages carry the new deletion-vector index files produced by
-        // dvMaintainer.persist() during rewrite, which are not referenced by the original written
-        // messages; aborting only the written messages would orphan them. For delete-only compact,
-        // writtenMessages is empty but compactMessages still carries the new DV index files, so it
-        // must be aborted (the previous writtenMessages.isEmpty() early return skipped cleanup
-        // entirely in that case).
-        abortWrittenQuietly(writtenMessages, cause);
-        abortCompactQuietly(compactMessages, cause);
+        // Keep writer output (compactAfter is the same files) so Flink batch recovery can restart
+        // only the committer and replay the same committables. New DV index files from rewrite are
+        // regenerated on retry, so they are the only files cleaned here.
+        abortNewIndexFilesQuietly(compactMessages, cause);
     }
 
     private void abortWrittenQuietly(List<CommitMessage> writtenMessages, Exception cause) {
@@ -252,9 +245,9 @@ public class SortCompactCommitter extends StoreCommitter {
         }
     }
 
-    private void abortCompactQuietly(List<CommitMessage> compactMessages, Exception cause) {
+    private void abortNewIndexFilesQuietly(List<CommitMessage> compactMessages, Exception cause) {
         try {
-            rewriter.abortCompactMessages(compactMessages);
+            rewriter.abortNewIndexFiles(compactMessages);
         } catch (Exception abortException) {
             cause.addSuppressed(abortException);
         }
