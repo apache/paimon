@@ -20,7 +20,9 @@ package org.apache.paimon.utils;
 
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -167,6 +169,49 @@ public class RoaringNavigableMap64Test {
         bitmap.addRange(new Range(0, 9999));
 
         assertThat(bitmap.toRangeList()).containsExactly(new Range(0, 9999));
+
+        RoaringNavigableMap64 withEarlyGap = new RoaringNavigableMap64();
+        withEarlyGap.addRange(new Range(0, 8));
+        withEarlyGap.addRange(new Range(10, 9999));
+        assertThat(withEarlyGap.toRangeList())
+                .containsExactly(new Range(0, 8), new Range(10, 9999));
+    }
+
+    @Test
+    public void testToRangeListForDenseShortRuns() {
+        for (int runLength : new int[] {1, 9, 31, 64, 256}) {
+            RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+            List<Range> expected = new ArrayList<>();
+            // Cross 32-bit bitmap containers and the 64-bit bitmap's high-key boundary.
+            long start = (1L << 32) - 10_000;
+            for (int run = 0; run < 1000; run++) {
+                Range range = new Range(start, start + runLength - 1);
+                bitmap.addRange(range);
+                expected.add(range);
+                start += runLength + 1;
+            }
+            assertThat(bitmap.toRangeList()).isEqualTo(expected);
+        }
+    }
+
+    @Test
+    public void testSelectPathForLargeRangesWithIsolatedGaps() throws Exception {
+        Method useSelect =
+                RoaringNavigableMap64.class.getDeclaredMethod("shouldUseSelectRanges", long.class);
+        useSelect.setAccessible(true);
+        for (long gap : new long[] {9, 600_032, 1_199_970}) {
+            for (int width : new int[] {1, 17}) {
+                List<Range> expected =
+                        Arrays.asList(new Range(0, gap - 1), new Range(gap + width, 1_199_999));
+                RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+                expected.forEach(bitmap::addRange);
+                // Verify the algorithmic bound without a timing assertion: a hole within a
+                // sample must not cause us to walk a million values for just two ranges.
+                assertThat((boolean) useSelect.invoke(bitmap, bitmap.getLongCardinality()))
+                        .isTrue();
+                assertThat(bitmap.toRangeList()).isEqualTo(expected);
+            }
+        }
     }
 
     @Test
