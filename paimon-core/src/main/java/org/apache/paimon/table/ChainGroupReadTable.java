@@ -225,7 +225,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         private final ChainGroupReadTable chainGroupReadTable;
         private final RecordComparator chainPartitionComparator;
         private final ChainPartitionProjector partitionProjector;
-        private Predicate dataPredicate;
+        private Predicate keyPredicate;
         private Filter<Integer> bucketFilter;
         protected boolean preloadTargetSnapshot = true;
 
@@ -267,15 +267,28 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         public ChainTableBatchScan withFilter(Predicate predicate) {
             super.withFilter(predicate);
             if (predicate == null) {
-                dataPredicate = null;
+                keyPredicate = null;
             } else {
                 Pair<Optional<PartitionPredicate>, List<Predicate>> pair =
                         PartitionPredicate.splitPartitionPredicatesAndDataPredicates(
                                 predicate,
                                 tableSchema.logicalRowType(),
                                 tableSchema.partitionKeys());
-                dataPredicate =
-                        pair.getRight().isEmpty() ? null : PredicateBuilder.and(pair.getRight());
+                List<String> fieldNames = tableSchema.fieldNames();
+                List<String> primaryKeys = tableSchema.trimmedPrimaryKeys();
+                int[] keyMapping = new int[fieldNames.size()];
+                for (int i = 0; i < keyMapping.length; i++) {
+                    keyMapping[i] = primaryKeys.contains(fieldNames.get(i)) ? i : -1;
+                }
+                // Branch scans are incomplete merge inputs. A value filter could remove an
+                // update or delete needed to suppress an older matching row in another branch.
+                // Keep only an inclusive key predicate, retaining the original row indices.
+                keyPredicate =
+                        pair.getRight().isEmpty()
+                                ? null
+                                : PredicateBuilder.transformFieldMapping(
+                                                PredicateBuilder.and(pair.getRight()), keyMapping)
+                                        .orElse(null);
             }
             return this;
         }
@@ -540,8 +553,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                                     ? chainGroupReadTable.newSnapshotScan(scanCreator)
                                     : chainGroupReadTable.newDeltaScan(scanCreator))
                             .withoutAuthPartitionPushdown();
-            if (dataPredicate != null) {
-                scan.withFilter(dataPredicate);
+            if (keyPredicate != null) {
+                scan.withFilter(keyPredicate);
             }
             if (bucketFilter != null) {
                 scan.withBucketFilter(bucketFilter);
