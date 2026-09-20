@@ -156,6 +156,44 @@ def test_native_batch_reader_uses_effective_parallelism():
     assert len(worker_names) == 2
 
 
+def test_native_batch_reader_close_closes_batch_iterator():
+    read = _table_read()
+    read._read_parallelism = 2
+    iterator_closed = threading.Event()
+
+    def batches():
+        try:
+            yield _id_batch([1])
+            yield _id_batch([2])
+        finally:
+            iterator_closed.set()
+
+    batch_iterator = batches()
+
+    class Reader:
+        def __init__(self):
+            self.closed = False
+
+        def read_next_batch(self):
+            return next(batch_iterator)
+
+        def close(self):
+            self.closed = True
+
+    reader = Reader()
+    with patch.object(
+            read,
+            '_new_arrow_batch_reader',
+            return_value=(reader, batch_iterator)):
+        batch_reader = read.to_arrow_batch_reader(
+            [_Split(), _Split()])
+        assert batch_reader.read_next_batch().column('id').to_pylist() == [1]
+        batch_reader.close()
+
+    assert reader.closed
+    assert iterator_closed.wait(timeout=1)
+
+
 def test_native_batch_reader_caps_blob_parallelism_across_rust_readers():
     read = _table_read()
     splits = [_Split() for _ in range(16)]
@@ -201,6 +239,55 @@ def test_parallel_native_stream_bounds_prefetch_per_reader():
             assert all(value <= 2 for value in produced)
     finally:
         batches.close()
+
+
+def test_parallel_native_stream_close_does_not_start_another_read():
+    read = _table_read()
+
+    class BlockingReader:
+        def __init__(self):
+            self._first = True
+            self._release = threading.Event()
+            self.second_read_started = threading.Event()
+            self.closed = threading.Event()
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self._first:
+                self._first = False
+                return _id_batch([1])
+            self.second_read_started.set()
+            self._release.wait(timeout=5)
+            raise StopIteration
+
+        def close(self):
+            self.closed.set()
+            self._release.set()
+
+    reader = BlockingReader()
+    batches = read._native_batches_parallel_streaming([reader])
+    assert next(batches).column('id').to_pylist() == [1]
+    reader.second_read_started.wait(timeout=1)
+
+    close_finished = threading.Event()
+
+    def close_batches():
+        batches.close()
+        close_finished.set()
+
+    close_thread = threading.Thread(target=close_batches, daemon=True)
+    close_thread.start()
+    closed_without_unblocking = close_finished.wait(timeout=1)
+    try:
+        assert closed_without_unblocking
+    finally:
+        reader.close()
+        close_thread.join(timeout=5)
+
+    assert reader.closed.is_set()
+    assert not reader.second_read_started.is_set()
 
 
 def test_native_read_runtime_parallelism_overrides_table_option():

@@ -219,8 +219,11 @@ class TableRead:
         table reads do not guarantee row order. Python fallback reads remain
         serial.
         """
-        reader, _ = self._new_arrow_batch_reader(
+        effective = self._resolve_parallelism(parallelism, len(splits))
+        reader, batch_iterator = self._new_arrow_batch_reader(
             splits, blob_parallelism, parallelism)
+        if self._should_run_parallel(splits, effective):
+            return _ClosableArrowBatchReader(reader, batch_iterator)
         return reader
 
     def _to_managed_arrow_batch_reader(
@@ -230,12 +233,15 @@ class TableRead:
             parallelism: Optional[int] = None):
         """Return a closeable batch reader supporting context management.
 
-        Newer PyArrow versions use ``RecordBatchReader.from_stream``. Older
-        versions fall back to ``_ClosableArrowBatchReader``, which closes both
-        the batch iterator and its underlying reader.
+        PyArrow readers do not close the Python iterator passed to
+        ``from_batches``. Retain it explicitly for a parallel read so native
+        split workers are stopped when a caller ends the read early.
         """
+        effective = self._resolve_parallelism(parallelism, len(splits))
         reader, batch_iterator = self._new_arrow_batch_reader(
             splits, blob_parallelism, parallelism)
+        if self._should_run_parallel(splits, effective):
+            return _ClosableArrowBatchReader(reader, batch_iterator)
         if (_RECORD_BATCH_READER_FROM_STREAM is not None
                 and hasattr(reader, "close")):
             return _RECORD_BATCH_READER_FROM_STREAM(reader)
@@ -573,12 +579,22 @@ class TableRead:
             completed = 0
             while completed < len(readers):
                 index, (kind, value) = results.get()
-                capacities[index].release()
                 if kind == 'batch':
-                    yield value
+                    try:
+                        yield value
+                    except BaseException:
+                        # Stop workers before releasing this reader's permit.
+                        # Otherwise an early close can let it enter another
+                        # blocking ``next`` before the outer finally runs.
+                        stop.set()
+                        raise
+                    finally:
+                        capacities[index].release()
                 elif kind == 'done':
+                    capacities[index].release()
                     completed += 1
                 else:
+                    capacities[index].release()
                     raise value
         finally:
             stop.set()
