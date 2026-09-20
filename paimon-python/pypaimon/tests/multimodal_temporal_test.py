@@ -495,6 +495,67 @@ class MultimodalTemporalTest(unittest.TestCase):
         # Per-window row-ID and position lists alone exceed this budget.
         self.assertLess(peak, 4 * 1024 * 1024)
 
+    def test_window_endpoints_preserve_values_across_chunks(self):
+        cases = [
+            (pa.string(), [None, "", "last", None], "", "last"),
+            (pa.binary(), [None, b"", b"last", None], b"", b"last"),
+            (pa.bool_(), [None, False, True, None], False, True),
+            (pa.int64(), [None, 0, -1, None], 0, -1),
+            (pa.float64(), [None, float("nan"), 1.0, None], float("nan"), 1.0),
+            (pa.list_(pa.int64()), [None, [], [1, None], None], [], [1, None]),
+            (pa.struct([pa.field("a", pa.int64())]),
+             [None, {"a": None}, {"a": 0}, None], {"a": None}, {"a": 0}),
+            (pa.string(), [None, None], None, None),
+            (pa.string(), [], None, None),
+        ]
+        for data_type, values, first, last in cases:
+            array = pa.array(values, type=data_type)
+            empty = pa.array([], type=data_type)
+            padded = pa.concat_arrays([
+                pa.nulls(1, type=data_type), array,
+                pa.nulls(1, type=data_type)])
+            chunks = pa.chunked_array([
+                empty, array.slice(0, 1), empty, array.slice(1), empty])
+            sliced_chunks = pa.chunked_array([
+                padded.slice(0, 2), empty, padded.slice(2), empty,
+            ]).slice(1, len(array))
+            for selected in (array, padded.slice(1, len(array)),
+                             chunks, sliced_chunks):
+                for operation, expected in (("first", first), ("last", last)):
+                    with self.subTest(data_type=data_type, operation=operation,
+                                      selected=selected):
+                        result = temporal._aggregate_values(selected, operation)
+                        if isinstance(expected, float) and np.isnan(expected):
+                            self.assertTrue(np.isnan(result))
+                        else:
+                            self.assertEqual(expected, result)
+
+    def test_window_endpoints_skip_null_dictionary_values(self):
+        array = pa.DictionaryArray.from_arrays(
+            pa.array([0, 1, 0], type=pa.int8()),
+            pa.array([None, "value"], type=pa.string()))
+        for selected in (array, pa.chunked_array([array.slice(0, 1), array.slice(1)])):
+            for operation in ("first", "last"):
+                with self.subTest(operation=operation, selected=selected):
+                    self.assertEqual(
+                        "value", temporal._aggregate_values(selected, operation))
+
+    def test_window_endpoints_do_not_materialize_full_payload(self):
+        payload = b"x" * 1024
+        selected = pa.chunked_array([
+            pa.array([payload] * 8192, type=pa.binary())])
+        for operation in ("first", "last"):
+            with self.subTest(operation=operation):
+                tracemalloc.start()
+                try:
+                    result = temporal._aggregate_values(selected, operation)
+                    _, peak = tracemalloc.get_traced_memory()
+                finally:
+                    tracemalloc.stop()
+                self.assertEqual(payload, result)
+                # Converting the entire window creates over 8 MiB of Python bytes.
+                self.assertLess(peak, 256 * 1024)
+
     def test_window_join_supports_asymmetric_timestamp_bounds(self):
         anchors = self._table("window_timestamp_anchors", {
             "episode_id": pa.int32(),
