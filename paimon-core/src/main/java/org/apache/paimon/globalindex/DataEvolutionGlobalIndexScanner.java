@@ -91,7 +91,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             RowType rowType,
             FileIO fileIO,
             IndexPathFactory indexPathFactory,
-            Collection<IndexFileMeta> indexFiles) {
+            Collection<IndexFileMeta> indexFiles,
+            GlobalIndexQueryContext queryContext) {
         this(
                 table,
                 snapshot,
@@ -101,7 +102,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                 fileIO,
                 indexPathFactory,
                 indexFiles,
-                indexFiles);
+                indexFiles,
+                queryContext);
     }
 
     private DataEvolutionGlobalIndexScanner(
@@ -113,13 +115,12 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             FileIO fileIO,
             IndexPathFactory indexPathFactory,
             Collection<IndexFileMeta> coverageIndexFiles,
-            Collection<IndexFileMeta> indexFiles) {
+            Collection<IndexFileMeta> indexFiles,
+            GlobalIndexQueryContext queryContext) {
         this.table = table;
         this.rowIdCount =
                 snapshot == null || snapshot.nextRowId() == null ? -1L : snapshot.nextRowId();
-        this.queryContext =
-                new GlobalIndexQueryContext(
-                        table.coreOptions().dataEvolutionScalarIndexMaxDecodedRowIds());
+        this.queryContext = queryContext;
         this.options = options;
         this.rowType = rowType;
         this.executor =
@@ -248,13 +249,22 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table.rowType(),
                         table.fileIO(),
                         table.store().pathFactory().globalIndexFileFactory(),
-                        globalIndexFiles));
+                        globalIndexFiles,
+                        GlobalIndexQueryContext.unlimited()));
     }
 
     public static Optional<DataEvolutionGlobalIndexScanner> create(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter) {
+        return create(table, partitionFilter, filter, GlobalIndexQueryContext.unlimited());
+    }
+
+    static Optional<DataEvolutionGlobalIndexScanner> create(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter,
+            GlobalIndexQueryContext queryContext) {
         @Nullable Snapshot snapshot = tryTravelOrLatest(table);
         List<IndexFileMeta> indexFiles =
                 table.store().newIndexFileHandler()
@@ -273,7 +283,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table.rowType(),
                         table.fileIO(),
                         table.store().pathFactory().globalIndexFileFactory(),
-                        indexFiles));
+                        indexFiles,
+                        queryContext));
     }
 
     /**
@@ -311,7 +322,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table.fileIO(),
                         table.store().pathFactory().globalIndexFileFactory(),
                         indexFiles,
-                        selectedIndexFiles));
+                        selectedIndexFiles,
+                        GlobalIndexQueryContext.unlimited()));
     }
 
     private static boolean isSupportedTopN(TopN topN) {

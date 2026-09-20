@@ -444,6 +444,32 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testScalarPreFilterDoesNotUseBatchScanRowIdBudget() throws Exception {
+        Identifier identifier = identifier("full_text_scalar_prefilter_row_id_budget");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(TEXT_FIELD_NAME, DataTypes.STRING())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(
+                                CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_DECODED_ROW_IDS.key(),
+                                "2")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = getTable(identifier);
+        writeDocuments(table, RANKED_DOCUMENTS);
+        buildAndCommitIndex(table, RANKED_DOCUMENTS);
+        buildAndCommitIdBTreeIndex(table, RANKED_DOCUMENTS.length);
+
+        Predicate filter =
+                new PredicateBuilder(table.rowType()).in(0, Arrays.asList(0, 1, 2, 3, 4, 5));
+        assertThat(searchWithFilter(table, filter, 10).results())
+                .containsExactlyInAnyOrder(0L, 1L, 2L, 3L, 4L, 5L);
+    }
+
+    @Test
     public void testFullTextSearchWithFilterMatchingNoRows() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();

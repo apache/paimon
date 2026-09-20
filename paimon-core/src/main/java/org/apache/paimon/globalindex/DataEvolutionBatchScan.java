@@ -352,8 +352,11 @@ public class DataEvolutionBatchScan implements DataTableScan {
         PartitionPredicate partitionFilter =
                 batchScan.snapshotReader().manifestsReader().partitionFilter();
         long totalStart = System.nanoTime();
+        GlobalIndexQueryContext queryContext =
+                new GlobalIndexQueryContext(options.dataEvolutionScalarIndexMaxDecodedRowIds());
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
-                DataEvolutionGlobalIndexScanner.create(table, partitionFilter, globalIndexFilter);
+                DataEvolutionGlobalIndexScanner.create(
+                        table, partitionFilter, globalIndexFilter, queryContext);
         long metadataDuration = System.nanoTime() - totalStart;
         if (!optionalScanner.isPresent()) {
             return Optional.empty();

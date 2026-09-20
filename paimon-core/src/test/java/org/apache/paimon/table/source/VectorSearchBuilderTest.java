@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
@@ -1251,6 +1252,42 @@ public class VectorSearchBuilderTest extends TableTestBase {
         // Read: preFilter returns empty bitmap, so vector search returns no results.
         GlobalIndexResult result = searchBuilder.newVectorRead().read(plan);
         assertThat(result.results().isEmpty()).isTrue();
+    }
+
+    @Test
+    public void testScalarPreFilterDoesNotUseBatchScanRowIdBudget() throws Exception {
+        Identifier identifier = identifier("vector_scalar_prefilter_row_id_budget");
+        catalog.createTable(
+                identifier,
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(
+                                CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_DECODED_ROW_IDS.key(),
+                                "2")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier);
+
+        float[][] vectors = {
+            {1.0f, 0.0f},
+            {0.9f, 0.1f},
+            {0.0f, 1.0f},
+            {0.1f, 0.9f}
+        };
+        writeVectors(table, vectors);
+        Range range = new Range(0, vectors.length - 1);
+        buildAndCommitVectorIndex(table, vectors, range);
+        buildAndCommitBTreeIndex(table, new int[] {0, 1, 2, 3}, range);
+
+        Predicate filter = new PredicateBuilder(table.rowType()).in(0, Arrays.asList(0, 1, 2, 3));
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(4)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(filter)
+                        .executeLocal();
+
+        assertThat(result.results()).containsExactlyInAnyOrder(0L, 1L, 2L, 3L);
     }
 
     @Test
