@@ -282,7 +282,8 @@ class _IndexMetaFileGroup:
 class _PaddingGlobalIndexReader(GlobalIndexReader):
     def __init__(self, wrapped, padding):
         self._wrapped = wrapped
-        self._padding = padding
+        # Padding rows have not been tested by this index.
+        self._padding = GlobalIndexResult.create(padding.results(), is_exact=False)
 
     def _pad(self, future):
         return _map_future(

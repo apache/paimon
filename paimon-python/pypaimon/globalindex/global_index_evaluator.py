@@ -195,6 +195,11 @@ class GlobalIndexEvaluator:
                     break
             if compound_result is None:
                 return None
+            if any(child is None for child in results):
+                # A dropped AND child can share a field with a supported child.
+                # Contributing field ids alone therefore cannot prove exactness.
+                compound_result = GlobalIndexResult.create(
+                    compound_result.results(), is_exact=False)
             return GlobalIndexEvaluation(compound_result,
                                          frozenset(contributing_field_ids))
 
