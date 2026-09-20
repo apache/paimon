@@ -361,6 +361,43 @@ def test_native_read_limit_caps_split_reader_fanout():
     assert native.call_args.args[1] == list(range(16))
 
 
+def test_native_read_limit_close_reaches_capped_native_reader():
+    read = _table_read(limit=1)
+    splits = [_Split(), _Split()]
+    for index, split in enumerate(splits):
+        split._native_split = index
+
+    class CloseTrackingReader:
+        def __init__(self):
+            self._batch = _id_batch([0, 1])
+            self.closed = False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self._batch is None:
+                raise StopIteration
+            batch, self._batch = self._batch, None
+            return batch
+
+        def close(self):
+            self.closed = True
+
+    native_reader = CloseTrackingReader()
+    with patch(
+            'pypaimon.read.native_plan.native_read',
+            return_value=native_reader) as native:
+        batch_reader = read.to_arrow_batch_reader(
+            splits, parallelism=2)
+        assert batch_reader.read_next_batch().column('id').to_pylist() == [0]
+        assert not native_reader.closed
+        batch_reader.close()
+
+    native.assert_called_once()
+    assert native_reader.closed
+
+
 def test_filtered_native_read_limit_keeps_split_parallelism():
     read = _table_read(limit=1)
     read.predicate = Mock()

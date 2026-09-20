@@ -219,7 +219,10 @@ class TableRead:
         table reads do not guarantee row order. Python fallback reads remain
         serial.
         """
-        effective = self._effective_parallelism(parallelism, len(splits))
+        # Cleanup ownership follows the uncapped concurrency decision. LIMIT
+        # may reduce the actual native worker count to one, but the returned
+        # PyArrow reader still does not close its suspended batch iterator.
+        effective = self._resolve_parallelism(parallelism, len(splits))
         reader, batch_iterator = self._new_arrow_batch_reader(
             splits, blob_parallelism, parallelism)
         if self._should_run_parallel(splits, effective):
@@ -237,7 +240,9 @@ class TableRead:
         ``from_batches``. Retain it explicitly for a parallel read so native
         split workers are stopped when a caller ends the read early.
         """
-        effective = self._effective_parallelism(parallelism, len(splits))
+        # Keep the explicit iterator cleanup chain even when LIMIT caps the
+        # native worker count inside _new_arrow_batch_reader to one.
+        effective = self._resolve_parallelism(parallelism, len(splits))
         reader, batch_iterator = self._new_arrow_batch_reader(
             splits, blob_parallelism, parallelism)
         if self._should_run_parallel(splits, effective):
