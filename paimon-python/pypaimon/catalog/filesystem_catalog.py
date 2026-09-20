@@ -17,7 +17,7 @@
 
 from typing import Dict, List, Optional, Union
 
-from pypaimon.api.api_response import GetTagResponse, PagedList
+from pypaimon.api.api_response import GetTagResponse, PagedList, Partition
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
@@ -38,10 +38,13 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.time_utils import (duration_to_iso8601,
                                         local_datetime_to_system_zone_millis)
 from pypaimon.filesystem.caching_file_io import CachingFileIO
+from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
+from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
+from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.table import Table
 
@@ -58,7 +61,7 @@ class FileSystemCatalog(Catalog):
             FileIO.get(self.warehouse, self.catalog_options), self.catalog_options,
             self._cache_manager)
 
-    def list_databases(self) -> list:
+    def list_databases(self) -> List[str]:
         statuses = self.file_io.list_status(self.warehouse)
         database_names = []
         for status in statuses:
@@ -75,7 +78,8 @@ class FileSystemCatalog(Catalog):
         else:
             raise DatabaseNotExistException(name)
 
-    def create_database(self, name: str, ignore_if_exists: bool, properties: Optional[dict] = None):
+    def create_database(self, name: str, ignore_if_exists: bool,
+                        properties: Optional[Dict[str, str]] = None) -> None:
         try:
             self.get_database(name)
             if not ignore_if_exists:
@@ -86,7 +90,7 @@ class FileSystemCatalog(Catalog):
             path = self.get_database_path(name)
             self.file_io.mkdirs(path)
 
-    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False) -> None:
         try:
             self.get_database(name)
         except DatabaseNotExistException:
@@ -111,7 +115,7 @@ class FileSystemCatalog(Catalog):
 
         self.file_io.delete(db_path, True)
 
-    def list_tables(self, database_name: str) -> list:
+    def list_tables(self, database_name: str) -> List[str]:
         try:
             self.get_database(database_name)
         except DatabaseNotExistException:
@@ -169,7 +173,7 @@ class FileSystemCatalog(Catalog):
             raise TableNotExistException(identifier)
         return sys_table
 
-    def create_table(self, identifier: Union[str, Identifier], schema: 'Schema', ignore_if_exists: bool):
+    def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool) -> None:
         if schema.options and schema.options.get(CoreOptions.AUTO_CREATE.key()):
             raise ValueError(f"The value of {CoreOptions.AUTO_CREATE.key()} property should be False.")
 
@@ -188,7 +192,7 @@ class FileSystemCatalog(Catalog):
             schema_manager = SchemaManager(self.file_io, table_path)
             schema_manager.create_table(schema)
 
-    def get_table_schema(self, identifier: Identifier):
+    def get_table_schema(self, identifier: Identifier) -> TableSchema:
         table_path = self.get_table_path(identifier)
         table_schema = SchemaManager(
             self.file_io,
@@ -212,7 +216,7 @@ class FileSystemCatalog(Catalog):
         identifier: Union[str, Identifier],
         changes: List[SchemaChange],
         ignore_if_not_exists: bool = False
-    ):
+    ) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
@@ -233,7 +237,8 @@ class FileSystemCatalog(Catalog):
         except Exception as e:
             raise RuntimeError(f"Failed to alter table {identifier.get_full_name()}: {e}") from e
 
-    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+    def rename_table(self, source_identifier: Union[str, Identifier],
+                     target_identifier: Union[str, Identifier]) -> None:
         if not isinstance(source_identifier, Identifier):
             source_identifier = Identifier.from_string(source_identifier)
         if not isinstance(target_identifier, Identifier):
@@ -259,7 +264,7 @@ class FileSystemCatalog(Catalog):
         target_path = self.get_table_path(target_identifier)
         self.file_io.rename(source_path, target_path)
 
-    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
+    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
 
@@ -285,7 +290,7 @@ class FileSystemCatalog(Catalog):
     ) -> bool:
         raise NotImplementedError("This catalog does not support commit catalog")
 
-    def load_snapshot(self, identifier: Identifier):
+    def load_snapshot(self, identifier: Identifier) -> Optional[TableSnapshot]:
         raise NotImplementedError("Filesystem catalog does not support load_snapshot")
 
     def list_partitions_paged(
@@ -294,8 +299,7 @@ class FileSystemCatalog(Catalog):
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
             partition_name_pattern: Optional[str] = None,
-    ):
-        from pypaimon.api.api_response import PagedList, Partition
+    ) -> PagedList[Partition]:
         from pypaimon.manifest.manifest_file_manager import ManifestFileManager
         from pypaimon.manifest.manifest_list_manager import ManifestListManager
 
