@@ -419,8 +419,8 @@ def _serialize_data_file_meta(data_file: DataFileMeta, bucket_path: str) -> byte
         data_file.first_row_id,
         (_encode_str_array(data_file.write_cols)
          if data_file.write_cols is not None else None),
-        (_encode_long_array(data_file.column_max_sequence_numbers)
-         if data_file.column_max_sequence_numbers is not None else None),
+        (_encode_long_array(data_file.write_cols_sequences)
+         if data_file.write_cols_sequences is not None else None),
     ]
     serialized = GenericRowSerializer.to_bytes(GenericRow(values, _DFM_FIELDS))
     return serialized[4:]  # DataSplit carries a raw BinaryRow without arity.
@@ -651,7 +651,7 @@ def _datafilemeta_from_row(row_bytes: bytes, bucket_path: str, arity: int,
         external_path=external_path,
         first_row_id=g(18),
         write_cols=_decode_str_array(g(19)),
-        column_max_sequence_numbers=(
+        write_cols_sequences=(
             _decode_non_null_long_array(g(20)) if arity >= 21 else None),
     )
     meta.file_path = external_path if external_path else "%s/%s" % (bucket_path.rstrip('/'), file_name)

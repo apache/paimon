@@ -203,7 +203,7 @@ class SplitSerializerTest(unittest.TestCase):
                 self.assertEqual(file.first_row_id, 12)
                 self.assertEqual(file.write_cols, ['a', 'b', 'c', 'f'])
                 self.assertEqual(
-                    file.column_max_sequence_numbers, [15, 100, 150, 200])
+                    file.write_cols_sequences, [15, 100, 150, 200])
                 self.assertEqual(len(split.data_deletion_files), 1)
                 dv = split.data_deletion_files[0]
                 self.assertEqual(

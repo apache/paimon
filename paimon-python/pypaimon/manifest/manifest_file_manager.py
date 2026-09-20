@@ -292,7 +292,7 @@ class ManifestFileManager:
                 external_path=file_dict.get('_EXTERNAL_PATH'),
                 first_row_id=file_dict['_FIRST_ROW_ID'] if '_FIRST_ROW_ID' in file_dict else None,
                 write_cols=file_dict['_WRITE_COLS'] if '_WRITE_COLS' in file_dict else None,
-                column_max_sequence_numbers=file_dict.get(
+                write_cols_sequences=file_dict.get(
                     '_WRITE_COLS_SEQUENCES'),
             )
             if partition is None:
@@ -435,7 +435,7 @@ class ManifestFileManager:
                 "_FIRST_ROW_ID": entry.file.first_row_id,
                 "_WRITE_COLS": entry.file.write_cols,
                 "_WRITE_COLS_SEQUENCES": (
-                    entry.file.column_max_sequence_numbers),
+                    entry.file.write_cols_sequences),
             }
         }
 

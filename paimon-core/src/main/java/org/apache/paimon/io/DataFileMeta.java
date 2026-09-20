@@ -266,7 +266,7 @@ public interface DataFileMeta {
             @Nullable String externalPath,
             @Nullable Long firstRowId,
             @Nullable List<String> writeCols,
-            @Nullable long[] columnMaxSequenceNumbers) {
+            @Nullable long[] writeColsSequences) {
         return new PojoDataFileMeta(
                 fileName,
                 fileSize,
@@ -288,7 +288,7 @@ public interface DataFileMeta {
                 externalPath,
                 firstRowId,
                 writeCols,
-                columnMaxSequenceNumbers);
+                writeColsSequences);
     }
 
     String fileName();
@@ -377,7 +377,7 @@ public interface DataFileMeta {
      * value otherwise. A null value means that only the file-level sequence range is available.
      */
     @Nullable
-    long[] columnMaxSequenceNumbers();
+    long[] writeColsSequences();
 
     DataFileMeta upgrade(int newLevel);
 
@@ -387,7 +387,7 @@ public interface DataFileMeta {
 
     DataFileMeta assignSequenceNumber(long minSequenceNumber, long maxSequenceNumber);
 
-    DataFileMeta withColumnMaxSequenceNumbers(long[] columnMaxSequenceNumbers);
+    DataFileMeta withWriteColsSequences(long[] writeColsSequences);
 
     DataFileMeta assignFirstRowId(long firstRowId);
 
