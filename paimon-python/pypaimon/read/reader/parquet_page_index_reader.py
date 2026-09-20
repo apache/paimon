@@ -40,6 +40,10 @@ _MAX_INDEX_BYTES = 8 * 1024 * 1024
 _MAX_PAGE_LOCATIONS = 128 * 1024
 
 
+class _PageIndexBudgetExceeded(Exception):
+    pass
+
+
 class _Compact:
     """Thrift compact values used by Parquet metadata (no generated bindings)."""
 
@@ -157,8 +161,11 @@ class _OffsetIndexDecoder:
 
     def _locations(self):
         count, element = self._collection()
-        if element != 12 or count > self.max_locations:
-            raise ValueError("Parquet OffsetIndex exceeds page-location budget")
+        if element != 12:
+            raise ValueError("Invalid Parquet OffsetIndex page locations")
+        if count > self.max_locations:
+            raise _PageIndexBudgetExceeded(
+                "Parquet OffsetIndex exceeds page-location budget")
         self._consume(count)
         return [self._location() for _ in range(count)]
 
@@ -191,7 +198,8 @@ class _OffsetIndexDecoder:
 
     def _consume(self, count):
         if count > self.remaining_items:
-            raise ValueError("Parquet compact metadata exceeds object budget")
+            raise _PageIndexBudgetExceeded(
+                "Parquet compact metadata exceeds object budget")
         self.remaining_items -= count
 
     def _skip_collection_value(self, kind, depth):
@@ -426,7 +434,10 @@ class ParquetPageIndexReader:
         remaining_locations = _MAX_PAGE_LOCATIONS
         for index in sorted(physical_columns):
             chunk = chunks[index]
-            locations = _decode_offset_index(raw_indexes[index], remaining_locations)
+            try:
+                locations = _decode_offset_index(raw_indexes[index], remaining_locations)
+            except _PageIndexBudgetExceeded:
+                return None
             remaining_locations -= len(locations)
             column = _get(chunk, 3)
             data_offset = _get(column, 9)

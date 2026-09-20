@@ -113,7 +113,8 @@ def test_ranges_projection_missing_fields_and_fallback_in_same_file(fixture):
     assert result.column('added').null_count == len(result)
 
 
-@pytest.mark.parametrize('mode', ['full', 'no_index', 'budget', 'cache', 'scattered'])
+@pytest.mark.parametrize(
+    'mode', ['full', 'no_index', 'budget', 'location_budget', 'cache', 'scattered'])
 def test_unsupported_or_expensive_reads_fall_back(fixture, mode):
     path, table, file_io, counter = fixture
     kwargs = {}
@@ -126,6 +127,8 @@ def test_unsupported_or_expensive_reads_fall_back(fixture, mode):
     elif mode == 'cache':
         kwargs['row_group_cache'] = reader_module._DecodedRowGroupCache(4 * 1024 * 1024)
     with patch.object(page_module, '_MAX_PAGE_BYTES', 1 if mode == 'budget' else 32 * 1024 * 1024), \
+            patch.object(page_module, '_MAX_PAGE_LOCATIONS',
+                         1 if mode == 'location_budget' else 128 * 1024), \
             patch.object(page_module.ParquetPageIndexReader, '_batches',
                          side_effect=AssertionError('must fall back')):
         result, _ = _read(fixture, **kwargs)
@@ -208,7 +211,8 @@ def test_corrupt_offset_index_is_not_silently_ignored(fixture):
 def test_offset_index_page_locations_are_bounded_before_decoding():
     count = page_module._MAX_PAGE_LOCATIONS + 1
     encoded = b'\x19\xfc' + page_module._unsigned(count) + b'\x00' * count + b'\x00'
-    with pytest.raises(ValueError, match='page-location budget'):
+    with pytest.raises(page_module._PageIndexBudgetExceeded,
+                       match='page-location budget'):
         page_module._decode_offset_index(encoded, page_module._MAX_PAGE_LOCATIONS)
 
 
