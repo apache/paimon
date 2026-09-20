@@ -472,6 +472,15 @@ case class PaimonSparkWriter(
       postCommit(finalMessages)
       return
     }
+    commitTable(commitMessages, operation)
+    postCommit(commitMessages)
+  }
+
+  def commitTable(commitMessages: Seq[CommitMessage]): Unit = {
+    commitTable(commitMessages, null)
+  }
+
+  def commitTable(commitMessages: Seq[CommitMessage], operation: Snapshot.Operation): Unit = {
     val activeWriteBuilder =
       Option(directPostponeWriteBuilder).getOrElse(writeBuilder)
     val tableCommit = activeWriteBuilder.newCommit()
@@ -485,7 +494,6 @@ case class PaimonSparkWriter(
     } finally {
       tableCommit.close()
     }
-    postCommit(commitMessages)
   }
 
   private def baseSnapshotHasNoRealBuckets: Boolean = {

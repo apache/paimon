@@ -308,6 +308,11 @@ public final class ProjectedDataFileMeta implements DataFileMeta {
     }
 
     @Override
+    public DataFileMeta assignFileSource(FileSource fileSource) {
+        throw unsupportedOperation("assignFileSource(FileSource)");
+    }
+
+    @Override
     public DataFileMeta withColumnMaxSequenceNumbers(long[] columnMaxSequenceNumbers) {
         throw unsupportedOperation("withColumnMaxSequenceNumbers(long[])");
     }
