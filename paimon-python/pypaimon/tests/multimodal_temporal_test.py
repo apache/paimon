@@ -1970,7 +1970,7 @@ class MultimodalTemporalTest(unittest.TestCase):
             for select in selected
         ))
 
-    def test_alignment_does_not_mask_internal_key_dependencies(self):
+    def test_alignment_rejects_a_mask_reading_a_masked_dependency(self):
         anchors = self._table("dependency_mask_anchors", {
             "episode_id": pa.int32(),
             "event_time": pa.int64(),
@@ -2014,19 +2014,14 @@ class MultimodalTemporalTest(unittest.TestCase):
         anchors.raw_table.catalog_environment.table_query_auth = (
             lambda options, identifier: lambda select: auth)
 
-        result = pmm.join_asof(
-            anchors.scan(), source.scan().select("value"),
-            on="event_time", by="episode_id",
-            direction="nearest", tolerance=0,
-        ).to_arrow()
+        with self.assertRaisesRegex(ValueError, "which is masked too"):
+            pmm.join_asof(
+                anchors.scan(), source.scan().select("value"),
+                on="event_time", by="episode_id",
+                direction="nearest", tolerance=0,
+            ).to_arrow()
 
-        self.assertEqual(7, result["value"][0].as_py())
-        self.assertEqual(1, result["episode_id"][0].as_py())
-        self.assertEqual("1", result["allowed_episode_id"][0].as_py())
-        self.assertEqual(
-            pa.string(), result.schema.field("allowed_episode_id").type)
-
-    def test_alignment_matches_masking_reader_rule_semantics(self):
+    def test_alignment_rejects_cross_column_and_json_null_masks(self):
         anchors = self._table("mask_semantics_anchors", {
             "episode_id": pa.int32(),
             "event_time": pa.int64(),
@@ -2064,21 +2059,21 @@ class MultimodalTemporalTest(unittest.TestCase):
         source.raw_table.catalog_environment.table_query_auth = (
             lambda options, identifier: lambda select: auth[0])
 
-        row = pmm.join_asof(
-            anchors.scan(), source.scan().select(["first", "second"]),
-            on="event_time", by="episode_id",
-            direction="nearest", tolerance=0,
-        ).to_list()[0]
-        self.assertEqual(("b", "a"), (row["first"], row["second"]))
+        with self.assertRaisesRegex(ValueError, "which is masked too"):
+            pmm.join_asof(
+                anchors.scan(), source.scan().select(["first", "second"]),
+                on="event_time", by="episode_id",
+                direction="nearest", tolerance=0,
+            ).to_list()
 
         auth[0] = TableQueryAuthResult(
             filter=None, column_masking={"first": "null"})
-        row = pmm.join_asof(
-            anchors.scan(), source.scan().select("first"),
-            on="event_time", by="episode_id",
-            direction="nearest", tolerance=0,
-        ).to_list()[0]
-        self.assertEqual("a", row["first"])
+        with self.assertRaisesRegex(ValueError, "JSON null"):
+            pmm.join_asof(
+                anchors.scan(), source.scan().select("first"),
+                on="event_time", by="episode_id",
+                direction="nearest", tolerance=0,
+            ).to_list()
 
     def test_alignment_rejects_incremental_scans(self):
         anchors = self.conn.create_table(
@@ -2282,7 +2277,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         source.raw_table.catalog_environment.table_query_auth = (
             lambda options, identifier: lambda select: auth)
 
-        with self.assertRaisesRegex(ValueError, "nested projection"):
+        with self.assertRaisesRegex(ValueError, "does not exist in table schema"):
             pmm.join_asof(
                 anchors.scan(), source.scan().select("payload.value"),
                 on="event_time", by="episode_id",

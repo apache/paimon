@@ -36,7 +36,7 @@ from pypaimon.consumer.consumer_manager import ConsumerManager
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.read.plan import Plan
-from pypaimon.read.query_auth_split import resolve_auth_result, wrap_plan_with_auth
+from pypaimon.read.query_auth_split import wrap_plan_with_auth
 from pypaimon.read.scanner.append_table_split_generator import \
     AppendTableSplitGenerator
 from pypaimon.read.scanner.changelog_follow_up_scanner import \
@@ -275,7 +275,8 @@ class AsyncStreamingTableScan:
         return wrap_plan_with_auth(self.__auth_query(), plan)
 
     def __auth_query(self):
-        return resolve_auth_result(self._query_auth_fn, self._read_type)
+        from pypaimon.read.table_scan import authorize
+        return authorize(self.table, self._query_auth_fn, self._read_type)
 
     def _start_prefetch(self, snapshot_id: int) -> None:
         """Start prefetching the next scannable snapshot in a background thread."""
