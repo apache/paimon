@@ -181,6 +181,46 @@ public class ParquetFastPathCompactRewriterTest {
     }
 
     @Test
+    public void testFastPathHitWithNotNullColumnAndCountsStatsMode() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("id", DataTypes.INT().notNull());
+        schemaBuilder.column("f1", DataTypes.BIGINT());
+        schemaBuilder.column("name", DataTypes.STRING());
+        schemaBuilder.column("mod", DataTypes.INT());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.METADATA_STATS_MODE.key(), "counts");
+        PreparedTable prepared =
+                prepareTable(
+                        schemaBuilder,
+                        options,
+                        3,
+                        10,
+                        (file, row) -> {
+                            int id = file * 10 + row;
+                            return GenericRow.of(
+                                    id,
+                                    (long) id * 3,
+                                    BinaryString.fromString("value-" + id),
+                                    id % 7);
+                        });
+
+        List<DataFileMeta> rewriteResult = compact(prepared, false);
+        CompactionFastPathMetrics metrics =
+                new CompactionFastPathMetrics(new TestMetricRegistry(), "test");
+        List<DataFileMeta> fastPathResult = compactWithMetrics(prepared, true, metrics, null);
+
+        // forbid silent fallback to rewrite
+        assertThat(getCounter(metrics, CompactionFastPathMetrics.HIT_COUNT)).isEqualTo(1L);
+        assertThat(sumRows(fastPathResult)).isEqualTo(sumRows(rewriteResult));
+        assertThat(readRows(prepared, fastPathResult))
+                .containsExactlyInAnyOrderElementsOf(readRows(prepared, rewriteResult));
+        assertThat(fastPathResult).isNotEmpty();
+        // counts stats mode: merged min/max bounds stay null
+        assertThat(fastPathResult.get(0).valueStats().minValues().isNullAt(0)).isTrue();
+        assertThat(fastPathResult.get(0).valueStats().maxValues().isNullAt(0)).isTrue();
+    }
+
+    @Test
     public void testFastPathWithExternalPath() throws Exception {
         java.nio.file.Path externalDir = tempDir.resolve("external-data");
         Map<String, String> options = new HashMap<>();

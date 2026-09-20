@@ -109,6 +109,29 @@ public class SimpleStatsMergerTest {
     }
 
     @Test
+    public void testMergeWithNotNullFieldType() {
+        RowType rowType = RowType.of(DataTypes.INT().notNull());
+        SimpleStatsConverter converter = new SimpleStatsConverter(rowType);
+        // metadata.stats-mode=counts: min/max bounds are null
+        SimpleStats countsOnly =
+                converter.toBinaryAllMode(new SimpleColStats[] {new SimpleColStats(null, null, 1L)});
+        SimpleStats full =
+                converter.toBinaryAllMode(new SimpleColStats[] {new SimpleColStats(3, 7, 0L)});
+
+        SimpleStats merged = SimpleStatsMerger.merge(Arrays.asList(countsOnly, full), rowType);
+        // an unknown bound from any contributor is propagated as null
+        assertThat(merged.minValues().isNullAt(0)).isTrue();
+        assertThat(merged.maxValues().isNullAt(0)).isTrue();
+        assertThat(merged.nullCounts().getLong(0)).isEqualTo(1L);
+
+        SimpleStats mergedCountsOnly =
+                SimpleStatsMerger.merge(Arrays.asList(countsOnly, countsOnly), rowType);
+        assertThat(mergedCountsOnly.minValues().isNullAt(0)).isTrue();
+        assertThat(mergedCountsOnly.maxValues().isNullAt(0)).isTrue();
+        assertThat(mergedCountsOnly.nullCounts().getLong(0)).isEqualTo(2L);
+    }
+
+    @Test
     public void testMergeBinaryBoundsWithUnsignedOrdering() {
         for (DataType binaryType : Arrays.asList(DataTypes.BINARY(1), DataTypes.BYTES())) {
             RowType rowType = RowType.of(binaryType);

@@ -32,6 +32,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 
@@ -51,6 +52,13 @@ public class SimpleStatsMerger {
         }
 
         RowType statsRowType = valueStatsCols == null ? rowType : rowType.project(valueStatsCols);
+        // Stats bounds can be null (e.g. metadata.stats-mode=counts), so the serializer and
+        // field getters must use nullable field types, as SimpleStatsConverter does.
+        statsRowType =
+                statsRowType.copy(
+                        statsRowType.getFields().stream()
+                                .map(f -> f.newType(f.type().copy(true)))
+                                .collect(Collectors.toList()));
         int fieldCount = statsRowType.getFieldCount();
         InternalRowSerializer serializer = new InternalRowSerializer(statsRowType);
         InternalRow.FieldGetter[] fieldGetters = new InternalRow.FieldGetter[fieldCount];
