@@ -51,15 +51,14 @@ class _RayBatchVectorSearchRead(BatchVectorSearchReadImpl):
         items = [(split, None if not pre_filters or pre_filters[i] is None
                   else pre_filters[i].serialize()) for i, split in enumerate(splits)]
         context = (self._table, self._vector_column, query, search_limit, self._options)
-        results = [None] * len(splits)
         with closing(_map_tasks(
-                _search_batch_index_split, context, items, self._concurrency, self._remote_args)) as tasks:
-            for ordinal, (metric, scores) in tasks:
+                _search_batch_index_split, context, items, self._concurrency, self._remote_args, True)) as tasks:
+            for _, (metric, scores) in tasks:
                 if metric is not None:
                     self._set_index_metric(metric)
                 # Retain plan order for duplicate IDs and global per-query selection.
-                results[ordinal] = [DictBasedScoredIndexResult(values) for values in scores]
-        return results
+                yield [DictBasedScoredIndexResult(values) for values in scores]
+                del scores
 
     def _read_raw_batch_search(self, raw_row_ranges, pre_filter, index_type=None, snapshot=None):
         heaps = [[] for _ in self._query_vectors]

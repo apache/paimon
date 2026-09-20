@@ -17,6 +17,7 @@
 
 import os
 from contextlib import closing
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
@@ -255,7 +256,8 @@ def test_warmed_read_context_and_distinct_worker_processes(table, ray_cluster):
     assert ids(query.to_arrow(execution="ray")) == [0, 1]
 
 
-def test_task_retry_keeps_original_snapshot(table, ray_cluster, tmp_path):
+@pytest.mark.parametrize("ordered", [False, True])
+def test_task_retry_keeps_original_snapshot(ordered, table, ray_cluster, tmp_path):
     add_rows(table, [[1., 1.]])
     pinned = table.search([1., 1.])._for_execution()._table
     add_rows(table, [[2., 1.]], 1)
@@ -272,10 +274,12 @@ def test_task_retry_keeps_original_snapshot(table, ray_cluster, tmp_path):
         raise RuntimeError("retry this read")
 
     assert list(search_module._map_tasks(
-        retry_once, pinned, [marker], 1, {"max_retries": 1, "retry_exceptions": True})) == [(0, (1, [0]))]
+        retry_once, pinned, [marker], 1,
+        {"max_retries": 1, "retry_exceptions": True}, ordered=ordered)) == [(0, (1, [0]))]
 
 
-def test_failure_cancels_outstanding_tasks(ray_cluster):
+@pytest.mark.parametrize("ordered", [False, True])
+def test_failure_cancels_outstanding_tasks(ordered, ray_cluster):
     def fail(context, item):
         if item == 0:
             raise ValueError("injected search failure")
@@ -284,11 +288,12 @@ def test_failure_cancels_outstanding_tasks(ray_cluster):
 
     with patch.object(ray, "cancel", wraps=ray.cancel) as cancel:
         with pytest.raises(ValueError, match="injected search failure"):
-            list(search_module._map_tasks(fail, None, [0, 1, 2], 2, {}))
+            list(search_module._map_tasks(fail, None, [0, 1, 2], 2, {}, ordered=ordered))
         assert cancel.call_count == 2
 
 
-def test_map_tasks_bounds_submissions_and_cancels_on_early_close(ray_cluster):
+@pytest.mark.parametrize("ordered", [False, True])
+def test_map_tasks_bounds_submissions_and_cancels_on_early_close(ordered, ray_cluster):
     def echo(context, item):
         return item
 
@@ -300,13 +305,13 @@ def test_map_tasks_bounds_submissions_and_cancels_on_early_close(ray_cluster):
         return wait(refs, **kwargs)
 
     with patch.object(ray, "wait", record_wait), patch.object(ray, "cancel", wraps=ray.cancel) as cancel:
-        with closing(search_module._map_tasks(echo, None, list(range(10)), 2, {})) as tasks:
+        with closing(search_module._map_tasks(echo, None, list(range(10)), 2, {}, ordered=ordered)) as tasks:
             next(tasks)
-        assert counts == [2]
-        assert cancel.call_count == 1
+        assert counts == [2] or (ordered and counts == [2, 1])
+        assert cancel.call_count == 2 - len(counts)
 
 
-def test_refinement_uses_global_candidates_despite_reverse_completion_order(table):
+def test_refinement_uses_global_candidates(table):
     from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit
     from pypaimon.index.index_file_meta import IndexFileMeta
 
@@ -324,8 +329,9 @@ def test_refinement_uses_global_candidates_despite_reverse_completion_order(tabl
             return
         # Row 3 is the true nearest, but is outside the GLOBAL approximate top-2.
         # Refining independently per shard would incorrectly bring it back in.
-        yield 1, ("l2", {2: 8., 3: 7.})
+        assert args[-1] is True  # Index tasks request plan-ordered results.
         yield 0, ("l2", {0: 10., 1: 9.})
+        yield 1, ("l2", {2: 8., 3: 7.})
 
     with patch.object(search_module, "_map_tasks", completed):
         result = distributed._read_indexed(splits, [1., 1.], query._table._read_snapshot)
@@ -344,8 +350,9 @@ def test_duplicate_scores_keep_plan_order(table):
     splits = [IndexVectorSearchSplit(0, 1, [index_file]), IndexVectorSearchSplit(0, 3, [index_file])]
 
     def completed(*args):
-        yield 1, ("l2", {0: 100.})
+        assert args[-1] is True
         yield 0, ("l2", {0: 1., 1: 2.})
+        yield 1, ("l2", {0: 100.})
 
     with patch.object(search_module, "_map_tasks", completed):
         result = distributed._read_indexed(splits, [1., 1.], None)
@@ -370,8 +377,8 @@ def test_metric_mismatch_fails_even_when_one_shard_has_no_hits(table):
 
     with patch.object(search_module, "_map_tasks", completed), \
             pytest.raises(ValueError, match="different metrics"):
-        distributed._search_index_splits(
-            [IndexVectorSearchSplit(0, 1, []), IndexVectorSearchSplit(2, 3, [])], [1., 1.], 1, [])
+        list(distributed._search_index_splits(
+            [IndexVectorSearchSplit(0, 1, []), IndexVectorSearchSplit(2, 3, [])], [1., 1.], 1, []))
     assert closed == [True]
 
 
@@ -407,3 +414,46 @@ def test_nan_scores_fail_before_worker_top_k(table, ray_cluster):
     # otherwise a different split layout can silently change the answer.
     with pytest.raises(ValueError, match="cannot rank NaN"):
         table.search([1., 1.]).limit(1).to_arrow(execution="ray")
+
+
+@pytest.mark.parametrize("ordered", [False, True])
+@pytest.mark.parametrize("early_close", [False, True])
+def test_slow_first_task_bounds_completed_results(ordered, early_close):
+    submitted, completed, consumed, cancelled = [], [], [], []
+
+    def submit(context, item):
+        # A slow prefix must not allow all later tasks/results to accumulate.
+        assert len(submitted) - len(consumed) < 3
+        submitted.append(item)
+        return item
+
+    def wait(refs, **kwargs):
+        # Complete the newest task first, delaying the first submitted task.
+        ref = max(refs)
+        completed.append(ref)
+        return [ref], [item for item in refs if item != ref]
+
+    remote = SimpleNamespace(remote=submit)
+    remote.options = lambda **kwargs: remote
+    with patch.object(ray, "put", return_value=None), \
+            patch.object(ray, "remote", return_value=remote), \
+            patch.object(ray, "wait", side_effect=wait), \
+            patch.object(ray, "get", side_effect=lambda ref: ref), \
+            patch.object(ray, "cancel", side_effect=cancelled.append):
+        with closing(search_module._map_tasks(None, None, list(range(10)), 3, {}, ordered)) as tasks:
+            for ordinal, result in tasks:
+                assert ordinal == result
+                consumed.append(ordinal)
+                if early_close:
+                    break
+    if ordered:
+        assert completed[:3] == [2, 1, 0]
+        assert consumed == ([0] if early_close else list(range(10)))
+    else:
+        assert consumed[0] == 2
+    if early_close:
+        assert submitted == [0, 1, 2]
+        assert cancelled == ([] if ordered else [0, 1])
+    else:
+        assert sorted(consumed) == list(range(10))
+        assert cancelled == []

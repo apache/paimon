@@ -187,6 +187,12 @@ with the number of index shards and the configured refinement budget, so Ray
 execution is most useful when shard search or raw scanning outweighs scheduling
 and transfer costs. Small queries can be faster locally.
 
+Local and Ray index searches merge shard results incrementally in plan order.
+The concurrency limit bounds running tasks plus completed results waiting for
+earlier shards, so a slow shard can delay further submissions. Global top-k
+selection still uses all merged candidate scores, whose storage grows with the
+number of unique candidate rows per query.
+
 ## Search Hybrid
 
 Use `search_hybrid` to combine vector and full-text routes, then rerank the

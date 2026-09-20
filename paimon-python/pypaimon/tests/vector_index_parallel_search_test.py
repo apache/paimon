@@ -16,6 +16,7 @@
 # under the License.
 
 import threading
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
@@ -138,8 +139,8 @@ def test_parallel_failure_closes_all_started_readers(batch, failure):
     with mock.patch(MODULE + "._create_vector_reader", side_effect=lambda t, f, p, m, o:
                     Reader(int(m[0].file_name))):
         with pytest.raises(ValueError) as exc:
-            read._search_index_splits(
-                splits, [[1.0], [2.0]] if batch else [1.0], 2, None, batch=batch)
+            list(read._search_index_splits(
+                splits, [[1.0], [2.0]] if batch else [1.0], 2, None, batch=batch))
     if failure == "search":
         assert exc.value is original
     else:
@@ -151,7 +152,7 @@ def test_parallel_failure_closes_all_started_readers(batch, failure):
 def test_invalid_parallelism(value):
     read, splits = make_read(False, {"global-index.thread-num": value})
     with pytest.raises(ValueError, match="'global-index.thread-num' must be a positive integer"):
-        read._search_index_splits(splits, [1.0], 2, None)
+        list(read._search_index_splits(splits, [1.0], 2, None))
 
 
 @pytest.mark.parametrize("batch", [False, True])
@@ -163,8 +164,8 @@ def test_explicit_serial_and_single_split_fast_path(batch):
         method = "_eval_batch" if batch else "_eval"
         with mock.patch(MODULE + ".ThreadPoolExecutor", side_effect=AssertionError("pool")), \
                 mock.patch.object(read, method, return_value=_completed_future(None)) as evaluate:
-            assert read._search_index_splits(
-                splits, query, 2, None, batch=batch) == [None] * count
+            assert list(read._search_index_splits(
+                splits, query, 2, None, batch=batch)) == [None] * count
         assert evaluate.call_count == count
 
 
@@ -177,8 +178,8 @@ def test_default_and_configured_worker_limits(batch, count, table_value, workers
     method = "_eval_batch" if batch else "_eval"
     with mock.patch(MODULE + ".ThreadPoolExecutor", wraps=ThreadPoolExecutor) as executor, \
             mock.patch.object(read, method, return_value=_completed_future(None)) as evaluate:
-        assert read._search_index_splits(
-            splits, query, 2, None, batch=batch) == [None] * count
+        assert list(read._search_index_splits(
+            splits, query, 2, None, batch=batch)) == [None] * count
     executor.assert_called_once_with(max_workers=workers)
     assert evaluate.call_count == count
 
@@ -194,4 +195,62 @@ def test_parallelism_from_table_options():
         return _completed_future(None)
 
     with mock.patch.object(read, "_eval", side_effect=evaluate):
-        assert read._search_index_splits(splits, [1.0], 2, None) == [None, None]
+        assert list(read._search_index_splits(splits, [1.0], 2, None)) == [None, None]
+
+
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("fail_merge", [False, True])
+def test_merge_releases_results_and_bounds_submissions(batch, fail_merge):
+    read, splits = make_read(batch, {"global-index.thread-num": "2"}, count=20)
+    references, submitted, cancelled = [], [], []
+
+    class Result(DictBasedScoredIndexResult):
+        def score_getter(self):
+            if fail_merge:
+                raise ValueError("injected merge failure")
+            return super().score_getter()
+
+    def evaluate(start, *args):
+        # Completed results from earlier splits must be released before refilling.
+        assert sum(ref() is not None for ref in references) <= (2 if batch else 1)
+        results = [Result({0: float(start), start + 1: 1.}),
+                   Result({0: -float(start), start + 2: 2.})] if batch else [
+            Result({0: float(start), start + 1: 1.})]
+        references.extend(weakref.ref(result) for result in results)
+        return _completed_future(results if batch else results[0])
+
+    class Executor:
+        def __init__(self, max_workers):
+            assert max_workers == 2
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def submit(self, fn, i):
+            submitted.append(i)
+            future = _completed_future(fn(i))
+            future.cancel = lambda: cancelled.append(i)
+            return future
+
+    method = "_eval_batch" if batch else "_eval"
+    with mock.patch(MODULE + ".ThreadPoolExecutor", Executor), \
+            mock.patch.object(read, method, side_effect=evaluate):
+        if fail_merge:
+            with pytest.raises(ValueError, match="injected merge failure"):
+                if batch:
+                    read._read_batch(splits, None)
+                else:
+                    read._read_indexed(splits, [1.0], None)
+            assert submitted == [0, 1]
+            assert cancelled == [1]
+        else:
+            results = read._read_batch(splits, None) if batch else [read._read_indexed(splits, [1.0], None)]
+            assert list(results[0].results()) == [1, 11]
+            if batch:
+                assert list(results[1].results()) == [2, 12]
+            assert submitted == list(range(20))
+            assert cancelled == []
+            assert all(ref() is None for ref in references)
