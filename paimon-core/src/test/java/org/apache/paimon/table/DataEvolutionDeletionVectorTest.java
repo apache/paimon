@@ -36,6 +36,9 @@ import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.format.blob.BlobFileFormat;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -46,6 +49,7 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
@@ -60,6 +64,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
@@ -80,6 +85,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
@@ -389,6 +395,61 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                 .hasMessageContaining("conflict");
         assertThat(table.latestSnapshot().get().id()).isEqualTo(reassignSnapshotId);
         assertThat(readPartitionedRowsWithRowIds(table)).isEqualTo(reassignedRows);
+    }
+
+    @Test
+    public void testGlobalIndexCompactionDoesNotReadDataManifests() throws Exception {
+        FileStoreTable table =
+                createPartitionedReassignTable("index_only_compaction", false)
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.MANIFEST_MERGE_MIN_COUNT.key(),
+                                        Integer.toString(Integer.MAX_VALUE)));
+        writePartitionRows(table, "a", 0, 1);
+        BinaryRow partitionA = partition(table, "a");
+        IndexFileMeta first = globalIndexFile("first-index", new Range(0, 0));
+        IndexFileMeta second = globalIndexFile("second-index", new Range(1, 1));
+        commitGlobalIndex(table, partitionA, first);
+        commitGlobalIndex(table, partitionA, second);
+        IndexFileMeta compacted = globalIndexFile("compacted-index", new Range(0, 1));
+        CommitMessage compaction =
+                new CommitMessageImpl(
+                        partitionA,
+                        UNAWARE_BUCKET,
+                        null,
+                        DataIncrement.emptyIncrement(),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(compacted),
+                                Arrays.asList(first, second)));
+
+        writePartitionRows(table, "a", 2);
+        Snapshot before = table.latestSnapshot().get();
+        Set<String> dataManifests =
+                table.store().newScan().manifestsReader().read(before, ScanMode.ALL)
+                        .filteredManifests.stream()
+                        .map(ManifestFileMeta::fileName)
+                        .collect(Collectors.toSet());
+        assertThat(dataManifests).isNotEmpty();
+        LocalFileIO guardedFileIO =
+                new LocalFileIO() {
+                    @Override
+                    public SeekableInputStream newInputStream(Path path) throws IOException {
+                        assertThat(dataManifests).doesNotContain(path.getName());
+                        return super.newInputStream(path);
+                    }
+                };
+        FileStoreTable guardedTable =
+                FileStoreTableFactory.create(guardedFileIO, table.location(), table.schema());
+
+        commit(guardedTable, Collections.singletonList(compaction));
+
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(before.id() + 1);
+        assertThat(table.latestSnapshot().get().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(liveGlobalIndexFileNames(table)).containsExactly("compacted-index");
     }
 
     @Test
