@@ -1031,9 +1031,7 @@ public class SortCompactCommitMessageRewriterTest {
         IndexFileMeta newDvFile = compact.compactIncrement().newIndexFiles().get(0);
         IndexFileMeta oldSharedDvFile = compact.compactIncrement().deletedIndexFiles().get(0);
         IndexPathFactory indexPathFactory =
-                table.store()
-                        .pathFactory()
-                        .indexFileFactory(compact.partition(), compact.bucket());
+                table.store().pathFactory().indexFileFactory(compact.partition(), compact.bucket());
         Path newDvPath = indexPathFactory.toPath(newDvFile);
         Path oldSharedDvPath = indexPathFactory.toPath(oldSharedDvFile);
         assertThat(table.fileIO().exists(newDvPath)).isTrue();
