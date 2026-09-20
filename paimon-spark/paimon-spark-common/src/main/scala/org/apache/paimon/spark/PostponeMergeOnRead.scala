@@ -22,8 +22,9 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.spark.PostponeMergeOnRead.{MergePlan, RealScanInfo}
-import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
+import org.apache.paimon.table.{BlobDescriptorReadUtils, BucketMode, FileStoreTable, Table}
 import org.apache.paimon.table.source.{PostponeMergePlan, PostponeMergeReadBuilder}
+import org.apache.paimon.utils.UriReaderFactory
 
 import scala.collection.JavaConverters._
 
@@ -81,8 +82,22 @@ final private[spark] class PostponeMergeOnRead(scan: PaimonBaseScan) {
               .reportDriverMetrics()
               .map(metric => metric.name() -> metric.value())
               .toMap)
-          mergePlan =
-            MergePlan(builder, corePlan, scan.coreOptions.blobAsDescriptor(), realScanInfo)
+          val blobAsDescriptor = scan.coreOptions.blobAsDescriptor()
+          val blobDescriptorFieldIndices =
+            BlobDescriptorReadUtils.blobDescriptorFieldIndices(
+              scan.table,
+              corePlan.resultReadType(),
+              blobAsDescriptor)
+          val uriReaderFactory =
+            BlobDescriptorReadUtils.createUriReaderFactory(scan.table, blobDescriptorFieldIndices)
+          mergePlan = MergePlan(
+            readBuilder = builder,
+            corePlan = corePlan,
+            blobAsDescriptor = blobAsDescriptor,
+            realScanInfo = realScanInfo,
+            uriReaderFactory = uriReaderFactory,
+            blobDescriptorFieldIndices = blobDescriptorFieldIndices
+          )
         }
         mergePlan
     }
@@ -131,7 +146,9 @@ private[spark] object PostponeMergeOnRead {
       readBuilder: PostponeMergeReadBuilder,
       corePlan: PostponeMergePlan,
       blobAsDescriptor: Boolean,
-      realScanInfo: RealScanInfo)
+      realScanInfo: RealScanInfo,
+      uriReaderFactory: UriReaderFactory,
+      blobDescriptorFieldIndices: Array[Int])
 
   private[spark] case class RealScanInfo(
       tableName: String,

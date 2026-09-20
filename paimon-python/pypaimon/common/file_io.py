@@ -50,10 +50,6 @@ def pread(stream, length: int, offset: int) -> bytes:
     return os.pread(stream.fileno(), length, offset)
 
 
-# Coalescing bounds: merge same-file ranges whose gap is within GAP, capping a
-# merged read at SPAN so threads stay busy and memory stays bounded.
-_COALESCE_GAP = 1 << 20
-_COALESCE_SPAN = 8 << 20
 _COALESCE_VIEW_MAX_RETAINED_AMPLIFICATION = 2.0
 # Bound per-object opens; 16 cuts them by 75% for default 64-range batches.
 _MAX_RANGE_LANES_PER_PATH = 16
@@ -187,8 +183,7 @@ class FileIO(ABC):
         finally:
             stream.close()
 
-    def read_ranges_coalesced(self, ranges, parallelism,
-                              max_gap=_COALESCE_GAP, max_span=_COALESCE_SPAN):
+    def read_ranges_coalesced(self, ranges, parallelism):
         """Read ``ranges`` (each ``None`` or ``(path, offset, length)``), returning
         bytes in the same order. Same-file nearby ranges are merged into one read
         to cut round trips, then sliced. Each worker lane reuses one exclusive
@@ -198,12 +193,12 @@ class FileIO(ABC):
         A failed read propagates and aborts the whole batch (unlike a per-row
         ``file.open()`` loop that fails one row at a time).
         """
+        max_gap, max_span = self._resolve_coalesce_limits()
         return self._read_ranges_coalesced(
             ranges, parallelism, max_gap, max_span,
             max_retained_amplification=0, return_views=False)
 
-    def read_ranges_coalesced_views(self, ranges, parallelism,
-                                    max_gap=_COALESCE_GAP, max_span=_COALESCE_SPAN,
+    def read_ranges_coalesced_views(self, ranges, parallelism, *,
                                     max_retained_amplification=(
                                         _COALESCE_VIEW_MAX_RETAINED_AMPLIFICATION)):
         """Read coalesced ranges as zero-copy ``memoryview`` slices.
@@ -216,13 +211,25 @@ class FileIO(ABC):
         excessive gap bytes; set ``max_retained_amplification`` to a non-positive
         value to always share the merged buffer.
         """
+        max_gap, max_span = self._resolve_coalesce_limits()
         return self._read_ranges_coalesced(
             ranges, parallelism, max_gap, max_span, max_retained_amplification,
             return_views=True)
 
+    def _resolve_coalesce_limits(self):
+        from pypaimon.common.options.config import FileIOOptions
+        properties = getattr(self, "properties", None)
+        if not isinstance(properties, Options):
+            properties = Options({})
+        return (
+            properties.get(FileIOOptions.READ_COALESCE_MAX_GAP).get_bytes(),
+            properties.get(FileIOOptions.READ_COALESCE_MAX_BLOCK).get_bytes(),
+        )
+
     def _read_ranges_coalesced(self, ranges, parallelism, max_gap, max_span,
                                max_retained_amplification, return_views):
         from concurrent.futures import ThreadPoolExecutor
+
         # Threads write disjoint results[idx]; safe under the GIL (no list resize).
         results = [None] * len(ranges)
         coalescible, singletons = [], []
@@ -598,7 +605,8 @@ class FileIO(ABC):
         Returns a FileIO instance for accessing the file system identified by the given path.
         - LocalFileIO for local file system (file:// or no scheme)
         - HdfsNativeFileIO for HDFS/ViewFS (default; pure protocol client, no Hadoop install)
-        - PyArrowFileIO for other remote file systems (oss://, s3://, gs://, ...),
+        - OssFileIO for OSS (oss://)
+        - PyArrowFileIO for other remote file systems (s3://, gs://, ...),
           and for HDFS when explicitly requested via hdfs.client.impl=pyarrow
         """
         import os as _os
@@ -650,6 +658,10 @@ class FileIO(ABC):
                     f"Unsupported hdfs.client.impl '{impl_value}' "
                     f"(from {impl_source}). Supported: 'native', 'pyarrow'."
                 )
+
+        if scheme == "oss":
+            from pypaimon.filesystem.oss_file_io import OssFileIO
+            return OssFileIO(path, opts)
 
         from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
         return PyArrowFileIO(path, opts)

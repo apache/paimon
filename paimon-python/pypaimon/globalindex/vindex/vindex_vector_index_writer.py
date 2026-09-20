@@ -86,6 +86,52 @@ class VindexVectorIndexWriter:
         self._vector_temp.write(array("f", materialized).tobytes())
         self._vector_count += 1
 
+    def write_batch(self, vectors, relative_row_ids) -> None:
+        """Write Arrow arrays without materializing valid float32 vectors as lists.
+
+        Unsupported layouts and invalid vectors use the scalar path so that
+        validation errors and the order of successfully written rows match write().
+        """
+        if self._closed:
+            raise RuntimeError("VindexVectorIndexWriter is already closed.")
+        if len(vectors) != len(relative_row_ids):
+            raise ValueError("Vector and row ID batch lengths differ.")
+        if relative_row_ids.null_count:
+            raise ValueError("Cannot build global index because _ROW_ID is null.")
+        if len(vectors) == 0:
+            return
+
+        import numpy as np
+        import pyarrow as pa
+        import pyarrow.compute as pc
+
+        valid_vectors, valid_ids = vectors, relative_row_ids
+        if vectors.null_count:
+            valid = pc.is_valid(vectors)
+            valid_vectors = pc.filter(vectors, valid)
+            valid_ids = pc.filter(relative_row_ids, valid)
+        if len(valid_vectors) == 0:
+            self._row_count += len(vectors)
+            return
+
+        values = _float32_batch_values(np, pa, valid_vectors, self._dimension)
+        if (values is not None and values.null_count == 0
+                and valid_ids.type == pa.int64()):
+            data = values.to_numpy(zero_copy_only=True)
+            if np.isfinite(data).all():
+                ids = np.ascontiguousarray(
+                    valid_ids.to_numpy(zero_copy_only=False), dtype=np.int64)
+                data = np.ascontiguousarray(data, dtype=np.float32)
+                self._row_count += len(vectors)
+                self._ensure_temp_files()
+                self._row_id_temp.write(memoryview(ids).cast('B'))
+                self._vector_temp.write(memoryview(data).cast('B'))
+                self._vector_count += len(valid_vectors)
+                return
+
+        for vector, row_id in zip(vectors.to_pylist(), relative_row_ids.to_pylist()):
+            self.write(vector, row_id)
+
     def finish(self) -> List[ResultEntry]:
         if self._closed:
             raise RuntimeError("VindexVectorIndexWriter is already closed.")
@@ -106,18 +152,8 @@ class VindexVectorIndexWriter:
 
             self._close_temp_files()
             self._file_io.check_or_mkdirs(self._index_path)
-            vectors = np.fromfile(
-                self._vector_temp_path,
-                dtype=np.float32,
-                count=self._vector_count * self._dimension,
-            ).reshape(self._vector_count, self._dimension)
-            training_vectors = _sample_training_vectors(
-                np, vectors, self._train_sample_ratio)
-            training = VectorIndexTrainer.train(
-                self._training_options(), training_vectors)
+            training = self._train(np, VectorIndexTrainer)
             try:
-                del training_vectors
-                del vectors
                 with VectorIndexWriter(training) as writer:
                     self._add_vectors_in_batches(np, writer)
                     with self._file_io.new_output_stream(file_path) as output_stream:
@@ -131,6 +167,16 @@ class VindexVectorIndexWriter:
             self._delete_temp_files()
 
         return [ResultEntry(self.file_name, self._row_count, b"{}")]
+
+    def _train(self, np, trainer_type):
+        with open(self._vector_temp_path, "rb") as vector_file:
+            with trainer_type.create(self._training_options()) as trainer:
+                for batch in _iter_training_batches(
+                    np, vector_file, self._vector_count, self._dimension,
+                    self._train_sample_ratio, batch_size=ADD_BATCH_SIZE,
+                ):
+                    trainer.add_training_vectors(batch)
+                return trainer.finish_training()
 
     def _file_path(self) -> str:
         return "%s/%s" % (self._index_path, self.file_name)
@@ -343,16 +389,51 @@ def _is_float_type(data_type: DataType) -> bool:
     )
 
 
-def _sample_training_vectors(np, vectors, sample_ratio: float):
-    vector_count = vectors.shape[0]
+def _iter_training_batches(
+    np, vector_file, vector_count: int, dimension: int, sample_ratio: float,
+    batch_size: int = ADD_BATCH_SIZE,
+):
+    """Yield the existing evenly spaced sample using bounded reads and buffers."""
     train_count = max(1, min(vector_count, int(math.ceil(
         vector_count * sample_ratio))))
-    if train_count == vector_count:
-        return vectors
-    indexes = (
-        np.arange(train_count, dtype=np.int64) * vector_count // train_count
-    )
-    return np.ascontiguousarray(vectors[indexes])
+    position = 0
+    item_size = np.dtype(np.float32).itemsize
+    while position < train_count:
+        start = position * vector_count // train_count
+        end = min(start + batch_size, vector_count)
+        # First sample position whose source row is at or beyond this block.
+        next_position = min(train_count, (end * train_count + vector_count - 1) // vector_count)
+        vector_file.seek(start * dimension * item_size)
+        vectors = np.fromfile(
+            vector_file, dtype=np.float32, count=(end - start) * dimension,
+        ).reshape(end - start, dimension)
+        if train_count == vector_count:
+            yield vectors
+        else:
+            indexes = np.arange(position, next_position, dtype=np.int64)
+            indexes = indexes * vector_count // train_count - start
+            yield np.ascontiguousarray(vectors[indexes])
+        position = next_position
+
+
+def _float32_batch_values(np, pa, vectors, dimension):
+    vector_type = vectors.type
+    if not (
+        pa.types.is_list(vector_type)
+        or pa.types.is_large_list(vector_type)
+        or pa.types.is_fixed_size_list(vector_type)
+    ) or vector_type.value_type != pa.float32():
+        return None
+
+    if pa.types.is_fixed_size_list(vector_type):
+        if vector_type.list_size != dimension:
+            return None
+        return vectors.values.slice(vectors.offset * dimension, len(vectors) * dimension)
+
+    offsets = vectors.offsets.to_numpy(zero_copy_only=True)
+    if not np.all(np.diff(offsets) == dimension):
+        return None
+    return vectors.values.slice(int(offsets[0]), int(offsets[-1] - offsets[0]))
 
 
 def _materialize_vector(

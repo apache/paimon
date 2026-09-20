@@ -17,6 +17,7 @@
 
 import unittest
 import uuid
+from dataclasses import replace
 from datetime import datetime
 from unittest.mock import MagicMock, Mock, patch
 
@@ -69,6 +70,8 @@ class TestFileStoreCommitRowTracking(unittest.TestCase):
         self.mock_table.file_io = Mock()
         self.mock_table.options.manifest_target_size.return_value = 8 * 1024 * 1024
         self.mock_table.options.manifest_merge_min_count.return_value = 30
+        self.mock_table.options.write_only.return_value = False
+        self.mock_table.options.manifest_merge_skip_on_write_only.return_value = False
         self.mock_snapshot_commit = Mock()
 
     def _create_file_store_commit(self):
@@ -272,6 +275,8 @@ class TestFileStoreCommit(unittest.TestCase):
         self.mock_table.file_io = Mock()
         self.mock_table.options.manifest_target_size.return_value = 8 * 1024 * 1024
         self.mock_table.options.manifest_merge_min_count.return_value = 30
+        self.mock_table.options.write_only.return_value = False
+        self.mock_table.options.manifest_merge_skip_on_write_only.return_value = False
 
         # Mock snapshot commit
         self.mock_snapshot_commit = Mock()
@@ -307,6 +312,8 @@ class TestFileStoreCommit(unittest.TestCase):
             self._manifest_meta('suffix'),
         ]
         replacement = [self._manifest_meta('merged')]
+        previous[0].extra_files = ['a.avro.sidecar']
+        current[1].extra_files = ['a.avro.sidecar']
 
         result = _try_replace_manifest_files(
             current, previous, replacement)
@@ -316,6 +323,31 @@ class TestFileStoreCommit(unittest.TestCase):
             [manifest.file_name for manifest in result],
         )
         self.assertIsNot(current[1], previous[0])
+
+    def test_replace_manifest_files_rejects_changed_metadata(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        previous = self._manifest_meta('before')
+        replacement = [self._manifest_meta('merged')]
+        changes = {
+            'min_bucket': 0,
+            'max_bucket': 3,
+            'min_level': 0,
+            'max_level': 2,
+            'total_buckets': 4,
+            'extra_files': ['before.avro.sidecar'],
+        }
+        for field, value in changes.items():
+            with self.subTest(field=field):
+                current = replace(previous, **{field: value})
+                self.assertIsNone(_try_replace_manifest_files(
+                    [current], [previous], replacement))
+
+        for old, new in [(None, []), ([], ['sidecar']), (['old'], ['new']),
+                         (['a', 'b'], ['b', 'a'])]:
+            with self.subTest(old=old, new=new):
+                self.assertIsNone(_try_replace_manifest_files(
+                    [replace(previous, extra_files=new)],
+                    [replace(previous, extra_files=old)], replacement))
 
     def test_replace_manifest_files_preserves_order_and_empty_semantics(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
@@ -515,6 +547,34 @@ class TestFileStoreCommit(unittest.TestCase):
         )
         file_store_commit.manifest_file_merger.merge.assert_called_once()
 
+    def test_disabled_manifest_merge_preserves_manifests_on_retry(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        options = CoreOptions(Options({
+            'write-only': 'true',
+            'manifest.merge.skip-on-write-only': 'true',
+        }))
+        self.mock_table.options.write_only.side_effect = options.write_only
+        self.mock_table.options.manifest_merge_skip_on_write_only.side_effect = (
+            options.manifest_merge_skip_on_write_only)
+        current = [self._manifest_meta('before-a'), self._manifest_meta('before-b')]
+        first_commit, retry_result = self._run_manifest_commit_attempt(
+            commit_result=False, existing_manifests=current)
+
+        self.assertIsInstance(retry_result, CommitFailRetryResult)
+        self.assertIsNone(retry_result.manifest_merge_result)
+        first_commit.manifest_file_merger.merge.assert_not_called()
+        self.assertEqual(
+            current, first_commit.manifest_list_manager.write.call_args_list[-1].args[1])
+
+        current.append(self._manifest_meta('concurrent'))
+        retry_commit, result = self._run_manifest_commit_attempt(
+            commit_result=True, retry_result=retry_result, existing_manifests=current)
+
+        self.assertTrue(result.is_success())
+        retry_commit.manifest_file_merger.merge.assert_not_called()
+        self.assertEqual(
+            current, retry_commit.manifest_list_manager.write.call_args_list[-1].args[1])
+
     def test_atomic_commit_exception_does_not_retain_manifest_merge_result(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
         failure = TimeoutError('lost commit response')
@@ -572,6 +632,30 @@ class TestFileStoreCommit(unittest.TestCase):
             ['prefix', 'merged', 'suffix'],
             [manifest.file_name for manifest in base_manifests],
         )
+
+    def test_retry_preserves_concurrently_added_manifest_sidecar(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        previous = self._manifest_meta('before')
+        _, retry_result = self._run_manifest_commit_attempt(
+            commit_result=False,
+            existing_manifests=[previous],
+            merged_manifests=[previous],
+        )
+        # A concurrent commit attaches a sidecar to the same manifest file.
+        current = replace(previous, extra_files=['before.avro.sidecar'])
+        file_store_commit, result = self._run_manifest_commit_attempt(
+            commit_result=True,
+            retry_result=retry_result,
+            existing_manifests=[current],
+        )
+
+        self.assertTrue(result.is_success())
+        file_store_commit.manifest_file_merger.merge.assert_not_called()
+        base_manifests = (
+            file_store_commit.manifest_list_manager.write
+            .call_args_list[-1][0][1])
+        self.assertEqual([current], base_manifests)
+        self.assertEqual(['before.avro.sidecar'], base_manifests[0].extra_files)
 
     def test_retry_skips_manifest_merge_when_previous_input_is_not_contiguous(
             self, mock_manifest_list_manager, mock_manifest_file_manager):

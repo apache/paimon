@@ -67,6 +67,7 @@ public class BTreeIndexReader implements Closeable {
     private final SstFileReader reader;
     private final KeySerializer keySerializer;
     private final Comparator<Object> comparator;
+    private final int fileVersion;
     private final LazyField<RoaringNavigableMap64> nullBitmap;
     private final Object minKey;
     private final Object maxKey;
@@ -161,6 +162,12 @@ public class BTreeIndexReader implements Closeable {
             Path filePath = globalIndexIOMeta.filePath();
             BlockCache blockCache = new BlockCache(filePath, input, cacheManager);
             BTreeFileFooter footer = readFooter(blockCache, fileSize);
+            this.fileVersion = footer.getVersion();
+            Preconditions.checkArgument(
+                    fileVersion >= BTreeFileFooter.VERSION_1
+                            && fileVersion <= BTreeFileFooter.MAX_SUPPORTED_VERSION,
+                    "Unsupported BTree index version: %s",
+                    fileVersion);
 
             // prepare nullBitmap and SstFileReader
             this.nullBitmap =
@@ -322,7 +329,7 @@ public class BTreeIndexReader implements Closeable {
     }
 
     public Optional<GlobalIndexResult> visitEqual(Object literal) {
-        return createResult(() -> rangeQuery(literal, literal, true, true));
+        return createResult(() -> pointQuery(literal));
     }
 
     public Optional<GlobalIndexResult> visitGreaterThan(Object literal) {
@@ -334,7 +341,12 @@ public class BTreeIndexReader implements Closeable {
                 () -> {
                     RoaringNavigableMap64 result = new RoaringNavigableMap64();
                     for (Object literal : literals) {
-                        result.or(rangeQuery(literal, literal, true, true));
+                        // SQL IN treats NULL as never matching; skip it instead of
+                        // failing to serialize a null key.
+                        if (literal == null) {
+                            continue;
+                        }
+                        result.or(pointQuery(literal));
                     }
                     return result;
                 });
@@ -351,6 +363,11 @@ public class BTreeIndexReader implements Closeable {
                     result.andNot(inResult);
                     return result;
                 });
+    }
+
+    public Optional<GlobalIndexResult> visitRange(
+            Object from, Object to, boolean fromInclusive, boolean toInclusive) {
+        return createResult(() -> rangeQuery(from, to, fromInclusive, toInclusive));
     }
 
     public Optional<GlobalIndexResult> visitBetween(Object from, Object to) {
@@ -392,6 +409,15 @@ public class BTreeIndexReader implements Closeable {
             return new RoaringNavigableMap64();
         }
         return rangeQuery(minKey, maxKey, true, true);
+    }
+
+    private RoaringNavigableMap64 pointQuery(Object key) throws IOException {
+        RoaringNavigableMap64 result = new RoaringNavigableMap64();
+        byte[] rowIds = reader.lookup(keySerializer.serialize(key));
+        if (rowIds != null) {
+            addRowIdsTo(MemorySlice.wrap(rowIds), result);
+        }
+        return result;
     }
 
     private TopNGlobalIndexResult topN(
@@ -503,28 +529,49 @@ public class BTreeIndexReader implements Closeable {
                     return result;
                 }
 
-                for (long rowId : deserializeRowIds(entry.getValue())) {
-                    result.add(rowId);
-                }
+                addRowIdsTo(entry.getValue(), result);
             }
         }
         return result;
     }
 
-    private long[] deserializeRowIds(MemorySlice slice) {
+    private long[] deserializeRowIds(MemorySlice slice) throws IOException {
         return deserializeRowIds(slice, Integer.MAX_VALUE);
     }
 
-    static long[] deserializeRowIds(MemorySlice slice, int maxRowIds) {
-        Preconditions.checkArgument(maxRowIds >= 0, "Max row id count must not be negative.");
-        MemorySliceInput sliceInput = slice.toInput();
-        int length = sliceInput.readVarLenInt();
-        Preconditions.checkState(length > 0, "Invalid row id length: 0");
-        int resultLength = Math.min(length, maxRowIds);
-        long[] ids = new long[resultLength];
-        for (int i = 0; i < resultLength; i++) {
-            ids[i] = sliceInput.readVarLenLong();
+    private long[] deserializeRowIds(MemorySlice slice, int maxRowIds) throws IOException {
+        return fileVersion == BTreeFileFooter.VERSION_1
+                ? deserializeVersion1RowIds(slice, maxRowIds)
+                : BTreePostingList.deserialize(slice, maxRowIds);
+    }
+
+    private void addRowIdsTo(MemorySlice slice, RoaringNavigableMap64 target) throws IOException {
+        if (fileVersion == BTreeFileFooter.VERSION_1) {
+            MemorySliceInput input = slice.toInput();
+            int count = readVersion1Count(input);
+            for (int i = 0; i < count; i++) {
+                target.add(input.readVarLenLong());
+            }
+        } else {
+            BTreePostingList.addTo(slice, target);
         }
-        return ids;
+    }
+
+    static long[] deserializeVersion1RowIds(MemorySlice slice, int maxRowIds) {
+        Preconditions.checkArgument(maxRowIds >= 0, "Max row id count must not be negative.");
+        MemorySliceInput input = slice.toInput();
+        int count = readVersion1Count(input);
+        int resultLength = Math.min(count, maxRowIds);
+        long[] result = new long[resultLength];
+        for (int i = 0; i < resultLength; i++) {
+            result[i] = input.readVarLenLong();
+        }
+        return result;
+    }
+
+    private static int readVersion1Count(MemorySliceInput input) {
+        int count = input.readVarLenInt();
+        Preconditions.checkState(count > 0, "Invalid BTree row id count: %s", count);
+        return count;
     }
 }

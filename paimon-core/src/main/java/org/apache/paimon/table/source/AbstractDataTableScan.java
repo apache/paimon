@@ -30,6 +30,7 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateRemapper;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -62,14 +63,17 @@ import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
+import org.apache.paimon.utils.TypeUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -99,6 +103,9 @@ abstract class AbstractDataTableScan implements DataTableScan {
     // Whether the auth predicate has a non-partition part (enforced only at read time). Used by
     // AbstractBatchTableScan to disable limit push down; not pushed through withFilter.
     protected boolean authHasNonPartitionFilter;
+    private boolean authPartitionPushdown = true;
+    // Turning the pushdown off after a filter was pushed has to rebuild it, rules unchanged.
+    private boolean appliedAuthPartitionPushdown = true;
     // auth state, refreshed each plan(). The filter is pushed once, without the conjuncts on
     // masked columns, whose raw statistics a mask invalidates; the partition fields are
     // replaced on each push, as ManifestsReader#withPartitionFilter overwrites rather than ands.
@@ -156,10 +163,12 @@ abstract class AbstractDataTableScan implements DataTableScan {
     protected abstract TableScan.Plan planWithoutAuth();
 
     private void applyAuthFilter(@Nullable Predicate authPredicate) {
-        if (Objects.equals(authPredicate, appliedAuthPredicate)) {
+        if (Objects.equals(authPredicate, appliedAuthPredicate)
+                && authPartitionPushdown == appliedAuthPartitionPushdown) {
             return;
         }
         appliedAuthPredicate = authPredicate;
+        appliedAuthPartitionPushdown = authPartitionPushdown;
 
         PartitionPredicate authPartitionFilter = null;
         boolean hasNonPartitionPart = false;
@@ -167,7 +176,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
             // Remap field-id FieldRefs to positional indices by name (as doAuth does on read), so
             // pruning stays correct across schema evolution.
             Predicate remappedAuth =
-                    TableQueryAuthResult.remapPredicate(authPredicate, schema.logicalRowType());
+                    PredicateRemapper.remap(authPredicate, schema.logicalRowType());
             if (remappedAuth != null) {
                 Pair<Optional<PartitionPredicate>, List<Predicate>> split =
                         PartitionPredicate.splitPartitionPredicatesAndDataPredicates(
@@ -179,11 +188,20 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
         // Push only the partition part, to a dedicated slot overwritten/cleared each plan() so a
         // changed/removed auth leaves no stale pruning. The full filter is enforced at read time.
-        snapshotReader.manifestsReader().withAuthPartitionFilter(authPartitionFilter);
+        snapshotReader
+                .manifestsReader()
+                .withAuthPartitionFilter(authPartitionPushdown ? authPartitionFilter : null);
         // A non-partition auth part is enforced only at read time, so limit push down is unsafe
         // (AbstractBatchTableScan reads this). Kept off SnapshotReader since it is not a pushed
-        // filter.
-        this.authHasNonPartitionFilter = hasNonPartitionPart;
+        // filter. Without the partition push down the whole rule is read time.
+        this.authHasNonPartitionFilter =
+                authPartitionPushdown ? hasNonPartitionPart : authPredicate != null;
+    }
+
+    @Override
+    public AbstractDataTableScan withoutAuthPartitionPushdown() {
+        this.authPartitionPushdown = false;
+        return this;
     }
 
     @Override
@@ -279,6 +297,14 @@ abstract class AbstractDataTableScan implements DataTableScan {
             return null;
         }
         List<String> select = readType == null ? null : readType.getFieldNames();
+        if (select != null && (userFilter != null || !partitionFilterFields.isEmpty())) {
+            // Authorize query operands before pruning or reading their values. Dependencies of
+            // trusted row filters and masks are supplied by the catalog and are not user selects.
+            Set<String> fields = new LinkedHashSet<>(select);
+            fields.addAll(PredicateVisitor.collectFieldNames(userFilter));
+            fields.addAll(partitionFilterFields);
+            select = new ArrayList<>(fields);
+        }
         TableQueryAuthResult result = queryAuth.auth(select);
         if (result != null && result.hasRules()) {
             // re-validated every plan, so a schema change under a live scan fails closed
@@ -320,10 +346,22 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     /** The partition columns a predicate references, or all of them when it cannot be read. */
     private Set<String> partitionPredicateFields(PartitionPredicate partitionPredicate) {
+        if (partitionPredicate == PartitionPredicate.ALWAYS_TRUE
+                || partitionPredicate == PartitionPredicate.ALWAYS_FALSE) {
+            return Collections.emptySet();
+        }
         if (partitionPredicate instanceof PartitionPredicate.DefaultPartitionPredicate) {
             return PredicateVisitor.collectFieldNames(
                     ((PartitionPredicate.DefaultPartitionPredicate) partitionPredicate)
                             .predicate());
+        }
+        if (partitionPredicate instanceof PartitionPredicate.AndPartitionPredicate) {
+            Set<String> fields = new HashSet<>();
+            for (PartitionPredicate child :
+                    ((PartitionPredicate.AndPartitionPredicate) partitionPredicate).predicates()) {
+                fields.addAll(partitionPredicateFields(child));
+            }
+            return fields;
         }
         return new HashSet<>(schema.partitionKeys());
     }
@@ -383,34 +421,24 @@ abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     /**
-     * Push the auth-widened read type to the snapshot reader before planning, so file-level column
-     * pruning keeps the files of the columns the rules read.
+     * Push the read type expanded for filters and auth rules to the snapshot reader before
+     * planning, so file-level column pruning keeps their dependencies.
      */
     private void applyAuthReadType(@Nullable TableQueryAuthResult queryAuthResult) {
         if (readType == null) {
             return;
         }
-        RowType desired = readType;
-        if (queryAuthResult != null && queryAuthResult.hasRules()) {
-            // post-mask conjuncts are evaluated at read time; their columns must survive planning
-            RowType widened =
-                    TableQueryAuthResult.appendMissingFields(
-                            schema.logicalRowType(),
-                            readType,
-                            queryAuthResult.authFields(readType.getFieldNames(), userFilter));
-            if (widened != null) {
-                desired = widened;
-            }
-        }
-        // never narrow within this scan's lifetime: readers fix their schema on first use
-        RowType widenedToApplied =
-                TableQueryAuthResult.appendMissingFields(
+        RowType desired =
+                TypeUtils.withMissingFields(
+                        schema.logicalRowType(),
+                        readType,
+                        ReadTransform.requiredFields(readType, userFilter, queryAuthResult));
+        // Never narrow within this scan's lifetime: readers may retain their physical schema.
+        desired =
+                TypeUtils.withMissingFields(
                         appliedScanReadType,
                         desired,
                         new HashSet<>(appliedScanReadType.getFieldNames()));
-        if (widenedToApplied != null) {
-            desired = widenedToApplied;
-        }
         if (!desired.equals(appliedScanReadType)) {
             snapshotReader.withReadType(desired);
             appliedScanReadType = desired;
@@ -434,7 +462,10 @@ abstract class AbstractDataTableScan implements DataTableScan {
             case COMPACT_BUCKET_TABLE:
                 checkArgument(
                         isStreaming, "Set 'streaming-compact' in batch mode. This is unexpected.");
-                return new ContinuousCompactorStartingScanner(snapshotManager);
+                return new ContinuousCompactorStartingScanner(
+                        snapshotManager,
+                        options.toConfiguration()
+                                .get(CoreOptions.CONTINUOUS_COMPACTION_INITIAL_SCAN_MODE));
             case FILE_MONITOR:
                 return new FullStartingScanner(snapshotManager);
         }

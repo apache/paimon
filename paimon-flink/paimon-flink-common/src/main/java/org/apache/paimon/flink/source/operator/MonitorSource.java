@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source.operator;
 
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
@@ -26,6 +27,7 @@ import org.apache.paimon.flink.source.PaimonDataStreamSource;
 import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.source.SplitListState;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.source.DataSplit;
@@ -56,7 +58,9 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.NavigableMap;
 import java.util.OptionalLong;
@@ -96,16 +100,27 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
     private final long monitorInterval;
     private final boolean emitSnapshotWatermark;
     private final boolean isBounded;
+    private final int maxSnapshotCount;
 
     public MonitorSource(
             ReadBuilder readBuilder,
             long monitorInterval,
             boolean emitSnapshotWatermark,
             boolean isBounded) {
+        this(readBuilder, monitorInterval, emitSnapshotWatermark, isBounded, -1);
+    }
+
+    MonitorSource(
+            ReadBuilder readBuilder,
+            long monitorInterval,
+            boolean emitSnapshotWatermark,
+            boolean isBounded,
+            int maxSnapshotCount) {
         this.readBuilder = readBuilder;
         this.monitorInterval = monitorInterval;
         this.emitSnapshotWatermark = emitSnapshotWatermark;
         this.isBounded = isBounded;
+        this.maxSnapshotCount = maxSnapshotCount;
     }
 
     @Override
@@ -136,6 +151,7 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
                                         Long.parseLong(x.split(":")[0]),
                                         Long.parseLong(x.split(":")[1])));
         private final TreeMap<Long, Long> nextSnapshotPerCheckpoint = new TreeMap<>();
+        private final Deque<Long> inFlightNextSnapshots = new ArrayDeque<>();
         private CompletableFuture<Void> availableFuture = CompletableFuture.completedFuture(null);
 
         @Override
@@ -143,8 +159,19 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
             NavigableMap<Long, Long> nextSnapshots =
                     nextSnapshotPerCheckpoint.headMap(checkpointId, true);
             OptionalLong max = nextSnapshots.values().stream().mapToLong(Long::longValue).max();
-            max.ifPresent(scan::notifyCheckpointComplete);
+            boolean limitReached = snapshotLimitReached();
+            max.ifPresent(
+                    completedNextSnapshot -> {
+                        scan.notifyCheckpointComplete(completedNextSnapshot);
+                        while (!inFlightNextSnapshots.isEmpty()
+                                && inFlightNextSnapshots.getFirst() <= completedNextSnapshot) {
+                            inFlightNextSnapshots.removeFirst();
+                        }
+                    });
             nextSnapshots.clear();
+            if (limitReached && !snapshotLimitReached()) {
+                availableFuture.complete(null);
+            }
         }
 
         @Override
@@ -190,6 +217,8 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
             for (Tuple2<Long, Long> tuple2 : nextSnapshotState.get()) {
                 nextSnapshotPerCheckpoint.put(tuple2.f0, tuple2.f1);
             }
+            inFlightNextSnapshots.clear();
+            availableFuture.complete(null);
         }
 
         @Override
@@ -199,11 +228,20 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
 
         @Override
         public InputStatus pollNext(ReaderOutput<Split> readerOutput) throws Exception {
+            if (snapshotLimitReached()) {
+                return InputStatus.NOTHING_AVAILABLE;
+            }
+
             boolean isEmpty;
             try {
                 List<Split> splits = isBounded ? batchScan.plan().splits() : scan.plan().splits();
                 isEmpty = splits.isEmpty();
                 splits.forEach(readerOutput::collect);
+                if (!isBounded && maxSnapshotCount > 0 && !isEmpty) {
+                    inFlightNextSnapshots.addLast(
+                            Preconditions.checkNotNull(
+                                    scan.checkpoint(), "Non-empty streaming plan without state."));
+                }
 
                 if (emitSnapshotWatermark && !isBounded) {
                     Long watermark = scan.watermark();
@@ -231,7 +269,17 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
                                 });
                 return InputStatus.NOTHING_AVAILABLE;
             }
+            if (snapshotLimitReached()) {
+                availableFuture = new CompletableFuture<>();
+                return InputStatus.NOTHING_AVAILABLE;
+            }
             return InputStatus.MORE_AVAILABLE;
+        }
+
+        private boolean snapshotLimitReached() {
+            return !isBounded
+                    && maxSnapshotCount > 0
+                    && inFlightNextSnapshots.size() >= maxSnapshotCount;
         }
     }
 
@@ -307,8 +355,24 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
             @Nullable Table table,
             RowType readType,
             boolean blobAsDescriptor) {
+        int maxSnapshotCount =
+                table == null
+                        ? -1
+                        : Options.fromMap(table.options())
+                                .get(FlinkConnectorOptions.SCAN_MAX_SNAPSHOT_COUNT);
+        Preconditions.checkArgument(
+                isBounded
+                        || maxSnapshotCount <= 0
+                        || env.getCheckpointConfig().isCheckpointingEnabled(),
+                "Option '%s' is only supported for streaming monitor source when checkpointing is enabled.",
+                FlinkConnectorOptions.SCAN_MAX_SNAPSHOT_COUNT.key());
         MonitorSource monitorSource =
-                new MonitorSource(readBuilder, monitorInterval, emitSnapshotWatermark, isBounded);
+                new MonitorSource(
+                        readBuilder,
+                        monitorInterval,
+                        emitSnapshotWatermark,
+                        isBounded,
+                        maxSnapshotCount);
         Source<Split, SimpleSourceSplit, NoOpEnumState> source = monitorSource;
         if (table != null) {
             source = new PaimonDataStreamSource<>(monitorSource, table);

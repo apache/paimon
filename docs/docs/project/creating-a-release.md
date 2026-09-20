@@ -37,77 +37,36 @@ after the vote.
 
 :::
 
+## Before you start
+
+Read the [release overview](./releases.md) for the artifact model and roles.
+Run the following steps in order; examples use `2.0.0` only to illustrate the
+variable names. Select the version and release branch agreed by the community.
+
+| Step | Ready to continue when |
+| --- | --- |
+| [Set up the RM environment](#one-time-rm-setup) | The signing key, credentials, and service access are configured |
+| [Prepare the release](#prepare-the-release) | Versions agree and the signed RC tag identifies a clean commit |
+| [Sign and stage Java artifacts](#sign-and-stage-the-java-convenience-artifacts-locally) | One complete Nexus repository is closed |
+| [Stage source candidates](#stage-the-source-candidates) | Both source archives, signatures, and checksums are available |
+| [Call the vote](#call-the-vote) | All candidate URLs and provenance are in the vote email |
+| [Publish after approval](./publishing-a-release.md) | The vote passed and the approved candidate is unchanged |
+
 ## Release model
 
-The combined Paimon and PyPaimon release uses one shared version number. The
-Maven project version and `paimon-python/setup.py` version must be equal.
-
-| Deliverable | Candidate | Published location |
-| --- | --- | --- |
-| Paimon source | `apache-paimon-PAIMON_VERSION-src.tgz`, `.asc`, `.sha512` | ASF distribution |
-| Java convenience artifacts | Maven artifacts built in the JDK 8, 11, and 17 lanes | Apache Nexus staging, then Maven Central |
-| PyPaimon source | `pypaimon-PAIMON_VERSION.tar.gz`, `.asc`, `.sha512` | ASF distribution |
-| Python convenience package | `pypaimon==PAIMON_VERSIONrcRC_NUMBER` for an RC | TestPyPI, then `pypaimon==PAIMON_VERSION` on PyPI |
-
-A combined release vote covers both signed source candidates. This guide does
-not define an independent PyPaimon release. Before releasing PyPaimon
-separately, the PMC must define a Python-only tag and workflow which do not
-depend on the Maven version or Java jobs, and must provide a signed source
-package which is independently sufficient to build and test the release.
+Paimon and PyPaimon use one shared version and one combined vote. See the
+[deliverables and Java build matrix](./releases.md#release-model).
 
 ### Java build matrix
 
-The three Java lanes are different release targets, not interchangeable build
-JDKs:
-
-| JDK | Maven profiles and scope | Main artifacts |
-| --- | --- | --- |
-| 8 | `spark3,flink1` and the default reactor | Paimon core, Flink 1.x, Spark 3.x, Hive, filesystems, bundles, and other Java 8 artifacts |
-| 11 | `flink2` plus `paimon-iceberg` | Flink 2.x, `paimon-flink2-common`, and Iceberg integration |
-| 17 | `spark4` | Spark 4.x and its Scala 2.13 common artifacts |
-
-Each lane must use the matching JDK. Building everything on JDK 17 with a lower
-compiler target is not a substitute for running the JDK 8 and JDK 11 lanes.
+See the [JDK 8, 11, and 17 release targets](./releases.md#java-build-matrix).
 
 ## GitHub Actions release workflow
 
-The release process uses the
-[Release workflow](https://github.com/apache/paimon/actions/workflows/release.yml)
-to package the JDK 8, JDK 11, and JDK 17 Java lanes and PyPaimon from every
-signed RC tag. The Java lanes are merged into one unsigned Maven repository
-image. The RM downloads that image, signs it, and stages it in Nexus. The RM
-also creates and signs the two ASF source archives locally from the same tag.
-The RM's GPG private key is never stored in GitHub Actions.
-
-The workflow has the following contract:
-
-| Job | Required behavior |
-| --- | --- |
-| Validation | Require an RC tag named `release-PAIMON_VERSION-rcN` or a final tag named `release-PAIMON_VERSION`, where `PAIMON_VERSION` exactly equals the root Maven `project.version` |
-| Java 8 | Use Temurin 8 to deploy the default reactor with Spark 3 and Flink 1 into a local Maven repository image |
-| Java 11 | Use Temurin 11 to deploy Flink 2 and Iceberg into a local Maven repository image |
-| Java 17 | Use Temurin 17 to deploy Spark 4 into a local Maven repository image |
-| Java repository | Require every deploy-enabled effective-POM project and its POM, main JAR, and source JAR; retain Javadoc JARs where Maven produces them; merge all three lanes; reject conflicting coordinates; then upload the complete unsigned Maven repository image, checksums, manifests, and logs |
-| Python package | Build and validate the PyPaimon source distribution and universal wheel, then upload them as workflow artifacts |
-| Python publish | Publish an RC to TestPyPI or a final tag to PyPI after Python packaging passes, without waiting for Java packaging |
-
-Before packaging, every Java lane runs Maven Enforcer's
-`requireReleaseVersion` and `requireReleaseDeps` rules over its complete reactor
-scope. The latter includes transitive dependencies. Any remaining
-`-SNAPSHOT` project, parent, direct dependency, or transitive dependency is a
-release blocker.
-
-The Java jobs run independently of the common validation and Python jobs. They
-use `-Dgpg.skip=true`, deploy only to runner-local file repositories, and never
-receive Nexus credentials or a GPG private key. The combined repository image
-contains POMs, main artifacts, source JARs, Javadoc JARs produced by Maven, and
-Maven-generated checksums. Scala-only and wrapper modules may not produce a
-Javadoc JAR. The image is the input to the RM's local signing and Nexus
-staging steps, not itself an ASF release. The Python RC job uses the
-`TEST_PYPI_API_TOKEN` repository Actions secret to publish
-`PAIMON_VERSIONrcRC_NUMBER` to TestPyPI. The final job uses the
-`PYPI_API_TOKEN` repository Actions secret to publish to PyPI. The release
-workflow passes only these two secrets to the reusable publishing workflow.
+The workflow packages Java artifacts and publishes Python candidates; the RM
+signs locally and stages the source and Java artifacts. See the
+[workflow contract](./releases.md#github-actions-release-workflow) before running
+the commands below.
 
 ## One-time RM setup
 
@@ -471,93 +430,24 @@ If the vote finds a problem:
 
 ## Finalize an approved release
 
+After recording a successful vote result, follow [Publishing a Release](./publishing-a-release.md)
+with the approved candidate's variables and repository ID.
+
 ### Create the final signed tag
 
-The final tag must point to exactly the approved RC commit:
-
-```shell
-git tag -s "${RELEASE_TAG}" "refs/tags/${RC_REF}^{commit}" \
-  -m "Release Apache Paimon ${PAIMON_VERSION}"
-
-test "$(git rev-parse "refs/tags/${RC_REF}^{commit}")" = \
-     "$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
-git tag -v "${RELEASE_TAG}"
-git push origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
-```
+[Tag the approved RC commit](./publishing-a-release.md#create-the-final-signed-tag).
 
 ### Promote the source releases
 
-Move, rather than copy or rebuild, both approved candidate directories:
-
-```shell
-svn mv -m "Release Apache Paimon ${PAIMON_VERSION}" \
-  "https://dist.apache.org/repos/dist/dev/paimon/paimon-${PAIMON_VERSION}-rc${RC_NUMBER}" \
-  "https://dist.apache.org/repos/dist/release/paimon/paimon-${PAIMON_VERSION}"
-
-svn mv -m "Release PyPaimon ${PAIMON_VERSION}" \
-  "https://dist.apache.org/repos/dist/dev/paimon/pypaimon-${PAIMON_VERSION}-rc${RC_NUMBER}" \
-  "https://dist.apache.org/repos/dist/release/paimon/pypaimon-${PAIMON_VERSION}"
-```
+[Move the approved source directories to ASF dist release](./publishing-a-release.md#promote-the-source-releases).
 
 ### Promote convenience artifacts
 
-1. In Nexus, confirm that the recorded Java staging repository is still closed
-   and has the exact artifact tree approved by the vote.
-2. Release that exact closed repository to Maven Central. Do not upload or
-   rebuild the Java artifacts again.
-3. Confirm that the final tag's PyPI publish job builds
-   `pypaimon==PAIMON_VERSION` from the approved tag commit and does not change
-   project source.
-4. Verify Maven Central and PyPI before announcing the release.
+[Release the closed Nexus repository and verify the final PyPI package](./publishing-a-release.md#promote-convenience-artifacts).
 
 ### Publish and announce
 
-Create a GitHub release from `release-PAIMON_VERSION`, review the generated
-notes, and link both source releases.
-
-Before announcing the release, publish the versioned documentation and update
-the project website. Treat the documentation in `apache/paimon` and the project
-website in `apache/paimon-website` as two separate, required updates.
-
-1. In `apache/paimon`, publish documentation for `DOC_VERSION` from the release
-   branch so that the published content matches the released code:
-   - On `RELEASE_BRANCH`, update `docs/docusaurus.config.js` with the released
-     `baseUrl`, `version`, `versionTitle`, `branch`, `editUrl`, `isStable`,
-     `stableDocs`, `previousDocs`, and navbar version menu.
-   - On `master`, set the next development version and update `stableDocs`,
-     `previousDocs`, and the navbar version menu to include `DOC_VERSION` as
-     the stable release.
-   - Review `docs/docs/project/download.mdx` and any release-specific engine or
-     compatibility information. The `@@VERSION@@`, `<Stable>`, and `<Unstable>`
-     sections must render the released artifacts on the stable site.
-   - Run `yarn build` from the `docs` directory for both configurations.
-2. In `apache/paimon-website`, update every public release entry point:
-   - Add the Paimon and PyPaimon source archives, checksums, signatures, and
-     current dependency examples to `community/docs/downloads.md`.
-   - Create or update the appropriate
-     `community/docs/releases/release-${DOC_VERSION}.md` release note. Its
-     `version` front matter must equal `PAIMON_VERSION`, and its weight must
-     place it correctly in the release list.
-   - Add `DOC_VERSION` to the `versions` list in
-     `src/app/components/header/header.component.ts`. If the menu keeps a fixed
-     number of versions, remove the oldest entry.
-   - Run `pnpm build` to parse the release metadata and build the website.
-3. After deployment, verify all public entry points before sending the
-   announcement:
-   - `https://paimon.apache.org/docs/${DOC_VERSION}/` serves the released docs
-     and the version switcher identifies it as stable;
-   - the homepage `DOCUMENT` menu includes `DOC_VERSION` on desktop and mobile;
-   - `https://paimon.apache.org/downloads/` lists both signed source releases;
-   - `https://paimon.apache.org/releases/${PAIMON_VERSION}` shows the release
-     note.
-
-After ASF mirrors, Maven Central, PyPI, the versioned documentation, and the
-project website are all available, announce the release to
-`dev@paimon.apache.org` and `announce@apache.org` from an `@apache.org` address.
-
-Remove superseded releases from the live ASF distribution area when required;
-they remain available from the
-[Apache archive](https://archive.apache.org/dist/paimon/).
+[Update documentation and the website before announcing](./publishing-a-release.md#publish-and-announce).
 
 See [Verifying a Release Candidate](./verifying-a-release-candidate.md) for the
 voter checklist.

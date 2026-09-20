@@ -54,6 +54,16 @@ public class QueryAuthSplit implements Split {
         return split;
     }
 
+    /**
+     * The split this wrapper carries, or {@code split} itself when it is not one. Narrowing a
+     * planned split to a concrete type must go through this, or the cast fails once the table
+     * carries a rule. A caller handing the split to a read passes the wrapper on instead, or the
+     * authorization never reaches the reader.
+     */
+    public static Split unwrap(Split split) {
+        return split instanceof QueryAuthSplit ? ((QueryAuthSplit) split).split() : split;
+    }
+
     @Nullable
     public TableQueryAuthResult authResult() {
         return authResult;

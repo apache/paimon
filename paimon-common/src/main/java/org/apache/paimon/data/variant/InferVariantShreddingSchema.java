@@ -18,6 +18,7 @@
 
 package org.apache.paimon.data.variant;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -26,6 +27,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.utils.StringUtils;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -301,19 +303,22 @@ public class InferVariantShreddingSchema {
 
                 for (int i = 0; i < size; i++) {
                     GenericVariant.ObjectField field = v.getFieldAtIndex(i);
+                    if (StringUtils.isNullOrWhitespaceOnly(field.key)) {
+                        // A blank key is a valid variant object key but not a RowType field
+                        // name, so leave it in the unshredded value instead of failing the write
+                        continue;
+                    }
                     DataType fieldType = schemaOf(field.value, maxDepth - 1);
                     // Store count in description temporarily (will be used in mergeRowTypes)
                     DataField dataField = new DataField(i, field.key, fieldType, "1");
                     fields.add(dataField);
                 }
 
-                // According to the variant spec, object fields must be sorted alphabetically
-                for (int i = 1; i < size; i++) {
-                    if (fields.get(i - 1).name().compareTo(fields.get(i).name()) >= 0) {
-                        throw new RuntimeException(
-                                "Variant object fields must be sorted alphabetically");
-                    }
-                }
+                // Writers disagree on how object keys are ordered: Paimon's builder sorts them
+                // by UTF-8 bytes, Spark's by UTF-16 code units, which differ once a supplementary
+                // character meets one from U+E000 upwards. mergeRowTypes merges sorted lists, so
+                // put every object into the same order here instead of trusting the writer's.
+                fields.sort((f1, f2) -> compareKeys(f1.name(), f2.name()));
 
                 return new RowType(fields);
 
@@ -354,16 +359,15 @@ public class InferVariantShreddingSchema {
 
             case DECIMAL:
                 BigDecimal dec = v.getDecimal();
-                int decPrecision = dec.precision();
+                if (dec.scale() < 0) {
+                    // getDecimal() strips trailing zeros, which turns 10.0 into 1E+1; a negative
+                    // scale is not a valid Paimon decimal, so fold the exponent back into digits
+                    dec = dec.setScale(0);
+                }
                 int decScale = dec.scale();
-                // Ensure precision is at least scale + 1 to be valid
-                if (decPrecision < decScale) {
-                    decPrecision = decScale;
-                }
-                // Ensure precision is at least 1
-                if (decPrecision == 0) {
-                    decPrecision = 1;
-                }
+                // precision() counts the digits of the unscaled value, so it is below the scale
+                // for a value under 0.1, which DecimalType rejects
+                int decPrecision = Math.max(dec.precision(), decScale);
                 return DataTypes.DECIMAL(decPrecision, decScale);
 
             case DATE:
@@ -384,6 +388,15 @@ public class InferVariantShreddingSchema {
             default:
                 return DataTypes.VARIANT();
         }
+    }
+
+    /**
+     * The one key order inference works in: UTF-8 bytes, as Paimon's own builder sorts. {@link
+     * String#compareTo} orders by UTF-16 code units instead, which puts a supplementary character
+     * such as an emoji before every character from U+E000 upwards, the reverse of the byte order.
+     */
+    private static int compareKeys(String key1, String key2) {
+        return BinaryString.fromString(key1).compareTo(BinaryString.fromString(key2));
     }
 
     private double getFieldCount(DataField field) {
@@ -465,7 +478,7 @@ public class InferVariantShreddingSchema {
             DataField field2 = fields2.get(f2Idx);
             String f1Name = field1.name();
             String f2Name = field2.name();
-            int comp = f1Name.compareTo(f2Name);
+            int comp = compareKeys(f1Name, f2Name);
 
             if (comp == 0) {
                 DataType dataType = mergeSchema(field1.type(), field2.type());

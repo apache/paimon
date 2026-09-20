@@ -18,15 +18,12 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.spark.{BaseTable, DataConverter, SparkTable, SparkTypeUtils, SparkUtils}
 import org.apache.paimon.spark.catalog.SparkBaseCatalog
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions
 import org.apache.paimon.spark.function.{BlobViewFieldIdSparkFunction, BlobViewSparkFunction, DescriptorToPresignedUrlFunction, ResolvedDescriptorToPresignedUrlFunction}
 import org.apache.paimon.spark.utils.CatalogUtils
 import org.apache.paimon.table.DataTable
-import org.apache.paimon.table.FormatTable
 import org.apache.paimon.types.DataTypeRoot
 import org.apache.paimon.utils.{InternalRowUtils, TypeUtils}
 
@@ -39,8 +36,6 @@ import org.apache.spark.sql.connector.catalog.{CatalogPlugin, Identifier}
 import org.apache.spark.sql.connector.catalog.PaimonCatalogImplicits._
 import org.apache.spark.sql.types.{BinaryType, DataType, DayTimeIntervalType, NullType, StringType}
 import org.apache.spark.unsafe.types.UTF8String
-
-import scala.collection.JavaConverters._
 
 object ReplacePaimonFunctions {
 
@@ -167,55 +162,17 @@ case class ReplacePaimonFunctions(spark: SparkSession) extends Rule[LogicalPlan]
 
     val toplevelPartitionType =
       TypeUtils.project(paimonTable.rowType, paimonTable.partitionKeys()).getTypeAt(0)
-    val partitions = paimonTable match {
-      case formatTable: FormatTable =>
-        val partitionType = TypeUtils.project(paimonTable.rowType, paimonTable.partitionKeys())
-        val candidates = formatTable.newReadBuilder.newScan
-          .listPartitionEntries()
-          .asScala
-          .map(entry => InternalRowUtils.get(entry.partition(), 0, toplevelPartitionType))
-          .filter(_ != null)
-          .distinct
-          .sortWith(InternalRowUtils.compare(_, _, toplevelPartitionType.getTypeRoot) > 0)
-
-        // Catalog metadata uses zero both for an empty format table partition and for a
-        // partition whose file count has not been reported. Check candidates from largest to
-        // smallest and stop at the first value whose filtered scan produces data. This also avoids
-        // treating an empty filesystem directory as data without planning splits for the whole
-        // table.
-        candidates.find {
-          candidate =>
-            val predicate = new PredicateBuilder(partitionType).equal(0, candidate)
-            val partitionFilter =
-              PartitionPredicate.fromPredicate(partitionType, predicate)
-            !formatTable.newReadBuilder
-              .withPartitionFilter(partitionFilter)
-              .newScan
-              .plan()
-              .splits()
-              .isEmpty
-        }.toSeq
-      case _ =>
-        // FileStoreTable manifests carry an exact file count, so keep the cheaper metadata path.
-        paimonTable.newReadBuilder.newScan
-          .listPartitionEntries()
-          .asScala
-          .filter(_.fileCount() > 0)
-          .map(entry => InternalRowUtils.get(entry.partition(), 0, toplevelPartitionType))
-    }
-    val partitionValues = partitions
-      // The default partition comes back as a real null, which InternalRowUtils.compare would
-      // dereference. It is also not a value anyone means by "the max partition".
-      .filter(_ != null)
-      .sortWith(InternalRowUtils.compare(_, _, toplevelPartitionType.getTypeRoot) < 0)
-      .map(DataConverter.fromPaimon(_, toplevelPartitionType))
-    if (partitionValues.isEmpty) {
+    val topPartitions = paimonTable.newReadBuilder.newScan.topNPartitions(1, 1)
+    if (topPartitions.isEmpty) {
       throw new UnsupportedOperationException(
         s"$table has no partitions or none of the partitions have any data")
     }
 
+    val partitionValue =
+      InternalRowUtils.get(topPartitions.get(0), 0, toplevelPartitionType)
     val sparkType = SparkTypeUtils.fromPaimonType(toplevelPartitionType)
-    val literal = Literal(partitionValues.last, sparkType)
+    val literal =
+      Literal(DataConverter.fromPaimon(partitionValue, toplevelPartitionType), sparkType)
     Cast(literal, func.dataType)
   }
 

@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="449" viewBox="0 0 900 449" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Index coverage after an append</title>
+<desc id="desc">An existing index covers row IDs 0 to 5. Later appended rows 6 to 9 are outside that index. Fast searches only the indexed range; a new index build covers new rows, while supported full or detail searches can include uncovered ranges. Updates also require freshness handling.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="898" height="447" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" font-weight="700" fill="#172b4d" text-anchor="start">Index coverage after an append</text>
+<text x="28" y="76" font-size="17" font-weight="400" fill="#526277" text-anchor="start">Index files track row-ID ranges; an append does not extend existing coverage.</text>
+<text x="28" y="124" font-size="19" font-weight="700" fill="#172b4d" text-anchor="start">Table rows</text>
+<rect x="208" y="101" width="60" height="50" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="238" y="134" font-size="21" font-weight="700" fill="#172b4d" text-anchor="middle">0</text>
+<rect x="274" y="101" width="60" height="50" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="304" y="134" font-size="21" font-weight="700" fill="#172b4d" text-anchor="middle">1</text>
+<rect x="340" y="101" width="60" height="50" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="370" y="134" font-size="21" font-weight="700" fill="#172b4d" text-anchor="middle">2</text>
+<rect x="406" y="101" width="60" height="50" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="436" y="134" font-size="21" font-weight="700" fill="#172b4d" text-anchor="middle">3</text>
+<rect x="472" y="101" width="60" height="50" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="502" y="134" font-size="21" font-weight="700" fill="#172b4d" text-anchor="middle">4</text>
+<rect x="538" y="101" width="60" height="50" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="568" y="134" font-size="21" font-weight="700" fill="#172b4d" text-anchor="middle">5</text>
+<rect x="604" y="101" width="60" height="50" rx="8" fill="#fff3df" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="634" y="134" font-size="21" font-weight="700" fill="#172b4d" text-anchor="middle">6</text>
+<rect x="670" y="101" width="60" height="50" rx="8" fill="#fff3df" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="700" y="134" font-size="21" font-weight="700" fill="#172b4d" text-anchor="middle">7</text>
+<rect x="736" y="101" width="60" height="50" rx="8" fill="#fff3df" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="766" y="134" font-size="21" font-weight="700" fill="#172b4d" text-anchor="middle">8</text>
+<rect x="802" y="101" width="60" height="50" rx="8" fill="#fff3df" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="832" y="134" font-size="21" font-weight="700" fill="#172b4d" text-anchor="middle">9</text>
+<text x="28" y="196" font-size="19" font-weight="700" fill="#172b4d" text-anchor="start">Existing index</text>
+<rect x="208" y="168" width="390" height="47" rx="8" fill="#e7f5f1" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="403" y="198" font-size="20" font-weight="700" fill="#14766b" text-anchor="middle">Indexed: [0, 5]</text>
+<rect x="604" y="168" width="258" height="47" rx="8" fill="#fff3df" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="733" y="198" font-size="20" font-weight="700" fill="#9a5200" text-anchor="middle">Uncovered: [6, 9]</text>
+<rect x="28" y="246" width="264" height="117" rx="8" fill="#fff3df" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="278" font-size="21" font-weight="700" fill="#9a5200" text-anchor="start">fast</text>
+<text x="46" y="307" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Search indexed coverage</text>
+<text x="46" y="332" font-size="18" font-weight="400" fill="#526277" text-anchor="start">New matches may be omitted</text>
+<rect x="308" y="246" width="264" height="117" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="326" y="278" font-size="21" font-weight="700" fill="#2463b4" text-anchor="start">full</text>
+<text x="326" y="307" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Check row-ID coverage</text>
+<text x="326" y="332" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Scan gaps where supported</text>
+<rect x="588" y="246" width="284" height="117" rx="8" fill="#f2ecfb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="606" y="278" font-size="21" font-weight="700" fill="#7046a4" text-anchor="start">detail</text>
+<text x="606" y="307" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Inspect active file metadata</text>
+<text x="606" y="332" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Find current coverage gaps</text>
+<text x="28" y="401" font-size="17" font-weight="400" fill="#172b4d" text-anchor="start">Coverage does not detect changed values at the same row IDs. Refresh after updates.</text>
+</g>
+</svg>

@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="485" viewBox="0 0 900 485" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Partition overwrite scope</title>
+<desc id="desc">Every example starts with row 1 in partition p1 and row 2 in partition p2, then writes row 3 to p1. Static overwrite without a partition filter removes p2. Static overwrite for p1 and dynamic overwrite both preserve p2.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="1" y="1" width="898" height="483" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">Partition overwrite scope</text>
+<text x="28" y="77" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Each case starts with the same table and writes one new row to p1</text>
+<rect x="28" y="103" width="844" height="70" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="48" y="145" font-size="19" fill="#172b4d" font-weight="700" text-anchor="start">Before:</text>
+<text x="137" y="145" font-size="20" fill="#526277" font-weight="400" text-anchor="start">p1 → row 1   |   p2 → row 2</text>
+<text x="540" y="145" font-size="20" fill="#2463b4" font-weight="700" text-anchor="start">Input: p1 → row 3</text>
+<path d="M 162 173 V 213" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="28" y="222" width="268" height="183" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="162" y="254" font-size="22" fill="#172b4d" font-weight="700" text-anchor="middle">Static</text>
+<text x="162" y="282" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">No partition filter</text>
+<rect x="46" y="300" width="232" height="39" rx="8" fill="#e8f7f2" stroke="#b8dcd2" stroke-width="1.5"/>
+<text x="162" y="326" font-size="20" fill="#087f6e" font-weight="700" text-anchor="middle">p1 → row 3</text>
+<rect x="46" y="350" width="232" height="39" rx="8" fill="#fff7e6" stroke="#e4cb92" stroke-width="1.5"/>
+<text x="162" y="376" font-size="20" fill="#946200" font-weight="700" text-anchor="middle">p2 removed</text>
+<path d="M 450 173 V 213" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="316" y="222" width="268" height="183" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="450" y="254" font-size="22" fill="#172b4d" font-weight="700" text-anchor="middle">Static</text>
+<text x="450" y="282" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">PARTITION (pt = &#x27;p1&#x27;)</text>
+<rect x="334" y="300" width="232" height="39" rx="8" fill="#e8f7f2" stroke="#b8dcd2" stroke-width="1.5"/>
+<text x="450" y="326" font-size="20" fill="#087f6e" font-weight="700" text-anchor="middle">p1 → row 3</text>
+<rect x="334" y="350" width="232" height="39" rx="8" fill="#eaf2ff" stroke="#bfd2ed" stroke-width="1.5"/>
+<text x="450" y="376" font-size="20" fill="#2463b4" font-weight="700" text-anchor="middle">p2 → row 2</text>
+<path d="M 738 173 V 213" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="604" y="222" width="268" height="183" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="738" y="254" font-size="22" fill="#172b4d" font-weight="700" text-anchor="middle">Dynamic</text>
+<text x="738" y="282" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Partitions present in input</text>
+<rect x="622" y="300" width="232" height="39" rx="8" fill="#e8f7f2" stroke="#b8dcd2" stroke-width="1.5"/>
+<text x="738" y="326" font-size="20" fill="#087f6e" font-weight="700" text-anchor="middle">p1 → row 3</text>
+<rect x="622" y="350" width="232" height="39" rx="8" fill="#eaf2ff" stroke="#bfd2ed" stroke-width="1.5"/>
+<text x="738" y="376" font-size="20" fill="#2463b4" font-weight="700" text-anchor="middle">p2 → row 2</text>
+<text x="28" y="443" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Empty input: static overwrite clears its selected scope; dynamic overwrite replaces no partitions.</text>
+<text x="28" y="467" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Set spark.sql.sources.partitionOverwriteMode explicitly when switching between these cases.</text>
+</g>
+</svg>

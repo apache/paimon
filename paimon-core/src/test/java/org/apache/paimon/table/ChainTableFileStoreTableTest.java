@@ -19,6 +19,9 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -27,6 +30,11 @@ import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FieldTransform;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -37,13 +45,17 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.source.ChainSplit;
+import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -53,6 +65,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.Mockito;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -63,6 +76,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
@@ -350,7 +365,303 @@ public class ChainTableFileStoreTableTest {
         assertThat(foundChainSplit).as("Should have found at least one ChainSplit").isTrue();
     }
 
+    @Test
+    public void testQueryAuthBatchPlanKeepsChainSplitsWrapped() throws Exception {
+        createChainTableWithQueryAuth();
+        TableQueryAuthResult authResult = maskValueAndFilterKey();
+
+        FileStoreTable table = loadTable(queryAuthEnvironment(this::maskValueAndFilterKey));
+        List<Split> splits = planQueriedPartition(table.newScan());
+
+        assertChainSplitsCarryAuth(splits, authResult);
+    }
+
+    @Test
+    public void testQueryAuthScanWithSnapshotReaderFactoryKeepsChainSplitsWrapped()
+            throws Exception {
+        createChainTableWithQueryAuth();
+        TableQueryAuthResult authResult = maskValueAndFilterKey();
+
+        FileStoreTable table = loadTable(queryAuthEnvironment(this::maskValueAndFilterKey));
+        List<Split> splits = planQueriedPartition(table.newScan(FileStoreTable::newSnapshotReader));
+
+        assertChainSplitsCarryAuth(splits, authResult);
+    }
+
+    @Test
+    public void testQueryAuthRulesAreAppliedWhenReadingChainSplits() throws Exception {
+        createChainTableWithQueryAuth();
+
+        // the same query without any rule: raw values, no row dropped
+        assertThat(getResult(loadTable(), QUERIED_PARTITION))
+                .containsExactlyInAnyOrder(
+                        row(1L, 2L, "1-1", "CN", "20250810", "21"),
+                        row(2L, 1L, "2", "CN", "20250810", "21"),
+                        row(4L, 1L, "4", "CN", "20250810", "21"));
+
+        FileStoreTable table = loadTable(queryAuthEnvironment(this::maskValueAndFilterKey));
+
+        // 'v' comes back as the region it is masked with, and k=4 is dropped by the row filter
+        assertThat(getResult(table, QUERIED_PARTITION))
+                .containsExactlyInAnyOrder(
+                        row(1L, 2L, "CN", "CN", "20250810", "21"),
+                        row(2L, 1L, "CN", "CN", "20250810", "21"));
+    }
+
+    /**
+     * A chain partition key names the partition a row is reported under, not the branch partition
+     * it is stored in: k=2 sits in the snapshot branch under hour 20, and the chain merge hands it
+     * to the reader under the queried hour 21. A rule on 'hour' therefore cannot prune branch
+     * partitions, or the row it does admit disappears.
+     */
+    @Test
+    public void testQueryAuthChainPartitionRuleKeepsRowsOfAnEarlierBranchPartition()
+            throws Exception {
+        createChainTableWithQueryAuth();
+
+        FileStoreTable table = loadTable(queryAuthEnvironment(this::keepQueriedChainPartition));
+
+        assertThat(getResult(table, QUERIED_PARTITION))
+                .containsExactlyInAnyOrder(
+                        row(1L, 2L, "1-1", "CN", "20250810", "21"),
+                        row(2L, 1L, "2", "CN", "20250810", "21"),
+                        row(4L, 1L, "4", "CN", "20250810", "21"));
+    }
+
+    /**
+     * The other direction: a partition the snapshot branch holds in full is read from it directly,
+     * branch partition and queried partition being the same row of values. A rule excluding that
+     * partition still has to prune it away, not hand the reader a split it filters down to nothing.
+     */
+    @Test
+    public void testQueryAuthPartitionRuleStillPrunesASnapshotBranchPartition() throws Exception {
+        createChainTableWithQueryAuth();
+        Map<String, String> snapshotPartition = ImmutableMap.of("dt", "20250810", "hour", "20");
+
+        assertThat(planPartition(loadTable().newScan(), snapshotPartition)).isNotEmpty();
+
+        // the rule admits hour 21 only, so nothing of the queried hour 20 is left to read
+        FileStoreTable table = loadTable(queryAuthEnvironment(this::keepQueriedChainPartition));
+        assertThat(planPartition(table.newScan(), snapshotPartition)).isEmpty();
+        assertThat(getResult(table, snapshotPartition)).isEmpty();
+    }
+
+    /**
+     * Partition listing has no read to follow it, so an excluded partition would be reported — with
+     * its row and file counts — to a caller that cannot read a row of it.
+     */
+    @Test
+    public void testQueryAuthPartitionRulePrunesTheListedPartitions() throws Exception {
+        createChainTableWithQueryAuth();
+
+        assertThat(listedHours(loadTable())).containsExactlyInAnyOrder("20", "21");
+
+        FileStoreTable table = loadTable(queryAuthEnvironment(this::keepQueriedChainPartition));
+        assertThat(listedHours(table)).containsExactly("21");
+    }
+
+    private List<String> listedHours(FileStoreTable table) {
+        return table.newScan().listPartitions().stream()
+                .map(partition -> partition.getString(2).toString())
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * The authorization has not changed when the pushdown is turned off, so the cheap way out of
+     * reapplying it would leave the pruning the caller just asked to drop.
+     */
+    @Test
+    public void testQueryAuthPartitionPushdownIsDroppedAfterOneWasPushed() throws Exception {
+        createChainTableWithQueryAuth();
+        FileStoreTable snapshotBranch =
+                loadBranchTable(
+                        SNAPSHOT_BRANCH, queryAuthEnvironment(this::keepQueriedChainPartition));
+
+        // the rule admits hour 21 and this branch holds only hour 20, so the push prunes it away
+        DataTableScan scan = snapshotBranch.newScan();
+        assertThat(scan.listPartitions()).isEmpty();
+
+        assertThat(scan.withoutAuthPartitionPushdown().plan().splits()).isNotEmpty();
+    }
+
+    /** The branch as an ordinary table. switchToBranch would build another chain table. */
+    private FileStoreTable loadBranchTable(String branch, CatalogEnvironment catalogEnvironment) {
+        Path tablePath = new Path(tempDir.toUri().toString(), tableName);
+        LocalFileIO fileIO = LocalFileIO.create();
+        Optional<TableSchema> schemaOpt =
+                new FileSystemSchemaManager(fileIO, tablePath, branch).latest();
+        assertThat(schemaOpt.isPresent()).isTrue();
+        Options options = new Options(schemaOpt.get().options());
+        options.set(CHAIN_TABLE_ENABLED, false);
+        options.set(CoreOptions.BRANCH, branch);
+        return FileStoreTableFactory.create(
+                fileIO, tablePath, schemaOpt.get().copy(options.toMap()), catalogEnvironment);
+    }
+
+    /** Keeps only the rows reported under the chain partition hour = '21'. */
+    private TableQueryAuthResult keepQueriedChainPartition() {
+        RowType rowType = loadTable().schema().logicalRowType();
+        Predicate rowFilter = new PredicateBuilder(rowType).equal(5, BinaryString.fromString("21"));
+        return new TableQueryAuthResult(
+                Collections.singletonList(JsonSerdeUtil.toFlatJson(rowFilter)), null);
+    }
+
+    @Test
+    public void testQueryAuthWithoutRulesLeavesPlanAndReadUntouched() throws Exception {
+        createChainTableWithQueryAuth();
+        List<GenericRow> withoutQueryAuth = getResult(loadTable(), QUERIED_PARTITION);
+
+        // authorization answers with neither a row filter nor a column mask
+        FileStoreTable table =
+                loadTable(queryAuthEnvironment(() -> new TableQueryAuthResult(null, null)));
+        List<Split> splits = planQueriedPartition(table.newScan());
+
+        assertThat(splits).isNotEmpty();
+        assertThat(splits)
+                .allSatisfy(
+                        split ->
+                                assertThat(
+                                                ((FallbackReadFileStoreTable.FallbackSplit) split)
+                                                        .wrapped())
+                                        .isInstanceOf(ChainSplit.class));
+        assertThat(getResult(table, QUERIED_PARTITION))
+                .containsExactlyInAnyOrderElementsOf(withoutQueryAuth);
+    }
+
+    @Test
+    public void testQueryAuthStreamingStartingPlanKeepsChainSplitsWrapped() throws Exception {
+        createChainTableWithQueryAuth();
+        TableQueryAuthResult authResult = maskValueAndFilterKey();
+
+        FileStoreTable table = loadTable(queryAuthEnvironment(this::maskValueAndFilterKey));
+        List<Split> splits = table.newStreamScan().plan().splits();
+
+        assertThat(splits).isNotEmpty();
+        assertThat(splits)
+                .allSatisfy(
+                        split -> {
+                            assertThat(split).isInstanceOf(QueryAuthSplit.class);
+                            QueryAuthSplit authSplit = (QueryAuthSplit) split;
+                            assertThat(authSplit.authResult()).isEqualTo(authResult);
+                            assertThat(authSplit.split()).isInstanceOf(ChainSplit.class);
+                        });
+
+        // phase 1 reads the latest snapshot partition plus the later delta partitions, so the
+        // same key shows up under both; what matters here is that both carry the rules
+        List<GenericRow> rows = readSplits(table, splits);
+        assertThat(rows).isNotEmpty();
+        assertThat(rows)
+                .allSatisfy(
+                        r -> {
+                            assertThat(r.getLong(0)).isLessThan(3L);
+                            assertThat(r.getString(2)).isEqualTo(r.getString(3));
+                        });
+    }
+
+    private static final Map<String, String> QUERIED_PARTITION =
+            ImmutableMap.of("dt", "20250810", "hour", "21");
+
+    private void createChainTableWithQueryAuth() throws Exception {
+        createChainTable(
+                options -> {
+                    options.set(CoreOptions.QUERY_AUTH_ENABLED, true);
+                    // a chain read that cannot handle its own split otherwise falls through to the
+                    // main branch with nothing but a log line, which would hide a routing mistake
+                    options.set(CoreOptions.SCAN_FALLBACK_BRANCH_READ_FAIL_FAST, true);
+                });
+        FileStoreTable chainTable = loadTable();
+        writeWithCommit(
+                chainTable.switchToBranch(SNAPSHOT_BRANCH),
+                row(1L, 1L, "1", "CN", "20250810", "20"),
+                row(2L, 1L, "2", "CN", "20250810", "20"));
+        writeWithCommit(
+                chainTable.switchToBranch(DELTA_BRANCH),
+                row(1L, 2L, "1-1", "CN", "20250810", "21"),
+                row(4L, 1L, "4", "CN", "20250810", "21"));
+    }
+
+    /** Masks column 'v' with the value of column 'region' and keeps only the rows with k &lt; 3. */
+    private TableQueryAuthResult maskValueAndFilterKey() {
+        RowType rowType = loadTable().schema().logicalRowType();
+        Predicate rowFilter = new PredicateBuilder(rowType).lessThan(0, 3L);
+        Transform mask = new FieldTransform(new FieldRef(3, "region", DataTypes.STRING()));
+        return new TableQueryAuthResult(
+                Collections.singletonList(JsonSerdeUtil.toFlatJson(rowFilter)),
+                Collections.singletonMap("v", JsonSerdeUtil.toFlatJson(mask)));
+    }
+
+    /**
+     * A catalog environment whose authorization answers with {@code authResult}. The table, its
+     * branch scans and its reads are all real; only the catalog call fetching the rules is stubbed.
+     * {@link CatalogEnvironment#empty()} cannot express this: without a catalog loader it short
+     * circuits to "no rules", so no split is ever wrapped.
+     */
+    private CatalogEnvironment queryAuthEnvironment(Supplier<TableQueryAuthResult> authResult) {
+        Catalog catalog = Mockito.mock(Catalog.class);
+        try {
+            // a fresh instance per call, as RESTCatalog#authTableQuery builds one per scan
+            Mockito.when(catalog.authTableQuery(Mockito.any(), Mockito.any()))
+                    .thenAnswer(invocation -> authResult.get());
+            // the snapshot manager takes the same catalog; let it fall back to the file system
+            // instead of answering "no snapshot" for every branch
+            Mockito.when(catalog.loadSnapshot(Mockito.any(Identifier.class)))
+                    .thenThrow(new UnsupportedOperationException());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return new CatalogEnvironment(
+                Identifier.create("default", tableName),
+                null,
+                () -> catalog,
+                null,
+                null,
+                null,
+                false,
+                false);
+    }
+
+    private List<Split> planQueriedPartition(DataTableScan scan) {
+        return planPartition(scan, QUERIED_PARTITION);
+    }
+
+    private List<Split> planPartition(DataTableScan scan, Map<String, String> partition) {
+        return scan.withPartitionFilter(partition).plan().splits();
+    }
+
+    private void assertChainSplitsCarryAuth(List<Split> splits, TableQueryAuthResult authResult) {
+        assertThat(splits).isNotEmpty();
+        assertThat(splits)
+                .allSatisfy(
+                        split -> {
+                            assertThat(split)
+                                    .isInstanceOf(FallbackReadFileStoreTable.FallbackSplit.class);
+                            Split wrapped =
+                                    ((FallbackReadFileStoreTable.FallbackSplit) split).wrapped();
+                            assertThat(wrapped).isInstanceOf(QueryAuthSplit.class);
+                            QueryAuthSplit authSplit = (QueryAuthSplit) wrapped;
+                            assertThat(authSplit.authResult()).isEqualTo(authResult);
+                            assertThat(authSplit.split()).isInstanceOf(ChainSplit.class);
+                        });
+    }
+
+    private List<GenericRow> readSplits(FileStoreTable table, List<Split> splits) throws Exception {
+        InternalRowSerializer serializer =
+                new InternalRowSerializer(table.schema().logicalRowType());
+        InnerTableRead read = table.newRead();
+        List<GenericRow> result = new ArrayList<>();
+        for (Split split : splits) {
+            try (RecordReader<InternalRow> reader = read.createReader(split)) {
+                reader.forEachRemaining(row -> result.add((GenericRow) serializer.copy(row)));
+            }
+        }
+        return result;
+    }
+
     private FileStoreTable loadTable() {
+        return loadTable(CatalogEnvironment.empty());
+    }
+
+    private FileStoreTable loadTable(CatalogEnvironment catalogEnvironment) {
         Path tablePath = new Path(tempDir.toUri().toString(), tableName);
         LocalFileIO fileIO = LocalFileIO.create();
         Options options = new Options();
@@ -359,8 +670,7 @@ public class ChainTableFileStoreTableTest {
         Optional<TableSchema> schemaOpt =
                 new FileSystemSchemaManager(fileIO, tablePath, branchName).latest();
         assertThat(schemaOpt.isPresent()).isTrue();
-        return FileStoreTableFactory.create(
-                fileIO, tablePath, schemaOpt.get(), CatalogEnvironment.empty());
+        return FileStoreTableFactory.create(fileIO, tablePath, schemaOpt.get(), catalogEnvironment);
     }
 
     private void createChainTable(Consumer<Options> optionCustomizer) throws Exception {

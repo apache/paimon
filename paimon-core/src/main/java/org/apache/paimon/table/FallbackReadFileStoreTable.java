@@ -43,6 +43,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.PartitionTopNUtils;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitSerializer;
 import org.apache.paimon.table.source.TableRead;
@@ -147,6 +148,12 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
     public void setManifestCache(SegmentsCache<Path> manifestCache) {
         super.setManifestCache(manifestCache);
         other.setManifestCache(manifestCache);
+    }
+
+    @Override
+    public void setManifestSidecarCache(SegmentsCache<Path> manifestSidecarCache) {
+        super.setManifestSidecarCache(manifestSidecarCache);
+        other.setManifestSidecarCache(manifestSidecarCache);
     }
 
     protected FileStoreTable switchWrappedToBranch(String branchName) {
@@ -618,6 +625,15 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                     .filter(e -> !partitions.contains(e.partition()))
                     .forEach(partitionEntries::add);
             return partitionEntries;
+        }
+
+        @Override
+        public List<BinaryRow> topNPartitions(int num, int partitionFieldCount) {
+            return PartitionTopNUtils.topNFileStorePartitions(
+                    listPartitionEntries(),
+                    tableSchema.logicalPartitionType(),
+                    num,
+                    partitionFieldCount);
         }
 
         protected void setPartitionPredicate(PartitionPredicate predicate) {

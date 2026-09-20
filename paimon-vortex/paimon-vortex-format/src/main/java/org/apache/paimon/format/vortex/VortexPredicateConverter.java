@@ -180,22 +180,45 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
 
     private static Expression toTimestampLiteral(
             Timestamp ts, int precision, @Nullable String timeZone) {
+        // The literal carries the precision of the engine that produced it, the file carries the
+        // precision of the column. When the literal does not land exactly on the column's grain,
+        // no single rounding direction is right for every operator, so refuse to push it down and
+        // let the caller drop the leaf instead.
         if (precision == 0) {
+            if (ts.getNanoOfMillisecond() != 0 || ts.getMillisecond() % 1000 != 0) {
+                return null;
+            }
             return Expression.literalTimestamp(
                     ts.getMillisecond() / 1000, Expression.TimeUnit.SECONDS, timeZone);
         } else if (precision <= 3) {
+            if (ts.getNanoOfMillisecond() != 0) {
+                return null;
+            }
             return Expression.literalTimestamp(
                     ts.getMillisecond(), Expression.TimeUnit.MILLISECONDS, timeZone);
         } else if (precision <= 6) {
+            if (ts.getNanoOfMillisecond() % 1000 != 0) {
+                return null;
+            }
             return Expression.literalTimestamp(
                     ts.getMillisecond() * 1000 + ts.getNanoOfMillisecond() / 1000,
                     Expression.TimeUnit.MICROSECONDS,
                     timeZone);
         } else {
-            return Expression.literalTimestamp(
-                    ts.getMillisecond() * 1_000_000 + ts.getNanoOfMillisecond(),
-                    Expression.TimeUnit.NANOSECONDS,
-                    timeZone);
+            // A TIMESTAMP value reaches year 9999, so nanoseconds since the epoch are not
+            // representable as an int64 outside roughly [1677-09-21, 2262-04-11]. A wrapped bound
+            // silently excludes matching rows, so refuse to push the literal down for the same
+            // reason as the grain checks above.
+            long nanos;
+            try {
+                nanos =
+                        Math.addExact(
+                                Math.multiplyExact(ts.getMillisecond(), 1_000_000L),
+                                ts.getNanoOfMillisecond());
+            } catch (ArithmeticException e) {
+                return null;
+            }
+            return Expression.literalTimestamp(nanos, Expression.TimeUnit.NANOSECONDS, timeZone);
         }
     }
 }

@@ -190,12 +190,18 @@ public class FormatReadBuilder implements ReadBuilder {
 
     protected RecordReader<InternalRow> createReader(
             FormatDataSplit dataSplit, @Nullable ReadBatchSizer readBatchSizer) throws IOException {
+        return createReader(dataSplit, readBatchSizer, readType());
+    }
+
+    protected RecordReader<InternalRow> createReader(
+            FormatDataSplit dataSplit, @Nullable ReadBatchSizer readBatchSizer, RowType readType)
+            throws IOException {
         // Skip pushing down partition filters to reader.
         List<Predicate> readFilters =
                 excludePredicateWithFields(
                         PredicateBuilder.splitAnd(filter), new HashSet<>(table.partitionKeys()));
         RowType dataRowType = getRowTypeWithoutPartition(table.rowType(), table.partitionKeys());
-        RowType readRowType = getRowTypeWithoutPartition(readType(), table.partitionKeys());
+        RowType readRowType = getRowTypeWithoutPartition(readType, table.partitionKeys());
         FormatReaderFactory readerFactory =
                 FileFormatDiscover.of(options)
                         .discover(options.formatType())
@@ -203,7 +209,7 @@ public class FormatReadBuilder implements ReadBuilder {
 
         Pair<int[], RowType> partitionMapping =
                 PartitionUtils.getPartitionMapping(
-                        table.partitionKeys(), readType().getFields(), table.partitionType());
+                        table.partitionKeys(), readType.getFields(), table.partitionType());
 
         BinaryRow partition = dataSplit.partition();
         FileIO fileIO = fileIOResolver().fileIO(dataSplit.useCatalogContextFileIO());
@@ -217,7 +223,8 @@ public class FormatReadBuilder implements ReadBuilder {
                                     partition,
                                     readerFactory,
                                     partitionMapping,
-                                    readBatchSizer));
+                                    readBatchSizer,
+                                    readType));
         }
         return ConcatRecordReader.create(suppliers);
     }
@@ -228,7 +235,8 @@ public class FormatReadBuilder implements ReadBuilder {
             @Nullable BinaryRow partition,
             FormatReaderFactory readerFactory,
             Pair<int[], RowType> partitionMapping,
-            @Nullable ReadBatchSizer readBatchSizer)
+            @Nullable ReadBatchSizer readBatchSizer,
+            RowType readType)
             throws IOException {
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(
@@ -243,7 +251,7 @@ public class FormatReadBuilder implements ReadBuilder {
                 reader = readerFactory.createReader(formatReaderContext);
             }
             return new DataFileRecordReader(
-                    readType(),
+                    readType,
                     reader,
                     options.scanIgnoreCorruptFile(),
                     options.scanIgnoreLostFile(),

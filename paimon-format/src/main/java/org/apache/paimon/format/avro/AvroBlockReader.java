@@ -54,6 +54,24 @@ public final class AvroBlockReader implements Closeable {
         }
     }
 
+    /** Returns a copy of the complete OCF header, including schema, codec and sync marker. */
+    public byte[] headerBytes() {
+        return reader.headerBytes();
+    }
+
+    /**
+     * Returns the block offset relative to the initial input position; read immediately after
+     * {@link #nextBorrowedRawBlock()}.
+     */
+    public long blockOffset() {
+        return reader.blockOffset();
+    }
+
+    /** Returns the last-read block's encoded length, including its header and sync marker. */
+    public long blockLength() {
+        return reader.blockLength();
+    }
+
     /** Creates a record decoder from the writer schema stored in the Avro file header. */
     public AvroRecordDecoder createRecordDecoder() {
         return new AvroRecordDecoder(reader.getSchema());

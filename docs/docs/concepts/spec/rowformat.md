@@ -24,30 +24,30 @@ under the License.
 
 # Row Format Specification
 
-The Row format (`.row`) is a row-oriented file format optimized for O(1) random access by row number. It is designed for scenarios where fast point lookups by row position are critical, such as deletion vector applications and changelog materialization.
+The Row format (`.row`) stores complete rows in compressed blocks and includes offsets for
+locating rows within each decompressed block. Use this reference for the file layout, value
+encoding, and row-selection behavior.
+
+The offset lookup within a decompressed block is O(1). Reading a row also requires selecting,
+reading, and decompressing its block, so end-to-end lookup is not O(1).
 
 ## File Layout
 
-A `.row` file consists of three sections:
+A `.row` file contains independently compressed data blocks, an encoded block index, and a
+fixed-size footer. The footer locates the index; the index describes the data blocks.
 
-```
-+====================================================================+
-|                        ROW FILE (.row)                              |
-+====================================================================+
-| Data Block 0 (ZSTD compressed)                                     |
-| Data Block 1 (ZSTD compressed)                                     |
-| ...                                                                |
-| Data Block K (ZSTD compressed)                                     |
-+--------------------------------------------------------------------+
-| Block Index (Delta+ZigZag+Varint encoded)                          |
-+--------------------------------------------------------------------+
-| Footer (fixed 32 bytes)                                            |
-+====================================================================+
-```
+[![A Row file ends with its block index and 32-byte footer. A decompressed block contains serialized rows, a row-offset array, and a row count.](/img/concepts-row-format.svg)](/img/concepts-row-format.svg)
+
+| Section | Role |
+| --- | --- |
+| [Data blocks](#data-block) | Store rows with per-row offsets inside each compressed block. |
+| [Block index](#block-index) | Store block sizes and starting row numbers. |
+| [Footer](#footer) | Locate the block index and identify the format. |
 
 ## Data Block
 
-Each data block is independently ZSTD Level 1 compressed. The uncompressed content has the following layout:
+Each data block is independently compressed with ZSTD. The compression level is controlled by
+`file.compression.zstd-level` and defaults to `1`. The uncompressed content has the following layout:
 
 ```
 +-----------------------------------------------------------+
@@ -135,7 +135,9 @@ null_bitmap[ceil(arity/8) bytes] | field_0 | field_1 | ... | field_N
 
 ## Block Index
 
-The block index stores metadata for all blocks, enabling binary search to locate the block containing a given row number.
+The block index stores metadata for all blocks. Its ordered row-start array can be searched to
+locate a row; the current reader scans the index to select blocks that intersect the requested
+row ranges.
 
 ```
 +--------------------------------------------------------------------+
@@ -159,35 +161,28 @@ The arrays are:
 
 ## Footer
 
-The footer is a fixed 32-byte structure at the end of the file:
+The footer occupies the last 32 bytes of the file. Offsets below are relative to the start of
+the footer. All multi-byte numeric fields are little-endian.
 
-```
-+-----------------------------------------------+
-| totalRowCount   | int64  | 8 bytes | LE       |
-| blockCount      | int32  | 4 bytes | LE       |
-| indexOffset      | int64  | 8 bytes | LE       |
-| indexLength      | int32  | 4 bytes | LE       |
-| version          | int8   | 1 byte  |          |
-| reserved         |        | 3 bytes |          |
-| magic            | int32  | 4 bytes | LE       |
-+-----------------------------------------------+
-```
+| Offset | Field | Size | Meaning |
+| --- | --- | --- | --- |
+| `0` | `totalRowCount` | 8 bytes | Total rows in the file. |
+| `8` | `blockCount` | 4 bytes | Number of data blocks. |
+| `12` | `indexOffset` | 8 bytes | Absolute file offset of the block index. |
+| `20` | `indexLength` | 4 bytes | Block-index length in bytes. |
+| `24` | `version` | 1 byte | Format version, currently `1`. |
+| `25` | `reserved` | 3 bytes | Reserved bytes, written as zero. |
+| `28` | `magic` | 4 bytes | Integer `0x524F5753`, serialized as bytes `53 57 4F 52`. |
 
-- **totalRowCount**: Total number of rows in the file.
-- **blockCount**: Number of data blocks.
-- **indexOffset**: Byte offset in the file where the block index starts.
-- **indexLength**: Length in bytes of the block index section.
-- **version**: Format version, currently `1`.
-- **reserved**: 3 bytes reserved for future use (must be 0).
-- **magic**: `0x524F5753` (ASCII "ROWS"), used for format validation.
+The magic is a little-endian integer. Do not write the ASCII byte sequence `ROWS` in its place.
 
 ## Row Number Lookup Algorithm
 
-To read a specific row by its global row number:
+To read a row by its zero-based row number within the file:
 
 1. **Read Footer**: Seek to file end - 32 bytes, read the 32-byte footer. Validate magic number.
 2. **Read Block Index**: Seek to `indexOffset`, read `indexLength` bytes, decode the three arrays. Compute block offsets by prefix sum of `blockCompressedSizes[]`.
-3. **Binary Search**: Search `blockRowStarts[]` to find block `b` where `blockRowStarts[b] <= rowNum < blockRowStarts[b+1]`.
+3. **Select Block**: Find block `b` where `blockRowStarts[b] <= rowNum < blockEnd`. For the last block, `blockEnd` is `totalRowCount`; otherwise it is `blockRowStarts[b + 1]`.
 4. **Read Block**: Seek to `blockOffset(b)`, read `blockCompressedSizes[b]` bytes.
 5. **Decompress**: ZSTD decompress into a buffer of size `blockUncompressedSizes[b]`.
 6. **Locate Row**: Compute `localIdx = rowNum - blockRowStarts[b]`. Read `offsets[localIdx]` from the offset array at the end of the decompressed block.
@@ -202,12 +197,15 @@ Column projection is applied after full row deserialization. Since the compact r
 Row selection via `RoaringBitmap32` enables efficient filtering:
 
 1. For each block, check if the selection bitmap intersects with `[blockRowStart, blockRowEnd)`.
-2. If no intersection, skip the entire block (no I/O or decompression).
+2. If there is no intersection, skip decompression and row decoding for that block.
 3. If there is an intersection, decompress the block and only deserialize the selected rows using their local indices.
+
+Vectored reads can combine nearby byte ranges into one I/O request. Such a request can include
+bytes from an unselected block between selected blocks; those extra bytes are not decompressed.
 
 ## Configuration
 
 | Option | Default | Description |
 |---|---|---|
 | `file.block-size` | 64 KB | Uncompressed block size threshold. Larger blocks improve compression ratio but increase read amplification for point lookups. |
-| ZSTD Level | 1 | Fixed at level 1 for fast compression with reasonable ratio. |
+| `file.compression.zstd-level` | 1 | ZSTD compression level used when writing blocks. |

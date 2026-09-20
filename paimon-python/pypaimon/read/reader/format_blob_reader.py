@@ -94,7 +94,6 @@ class FormatBlobReader(RecordBatchReader):
                 if file_size is not None and file_size > 0
                 else file_io.get_file_size(file_path)
             )
-            self._input_stream = file_io.new_input_stream(file_path)
             self._read_index()
             self._apply_row_indices(row_indices)
 
@@ -128,8 +127,12 @@ class FormatBlobReader(RecordBatchReader):
                     or self._blob_parallelism > 1
                 )
             ):
-                self._input_stream.close()
-                self._input_stream = None
+                if self._input_stream is not None:
+                    self._input_stream.close()
+                    self._input_stream = None
+            elif self._input_stream is None:
+                # A cached index does not provide bytes for payloads or nested layouts.
+                self._input_stream = file_io.new_input_stream(file_path)
         except Exception:
             self.close()
             raise
@@ -365,6 +368,7 @@ class FormatBlobReader(RecordBatchReader):
 
     def _read_index(self) -> None:
         if self._is_video:
+            self._input_stream = self._file_io.new_input_stream(self.file_path)
             self._video_meta = VideoFileMeta(
                 self._input_stream, self._file_size
             )
@@ -378,6 +382,7 @@ class FormatBlobReader(RecordBatchReader):
             self.blob_offsets = list(blob_offsets)
             return
 
+        self._input_stream = self._file_io.new_input_stream(self.file_path)
         f = self._input_stream
 
         # Seek to header: last 5 bytes

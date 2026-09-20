@@ -19,6 +19,8 @@
 package org.apache.paimon.append.dataevolution;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -26,6 +28,7 @@ import java.util.List;
 import static org.apache.paimon.append.dataevolution.CompactCandidateRangeCollector.IGNORED_DEDICATED_FILE;
 import static org.apache.paimon.append.dataevolution.CompactCandidateRangeCollector.NORMAL_FILE;
 import static org.apache.paimon.append.dataevolution.CompactCandidateRangeCollector.VECTOR_FILE;
+import static org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator.largeFileThreshold;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link CompactCandidateRangeCollector}. */
@@ -43,6 +46,53 @@ class CompactCandidateRangeCollectorTest {
         assertThat(finish(collector)).containsExactly("20-39:2");
         assertThat(collector.usedWordCount()).isZero();
         assertThat(collector.retainedWordCount()).isZero();
+    }
+
+    @Test
+    void testSplitLargeFilesUsesPhysicalSizeAndIncludesColumnUpdates() {
+        for (boolean enabled : new boolean[] {false, true}) {
+            CompactCandidateRangeCollector collector =
+                    new CompactCandidateRangeCollector(
+                            16, 100L, 100L, 1000L, 10L, enabled ? 200L : Long.MAX_VALUE);
+            collector.add(0, NORMAL_FILE, 0L, 10L, 199L);
+            collector.add(0, NORMAL_FILE, 10L, 10L, 200L);
+            collector.add(0, NORMAL_FILE, 20L, 10L, 201L);
+            collector.add(0, NORMAL_FILE, 20L, 10L, 10L);
+            // Dedicated files never trigger normal-file splitting.
+            collector.add(0, 3, 0L, 10L, 1000L);
+            if (enabled) {
+                assertThat(finish(collector)).containsExactly("20-29:2");
+            } else {
+                assertThat(finish(collector)).isEmpty();
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"1.0,100", "1.15,115", "1.5,150", "3.0,300"})
+    void testCustomLargeFileRatioUsesIndividualPhysicalFileSize(double ratio, long threshold) {
+        CompactCandidateRangeCollector collector =
+                new CompactCandidateRangeCollector(
+                        16, 100L, 100L, 1000L, 10L, largeFileThreshold(100L, ratio));
+        collector.add(0, NORMAL_FILE, 0L, 10L, threshold - 1);
+        collector.add(0, NORMAL_FILE, 10L, 10L, threshold);
+        collector.add(0, NORMAL_FILE, 20L, 10L, 10L);
+        collector.add(0, NORMAL_FILE, 20L, 10L, threshold + 1);
+        // Neither the sum of versions nor dedicated-file sizes bypass the minimum file count.
+        collector.add(0, NORMAL_FILE, 30L, 10L, threshold * 3 / 4);
+        collector.add(0, NORMAL_FILE, 30L, 10L, threshold * 3 / 4);
+        collector.add(0, IGNORED_DEDICATED_FILE, 0L, 10L, 1000L);
+
+        assertThat(finish(collector)).containsExactly("20-29:2");
+    }
+
+    @Test
+    void testSplitThresholdDoesNotOverflow() {
+        CompactCandidateRangeCollector collector =
+                new CompactCandidateRangeCollector(
+                        16, Long.MAX_VALUE, 100L, 1L, 2L, largeFileThreshold(Long.MAX_VALUE, 2.0d));
+        collector.add(0, NORMAL_FILE, 0L, 10L, Long.MAX_VALUE);
+        assertThat(finish(collector)).isEmpty();
     }
 
     @Test
@@ -156,7 +206,12 @@ class CompactCandidateRangeCollectorTest {
             long openFileCost,
             long compactMinFileNum) {
         return new CompactCandidateRangeCollector(
-                16, targetFileSize, blobTargetFileSize, openFileCost, compactMinFileNum);
+                16,
+                targetFileSize,
+                blobTargetFileSize,
+                openFileCost,
+                compactMinFileNum,
+                Long.MAX_VALUE);
     }
 
     private List<String> finish(CompactCandidateRangeCollector collector) {

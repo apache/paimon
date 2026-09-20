@@ -27,8 +27,11 @@ public class FieldSumAgg extends FieldAggregator {
 
     private static final long serialVersionUID = 1L;
 
-    public FieldSumAgg(String name, DataType dataType) {
+    private final boolean failOnOverflow;
+
+    public FieldSumAgg(String name, DataType dataType, boolean failOnOverflow) {
         super(name, dataType);
+        this.failOnOverflow = failOnOverflow;
     }
 
     @Override
@@ -55,16 +58,16 @@ public class FieldSumAgg extends FieldAggregator {
                                 mergeFieldDD.scale());
                 break;
             case TINYINT:
-                sum = addExactByte((byte) accumulator, (byte) inputField);
+                sum = addByte((byte) accumulator, (byte) inputField);
                 break;
             case SMALLINT:
-                sum = addExactShort((short) accumulator, (short) inputField);
+                sum = addShort((short) accumulator, (short) inputField);
                 break;
             case INTEGER:
-                sum = addExactInt((int) accumulator, (int) inputField);
+                sum = addInt((int) accumulator, (int) inputField);
                 break;
             case BIGINT:
-                sum = addExactLong((long) accumulator, (long) inputField);
+                sum = addLong((long) accumulator, (long) inputField);
                 break;
             case FLOAT:
                 sum = (float) accumulator + (float) inputField;
@@ -105,16 +108,16 @@ public class FieldSumAgg extends FieldAggregator {
                                 mergeFieldDD.scale());
                 break;
             case TINYINT:
-                sum = subtractExactByte((byte) accumulator, (byte) inputField);
+                sum = subtractByte((byte) accumulator, (byte) inputField);
                 break;
             case SMALLINT:
-                sum = subtractExactShort((short) accumulator, (short) inputField);
+                sum = subtractShort((short) accumulator, (short) inputField);
                 break;
             case INTEGER:
-                sum = subtractExactInt((int) accumulator, (int) inputField);
+                sum = subtractInt((int) accumulator, (int) inputField);
                 break;
             case BIGINT:
-                sum = subtractExactLong((long) accumulator, (long) inputField);
+                sum = subtractLong((long) accumulator, (long) inputField);
                 break;
             case FLOAT:
                 sum = (float) accumulator - (float) inputField;
@@ -142,13 +145,13 @@ public class FieldSumAgg extends FieldAggregator {
                 return Decimal.fromBigDecimal(
                         decimal.toBigDecimal().negate(), decimal.precision(), decimal.scale());
             case TINYINT:
-                return negateExactByte((byte) value);
+                return negateByte((byte) value);
             case SMALLINT:
-                return negateExactShort((short) value);
+                return negateShort((short) value);
             case INTEGER:
-                return negateExactInt((int) value);
+                return negateInt((int) value);
             case BIGINT:
-                return negateExactLong((long) value);
+                return negateLong((long) value);
             case FLOAT:
                 return -((float) value);
             case DOUBLE:
@@ -162,101 +165,101 @@ public class FieldSumAgg extends FieldAggregator {
         }
     }
 
-    private static byte addExactByte(byte a, byte b) {
+    private byte addByte(byte a, byte b) {
         int value = a + b;
-        if (value > Byte.MAX_VALUE || value < Byte.MIN_VALUE) {
+        if (failOnOverflow && (value > Byte.MAX_VALUE || value < Byte.MIN_VALUE)) {
             throw new ArithmeticException(
                     String.format("byte overflow: %d + %d = %d", a, b, value));
         }
         return (byte) value;
     }
 
-    private static short addExactShort(short a, short b) {
+    private short addShort(short a, short b) {
         int value = a + b;
-        if (value > Short.MAX_VALUE || value < Short.MIN_VALUE) {
+        if (failOnOverflow && (value > Short.MAX_VALUE || value < Short.MIN_VALUE)) {
             throw new ArithmeticException(
                     String.format("short overflow: %d + %d = %d", a, b, value));
         }
         return (short) value;
     }
 
-    private static int addExactInt(int a, int b) {
+    private int addInt(int a, int b) {
         try {
-            return Math.addExact(a, b);
+            return failOnOverflow ? Math.addExact(a, b) : a + b;
         } catch (ArithmeticException e) {
             throw new ArithmeticException(String.format("int overflow: %d + %d", a, b));
         }
     }
 
-    private static long addExactLong(long a, long b) {
+    private long addLong(long a, long b) {
         try {
-            return Math.addExact(a, b);
+            return failOnOverflow ? Math.addExact(a, b) : a + b;
         } catch (ArithmeticException e) {
             throw new ArithmeticException(String.format("long overflow: %d + %d", a, b));
         }
     }
 
-    private static byte subtractExactByte(byte a, byte b) {
+    private byte subtractByte(byte a, byte b) {
         int value = a - b;
-        if (value > Byte.MAX_VALUE || value < Byte.MIN_VALUE) {
+        if (failOnOverflow && (value > Byte.MAX_VALUE || value < Byte.MIN_VALUE)) {
             throw new ArithmeticException(
                     String.format("byte overflow: %d - %d = %d", a, b, value));
         }
         return (byte) value;
     }
 
-    private static short subtractExactShort(short a, short b) {
+    private short subtractShort(short a, short b) {
         int value = a - b;
-        if (value > Short.MAX_VALUE || value < Short.MIN_VALUE) {
+        if (failOnOverflow && (value > Short.MAX_VALUE || value < Short.MIN_VALUE)) {
             throw new ArithmeticException(
                     String.format("short overflow: %d - %d = %d", a, b, value));
         }
         return (short) value;
     }
 
-    private static int subtractExactInt(int a, int b) {
+    private int subtractInt(int a, int b) {
         try {
-            return Math.subtractExact(a, b);
+            return failOnOverflow ? Math.subtractExact(a, b) : a - b;
         } catch (ArithmeticException e) {
             throw new ArithmeticException(String.format("int overflow: %d - %d", a, b));
         }
     }
 
-    private static long subtractExactLong(long a, long b) {
+    private long subtractLong(long a, long b) {
         try {
-            return Math.subtractExact(a, b);
+            return failOnOverflow ? Math.subtractExact(a, b) : a - b;
         } catch (ArithmeticException e) {
             throw new ArithmeticException(String.format("long overflow: %d - %d", a, b));
         }
     }
 
-    private static byte negateExactByte(byte a) {
+    private byte negateByte(byte a) {
         int value = -a;
-        if (value > Byte.MAX_VALUE || value < Byte.MIN_VALUE) {
+        if (failOnOverflow && (value > Byte.MAX_VALUE || value < Byte.MIN_VALUE)) {
             throw new ArithmeticException(String.format("byte overflow: -%d = %d", a, value));
         }
         return (byte) value;
     }
 
-    private static short negateExactShort(short a) {
+    private short negateShort(short a) {
         int value = -a;
-        if (value > Short.MAX_VALUE || value < Short.MIN_VALUE) {
+        if (failOnOverflow && (value > Short.MAX_VALUE || value < Short.MIN_VALUE)) {
             throw new ArithmeticException(String.format("short overflow: -%d = %d", a, value));
         }
         return (short) value;
     }
 
-    private static int negateExactInt(int a) {
+    private int negateInt(int a) {
         try {
-            return Math.negateExact(a);
+            return failOnOverflow ? Math.negateExact(a) : -a;
         } catch (ArithmeticException e) {
             throw new ArithmeticException(String.format("int overflow: -%d", a));
         }
     }
 
-    private static long negateExactLong(long a) {
+    private long negateLong(long a) {
         try {
-            return Math.negateExact(a);
+            return failOnOverflow ? Math.negateExact(a) : -a;
         } catch (ArithmeticException e) {
             throw new ArithmeticException(String.format("long overflow: -%d", a));
         }

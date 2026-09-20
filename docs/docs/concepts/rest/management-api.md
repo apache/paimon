@@ -1,6 +1,5 @@
 ---
 title: "REST Management API"
-hide_table_of_contents: true
 ---
 
 <!--
@@ -20,13 +19,35 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
-The REST Management API is an experimental OpenAPI 3.1 control-plane extension for object
-privileges, row filters, and column masks in a Paimon REST Catalog. Its current contract version is
-`1.0` and may evolve incompatibly while the design is being validated.
+# REST Management API
 
-`RESTCatalog` exposes `permissionManagement()` and `policyManagement()` directly. These methods are
-intentionally not part of the generic `Catalog` interface. Other catalog implementations do not
-expose this management contract.
+The REST Management API is an experimental OpenAPI 3.1 control-plane extension for entity labels,
+object privileges, row filters, and column masks in a Paimon REST Catalog. Its current contract
+version is `1.0` and may evolve incompatibly while the design is being validated.
+
+`RESTCatalog` exposes `labelManagement()`, `permissionManagement()`, and `policyManagement()`
+directly. These methods are intentionally not part of the generic `Catalog` interface. Other
+catalog implementations do not expose this management contract.
+
+`RESTCatalog.semanticViewManagement()` provides [Semantic View definition management](semantic-views.md).
+Its object CRUD routes are defined in the Catalog OpenAPI; permissions and labels use this
+management contract.
+
+`LabelManagement` provides generic label operations backed by the catalog's existing `RESTApi`
+client, authentication, and prefix configuration. The REST server must implement entity resolution,
+authorization, and atomic label storage.
+
+## Find the Right Operation
+
+| Task | Guide |
+| --- | --- |
+| Set, inspect, or remove entity labels | [Entity labels](#entity-labels) |
+| Understand resources and allowed accesses | [Permission model](#permission-model) |
+| Grant, inspect, or revoke access | [Grant](#grant-permissions), [List](#list-permissions), [Revoke](#revoke-permissions) |
+| Restrict visible columns | [Column permissions](#column-permissions) |
+| Filter rows or mask values | [Data policy model](#data-policy-model), [Row filters](#create-row-filter-policies), [Column masks](#create-column-masking-policies) |
+| Inspect or remove policies | [List policies](#list-policies), [Drop policies](#drop-policies) |
+| Implement a server or client | [OpenAPI specification](/rest-management-open-api.yaml) |
 
 ## Catalog addressing
 
@@ -34,6 +55,11 @@ All management endpoints use the opaque `prefix` returned by the REST Catalog co
 is not a catalog name in a payload and is independent of local engine catalog aliases.
 
 ```
+GET    /v1/{prefix}/labels/{entityType}/{entityName}
+GET    /v1/{prefix}/labels/{entityType}/{entityName}/{key}
+POST   /v1/{prefix}/labels/{entityType}/{entityName}/{key}
+DELETE /v1/{prefix}/labels/{entityType}/{entityName}/{key}
+
 GET  /v1/{prefix}/permissions
 POST /v1/{prefix}/permissions/grant
 POST /v1/{prefix}/permissions/revoke
@@ -50,6 +76,88 @@ path inheritance.
 
 The complete wire contract is available in
 [`rest-management-open-api.yaml`](/rest-management-open-api.yaml).
+
+## Entity labels
+
+A label is a string key/value bound directly to one existing entity. The same endpoints serve
+tables, columns, databases, and other server-supported entity types. Labels are separate from
+Paimon's table snapshot `tags`; a label does not itself grant access or enforce a policy.
+
+`entityType` is an extensible, server-defined string, for example `TABLE` or `COLUMN`.
+`entityName` is the server's canonical name within the configured catalog prefix. For example, a
+server may identify a table as `sales.orders` and a column as `sales.orders.order_id`. The server
+must define unambiguous names, including how to quote or escape identifier components. The client
+passes names unchanged and never splits them on dots. Path parameters use REST Catalog URL
+encoding as individual UTF-8 segments; JSON responses contain the original unencoded strings.
+
+### Java catalog access
+
+Obtain `LabelManagement` from a configured `RESTCatalog`. Read methods return `Label` objects with
+the entity type, canonical entity name, key, and value:
+
+```java
+import org.apache.paimon.management.LabelManagement;
+
+LabelManagement labels = restCatalog.labelManagement();
+labels.upsertLabel("TABLE", "sales.orders", "domain", "sales");
+String domain = labels.getLabel("TABLE", "sales.orders", "domain").getValue();
+labels.listLabels("TABLE", "sales.orders"); // Follows all pages.
+labels.listLabelsPaged("TABLE", "sales.orders", 100, null); // Reads one page.
+labels.deleteLabel("TABLE", "sales.orders", "domain");
+```
+
+The standalone `RESTApi` client also exposes these operations; see
+[Java REST API](../../program-api/rest-api#entity-labels).
+
+### Set a label
+
+`POST /v1/{prefix}/labels/{entityType}/{entityName}/{key}` atomically creates or replaces
+the binding identified by the path. For example, set the `domain` label on `sales.orders`:
+
+```http
+POST /v1/{prefix}/labels/TABLE/sales.orders/domain
+Content-Type: application/json
+```
+
+```json
+{
+  "value": "sales"
+}
+```
+
+The request body contains only the value; it does not repeat the identity from the path.
+The entity must already exist. Repeating the same request leaves the same label value, and
+updating one key leaves other keys unchanged. Identity fields must be non-blank; keys are case
+sensitive. The value must be a string; an empty string is allowed and null is rejected.
+The successful response is HTTP 200 with no body. There is no separate create-only or PATCH
+operation.
+
+### Read and delete labels
+
+`GET .../labels/{entityType}/{entityName}/{key}` returns the complete binding with
+`entityType`, `entityName`, `key`, and `value`. A missing entity or key returns 404.
+For a missing key, the error identifies
+`resourceType=LABEL` and `resourceName={key}`.
+
+`GET .../labels/{entityType}/{entityName}` lists direct bindings:
+
+```json
+{
+  "labels": [
+    {"entityType": "TABLE", "entityName": "sales.orders", "key": "domain", "value": "sales"}
+  ],
+  "nextPageToken": "opaque-continuation-token"
+}
+```
+
+Use `maxResults` (1–1000, omitted for the server default) and the returned opaque `pageToken`
+to request subsequent pages. The last page omits `nextPageToken`. As with other Paimon catalog
+listings, an empty page terminates pagination and must not carry a continuation token. An existing
+entity with no labels returns `{"labels":[]}`; a missing entity returns 404.
+
+`DELETE .../labels/{entityType}/{entityName}/{key}` removes only that binding. It returns HTTP 200
+with no body even if the key is already absent, provided the entity exists. A missing entity
+still returns 404.
 
 ## Privileges and policies are independent
 

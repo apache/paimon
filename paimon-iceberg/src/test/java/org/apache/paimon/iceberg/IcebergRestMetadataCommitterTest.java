@@ -70,6 +70,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.annotation.Nullable;
+
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -1727,6 +1730,140 @@ public class IcebergRestMetadataCommitterTest {
             assertThat(path.getName()).startsWith("rest-register-v3-");
             assertThat(IcebergMetadata.fromPath(table.fileIO(), path).currentSnapshotId())
                     .isEqualTo(3);
+        }
+    }
+
+    @Test
+    public void testUnknownHostRetriesWithExponentialBackoff() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(IcebergOptions.UNKNOWN_HOST_RETRY_MAX_RETRIES.key(), "2");
+        options.put(IcebergOptions.UNKNOWN_HOST_RETRY_INITIAL_DELAY_MILLIS.key(), "7");
+        FileStoreTable table = createRetryTestTable(options);
+        IcebergMetadata metadata = writeLocalMetadata(table);
+        TestingIcebergRestMetadataCommitter committer =
+                new TestingIcebergRestMetadataCommitter(
+                        table,
+                        2,
+                        new RuntimeException(new UnknownHostException("simulated DNS failure")));
+
+        committer.commitMetadata(metadata, null);
+
+        assertThat(committer.attempts).isEqualTo(3);
+        assertThat(committer.delays).containsExactly(7L, 14L);
+        assertThat(
+                        restCatalog
+                                .loadTable(TableIdentifier.of("mydb", "t"))
+                                .currentSnapshot()
+                                .snapshotId())
+                .isEqualTo(1);
+    }
+
+    @Test
+    public void testUnknownHostRetryExhaustionFailsCommit() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(IcebergOptions.UNKNOWN_HOST_RETRY_MAX_RETRIES.key(), "1");
+        options.put(IcebergOptions.UNKNOWN_HOST_RETRY_INITIAL_DELAY_MILLIS.key(), "7");
+        FileStoreTable table = createRetryTestTable(options);
+        IcebergMetadata metadata = writeLocalMetadata(table);
+        TestingIcebergRestMetadataCommitter committer =
+                new TestingIcebergRestMetadataCommitter(
+                        table,
+                        Integer.MAX_VALUE,
+                        new RuntimeException(new UnknownHostException("simulated DNS failure")));
+
+        assertThatThrownBy(() -> committer.commitMetadata(metadata, null))
+                .hasRootCauseInstanceOf(UnknownHostException.class);
+        assertThat(committer.attempts).isEqualTo(2);
+        assertThat(committer.delays).containsExactly(7L);
+        assertThat(restCatalog.tableExists(TableIdentifier.of("mydb", "t"))).isFalse();
+    }
+
+    @Test
+    public void testZeroUnknownHostRetriesPreservesImmediateFailure() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(IcebergOptions.UNKNOWN_HOST_RETRY_MAX_RETRIES.key(), "0");
+        FileStoreTable table = createRetryTestTable(options);
+        IcebergMetadata metadata = writeLocalMetadata(table);
+        TestingIcebergRestMetadataCommitter committer =
+                new TestingIcebergRestMetadataCommitter(
+                        table,
+                        Integer.MAX_VALUE,
+                        new RuntimeException(new UnknownHostException("simulated DNS failure")));
+
+        assertThatThrownBy(() -> committer.commitMetadata(metadata, null))
+                .hasRootCauseInstanceOf(UnknownHostException.class);
+        assertThat(committer.attempts).isEqualTo(1);
+        assertThat(committer.delays).isEmpty();
+    }
+
+    @Test
+    public void testNonDnsFailureIsNotRetried() throws Exception {
+        FileStoreTable table = createRetryTestTable(Collections.emptyMap());
+        IcebergMetadata metadata = writeLocalMetadata(table);
+        TestingIcebergRestMetadataCommitter committer =
+                new TestingIcebergRestMetadataCommitter(
+                        table, Integer.MAX_VALUE, new IllegalStateException("catalog failure"));
+
+        assertThatThrownBy(() -> committer.commitMetadata(metadata, null))
+                .hasRootCauseInstanceOf(IllegalStateException.class);
+        assertThat(committer.attempts).isEqualTo(1);
+        assertThat(committer.delays).isEmpty();
+    }
+
+    private FileStoreTable createRetryTestTable(Map<String, String> options) throws Exception {
+        restCatalog.dropTable(TableIdentifier.of("mydb", "t"), false);
+        return createPaimonTable(
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"}),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                -1,
+                "avro",
+                options);
+    }
+
+    private static IcebergMetadata writeLocalMetadata(FileStoreTable table) throws Exception {
+        FileStoreTable localTable =
+                table.copy(
+                        Collections.singletonMap(
+                                IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location"));
+        String commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = localTable.newWrite(commitUser);
+                TableCommitImpl commit = localTable.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, 10));
+            commit.commit(1, write.prepareCommit(true, 1));
+        }
+        return localMetadata(localTable, 1);
+    }
+
+    private static class TestingIcebergRestMetadataCommitter extends IcebergRestMetadataCommitter {
+
+        private int failuresRemaining;
+        private final RuntimeException failure;
+        private int attempts;
+        private final List<Long> delays = new ArrayList<>();
+
+        private TestingIcebergRestMetadataCommitter(
+                FileStoreTable table, int failures, RuntimeException failure) {
+            super(table);
+            this.failuresRemaining = failures;
+            this.failure = failure;
+        }
+
+        @Override
+        protected void commitMetadataImpl(
+                IcebergMetadata newIcebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata) {
+            attempts++;
+            if (failuresRemaining > 0) {
+                failuresRemaining--;
+                throw failure;
+            }
+            super.commitMetadataImpl(newIcebergMetadata, baseIcebergMetadata);
+        }
+
+        @Override
+        protected void sleepBeforeUnknownHostRetry(long delayMillis) {
+            delays.add(delayMillis);
         }
     }
 

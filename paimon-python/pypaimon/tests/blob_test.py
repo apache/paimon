@@ -28,7 +28,7 @@ import unittest
 import zlib
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pyarrow as pa
 
@@ -76,6 +76,29 @@ class MockFileIO:
         if not isinstance(path, (str, type(None))):
             path = str(path)
         return self._file_io.new_input_stream(path)
+
+
+class CountingBlobFileIO(LocalFileIO):
+    def __init__(self, root):
+        super().__init__(root, Options({}))
+        self.stat_count = 0
+        self.streams = []
+
+    def get_file_size(self, path):
+        self.stat_count += 1
+        return super().get_file_size(path)
+
+    def new_input_stream(self, path):
+        stream = MagicMock(wraps=super().new_input_stream(path))
+        stream.__enter__.return_value = stream
+        stream.__exit__.side_effect = lambda *args: stream.close()
+        self.streams.append(stream)
+        return stream
+
+    def counts(self):
+        return (self.stat_count, len(self.streams),
+                sum(stream.read.call_count for stream in self.streams),
+                sum(stream.close.call_count for stream in self.streams))
 
 
 def _to_url(path):
@@ -1794,27 +1817,18 @@ class BlobEndToEndTest(unittest.TestCase):
             reader.close()
 
     def test_blob_readers_reuse_index_by_path(self):
-        from pypaimon.read.reader.format_blob_reader import _BLOB_INDEX_CACHE
+        from pypaimon.read.reader.format_blob_reader import _BLOB_INDEX_CACHE, _BLOB_INDEX_CACHE_LOCK
 
         field = DataField(0, "blob_field", AtomicType("BLOB"))
         path = os.path.join(self.temp_dir, "cached-index.blob")
-        file_io = LocalFileIO(self.temp_dir, Options({}))
+        file_io = CountingBlobFileIO(self.temp_dir)
         self._write_single_blob(path, field, b"cached-value")
-        _BLOB_INDEX_CACHE.clear()
-        input_streams = []
-        new_input_stream = file_io.new_input_stream
-
-        def counting_input_stream(file_path):
-            stream = Mock(wraps=new_input_stream(file_path))
-            input_streams.append(stream)
-            return stream
+        with _BLOB_INDEX_CACHE_LOCK:
+            _BLOB_INDEX_CACHE.clear()
+        results = []
 
         try:
             with patch.object(
-                    file_io,
-                    "new_input_stream",
-                    side_effect=counting_input_stream,
-            ), patch.object(
                     DeltaVarintCompressor,
                     "decompress",
                     wraps=DeltaVarintCompressor.decompress,
@@ -1827,42 +1841,201 @@ class BlobEndToEndTest(unittest.TestCase):
                         [field],
                         None,
                         True,
+                        file_size=os.path.getsize(path),
                     )
-                    reader.close()
+                    try:
+                        results.append(reader.read_arrow_batch().column(0).to_pylist())
+                    finally:
+                        reader.close()
+                        reader.close()
+                    self.assertEqual((0, 1, 2, 1), file_io.counts())
 
                 self.assertEqual(1, decompress.call_count)
-                self.assertEqual(
-                    [2, 0],
-                    [stream.read.call_count for stream in input_streams],
-                )
+                self.assertEqual(results[0], results[1])
+                descriptor = BlobDescriptor.deserialize(results[0][0])
+                self.assertEqual((path, 4, len(b"cached-value")),
+                                 (descriptor.uri, descriptor.offset, descriptor.length))
         finally:
-            _BLOB_INDEX_CACHE.clear()
+            with _BLOB_INDEX_CACHE_LOCK:
+                _BLOB_INDEX_CACHE.clear()
+
+    def test_blob_cached_index_keeps_payload_reads(self):
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = os.path.join(self.temp_dir, "cached-payload.blob")
+        file_io = CountingBlobFileIO(self.temp_dir)
+        self._write_single_blob(path, field, b"payload")
+        for descriptor, parallelism in [(True, 1), (False, 1), (False, 4)]:
+            with self.subTest(descriptor=descriptor, parallelism=parallelism):
+                previous_opens = len(file_io.streams)
+                reader = FormatBlobReader(
+                    file_io, path, [field.name], [field], None, descriptor,
+                    blob_parallelism=parallelism, file_size=os.path.getsize(path))
+                try:
+                    values = reader.read_arrow_batch().column(0).to_pylist()
+                    if not descriptor:
+                        self.assertEqual([b"payload"], values)
+                        self.assertEqual(previous_opens + 1, len(file_io.streams))
+                finally:
+                    reader.close()
+                    reader.close()
+        self.assertEqual(0, file_io.stat_count)
+        self.assertTrue(all(stream._mock_wraps.closed for stream in file_io.streams))
+        self.assertTrue(all(stream.close.call_count == 1 for stream in file_io.streams))
+
+    def test_blob_cached_index_reader_isolation(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = os.path.join(self.temp_dir, "cached-selection.blob")
+        file_io = CountingBlobFileIO(self.temp_dir)
+        with open(path, 'wb') as output:
+            writer = BlobFormatWriter(output)
+            for value in [BlobData(b"first"), None, Blob.PLACE_HOLDER, BlobData(b"last")]:
+                writer.add_element(GenericRow([value], [field], RowKind.INSERT))
+            writer.close()
+        readers = []
+        try:
+            for indices in ([3, 1, 0], [0, 3]):
+                readers.append(FormatBlobReader(
+                    file_io, path, [field.name], [field], None, False,
+                    row_indices=indices, file_size=os.path.getsize(path)))
+            self.assertIsNot(readers[0]._input_stream, readers[1]._input_stream)
+            self.assertEqual([b"last", None, b"first"],
+                             readers[0].read_arrow_batch().column(0).to_pylist())
+            readers[0].blob_lengths[0] = -1
+            readers[0].blob_offsets[0] = -1
+            readers[0].close()
+            self.assertEqual([b"first", b"last"],
+                             readers[1].read_arrow_batch().column(0).to_pylist())
+            previous = file_io.counts()
+            unselected = FormatBlobReader(
+                file_io, path, [field.name], [field], None, True,
+                file_size=os.path.getsize(path))
+            readers.append(unselected)
+            unselected.blob_lengths[3] = -1
+            unselected.blob_offsets[3] = -1
+            descriptor_reader = FormatBlobReader(
+                file_io, path, [field.name], [field], None, True,
+                row_indices=[3, 1, 2], file_size=os.path.getsize(path))
+            readers.append(descriptor_reader)
+            values = descriptor_reader.read_values_at([0, 1, 2])
+            self.assertEqual((len(b"first") + 16 + 4, len(b"last")),
+                             (values[0].to_descriptor().offset, values[0].to_descriptor().length))
+            self.assertIsNone(values[1])
+            self.assertIs(Blob.PLACE_HOLDER, values[2])
+            with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
+                descriptor_reader.read_arrow_batch()
+            with self.assertRaises(IndexError):
+                FormatBlobReader(
+                    file_io, path, [field.name], [field], None, True,
+                    row_indices=[4], file_size=os.path.getsize(path))
+            self.assertEqual(previous, file_io.counts())
+        finally:
+            for reader in readers:
+                reader.close()
+                reader.close()
+        self.assertTrue(all(stream._mock_wraps.closed for stream in file_io.streams))
+
+    def test_blob_cached_nested_layout_reads(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        for data_type, value in [
+            (ArrayType(True, AtomicType("BLOB")), [BlobData(b"a"), None, BlobData(b"bc")]),
+            (MapType(True, AtomicType("STRING"), AtomicType("BLOB")),
+             [("a", BlobData(b"a")), ("n", None), ("b", BlobData(b"bc"))]),
+        ]:
+            field = DataField(0, "blob_field", data_type)
+            path = os.path.join(self.temp_dir, type(data_type).__name__ + ".blob")
+            file_io = CountingBlobFileIO(self.temp_dir)
+            with open(path, 'wb') as output:
+                writer = BlobFormatWriter(output)
+                writer.add_element(GenericRow([value], [field], RowKind.INSERT))
+                writer.close()
+            for descriptor, parallelism in [(True, 1), (False, 1), (False, 4)]:
+                results = []
+                for _ in range(2):
+                    previous = len(file_io.streams)
+                    reader = FormatBlobReader(
+                        file_io, path, [field.name], [field], None, descriptor,
+                        blob_parallelism=parallelism, file_size=os.path.getsize(path))
+                    try:
+                        self.assertEqual(previous + 1, len(file_io.streams))
+                        results.append(reader.read_arrow_batch().column(0)[0].as_py())
+                    finally:
+                        reader.close()
+                        reader.close()
+                self.assertEqual(results[0], results[1])
+                values = list(dict(results[0]).values()) if isinstance(data_type, MapType) else results[0]
+                if descriptor:
+                    self.assertEqual([1, None, 2], [
+                        BlobDescriptor.deserialize(item).length if item is not None else None for item in values])
+                else:
+                    self.assertEqual([b"a", None, b"bc"], values)
+            self.assertEqual(0, file_io.stat_count)
+            self.assertTrue(all(stream._mock_wraps.closed for stream in file_io.streams))
+
+    def test_blob_index_failures_close_stream(self):
+        from pypaimon.read.reader.format_blob_reader import _BLOB_INDEX_CACHE
+
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        for failure in ('version', 'header', 'index', 'read', 'row_indices'):
+            with self.subTest(failure=failure):
+                path = os.path.join(self.temp_dir, failure + ".blob")
+                self._write_single_blob(path, field, b"value")
+                file_io = CountingBlobFileIO(self.temp_dir)
+                file_size = os.path.getsize(path)
+                if failure == 'version':
+                    with open(path, 'r+b') as output:
+                        output.seek(-1, os.SEEK_END)
+                        output.write(b'\x63')
+                elif failure == 'header':
+                    file_size += 3
+                original_open = file_io.new_input_stream
+
+                def open_stream(file_path):
+                    stream = original_open(file_path)
+                    if failure == 'read':
+                        stream.read.side_effect = IOError("injected read failure")
+                    elif failure == 'index':
+                        read = stream._mock_wraps.read
+                        stream.read.side_effect = lambda size: read(size) if size == 5 else read(size)[:-1]
+                    return stream
+
+                with patch.object(file_io, 'new_input_stream', side_effect=open_stream):
+                    with self.assertRaises(IndexError if failure == 'row_indices' else IOError):
+                        FormatBlobReader(
+                            file_io, path, [field.name], [field], None, True,
+                            row_indices=[1] if failure == 'row_indices' else None,
+                            file_size=file_size)
+                self.assertEqual(1, len(file_io.streams))
+                self.assertTrue(file_io.streams[0]._mock_wraps.closed)
+                self.assertEqual(1, file_io.streams[0].close.call_count)
+                if failure != 'row_indices':
+                    self.assertNotIn(path, _BLOB_INDEX_CACHE)
 
     def test_blob_reader_falls_back_to_file_size_lookup(self):
         field = DataField(0, "blob_field", AtomicType("BLOB"))
         path = os.path.join(self.temp_dir, "fallback-size.blob")
-        file_io = LocalFileIO(self.temp_dir, Options({}))
         self._write_single_blob(path, field, b"value")
 
         for file_size in [None, 0, -1]:
-            with self.subTest(file_size=file_size):
-                counting_file_io = MockFileIO(file_io)
-                reader = FormatBlobReader(
-                    counting_file_io,
-                    path,
-                    [field.name],
-                    [field],
-                    None,
-                    False,
-                    file_size=file_size,
-                )
-                try:
-                    self.assertEqual(
-                        [b"value"],
-                        reader.read_arrow_batch().column(0).to_pylist())
-                    self.assertEqual(1, counting_file_io.file_size_calls)
-                finally:
-                    reader.close()
+            for descriptor in (False, True):
+                with self.subTest(file_size=file_size, descriptor=descriptor):
+                    file_io = CountingBlobFileIO(self.temp_dir)
+                    reader = FormatBlobReader(
+                        file_io, path, [field.name], [field], None, descriptor,
+                        file_size=file_size)
+                    try:
+                        values = reader.read_arrow_batch().column(0).to_pylist()
+                        if descriptor:
+                            self.assertEqual(BlobDescriptor(path, 4, 5).serialize(), values[0])
+                            self.assertEqual((1, 0, 0, 0), file_io.counts())
+                        else:
+                            self.assertEqual([b"value"], values)
+                            self.assertEqual(1, file_io.stat_count)
+                            self.assertEqual(1, len(file_io.streams))
+                    finally:
+                        reader.close()
 
     def test_split_read_passes_blob_file_size(self):
         from pypaimon.read.split import DataSplit
@@ -4135,6 +4308,68 @@ class CoalesceRangesTest(unittest.TestCase):
             self.assertEqual(got[4], data[100:])     # length -1 => read to EOF
             self.assertIsNone(got[5])                # None offset/length => skipped
 
+    def test_coalesce_limits_from_file_io_options(self):
+        from pypaimon.common.options.config import FileIOOptions
+        self.assertEqual(1 << 20, Options({}).get(
+            FileIOOptions.READ_COALESCE_MAX_GAP).get_bytes())
+        self.assertEqual(8 << 20, Options({}).get(
+            FileIOOptions.READ_COALESCE_MAX_BLOCK).get_bytes())
+        data = bytes(range(256))
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "f.bin")
+            with open(path, "wb") as output:
+                output.write(data)
+            file_io = FileIO.get(
+                "file://" + tmp_dir,
+                Options({
+                    "file-io.read-coalesce.max-gap": "64 b",
+                    "file-io.read-coalesce.max-block": "100 b",
+                }),
+            )
+            reads = []
+            original_open = file_io.new_input_stream
+
+            def new_input_stream(file_path):
+                stream = original_open(file_path)
+
+                class TrackingStream:
+                    def read_at(self, length, offset):
+                        reads.append((offset, length))
+                        return os.pread(stream.fileno(), length, offset)
+
+                    def close(self):
+                        stream.close()
+
+                return TrackingStream()
+
+            file_io.new_input_stream = new_input_stream
+            ranges = [(path, 0, 10), (path, 60, 10), (path, 120, 10)]
+
+            self.assertEqual(
+                [data[0:10], data[60:70], data[120:130]],
+                file_io.read_ranges_coalesced(ranges, parallelism=3),
+            )
+            self.assertEqual([(0, 70), (120, 10)], sorted(reads))
+
+            reads.clear()
+            views = file_io.read_ranges_coalesced_views(ranges, parallelism=3)
+            self.assertEqual([data[0:10], data[60:70], data[120:130]],
+                             [bytes(view) for view in views])
+            self.assertEqual([(0, 70), (120, 10)], sorted(reads))
+
+            reads.clear()
+            file_io.properties.set(
+                FileIOOptions.READ_COALESCE_MAX_GAP, "0 b")
+            file_io.read_ranges_coalesced(
+                ranges, parallelism=3)
+            self.assertEqual([(0, 10), (60, 10), (120, 10)], sorted(reads))
+
+            reads.clear()
+            file_io.properties.set(
+                FileIOOptions.READ_COALESCE_MAX_GAP, "64 b")
+            file_io.read_ranges_coalesced(ranges, parallelism=3)
+            self.assertEqual([(0, 70), (120, 10)], sorted(reads))
+
     def test_read_ranges_coalesced_views(self):
         from pypaimon.common.file_io import FileIO
         data = bytes(range(256)) * 4
@@ -4142,11 +4377,13 @@ class CoalesceRangesTest(unittest.TestCase):
             path = os.path.join(tmp_dir, "f.bin")
             with open(path, 'wb') as output:
                 output.write(data)
-            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            file_io = FileIO.get(
+                f"file://{tmp_dir}",
+                Options({"file-io.read-coalesce.max-gap": "100 b"}))
             ranges = [(path, 0, 10), (path, 10, 10), None,
                       (path, 500, 20), (path, 100, -1)]
             got = file_io.read_ranges_coalesced_views(
-                ranges, parallelism=4, max_gap=100)
+                ranges, parallelism=4)
 
             self.assertIsInstance(got[0], memoryview)
             self.assertIsInstance(got[1], memoryview)
@@ -4170,7 +4407,10 @@ class CoalesceRangesTest(unittest.TestCase):
             path = os.path.join(tmp_dir, "f.bin")
             with open(path, 'wb') as output:
                 output.write(data)
-            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            file_io = FileIO.get(
+                f"file://{tmp_dir}",
+                Options({"file-io.read-coalesce.max-gap": "1000 b",
+                         "file-io.read-coalesce.max-block": "1 mb"}))
             reads = []
             original_open = file_io.new_input_stream
 
@@ -4191,8 +4431,6 @@ class CoalesceRangesTest(unittest.TestCase):
             got = file_io.read_ranges_coalesced_views(
                 [(path, 0, 10), (path, 1000, 10)],
                 parallelism=4,
-                max_gap=1000,
-                max_span=1 << 20,
             )
 
             self.assertEqual(reads, [(path, 0, 1010)])
@@ -4204,8 +4442,6 @@ class CoalesceRangesTest(unittest.TestCase):
             shared = file_io.read_ranges_coalesced_views(
                 [(path, 0, 10), (path, 1000, 10)],
                 parallelism=4,
-                max_gap=1000,
-                max_span=1 << 20,
                 max_retained_amplification=0,
             )
             self.assertEqual(reads, [(path, 0, 1010)])
@@ -4219,7 +4455,9 @@ class CoalesceRangesTest(unittest.TestCase):
             path = os.path.join(tmp_dir, "blob.bin")
             with open(path, "wb") as output:
                 output.write(data)
-            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            file_io = FileIO.get(
+                f"file://{tmp_dir}",
+                Options({"file-io.read-coalesce.max-gap": "0 b"}))
             fallbacks = []
 
             class FailingStream:
@@ -4239,8 +4477,7 @@ class CoalesceRangesTest(unittest.TestCase):
 
             self.assertEqual(
                 [data[0:4], data[16:20]],
-                file_io.read_ranges_coalesced(
-                    ranges, parallelism=2, max_gap=0),
+                file_io.read_ranges_coalesced(ranges, parallelism=2),
             )
             self.assertEqual(2, len(fallbacks))
 
@@ -4297,7 +4534,7 @@ class CoalesceRangesTest(unittest.TestCase):
         self.assertEqual(
             [b"ok"] * parallelism,
             file_io.read_ranges_coalesced(
-                ranges, parallelism=parallelism, max_gap=0),
+                ranges, parallelism=parallelism),
         )
         self.assertLessEqual(max_open_streams, parallelism)
         self.assertEqual(0, open_streams)
@@ -4344,7 +4581,6 @@ class CoalesceRangesTest(unittest.TestCase):
             file_io.read_ranges_coalesced(
                 [("blob", 0, 5), ("blob", 5, -1)],
                 parallelism=1,
-                max_gap=0,
             ),
         )
         self.assertEqual([
@@ -4359,7 +4595,8 @@ class CoalesceRangesTest(unittest.TestCase):
         from pypaimon.common.file_io import FileIO
 
         data = bytes(range(128))
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
 
         class SerialStream:
             def __init__(self):
@@ -4396,8 +4633,7 @@ class CoalesceRangesTest(unittest.TestCase):
 
         self.assertEqual(
             [data[i * 4:i * 4 + 2] for i in range(16)],
-            file_io.read_ranges_coalesced(
-                ranges, parallelism=8, max_gap=0),
+            file_io.read_ranges_coalesced(ranges, parallelism=8),
         )
         self.assertGreater(len(streams), 1)
         self.assertLessEqual(len(streams), 8)
@@ -4406,7 +4642,8 @@ class CoalesceRangesTest(unittest.TestCase):
         from pypaimon.common.file_io import FileIO
 
         data = bytes(range(256)) * 64
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         streams = []
 
         class PositionalStream:
@@ -4440,8 +4677,7 @@ class CoalesceRangesTest(unittest.TestCase):
         self.assertEqual(
             [data[offset:offset + length]
              for _, offset, length in ranges],
-            file_io.read_ranges_coalesced(
-                ranges, parallelism=64, max_gap=0),
+            file_io.read_ranges_coalesced(ranges, parallelism=64),
         )
         self.assertEqual(16, len(streams))
         self.assertTrue(all(stream.reads == 4 for stream in streams))
@@ -4452,7 +4688,8 @@ class CoalesceRangesTest(unittest.TestCase):
         from pypaimon.common.file_io import FileIO
 
         large = 8 << 20
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         streams = []
 
         class PositionalStream:
@@ -4479,8 +4716,7 @@ class CoalesceRangesTest(unittest.TestCase):
             ranges.append(("blob", offset, length))
             offset += length + 1
 
-        file_io.read_ranges_coalesced(
-            ranges, parallelism=64, max_gap=0)
+        file_io.read_ranges_coalesced(ranges, parallelism=64)
 
         self.assertEqual(16, len(streams))
         self.assertEqual(
@@ -4493,7 +4729,8 @@ class CoalesceRangesTest(unittest.TestCase):
 
         from pypaimon.common.file_io import FileIO
 
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         streams = Counter()
         lock = threading.Lock()
 
@@ -4518,8 +4755,7 @@ class CoalesceRangesTest(unittest.TestCase):
             + [("cold", index * 2, 1) for index in range(100)]
         )
 
-        result = file_io.read_ranges_coalesced(
-            ranges, parallelism=64, max_gap=0)
+        result = file_io.read_ranges_coalesced(ranges, parallelism=64)
 
         self.assertEqual([b"h"] * 9900 + [b"c"] * 100, result)
         self.assertEqual(Counter({"hot": 16, "cold": 16}), streams)
@@ -4529,7 +4765,8 @@ class CoalesceRangesTest(unittest.TestCase):
 
         from pypaimon.common.file_io import FileIO
 
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         streams = Counter()
         lock = threading.Lock()
         active_streams = 0
@@ -4566,8 +4803,7 @@ class CoalesceRangesTest(unittest.TestCase):
             + [("cold-%d" % index, 0, 1) for index in range(63)]
         )
 
-        result = file_io.read_ranges_coalesced(
-            ranges, parallelism=64, max_gap=0)
+        result = file_io.read_ranges_coalesced(ranges, parallelism=64)
 
         self.assertEqual(10063, len(result))
         self.assertEqual(16, streams["hot"])
@@ -4577,7 +4813,8 @@ class CoalesceRangesTest(unittest.TestCase):
     def test_stream_count_is_bounded_across_paths(self):
         from pypaimon.common.file_io import FileIO
 
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         lock = threading.Lock()
         open_streams = 0
         max_open_streams = 0
@@ -4610,8 +4847,7 @@ class CoalesceRangesTest(unittest.TestCase):
 
         self.assertEqual(
             [bytes([offset]) * length for _, offset, length in ranges],
-            file_io.read_ranges_coalesced(
-                ranges, parallelism=4, max_gap=0),
+            file_io.read_ranges_coalesced(ranges, parallelism=4),
         )
         self.assertLessEqual(max_open_streams, 4)
         self.assertEqual(4, total_streams)
@@ -4621,7 +4857,8 @@ class CoalesceRangesTest(unittest.TestCase):
         from pypaimon.common.file_io import FileIO
 
         data = bytes(range(128))
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         streams = []
 
         class CloseStream:
@@ -4647,8 +4884,7 @@ class CoalesceRangesTest(unittest.TestCase):
         ranges = [("blob", offset, 4) for offset in range(0, 64, 8)]
 
         with self.assertRaisesRegex(IOError, "first close failed"):
-            file_io.read_ranges_coalesced(
-                ranges, parallelism=4, max_gap=0)
+            file_io.read_ranges_coalesced(ranges, parallelism=4)
 
         self.assertGreater(len(streams), 1)
         self.assertTrue(all(stream.closed for stream in streams))
@@ -4680,7 +4916,6 @@ class CoalesceRangesTest(unittest.TestCase):
             file_io.read_ranges_coalesced(
                 [("close-error", 0, 2), ("read-error", 0, 2)],
                 parallelism=2,
-                max_gap=0,
             )
 
     def test_failed_stream_close_stops_before_fallback(self):
@@ -4705,7 +4940,7 @@ class CoalesceRangesTest(unittest.TestCase):
 
         with self.assertRaisesRegex(IOError, "pooled read failed"):
             file_io.read_ranges_coalesced(
-                [("blob", 0, 2)], parallelism=1, max_gap=0)
+                [("blob", 0, 2)], parallelism=1)
         self.assertEqual([], fallbacks)
 
 

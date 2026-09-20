@@ -155,9 +155,76 @@ The `.video` column yields serialized `VideoFrameDescriptor` values whose
 embedded frame ordinals keep frame mapping out of the normal data file. Use
 `pypaimon.multimodal.VideoFrameCollator` as the DataLoader `collate_fn` to open
 physical video ranges and cache decoder sessions per worker. See
-[Multimodal API: Video Frame Storage](multimodal-api#video-frame-storage)
+[Multimodal API: Video Frame Storage](video#video-frame-storage)
 for the write path and a complete decoder example.
+## Contiguous Windows
 
+Use a map-style `ContiguousWindowDataset` to construct training samples from
+one materialized frame table. Each field can have its own history or future
+window, and windows never cross a sequence boundary. The dataset builds an index
+from only the group column, order column, and Paimon row IDs. Projected values,
+including BLOB payloads, are read from the pinned snapshot when a sample is
+requested; they are not retained in the index.
+
+```python
+from functools import partial
+
+import torch
+from torch.utils.data import DataLoader
+from pypaimon.multimodal.window_transforms import images_to_tensor, to_tensor
+
+dataset = (
+    frames.scan()
+    .to_contiguous_window_dataset(
+        columns=["state", "image", "action"],
+        frame_offsets={"state": [-2, -1, 0], "action": list(range(16))},
+        group_key="episode_index",
+        order_key="frame_index",
+        boundary="pad",
+        column_transforms={
+            "state": partial(to_tensor, dtype=torch.float32),
+            "action": partial(to_tensor, dtype=torch.float32),
+            "image": images_to_tensor,
+        },
+    )
+)
+
+loader = DataLoader(dataset, batch_size=32, num_workers=4, shuffle=True)
+```
+
+Each raw item contains scalar group/order keys, a list for every selected column,
+and a Boolean `<column>_is_pad` tensor where `True` marks padding. Unspecified
+field offsets default to `[0]`. The example produces state/action tensors with
+time lengths 3/16 and an image tensor of shape `(1, C, H, W)`; DataLoader adds the
+batch dimension. `pad_values` can replace endpoint repetition for individual
+columns, before any transforms. `adapter` can normalize or rename fields and
+produce a model-specific mapping. Keep callbacks picklable for multiple workers.
+
+Scheduled anchors start at each group's first row and advance by `stride`
+(default `1`). `boundary="drop"` (default) omits anchors incomplete for any
+field, `boundary="pad"` pads either end, and `boundary="error"` rejects any
+scheduled incomplete window. `delta_timestamps` with an explicit `fps` is an
+alternative to integer offsets, with frame-grid alignment checked against
+`tolerance_s`. Existing `window_size`/`anchor_columns`/`tail` calls retain their
+single `is_pad` output. See [multimodal reading](multimodal-reading#contiguous-windows-for-pytorch)
+for the full sample and conversion contract.
+Rows are sorted by `order_key` inside each `group_key` value. Order values must
+be integers which increase by exactly one; duplicates and missing steps are
+rejected, and windows never cross groups. The resolved Paimon
+snapshot is pinned for the lifetime of the dataset, so later commits cannot
+change its index or sample contents. A dataset pinned through `tag_name` fails
+its reads if the tag is moved to another snapshot, rather than mixing rows from
+the two snapshots.
+
+Use normal PyTorch samplers for shuffling and distributed training. For DDP,
+pass `DistributedSampler(dataset)` to DataLoader, omit `shuffle=True`, and call
+the sampler's `set_epoch(epoch)` each epoch. Its padding or drop behavior still
+applies when the sample count is not divisible by the number of ranks. Dataset
+version pinning does not save sampler progress or random augmentation state.
+
+Columns configured by `video-frame-field` are rejected: a window read would drop
+the `frame_index` and other metadata carried by their `VideoFrameDescriptor`
+values. Read those columns with `to_torch()` instead.
 ## File Format Metadata Cache
 
 Reusable PyArrow Dataset metadata is cached across reads. Configure its estimated

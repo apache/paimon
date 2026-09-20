@@ -170,6 +170,10 @@ public class ManagedBlobReferenceFile {
             return relativePath;
         }
 
+        public Path toPath() {
+            return new Path(storageRootId, relativePath);
+        }
+
         @Override
         public boolean equals(Object o) {
             if (this == o) {

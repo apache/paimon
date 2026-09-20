@@ -152,7 +152,7 @@ class _RowIdRangeIndex:
         return row_ids
 
 
-class _SplitRangeIndex:
+class SplitRangeIndex:
 
     def __init__(self, ranges_by_split):
         self.intervals = sorted(
@@ -180,6 +180,56 @@ class _SplitRangeIndex:
         return sorted(split_indices)
 
 
+def row_ranges_for_split(split) -> List[Range]:
+    """Return the merged global row-ID ranges covered by ``split``."""
+    if isinstance(split, QueryAuthSplit):
+        split = split.split
+    if isinstance(split, IndexedSplit):
+        ranges = split.row_ranges()
+    else:
+        ranges = [
+            data_file.row_id_range()
+            for data_file in split.files
+            if data_file.first_row_id is not None
+        ]
+    return Range.sort_and_merge_overlap(ranges, True)
+
+
+def select_indexed_splits(
+        splits, split_ranges, split_range_index, ranges) -> List[Split]:
+    """Return ``IndexedSplit``s restricting ``splits`` to ``ranges``.
+
+    Row ranges reach the format readers through ``IndexedSplit``, which lets a
+    data-evolution read skip files and row blocks that no requested row ID
+    touches. Authorization wrappers are preserved.
+    """
+    selected = []
+    for split_index in split_range_index.find(ranges):
+        original = splits[split_index]
+        auth_result = None
+        split = original
+        if isinstance(split, QueryAuthSplit):
+            auth_result = split.auth_result
+            split = split.split
+
+        if isinstance(split, IndexedSplit):
+            split = split.data_split()
+        allowed = Range.and_(ranges, split_ranges[split_index])
+        if not allowed:
+            continue
+
+        indexed = IndexedSplit(
+            split,
+            allowed,
+            exact_merged_row_count=sum(r.count() for r in allowed),
+        )
+        selected.append(
+            QueryAuthSplit(indexed, auth_result)
+            if auth_result is not None else indexed
+        )
+    return selected
+
+
 class TorchDataset(Dataset):
     """
     Map-style PyTorch Dataset for Paimon table data.
@@ -205,9 +255,9 @@ class TorchDataset(Dataset):
         self._split_range_index = None
         if self._supports_lazy_row_id_read():
             self._split_ranges = [
-                self._row_ranges_for_split(split) for split in splits
+                row_ranges_for_split(split) for split in splits
             ]
-            self._split_range_index = _SplitRangeIndex(self._split_ranges)
+            self._split_range_index = SplitRangeIndex(self._split_ranges)
             self._row_ids = self._compact_row_id_index()
             if self._row_ids is None:
                 row_id_read = TableRead(
@@ -273,20 +323,6 @@ class TorchDataset(Dataset):
                 r.count() for r in merged):
             return None
         return _RowIdRangeIndex(ranges, self.table_read.limit)
-
-    @staticmethod
-    def _row_ranges_for_split(split):
-        if isinstance(split, QueryAuthSplit):
-            split = split.split
-        if isinstance(split, IndexedSplit):
-            ranges = split.row_ranges()
-        else:
-            ranges = [
-                data_file.row_id_range()
-                for data_file in split.files
-                if data_file.first_row_id is not None
-            ]
-        return Range.sort_and_merge_overlap(ranges, True)
 
     def _materialize(self):
         self._row_ids = None
@@ -377,33 +413,8 @@ class TorchDataset(Dataset):
         return index
 
     def _select_splits(self, ranges) -> List[Split]:
-        selected = []
-        split_indices = self._split_range_index.find(ranges)
-        for split_index in split_indices:
-            original = self.splits[split_index]
-            auth_result = None
-            split = original
-            if isinstance(split, QueryAuthSplit):
-                auth_result = split.auth_result
-                split = split.split
-
-            if isinstance(split, IndexedSplit):
-                split = split.data_split()
-            allowed = Range.and_(
-                ranges, self._split_ranges[split_index])
-            if not allowed:
-                continue
-
-            indexed = IndexedSplit(
-                split,
-                allowed,
-                exact_merged_row_count=sum(r.count() for r in allowed),
-            )
-            selected.append(
-                QueryAuthSplit(indexed, auth_result)
-                if auth_result is not None else indexed
-            )
-        return selected
+        return select_indexed_splits(
+            self.splits, self._split_ranges, self._split_range_index, ranges)
 
 
 class _BaseTorchIterDataset(IterableDataset):

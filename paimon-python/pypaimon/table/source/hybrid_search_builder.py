@@ -19,7 +19,9 @@
 
 import heapq
 import math
+from copy import copy
 from abc import ABC, abstractmethod
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -34,6 +36,7 @@ RRF_RANKER = "rrf"
 WEIGHTED_SCORE_RANKER = "weighted_score"
 MRR_RANKER = "mrr"
 _RRF_K = 60.0
+_MAX_ROUTE_WORKERS = 4
 
 
 def _check_full_text_options(options: Dict[str, str]):
@@ -230,11 +233,36 @@ class HybridSearchBuilder(ABC):
     def execute_local(self) -> ScoredGlobalIndexResult:
         """Execute hybrid index search locally."""
         route_builders = self.route_builders()
-        route_results = []
-        for route_builder in route_builders:
-            route_results.append(
+        if len(route_builders) <= 1:
+            return self.rank([
                 self.to_route_result(
-                    route_builder, route_builder.execute_local()))
+                    route_builder, route_builder.execute_local())
+                for route_builder in route_builders
+            ])
+
+        workers = min(len(route_builders), _MAX_ROUTE_WORKERS)
+        with ThreadPoolExecutor(
+                max_workers=workers,
+                thread_name_prefix="paimon-hybrid-search") as executor:
+            futures = [
+                executor.submit(route_builder.execute_local)
+                for route_builder in route_builders
+            ]
+            done, pending = wait(futures, return_when=FIRST_EXCEPTION)
+            failed = next(
+                (future for future in futures
+                 if future in done and future.exception() is not None),
+                None,
+            )
+            if failed is not None:
+                for future in pending:
+                    future.cancel()
+                failed.result()
+
+            route_results = [
+                self.to_route_result(route_builder, future.result())
+                for route_builder, future in zip(route_builders, futures)
+            ]
         return self.rank(route_results)
 
 
@@ -285,16 +313,19 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
 
     def route_builders(self) -> List[HybridSearchRouteBuilder]:
         self._validate_search()
+        from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+        execution = copy(self)
+        execution._table = self._table._copy_with_snapshot(TimeTravelUtil.resolve_snapshot(self._table))
         builders = []
         for route in self._routes:
             if route.is_vector():
                 builders.append(
                     HybridSearchRouteBuilder(
-                        route, self._new_vector_search_builder(route)))
+                        route, execution._new_vector_search_builder(route)))
             else:
                 builders.append(
                     HybridSearchRouteBuilder(
-                        route, self._new_full_text_search_builder(route)))
+                        route, execution._new_full_text_search_builder(route)))
         return builders
 
     def to_route_result(

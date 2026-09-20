@@ -327,7 +327,7 @@ public class DataEvolutionUtils {
 
         checkState(
                 anchor != null,
-                "Data-evolution deletion vectors should have a normal anchor file in each row range group.");
+                "A data-evolution row range group must contain a normal (non-blob, non-vector-store) anchor file.");
         return anchor;
     }
 

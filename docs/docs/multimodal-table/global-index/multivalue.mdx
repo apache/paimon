@@ -41,20 +41,14 @@ For membership lookup, the index has these semantics:
 The indexed column must be an `ARRAY` whose element type is supported by the global-index key
 serializer. A Multivalue index is single-column.
 
+For shared build, refresh, and coverage behavior, see
+[Manage Global Indexes](./manage-indexes).
+
 ## Build on a Data Evolution Table
 
-Create a table with the regular global-index prerequisites:
-
-```sql
-CREATE TABLE my_table (
-    id INT,
-    tags ARRAY<STRING>
-) TBLPROPERTIES (
-    'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true',
-    'global-index.enabled' = 'true'
-);
-```
+Create and populate the [shared example table](../global-index#prerequisites).
+Its `tags ARRAY<STRING>` column includes `blue`, `green`, and `red` values for the
+membership examples below.
 
 Flink and Spark can build the index with `create_global_index`:
 

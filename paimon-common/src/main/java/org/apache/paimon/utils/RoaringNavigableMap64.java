@@ -109,6 +109,18 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         return roaring64NavigableMap.iterator();
     }
 
+    /** Returns at most the first {@code maxValues} values without boxing them. */
+    public long[] toArray(int maxValues) {
+        Preconditions.checkArgument(maxValues >= 0, "Max value count must not be negative.");
+        int resultLength = (int) Math.min(getLongCardinality(), (long) maxValues);
+        long[] result = new long[resultLength];
+        LongIterator iterator = roaring64NavigableMap.getLongIterator();
+        for (int i = 0; i < resultLength; i++) {
+            result[i] = iterator.next();
+        }
+        return result;
+    }
+
     public static RoaringNavigableMap64 and(RoaringNavigableMap64 x1, RoaringNavigableMap64 x2) {
         Roaring64NavigableMap result = new Roaring64NavigableMap();
         result.or(x1.roaring64NavigableMap);
@@ -149,7 +161,18 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
     }
 
     public void deserialize(byte[] rbmBytes) throws IOException {
-        try (ByteArrayInputStream bis = new ByteArrayInputStream(rbmBytes);
+        deserialize(rbmBytes, 0, rbmBytes.length);
+    }
+
+    /** Deserializes a bitmap from a region of the given byte array without copying that region. */
+    public void deserialize(byte[] rbmBytes, int offset, int length) throws IOException {
+        Preconditions.checkArgument(
+                offset >= 0 && length >= 0 && offset <= rbmBytes.length - length,
+                "Invalid bitmap byte range [%s, %s) for array length %s.",
+                offset,
+                (long) offset + length,
+                rbmBytes.length);
+        try (ByteArrayInputStream bis = new ByteArrayInputStream(rbmBytes, offset, length);
                 DataInputStream dis = new DataInputStream(bis)) {
             roaring64NavigableMap.deserializePortable(dis);
         }

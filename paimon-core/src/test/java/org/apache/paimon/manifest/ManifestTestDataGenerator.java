@@ -101,6 +101,8 @@ public class ManifestTestDataGenerator {
         long numDeletedFiles = 0;
         int minBucket = Integer.MAX_VALUE;
         int maxBucket = Integer.MIN_VALUE;
+        Integer totalBuckets = null;
+        boolean totalBucketsKnown = true;
         int minLevel = Integer.MAX_VALUE;
         int maxLevel = Integer.MIN_VALUE;
         for (ManifestEntry entry : entries) {
@@ -112,6 +114,18 @@ public class ManifestTestDataGenerator {
             }
             minBucket = Math.min(minBucket, entry.bucket());
             maxBucket = Math.max(maxBucket, entry.bucket());
+            int candidate = entry.totalBuckets();
+            if (totalBucketsKnown) {
+                if (candidate <= 0) {
+                    totalBucketsKnown = false;
+                    totalBuckets = null;
+                } else if (totalBuckets == null) {
+                    totalBuckets = candidate;
+                } else if (totalBuckets != candidate) {
+                    totalBucketsKnown = false;
+                    totalBuckets = null;
+                }
+            }
             minLevel = Math.min(minLevel, entry.level());
             maxLevel = Math.max(maxLevel, entry.level());
         }
@@ -128,6 +142,8 @@ public class ManifestTestDataGenerator {
                 minLevel,
                 maxLevel,
                 null,
+                null,
+                totalBucketsKnown ? totalBuckets : null,
                 null);
     }
 

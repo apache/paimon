@@ -196,6 +196,21 @@ public class HadoopSecuredFileSystem extends FileSystem {
         }
     }
 
+    /**
+     * The underlying {@link FileSystem} this secured wrapper delegates to. Callers that reach past
+     * the wrapper for a method it cannot override, such as {@link FileSystem}'s protected
+     * three-argument {@code rename}, have to run the call through {@link #callAsLoginUser} so it
+     * still happens as the login user.
+     */
+    public FileSystem unwrap() {
+        return fileSystem;
+    }
+
+    /** Runs the callable as the login user, like every delegating method here does. */
+    public <T> T callAsLoginUser(Callable<T> callable) throws IOException {
+        return runSecuredWithIOException(callable);
+    }
+
     public static FileSystem trySecureFileSystem(
             FileSystem fileSystem, Options options, Configuration configuration)
             throws IOException {

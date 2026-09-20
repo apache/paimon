@@ -28,7 +28,25 @@ under the License.
 
 # SQL Query
 
-Just like all other tables, Paimon tables can be queried with `SELECT` statement.
+Query a Paimon table with `SELECT`. Choose the runtime mode and starting point before tuning
+parallelism or filters.
+
+## Choose a Read Mode
+
+| Goal | Runtime mode | Starting point |
+| --- | --- | --- |
+| Read the current table once | Batch | Latest snapshot by default. |
+| Read an older table version | Batch | [Snapshot, timestamp, watermark, or tag](#batch-time-travel). |
+| Process a bounded range of changes | Batch | [Incremental range](#batch-incremental), with an exclusive start and inclusive end. |
+| Load the table and follow changes | Streaming | Latest full snapshot, then subsequent changes by default. |
+| Follow only new changes | Streaming | `scan.mode = latest`. |
+| Resume from a selected version | Streaming | [Streaming time travel](#streaming-time-travel); use `from-snapshot-full` to include its full contents. |
+
+![Batch reads one snapshot and stops; streaming can read a full snapshot then follow changes, or follow new changes only.](/img/flink-query-modes.svg)
+
+For primary-key tables, choose a [changelog producer](../primary-key-table/changelog-producer)
+that supplies the changes required by the downstream query. For append tables, see
+[Streaming Reads](../append-table/streaming).
 
 ## Batch Query
 
@@ -41,7 +59,8 @@ SET 'execution.runtime-mode' = 'batch';
 
 ### Batch Time Travel
 
-Paimon batch reads with time travel can specify a snapshot or a tag and read the corresponding data.
+Select a retained snapshot by ID, timestamp, watermark, or tag. A batch time-travel query returns
+the table contents at that version; it does not return only the changes made in that snapshot.
 
 <Tabs groupId="time-travel-example">
 
@@ -61,22 +80,22 @@ SELECT * FROM t /*+ OPTIONS('scan.timestamp' = '2023-12-09 23:09:12') */;
 -- read tag 'my-tag'
 SELECT * FROM t /*+ OPTIONS('scan.tag-name' = 'my-tag') */;
 
--- read the snapshot from watermark, will match the first snapshot after the watermark
-SELECT * FROM t /*+ OPTIONS('scan.watermark' = '1678883047356') */; 
+-- Read the first retained snapshot with watermark >= the requested value.
+SELECT * FROM t /*+ OPTIONS('scan.watermark' = '1678883047356') */;
 ```
 
 </TabItem>
 
 <TabItem value="flink-1-18" label="Flink 1.18+">
 
-Flink SQL supports time travel syntax after 1.18.
+Flink 1.18+ supports SQL time-travel syntax.
 
 ```sql
 -- read the snapshot from specified timestamp
 SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '2023-01-01 00:00:00';
 
 -- you can also use some simple expressions (see flink document to get supported functions)
-SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '2023-01-01 00:00:00' + INTERVAL '1' DAY
+SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '2023-01-01 00:00:00' + INTERVAL '1' DAY;
 ```
 
 </TabItem>
@@ -85,60 +104,67 @@ SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '2023-01-01 00:00:00' + INTERVAL
 
 ### Batch Incremental
 
-Read incremental changes between start snapshot (exclusive) and end snapshot.
+Read changes in **(start, end]**: the start boundary is excluded and the end boundary is included.
+You can specify snapshot IDs, tag names, or timestamps.
 
-For example:
-- '5,10' means changes between snapshot 5 and snapshot 10.
-- 'TAG1,TAG3' means changes between TAG1 and TAG3.
+![An incremental read from snapshot 12 to 15 excludes snapshot 12, includes changes from 13 through 15, and stops at 15.](/img/flink-incremental-boundaries.svg)
 
 ```sql
--- incremental between snapshot ids
-SELECT * FROM t /*+ OPTIONS('incremental-between' = '12,20') */;
+SET 'execution.runtime-mode' = 'batch';
 
--- incremental between snapshot time mills
-SELECT * FROM t /*+ OPTIONS('incremental-between-timestamp' = '1692169000000,1692169900000') */;
-SELECT * FROM t /*+ OPTIONS('incremental-between-timestamp' = '2025-03-12 00:00:00,2025-03-12 00:08:00') */;
+-- Changes committed after snapshot 12, through snapshot 15.
+SELECT * FROM t /*+ OPTIONS('incremental-between' = '12,15') */;
+
+-- The same boundary convention applies to tags.
+SELECT * FROM t /*+ OPTIONS('incremental-between' = 'TAG1,TAG3') */;
+
+-- Timestamp boundaries can be Unix milliseconds or timestamp strings.
+SELECT * FROM t /*+ OPTIONS(
+    'incremental-between-timestamp' = '1692169000000,1692169900000'
+) */;
+SELECT * FROM t /*+ OPTIONS(
+    'incremental-between-timestamp' = '2025-03-12 00:00:00,2025-03-12 00:08:00'
+) */;
 ```
 
-By default, will scan changelog files for the table which produces changelog files. Otherwise, scan newly changed files.
-You can also force specifying `'incremental-between-scan-mode'`.
+By default, an incremental read uses changelog files when the table produces them; otherwise it
+reads newly changed files. Use `incremental-between-scan-mode` to select the scan mode explicitly.
+An incremental read is not a full table snapshot.
 
-In Batch SQL, the `DELETE` records are not allowed to be returned, so records of `-D` will be dropped.
-If you want see `DELETE` records, you can use audit_log table:
+Batch SQL drops `DELETE` records from an ordinary table result. To inspect deletes as data, read
+the [audit-log system table](../concepts/system-tables#audit-log-table), which exposes the row kind:
 
 ```sql
-SELECT * FROM t$audit_log /*+ OPTIONS('incremental-between' = '12,20') */;
+SELECT * FROM `t$audit_log` /*+ OPTIONS('incremental-between' = '12,15') */;
 ```
 
 ### Batch Incremental between Auto-created Tags
 
-You can use `incremental-between` to query incremental changes between two tags. But for auto-created tag, the tag may
-not be created in-time because of data delay.
+An automatically created tag may be missing when data is delayed. A direct `incremental-between`
+query fails if a named boundary tag does not exist.
 
-For example, assume that tags '2024-12-01', '2024-12-02' and '2024-12-04' are auto created daily. Data for 12/03 are delayed
-and ingested with data for 12/04. Now if you want to query the incremental changes between tags, and you don't know the tag 
-of 12/03 is not created, you will use `incremental-between` with '2024-12-01,2024-12-02', '2024-12-02,2024-12-03' and 
-'2024-12-03,2024-12-04' respectively, then you will get an error that the tag '2024-12-03' doesn't exist.
+Use `incremental-to-auto-tag` when only the end tag is known. Paimon finds the preceding tag and
+reads the changes between them. If either the requested tag or its predecessor is missing, the
+result is empty.
 
-We introduced a new option `incremental-to-auto-tag` for this scenario. You can only specify the end tag, and Paimon will 
-find an earlier tag and return changes between them. If the tag doesn't exist or the earlier tag doesn't exist, return empty. 
+For example, suppose the existing daily tags are `2024-12-01`, `2024-12-02`, and `2024-12-04`:
 
-For example, when you query 'incremental-to-auto-tag=2024-12-01' or 'incremental-to-auto-tag=2024-12-03', the result is 
-empty; Query 'incremental-to-auto-tag=2024-12-02', the result is change between 12/01 and 12/02; Query 'incremental-to-auto-tag=2024-12-04', 
-the result is change between 12/02 and 12/04.
+| Requested end tag | Result |
+| --- | --- |
+| `2024-12-01` | Empty: there is no preceding tag. |
+| `2024-12-02` | Changes between `2024-12-01` and `2024-12-02`. |
+| `2024-12-03` | Empty: this tag does not exist. |
+| `2024-12-04` | Changes between `2024-12-02` and `2024-12-04`. |
+
+```sql
+SELECT * FROM t /*+ OPTIONS('incremental-to-auto-tag' = '2024-12-04') */;
+```
 
 ## Streaming Query
 
-By default, Streaming read produces the latest snapshot on the table upon first startup,
-and continue to read the latest changes.
-
-Paimon by default ensures that your startup is properly processed with all data included.
-
-:::warning
-
-Paimon Source in Streaming mode is unbounded, like a queue that never ends.
-
-:::
+On a fresh start with no time-travel options or stored consumer progress, a streaming read
+loads the latest full snapshot and then follows changes. It is unbounded: the query continues
+running until it is canceled or otherwise stopped.
 
 ```sql
 -- Flink SQL
@@ -153,20 +179,23 @@ SELECT * FROM t /*+ OPTIONS('scan.mode' = 'latest') */;
 
 ### Streaming Time Travel
 
-If you only want to process data for today and beyond, you can do so with partitioned filters:
+Use a partition filter when the intended range is expressed by partition values:
 
 ```sql
 SELECT * FROM t WHERE dt > '2023-06-26';
 ```
 
-If it's not a partitioned table, or you can't filter by partition, you can use Time travel's stream read.
+To select a position in commit history, use streaming time travel. `scan.snapshot-id` alone
+starts with changes from that snapshot; `from-snapshot-full` first loads its complete contents
+and then follows later changes. These examples apply to a fresh scan; stored consumer progress
+or restored Flink state can determine the start position instead.
 
 <Tabs groupId="streaming-time-travel">
 
 <TabItem value="flink-dynamic-option" label="Flink (dynamic option)">
 
 ```sql
--- read changes from snapshot id 1L 
+-- read changes from snapshot id 1L
 SELECT * FROM t /*+ OPTIONS('scan.snapshot-id' = '1') */;
 
 -- read changes from snapshot specified timestamp
@@ -180,22 +209,26 @@ SELECT * FROM t /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id' 
 
 <TabItem value="flink-1-18" label="Flink 1.18+">
 
-Flink SQL supports time travel syntax after 1.18.
+Flink 1.18+ supports SQL time-travel syntax.
 ```sql
 -- read the snapshot from specified timestamp
 SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '2023-01-01 00:00:00';
 
 -- you can also use some simple expressions (see flink document to get supported functions)
-SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '2023-01-01 00:00:00' + INTERVAL '1' DAY
+SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '2023-01-01 00:00:00' + INTERVAL '1' DAY;
 ```
 
 </TabItem>
 
 </Tabs>
 
-Time travel's stream read rely on snapshots, but by default, snapshot only retains data within 1 hour, which can 
-prevent you from reading older incremental data. So, Paimon also provides another mode for streaming reads, 
-`scan.file-creation-time-millis`, which provides a rough filtering to retain files generated after `timeMillis`.
+Streaming time travel depends on retained snapshots or changelogs. Configure
+[snapshot retention](../maintenance/manage-snapshots) and use a [Consumer ID](./consumer-id)
+when a reader needs to protect its progress from expiration.
+
+For approximate filtering by data-file creation time, use `scan.file-creation-time-millis`.
+This filters files, not individual record timestamps, and is not a replacement for retaining
+the history needed for exact replay.
 
 ```sql
 SELECT * FROM t /*+ OPTIONS('scan.file-creation-time-millis' = '1678883047356') */;
@@ -203,48 +236,38 @@ SELECT * FROM t /*+ OPTIONS('scan.file-creation-time-millis' = '1678883047356') 
 
 ### Read Overwrite
 
-Streaming reading will ignore the commits generated by `INSERT OVERWRITE` by default. If you want to read the
-commits of `OVERWRITE`, you can configure `streaming-read-overwrite`.
+Streaming reads ignore `INSERT OVERWRITE` commits by default. For primary key tables, enable `streaming-read-overwrite`
+to read the changes. For append tables, use `streaming-read-append-overwrite` to read the added rows without retractions
+for replaced rows; see [Append-table overwrite commits](../append-table/streaming#overwrite-commits).
 
 ## Read Parallelism
 
-By default, the parallelism of batch reads is the same as the number of splits, while the parallelism of stream 
-reads is the same as the number of buckets, but not greater than `scan.infer-parallelism.max`.
+Set `scan.parallelism` to choose source parallelism explicitly:
 
-Disable `scan.infer-parallelism`, global parallelism will be used for reads.
+```sql
+SELECT * FROM t /*+ OPTIONS('scan.parallelism' = '4') */;
+```
 
-You can also manually specify the parallelism from `scan.parallelism`.
+Otherwise, Paimon infers source parallelism only when global parallelism is unset and
+`scan.infer-parallelism` is enabled. The inference depends on the read path:
 
-<table className="configuration table table-bordered">
-    <thead>
-        <tr>
-            <th className="text-left" style={{width: "20%"}}>Key</th>
-            <th className="text-left" style={{width: "15%"}}>Default</th>
-            <th className="text-left" style={{width: "10%"}}>Type</th>
-            <th className="text-left" style={{width: "55%"}}>Description</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td><h5>scan.infer-parallelism</h5></td>
-            <td style={{wordWrap: "break-word"}}>true</td>
-            <td>Boolean</td>
-            <td>If it is false, parallelism of source are set by global parallelism. Otherwise, source parallelism is inferred from splits number (batch mode) or bucket number(streaming mode).</td>
-        </tr>
-         <tr>
-            <td><h5>scan.infer-parallelism.max</h5></td>
-            <td style={{wordWrap: "break-word"}}>1024</td>
-            <td>Integer</td>
-            <td>If scan.infer-parallelism is true, limit the parallelism of source through this option.</td>
-        </tr>
-        <tr>
-            <td><h5>scan.parallelism</h5></td>
-            <td style={{wordWrap: "break-word"}}>(none)</td>
-            <td>Integer</td>
-            <td>Define a custom parallelism for the scan source. By default, if this option is not defined, the planner will derive the parallelism for each statement individually by also considering the global configuration. If user enable the scan.infer-parallelism, the planner will derive the parallelism by inferred parallelism.</td>
-        </tr>
-    </tbody>
-</table>
+| Read path | Inference |
+| --- | --- |
+| Batch data table | Estimate planned work from partition data size and `split.target-size`; the estimate need not equal the actual split count. |
+| Other batch sources | Use their planned splits. |
+| Streaming, fixed buckets | Use the bucket count. |
+| Streaming, `bucket = -1` | Fall back to Flink's configured or default parallelism. |
+
+Batch inference is capped by `scan.infer-parallelism.max` and can also be reduced by a query
+limit. That cap is not applied by the fixed-bucket streaming inference path.
+
+| Option | Default | Effect |
+| --- | --- | --- |
+| `scan.parallelism` | Not set | Set the source parallelism explicitly. |
+| `scan.infer-parallelism` | `true` | Enable inference when no explicit source or global parallelism is set. |
+| `scan.infer-parallelism.max` | `1024` | Cap inferred batch parallelism. |
+
+See [FlinkConnectorOptions](../maintenance/configurations#flinkconnectoroptions) for the full reference.
 
 ## Query Optimization
 
@@ -263,10 +286,10 @@ The filter functions that can accelerate data skipping are:
 - `LIKE 'abc%'`
 - `IS NULL`
 
-Paimon will sort the data by primary key, which speeds up the point queries
-and range queries. When using a composite primary key, it is best for the query
-filters to form a [leftmost prefix](https://dev.mysql.com/doc/refman/5.7/en/multiple-column-indexes.html)
-of the primary key for good acceleration.
+Primary-key tables normally sort rows by primary key, which helps point and range queries.
+For a composite primary key, filters on its leading columns can skip more data. Check the table's
+actual [data layout](../primary-key-table/data-distribution) and
+[query performance guidance](../primary-key-table/query-performance) when choosing filters.
 
 Suppose that a table has the following specification:
 
@@ -274,7 +297,7 @@ Suppose that a table has the following specification:
 CREATE TABLE orders (
     catalog_id BIGINT,
     order_id BIGINT,
-    .....,
+    amount DECIMAL(10, 2),
     PRIMARY KEY (catalog_id, order_id) NOT ENFORCED -- composite primary key
 );
 ```

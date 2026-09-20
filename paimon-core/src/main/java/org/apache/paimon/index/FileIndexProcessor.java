@@ -49,6 +49,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -211,7 +212,9 @@ public class FileIndexProcessor {
                                 : createIndexNameMapping(
                                         currentSchema.fields(), fileSchema.getFields());
 
-                List<String> projectedColNames = new ArrayList<>();
+                // several nested columns can share one top level map column, and the projection
+                // must not repeat it: RowType rejects duplicate field names
+                Set<String> projectedColNames = new LinkedHashSet<>();
                 Set<String> projectedColFullNames = new HashSet<>();
                 Map<String, Set<String>> projectedIndexTypes = new HashMap<>();
                 for (Map.Entry<FileIndexOptions.Column, Map<String, Options>> entry :

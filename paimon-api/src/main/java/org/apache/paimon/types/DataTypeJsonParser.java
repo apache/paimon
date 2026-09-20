@@ -42,13 +42,19 @@ public final class DataTypeJsonParser {
         return parseDataField(json, null);
     }
 
-    private static DataField parseDataField(JsonNode json, AtomicInteger fieldId) {
+    /**
+     * Parses a field, drawing its id from {@code fieldId} when the json carries none. Callers that
+     * parse a sequence of fields pass one counter for the whole sequence so the ids stay distinct;
+     * pass {@code null} to require an explicit id.
+     */
+    public static DataField parseDataField(JsonNode json, AtomicInteger fieldId) {
         int id;
         JsonNode idNode = json.get("id");
         if (idNode != null) {
             checkState(fieldId == null || fieldId.get() == -1, "Partial field id is not allowed.");
             id = idNode.asInt();
         } else {
+            checkState(fieldId != null, "Field id is required but the field carries none.");
             id = fieldId.incrementAndGet();
         }
         String name = json.get("name").asText();

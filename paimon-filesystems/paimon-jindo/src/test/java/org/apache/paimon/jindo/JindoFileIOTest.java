@@ -21,17 +21,23 @@ package org.apache.paimon.jindo;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.RenamingTwoPhaseOutputStream;
+import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.Pair;
 
+import com.aliyun.jindodata.common.JindoHadoopSystem;
 import com.aliyun.oss.HttpMethod;
 import com.aliyun.oss.OSSClient;
 import com.aliyun.oss.model.ObjectMetadata;
+import org.apache.hadoop.fs.FSDataOutputStream;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.net.URL;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.util.Date;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -80,7 +86,7 @@ public class JindoFileIOTest {
         options.set("fs.oss.accessKeySecret", "access-secret");
         options.set("fs.oss.securityToken", "security-token");
 
-        OSSClient client = JindoFileIO.createBlobClient(options);
+        OSSClient client = JindoBlobPresigner.createBlobClient(options);
         try {
             assertThat(client.getEndpoint()).isEqualTo(URI.create("https://oss.example.com"));
             assertThat(client.getObjectOperation().getRegion()).isEqualTo("cn-hangzhou");
@@ -90,6 +96,17 @@ public class JindoFileIOTest {
                     .isEqualTo("access-secret");
             assertThat(client.getCredentialsProvider().getCredentials().getSecurityToken())
                     .isEqualTo("security-token");
+            URL signedUrl =
+                    client.generatePresignedUrl(
+                            "bucket", "object", new Date(System.currentTimeMillis() + 60_000));
+            assertThat(signedUrl.getProtocol()).isEqualTo("https");
+            assertThat(signedUrl.getHost()).isEqualTo("bucket.oss.example.com");
+            assertThat(signedUrl.getPath()).isEqualTo("/object");
+            assertThat(signedUrl.getQuery())
+                    .contains(
+                            "OSSAccessKeyId=access-key",
+                            "Signature=",
+                            "security-token=security-token");
         } finally {
             client.shutdown();
         }
@@ -114,12 +131,53 @@ public class JindoFileIOTest {
                                         "https://bucket.oss.example.com/"
                                                 + invocation.getArgument(1)));
 
-        JindoFileIO fileIO = new JindoFileIO(client);
+        JindoFileIO fileIO = new JindoFileIO(new JindoBlobPresigner(client));
         assertThat(fileIO.createBlobPresignedUrl(tableRoot, descriptor, Duration.ofHours(1)))
                 .startsWith("https://bucket.oss.example.com/table/data/_bloburl_");
 
         fileIO.close();
         verify(client).shutdown();
+    }
+
+    @Test
+    public void testFallbackToRenamingWhenMultipartUploadUnsupported() throws Exception {
+        JindoHadoopSystem fs = mock(JindoHadoopSystem.class);
+        org.apache.hadoop.fs.Path hadoopPath = mock(org.apache.hadoop.fs.Path.class);
+        when(fs.exists(any())).thenReturn(false);
+        when(fs.getMpuStore(any())).thenReturn(null);
+        when(fs.create(any(), eq(false))).thenReturn(mock(FSDataOutputStream.class));
+
+        JindoFileIO fileIO = new TestingJindoFileIO(fs, hadoopPath);
+        TwoPhaseOutputStream stream =
+                fileIO.newTwoPhaseOutputStream(
+                        new Path("oss://bucket.cn-hangzhou.oss-dls.aliyuncs.com/table/file"),
+                        false);
+
+        assertThat(stream).isInstanceOf(RenamingTwoPhaseOutputStream.class);
+        stream.close();
+        verify(fs).getMpuStore(hadoopPath);
+    }
+
+    private static class TestingJindoFileIO extends JindoFileIO {
+
+        private final JindoHadoopSystem fs;
+        private final org.apache.hadoop.fs.Path hadoopPath;
+
+        private TestingJindoFileIO(JindoHadoopSystem fs, org.apache.hadoop.fs.Path hadoopPath) {
+            this.fs = fs;
+            this.hadoopPath = hadoopPath;
+        }
+
+        @Override
+        protected org.apache.hadoop.fs.Path path(Path path) {
+            return hadoopPath;
+        }
+
+        @Override
+        protected Pair<JindoHadoopSystem, String> getFileSystemPair(
+                org.apache.hadoop.fs.Path path, boolean enableCache) {
+            return Pair.of(fs, "dls");
+        }
     }
 
     private static String sha256Hex(byte[] bytes) throws Exception {

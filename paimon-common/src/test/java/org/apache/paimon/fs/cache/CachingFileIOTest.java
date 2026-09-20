@@ -25,6 +25,7 @@ import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadUtils;
 import org.apache.paimon.options.MemorySize;
@@ -95,6 +96,63 @@ class CachingFileIOTest {
     }
 
     @Test
+    void testMemoryModeDoesNotCacheInPlaceOverwrittenFiles() throws IOException {
+        MockFileIO delegate = new MockFileIO();
+        CachingFileIO cachingIO =
+                newCachingFileIO(
+                        delegate,
+                        new LocalMemoryCacheManager(Long.MAX_VALUE, 64),
+                        EnumSet.of(FileType.META),
+                        64);
+        Path consumer = new Path("consumer-1");
+
+        // consumer-* is written in place by overwriteFileUtf8, so it is mutable and bypasses the
+        // cache: each read reaches the delegate and sees the current content.
+        delegate.addFile("consumer-1", "v1cc".getBytes());
+        try (SeekableInputStream in = cachingIO.newInputStream(consumer)) {
+            assertThat(in).isNotInstanceOf(CachingSeekableInputStream.class);
+            byte[] buf = new byte[4];
+            in.read(buf, 0, 4);
+            assertThat(new String(buf)).isEqualTo("v1cc");
+        }
+        assertThat(delegate.newInputStreamCallCount("consumer-1")).isEqualTo(1);
+
+        delegate.addFile("consumer-1", "v2cc".getBytes());
+        try (SeekableInputStream in = cachingIO.newInputStream(consumer)) {
+            byte[] buf = new byte[4];
+            in.read(buf, 0, 4);
+            assertThat(new String(buf)).isEqualTo("v2cc");
+        }
+        // never cached: the overwrite is visible and the delegate was opened again
+        assertThat(delegate.newInputStreamCallCount("consumer-1")).isEqualTo(2);
+    }
+
+    @Test
+    void testMemoryModeImmutableCacheHitsDoNotRestatDelegate() throws IOException {
+        MockFileIO delegate = new MockFileIO();
+        CachingFileIO cachingIO =
+                newCachingFileIO(
+                        delegate,
+                        new LocalMemoryCacheManager(Long.MAX_VALUE, 64),
+                        EnumSet.of(FileType.META),
+                        64);
+        Path snapshot = new Path("snapshot-1");
+        delegate.addFile("snapshot-1", "0123456789abcdef".getBytes());
+
+        for (int i = 0; i < 3; i++) {
+            try (SeekableInputStream in = cachingIO.newInputStream(snapshot)) {
+                assertThat(readAll(in, 16)).isEqualTo("0123456789abcdef".getBytes());
+            }
+        }
+
+        // An immutable file keeps the path-only memory key: opened once, then served from cache.
+        // Its size is resolved lazily and remembered, so repeated hits do not re-stat the
+        // delegate the way moving getFileStatus onto every open would.
+        assertThat(delegate.newInputStreamCallCount("snapshot-1")).isEqualTo(1);
+        assertThat(delegate.getFileStatusCallCount("snapshot-1")).isEqualTo(1);
+    }
+
+    @Test
     void testCreateBlobPresignedUrlDelegates() throws IOException {
         FileIO delegate = mock(FileIO.class);
         CachingFileIO cachingIO =
@@ -133,6 +191,26 @@ class CachingFileIOTest {
         verify(delegate, never()).rename(any(), any());
     }
 
+    @Test
+    void testListFilesIterativeReachesDelegateOverride() throws IOException {
+        FileIO delegate = mock(FileIO.class);
+        CachingFileIO cachingIO =
+                newCachingFileIO(
+                        delegate,
+                        new LocalMemoryCacheManager(1024, 64),
+                        EnumSet.of(FileType.DATA),
+                        64);
+        Path tableRoot = new Path("oss://bucket/table");
+        @SuppressWarnings("unchecked")
+        RemoteIterator<FileStatus> marker = mock(RemoteIterator.class);
+        when(delegate.listFilesIterative(tableRoot, true)).thenReturn(marker);
+
+        assertThat(cachingIO.listFilesIterative(tableRoot, true)).isSameAs(marker);
+        verify(delegate).listFilesIterative(tableRoot, true);
+        // the interface default would construct its own iterator backed by listStatus
+        verify(delegate, never()).listStatus(any());
+    }
+
     private CachingFileIO newCachingFileIO(
             FileIO delegate, LocalCacheManager cache, EnumSet<FileType> whitelist, int blockSize) {
         return new CachingFileIO(delegate, cache, whitelist);
@@ -153,6 +231,44 @@ class CachingFileIOTest {
                     .isInstanceOf(IOException.class)
                     .hasMessageContaining("Premature EOF");
         }
+    }
+
+    @Test
+    void fileSizeMemoIsBounded() {
+        // both cache managers keep this memo, and either one is picked purely by whether
+        // local-cache.dir is set, so the bound has to hold for both
+        assertFileSizeMemoIsBounded(new LocalMemoryCacheManager(Long.MAX_VALUE, 64));
+        assertFileSizeMemoIsBounded(
+                new LocalDiskCacheManager(
+                        tempDir.resolve("memo-bound").toString(), Long.MAX_VALUE, 64));
+    }
+
+    private static void assertFileSizeMemoIsBounded(LocalCacheManager cache) {
+        // more puts than the bound, so eviction has to run. FileSizeMemoTest pins the count and
+        // the eviction order; this only checks that the manager routes through a bounded memo.
+        long entries = FileSizeMemo.maxEntries() + 1024L;
+
+        cache.putFileSize("file-0", 100L);
+        for (long i = 1; i <= entries; i++) {
+            cache.putFileSize("file-" + i, i);
+        }
+
+        assertThat(cache.getFileSize("file-0")).isEqualTo(-1L);
+        assertThat(cache.getFileSize("file-" + entries)).isEqualTo(entries);
+    }
+
+    @Test
+    void memoryCacheInvalidatesFileSizeMemoByPrefix() {
+        // only the memory manager overrides invalidate; the disk one inherits the no-op default,
+        // which this PR does not change
+        LocalMemoryCacheManager cache = new LocalMemoryCacheManager(Long.MAX_VALUE, 64);
+        cache.putFileSize("ns/a", 1L);
+        cache.putFileSize("other/a", 2L);
+
+        cache.invalidate("ns/");
+
+        assertThat(cache.getFileSize("ns/a")).isEqualTo(-1L);
+        assertThat(cache.getFileSize("other/a")).isEqualTo(2L);
     }
 
     @Test

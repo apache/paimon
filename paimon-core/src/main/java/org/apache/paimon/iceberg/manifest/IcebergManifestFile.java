@@ -18,6 +18,7 @@
 
 package org.apache.paimon.iceberg.manifest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.Serializer;
@@ -120,7 +121,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                         + "kv_name_r2_upper_bounds:k129_v130,"
                         + "k_id_k129_v130:129,"
                         + "v_id_k129_v130:130");
-        FileFormat manifestFileAvro = FileFormat.fromIdentifier("avro", avroOptions);
+        FileFormat manifestFileAvro = FileFormat.manifestFormat(new CoreOptions(avroOptions));
         return new IcebergManifestFile(
                 table.fileIO(),
                 partitionType,

@@ -75,12 +75,16 @@ def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
             try:
                 index_file = entry.index_file
                 file_name = index_file.file_name
-                path = (
-                    index_file.external_path
-                    or table.path_factory()
-                    .global_index_path_factory()
-                    .to_path(file_name)
-                )
+                if index_file.index_type == 'DELETION_VECTORS':
+                    path = table.path_factory().bucket_index_path(
+                        tuple(entry.partition.values), entry.bucket, index_file, table.file_io)
+                else:
+                    path = (
+                        index_file.external_path
+                        or table.path_factory()
+                        .global_index_path_factory()
+                        .to_path(file_name)
+                    )
                 table.file_io.delete_quietly(path)
             except Exception as error:
                 logger.warning(
@@ -116,8 +120,14 @@ def _manifest_file_key(manifest: ManifestFileMeta):
         GenericRowSerializer.to_bytes(stats.max_values),
         tuple(stats.null_counts) if stats.null_counts is not None else None,
         manifest.schema_id,
+        manifest.min_bucket,
+        manifest.max_bucket,
+        manifest.min_level,
+        manifest.max_level,
         manifest.min_row_id,
         manifest.max_row_id,
+        manifest.total_buckets,
+        tuple(manifest.extra_files) if manifest.extra_files is not None else None,
     )
 
 
@@ -222,6 +232,8 @@ class FileStoreCommit:
         self.manifest_list_manager = ManifestListManager(table)
 
         self.manifest_target_size = table.options.manifest_target_size()
+        self.skip_manifest_merge_on_write_only = (
+            table.options.write_only() and table.options.manifest_merge_skip_on_write_only())
         self.manifest_merge_min_count = table.options.manifest_merge_min_count()
         self.manifest_file_merger = ManifestFileMerger(
             self.manifest_file_manager,
@@ -250,9 +262,14 @@ class FileStoreCommit:
         table_rollback = table.catalog_environment.catalog_table_rollback()
         self.rollback = CommitRollback(table_rollback) if table_rollback is not None else None
 
-    def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
+    def commit(
+            self,
+            commit_messages: List[CommitMessage],
+            commit_identifier: int,
+            snapshot_properties: Optional[Dict[str, str]] = None):
         """Commit the given commit messages in normal append mode."""
-        if not commit_messages:
+        ignore_empty_commit = self.table.options.snapshot_ignore_empty_commit()
+        if not commit_messages and ignore_empty_commit:
             return
 
         # Extract the minimum check_from_snapshot from commit messages
@@ -334,9 +351,16 @@ class FileStoreCommit:
                          allow_rollback=allow_rollback,
                          index_deletes=index_deletes,
                          index_adds=index_adds,
-                         hash_index_base_snapshot=hash_index_base_snapshot)
+                         hash_index_base_snapshot=hash_index_base_snapshot,
+                         snapshot_properties=snapshot_properties,
+                         allow_empty_commit=not ignore_empty_commit)
 
-    def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
+    def overwrite(
+            self,
+            overwrite_partition,
+            commit_messages: List[CommitMessage],
+            commit_identifier: int,
+            snapshot_properties: Optional[Dict[str, str]] = None):
         """Commit the given commit messages in overwrite mode."""
         logger.info(
             "Ready to overwrite to table %s, number of commit messages: %d",
@@ -382,6 +406,7 @@ class FileStoreCommit:
                 index_deletes=index_deletes,
                 index_adds=index_adds,
                 hash_index_base_snapshot=hash_index_base_snapshot,
+                snapshot_properties=snapshot_properties,
             )
 
     @staticmethod
@@ -487,7 +512,9 @@ class FileStoreCommit:
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan,
                     detect_conflicts=False, allow_rollback=False, index_deletes=None,
                     index_adds=None, changelog_entries=None,
-                    hash_index_base_snapshot=None):
+                    hash_index_base_snapshot=None,
+                    snapshot_properties: Optional[Dict[str, str]] = None,
+                    allow_empty_commit=False):
 
         retry_count = 0
         retry_result = None
@@ -510,9 +537,10 @@ class FileStoreCommit:
                 else commit_entries_plan(latest_snapshot)
             )
 
-            # No entries to commit (e.g. drop_partitions with no matching
-            # data): skip an empty snapshot.
-            if not commit_entries and not index_deletes and not index_adds:
+            # Append can explicitly publish an empty snapshot for tagging.
+            # No-op overwrite/drop operations retain their existing behavior.
+            if (not allow_empty_commit and not commit_entries
+                    and not index_deletes and not index_adds):
                 break
 
             result = self._try_commit_once(
@@ -528,6 +556,7 @@ class FileStoreCommit:
                 index_adds=index_adds,
                 hash_index_base_snapshot=hash_index_base_snapshot,
                 commit_result_may_be_uncertain=commit_result_may_be_uncertain,
+                snapshot_properties=snapshot_properties,
             )
 
             if isinstance(result, RewriteResult):
@@ -606,7 +635,9 @@ class FileStoreCommit:
                          index_deletes=None,
                          index_adds=None,
                          hash_index_base_snapshot=None,
-                         commit_result_may_be_uncertain: bool = False) -> CommitResult:
+                         commit_result_may_be_uncertain: bool = False,
+                         snapshot_properties: Optional[Dict[str, str]] = None
+                         ) -> CommitResult:
         start_millis = int(time.time() * 1000)
         if self._is_duplicate_commit(
                 retry_result,
@@ -719,7 +750,7 @@ class FileStoreCommit:
         merge_before_manifests = []
         merge_after_manifests = []
         merge_new_files = []
-        skip_manifest_merge_on_retry = False
+        skip_manifest_merge = False
         try:
             new_manifest_file_metas = self._write_manifest_files(commit_entries, new_manifest_file)
             self.manifest_list_manager.write(delta_manifest_list, new_manifest_file_metas)
@@ -748,10 +779,12 @@ class FileStoreCommit:
                 if previous_record_count:
                     total_record_count += previous_record_count
 
-            reused_manifests = _try_reuse_manifest_merge_result(
-                retry_result, merge_before_manifests)
-            skip_manifest_merge_on_retry = (
-                reused_manifests is None and retry_result is not None)
+            reused_manifests = (
+                _try_reuse_manifest_merge_result(retry_result, merge_before_manifests)
+                if not self.skip_manifest_merge_on_write_only else None)
+            skip_manifest_merge = (
+                self.skip_manifest_merge_on_write_only
+                or (reused_manifests is None and retry_result is not None))
             if reused_manifests is not None:
                 merge_after_manifests = reused_manifests
                 old_names = {
@@ -761,7 +794,7 @@ class FileStoreCommit:
                     manifest for manifest in merge_after_manifests
                     if manifest.file_name not in old_names
                 ]
-            elif skip_manifest_merge_on_retry:
+            elif skip_manifest_merge:
                 merge_after_manifests = merge_before_manifests
             else:
                 merge_after_manifests, merge_new_files = (
@@ -807,6 +840,9 @@ class FileStoreCommit:
                     latest_snapshot.watermark if latest_snapshot else None),
                 next_row_id=next_row_id,
                 index_manifest=index_manifest,
+                properties=(
+                    dict(snapshot_properties)
+                    if snapshot_properties else None),
             )
             # Generate partition statistics for the commit
             statistics = self._generate_partition_statistics(commit_entries)
@@ -843,7 +879,7 @@ class FileStoreCommit:
                     )
                     manifest_merge_result = (
                         None
-                        if skip_manifest_merge_on_retry
+                        if skip_manifest_merge
                         else ManifestMergeResult(
                             merge_before_manifests,
                             merge_after_manifests,

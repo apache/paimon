@@ -51,6 +51,7 @@ import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.CastTransform;
 import org.apache.paimon.predicate.ConcatTransform;
@@ -81,6 +82,7 @@ import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
@@ -125,6 +127,8 @@ import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mockito;
 
 import java.io.File;
@@ -2471,6 +2475,57 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testLoadSchema() throws Exception {
+        Identifier identifier = Identifier.create("test_list_schemas", "table_load");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager local = new FileSystemSchemaManager(table.fileIO(), table.location());
+        TableSchema first = local.latest().get();
+
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        TableSchema latest = local.latest().get();
+
+        assertThat(catalog.loadSchema(identifier, "EARLIEST")).contains(first);
+        assertThat(catalog.loadSchema(identifier, "LATEST")).contains(latest);
+        assertThat(catalog.loadSchema(identifier, Long.toString(first.id()))).contains(first);
+        assertThat(catalog.loadSchema(identifier, "9999")).isEmpty();
+        assertThat(catalog.loadSchema(identifier, "invalid-version")).isEmpty();
+    }
+
+    @Test
+    public void testListSchemasPaged() throws Exception {
+        Identifier identifier = Identifier.create("test_list_schemas", "table_paged");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager local = new FileSystemSchemaManager(table.fileIO(), table.location());
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        catalog.alterTable(identifier, SchemaChange.setOption("cc", "dd"), false);
+        catalog.alterTable(identifier, SchemaChange.setOption("ee", "ff"), false);
+
+        List<TableSchema> expected = local.listAll();
+        expected.sort(java.util.Comparator.comparingLong(TableSchema::id).reversed());
+        PagedList<TableSchema> firstPage = catalog.listSchemasPaged(identifier, 2, null);
+        assertThat(firstPage.getElements()).containsExactlyElementsOf(expected.subList(0, 2));
+        assertThat(firstPage.getNextPageToken()).isNotNull();
+
+        PagedList<TableSchema> secondPage =
+                catalog.listSchemasPaged(identifier, 2, firstPage.getNextPageToken());
+        assertThat(secondPage.getElements()).containsExactlyElementsOf(expected.subList(2, 4));
+        assertThat(secondPage.getNextPageToken()).isNull();
+    }
+
+    @Test
+    public void testSchemaMethodsTableNotExist() {
+        Identifier missing = Identifier.create("test_list_schemas", "missing_table");
+        assertThatThrownBy(() -> catalog.loadSchema(missing, "LATEST"))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+        assertThatThrownBy(() -> catalog.listSchemasPaged(missing, null, null))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+    }
+
+    @Test
     public void testDataTokenExpired() throws Exception {
         this.catalog = newRestCatalogWithDataToken();
         Identifier identifier =
@@ -3043,6 +3098,84 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         // no exception
         table.newReadBuilder().withProjection(new int[] {1}).newScan().plan();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "true,false", "false,true", "true,true"})
+    void testTableAuthIncludesUnprojectedFilterFields(boolean streaming, boolean partitionFilter)
+            throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_filter_columns");
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        Arrays.asList(
+                                new DataField(0, "public_id", DataTypes.INT()),
+                                new DataField(1, "secret_score", DataTypes.INT())),
+                        partitionFilter ? singletonList("secret_score") : Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+        commitRows(table, GenericRow.of(1, 10), GenericRow.of(2, 20), GenericRow.of(3, 30));
+        authTableColumns(identifier, singletonList("public_id"));
+
+        assertThatThrownBy(
+                        () -> table.newReadBuilder().withProjection(new int[] {1}).newScan().plan())
+                .hasMessageContaining("has no permission");
+
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {0});
+        if (partitionFilter) {
+            readBuilder.withPartitionFilter(singletonMap("secret_score", "20"));
+        } else {
+            readBuilder.withFilter(new PredicateBuilder(table.rowType()).equal(1, 20));
+        }
+        TableScan scan = streaming ? readBuilder.newStreamScan() : readBuilder.newScan();
+        TableRead read = readBuilder.newRead().executeFilter();
+        assertThatThrownBy(
+                        () -> {
+                            try (RecordReader<InternalRow> reader =
+                                    read.createReader(scan.plan().splits())) {
+                                reader.forEachRemaining(row -> {});
+                            }
+                        })
+                .hasMessageContaining("has no permission");
+
+        // Granting the filter operand allows the same query without exposing the extra column.
+        authTableColumns(identifier, Arrays.asList("public_id", "secret_score"));
+        List<InternalRow> rows =
+                collectRows(
+                        read.createReader(scan.plan().splits()),
+                        table.rowType().project("public_id"));
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getFieldCount()).isEqualTo(1);
+        assertThat(rows.get(0).getInt(0)).isEqualTo(2);
+    }
+
+    @Test
+    void testTableAuthWithCombinedPartitionFilter() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_table_db", "auth_combined_partition_filter");
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        stringFields("p1", "p2", "v"),
+                        Arrays.asList("p1", "p2"),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+        writeStringRows(table, new String[] {"x", "a", "v1"}, new String[] {"y", "b", "v2"});
+        authTableColumns(identifier, Arrays.asList("p1", "v"));
+
+        RowType partitionType = table.rowType().project(table.partitionKeys());
+        Predicate onP1 = new PredicateBuilder(partitionType).equal(0, BinaryString.fromString("x"));
+        ReadBuilder readBuilder =
+                table.newReadBuilder()
+                        .withProjection(new int[] {2})
+                        .withPartitionFilter(
+                                PartitionPredicate.and(
+                                        Arrays.asList(
+                                                PartitionPredicate.fromPredicate(
+                                                        partitionType, onP1),
+                                                PartitionPredicate.ALWAYS_TRUE)));
+        assertThat(batchRead(table, readBuilder.newScan().plan().splits(), readBuilder))
+                .containsExactly("+I[v1]");
     }
 
     @Test
@@ -4024,6 +4157,9 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 new String[] {"jane", "roe", "ignored", "o2"});
         maskDisplayWithFullName(identifier);
 
+        // Trusted masking inputs do not require the caller to have column access.
+        authTableColumns(identifier, singletonList("display"));
+
         ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {2});
         List<Split> splits = readBuilder.newScan().plan().splits();
         List<InternalRow> rows =
@@ -4092,6 +4228,9 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         BinaryString.fromString("secret"));
         setRowFilter(identifier, Collections.singletonList(displayFilter));
         maskDisplayWithFullName(identifier);
+
+        // Trusted row-filter inputs do not require the caller to have column access either.
+        authTableColumns(identifier, singletonList("other"));
 
         ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {3});
         List<Split> splits = readBuilder.newScan().plan().splits();

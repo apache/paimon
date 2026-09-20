@@ -282,8 +282,10 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
         self._write(table, [{'id': 1, 'a': 'first', 'b': None, 'c': None}])
         self._write(table, [{'id': 1, 'a': 'second', 'b': 'B', 'c': 'C'}])
 
+        self.assertEqual(self._read(table), [])
+        builder = table.new_read_builder()
         self.assertEqual(
-            self._read(table),
+            builder.new_read().to_arrow(builder.new_scan().plan_for_write().splits()).to_pylist(),
             [{'id': 1, 'a': 'first', 'b': None, 'c': None}],
         )
 

@@ -29,13 +29,21 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.GenericVariantUtil.Type;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.utils.DateTimeUtils;
+
+import javax.annotation.Nullable;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.ZoneId;
 import java.util.HashMap;
+import java.util.TimeZone;
 
 /** Utils for variant get. */
 public class VariantGet {
@@ -137,11 +145,9 @@ public class VariantGet {
                     inputType = DataTypes.DOUBLE();
                     break;
                 case DECIMAL:
-                    BigDecimal decimal = v.getDecimal();
-                    int precision = decimal.precision();
-                    int scale = decimal.scale();
-                    input = Decimal.fromBigDecimal(decimal, precision, scale);
-                    inputType = DataTypes.DECIMAL(precision, scale);
+                    Decimal decimal = normalizedDecimal(v.getDecimal());
+                    input = decimal;
+                    inputType = DataTypes.DECIMAL(decimal.precision(), decimal.scale());
                     break;
                 case DATE:
                     input = (int) v.getLong();
@@ -174,16 +180,183 @@ public class VariantGet {
 
             CastExecutor<Object, Object> resolve =
                     (CastExecutor<Object, Object>) CastExecutors.resolve(inputType, dataType);
-            if (resolve != null) {
-                try {
-                    return resolve.cast(input);
-                } catch (Exception e) {
-                    return invalidCast(v, dataType, castArgs);
-                }
-            }
-
-            return invalidCast(v, dataType, castArgs);
+            Object result = castScalar(input, inputType, dataType, resolve, castArgs.zoneId());
+            return result == null ? invalidCast(v, dataType, castArgs) : result;
         }
+    }
+
+    /**
+     * Casts a non-null scalar read from a variant to {@code targetType}, returning null when the
+     * cast is invalid. The generic cast rules wrap a numeric value that does not fit the target, so
+     * an out-of-range value is rejected here first, matching Spark's TRY cast semantics. Casts that
+     * move between an instant and a local date or time use {@code zoneId}, the zone the query asked
+     * for, rather than the JVM default the generic rules fall back to.
+     */
+    @Nullable
+    static Object castScalar(
+            Object input,
+            DataType inputType,
+            DataType targetType,
+            @Nullable CastExecutor<Object, Object> executor,
+            ZoneId zoneId) {
+        Object temporal = castTemporal(input, inputType, targetType, zoneId);
+        if (temporal != NOT_TEMPORAL) {
+            return temporal;
+        }
+        if (executor == null || !fitsIntegralTarget(input, inputType, targetType)) {
+            return null;
+        }
+        try {
+            return executor.cast(input);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static final Object NOT_TEMPORAL = new Object();
+
+    /**
+     * The casts whose result depends on a time zone: between a timestamp with local time zone and a
+     * string, a timestamp without time zone or a date, and from a string to a timestamp with local
+     * time zone. Returns {@link #NOT_TEMPORAL} for every other pair, and null for a string that
+     * does not parse. A timestamp renders like Spark's cast, without trailing fraction zeros.
+     */
+    @Nullable
+    private static Object castTemporal(
+            Object input, DataType inputType, DataType targetType, ZoneId zoneId) {
+        TimeZone tz = TimeZone.getTimeZone(zoneId);
+        switch (inputType.getTypeRoot()) {
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                Timestamp instant = (Timestamp) input;
+                switch (targetType.getTypeRoot()) {
+                    case CHAR:
+                    case VARCHAR:
+                        return BinaryString.fromString(
+                                DateTimeUtils.formatTimestamp(
+                                        DateTimeUtils.timestampWithLocalZoneToTimestamp(
+                                                instant, tz),
+                                        0));
+                    case TIMESTAMP_WITHOUT_TIME_ZONE:
+                        return truncate(
+                                DateTimeUtils.timestampWithLocalZoneToTimestamp(instant, tz),
+                                targetType);
+                    case DATE:
+                        return DateTimeUtils.timestampWithLocalZoneToDate(instant, tz);
+                    default:
+                        return NOT_TEMPORAL;
+                }
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                Timestamp local = (Timestamp) input;
+                switch (targetType.getTypeRoot()) {
+                    case CHAR:
+                    case VARCHAR:
+                        return BinaryString.fromString(DateTimeUtils.formatTimestamp(local, 0));
+                    case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                        return truncate(
+                                DateTimeUtils.timestampToTimestampWithLocalZone(local, tz),
+                                targetType);
+                    default:
+                        return NOT_TEMPORAL;
+                }
+            case DATE:
+                if (targetType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
+                    return DateTimeUtils.dateToTimestampWithLocalZone((Integer) input, tz);
+                }
+                return NOT_TEMPORAL;
+            case CHAR:
+            case VARCHAR:
+                if (targetType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
+                    try {
+                        return DateTimeUtils.parseTimestampData(
+                                input.toString(), DataTypeChecks.getPrecision(targetType), tz);
+                    } catch (Exception e) {
+                        return null;
+                    }
+                }
+                return NOT_TEMPORAL;
+            default:
+                return NOT_TEMPORAL;
+        }
+    }
+
+    private static Timestamp truncate(Timestamp timestamp, DataType targetType) {
+        return DateTimeUtils.truncate(timestamp, DataTypeChecks.getPrecision(targetType));
+    }
+
+    /** Whether a numeric {@code input} lies within the range of an integral {@code targetType}. */
+    private static boolean fitsIntegralTarget(
+            Object input, DataType inputType, DataType targetType) {
+        long min;
+        long max;
+        switch (targetType.getTypeRoot()) {
+            case TINYINT:
+                min = Byte.MIN_VALUE;
+                max = Byte.MAX_VALUE;
+                break;
+            case SMALLINT:
+                min = Short.MIN_VALUE;
+                max = Short.MAX_VALUE;
+                break;
+            case INTEGER:
+                min = Integer.MIN_VALUE;
+                max = Integer.MAX_VALUE;
+                break;
+            case BIGINT:
+                min = Long.MIN_VALUE;
+                max = Long.MAX_VALUE;
+                break;
+            default:
+                return true;
+        }
+
+        switch (inputType.getTypeRoot()) {
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+            case BIGINT:
+                long value = ((Number) input).longValue();
+                return value >= min && value <= max;
+            case FLOAT:
+            case DOUBLE:
+                // The fractional part is truncated by the cast, so any finite value strictly
+                // between min - 1 and max + 1 fits. Both bounds are exact doubles; for BIGINT
+                // max + 1 is 2^63 and min - 1 rounds to -2^63, which is itself in range.
+                double d = ((Number) input).doubleValue();
+                if (Double.isNaN(d) || Double.isInfinite(d)) {
+                    return false;
+                }
+                return max == Long.MAX_VALUE
+                        ? d >= -0x1p63 && d < 0x1p63
+                        : d > min - 1.0 && d < max + 1.0;
+            case DECIMAL:
+                BigDecimal truncated =
+                        ((Decimal) input).toBigDecimal().setScale(0, RoundingMode.DOWN);
+                return truncated.compareTo(BigDecimal.valueOf(min)) >= 0
+                        && truncated.compareTo(BigDecimal.valueOf(max)) <= 0;
+            default:
+                return true;
+        }
+    }
+
+    /**
+     * The decimal a variant scalar is cast from: trailing zeros stripped, the way {@code toJson}
+     * renders it, with a precision and scale that {@code DecimalType} accepts. The shredded reader
+     * applies the same normalization to a {@code typed_value} decimal, whose scale comes from the
+     * file schema, so that a cast yields the same result for a plain and a shredded file.
+     */
+    static Decimal normalizedDecimal(BigDecimal decimal) {
+        decimal = decimal.stripTrailingZeros();
+        if (decimal.scale() < 0) {
+            // stripTrailingZeros folds trailing zeros into a negative exponent, and a negative
+            // scale is not a Paimon decimal
+            decimal = decimal.setScale(0);
+        }
+        int scale = decimal.scale();
+        // precision() counts the digits of the unscaled value, so it is smaller than the scale
+        // for a value below 0.1, which DecimalType rejects. The variant writer caps both at
+        // MAX_DECIMAL16_PRECISION, so this stays in range.
+        int precision = Math.max(decimal.precision(), scale);
+        return Decimal.fromBigDecimal(decimal, precision, scale);
     }
 
     public static Object invalidCast(Variant v, DataType dataType, VariantCastArgs castArgs) {

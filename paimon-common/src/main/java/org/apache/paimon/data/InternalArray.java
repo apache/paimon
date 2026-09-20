@@ -124,6 +124,9 @@ public interface InternalArray extends DataGetters {
             case ARRAY:
                 elementGetter = InternalArray::getArray;
                 break;
+            case VECTOR:
+                elementGetter = InternalArray::getVector;
+                break;
             case MULTISET:
             case MAP:
                 elementGetter = InternalArray::getMap;

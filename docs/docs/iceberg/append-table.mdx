@@ -1,5 +1,5 @@
 ---
-title: "Append Table"
+title: "Append Tables"
 sidebar_position: 2
 ---
 
@@ -27,53 +27,93 @@ under the License.
 
 # Append Tables
 
-Let's walk through a simple example, where we query Paimon tables with Iceberg connectors in Flink and Spark.
-Before trying out this example, make sure that your compute engine already supports Iceberg.
-Please refer to Iceberg's document if you haven't set up Iceberg.
-* Flink: [Preparation when using Flink SQL Client](https://iceberg.apache.org/docs/latest/flink/#preparation-when-using-flink-sql-client)
-* Spark: [Using Iceberg in Spark 3](https://iceberg.apache.org/docs/latest/spark-getting-started/#using-iceberg-in-spark-3)
+This walkthrough creates an append table through Paimon and reads the same data through an Iceberg
+Hadoop catalog. It also provides the catalog setup used by the [primary key examples](./primary-key-table.mdx).
 
-Let's now create a Paimon append only table with Iceberg compatibility enabled and insert some data.
+## Before You Begin
 
-<Tabs groupId="create-paimon-append-only-table">
+Install the Paimon connector for your engine and an Iceberg runtime compatible with that engine.
+See the [Paimon Flink quick start](../flink/quick-start.mdx),
+[Paimon Spark quick start](../spark/quick-start.mdx), and Iceberg's
+[Flink setup](https://iceberg.apache.org/docs/latest/flink/) or
+[Spark setup](https://iceberg.apache.org/docs/latest/spark-getting-started/).
 
-<TabItem value="flink-sql" label="Flink SQL">
+Replace the path and version placeholders below. Both connectors must be able to access the same
+warehouse. In a cluster, use shared storage accessible to every worker.
+
+## Prepare Catalogs
+
+<Tabs groupId="iceberg-engine">
+<TabItem value="flink" label="Flink SQL">
+
+Install the Paimon and Iceberg Flink runtime JARs before starting the cluster and SQL client.
+Use batch mode for the bounded examples and synchronous DML so each insert finishes before its query.
 
 ```sql
+SET 'execution.runtime-mode' = 'batch';
+SET 'table.dml-sync' = 'true';
+
 CREATE CATALOG paimon_catalog WITH (
     'type' = 'paimon',
     'warehouse' = '<path-to-warehouse>'
 );
 
+CREATE DATABASE IF NOT EXISTS paimon_catalog.`default`;
+
+CREATE CATALOG iceberg_catalog WITH (
+    'type' = 'iceberg',
+    'catalog-type' = 'hadoop',
+    'warehouse' = '<path-to-warehouse>/iceberg',
+    'cache-enabled' = 'false'
+);
+```
+
+</TabItem>
+<TabItem value="spark" label="Spark SQL">
+
+Start `spark-sql` with both catalogs. The Iceberg artifact name contains the Spark major/minor and
+Scala binary versions; its Maven version follows the colon. Select a combination published by
+Iceberg and supported by your Paimon Spark connector.
+
+```bash
+spark-sql \
+    --jars <path-to-paimon-spark-jar> \
+    --packages org.apache.iceberg:iceberg-spark-runtime-<spark-major.minor>_<scala-binary-version>:<iceberg-version> \
+    --conf spark.sql.catalog.paimon_catalog=org.apache.paimon.spark.SparkCatalog \
+    --conf spark.sql.catalog.paimon_catalog.warehouse=<path-to-warehouse> \
+    --conf spark.sql.catalog.iceberg_catalog=org.apache.iceberg.spark.SparkCatalog \
+    --conf spark.sql.catalog.iceberg_catalog.type=hadoop \
+    --conf spark.sql.catalog.iceberg_catalog.warehouse=<path-to-warehouse>/iceberg \
+    --conf spark.sql.catalog.iceberg_catalog.cache-enabled=false \
+    --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions,org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+```
+
+```sql
+CREATE DATABASE IF NOT EXISTS paimon_catalog.`default`;
+```
+
+</TabItem>
+</Tabs>
+
+The examples disable Iceberg catalog caching to make newly published metadata easier to observe.
+For Hive or REST access, use the corresponding [catalog guide](./catalogs.md).
+
+## Create the Paimon Table
+
+<Tabs groupId="iceberg-engine">
+<TabItem value="flink" label="Flink SQL">
+
+```sql
 CREATE TABLE paimon_catalog.`default`.cities (
     country STRING,
     name STRING
 ) WITH (
     'metadata.iceberg.storage' = 'hadoop-catalog'
 );
-
-INSERT INTO paimon_catalog.`default`.cities VALUES ('usa', 'new york'), ('germany', 'berlin'), ('usa', 'chicago'), ('germany', 'hamburg');
 ```
 
 </TabItem>
-
-<TabItem value="spark-sql" label="Spark SQL">
-
-Start `spark-sql` with the following command line.
-
-```bash
-spark-sql --jars <path-to-paimon-jar> \
-    --conf spark.sql.catalog.paimon_catalog=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.paimon_catalog.warehouse=<path-to-warehouse> \
-    --packages org.apache.iceberg:iceberg-spark-runtime-<iceberg-version> \
-    --conf spark.sql.catalog.iceberg_catalog=org.apache.iceberg.spark.SparkCatalog \
-    --conf spark.sql.catalog.iceberg_catalog.type=hadoop \
-    --conf spark.sql.catalog.iceberg_catalog.warehouse=<path-to-warehouse>/iceberg \
-    --conf spark.sql.catalog.iceberg_catalog.cache-enabled=false \ # disable iceberg catalog caching to quickly see the result
-    --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions,org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
-```
-
-Run the following Spark SQL to create Paimon table and insert data.
+<TabItem value="spark" label="Spark SQL">
 
 ```sql
 CREATE TABLE paimon_catalog.`default`.cities (
@@ -82,92 +122,55 @@ CREATE TABLE paimon_catalog.`default`.cities (
 ) TBLPROPERTIES (
     'metadata.iceberg.storage' = 'hadoop-catalog'
 );
-
-INSERT INTO paimon_catalog.`default`.cities VALUES ('usa', 'new york'), ('germany', 'berlin'), ('usa', 'chicago'), ('germany', 'hamburg');
 ```
 
 </TabItem>
-
 </Tabs>
 
-Now let's query this Paimon table with Iceberg connector.
+## Write with Paimon, Read with Iceberg
 
-<Tabs groupId="query-paimon-append-only-table">
-
-<TabItem value="flink-sql" label="Flink SQL">
-
-```sql
-CREATE CATALOG iceberg_catalog WITH (
-    'type' = 'iceberg',
-    'catalog-type' = 'hadoop',
-    'warehouse' = '<path-to-warehouse>/iceberg',
-    'cache-enabled' = 'false' -- disable iceberg catalog caching to quickly see the result
-);
-
-SELECT * FROM iceberg_catalog.`default`.cities WHERE country = 'germany';
-/*
-+----+--------------------------------+--------------------------------+
-| op |                        country |                           name |
-+----+--------------------------------+--------------------------------+
-| +I |                        germany |                         berlin |
-| +I |                        germany |                        hamburg |
-+----+--------------------------------+--------------------------------+
-*/
-```
-
-</TabItem>
-
-<TabItem value="spark-sql" label="Spark SQL">
+Run the following SQL in either engine. The catalog name determines which connector handles each
+statement.
 
 ```sql
-SELECT * FROM iceberg_catalog.`default`.cities WHERE country = 'germany';
-/*
-germany berlin
-germany hamburg
-*/
+INSERT INTO paimon_catalog.`default`.cities VALUES
+    ('usa', 'new york'),
+    ('germany', 'berlin'),
+    ('usa', 'chicago'),
+    ('germany', 'hamburg');
+
+SELECT country, name
+FROM iceberg_catalog.`default`.cities
+WHERE country = 'germany'
+ORDER BY name;
 ```
 
-</TabItem>
+Expected rows:
 
-</Tabs>
+```text
+country  name
+germany  berlin
+germany  hamburg
+```
 
-Let's insert more data and query again.
-
-<Tabs groupId="query-paimon-append-only-table-again">
-
-<TabItem value="flink-sql" label="Flink SQL">
+Insert another row through Paimon, then read the refreshed Iceberg representation:
 
 ```sql
-INSERT INTO paimon_catalog.`default`.cities VALUES ('usa', 'houston'), ('germany', 'munich');
+INSERT INTO paimon_catalog.`default`.cities VALUES ('germany', 'munich');
 
-SELECT * FROM iceberg_catalog.`default`.cities WHERE country = 'germany';
-/*
-+----+--------------------------------+--------------------------------+
-| op |                        country |                           name |
-+----+--------------------------------+--------------------------------+
-| +I |                        germany |                         munich |
-| +I |                        germany |                         berlin |
-| +I |                        germany |                        hamburg |
-+----+--------------------------------+--------------------------------+
-*/
+SELECT country, name
+FROM iceberg_catalog.`default`.cities
+WHERE country = 'germany'
+ORDER BY name;
 ```
 
-</TabItem>
-
-<TabItem value="spark-sql" label="Spark SQL">
-
-```sql
-INSERT INTO paimon_catalog.`default`.cities VALUES ('usa', 'houston'), ('germany', 'munich');
-
-SELECT * FROM iceberg_catalog.`default`.cities WHERE country = 'germany';
-/*
-germany munich
-germany berlin
-germany hamburg
-*/
+```text
+country  name
+germany  berlin
+germany  hamburg
+germany  munich
 ```
 
-</TabItem>
-
-</Tabs>
-
+If the table or new rows are missing, first check that the insert completed, the Iceberg warehouse
+ends in `/iceberg`, and the reader can access the published metadata and original data files.
+For updates and deletes, continue with [primary key tables](./primary-key-table.mdx).

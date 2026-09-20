@@ -426,7 +426,8 @@ public class CoreOptions implements Serializable {
                     .memoryType()
                     .noDefaultValue()
                     .withDescription(
-                            "File block size of format, default value of orc stripe is 64 MB, and parquet row group is 128 MB.");
+                            "File block size of format, default value of orc stripe is 64 MB, parquet row group is 128 MB, "
+                                    + "and avro block is 64 KB.");
 
     public static final ConfigOption<MemorySize> FILE_INDEX_IN_MANIFEST_THRESHOLD =
             key("file-index.in-manifest-threshold")
@@ -522,12 +523,28 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.ofMebiBytes(8))
                     .withDescription("Suggested file size of a manifest file.");
 
+    public static final ConfigOption<Boolean> MANIFEST_SIDECAR_ENABLED =
+            key("manifest.sidecar.enabled")
+                    .booleanType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Whether to enable manifest sidecars with independent partition, row-id and bucket coverage. Defaults to manifest-sort.enabled when unset.");
+
     public static final ConfigOption<MemorySize> MANIFEST_FULL_COMPACTION_FILE_SIZE =
             key("manifest.full-compaction-threshold-size")
                     .memoryType()
                     .defaultValue(MemorySize.ofMebiBytes(16))
                     .withDescription(
                             "The size threshold for triggering full compaction of manifest.");
+
+    public static final ConfigOption<Boolean> MANIFEST_MERGE_SKIP_ON_WRITE_ONLY =
+            key("manifest.merge.skip-on-write-only")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to skip automatic manifest merging during commit when write-only is true."
+                                    + " This also skips automatic manifest sort rewrite."
+                                    + " Explicit manifest compaction is not affected.");
 
     public static final ConfigOption<Integer> MANIFEST_MERGE_MIN_COUNT =
             key("manifest.merge-min-count")
@@ -559,7 +576,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             Description.builder()
-                                    .text("Whether to invoke manifest sort rewrite during commit.")
+                                    .text(
+                                            "Whether to invoke manifest sort rewrite during commit."
+                                                    + " Non-partitioned tables can sort by bucket"
+                                                    + " with fixed or postponed buckets, or by RowID"
+                                                    + " for data evolution tables when all input"
+                                                    + " manifests contain RowID ranges.")
                                     .linebreak()
                                     .text(
                                             "Note: enabling this changes the semantics of '"
@@ -578,7 +600,9 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "Partition field name to sort manifest entries by. Validated by"
-                                    + " schema validation, if not configured, defaults to the first partition field.");
+                                    + " schema validation; must be unset for non-partitioned tables."
+                                    + " If not configured, defaults to the first partition field,"
+                                    + " or all partition fields for data evolution RowID sorting.");
 
     public static final ConfigOption<MemorySize> MANIFEST_SORT_MAX_REWRITE_SIZE =
             key("manifest-sort.max-rewrite-size")
@@ -771,7 +795,8 @@ public class CoreOptions implements Serializable {
                     .withFallbackKeys("write.compaction-skip")
                     .withDescription(
                             "If set to true, compactions and snapshot expiration will be skipped. "
-                                    + "This option is used along with dedicated compact jobs.");
+                                    + "This option is used along with dedicated compact jobs. "
+                                    + "Automatic manifest merging is also skipped when manifest.merge.skip-on-write-only is true.");
 
     public static final ConfigOption<MemorySize> SOURCE_SPLIT_TARGET_SIZE =
             key("source.split.target-size")
@@ -865,7 +890,8 @@ public class CoreOptions implements Serializable {
                                     + "Enforced at bundle granularity, so a bundled write may exceed it "
                                     + "by up to one bundle. Only constrains files at write time: "
                                     + "compaction is size-based and may merge into larger files, and "
-                                    + "data-evolution compaction still produces a single file. Bounds "
+                                    + "data-evolution compaction produces a single file unless "
+                                    + "data-evolution.compaction.split-large-files is enabled. Bounds "
                                     + "per-file rows for wide columns to avoid data-evolution OOM. "
                                     + "PyPaimon supports this for data-evolution append tables; its "
                                     + "primary-key, blob and vector writers still fail fast when it "
@@ -1655,6 +1681,20 @@ public class CoreOptions implements Serializable {
                             "Only used to force TableScan to construct suitable 'StartingUpScanner' and 'FollowUpScanner' "
                                     + "dedicated internal streaming scan.");
 
+    public static final ConfigOption<CompactionInitialScanMode>
+            CONTINUOUS_COMPACTION_INITIAL_SCAN_MODE =
+                    key("continuous-compaction.initial-scan-mode")
+                            .enumType(CompactionInitialScanMode.class)
+                            .defaultValue(CompactionInitialScanMode.EARLIEST)
+                            .withDescription(
+                                    "Initial snapshot mode for dedicated streaming compaction. "
+                                            + "When set to 'earliest' (the default), compaction starts from the earliest available snapshot "
+                                            + "if no COMPACT snapshot exists; when a COMPACT snapshot exists, compaction always resumes from the snapshot after it. "
+                                            + "When set to 'latest', the latest snapshot is read in ALL mode "
+                                            + "as the initial baseline and subsequent scans start from the next snapshot. "
+                                            + "The 'latest' mode skips historical snapshot changes and should only be used when historical "
+                                            + "changelog replay is not required.");
+
     @ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<BatchScanMode> BATCH_SCAN_MODE =
             key("batch-scan-mode")
@@ -2421,15 +2461,34 @@ public class CoreOptions implements Serializable {
                                     + "instead of at the end of the schema. "
                                     + "This only takes effect for partitioned tables.");
 
+    public static final ConfigOption<Long> COMMIT_LAST_SAFE_SNAPSHOT =
+            ConfigOptions.key("commit.last-safe-snapshot")
+                    .longType()
+                    .noDefaultValue()
+                    .withFallbackKeys("commit.strict-mode.last-safe-snapshot")
+                    .withDescription(
+                            "Snapshot preceding the earliest snapshot to inspect when committing. "
+                                    + "Only later snapshots are searched for this commit user's previous commits. "
+                                    + "This also provides the starting point for strict-mode checks when enabled. "
+                                    + "Keep this bound unchanged across retries and recovery.");
+
+    public static final ConfigOption<Boolean> COMMIT_STRICT_MODE_ENABLED =
+            ConfigOptions.key("commit.strict-mode.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to check concurrent snapshot changes after commit.last-safe-snapshot, "
+                                    + "when that bound is configured. Rejects COMPACT or OVERWRITE changes "
+                                    + "in the same partition, and fixed-bucket APPEND changes when committing OVERWRITE. "
+                                    + "Disabling this does not disable regular conflict detection or the history search bound.");
+
+    /** @deprecated Use {@link #COMMIT_LAST_SAFE_SNAPSHOT}. */
+    @Deprecated
     public static final ConfigOption<Long> COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT =
             ConfigOptions.key("commit.strict-mode.last-safe-snapshot")
                     .longType()
                     .noDefaultValue()
-                    .withDescription(
-                            "If set, committer will check if there are other commit user's snapshot starting from the "
-                                    + "snapshot after this one. If found a COMPACT / OVERWRITE snapshot, or found a "
-                                    + "APPEND snapshot which committed files to fixed bucket, commit will be aborted."
-                                    + "If the value of this option is -1, committer will not check for its first commit.");
+                    .withDescription("Deprecated alias for commit.last-safe-snapshot.");
 
     public static final ConfigOption<String> CLUSTERING_COLUMNS =
             key("clustering.columns")
@@ -2450,7 +2509,7 @@ public class CoreOptions implements Serializable {
                             "Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', "
                                     + "corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, "
                                     + "respectively. When not configured, it will automatically determine the algorithm based on the number of columns "
-                                    + "in 'clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
+                                    + "in 'clustering.columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
                                     + "and 'hilbert' for 5 or more columns.");
 
     public static final ConfigOption<Boolean> CLUSTERING_INCREMENTAL =
@@ -2618,6 +2677,31 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Whether to persist source when process merge into action on data evolution table.");
+
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES =
+            key("data-evolution.compaction.split-large-files")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether data-evolution compaction selects normal data files larger than "
+                                    + "data-evolution.compaction.large-file-ratio times target-file-size, "
+                                    + "even below compaction.min.file-num when dedicated-file ranges allow splitting. "
+                                    + "Normal output ranges are estimated from input file sizes and row counts "
+                                    + "toward target-file-size, then adjusted to avoid cutting through any "
+                                    + "BLOB or VECTOR file range. Actual output sizes may differ from the target. "
+                                    + "Row IDs and logical deletions are preserved, and associated "
+                                    + "BLOB and VECTOR files are not rewritten by this option.");
+
+    public static final ConfigOption<Double> DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO =
+            key("data-evolution.compaction.large-file-ratio")
+                    .doubleType()
+                    .defaultValue(2.0d)
+                    .withDescription(
+                            "Size multiplier relative to target-file-size for selecting large normal "
+                                    + "files when data-evolution.compaction.split-large-files is enabled. "
+                                    + "An individual file must strictly exceed this threshold. The value "
+                                    + "must be finite and at least 1.0. This does not change the target "
+                                    + "size of compacted output files.");
 
     public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS =
             key("data-evolution.compaction.rewrite-row-ids")
@@ -3160,6 +3244,10 @@ public class CoreOptions implements Serializable {
         return options.get(MANIFEST_TARGET_FILE_SIZE);
     }
 
+    public boolean manifestSidecarEnabled() {
+        return options.getOptional(MANIFEST_SIDECAR_ENABLED).orElseGet(this::manifestSortEnabled);
+    }
+
     public MemorySize manifestFullCompactionThresholdSize() {
         return options.get(MANIFEST_FULL_COMPACTION_FILE_SIZE);
     }
@@ -3305,6 +3393,20 @@ public class CoreOptions implements Serializable {
     public boolean fieldAggIgnoreRetract(String fieldName) {
         return options.get(
                 key(FIELDS_PREFIX + "." + fieldName + "." + IGNORE_RETRACT)
+                        .booleanType()
+                        .defaultValue(false));
+    }
+
+    public boolean fieldSumAggFailOnOverflow(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + ".sum.fail-on-overflow")
+                        .booleanType()
+                        .defaultValue(false));
+    }
+
+    public boolean fieldProductAggFailOnOverflow(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + ".product.fail-on-overflow")
                         .booleanType()
                         .defaultValue(false));
     }
@@ -3487,6 +3589,10 @@ public class CoreOptions implements Serializable {
                 .changelogMaxDeletes(snapshotExpireLimit())
                 .consumerChangelogOnly(consumerChangelogOnly())
                 .build();
+    }
+
+    public boolean manifestMergeSkipOnWriteOnly() {
+        return options.get(MANIFEST_MERGE_SKIP_ON_WRITE_ONLY);
     }
 
     public int manifestMergeMinCount() {
@@ -4375,6 +4481,19 @@ public class CoreOptions implements Serializable {
         return options.get(DELETION_VECTOR_BITMAP64);
     }
 
+    public boolean dataEvolutionCompactionSplitLargeFiles() {
+        return options.get(DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES);
+    }
+
+    public double dataEvolutionCompactionLargeFileRatio() {
+        double ratio = options.get(DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO);
+        checkArgument(
+                Double.isFinite(ratio) && ratio >= 1.0d,
+                "The option %s must be finite and at least 1.0.",
+                DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO.key());
+        return ratio;
+    }
+
     public boolean dataEvolutionCompactionRewriteRowIds() {
         return options.get(DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS);
     }
@@ -4512,8 +4631,18 @@ public class CoreOptions implements Serializable {
         return options.get(AGGREGATION_REMOVE_RECORD_ON_DELETE);
     }
 
+    public Optional<Long> commitLastSafeSnapshot() {
+        return options.getOptional(COMMIT_LAST_SAFE_SNAPSHOT);
+    }
+
+    public boolean commitStrictModeEnabled() {
+        return options.get(COMMIT_STRICT_MODE_ENABLED);
+    }
+
+    /** @deprecated Use {@link #commitLastSafeSnapshot()}. */
+    @Deprecated
     public Optional<Long> commitStrictModeLastSafeSnapshot() {
-        return options.getOptional(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT);
+        return commitLastSafeSnapshot();
     }
 
     public List<String> clusteringColumns() {
@@ -5179,6 +5308,30 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         ChangelogProducer(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Initial snapshot mode for dedicated streaming compaction. */
+    public enum CompactionInitialScanMode implements DescribedEnum {
+        EARLIEST("earliest", "Read snapshots from the earliest available snapshot."),
+        LATEST("latest", "Read the latest snapshot as the initial full baseline.");
+
+        private final String value;
+        private final String description;
+
+        CompactionInitialScanMode(String value, String description) {
             this.value = value;
             this.description = description;
         }
