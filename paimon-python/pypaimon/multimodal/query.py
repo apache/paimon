@@ -554,6 +554,18 @@ class VectorQuery(_PreFilterQuery):
             concurrency=concurrency, ray_remote_args=ray_remote_args)
         return query._read_global_index_result(result)
 
+    def to_pandas(self, *, execution="local", concurrency=None, ray_remote_args=None):
+        """Execute with the same options as to_arrow and return a DataFrame."""
+        return self.to_arrow(
+            execution=execution, concurrency=concurrency,
+            ray_remote_args=ray_remote_args).to_pandas()
+
+    def to_list(self, *, execution="local", concurrency=None, ray_remote_args=None) -> List[dict]:
+        """Execute with the same options as to_arrow and return rows."""
+        return self.to_arrow(
+            execution=execution, concurrency=concurrency,
+            ray_remote_args=ray_remote_args).to_pylist()
+
     def _execute_vector(self, query):
         return self._vector_search_builder(query).execute_local()
 
@@ -716,11 +728,15 @@ class BatchVectorQuery(_PreFilterQuery):
             output.append(table.take(pa.array(selected, type=pa.int64())))
         return output
 
-    def to_pandas(self):
-        return [table.to_pandas() for table in self.to_arrow()]
+    def to_pandas(self, *, execution="local", concurrency=None, ray_remote_args=None):
+        """Return one DataFrame per query, using the same options as to_arrow."""
+        return [table.to_pandas() for table in self.to_arrow(
+            execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args)]
 
-    def to_list(self) -> List[List[dict]]:
-        return [table.to_pylist() for table in self.to_arrow()]
+    def to_list(self, *, execution="local", concurrency=None, ray_remote_args=None) -> List[List[dict]]:
+        """Return rows per query, using the same options as to_arrow."""
+        return [table.to_pylist() for table in self.to_arrow(
+            execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args)]
 
     def _execute_batch_vector(self, query):
         return self._batch_vector_search_builder(query).execute_batch_local()
