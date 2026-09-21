@@ -120,7 +120,7 @@ fi
 
 echo "Verified ${artifact_count} signed Maven artifacts."
 echo "Uploading the signed Maven repository image to ${NEXUS_URL}"
-${MVN} -ntp \
+${MVN} -N -ntp \
     org.sonatype.plugins:nexus-staging-maven-plugin:${NEXUS_STAGING_PLUGIN_VERSION}:deploy-staged-repository \
     -DrepositoryDirectory="${REPOSITORY_DIRECTORY}" \
     -DnexusUrl="${NEXUS_URL}" \
