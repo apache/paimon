@@ -243,9 +243,11 @@ class FormatRowReader(RecordBatchReader):
         """Cross-check the index against the footer, as the row format spec requires.
 
         Blocks are written contiguously from position 0 and the index follows the last one, so the
-        compressed sizes sum to exactly index_offset. Row starts become the row range of a block,
-        and a block whose range a selection does not intersect is skipped, so a first start past 0,
-        a repeated start or a last start at the row count would drop rows silently.
+        compressed sizes sum to exactly index_offset. Row starts have to start at 0 and increase
+        strictly because _compute_blocks_for_indices bisects them: a first start past 0 makes
+        bisect_right return 0 for the rows before it, so block_idx is -1, row_starts[-1] is the last
+        start, and the local row goes negative — this reader would decode a row from the wrong place
+        in the block rather than skip it.
         """
         counts = (len(self._block_compressed_sizes), len(self._block_uncompressed_sizes),
                   len(self._block_row_starts))
@@ -265,6 +267,11 @@ class FormatRowReader(RecordBatchReader):
         if blocks_end != self._index_offset:
             raise IOError(f"Row file blocks end at {blocks_end}, but the footer puts the "
                           f"block index at {self._index_offset}")
+
+        for i, size in enumerate(self._block_uncompressed_sizes):
+            # nothing in the footer bounds this one, and it sizes the decompression buffer
+            if size < 0:
+                raise IOError(f"Row file block {i} has a negative uncompressed size {size}")
 
         if self._block_count == 0:
             if self._total_row_count != 0:

@@ -85,6 +85,16 @@ class RowBlockIndex {
                             blocksEnd, footer.indexOffset));
         }
 
+        for (int i = 0; i < blockCount(); i++) {
+            // nothing in the footer bounds this one, and it sizes the decompression buffer
+            if (blockUncompressedSizes[i] < 0) {
+                throw new IOException(
+                        String.format(
+                                "Row file block %d has a negative uncompressed size %d.",
+                                i, blockUncompressedSizes[i]));
+            }
+        }
+
         if (blockCount() == 0) {
             if (footer.totalRowCount != 0) {
                 throw new IOException(
