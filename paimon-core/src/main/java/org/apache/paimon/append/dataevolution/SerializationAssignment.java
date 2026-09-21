@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Range;
 
@@ -32,6 +33,7 @@ import javax.annotation.Nullable;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -47,8 +49,8 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.readCount;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
-/** The row-id assignment used to rewrite metadata and persisted for subsequent commits. */
-public final class DataEvolutionRowIdAssignment {
+/** Persisted row-id mappings and allocation bounds copied from a reassignment attempt. */
+public final class SerializationAssignment {
 
     /** A snapshot-local marker and reference to the plan in the manifest directory. */
     public static final String PLAN_FILE_PROPERTY = "row-id-reassign.plan";
@@ -60,7 +62,7 @@ public final class DataEvolutionRowIdAssignment {
     private final long firstAssignedRowId;
     private final long nextRowId;
 
-    DataEvolutionRowIdAssignment(
+    private SerializationAssignment(
             Map<BinaryRow, RowRangeMappingIndex> rowIdMappings,
             long firstAssignedRowId,
             long nextRowId) {
@@ -75,20 +77,12 @@ public final class DataEvolutionRowIdAssignment {
         this.nextRowId = nextRowId;
     }
 
-    Map<BinaryRow, RowRangeMappingIndex> rowIdMappings() {
-        return rowIdMappings;
-    }
-
     public long firstAssignedRowId() {
         return firstAssignedRowId;
     }
 
     public long nextRowId() {
         return nextRowId;
-    }
-
-    public long logicalRowCount() {
-        return nextRowId - firstAssignedRowId;
     }
 
     /** Returns a mapping only when the entire range maps to a contiguous range. */
@@ -118,8 +112,40 @@ public final class DataEvolutionRowIdAssignment {
         return result.isEmpty() ? null : result;
     }
 
+    /** Persists the assignment and adds its reference to this commit's snapshot properties. */
+    static Map<String, String> writeProperties(
+            FileStoreTable table,
+            Snapshot snapshot,
+            Map<BinaryRow, RowRangeMappingIndex> rowIdMappings,
+            long firstAssignedRowId,
+            long nextRowId) {
+        String planFile;
+        try {
+            planFile =
+                    new SerializationAssignment(rowIdMappings, firstAssignedRowId, nextRowId)
+                            .write(table.fileIO(), table.store().pathFactory());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to persist row-id reassignment plan.", e);
+        }
+        Map<String, String> properties =
+                snapshot.properties() == null
+                        ? new HashMap<>()
+                        : new HashMap<>(snapshot.properties());
+        properties.put(PLAN_FILE_PROPERTY, planFile);
+        return properties;
+    }
+
+    /** Only call after a definitively rejected commit, never when its outcome is uncertain. */
+    static void deletePlan(FileStoreTable table, Map<String, String> properties) {
+        table.fileIO()
+                .deleteQuietly(
+                        table.store()
+                                .pathFactory()
+                                .toManifestFilePath(properties.get(PLAN_FILE_PROPERTY)));
+    }
+
     /** Streams the effective mappings without materializing another copy of the plan. */
-    String write(FileIO fileIO, FileStorePathFactory pathFactory) throws IOException {
+    private String write(FileIO fileIO, FileStorePathFactory pathFactory) throws IOException {
         String fileName = FILE_PREFIX + UUID.randomUUID();
         Path path = pathFactory.toManifestFilePath(fileName);
         try (DataOutputViewStreamWrapper out =
@@ -145,7 +171,7 @@ public final class DataEvolutionRowIdAssignment {
         return fileName;
     }
 
-    public static DataEvolutionRowIdAssignment read(
+    public static SerializationAssignment read(
             FileIO fileIO, FileStorePathFactory pathFactory, String fileName) throws IOException {
         try (DataInputViewStreamWrapper in =
                 new DataInputViewStreamWrapper(
@@ -175,7 +201,7 @@ public final class DataEvolutionRowIdAssignment {
             if (in.read() != -1) {
                 throw new IOException("Unexpected trailing bytes in row-id reassignment plan.");
             }
-            return new DataEvolutionRowIdAssignment(mappings, firstAssignedRowId, nextRowId);
+            return new SerializationAssignment(mappings, firstAssignedRowId, nextRowId);
         } catch (IllegalArgumentException e) {
             throw new IOException("Invalid row-id reassignment plan " + fileName, e);
         }
