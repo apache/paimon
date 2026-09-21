@@ -180,6 +180,8 @@ The factory auto-dispatches based on the bytes content (`BLOBDESC`,
 
 - [Blob Storage](../multimodal-table/blob) — concept, storage modes,
   SQL/Java API
+- [DLF BLOB Presigned URL Quick Start](./dlf-blob-presigned-url) — create a
+  DLF table, store a video, and send a temporary OSS URL to Model Studio
 - [Data Evolution](./data-evolution) — required for
   blob tables
 - [Multimodal video frames](./video#video-frame-storage) —
