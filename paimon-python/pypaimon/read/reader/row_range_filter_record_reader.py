@@ -39,6 +39,7 @@ class RowIdFilterRecordBatchReader(RecordBatchReader):
             batch = self.reader.read_arrow_batch()
             if batch is None:
                 return None
+            self._refresh_blob_view_lookup(self.reader)
             if batch.num_rows == 0:
                 return batch
             import numpy as np
