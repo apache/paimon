@@ -147,6 +147,8 @@ def map_with_blobs(
     *,
     file_io=None,
     all_blob_columns=None,
+    map_blob_columns=None,
+    array_blob_columns=None,
     parallelism: int = 64,
     batch_size: Optional[int] = 1024,
     fn_kwargs: Optional[Dict[str, Any]] = None,
@@ -156,10 +158,15 @@ def map_with_blobs(
     """Fetch BLOB payloads in Ray batches and call ``fn``.
 
     ``fn(scalar_batch, blobs, **fn_kwargs)`` receives a ``pyarrow.Table`` of
-    non-BLOB columns and a row-aligned ``dict`` of BLOB bytes. Return a small
-    Ray-compatible batch; for side-effect-only work, return an empty
+    non-BLOB columns and a row-aligned ``dict`` of BLOB bytes. ARRAY BLOB cells
+    are lists and MAP BLOB cells are lists of key-value pairs; null cells and
+    elements are preserved. Return a small Ray-compatible batch; for
+    side-effect-only work, return an empty
     ``pyarrow.Table`` instead of ``None``. Call this directly on
     ``scan().to_ray()`` output, or pass ``file_io`` and ``all_blob_columns``.
+    Supply ``map_blob_columns`` and ``array_blob_columns`` when transforms
+    erase the source metadata and Arrow nested types. The table method
+    supplies this information automatically.
     Tune ``batch_size`` for BLOB size and worker memory.
     """
     _require_ray_data()
@@ -209,12 +216,23 @@ def map_with_blobs(
     if invalid:
         raise ValueError("Column {!r} is not a BLOB column.".format(invalid[0]))
 
+    if map_blob_columns is None:
+        map_blob_columns = getattr(dataset, "_paimon_map_blob_columns", ())
+    if array_blob_columns is None:
+        array_blob_columns = getattr(dataset, "_paimon_array_blob_columns", ())
+    map_blob_columns, array_blob_columns = set(map_blob_columns), set(array_blob_columns)
+    if (map_blob_columns & array_blob_columns
+            or (map_blob_columns | array_blob_columns) - all_blob):
+        raise ValueError("Nested BLOB columns must be disjoint subsets of all_blob_columns.")
+
     return dataset.map_batches(
         _map_blob_batch,
         fn_kwargs={
             "file_io": resolved_file_io,
             "blob_cols": blob_cols,
             "all_blob_cols": list(all_blob_cols),
+            "map_blob_cols": list(map_blob_columns),
+            "array_blob_cols": list(array_blob_columns),
             "parallelism": parallelism,
             "fn": fn,
             "fn_kwargs": dict(fn_kwargs or {}),
@@ -233,7 +251,10 @@ def _set_map_batches_remote_args(dataset, kwargs, ray_remote_args):
 
 
 def _map_blob_batch(
-        batch, file_io, blob_cols, all_blob_cols, parallelism, fn, fn_kwargs):
+        batch, file_io, blob_cols, all_blob_cols, parallelism, fn, fn_kwargs,
+        map_blob_cols=(), array_blob_cols=()):
+    import pyarrow as pa
+
     from pypaimon.multimodal.blob_read import fetch_blob_bodies
 
     missing = [name for name in blob_cols if name not in batch.schema.names]
@@ -251,8 +272,17 @@ def _map_blob_batch(
             "table.map_with_blobs() in a separate pass, or drop it before "
             "mapping.".format(unknown[0]))
 
+    map_blob_cols = set(map_blob_cols) | {
+        name for name in blob_cols if pa.types.is_map(batch.schema.field(name).type)}
+    array_blob_cols = set(array_blob_cols) | {
+        name for name in blob_cols
+        if (pa.types.is_list(batch.schema.field(name).type)
+            or pa.types.is_large_list(batch.schema.field(name).type)
+            or pa.types.is_fixed_size_list(batch.schema.field(name).type))
+    }
     bodies = fetch_blob_bodies(
-        file_io, batch.select(blob_cols).to_pydict(), blob_cols, parallelism)
+        file_io, batch.select(blob_cols).to_pydict(), blob_cols, parallelism,
+        map_blob_cols, array_blob_cols)
     result = fn(batch.select(scalar_cols), bodies, **fn_kwargs)
     if result is None:
         raise ValueError(
@@ -272,13 +302,34 @@ def _looks_like_blob_descriptor(column):
     import pyarrow as pa
     from pypaimon.table.row.blob import BlobDescriptorSerde
 
+    chunks = getattr(column, "chunks", [column])
+    if (pa.types.is_list(column.type) or pa.types.is_large_list(column.type)
+            or pa.types.is_fixed_size_list(column.type)):
+        return any(_looks_like_blob_descriptor(chunk.flatten()) for chunk in chunks)
+    if pa.types.is_map(column.type):
+        return any(
+            _looks_like_blob_descriptor(value.values.field(1))
+            for value in column if value.is_valid)
+    if isinstance(column.type, pa.ExtensionType):
+        return any(_contains_blob_descriptor(value.as_py()) for value in column if value.is_valid)
     if not (pa.types.is_binary(column.type) or pa.types.is_large_binary(column.type)):
         return False
-    chunks = getattr(column, "chunks", None) or [column]
     for chunk in chunks:
         for value in chunk:
-            if value.is_valid:
-                return BlobDescriptorSerde.is_descriptor(value.as_py())
+            if value.is_valid and BlobDescriptorSerde.is_descriptor(value.as_py()):
+                return True
+    return False
+
+
+def _contains_blob_descriptor(value):
+    from pypaimon.table.row.blob import BlobDescriptorSerde
+
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return BlobDescriptorSerde.is_descriptor(bytes(value))
+    if isinstance(value, dict):
+        return any(_contains_blob_descriptor(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_blob_descriptor(item) for item in value)
     return False
 
 

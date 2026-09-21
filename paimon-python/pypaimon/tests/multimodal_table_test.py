@@ -1751,6 +1751,122 @@ class MultimodalTableTest(unittest.TestCase):
                 ray.shutdown()
 
     @unittest.skipIf(ray is None, "ray is not installed")
+    def test_scan_to_ray_map_with_nested_blobs(self):
+        from pypaimon.ray import map_with_blobs
+
+        schema = _schema({
+            "id": pa.int32(), "image": pa.large_binary(),
+            "pages": pa.list_(pa.large_binary()),
+            "assets": pa.map_(pa.string(), pa.large_binary()),
+        })
+        table = self.conn.create_table(
+            "ray_nested_blobs", schema=schema, options=_PARQUET_OPTIONS)
+        rows = [
+            {"id": 1, "image": b"preview", "pages": [b"a", None, b"", b"b"],
+             "assets": [("thumb", b"thumb"), ("missing", None), ("empty", b"")]},
+            {"id": 2, "image": None, "pages": None, "assets": None},
+            {"id": 3, "image": b"preview", "pages": [], "assets": []},
+            {"id": 4, "image": b"preview", "pages": [b"d"], "assets": [("thumb", b"last")]},
+        ]
+        table.add(pa.Table.from_pylist(rows, schema=schema))
+        output_schema = pa.schema([schema.field(name) for name in ("id", "pages", "assets")])
+
+        def collect(scalar, blobs):
+            assert scalar.column_names == ["id"]
+            return pa.Table.from_pydict(dict(id=scalar["id"], **blobs), schema=output_schema)
+
+        started_ray = not ray.is_initialized()
+        if started_ray:
+            ray.init(ignore_reinit_error=True, num_cpus=2)
+        try:
+            dataset = table.scan().to_ray(concurrency=1, override_num_blocks=1)
+            for maps, arrays in ((["assets"], ["assets"]), (["unknown"], [])):
+                with self.assertRaisesRegex(ValueError, "disjoint subsets"):
+                    map_with_blobs(dataset, ["pages", "assets"], collect,
+                                   map_blob_columns=maps, array_blob_columns=arrays)
+            expected = [{name: row[name] for name in output_schema.names} for row in rows]
+            for use_table in (False, True):
+                with self.subTest(use_table=use_table):
+                    if use_table:
+                        # Ray transformations do not preserve the source metadata.
+                        result = table.map_with_blobs(
+                            dataset.filter(lambda row: row["id"] > 0),
+                            ["pages", "assets"], collect, batch_size=2)
+                    else:
+                        result = map_with_blobs(
+                            dataset, ["pages", "assets"], collect, batch_size=2)
+                    actual = [row for batch in result.iter_batches(batch_format="pyarrow")
+                              for row in batch.to_pylist()]
+                    self.assertEqual(expected, sorted(actual, key=lambda row: row["id"]))
+
+            projected = table.scan().select(["id", "pages"]).to_ray()
+            result = table.map_with_blobs(
+                projected, "pages", lambda scalar, blobs: scalar, batch_size=2)
+            self.assertEqual([1, 2, 3, 4], sorted(row["id"] for row in result.take_all()))
+            empty = table.scan().where("id < 0").to_ray()
+            self.assertEqual([], map_with_blobs(empty, ["pages", "assets"], collect).take_all())
+        finally:
+            if started_ray:
+                ray.shutdown()
+
+    def test_map_with_blobs_rejects_foreign_nested_descriptors(self):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+        from pypaimon.ray.ray_paimon import _map_blob_batch
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        descriptor = BlobDescriptor("oss://other-table/blob", 0, 1).serialize()
+        for arrow_type, values in (
+                (pa.list_(pa.large_binary()), [None, [], [b"inline", descriptor]]),
+                (pa.map_(pa.string(), pa.large_binary()),
+                 [None, [], [("inline", b"inline"), ("foreign", descriptor)]])):
+            with self.subTest(arrow_type=arrow_type):
+                batch = pa.table({
+                    "image": [b"inline"] * 3,
+                    "foreign": pa.array(values, type=arrow_type),
+                })
+                with self.assertRaisesRegex(ValueError, "does not own"):
+                    _map_blob_batch(batch, None, ["image"], ["image"], 1, None, {})
+                # A descriptor outside the current slice is not a foreign column value.
+                _map_blob_batch(batch.slice(0, 2), LocalFileIO(), ["image"], ["image"], 1,
+                                lambda scalar, blobs: scalar, {})
+                empty = pa.table({
+                    "image": pa.chunked_array([], type=pa.large_binary()),
+                    "foreign": pa.chunked_array([], type=arrow_type),
+                })
+                result = _map_blob_batch(empty, LocalFileIO(), ["image"], ["image"], 1,
+                                         lambda scalar, blobs: scalar, {})
+                self.assertEqual(0, result.num_rows)
+
+    @unittest.skipIf(ray is None, "ray is not installed")
+    def test_map_with_blobs_python_object_columns(self):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+        from pypaimon.ray.ray_paimon import _map_blob_batch
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        try:
+            from ray.data.extensions import ArrowPythonObjectArray
+        except ImportError:
+            self.skipTest("Ray has no Python object extension type")
+
+        expected = {
+            "assets": [None, [], [("image", b"body"), ("missing", None)]],
+            "pages": [None, [], [b"page", None]],
+        }
+        batch = pa.table({name: ArrowPythonObjectArray.from_objects(values)
+                          for name, values in expected.items()})
+        actual = _map_blob_batch(
+            batch, LocalFileIO(), ["assets", "pages"], ["assets", "pages"], 1,
+            lambda scalar, blobs: blobs, {}, map_blob_cols=["assets"], array_blob_cols=["pages"])
+        self.assertEqual(expected, actual)
+
+        foreign = ArrowPythonObjectArray.from_objects([
+            None, [], [("inline", b"body"), ("foreign", BlobDescriptor("oss://other/blob", 0, 1).serialize())],
+        ])
+        with self.assertRaisesRegex(ValueError, "does not own"):
+            _map_blob_batch(batch.append_column("foreign", foreign), None,
+                            ["assets"], ["assets", "pages"], 1, None, {}, map_blob_cols=["assets"])
+
+    @unittest.skipIf(ray is None, "ray is not installed")
     def test_scan_to_ray_map_with_blobs_guards(self):
         started_ray = False
         if not ray.is_initialized():
