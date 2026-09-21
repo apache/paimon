@@ -26,6 +26,8 @@ import org.apache.paimon.utils.VarLengthIntUtils;
 
 import java.io.IOException;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** Block index that maps row numbers to block locations. */
 class RowBlockIndex {
 
@@ -36,10 +38,85 @@ class RowBlockIndex {
 
     RowBlockIndex(
             long[] blockCompressedSizes, long[] blockUncompressedSizes, long[] blockRowStarts) {
+        checkArgument(
+                blockCompressedSizes.length == blockUncompressedSizes.length
+                        && blockCompressedSizes.length == blockRowStarts.length,
+                "Row file block index arrays disagree on the block count: %s compressed sizes, %s uncompressed sizes, %s row starts.",
+                blockCompressedSizes.length,
+                blockUncompressedSizes.length,
+                blockRowStarts.length);
         this.blockCompressedSizes = blockCompressedSizes;
         this.blockUncompressedSizes = blockUncompressedSizes;
         this.blockRowStarts = blockRowStarts;
         this.blockOffsets = computeOffsets(blockCompressedSizes);
+    }
+
+    /**
+     * Checks the index against the footer, which is the only place both are in hand. Blocks are
+     * written contiguously from position 0 and the index follows the last one, so the compressed
+     * sizes must sum to exactly {@code indexOffset} — see the row format spec. Row starts must
+     * cover every row exactly once, because {@code RowFormatReader} turns consecutive starts into
+     * the row range of a block and skips a block whose range a selection does not intersect: a
+     * first start past 0, a repeated start, or a last start at the row count would drop rows
+     * silently.
+     */
+    void validate(RowFileFooter footer) throws IOException {
+        if (blockCount() != footer.blockCount) {
+            throw new IOException(
+                    String.format(
+                            "Row file block index holds %d blocks, but the footer declares %d.",
+                            blockCount(), footer.blockCount));
+        }
+
+        long blocksEnd = 0;
+        for (int i = 0; i < blockCount(); i++) {
+            if (blockCompressedSizes[i] < 0) {
+                throw new IOException(
+                        String.format(
+                                "Row file block %d has a negative compressed size %d.",
+                                i, blockCompressedSizes[i]));
+            }
+            blocksEnd += blockCompressedSizes[i];
+        }
+        if (blocksEnd != footer.indexOffset) {
+            throw new IOException(
+                    String.format(
+                            "Row file blocks end at %d, but the footer puts the block index at %d.",
+                            blocksEnd, footer.indexOffset));
+        }
+
+        if (blockCount() == 0) {
+            if (footer.totalRowCount != 0) {
+                throw new IOException(
+                        String.format(
+                                "Row file block index is empty, but the footer declares %d rows.",
+                                footer.totalRowCount));
+            }
+            return;
+        }
+
+        if (blockRowStarts[0] != 0) {
+            throw new IOException(
+                    String.format(
+                            "Row file block 0 starts at row %d, so rows before it are unreachable.",
+                            blockRowStarts[0]));
+        }
+        for (int i = 1; i < blockCount(); i++) {
+            if (blockRowStarts[i] <= blockRowStarts[i - 1]) {
+                throw new IOException(
+                        String.format(
+                                "Row file block %d starts at row %d, not after block %d at row %d.",
+                                i, blockRowStarts[i], i - 1, blockRowStarts[i - 1]));
+            }
+        }
+        if (blockRowStarts[blockCount() - 1] >= footer.totalRowCount) {
+            throw new IOException(
+                    String.format(
+                            "Row file block %d starts at row %d, which the declared row count %d does not reach.",
+                            blockCount() - 1,
+                            blockRowStarts[blockCount() - 1],
+                            footer.totalRowCount));
+        }
     }
 
     int blockCount() {
