@@ -419,7 +419,11 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             RowType finalReadKeyType = projectKeys ? this.readKeyType : keyType;
             List<DataField> readValueFields = new ArrayList<>(readValueType.getFields());
             if (changelogExtraValueFields != null) {
-                readValueFields.addAll(changelogExtraValueFields);
+                for (DataField extraField : changelogExtraValueFields) {
+                    if (!readValueType.containsField(extraField.name())) {
+                        readValueFields.add(extraField);
+                    }
+                }
             }
             List<DataField> readTableFields =
                     KeyValue.createKeyValueFields(finalReadKeyType.getFields(), readValueFields);

@@ -239,6 +239,16 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
     public static class FirstRowMergeFunctionWrapperFactory
             implements MergeFunctionWrapperFactory<Boolean> {
 
+        @Nullable private final int[] preserveFieldIndices;
+
+        public FirstRowMergeFunctionWrapperFactory() {
+            this(null);
+        }
+
+        public FirstRowMergeFunctionWrapperFactory(@Nullable int[] preserveFieldIndices) {
+            this.preserveFieldIndices = preserveFieldIndices;
+        }
+
         @Override
         public MergeFunctionWrapper<ChangelogResult> create(
                 MergeFunctionFactory<KeyValue> mfFactory,
@@ -253,7 +263,8 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                         } catch (IOException e) {
                             throw new UncheckedIOException(e);
                         }
-                    });
+                    },
+                    preserveFieldIndices);
         }
     }
 }

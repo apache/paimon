@@ -35,7 +35,6 @@ import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChangelogManager;
@@ -43,7 +42,6 @@ import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -64,26 +62,8 @@ public class ChangelogEventMetadataTable implements DataTable, ReadonlyTable {
     }
 
     public static RowType computeExtendedRowType(FileStoreTable table, RowType baseRowType) {
-        CoreOptions coreOptions = CoreOptions.fromMap(table.options());
-        List<String> preserveColumns = coreOptions.changelogExposeFieldAsMetadata();
-        if (preserveColumns.isEmpty()) {
-            return baseRowType;
-        }
-        String prefix = coreOptions.changelogMetadataFieldPrefix();
-        RowType valueType = table.schema().logicalRowType();
-        int nextId = valueType.getFields().stream().mapToInt(DataField::id).max().orElse(0) + 1;
-        List<DataField> fields = new ArrayList<>(baseRowType.getFields());
-        List<String> fieldNames = baseRowType.getFieldNames();
-        for (String name : preserveColumns) {
-            int idx = fieldNames.indexOf(name);
-            if (idx >= 0) {
-                DataField original = fields.get(idx);
-                fields.add(
-                        new DataField(
-                                nextId++, prefix + original.name(), original.type().copy(true)));
-            }
-        }
-        return new RowType(fields);
+        return ChangelogEventMetadata.appendMetadataFields(
+                baseRowType, table.schema().logicalRowType(), CoreOptions.fromMap(table.options()));
     }
 
     @Override
