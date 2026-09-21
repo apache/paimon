@@ -69,8 +69,6 @@ def native_split_from_python(split):
     Vector scores intentionally stay on the Python IndexedSplit. Rust needs
     only its row ranges to perform the physical read.
     """
-    if not native_split_bridge_available():
-        return None
     from pypaimon_rust.datafusion import Split as NativeSplit
     return NativeSplit.deserialize(
         serialize_split_v1(split, include_scores=False))

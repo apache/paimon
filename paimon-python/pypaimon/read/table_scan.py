@@ -32,35 +32,6 @@ from pypaimon.read.scanner.file_scanner import FileScanner
 
 logger = logging.getLogger(__name__)
 
-_NATIVE_FAMILY_SEARCH_MODE_OPTIONS = frozenset({
-    CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(),
-    CoreOptions.VECTOR_INDEX_SEARCH_MODE.key(),
-    CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE.key(),
-})
-_NATIVE_SEARCH_MODE_OPTIONS = _NATIVE_FAMILY_SEARCH_MODE_OPTIONS | {
-    CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(),
-}
-_NATIVE_FORWARDED_OPTIONS = frozenset({
-    CoreOptions.SCAN_NATIVE_PLAN_ENABLED.key(),
-    CoreOptions.SCAN_MODE.key(),
-    CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(),
-    CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(),
-    CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(),
-    CoreOptions.DELETION_VECTORS_MERGE_ON_READ.key(),
-    CoreOptions.SCAN_VERSION.key(),
-    CoreOptions.SCAN_SNAPSHOT_ID.key(),
-    CoreOptions.SCAN_TAG_NAME.key(),
-    CoreOptions.SCAN_TIMESTAMP.key(),
-    CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
-    CoreOptions.SCAN_WATERMARK.key(),
-    CoreOptions.BRANCH.key(),
-}) | _NATIVE_SEARCH_MODE_OPTIONS
-_NATIVE_PLAN_INDEPENDENT_OPTIONS = frozenset({
-    CoreOptions.BLOB_AS_DESCRIPTOR.key(),
-    CoreOptions.READ_NATIVE_ENABLED.key(),
-    CoreOptions.READ_BATCH_SIZE.key(),
-    CoreOptions.READ_PARALLELISM.key(),
-})
 _NATIVE_TIME_TRAVEL_OPTIONS = frozenset({
     CoreOptions.SCAN_VERSION.key(),
     CoreOptions.SCAN_SNAPSHOT_ID.key(),
@@ -127,52 +98,20 @@ class TableScan:
         primary-key global-index results,
         a primary-key table whose trimmed PK is empty (PK equals the partition
         key; Rust rejects this schema), unsupported time travel selectors,
-        and catalog-loaded tables with schema/option overrides Rust cannot carry,
-        query auth, a missing/old
-        pypaimon-rust, or a catalog / identifier Rust cannot reconstruct. Keep
-        this capability gate in sync when adding scan features."""
+        query auth, a missing pypaimon-rust, or a catalog / identifier Rust
+        cannot reconstruct. Keep this capability gate in sync when adding scan
+        features."""
         from pypaimon.read.native_plan import (
-            _resolved_schema_file_io_options, native_method_available,
-            native_runtime_available, native_version_at_least,
+            _resolved_schema_file_io_options, native_runtime_available,
         )
         if not native_runtime_available():
             return False
         fs = self.file_scanner
-        if fs.is_streaming and not native_method_available('Split', 'is_streaming'):
-            return False
         if not self._native_global_index_result_supported():
             return False
         if getattr(fs, 'chunk_shuffle', None) is not None:
             fs._validate_chunk_shuffle_compat()
-            if not native_method_available('TableScan', 'with_chunk_shuffle'):
-                return False
-        # Positional append distribution needs the stable partition/file order
-        # introduced in 0.4. Older bindings can assign different rows per call.
-        if (not self.table.is_primary_key_table and not fs.data_evolution
-                and (fs.idx_of_this_subtask is not None or fs.start_pos_of_this_subtask is not None)
-                and not native_version_at_least(0, 4)):
-            return False
-        if getattr(fs, 'deletion_vectors_enabled', False):
-            # 0.4.0 includes Python-written DV decoding and legacy bucket paths.
-            if not native_version_at_least(0, 4, 0):
-                return False
-        if (not self.table.is_primary_key_table
-                and (getattr(fs, 'idx_of_this_subtask', None) is not None
-                     or getattr(fs, 'start_pos_of_this_subtask', None) is not None)):
-            if (getattr(fs, 'idx_of_this_subtask', None) is not None
-                    and not native_method_available('TableScan', 'with_row_position_shard')):
-                return False
-            if (getattr(fs, 'start_pos_of_this_subtask', None) is not None
-                    and not native_method_available('TableScan', 'with_row_position_slice')):
-                return False
-        if (getattr(fs, '_row_ranges', None) is not None
-                and not native_method_available('ReadBuilder', 'with_row_ranges')):
-            return False
-        if (self.table.current_branch() != 'main'
-                and not native_method_available('Table', 'branch')):
-            return False
-        resolved_schema = _resolved_schema_file_io_options(self.table) is not None
-        if not resolved_schema:
+        if _resolved_schema_file_io_options(self.table) is None:
             loader = getattr(
                 getattr(self.table, 'catalog_environment', None),
                 'catalog_loader',
@@ -194,9 +133,6 @@ class TableScan:
             database_name = self.table.identifier.get_database_name()
             if not database_name or database_name == UNKNOWN_DATABASE:
                 return False
-            if ('.' in database_name
-                    and not native_method_available('Table', 'copy_with_resolved_schema')):
-                return False
         if self.table.options.query_auth_enabled:
             return False
         # Rust rejects schemas whose primary keys are all partition keys.
@@ -204,38 +140,9 @@ class TableScan:
                 and not self.table.trimmed_primary_keys:
             return False
         options = self.table.options.options
-        if (options.contains_key(CoreOptions.SCAN_WATERMARK.key())
-                and not native_version_at_least(0, 4)):
-            return False
-        if (any(options.contains_key(key)
-                for key in _NATIVE_FAMILY_SEARCH_MODE_OPTIONS)):
-            from pypaimon.read.native_plan import native_family_search_modes_available
-            if not native_family_search_modes_available():
-                return False
-        if not resolved_schema and not native_method_available('Table', 'copy_with_resolved_schema'):
-            supported_time_travel = any(
-                options.contains_key(key) for key in _NATIVE_TIME_TRAVEL_OPTIONS)
-            # Time travel intentionally carries a historical schema; other stale
-            # table objects must still fall back because Rust reloads the latest.
-            latest_schema = self.table.schema_manager.latest()
-            if (not supported_time_travel and latest_schema is not None
-                    and latest_schema.id != self.table.table_schema.id):
-                return False
-            # Rust cannot remove an option persisted in the catalog-loaded schema.
-            applied_options = getattr(self.table, '_applied_dynamic_options', {}) or {}
-            allowed_options = (
-                _NATIVE_FORWARDED_OPTIONS | _NATIVE_PLAN_INDEPENDENT_OPTIONS)
-            if (set(applied_options) - allowed_options
-                    or any(key in (_NATIVE_TIME_TRAVEL_OPTIONS
-                                   | _NATIVE_SEARCH_MODE_OPTIONS) and value is None
-                           for key, value in applied_options.items())):
-                return False
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
         unsupported_scan_keys = set(SCAN_KEYS) - _NATIVE_TIME_TRAVEL_OPTIONS
-        if any(options.contains_key(k) for k in unsupported_scan_keys):
-            return False
-        return (not options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
-                or native_method_available('ReadBuilder', 'new_incremental_scan'))
+        return not any(options.contains_key(k) for k in unsupported_scan_keys)
 
     def _native_global_index_result_supported(self) -> bool:
         result = self.file_scanner._global_index_result
