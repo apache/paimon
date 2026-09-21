@@ -42,6 +42,10 @@ RUNS = [(0, 2), (125, 132), (4500, 4540), (N - 2, N - 1)]
 FIELDS = [DataField(0, 'id', AtomicType('BIGINT')),
           DataField(1, 'payload', AtomicType('STRING'))]
 PAGE_INDEX_OPTIONS = CoreOptions(Options({'parquet.filter.columnindex.enabled': 'true'}))
+VARIANT_TYPE = pa.struct([
+    pa.field('value', pa.binary(), nullable=False),
+    pa.field('metadata', pa.binary(), nullable=False),
+])
 
 
 @pytest.fixture
@@ -175,6 +179,117 @@ def test_sparse_row_indices_are_normalized(fixture):
     assert result.equals(_expected(fixture[1], [(i, i) for i in rows]))
     assert _read(fixture, row_ranges=[])[0] is None
     assert _read(fixture, row_ranges=[(N, N + 10)])[0] is None
+
+
+@pytest.mark.parametrize('selected_row', [0, 3009, 3011, 4095])
+@pytest.mark.parametrize('page_version', ['1.0', '2.0'])
+def test_standard_variant_reads_selected_pages(
+        tmp_path, selected_row, page_version):
+    count = 4096
+    table = pa.table({
+        'record_value': pa.array([
+            None if index % 17 == 0 else {
+                'value': hashlib.shake_256(str(index).encode()).digest(512),
+                'metadata': hashlib.shake_256(
+                    ('metadata-%d' % index).encode()).digest(512),
+            }
+            for index in range(count)
+        ], type=VARIANT_TYPE),
+    })
+    path = str(tmp_path / 'variant.parquet')
+    pq.write_table(
+        table, path, write_page_index=True, data_page_size=4096,
+        write_batch_size=32, row_group_size=count,
+        use_dictionary=False, compression='zstd',
+        data_page_version=page_version)
+    counter = _CountingLocalFileSystem(skip_instance_cache=True)
+    file_io = LocalFileIO(str(tmp_path), Options({}))
+    file_io.filesystem = pafs.PyFileSystem(pafs.FSSpecHandler(counter))
+    fields = [DataField(0, 'record_value', AtomicType('VARIANT'))]
+
+    def read(options):
+        counter.reset_counts()
+        reader = reader_module.FormatPyArrowReader(
+            file_io, 'parquet', path, fields, None,
+            row_ranges=[(selected_row, selected_row)],
+            batch_size=31, options=options)
+        try:
+            if options is not None:
+                assert reader._page_index_reader is not None
+            batches = []
+            while True:
+                batch = reader.read_arrow_batch()
+                if batch is None:
+                    break
+                batches.append(batch)
+            return pa.Table.from_batches(batches), sum(
+                size for _, size in counter.reads)
+        finally:
+            reader.close()
+
+    baseline, baseline_bytes = read(None)
+    with patch.object(
+            page_module.ParquetPageIndexReader, '_column_payload',
+            autospec=True,
+            side_effect=page_module.ParquetPageIndexReader._column_payload,
+    ) as selected_pages:
+        optimized, optimized_bytes = read(PAGE_INDEX_OPTIONS)
+    assert optimized.equals(baseline)
+    assert optimized.equals(table.slice(selected_row, 1))
+    assert [len(call.args[1][4]) for call in selected_pages.call_args_list] == [1, 1]
+    assert optimized_bytes < baseline_bytes
+
+
+def test_unprofitable_variant_page_selection_uses_ordinary_reader(tmp_path):
+    count = 4096
+    table = pa.table({
+        'record_value': pa.array([
+            {
+                'value': hashlib.shake_256(str(index).encode()).digest(512),
+                'metadata': b'\x01',
+            }
+            for index in range(count)
+        ], type=VARIANT_TYPE),
+    })
+    path = str(tmp_path / 'unprofitable-variant.parquet')
+    pq.write_table(
+        table, path, write_page_index=True, data_page_size=4096,
+        write_batch_size=32, row_group_size=count,
+        use_dictionary=True, compression='zstd')
+    reader = reader_module.FormatPyArrowReader(
+        LocalFileIO(str(tmp_path), Options({})), 'parquet', path,
+        [DataField(0, 'record_value', AtomicType('VARIANT'))], None,
+        row_ranges=[(3009, 3009)], options=PAGE_INDEX_OPTIONS)
+    try:
+        assert reader._page_index_reader is not None
+        with patch.object(
+                page_module.ParquetPageIndexReader, '_column_payload',
+                side_effect=AssertionError('must use the ordinary reader')):
+            result = reader.read_arrow_batch()
+        assert pa.Table.from_batches([result]).equals(table.slice(3009, 1))
+    finally:
+        reader.close()
+
+
+def test_variant_without_offset_index_uses_ordinary_reader(tmp_path):
+    table = pa.table({
+        'record_value': pa.array([
+            {'value': b'one', 'metadata': b'\x01'},
+            {'value': b'two', 'metadata': b'\x01'},
+        ], type=VARIANT_TYPE),
+    })
+    path = str(tmp_path / 'unindexed-variant.parquet')
+    pq.write_table(table, path, write_page_index=False)
+    reader = reader_module.FormatPyArrowReader(
+        LocalFileIO(str(tmp_path), Options({})), 'parquet', path,
+        [DataField(0, 'record_value', AtomicType('VARIANT'))], None,
+        row_ranges=[(1, 1)], options=PAGE_INDEX_OPTIONS)
+    try:
+        assert reader._page_index_reader is None
+        assert pa.Table.from_batches([reader.read_arrow_batch()]).equals(
+            table.slice(1, 1))
+    finally:
+        reader.close()
 
 
 def test_concurrent_readers_and_early_close(fixture):
