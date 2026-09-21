@@ -201,18 +201,29 @@ class BlobStore:
                 raise ValueError("limit must be greater than or equal to 0.")
             if limit == 0:
                 return []
-        rows = self._read_rows(
-            include_blob=True,
-            columns=columns,
-        )
+        read_table = self._raw_table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"})
+        read_builder = read_table.new_read_builder().with_projection(
+            self._projection(True, columns))
+        # A prefix filters the exposed key's string representation, including
+        # non-string keys. Only push the limit when every row is a match.
+        if limit is not None and prefix is None:
+            read_builder = read_builder.with_limit(limit)
+        reader = read_builder.new_read()._to_managed_arrow_batch_reader(
+            read_builder.new_scan().plan().splits())
         objects = []
-        for row in rows:
-            key = row[self.key_column]
-            if prefix is not None and not str(key).startswith(prefix):
-                continue
-            objects.append(self._row_to_info(row))
-            if limit is not None and len(objects) >= limit:
-                break
+        try:
+            for batch in reader:
+                data = batch.to_pydict()
+                for values in zip(*data.values()):
+                    row = dict(zip(data, values))
+                    key = row[self.key_column]
+                    if prefix is not None and not str(key).startswith(prefix):
+                        continue
+                    objects.append(self._row_to_info(row))
+                    if limit is not None and len(objects) >= limit:
+                        return objects
+        finally:
+            reader.close()
         return objects
 
     def delete_object(self, key) -> None:
