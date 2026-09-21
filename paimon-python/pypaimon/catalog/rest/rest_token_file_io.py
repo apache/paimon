@@ -18,6 +18,7 @@
 import logging
 import threading
 import time
+from datetime import timedelta
 from typing import Optional, Union
 
 from cachetools import TTLCache
@@ -85,9 +86,18 @@ class RESTTokenFileIO(FileIO):
         self.api_instance = None
         self._init_file_io_cache()
 
-    def file_io(self) -> FileIO:
+    def file_io(self, minimum_validity_millis: int = 0) -> FileIO:
         with self._file_io_cache_lock:
-            self.try_to_refresh_token()
+            if minimum_validity_millis:
+                self.try_to_refresh_token(minimum_validity_millis)
+                if self.token is not None and (
+                        self.token.expire_at_millis - int(time.time() * 1000)
+                        < minimum_validity_millis):
+                    raise ValueError(
+                        "Requested presigned URL validity exceeds the remaining "
+                        "REST credential lifetime after refresh.")
+            else:
+                self.try_to_refresh_token()
 
             if self.token is None:
                 return FileIO.get(self.path, self.catalog_options or Options({}))
@@ -157,7 +167,13 @@ class RESTTokenFileIO(FileIO):
     def create_blob_presigned_url(self, table_root, descriptor, validity) -> str:
         if table_root != self.path:
             raise ValueError("Table root does not match RESTTokenFileIO bound table root.")
-        return self.file_io().create_blob_presigned_url(
+        if not isinstance(validity, timedelta):
+            raise TypeError("Blob presigned URL validity must be datetime.timedelta.")
+        if validity <= timedelta(0) or validity.microseconds != 0:
+            raise ValueError("Blob presigned URL validity must be positive whole seconds.")
+        # Allow for rounding to whole seconds when the URL is signed.
+        minimum_validity_millis = int(validity.total_seconds() * 1000) + 1000
+        return self.file_io(minimum_validity_millis).create_blob_presigned_url(
             table_root, descriptor, validity)
 
     def write_parquet(self, path: str, data, compression: str = 'zstd',
@@ -213,14 +229,14 @@ class RESTTokenFileIO(FileIO):
             return auth_provider.token or 'anonymous'
         return 'anonymous'
 
-    def try_to_refresh_token(self):
+    def try_to_refresh_token(self, minimum_validity_millis: int = 0):
         identifier_str = self._build_cache_key()
 
-        if self.token is not None and not self._is_token_expired(self.token):
+        if self.token is not None and not self._is_token_expired(self.token, minimum_validity_millis):
             return
 
         cached_token = self._get_cached_token(identifier_str)
-        if cached_token and not self._is_token_expired(cached_token):
+        if cached_token and not self._is_token_expired(cached_token, minimum_validity_millis):
             self.token = cached_token
             return
 
@@ -228,12 +244,12 @@ class RESTTokenFileIO(FileIO):
 
         with global_lock:
             cached_token = self._get_cached_token(identifier_str)
-            if cached_token and not self._is_token_expired(cached_token):
+            if cached_token and not self._is_token_expired(cached_token, minimum_validity_millis):
                 self.token = cached_token
                 return
 
             token_to_check = cached_token if cached_token else self.token
-            if token_to_check is None or self._is_token_expired(token_to_check):
+            if token_to_check is None or self._is_token_expired(token_to_check, minimum_validity_millis):
                 self.refresh_token()
                 self._set_cached_token(identifier_str, self.token)
 
@@ -245,11 +261,13 @@ class RESTTokenFileIO(FileIO):
         with self._TOKEN_LOCKS_LOCK:
             self._TOKEN_CACHE[identifier_str] = token
 
-    def _is_token_expired(self, token: Optional[RESTToken]) -> bool:
+    def _is_token_expired(
+            self, token: Optional[RESTToken], minimum_validity_millis: int = 0) -> bool:
         if token is None:
             return True
         current_time = int(time.time() * 1000)
-        return (token.expire_at_millis - current_time) < RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS
+        return (token.expire_at_millis - current_time) < max(
+            RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS, minimum_validity_millis)
 
     def _get_global_token_lock(self, identifier_str: str) -> threading.Lock:
         with self._TOKEN_LOCKS_LOCK:

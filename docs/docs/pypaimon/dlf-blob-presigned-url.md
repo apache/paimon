@@ -240,8 +240,10 @@ when both the application materializing the BLOB and the URL consumer can reach
 that endpoint. PyPaimon does not replace Internal endpoints with public endpoints.
 
 OSS V4 URL validity is limited to 7 days for long-lived AccessKeys and 12 hours
-for STS credentials. An STS URL also expires when its signing token expires,
-even if the requested URL validity is longer. Credential refresh does not extend
+for STS credentials. Before signing, the DLF REST FileIO refreshes credentials if
+their remaining lifetime cannot cover the requested validity, and rejects the request
+if the refreshed credentials are still insufficient. An STS URL expires when its
+signing token expires. Credential refresh does not extend
 URLs that have already been issued.
 
 ## How the temporary URL works

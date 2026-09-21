@@ -73,6 +73,52 @@ class RESTTokenFileIOTest(unittest.TestCase):
                     other_root, descriptor, timedelta(minutes=30))
             resolve.assert_not_called()
 
+    def test_presigned_url_refreshes_credentials_for_requested_lifetime(self):
+        self._check_presigned_url_lifetime(3, 4, True)
+
+    def test_presigned_url_reuses_credentials_for_short_validity(self):
+        self._check_presigned_url_lifetime(0.5, 4, False)
+
+    def test_presigned_url_rejects_insufficient_refreshed_lifetime(self):
+        self._check_presigned_url_lifetime(3, 2, True, rejected=True)
+
+    def _check_presigned_url_lifetime(
+            self, requested_hours, refreshed_hours, should_refresh, rejected=False):
+        root = "oss://bucket/table"
+        file_io = RESTTokenFileIO(self.identifier, root, self.catalog_options)
+        now = 1700000000
+        token_properties = {OssOptions.OSS_SECURITY_TOKEN.key(): "test-token"}
+        old_token = RESTToken(token_properties, (now + 2 * 3600) * 1000)
+        new_token = RESTToken(token_properties, (now + refreshed_hours * 3600) * 1000)
+        file_io.token = old_token
+        descriptor = BlobDescriptor(root + "/video.blob", 0, 10)
+        validity = timedelta(hours=requested_hours)
+
+        def refresh():
+            file_io.token = new_token
+
+        with patch('pypaimon.catalog.rest.rest_token_file_io.time.time', return_value=now), \
+                patch.object(file_io, '_build_cache_key', return_value='presigning-test'), \
+                patch.object(file_io, '_get_cached_token', return_value=old_token), \
+                patch.object(file_io, '_set_cached_token') as cache_token, \
+                patch.object(file_io, 'refresh_token', side_effect=refresh) as refresh_token, \
+                patch('pypaimon.catalog.rest.rest_token_file_io.FileIO.get') as get_io:
+            get_io.return_value.create_blob_presigned_url.return_value = "https://signed-url"
+            if rejected:
+                with self.assertRaisesRegex(ValueError, "credential lifetime after refresh"):
+                    file_io.create_blob_presigned_url(root, descriptor, validity)
+                get_io.assert_not_called()
+            else:
+                self.assertEqual("https://signed-url", file_io.create_blob_presigned_url(
+                    root, descriptor, validity))
+                get_io.return_value.create_blob_presigned_url.assert_called_once_with(
+                    root, descriptor, validity)
+            self.assertEqual(int(should_refresh), refresh_token.call_count)
+            if should_refresh:
+                cache_token.assert_called_once_with(file_io._build_cache_key(), new_token)
+            else:
+                cache_token.assert_not_called()
+
     def test_new_output_stream_path_conversion_and_parent_creation(self):
         """Test new_output_stream correctly handles URI paths and creates parent directories."""
         with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
