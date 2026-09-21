@@ -25,6 +25,7 @@ import queue
 import random
 import threading
 import warnings
+from collections import deque
 from typing import Any, Callable, Iterator, List, Optional
 
 import pyarrow as pa
@@ -763,100 +764,9 @@ def _default_to_tensor(batch: pa.RecordBatch) -> dict:
     return tensors
 
 
-class TorchBatchIterDataset(_BaseTorchIterDataset):
-    """Streaming IterableDataset which yields Arrow or Tensor batches."""
+class _TorchShuffleMixin:
 
-    def __init__(
-        self,
-        table_read: TableRead,
-        splits: List[Split],
-        batch_format: str,
-        batch_size: Optional[int],
-        to_tensor_fn: Optional[Callable[[pa.RecordBatch], Any]] = None,
-        auto_detect_rank: bool = False,
-        sharding_rank: Optional[int] = None,
-        sharding_world_size: Optional[int] = None,
-    ):
-        super().__init__(
-            table_read,
-            splits,
-            auto_detect_rank,
-            sharding_rank,
-            sharding_world_size,
-        )
-        self.batch_format = batch_format
-        self.batch_size = batch_size
-        self.to_tensor_fn = to_tensor_fn
-
-    def __iter__(self):
-        worker_info = torch.utils.data.get_worker_info()
-        splits_to_process = self._worker_splits(worker_info)
-        raw_batches = self._arrow_batches_for_splits(splits_to_process)
-
-        batches = _sized_record_batches(
-            self._limit_batches(raw_batches), self.batch_size
-        )
-        for batch in batches:
-            if self.batch_format == "torch":
-                converter = self.to_tensor_fn or _default_to_tensor
-                yield converter(batch)
-            else:
-                yield batch
-
-    def _arrow_batches_for_splits(
-        self, splits: List[Split]
-    ) -> Iterator[pa.RecordBatch]:
-        reader = self.table_read.to_arrow_batch_reader(splits)
-        try:
-            for batch in iter(reader.read_next_batch, None):
-                if batch.num_rows:
-                    yield batch
-        finally:
-            close = getattr(reader, "close", None)
-            if close is not None:
-                close()
-
-    def _limit_batches(
-        self, batches: Iterator[pa.RecordBatch]
-    ) -> Iterator[pa.RecordBatch]:
-        remaining = self.table_read.limit
-        for batch in batches:
-            if remaining is not None:
-                if remaining <= 0:
-                    return
-                if batch.num_rows > remaining:
-                    batch = batch.slice(0, remaining)
-                remaining -= batch.num_rows
-            yield batch
-
-
-class TorchShuffledIterDataset(_BaseTorchIterDataset):
-    """
-    PyTorch IterableDataset with Paimon-controlled streaming shuffle.
-
-    This dataset consumes pre-planned splits, then mixes rows with split
-    interleaving and a shuffle buffer. Chunk-level shuffle, when needed,
-    stays in TableScan.with_chunk_shuffle().
-    """
-
-    def __init__(
-        self,
-        table_read: TableRead,
-        splits: List[Split],
-        seed: int = 0,
-        buffer_size: int = 1000,
-        max_buffer_input_splits: int = 10,
-        auto_detect_rank: bool = False,
-        sharding_rank: Optional[int] = None,
-        sharding_world_size: Optional[int] = None,
-    ):
-        super().__init__(
-            table_read,
-            splits,
-            auto_detect_rank,
-            sharding_rank,
-            sharding_world_size,
-        )
+    def _init_shuffle(self, seed, buffer_size, max_buffer_input_splits):
         self.seed = self._require_int(seed, "seed")
         self.buffer_size = self._require_positive_int(buffer_size, "buffer_size")
         self.max_buffer_input_splits = self._require_positive_int(
@@ -888,9 +798,197 @@ class TorchShuffledIterDataset(_BaseTorchIterDataset):
             raise ValueError("%s must be a positive int" % name)
         return value
 
-    def set_epoch(self, epoch: int) -> "TorchShuffledIterDataset":
+    def set_epoch(self, epoch: int):
         self.epoch = epoch
         return self
+
+    def _shuffle_rng(self, worker_id):
+        rank, world_size = self._distributed_context()
+        rng_seed = self.seed + self.epoch * 1000003 + worker_id
+        if world_size > 1:
+            rng_seed = "%d:%d" % (rng_seed, rank)
+        return random.Random(rng_seed)
+
+
+class TorchBatchIterDataset(_BaseTorchIterDataset):
+    """Streaming IterableDataset which yields Arrow or Tensor batches."""
+
+    def __init__(
+        self,
+        table_read: TableRead,
+        splits: List[Split],
+        batch_format: str,
+        batch_size: Optional[int],
+        to_tensor_fn: Optional[Callable[[pa.RecordBatch], Any]] = None,
+        auto_detect_rank: bool = False,
+        sharding_rank: Optional[int] = None,
+        sharding_world_size: Optional[int] = None,
+    ):
+        super().__init__(
+            table_read,
+            splits,
+            auto_detect_rank,
+            sharding_rank,
+            sharding_world_size,
+        )
+        self.batch_format = batch_format
+        self.batch_size = batch_size
+        self.to_tensor_fn = to_tensor_fn
+
+    def __iter__(self):
+        worker_info = torch.utils.data.get_worker_info()
+        splits_to_process = self._worker_splits(worker_info)
+        raw_batches = self._arrow_batches_for_splits(splits_to_process)
+        worker_id = worker_info.id if worker_info is not None else 0
+        try:
+            for batch in self._prepare_batches(raw_batches, worker_id):
+                if self.batch_format == "torch":
+                    converter = self.to_tensor_fn or _default_to_tensor
+                    yield converter(batch)
+                else:
+                    yield batch
+        finally:
+            raw_batches.close()
+
+    def _prepare_batches(self, raw_batches, worker_id):
+        return _sized_record_batches(
+            self._limit_batches(raw_batches), self.batch_size)
+
+    def _arrow_batches_for_splits(
+        self, splits: List[Split]
+    ) -> Iterator[pa.RecordBatch]:
+        reader = self.table_read.to_arrow_batch_reader(splits)
+        try:
+            for batch in iter(reader.read_next_batch, None):
+                if batch.num_rows:
+                    yield batch
+        finally:
+            close = getattr(reader, "close", None)
+            if close is not None:
+                close()
+
+    def _limit_batches(
+        self, batches: Iterator[pa.RecordBatch]
+    ) -> Iterator[pa.RecordBatch]:
+        remaining = self.table_read.limit
+        for batch in batches:
+            if remaining is not None:
+                if remaining <= 0:
+                    return
+                if batch.num_rows > remaining:
+                    batch = batch.slice(0, remaining)
+                remaining -= batch.num_rows
+            yield batch
+
+
+class TorchShuffledBatchIterDataset(_TorchShuffleMixin, TorchBatchIterDataset):
+    """Shuffle Arrow rows before sizing batches and converting to tensors."""
+
+    def __init__(self, table_read, splits, seed=0, buffer_size=1000,
+                 max_buffer_input_splits=10, **kwargs):
+        super().__init__(table_read, splits, **kwargs)
+        self._init_shuffle(seed, buffer_size, max_buffer_input_splits)
+
+    def _prepare_batches(self, raw_batches, worker_id):
+        shuffled = _shuffle_record_batches(
+            self._limit_batches(raw_batches), self.buffer_size,
+            self._shuffle_rng(worker_id))
+        return _sized_record_batches(shuffled, self.batch_size)
+
+    def _arrow_batches_for_splits(self, splits):
+        # Keep the selected prefix of a binding limit unchanged before shuffle.
+        if self.max_buffer_input_splits == 1 or not self._limit_covers_all_splits():
+            yield from super()._arrow_batches_for_splits(splits)
+            return
+
+        split_iter = iter(splits)
+        active = deque()
+        read_batches = super()._arrow_batches_for_splits
+
+        def add_next():
+            split = next(split_iter, None)
+            if split is not None:
+                active.append(read_batches([split]))
+
+        try:
+            for _ in range(min(self.max_buffer_input_splits, len(splits))):
+                add_next()
+            while active:
+                try:
+                    yield next(active[0])
+                except StopIteration:
+                    active.popleft().close()
+                    add_next()
+                else:
+                    active.rotate(-1)
+        finally:
+            for batches in active:
+                batches.close()
+
+
+def _shuffle_record_batches(batches, buffer_size, rng):
+    # Only row positions enter Python. Payloads, including nested values and
+    # nulls, stay in Arrow. Each input block replaces random reservoir slots.
+    buffer = None
+    for batch in _sized_record_batches(batches, buffer_size):
+        if buffer is None:
+            buffer = batch
+            continue
+        usage = _batch_offset_usage(buffer)
+        if any(usage.get(path, 0) + value > _MAX_ARROW_OFFSET
+               for path, value in _batch_offset_usage(batch).items()):
+            # Drain before concatenation would overflow a 32-bit Arrow offset.
+            yield _shuffled_record_batch(buffer, rng)
+            buffer = batch
+            continue
+        combined = _concat_record_batches([buffer, batch])
+        retained = list(range(buffer.num_rows))
+        selected = []
+        for row in range(batch.num_rows):
+            slot = rng.randrange(buffer.num_rows)
+            selected.append(retained[slot])
+            retained[slot] = buffer.num_rows + row
+        output = combined.take(pa.array(selected, type=pa.int64()))
+        buffer = combined.take(pa.array(retained, type=pa.int64()))
+        yield output
+    if buffer is not None:
+        yield _shuffled_record_batch(buffer, rng)
+
+
+def _shuffled_record_batch(batch, rng):
+    order = list(range(batch.num_rows))
+    rng.shuffle(order)
+    return batch.take(pa.array(order, type=pa.int64()))
+
+
+class TorchShuffledIterDataset(_TorchShuffleMixin, _BaseTorchIterDataset):
+    """
+    PyTorch IterableDataset with Paimon-controlled streaming shuffle.
+
+    This dataset consumes pre-planned splits, then mixes rows with split
+    interleaving and a shuffle buffer. Chunk-level shuffle, when needed,
+    stays in TableScan.with_chunk_shuffle().
+    """
+
+    def __init__(
+        self,
+        table_read: TableRead,
+        splits: List[Split],
+        seed: int = 0,
+        buffer_size: int = 1000,
+        max_buffer_input_splits: int = 10,
+        auto_detect_rank: bool = False,
+        sharding_rank: Optional[int] = None,
+        sharding_world_size: Optional[int] = None,
+    ):
+        super().__init__(
+            table_read,
+            splits,
+            auto_detect_rank,
+            sharding_rank,
+            sharding_world_size,
+        )
+        self._init_shuffle(seed, buffer_size, max_buffer_input_splits)
 
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
@@ -957,11 +1055,7 @@ class TorchShuffledIterDataset(_BaseTorchIterDataset):
         rows: Iterator[dict],
         worker_id: int,
     ) -> Iterator[dict]:
-        rank, world_size = self._distributed_context()
-        rng_seed = self.seed + self.epoch * 1000003 + worker_id
-        if world_size > 1:
-            rng_seed = "%d:%d" % (rng_seed, rank)
-        rng = random.Random(rng_seed)
+        rng = self._shuffle_rng(worker_id)
         buffer = []
         for row in rows:
             if len(buffer) < self.buffer_size:
