@@ -315,20 +315,15 @@ class ScanQuery:
         return self._iter_blobs(read_builder, file_io, blob_cols, parallelism)
 
     def _iter_blobs(self, read_builder, file_io, blob_cols, parallelism):
-        reader = read_builder.new_read().to_arrow_batch_reader(
-            read_builder.new_scan().plan().splits())
         map_blob_cols, array_blob_cols = self._nested_blob_columns()
-        try:
+        with read_builder.new_read()._to_managed_arrow_batch_reader(
+                read_builder.new_scan().plan().splits()) as reader:
             for batch in reader:
                 bodies = self._fetch_bodies(
                     file_io, batch.select(blob_cols).to_pydict(), blob_cols,
                     parallelism, map_blob_cols, array_blob_cols)
                 scalar = batch.select(self._scalar_columns(batch.schema.names))
                 yield scalar, bodies
-        finally:
-            # Close the reader even if the caller breaks out early.
-            if hasattr(reader, "close"):
-                reader.close()
 
     def _blob_descriptor_query_read_builder(self):
         from pypaimon.common.options.core_options import CoreOptions

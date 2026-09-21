@@ -1662,6 +1662,47 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(
             [], list(obs.scan().where("clip = 'none'").stream_blobs("image")))
 
+    def test_scan_stream_blobs_closes_underlying_iterator(self):
+        from pypaimon.read.table_read import TableRead
+
+        table = self.conn.create_table(
+            "stream_cleanup", schema=_schema({
+                "id": pa.int32(), "image": pa.large_binary(),
+            }), options=dict(_PARQUET_OPTIONS, **{"read.batch-size": "1"}))
+        table.add([{"id": i, "image": b"body"} for i in range(3)])
+        original = TableRead._arrow_batch_generator
+        closed = []
+
+        def tracked_read(read, *args, **kwargs):
+            reader = original(read, *args, **kwargs)
+            try:
+                yield from reader
+            finally:
+                reader.close()
+                closed.append(True)
+
+        with patch.object(TableRead, "_try_native_batches", return_value=None), \
+                patch.object(TableRead, "_arrow_batch_generator", tracked_read):
+            stream = table.scan().stream_blobs("image")
+            next(stream)
+            stream.close()
+            self.assertEqual([True], closed)
+
+            for method in ("_fetch_bodies", "_scalar_columns"):
+                with self.subTest(method=method):
+                    closed.clear()
+                    query = table.scan()
+                    with patch.object(query, method, side_effect=ValueError("batch failed")):
+                        stream = query.stream_blobs("image")
+                        try:
+                            next(stream)
+                        except ValueError as error:
+                            self.assertEqual("batch failed", str(error))
+                            # Assert while the traceback still retains the reader's frame.
+                            self.assertEqual([True], closed)
+                        else:
+                            self.fail("Expected batch failure")
+
     @unittest.skipIf(ray is None, "ray is not installed")
     def test_scan_to_ray_map_with_blobs(self):
         started_ray = False
