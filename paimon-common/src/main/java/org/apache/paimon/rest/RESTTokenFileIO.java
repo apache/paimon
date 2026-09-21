@@ -197,16 +197,29 @@ public class RESTTokenFileIO implements FileIO {
                 || validity.getNano() != 0) {
             throw new IOException("Blob presigned URL validity must be positive whole seconds.");
         }
-        final long minimumValidityMillis;
+        final long validityMillis;
         try {
-            // Reserve the normal refresh safety window for materialization and signing.
-            minimumValidityMillis =
-                    Math.addExact(validity.toMillis(), TOKEN_EXPIRATION_SAFE_TIME_MILLIS);
+            validityMillis = validity.toMillis();
         } catch (ArithmeticException e) {
             throw new IOException("Blob presigned URL validity is too large.", e);
         }
-        return fileIO(minimumValidityMillis)
-                .createBlobPresignedUrl(tableRoot, descriptor, validity);
+
+        FileIOWithToken first = fileIOWithToken(validityMillis);
+        String url = first.fileIO.createBlobPresignedUrl(tableRoot, descriptor, validity);
+        if (hasRemainingLifetime(first.token, validityMillis)) {
+            return url;
+        }
+
+        // The first call materialized the range. Refresh and sign the cached object again so the
+        // returned URL has the requested lifetime.
+        FileIOWithToken refreshed = fileIOWithToken(validityMillis);
+        url = refreshed.fileIO.createBlobPresignedUrl(tableRoot, descriptor, validity);
+        if (!hasRemainingLifetime(refreshed.token, validityMillis)) {
+            throw new IOException(
+                    "Requested presigned URL validity exceeds the remaining "
+                            + "REST credential lifetime after refresh.");
+        }
+        return url;
     }
 
     @Override
@@ -219,31 +232,31 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     public FileIO fileIO() throws IOException {
-        return fileIO(0);
+        return fileIOWithToken(0).fileIO;
     }
 
-    private FileIO fileIO(long minimumValidityMillis) throws IOException {
+    private FileIOWithToken fileIOWithToken(long minimumValidityMillis) throws IOException {
         tryToRefreshToken(minimumValidityMillis);
-        if (minimumValidityMillis > 0
-                && token.expireAtMillis() - System.currentTimeMillis() < minimumValidityMillis) {
+        RESTToken currentToken = token;
+        if (!hasRemainingLifetime(currentToken, minimumValidityMillis)) {
             throw new IOException(
                     "Requested presigned URL validity exceeds the remaining "
                             + "REST credential lifetime after refresh.");
         }
 
-        FileIO fileIO = FILE_IO_CACHE.getIfPresent(token);
+        FileIO fileIO = FILE_IO_CACHE.getIfPresent(currentToken);
         if (fileIO != null) {
-            return fileIO;
+            return new FileIOWithToken(fileIO, currentToken);
         }
 
         synchronized (FILE_IO_CACHE) {
-            fileIO = FILE_IO_CACHE.getIfPresent(token);
+            fileIO = FILE_IO_CACHE.getIfPresent(currentToken);
             if (fileIO != null) {
-                return fileIO;
+                return new FileIOWithToken(fileIO, currentToken);
             }
 
             Options options = catalogContext.options();
-            options = new Options(RESTUtil.merge(options.toMap(), token.token()));
+            options = new Options(RESTUtil.merge(options.toMap(), currentToken.token()));
             options.set(FILE_IO_ALLOW_CACHE, false);
             CatalogContext context =
                     CatalogContext.create(
@@ -252,9 +265,18 @@ public class RESTTokenFileIO implements FileIO {
                             catalogContext.preferIO(),
                             catalogContext.fallbackIO());
             fileIO = FileIO.get(path, context);
-            FILE_IO_CACHE.put(token, fileIO);
-            return fileIO;
+            FILE_IO_CACHE.put(currentToken, fileIO);
+            return new FileIOWithToken(fileIO, currentToken);
         }
+    }
+
+    private boolean hasRemainingLifetime(RESTToken signingToken, long minimumValidityMillis) {
+        return signingToken == null
+                || signingToken.expireAtMillis() - currentTimeMillis() >= minimumValidityMillis;
+    }
+
+    long currentTimeMillis() {
+        return System.currentTimeMillis();
     }
 
     private void tryToRefreshToken() {
@@ -273,8 +295,19 @@ public class RESTTokenFileIO implements FileIO {
 
     private boolean shouldRefresh(long minimumValidityMillis) {
         return token == null
-                || token.expireAtMillis() - System.currentTimeMillis()
+                || token.expireAtMillis() - currentTimeMillis()
                         < Math.max(TOKEN_EXPIRATION_SAFE_TIME_MILLIS, minimumValidityMillis);
+    }
+
+    private static class FileIOWithToken {
+
+        private final FileIO fileIO;
+        private final RESTToken token;
+
+        private FileIOWithToken(FileIO fileIO, RESTToken token) {
+            this.fileIO = fileIO;
+            this.token = token;
+        }
     }
 
     private void refreshToken() {

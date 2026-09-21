@@ -35,6 +35,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -101,7 +102,7 @@ class RESTTokenFileIOTest {
     @Test
     void testPresigningRefreshesForRequestedLifetime() throws IOException {
         checkPresignedLifetime(
-                Duration.ofHours(3), Duration.ofHours(2), Duration.ofHours(5), true, false);
+                Duration.ofHours(3), Duration.ofHours(2), Duration.ofHours(4), true, false);
     }
 
     @Test
@@ -111,12 +112,12 @@ class RESTTokenFileIOTest {
     }
 
     @Test
-    void testPresigningRefreshesWhenOnlyOneSecondExceedsValidity() throws IOException {
+    void testPresigningAcceptsWhenOneSecondExceedsValidity() throws IOException {
         checkPresignedLifetime(
                 Duration.ofMinutes(90),
                 Duration.ofMinutes(90).plusSeconds(1),
                 Duration.ofHours(3),
-                true,
+                false,
                 false);
     }
 
@@ -157,13 +158,17 @@ class RESTTokenFileIOTest {
                                 now + refreshedLifetime.toMillis()));
         RESTTokenFileIO fileIO =
                 new RESTTokenFileIO(
-                        CatalogContext.create(new Options(), loader, null), api, identifier, root);
+                        CatalogContext.create(new Options(), loader, null), api, identifier, root) {
+                    @Override
+                    long currentTimeMillis() {
+                        return now;
+                    }
+                };
         fileIO.validToken();
         if (rejected) {
             assertThatThrownBy(() -> fileIO.createBlobPresignedUrl(root, descriptor, validity))
                     .isInstanceOf(IOException.class)
                     .hasMessageContaining("credential lifetime after refresh");
-            verify(loader, never()).load(any());
             verify(delegate, never()).createBlobPresignedUrl(any(), any(), any());
         } else {
             assertThat(fileIO.createBlobPresignedUrl(root, descriptor, validity))
@@ -171,6 +176,54 @@ class RESTTokenFileIOTest {
             verify(delegate).createBlobPresignedUrl(root, descriptor, validity);
         }
         verify(api, times(refresh ? 2 : 1)).loadTableToken(identifier);
+    }
+
+    @Test
+    void testPresigningRefreshesAndResignsAfterMaterialization() throws IOException {
+        Path root = new Path("oss://bucket/table");
+        BlobDescriptor descriptor = new BlobDescriptor("oss://bucket/table/data.blob", 0, 1);
+        Duration validity = Duration.ofMinutes(30);
+        AtomicLong now = new AtomicLong(1700000000000L);
+        FileIO delegate = mock(FileIO.class);
+        when(delegate.exists(any())).thenReturn(true);
+        when(delegate.createBlobPresignedUrl(root, descriptor, validity))
+                .thenAnswer(
+                        ignored -> {
+                            if (now.get() == 1700000000000L) {
+                                now.addAndGet(Duration.ofHours(2).toMillis());
+                                return "https://first";
+                            }
+                            return "https://refreshed";
+                        });
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenReturn(delegate);
+        when(loader.getScheme()).thenReturn("oss");
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        when(api.loadTableToken(identifier))
+                .thenReturn(
+                        new GetTableTokenResponse(
+                                Collections.singletonMap(
+                                        "test.token", UUID.randomUUID().toString()),
+                                now.get() + Duration.ofHours(2).toMillis()),
+                        new GetTableTokenResponse(
+                                Collections.singletonMap(
+                                        "test.token", UUID.randomUUID().toString()),
+                                now.get() + Duration.ofHours(4).toMillis()));
+        RESTTokenFileIO fileIO =
+                new RESTTokenFileIO(
+                        CatalogContext.create(new Options(), loader, null), api, identifier, root) {
+                    @Override
+                    long currentTimeMillis() {
+                        return now.get();
+                    }
+                };
+
+        fileIO.validToken();
+        assertThat(fileIO.createBlobPresignedUrl(root, descriptor, validity))
+                .isEqualTo("https://refreshed");
+        verify(delegate, times(2)).createBlobPresignedUrl(root, descriptor, validity);
+        verify(api, times(2)).loadTableToken(identifier);
     }
 
     @Test
