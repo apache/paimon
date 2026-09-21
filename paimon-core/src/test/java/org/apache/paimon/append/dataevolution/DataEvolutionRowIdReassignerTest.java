@@ -21,6 +21,8 @@ package org.apache.paimon.append.dataevolution;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.RenamingSnapshotCommit;
+import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -51,14 +53,17 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.LocalOrphanFilesClean;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
@@ -78,6 +83,8 @@ import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -704,7 +711,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 table.store()
                         .pathFactory()
                         .toManifestFilePath(
-                                "snapshot-99999-00000000-0000-0000-0000-000000000000.plan");
+                                "snapshot-99999-00000000-0000-0000-0000-000000000000.reassign-plan");
         table.fileIO().newOutputStream(orphan, false).close();
 
         new LocalOrphanFilesClean(table, System.currentTimeMillis() + 2000).clean();
@@ -792,7 +799,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                         boolean result = super.exists(path);
                         if (!result
                                 && path.getName().startsWith(planPrefix)
-                                && path.getName().endsWith(".plan")) {
+                                && path.getName().endsWith(".reassign-plan")) {
                             // Both creates observe an absent path before either opens its stream.
                             planNames.add(path.getName());
                             checkedAbsent.countDown();
@@ -844,6 +851,16 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                                                 table.store()
                                                         .pathFactory()
                                                         .toManifestFilePath(planName)))
+                        .isTrue();
+            }
+            new LocalOrphanFilesClean(table, System.currentTimeMillis() + 2000).clean();
+            for (String planName : planNames) {
+                assertThat(
+                                table.fileIO()
+                                        .exists(
+                                                table.store()
+                                                        .pathFactory()
+                                                        .toManifestFilePath(planName)))
                         .isEqualTo(planName.equals(planFile(committed)));
             }
             assertPersistedPlan(table);
@@ -851,6 +868,52 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
             releaseLoser.countDown();
             executor.shutdownNow();
         }
+    }
+
+    @Test
+    public void testCommittedPlanSurvivesFalseCommitResult() throws Exception {
+        FileStoreTable original = createTableWithInterleavedPartitions();
+        AtomicBoolean committedButReturnedFalse = new AtomicBoolean();
+        CatalogEnvironment environment =
+                new CatalogEnvironment(null, null, null, null, null, null, false, false) {
+                    @Override
+                    public SnapshotCommit snapshotCommit(SnapshotManager manager) {
+                        SnapshotCommit delegate = new RenamingSnapshotCommit(manager, Lock.empty());
+                        return new SnapshotCommit() {
+                            @Override
+                            public boolean commit(
+                                    @Nullable String baseUuid,
+                                    Snapshot snapshot,
+                                    String branch,
+                                    List<PartitionStatistics> statistics)
+                                    throws Exception {
+                                boolean committed =
+                                        delegate.commit(baseUuid, snapshot, branch, statistics);
+                                if (committed) {
+                                    committedButReturnedFalse.set(true);
+                                    return false;
+                                }
+                                return committed;
+                            }
+
+                            @Override
+                            public void close() throws Exception {
+                                delegate.close();
+                            }
+                        };
+                    }
+                };
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        original.fileIO(), original.location(), original.schema(), environment);
+        // Reuse the false-success failure model covered by FileStoreCommitTest.
+        assertThatThrownBy(() -> new DataEvolutionRowIdReassigner(table).reassign("false-result"))
+                .hasMessageContaining("OVERWRITE snapshot");
+        assertThat(committedButReturnedFalse).isTrue();
+        Snapshot committed = table.snapshotManager().latestSnapshot();
+        assertThat(committed.commitUser()).isEqualTo("false-result");
+        new LocalOrphanFilesClean(table, System.currentTimeMillis() + 2000).clean();
+        assertPersistedPlan(table);
     }
 
     private static void awaitReassignLatch(CountDownLatch latch) {
@@ -938,6 +1001,15 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 .isInstanceOf(IOException.class);
     }
 
+    private long planFileCount(FileStoreTable table) throws IOException {
+        return Arrays.stream(table.fileIO().listStatus(table.store().pathFactory().manifestPath()))
+                .filter(
+                        file ->
+                                file.getPath().getName().startsWith("snapshot-")
+                                        && file.getPath().getName().endsWith(".reassign-plan"))
+                .count();
+    }
+
     private void overwritePlan(FileStoreTable table, Path path, byte[] bytes) throws IOException {
         try (OutputStream out = table.fileIO().newOutputStream(path, true)) {
             out.write(bytes);
@@ -951,8 +1023,9 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 .containsKey(PLAN_FILE_PROPERTY);
         String prefix = "snapshot-" + snapshot.id() + "-";
         String fileName = planFile(snapshot);
-        assertThat(fileName).startsWith(prefix).endsWith(".plan");
-        UUID.fromString(fileName.substring(prefix.length(), fileName.length() - ".plan".length()));
+        assertThat(fileName).startsWith(prefix).endsWith(".reassign-plan");
+        UUID.fromString(
+                fileName.substring(prefix.length(), fileName.length() - ".reassign-plan".length()));
         SerializationAssignment assignment =
                 readPlan(table.fileIO(), table.store().pathFactory(), planFile(snapshot));
         assertThat(assignment.snapshotId()).isEqualTo(snapshot.id());
@@ -1061,14 +1134,10 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         assertThat(valueStatsByFile(table)).containsAllEntriesOf(valueStatsBefore);
         assertThat(table.snapshotManager().latestSnapshot().nextRowId()).isEqualTo(11L);
         assertPersistedPlan(table);
-        long planFiles =
-                Arrays.stream(table.fileIO().listStatus(table.store().pathFactory().manifestPath()))
-                        .filter(
-                                file ->
-                                        file.getPath().getName().startsWith("snapshot-")
-                                                && file.getPath().getName().endsWith(".plan"))
-                        .count();
-        assertThat(planFiles).isEqualTo(1L);
+        assertThat(planFileCount(table)).isEqualTo(2L);
+        new LocalOrphanFilesClean(table, System.currentTimeMillis() + 2000).clean();
+        assertThat(planFileCount(table)).isEqualTo(1L);
+        assertPersistedPlan(table);
     }
 
     @Test

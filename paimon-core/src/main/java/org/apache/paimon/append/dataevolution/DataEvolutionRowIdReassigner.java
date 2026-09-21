@@ -67,7 +67,6 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static java.util.Collections.singletonList;
-import static org.apache.paimon.append.dataevolution.SerializationAssignment.deletePlan;
 import static org.apache.paimon.append.dataevolution.SerializationAssignment.writeProperties;
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecuteCloseable;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -450,9 +449,6 @@ public class DataEvolutionRowIdReassigner {
                             rewrittenIndexManifest.indexManifest,
                             assignment.nextRowId,
                             properties);
-        }
-        if (!success) {
-            deletePlan(table, properties);
         }
         return new CommitAssignmentResult(
                 success, rewrittenDataManifests.fileCount, rewrittenIndexManifest.indexFileCount);

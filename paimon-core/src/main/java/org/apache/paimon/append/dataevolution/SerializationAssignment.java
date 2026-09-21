@@ -154,18 +154,9 @@ public final class SerializationAssignment {
         return properties;
     }
 
-    /** Only call after a definitively rejected commit, never when its outcome is uncertain. */
-    static void deletePlan(FileStoreTable table, Map<String, String> properties) {
-        table.fileIO()
-                .deleteQuietly(
-                        table.store()
-                                .pathFactory()
-                                .toManifestFilePath(properties.get(PLAN_FILE_PROPERTY)));
-    }
-
     /** Streams the effective mappings without materializing another copy of the plan. */
     private String write(FileIO fileIO, FileStorePathFactory pathFactory) throws IOException {
-        String fileName = FILE_PREFIX + snapshotId + "-" + UUID.randomUUID() + ".plan";
+        String fileName = FILE_PREFIX + snapshotId + "-" + UUID.randomUUID() + ".reassign-plan";
         Path path = pathFactory.toManifestFilePath(fileName);
         // A failed create may mean another attempt owns this path. Do not delete its plan.
         OutputStream fileOut = fileIO.newOutputStream(path, false);
