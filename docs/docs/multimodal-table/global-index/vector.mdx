@@ -136,6 +136,16 @@ Every query vector must have that same dimension.
 
 ## Vector Search
 
+Python indexed vector searches use the `global-index.thread-num` table option,
+the same as Java. It must be a positive integer and defaults to `32`. Single and
+batch queries open and search at most that many index shards concurrently,
+bounded by the number of splits. Set it to `1` for serial shard searches. It
+applies to both paimon-vindex and Lumina indexes. Results retain the same score
+and row-ID tie ordering. Each shard can also use native search and I/O threads,
+so choose the thread count together with those settings and the available
+memory. In Python, raw-vector fallback continues to use the table read
+parallelism.
+
 The examples search the three-dimensional IVF-flat index built above. A limit of
 `5` returns at most five matches; the three-row sample table returns fewer.
 `ivf.nprobe=1` matches the single cluster in this example.
@@ -274,6 +284,13 @@ result = (
 The scalar filter is evaluated with matching scalar global indexes before vector search. Build a
 BTree index for frequently used metadata filters, such as `category`, `tenant_id`, or `event_time`,
 so vector search can restrict the candidate row ids before running ANN search.
+
+An index answer that is only a candidate set — `contains`, ends-with or `LIKE` on a BTree index,
+or a conjunction with a member no index can evaluate — is never ranked as if it matched, because
+a non-matching but closer row would take a top-k slot from a matching one. By default such
+candidates are excluded and a warning is logged, so the result may hold fewer than `limit` rows;
+set `global-index.filter.refine-from-data=true` to verify them by reading their filter columns
+instead. That read runs on the caller and can cover every candidate row.
 
 </TabItem>
 

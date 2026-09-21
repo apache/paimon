@@ -33,13 +33,19 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.BucketFilter;
 import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestIndexTestUtils;
+import org.apache.paimon.manifest.ManifestSidecar;
+import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.operation.FileDeletionBase.DataFileDeletionPlan;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -71,6 +77,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -534,6 +541,7 @@ public class ExpireSnapshotsTest {
                 null,
                 null,
                 null,
+                null,
                 extraFiles);
     }
 
@@ -854,6 +862,75 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
+    void testSidecarsFollowSnapshotAndTagRetention() throws Exception {
+        store.options().toConfiguration().set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 2);
+        store.options()
+                .toConfiguration()
+                .set(CoreOptions.MANIFEST_TARGET_FILE_SIZE, MemorySize.parse("8 mb"));
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(8, allData, snapshotPositions);
+        int latest = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        Set<Path> manifests = new HashSet<>();
+        Set<Path> retainedManifests = new HashSet<>();
+        for (int snapshotId = 1; snapshotId <= latest; snapshotId++) {
+            rewriteSnapshotTime(snapshotId, 0);
+            ManifestIndexTestUtils.registerIndexReferences(store, snapshotId);
+            snapshotManager.invalidateCache();
+            for (ManifestFileMeta meta :
+                    store.manifestListFactory()
+                            .create()
+                            .readDataManifests(snapshotManager.snapshot(snapshotId))) {
+                Path manifest = store.pathFactory().toManifestFilePath(meta.fileName());
+                manifests.add(manifest);
+                if (snapshotId == 3 || snapshotId == latest) {
+                    retainedManifests.add(manifest);
+                }
+            }
+        }
+        store.newTagManager()
+                .createTag(
+                        snapshotManager.snapshot(3),
+                        "keep-sidecars",
+                        store.options().tagDefaultTimeRetained(),
+                        Collections.emptyList(),
+                        false);
+        Set<Path> expiredManifests = new HashSet<>(manifests);
+        expiredManifests.removeAll(retainedManifests);
+        assertThat(expiredManifests).isNotEmpty();
+        ExpireSnapshotsImpl expire =
+                (ExpireSnapshotsImpl) store.newExpire(expireAllButLatestConfig());
+        expire.setCurrentTimeMillis(() -> 1000L);
+        expire.expire();
+        for (Path manifest : manifests) {
+            boolean retained = retainedManifests.contains(manifest);
+            assertThat(fileIO.exists(manifest)).as("manifest %s", manifest).isEqualTo(retained);
+            assertThat(
+                            fileIO.exists(
+                                    new Path(
+                                            manifest.getParent(),
+                                            "index-for-"
+                                                    + manifest.getName()
+                                                    + ManifestSidecar.SUFFIX)))
+                    .as("sidecar for %s", manifest)
+                    .isEqualTo(retained);
+        }
+        for (ManifestFileMeta meta :
+                store.manifestListFactory()
+                        .create()
+                        .readDataManifests(
+                                store.newTagManager()
+                                        .getOrThrow("keep-sidecars")
+                                        .trimToSnapshot())) {
+            assertThat(
+                            fileIO.exists(
+                                    store.pathFactory()
+                                            .toManifestFilePath(ManifestSidecar.fileName(meta))))
+                    .isTrue();
+        }
+    }
+
+    @Test
     public void testExpireWithTagsAndConcurrentPlanningKeepsTaggedSnapshotsReadable()
             throws Exception {
         store.options().toConfiguration().set(CoreOptions.FILE_OPERATION_THREAD_NUM, 4);
@@ -891,6 +968,85 @@ public class ExpireSnapshotsTest {
         assertSnapshot(latestSnapshotId, allData, snapshotPositions);
         assertSnapshot(tagManager.getOrThrow("tag3").trimToSnapshot(), allData, snapshotPositions);
         assertSnapshot(tagManager.getOrThrow("tag6").trimToSnapshot(), allData, snapshotPositions);
+    }
+
+    @Test
+    public void testExpireFiltersTagFilesByDeletionCandidates() throws Exception {
+        List<KeyValue> candidateData = FileStoreTestUtils.partitionedData(5, gen, "0401", 8);
+        List<KeyValue> unrelatedData = FileStoreTestUtils.partitionedData(5, gen, "0402", 8);
+        BinaryRow candidatePartition = gen.getPartition(candidateData.get(0));
+        BinaryRow unrelatedPartition = gen.getPartition(unrelatedData.get(0));
+        Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
+        writers.put(
+                candidatePartition,
+                Collections.singletonMap(
+                        0,
+                        FileStoreTestUtils.writeData(store, candidateData, candidatePartition, 0)));
+        writers.put(
+                unrelatedPartition,
+                Collections.singletonMap(
+                        0,
+                        FileStoreTestUtils.writeData(store, unrelatedData, unrelatedPartition, 0)));
+        FileStoreTestUtils.commitData(store, 0, writers);
+
+        Snapshot taggedSnapshot = snapshotManager.latestSnapshot();
+        TagManager tagManager = store.newTagManager();
+        tagManager.createTag(
+                taggedSnapshot,
+                "tag1",
+                store.options().tagDefaultTimeRetained(),
+                Collections.emptyList(),
+                false);
+
+        List<ManifestEntry> delete =
+                store.newScan().plan().files().stream()
+                        .filter(entry -> entry.partition().equals(candidatePartition))
+                        .map(
+                                entry ->
+                                        ManifestEntry.create(
+                                                FileKind.DELETE,
+                                                entry.partition(),
+                                                entry.bucket(),
+                                                entry.totalBuckets(),
+                                                entry.file()))
+                        .collect(Collectors.toList());
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.tryCommitOnce(
+                    null,
+                    delete,
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    1,
+                    null,
+                    Collections.emptyMap(),
+                    Snapshot.CommitKind.APPEND,
+                    false,
+                    taggedSnapshot,
+                    true,
+                    null);
+        }
+
+        CandidateTrackingSnapshotDeletion snapshotDeletion =
+                new CandidateTrackingSnapshotDeletion(store);
+        ExpireSnapshotsImpl expire =
+                newExpireWithSnapshotDeletion(store, snapshotManager, snapshotDeletion);
+        expire.config(
+                ExpireConfig.builder()
+                        .snapshotRetainMin(1)
+                        .snapshotRetainMax(1)
+                        .snapshotTimeRetain(Duration.ofMillis(Long.MAX_VALUE))
+                        .build());
+        expire.expire();
+
+        assertThat(snapshotDeletion.candidateTagSkipperCalls()).isGreaterThan(0);
+        assertThat(snapshotDeletion.filteredTagReads()).isGreaterThan(0);
+        assertThat(snapshotDeletion.materializedTagEntries()).isOne();
+        List<KeyValue> taggedData = new ArrayList<>(candidateData);
+        taggedData.addAll(unrelatedData);
+        assertSnapshot(
+                tagManager.getOrThrow("tag1").trimToSnapshot(),
+                taggedData,
+                Collections.singletonList(taggedData.size()));
     }
 
     @Test
@@ -942,6 +1098,8 @@ public class ExpireSnapshotsTest {
                         1,
                         SimpleStats.EMPTY_STATS,
                         0,
+                        null,
+                        null,
                         null,
                         null,
                         null,
@@ -1492,12 +1650,11 @@ public class ExpireSnapshotsTest {
         }
 
         @Override
-        public List<Path> planDeletedInDeltaManifest(
-                Snapshot snapshot, Predicate<ExpireFileEntry> skipper) {
+        public DataFileDeletionPlan planDeletedInDeltaManifest(Snapshot snapshot) {
             if (blockDataFilePlans && shouldBlock(snapshot.id())) {
                 dataFilePlans.awaitConcurrentCall();
             }
-            return super.planDeletedInDeltaManifest(snapshot, skipper);
+            return super.planDeletedInDeltaManifest(snapshot);
         }
 
         @Override
@@ -1530,6 +1687,71 @@ public class ExpireSnapshotsTest {
 
         private int maxActiveManifestPlans() {
             return manifestPlans.maxActiveCalls();
+        }
+    }
+
+    private static class CandidateTrackingSnapshotDeletion extends SnapshotDeletion {
+
+        private final AtomicInteger candidateTagSkipperCalls = new AtomicInteger();
+        private final AtomicInteger filteredTagReads = new AtomicInteger();
+        private final AtomicInteger materializedTagEntries = new AtomicInteger();
+
+        private CandidateTrackingSnapshotDeletion(TestFileStore store) {
+            super(
+                    store.fileIO(),
+                    store.pathFactory(),
+                    store.manifestFileFactory().create(),
+                    store.manifestListFactory().create(),
+                    store.newIndexFileHandler(),
+                    store.newStatsFileHandler(),
+                    store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
+                    store.options().cleanEmptyDirectories(),
+                    store.options().fileOperationThreadNum(),
+                    store.options().scanManifestParallelism());
+        }
+
+        @Override
+        public Predicate<ExpireFileEntry> createDataFileSkipperForTag(Snapshot tag)
+                throws Exception {
+            throw new AssertionError("Snapshot expiration must not index all files in a tag.");
+        }
+
+        @Override
+        public Predicate<ExpireFileEntry> createDataFileSkipperForTag(
+                Snapshot tag, Collection<DataFileDeletionPlan> plans) throws Exception {
+            candidateTagSkipperCalls.incrementAndGet();
+            return super.createDataFileSkipperForTag(tag, plans);
+        }
+
+        @Override
+        protected Collection<ExpireFileEntry> readMergedDataFiles(List<ManifestFileMeta> manifests)
+                throws IOException {
+            throw new AssertionError("Snapshot expiration must not merge all files in a tag.");
+        }
+
+        @Override
+        protected Collection<ExpireFileEntry> readMergedDataFiles(
+                List<ManifestFileMeta> manifests,
+                BucketFilter bucketFilter,
+                Predicate<ProjectedManifestEntry> filter)
+                throws IOException {
+            filteredTagReads.incrementAndGet();
+            Collection<ExpireFileEntry> entries =
+                    super.readMergedDataFiles(manifests, bucketFilter, filter);
+            materializedTagEntries.addAndGet(entries.size());
+            return entries;
+        }
+
+        private int candidateTagSkipperCalls() {
+            return candidateTagSkipperCalls.get();
+        }
+
+        private int filteredTagReads() {
+            return filteredTagReads.get();
+        }
+
+        private int materializedTagEntries() {
+            return materializedTagEntries.get();
         }
     }
 

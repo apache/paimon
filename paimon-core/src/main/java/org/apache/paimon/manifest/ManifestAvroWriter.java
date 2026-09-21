@@ -18,6 +18,7 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.SimpleColStats;
@@ -43,6 +44,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -68,6 +70,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
     private final String compression;
     private final PathFactory pathFactory;
     private final long targetFileSize;
+    private final CoreOptions options;
 
     private final List<ManifestFileMeta> results = new ArrayList<>();
     private final List<Path> completedPaths = new ArrayList<>();
@@ -83,7 +86,8 @@ public final class ManifestAvroWriter implements AutoCloseable {
             ObjectSerializer<ManifestEntry> serializer,
             String compression,
             PathFactory pathFactory,
-            long targetFileSize) {
+            long targetFileSize,
+            CoreOptions options) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
@@ -92,6 +96,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
         this.compression = compression;
         this.pathFactory = pathFactory;
         this.targetFileSize = targetFileSize;
+        this.options = options;
     }
 
     public void write(ManifestEntry entry) throws IOException {
@@ -218,6 +223,9 @@ public final class ManifestAvroWriter implements AutoCloseable {
         currentWriter.close();
         ManifestFileMeta result = currentWriter.result();
         completedPaths.add(currentWriter.path);
+        if (currentWriter.sidecarCreated) {
+            completedPaths.add(ManifestSidecar.path(currentWriter.path));
+        }
         results.add(result);
         currentWriter = null;
     }
@@ -296,6 +304,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
         private byte kind;
         private BinaryRow partition;
         private int bucket;
+        private int totalBuckets;
         private int level;
         private long schemaId;
         private boolean hasRowId;
@@ -306,6 +315,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
                 byte kind,
                 BinaryRow partition,
                 int bucket,
+                int totalBuckets,
                 int level,
                 long schemaId,
                 long firstRowId,
@@ -313,6 +323,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
             this.kind = kind;
             this.partition = partition;
             this.bucket = bucket;
+            this.totalBuckets = totalBuckets;
             this.level = level;
             this.schemaId = schemaId;
             this.hasRowId = true;
@@ -325,12 +336,14 @@ public final class ManifestAvroWriter implements AutoCloseable {
                 byte kind,
                 BinaryRow partition,
                 int bucket,
+                int totalBuckets,
                 int level,
                 long schemaId,
                 long rowCount) {
             this.kind = kind;
             this.partition = partition;
             this.bucket = bucket;
+            this.totalBuckets = totalBuckets;
             this.level = level;
             this.schemaId = schemaId;
             this.hasRowId = false;
@@ -348,6 +361,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
         private final long schemaId;
         private final int minBucket;
         private final int maxBucket;
+        private final @Nullable Integer totalBuckets;
         private final int minLevel;
         private final int maxLevel;
         private final long minRowId;
@@ -360,6 +374,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
                 long schemaId,
                 int minBucket,
                 int maxBucket,
+                @Nullable Integer totalBuckets,
                 int minLevel,
                 int maxLevel,
                 long minRowId,
@@ -370,6 +385,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
             this.schemaId = schemaId;
             this.minBucket = minBucket;
             this.maxBucket = maxBucket;
+            this.totalBuckets = totalBuckets;
             this.minLevel = minLevel;
             this.maxLevel = maxLevel;
             this.minRowId = minRowId;
@@ -396,13 +412,16 @@ public final class ManifestAvroWriter implements AutoCloseable {
         private long schemaId = Long.MIN_VALUE;
         private int minBucket = Integer.MAX_VALUE;
         private int maxBucket = Integer.MIN_VALUE;
+        private @Nullable Integer totalBuckets;
         private int minLevel = Integer.MAX_VALUE;
         private int maxLevel = Integer.MIN_VALUE;
         private boolean bucketStatsKnown = true;
+        private boolean totalBucketsKnown = true;
         private boolean levelStatsKnown = true;
         private @Nullable RowIdStats rowIdStats = new RowIdStats();
         private boolean closed;
         private boolean aborted;
+        private boolean sidecarCreated;
 
         private FileWriter(Path path) {
             this.path = path;
@@ -473,11 +492,12 @@ public final class ManifestAvroWriter implements AutoCloseable {
             schemaId = Math.max(schemaId, entry.file().schemaId());
             minBucket = Math.min(minBucket, entry.bucket());
             maxBucket = Math.max(maxBucket, entry.bucket());
+            collectTotalBuckets(entry.totalBuckets());
             minLevel = Math.min(minLevel, entry.level());
             maxLevel = Math.max(maxLevel, entry.level());
             if (rowIdStats != null) {
                 Long firstRowId = entry.file().firstRowId();
-                if (firstRowId == null) {
+                if (!validRowIdRange(firstRowId, entry.file().rowCount())) {
                     rowIdStats = null;
                 } else {
                     rowIdStats.collect(firstRowId, entry.file().rowCount());
@@ -500,10 +520,11 @@ public final class ManifestAvroWriter implements AutoCloseable {
             schemaId = Math.max(schemaId, entry.schemaId);
             minBucket = Math.min(minBucket, entry.bucket);
             maxBucket = Math.max(maxBucket, entry.bucket);
+            collectTotalBuckets(entry.totalBuckets);
             minLevel = Math.min(minLevel, entry.level);
             maxLevel = Math.max(maxLevel, entry.level);
             if (rowIdStats != null) {
-                if (!entry.hasRowId) {
+                if (!entry.hasRowId || !validRowIdRange(entry.firstRowId, entry.rowCount)) {
                     rowIdStats = null;
                 } else {
                     rowIdStats.collect(entry.firstRowId, entry.rowCount);
@@ -517,6 +538,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
             schemaId = Math.max(schemaId, metadata.schemaId);
             minBucket = Math.min(minBucket, metadata.minBucket);
             maxBucket = Math.max(maxBucket, metadata.maxBucket);
+            collectTotalBuckets(metadata.totalBuckets);
             minLevel = Math.min(minLevel, metadata.minLevel);
             maxLevel = Math.max(maxLevel, metadata.maxLevel);
             if (rowIdStats != null) {
@@ -538,6 +560,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
                 minBucket = Math.min(minBucket, manifest.minBucket());
                 maxBucket = Math.max(maxBucket, manifest.maxBucket());
             }
+            collectTotalBuckets(manifest.totalBuckets());
             if (manifest.minLevel() == null || manifest.maxLevel() == null) {
                 levelStatsKnown = false;
             } else {
@@ -553,6 +576,21 @@ public final class ManifestAvroWriter implements AutoCloseable {
             }
 
             collectCopiedPartitionStats(manifest.partitionStats());
+        }
+
+        private void collectTotalBuckets(@Nullable Integer candidate) {
+            if (!totalBucketsKnown) {
+                return;
+            }
+            if (candidate == null || candidate <= 0) {
+                totalBucketsKnown = false;
+                totalBuckets = null;
+            } else if (totalBuckets == null) {
+                totalBuckets = candidate;
+            } else if (!totalBuckets.equals(candidate)) {
+                totalBucketsKnown = false;
+                totalBuckets = null;
+            }
         }
 
         private void collectCopiedPartitionStats(SimpleStats partitionStats) {
@@ -668,6 +706,14 @@ public final class ManifestAvroWriter implements AutoCloseable {
                             ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);
                 }
             }
+            if (sidecarCreated) {
+                try {
+                    fileIO.deleteQuietly(ManifestSidecar.path(path));
+                } catch (Throwable cleanupFailure) {
+                    primaryFailure =
+                            ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);
+                }
+            }
             return primaryFailure;
         }
 
@@ -682,11 +728,32 @@ public final class ManifestAvroWriter implements AutoCloseable {
                 outputBytes = out.getPos();
                 out.close();
                 out = null;
+                writeSidecar();
             } catch (IOException | RuntimeException | Error failure) {
                 abortCollecting(failure, true);
                 throw failure;
             } finally {
                 closed = true;
+            }
+        }
+
+        private void writeSidecar() throws IOException {
+            if (!options.manifestSidecarEnabled()) {
+                return;
+            }
+            byte[] bytes =
+                    ManifestSidecar.build(
+                            fileIO,
+                            path,
+                            outputBytes,
+                            Math.addExact(numAddedFiles, numDeletedFiles),
+                            options.dataEvolutionEnabled(),
+                            options.bucket() != -1);
+            // Publish result() only after both immutable objects have closed. No rename.
+            try (PositionOutputStream sidecarOut =
+                    fileIO.newOutputStream(ManifestSidecar.path(path), false)) {
+                sidecarCreated = true;
+                sidecarOut.write(bytes);
             }
         }
 
@@ -709,8 +776,16 @@ public final class ManifestAvroWriter implements AutoCloseable {
                     levelStatsKnown ? minLevel : null,
                     levelStatsKnown ? maxLevel : null,
                     rowIdStats == null ? null : rowIdStats.minRowId,
-                    rowIdStats == null ? null : rowIdStats.maxRowId);
+                    rowIdStats == null ? null : rowIdStats.maxRowId,
+                    totalBucketsKnown ? totalBuckets : null,
+                    sidecarCreated
+                            ? Collections.singletonList(ManifestSidecar.path(path).getName())
+                            : null);
         }
+    }
+
+    private static boolean validRowIdRange(@Nullable Long first, long count) {
+        return first != null && first >= 0 && count > 0 && count - 1 <= Long.MAX_VALUE - first;
     }
 
     private static class RowIdStats {

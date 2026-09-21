@@ -154,6 +154,65 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testAllMatchSkipsIndexFilesAndPreservesCoverage() throws Exception {
+        createTableDefault();
+        appendDogRows(0, 20);
+        createIndex("f1");
+        createIndex("f0");
+        appendDogRows(20, 25);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        int skippedFiles = 0;
+        for (IndexManifestEntry entry : table.store().newIndexFileHandler().scanEntries()) {
+            IndexFileMeta file = entry.indexFile();
+            if ("btree".equals(file.indexType())
+                    && file.globalIndexMeta().indexFieldId()
+                            == table.rowType().getField("f1").id()) {
+                // Any attempt to open the all-matching index must fail, including a cold scan.
+                assertThat(
+                                table.fileIO()
+                                        .delete(
+                                                table.store()
+                                                        .pathFactory()
+                                                        .globalIndexFileFactory()
+                                                        .toPath(file),
+                                                false))
+                        .isTrue();
+                skippedFiles++;
+            }
+        }
+        assertThat(skippedFiles).isPositive();
+
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        Predicate allMatch = builder.equal(1, BinaryString.fromString("dog"));
+        for (String mode : Arrays.asList("fast", "full", "detail")) {
+            FileStoreTable configured = tableWithSearchMode(table, mode);
+            assertThat(readF1(configured, allMatch))
+                    .containsExactlyElementsOf(
+                            Collections.nCopies(mode.equals("fast") ? 20 : 25, "dog"));
+
+            // An all-matching branch must not disable another column's selective index.
+            ReadBuilder readBuilder =
+                    configured
+                            .newReadBuilder()
+                            .withFilter(PredicateBuilder.and(allMatch, builder.equal(0, 7)));
+            TableScan.Plan plan = readBuilder.newScan().plan();
+            assertThat(readF1(readBuilder, plan)).containsExactly("dog");
+            if (mode.equals("fast")) {
+                assertThat(
+                                plan.splits().stream()
+                                        .map(IndexedSplit.class::cast)
+                                        .flatMap(split -> split.rowRanges().stream())
+                                        .collect(Collectors.toList()))
+                        .containsExactly(new Range(7, 7));
+            }
+            assertThat(readF1(configured, PredicateBuilder.or(allMatch, builder.equal(0, 7))))
+                    .containsExactlyElementsOf(
+                            Collections.nCopies(mode.equals("fast") ? 20 : 25, "dog"));
+        }
+    }
+
+    @Test
     public void testFullSearchIgnoresUnindexedAndResidualForCoverage() throws Exception {
         write(100L);
         createIndex("f1");
@@ -870,6 +929,22 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     private FileStoreTable tableWithSearchMode(FileStoreTable table, String searchMode) {
         return table.copy(
                 Collections.singletonMap(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), searchMode));
+    }
+
+    private void appendDogRows(int fromInclusive, int toExclusive) throws Exception {
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = fromInclusive; i < toExclusive; i++) {
+                write.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("dog"),
+                                BinaryString.fromString("b" + i)));
+            }
+            commit.commit(write.prepareCommit());
+        }
     }
 
     private void appendRows(int fromInclusive, int toExclusive) throws Exception {

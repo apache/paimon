@@ -42,6 +42,16 @@ public class RowRangeIndex {
         }
     }
 
+    /** Builds an index from a bitmap, skipping sorting and merging for already ordered ranges. */
+    public static RowRangeIndex fromBitmap(RoaringNavigableMap64 bitmap) {
+        List<Range> ranges = bitmap.toRangeList();
+        // Bitmap order is unsigned; mixed signs still require signed sorting and merging.
+        if (ranges.size() > 1 && ranges.get(0).from > ranges.get(ranges.size() - 1).from) {
+            return create(ranges);
+        }
+        return new RowRangeIndex(ranges);
+    }
+
     public static RowRangeIndex create(List<Range> ranges) {
         return create(ranges, true);
     }

@@ -717,6 +717,8 @@ public class DataEvolutionCompactCoordinatorTest {
                         null,
                         null,
                         null,
+                        null,
+                        null,
                         null);
         ManifestFileMeta metaWithRowId =
                 new ManifestFileMeta(
@@ -731,7 +733,9 @@ public class DataEvolutionCompactCoordinatorTest {
                         null,
                         null,
                         0L,
-                        199L);
+                        199L,
+                        null,
+                        null);
         List<ManifestFileMeta> metas = Arrays.asList(metaWithNullRowId, metaWithRowId);
         when(manifestsReader.read(snapshot, ScanMode.ALL))
                 .thenReturn(new ManifestsReader.Result(snapshot, metas, metas));
@@ -813,6 +817,8 @@ public class DataEvolutionCompactCoordinatorTest {
                         0L,
                         StatsTestUtils.newEmptySimpleStats(),
                         0L,
+                        null,
+                        null,
                         null,
                         null,
                         null,

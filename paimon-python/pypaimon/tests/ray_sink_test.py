@@ -27,6 +27,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.write.ray_datasink import (
     PaimonDatasink,
     _consume_write_results,
+    _cast_binary_to_table_schema,
 )
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_write import TableWrite
@@ -77,6 +78,20 @@ class RaySinkTest(unittest.TestCase):
                 if file_name.endswith(('.parquet', '.blob')) or '.vector.' in file_name:
                     data_files.append(os.path.join(root, file_name))
         return data_files
+
+    def test_binary_restoration_uses_table_contract_and_preserves_strings(self):
+        batch = pa.table({
+            'blob': pa.array([b'x', None], type=pa.binary()),
+            'bytes': pa.array([b'y', b'z'], type=pa.large_binary()),
+            'text': pa.array(['中文', ''], type=pa.large_string()),
+        }).replace_schema_metadata({b'source': b'ray'})
+        target = pa.schema([('blob', pa.large_binary()), ('bytes', pa.binary()), ('text', pa.string())])
+        result = _cast_binary_to_table_schema(batch, target)
+        self.assertEqual(result.to_pydict(), batch.to_pydict())
+        self.assertEqual(result.schema.field('blob').type, pa.large_binary())
+        self.assertEqual(result.schema.field('bytes').type, pa.binary())
+        self.assertEqual(result.schema.field('text').type, pa.large_string())
+        self.assertEqual(result.schema.metadata, batch.schema.metadata)
 
     def test_init_and_serialization(self):
         """Test initialization, serialization, and table name."""

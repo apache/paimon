@@ -64,7 +64,7 @@ result — sound but possibly wider than the per-partition tight set.
 """
 
 from itertools import product
-from typing import Any, Callable, Dict, FrozenSet, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple, Union
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.schema.data_types import DataField
@@ -404,6 +404,17 @@ class _Selector:
             # forbids false-negatives.
             return True
 
+    def may_contain(self, min_bucket: int, max_bucket: int, total_buckets: int) -> bool:
+        """Conservatively test an inclusive manifest range without a known partition."""
+        if min_bucket < 0 or max_bucket < min_bucket or total_buckets <= 0:
+            return True
+        try:
+            return any(min_bucket <= bucket <= max_bucket
+                       for bucket in self._compute(None, total_buckets))
+        except Exception:
+            # Use the same fail-open behavior as entry-level bucket selection.
+            return True
+
     def _compute(self, partition, total_buckets: int) -> FrozenSet[int]:
         cache_key = (_partition_to_cache_key(partition, self._partition_fields),
                      total_buckets)
@@ -450,7 +461,7 @@ def create_bucket_selector(
         predicate: Optional[Predicate],
         bucket_key_fields: List[DataField],
         partition_fields: Optional[List[DataField]] = None,
-) -> Optional[Callable[[Any, int, int], bool]]:
+) -> Optional[_Selector]:
     """Try to derive a bucket selector from ``predicate`` constrained to
     ``bucket_key_fields``.
 
@@ -466,6 +477,9 @@ def create_bucket_selector(
 
       Returns None when the predicate carries no usable bucket-key
       constraint at all (caller must NOT prune by bucket).
+
+      ``may_contain(min_bucket, max_bucket, total_buckets)`` tests a
+      manifest's inclusive bucket range without partition specialisation.
     """
     if predicate is None or not bucket_key_fields:
         return None

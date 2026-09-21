@@ -31,6 +31,7 @@ from pypaimon.index.dynamic_bucket import (
     _iter_hashes,
     compute_assigner,
     to_signed_int32,
+    validate_bucket_id,
 )
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.index.index_file_meta import IndexFileMeta
@@ -191,12 +192,65 @@ class DynamicBucketTest(unittest.TestCase):
 
         bucket = index.assign(
             key_hash=1,
-            bucket_filter=lambda candidate: candidate == 32766,
+            bucket_filter=lambda candidate: candidate == 32767,
             max_buckets_num=-1,
-            max_bucket_id=32765,
+            max_bucket_id=32766,
         )
 
-        self.assertEqual(bucket, 32766)
+        self.assertEqual(bucket, 32767)
+
+    def test_rejects_bucket_count_above_java_short_range(self):
+        index = _PartitionIndex({}, {}, 1)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "'dynamic-bucket.max-buckets' must be -1 or between 1 and 32768",
+        ):
+            index.assign(
+                key_hash=1,
+                bucket_filter=lambda candidate: candidate >= 32768,
+                max_buckets_num=40000,
+                max_bucket_id=32767,
+            )
+
+    def test_rejects_bucket_id_above_java_short_range(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Dynamic bucket id must be between 0 and 32767, but was 32768",
+        ):
+            validate_bucket_id(32768)
+
+    def test_restore_rejects_bucket_id_above_java_short_range(self):
+        assigner = HashBucketAssigner(
+            table=Mock(),
+            num_channels=1,
+            num_assigners=1,
+            assign_id=0,
+            target_bucket_row_number=1,
+            max_buckets_num=-1,
+            snapshot=Mock(),
+        )
+        entry = Mock()
+        entry.bucket = 32768
+
+        with patch(
+            'pypaimon.index.dynamic_bucket.IndexFileHandler'
+        ) as handler:
+            handler.return_value.scan.return_value = [entry]
+            with patch.object(
+                assigner, '_active_data_buckets', return_value=set()
+            ):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "Dynamic bucket id must be between 0 and 32767",
+                ):
+                    assigner._load_partition((), {1})
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "Dynamic bucket id must be between 0 and 32767",
+            ):
+                assigner._restore_requested_hashes((), {1}, {})
 
     def test_assigner_rejects_record_owned_by_another_writer(self):
         with tempfile.TemporaryDirectory() as root:
@@ -238,7 +292,7 @@ class DynamicBucketTest(unittest.TestCase):
                 key_hash=1,
                 bucket_filter=lambda _: False,
                 max_buckets_num=-1,
-                max_bucket_id=32766,
+                max_bucket_id=32767,
             )
 
     def test_corrupt_hash_index_rejects_trailing_bytes(self):

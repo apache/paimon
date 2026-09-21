@@ -44,6 +44,8 @@ import static org.apache.paimon.utils.InternalRowUtils.toStringArrayData;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
+import static org.apache.paimon.utils.SerializationUtils.presizedCapacity;
+import static org.apache.paimon.utils.SerializationUtils.readCount;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** Serializer for {@link DataFileMeta} with 0.9 version. */
@@ -110,8 +112,8 @@ public class DataFileMeta09Serializer implements Serializable {
     }
 
     public final List<DataFileMeta> deserializeList(DataInputView source) throws IOException {
-        int size = source.readInt();
-        List<DataFileMeta> records = new ArrayList<>(size);
+        int size = readCount(source, getClass().getSimpleName());
+        List<DataFileMeta> records = new ArrayList<>(presizedCapacity(size));
         for (int i = 0; i < size; i++) {
             records.add(deserialize(source));
         }

@@ -2351,7 +2351,9 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 manifestMeta.minLevel(),
                 manifestMeta.maxLevel(),
                 manifestMeta.minRowId(),
-                manifestMeta.maxRowId());
+                manifestMeta.maxRowId(),
+                null,
+                null);
     }
 
     private void assertReassignedOutOfOrderPartitionEntries(

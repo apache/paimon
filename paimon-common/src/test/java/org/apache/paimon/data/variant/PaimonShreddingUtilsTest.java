@@ -46,6 +46,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -219,10 +220,11 @@ public class PaimonShreddingUtilsTest {
                         BinaryString.fromString("true"),
                         null,
                         BinaryString.fromString(DateTimeUtils.formatDate(20000)),
+                        // rendered in the zone castArgs asks for, not the JVM default
                         BinaryString.fromString(
                                 DateTimeUtils.formatTimestamp(
                                         Timestamp.fromMicros(1_234_567_890_123_456L),
-                                        TimeZone.getDefault(),
+                                        DateTimeUtils.UTC_ZONE,
                                         6)),
                         BinaryString.fromString(
                                 DateTimeUtils.formatTimestamp(
@@ -289,6 +291,95 @@ public class PaimonShreddingUtilsTest {
                                                         BinaryString.fromString("Apache Paimon"));
                                             }
                                         })));
+    }
+
+    @Test
+    public void testShreddedDecimalCastsLikeUnshredded() {
+        // A shredded typed_value carries the scale of the file schema, e.g. 10.0 as
+        // DECIMAL(18, 1), while the unshredded leg strips trailing zeros; both legs must
+        // produce the same string, and numeric targets must stay unaffected.
+        GenericVariant v =
+                GenericVariant.fromJson(
+                        "{\"price\": 10.0, \"amount\": 1.50, \"tiny\": 0.05, \"zero\": 0.00}");
+        VariantCastArgs castArgs = new VariantCastArgs(true, ZoneOffset.UTC);
+
+        RowType shredded =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.DECIMAL(18, 2),
+                            DataTypes.DECIMAL(18, 1),
+                            DataTypes.DECIMAL(18, 2),
+                            DataTypes.DECIMAL(18, 2)
+                        },
+                        new String[] {"amount", "price", "tiny", "zero"});
+        RowType unshredded = RowType.of();
+
+        for (RowType shape : new RowType[] {shredded, unshredded}) {
+            VariantSchema variantSchema = buildVariantSchema(variantShreddingSchema(shape));
+            FieldToExtract[] fieldsToExtract = {
+                buildFieldsToExtract(DataTypes.STRING(), "$.price", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.STRING(), "$.amount", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.STRING(), "$.tiny", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.STRING(), "$.zero", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.DECIMAL(10, 2), "$.price", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.DOUBLE(), "$.amount", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.BIGINT(), "$.price", castArgs, variantSchema)
+            };
+
+            assertThat(
+                            assembleVariantStruct(
+                                    castShredded(v, variantSchema), variantSchema, fieldsToExtract))
+                    .as("shape %s", shape)
+                    .isEqualTo(
+                            GenericRow.of(
+                                    BinaryString.fromString("10"),
+                                    BinaryString.fromString("1.5"),
+                                    BinaryString.fromString("0.05"),
+                                    BinaryString.fromString("0"),
+                                    Decimal.fromBigDecimal(new BigDecimal("10.00"), 10, 2),
+                                    1.5,
+                                    10L));
+        }
+    }
+
+    @Test
+    public void testShreddedTimestampCastsUseRequestedZone() {
+        // A shredded typed_value timestamp goes through the scalar reader, an unshredded one
+        // through VariantGet; both must convert with the requested zone, not the JVM default.
+        Map<String, Object> values = new HashMap<>();
+        values.put("ts", 1700000000500000L); // 2023-11-14 22:13:20.5 UTC
+        RowType valueType =
+                RowType.of(
+                        new DataType[] {DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE()},
+                        new String[] {"ts"});
+        GenericVariant v = GenericVariantBuilderHelper.build(valueType, values);
+        VariantCastArgs shanghai = new VariantCastArgs(true, ZoneId.of("Asia/Shanghai"));
+
+        TimeZone original = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("America/Los_Angeles"));
+            for (RowType shape : new RowType[] {valueType, RowType.of()}) {
+                VariantSchema variantSchema = buildVariantSchema(variantShreddingSchema(shape));
+                FieldToExtract[] fieldsToExtract = {
+                    buildFieldsToExtract(DataTypes.STRING(), "$.ts", shanghai, variantSchema),
+                    buildFieldsToExtract(DataTypes.TIMESTAMP(), "$.ts", shanghai, variantSchema),
+                    buildFieldsToExtract(DataTypes.DATE(), "$.ts", shanghai, variantSchema)
+                };
+                assertThat(
+                                assembleVariantStruct(
+                                        castShredded(v, variantSchema),
+                                        variantSchema,
+                                        fieldsToExtract))
+                        .as("shape %s", shape)
+                        .isEqualTo(
+                                GenericRow.of(
+                                        BinaryString.fromString("2023-11-15 06:13:20.5"),
+                                        Timestamp.fromMicros(1700000000500000L + 8 * 3600_000_000L),
+                                        19676));
+            }
+        } finally {
+            TimeZone.setDefault(original);
+        }
     }
 
     @Test

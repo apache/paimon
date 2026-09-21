@@ -198,9 +198,11 @@ To rollback to a specific version of target table. Argument:
 
 - `table`: the target table identifier. Cannot be empty.
 
-- snapshotId (Long): id of the snapshot that will roll back to.
+- `snapshot_id`: id of the snapshot that will roll back to.
 
-- `tagName`: name of the tag that will roll back to.
+- `tag`: name of the tag that will roll back to.
+
+Exactly one of `snapshot_id` and `tag` must be set.
 
 **Syntax**
 

@@ -29,6 +29,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestSidecar;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.metrics.ScanMetrics;
@@ -157,6 +158,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withBucketFilter(Filter<Integer> bucketFilter) {
+        manifestsReader.withBucketFilter(bucketFilter);
         this.bucketFilter = bucketFilter;
         return this;
     }
@@ -164,6 +166,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withTotalAwareBucketFilter(
             TriFilter<BinaryRow, Integer, Integer> totalAwareBucketFilter) {
+        manifestsReader.withTotalAwareBucketFilter(totalAwareBucketFilter);
         this.totalAwareBucketFilter = totalAwareBucketFilter;
         return this;
     }
@@ -496,27 +499,35 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             @Nullable Filter<InternalRow> additionalFilter,
             @Nullable Filter<ManifestEntry> additionalTFilter) {
 
+        ManifestFile manifestFile = manifestFileFactory.create();
+        BucketFilter bucketFilter = createBucketFilter();
+        ManifestSidecar.Selection selected =
+                manifestFile.selectBlocks(
+                        manifest, rowRangeIndex, manifestsReader.partitionFilter(), bucketFilter);
+        if (selected != null && selected.blocks().isEmpty()) {
+            return Collections.emptyList();
+        }
         Filter<InternalRow> entryRowFilter = createEntryRowFilter();
         Function<ManifestEntry, T> finalConverter =
                 dropStats ? e -> converter.apply(dropStats(e)) : converter;
 
         List<T> entries =
-                manifestFileFactory
-                        .create()
+                manifestFile
                         .withCacheMetrics(
                                 scanMetrics != null ? scanMetrics.getCacheMetrics() : null)
                         .read(
                                 manifest.fileName(),
                                 manifest.fileSize(),
                                 manifestsReader.partitionFilter(),
-                                createBucketFilter(),
+                                bucketFilter,
                                 entryRowFilter.and(additionalFilter),
                                 entry ->
                                         (additionalTFilter == null || additionalTFilter.test(entry))
                                                 && (manifestEntryFilter == null
                                                         || manifestEntryFilter.test(entry))
                                                 && filterByStats(entry),
-                                finalConverter);
+                                finalConverter,
+                                selected);
         LOG.info("Read {} manifest entries from {}", entries.size(), manifest.fileName());
         return entries;
     }

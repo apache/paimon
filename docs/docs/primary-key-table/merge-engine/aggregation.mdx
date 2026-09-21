@@ -96,9 +96,15 @@ Check [Retraction](#retraction) before accepting `UPDATE_BEFORE` or `DELETE` rec
   The sum function aggregates the values across multiple rows.
   It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
 
+  For TINYINT, SMALLINT, INTEGER, and BIGINT, overflows are ignored by default.
+  Set `fields.<field-name>.sum.fail-on-overflow` to `true` to throw an exception on overflow.
+
 ### product
   The product function can compute product values across multiple lines.
   It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
+
+  For TINYINT, SMALLINT, INTEGER, and BIGINT, overflows are ignored by default.
+  Set `fields.<field-name>.product.fail-on-overflow` to `true` to throw an exception on overflow.
 
 ### Counting with sum {#count}
 

@@ -222,7 +222,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.statsFileHandler = statsFileHandler;
         this.bucketMode = bucketMode;
         this.strictModeChecker =
-                options.commitStrictModeLastSafeSnapshot()
+                options.commitLastSafeSnapshot()
+                        .filter(ignored -> options.commitStrictModeEnabled())
                         .map(
                                 id ->
                                         new StrictModeChecker(
@@ -294,14 +295,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     "Committables must be sorted according to identifiers before filtering. This is unexpected.");
         }
 
-        Optional<Long> optionalStrictSnapshot = options.commitStrictModeLastSafeSnapshot();
+        Optional<Long> lastSafeSnapshot = options.commitLastSafeSnapshot();
         Optional<Snapshot> latestSnapshot;
-        if (optionalStrictSnapshot.isPresent()) {
+        if (lastSafeSnapshot.isPresent()) {
             latestSnapshot =
                     snapshotManager.latestSnapshotOfUser(
                             commitUser,
                             snapshotManager.latestSnapshotId(),
-                            optionalStrictSnapshot.get() + 1);
+                            lastSafeSnapshot.get() + 1);
         } else {
             latestSnapshot = snapshotManager.latestSnapshotOfUser(commitUser);
         }
@@ -1044,7 +1045,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (!checkConflicts && shouldCheckSameFixedBucket(commitKind)) {
             checkSameFixedBucketFromSnapshot(deltaFiles, latestSnapshot);
         }
-        if (checkConflicts) {
+        if (checkConflicts
+                && !conflictDetection.canSkipDataFileConflictDetection(
+                        latestSnapshot, deltaFiles, indexFiles, commitKind)) {
             // latestSnapshotId is different from the snapshot id we've checked for conflicts,
             // so we have to check again
             if (changedPartitions == null) {
@@ -1615,8 +1618,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         mergeBeforeManifests,
                         manifestFile,
                         partitionType,
-                        manifestCompactionOptions(options, mergeBeforeManifests, partitionType),
-                        ioManager);
+                        manifestCompactionOptions(options),
+                        ioManager,
+                        true);
 
         if (new HashSet<>(mergeBeforeManifests).equals(new HashSet<>(mergeAfterManifests))) {
             // no need to commit this snapshot, because no compact were happened
@@ -1655,17 +1659,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return commitSnapshotImpl(latestSnapshot, newSnapshot, emptyList());
     }
 
-    static CoreOptions manifestCompactionOptions(
-            CoreOptions options, List<ManifestFileMeta> manifests, RowType partitionType) {
-        // Use a copied options with forced full compaction settings for the legacy merge path.
-        // Manifest sort has its own full/minor picking strategy and should respect its configured
-        // thresholds.
+    static CoreOptions manifestCompactionOptions(CoreOptions options) {
+        // Use copied options so explicit manifest compaction always takes the full-compaction path
+        // without changing the table options used by regular commits.
         Options compactOptions = Options.fromMap(options.toMap());
-        if (!ManifestFileMerger.canUseManifestSort(manifests, partitionType, options)) {
-            compactOptions.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 1);
-            compactOptions.set(
-                    CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE, MemorySize.ofBytes(1));
-        }
+        compactOptions.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 1);
+        compactOptions.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE, MemorySize.ofBytes(1));
         return new CoreOptions(compactOptions);
     }
 

@@ -121,6 +121,9 @@ public abstract class FileFormat {
     }
 
     public static FileFormat manifestFormat(CoreOptions options) {
-        return FileFormat.fromIdentifier(CoreOptions.FILE_FORMAT_AVRO, options.toConfiguration());
+        // Manifest blocks retain the Avro default independently of data-file block sizing.
+        Options manifestOptions = new Options(options.toMap());
+        manifestOptions.remove(CoreOptions.FILE_BLOCK_SIZE);
+        return FileFormat.fromIdentifier(CoreOptions.FILE_FORMAT_AVRO, manifestOptions);
     }
 }

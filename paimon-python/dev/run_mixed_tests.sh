@@ -1027,11 +1027,27 @@ run_shared_shredding_map_test() {
 
     cd "$PAIMON_PYTHON_DIR"
     echo "Running Python shared-shredding MAP read test..."
-    if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_shared_shredding_map_written_by_java -v; then
+    if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest \
+        -k "test_read_shared_shredding_map_written_by_java or test_read_selected_shared_shredding_keys_written_by_java" -v; then
         echo -e "${RED}✗ Python shared-shredding MAP read test failed${NC}"
         return 1
     fi
     echo -e "${GREEN}✓ Python shared-shredding MAP read test completed successfully${NC}"
+
+    echo "Running Python shared-shredding MAP write test..."
+    if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_write_shared_shredding_map_for_java -v; then
+        echo -e "${RED}✗ Python shared-shredding MAP write test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Python shared-shredding MAP write test completed successfully${NC}"
+
+    cd "$PROJECT_ROOT"
+    echo "Running Maven test for JavaPyE2ETest.testJavaReadSharedShreddingMapTable..."
+    if ! mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaReadSharedShreddingMapTable -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${RED}✗ Java shared-shredding MAP read test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Java shared-shredding MAP read test completed successfully${NC}"
 }
 
 # Function to run VARIANT test (Java write, Python read)

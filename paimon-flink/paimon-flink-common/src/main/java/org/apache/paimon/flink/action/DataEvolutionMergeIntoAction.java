@@ -162,7 +162,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
         table =
                 table.copy(
                         Collections.singletonMap(
-                                CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(),
+                                CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT.key(),
                                 latestSnapshotId.toString()));
 
         this.coreOptions = ((FileStoreTable) table).coreOptions();

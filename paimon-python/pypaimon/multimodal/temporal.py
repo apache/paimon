@@ -53,14 +53,19 @@ _TEMPORAL_ROW_GROUP_CACHE_MAX_SIZE = 64 * 1024 * 1024
 
 
 def join_asof(left, right, *, on, by, direction="backward", tolerance=None,
-              right_on=None, suffix="_right") -> "TemporalAlignment":
-    """Join each left row with at most one time-aligned right row."""
+              right_on=None, suffix="_right",
+              allow_exact_matches=True) -> "TemporalAlignment":
+    """Join each left row with at most one time-aligned right row.
+
+    Set allow_exact_matches=False to exclude equal timestamps.
+    """
     return TemporalAlignment(left, on=on, by=by).join_asof(
         right,
         direction=direction,
         tolerance=tolerance,
         right_on=right_on,
         suffix=suffix,
+        allow_exact_matches=allow_exact_matches,
     )
 
 
@@ -125,8 +130,12 @@ class TemporalAlignment:
         self.schema = self._output_schema()
 
     def join_asof(self, right, *, direction="backward", tolerance=None,
-                  right_on=None, suffix="_right") -> "TemporalAlignment":
-        """Append a right-side as-of join without materializing this scan."""
+                  right_on=None, suffix="_right",
+                  allow_exact_matches=True) -> "TemporalAlignment":
+        """Append a right-side as-of join without materializing this scan.
+
+        Set allow_exact_matches=False to exclude equal timestamps.
+        """
         position = len(self._sources) + 1
         label = "right source %d" % position
         source = _AsOfJoinRight(
@@ -138,6 +147,7 @@ class TemporalAlignment:
             tolerance,
             right_on,
             suffix,
+            allow_exact_matches=allow_exact_matches,
         )
         return self._append(source)
 
@@ -342,11 +352,14 @@ class TemporalAlignment:
 class _AsOfJoinRight:
 
     def __init__(self, label, query, anchor_on, by, direction, tolerance,
-                 right_on, suffix):
+                 right_on, suffix, *, allow_exact_matches=True):
         _validate_join_options(direction, tolerance, right_on, suffix)
+        if not isinstance(allow_exact_matches, bool):
+            raise TypeError("allow_exact_matches must be a bool.")
         self.label = label
         self.query = _pin_scan_to_snapshot(_require_scan(query, label))
         self.direction = direction
+        self.allow_exact_matches = allow_exact_matches
         self.suffix = suffix
         self.anchor_on = anchor_on
         self.on = anchor_on if right_on is None else right_on
@@ -395,7 +408,8 @@ class _AsOfJoinRight:
             return None
         target_key = anchor_row[_TIME_KEY]
         index = _match_index(
-            self._time_keys, target_key, self.direction, *bounds)
+            self._time_keys, target_key, self.direction, *bounds,
+            allow_exact_matches=self.allow_exact_matches)
         if index is None:
             return None
         matched_key = _python_scalar(self._time_keys[index])
@@ -577,11 +591,11 @@ class _WindowJoinRight(_AsOfJoinRight):
                 metadata=source.metadata))
         return fields
 
-    def match(self, anchor_row):
+    def _match_range(self, anchor_row):
         key = tuple(anchor_row[name] for name in self.by)
         bounds = self._index.get(key)
         if bounds is None:
-            return []
+            return 0, 0
         target = anchor_row[_TIME_KEY]
         start, end = bounds
         left = target - self._preceding_key
@@ -602,7 +616,7 @@ class _WindowJoinRight(_AsOfJoinRight):
             first_key = max(first_key, _python_scalar(self._time_keys[start]))
             last_key = min(last_key, _python_scalar(self._time_keys[end - 1]))
             if first_key > last_key:
-                return []
+                return 0, 0
             first = bisect_left(
                 self._time_keys, first_key, start, end)
             last = bisect_right(
@@ -618,31 +632,51 @@ class _WindowJoinRight(_AsOfJoinRight):
                 if self.closed in ("both", "right")
                 else bisect_left(self._time_keys, right, first, end)
             )
-        return [self._row_ids[index].as_py()
-                for index in range(first, last)]
+        return first, last
 
     def build_arrays(self, anchor_rows, fetcher):
-        matches = [self.match(row) for row in anchor_rows]
-        unique_ids = list(dict.fromkeys(
-            row_id for match in matches for row_id in match))
+        ranges = [self._match_range(row) for row in anchor_rows]
+        slices = [(0, 0)] * len(ranges)
+        unique_ids = []
+        covered_end = 0
+        offset = 0
+        # Ranges refer to sorted metadata positions, not contiguous row IDs.
+        # Fetch their union in that order so each window becomes an Arrow slice.
+        for index, (start, end) in sorted(
+                enumerate(ranges), key=lambda item: item[1]):
+            if start == end:
+                continue
+            if start >= covered_end:
+                offset = len(unique_ids) - start
+            unread_start = max(start, covered_end)
+            if end > unread_start:
+                unique_ids.extend(
+                    self._row_ids.slice(unread_start, end - unread_start).to_pylist())
+                covered_end = end
+            slices[index] = (start + offset, end - start)
         values = fetcher.fetch(unique_ids)
-        positions = {
-            row_id: index for index, row_id in enumerate(unique_ids)
-        }
-        indices = [
-            [positions[row_id] for row_id in match]
-            for match in matches
-        ]
-        arrays = []
-        for _, source_name, aggregation in self.aggregations:
+        aggregations_by_source = {}
+        for index, (_, source_name, aggregation) in enumerate(self.aggregations):
+            aggregations_by_source.setdefault(source_name, []).append(
+                (index, aggregation))
+
+        arrays = [None] * len(self.aggregations)
+        for source_name, aggregations in aggregations_by_source.items():
             effective = fetcher.schema.field(source_name)
-            output_type = _aggregate_output_type(
-                effective.type, aggregation)
-            arrays.append(pa.array([
-                _aggregate_values(
-                    values[source_name], row_indices, aggregation)
-                for row_indices in indices
-            ], type=output_type))
+            output_types = [
+                _aggregate_output_type(effective.type, aggregation)
+                for _, aggregation in aggregations
+            ]
+            source_values = values[source_name]
+            results = [[] for _ in aggregations]
+            for start, length in slices:
+                selected = source_values.slice(start, length)
+                for (_, aggregation), result in zip(aggregations, results):
+                    result.append(_aggregate_values(selected, aggregation))
+                del selected
+            for (index, _), result, output_type in zip(
+                    aggregations, results, output_types):
+                arrays[index] = pa.array(result, type=output_type)
         return arrays
 
 
@@ -695,10 +729,9 @@ def _aggregate_output_type(data_type, aggregation):
     return data_type
 
 
-def _aggregate_values(values, indices, aggregation):
-    if not indices:
+def _aggregate_values(selected, aggregation):
+    if len(selected) == 0:
         return 0 if aggregation == "count" else None
-    selected = pc.take(values, pa.array(indices, type=pa.int64()))
     if aggregation == "count":
         return pc.count(selected).as_py()
     if aggregation == "mean":
@@ -706,7 +739,7 @@ def _aggregate_values(values, indices, aggregation):
                  if item is not None]
         if not items:
             return None
-        if pa.types.is_integer(values.type):
+        if pa.types.is_integer(selected.type):
             return sum(items) / len(items)
         if not all(math.isfinite(item) for item in items):
             return pc.mean(selected).as_py()
@@ -722,10 +755,23 @@ def _aggregate_values(values, indices, aggregation):
         return pc.min(selected).as_py()
     if aggregation == "max":
         return pc.max(selected).as_py()
-    items = selected.to_pylist()
-    if aggregation == "first":
-        return next((item for item in items if item is not None), None)
-    return next((item for item in reversed(items) if item is not None), None)
+    chunks = selected.chunks if isinstance(selected, pa.ChunkedArray) else (selected,)
+    if aggregation == "last":
+        chunks = reversed(chunks)
+    for chunk in chunks:
+        if chunk.null_count == len(chunk):
+            continue
+        indices = range(len(chunk))
+        if aggregation == "last":
+            indices = reversed(indices)
+        for index in indices:
+            scalar = chunk[index]
+            if scalar.is_valid:
+                value = scalar.as_py()
+                # A valid dictionary index can still reference a null value.
+                if value is not None:
+                    return value
+    return None
 
 
 def _window_bound_key(name, value, data_type):
@@ -1195,11 +1241,7 @@ class _RowIdFetcher:
             allowed = Range.and_(wanted, self._split_ranges[split_index])
             if not allowed:
                 continue
-            indexed = IndexedSplit(
-                split,
-                allowed,
-                exact_merged_row_count=sum(r.count() for r in allowed),
-            )
+            indexed = IndexedSplit(split, allowed)
             if auth_result is not None:
                 indexed = QueryAuthSplit(indexed, auth_result)
             selected_splits.append(indexed)
@@ -1450,24 +1492,31 @@ def _project_effective_schema(
     return pa.schema(fields, metadata=schema.metadata)
 
 
-def _match_index(times, target, method, start=0, end=None):
+def _match_index(times, target, method, start=0, end=None, *,
+                 allow_exact_matches=True):
     end = len(times) if end is None else end
     if start >= end:
         return None
     position = bisect_left(times, target, start, end)
     if method == "backward":
-        position = bisect_right(times, target, start, end)
+        if allow_exact_matches:
+            position = bisect_right(times, target, start, end)
         return position - 1 if position > start else None
     if method == "forward":
+        if not allow_exact_matches:
+            position = bisect_right(times, target, position, end)
         return position if position < end else None
     if method == "nearest":
-        if position < end and times[position] == target:
+        if (allow_exact_matches
+                and position < end and times[position] == target):
             return bisect_right(times, target, position, end) - 1
-        if position == start:
-            return start
-        if position == end:
-            return end - 1
         before = position - 1
+        if not allow_exact_matches:
+            position = bisect_right(times, target, position, end)
+        if before < start:
+            return position if position < end else None
+        if position == end:
+            return before
         before_value = _python_scalar(times[before])
         after_value = _python_scalar(times[position])
         if target - before_value <= after_value - target:

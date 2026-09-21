@@ -106,6 +106,7 @@ public class BTreeThreadSafetyTest {
 
         Options options = new Options();
         options.set(BTreeIndexOptions.BTREE_INDEX_CACHE_SIZE, MemorySize.ofMebiBytes(8));
+        options.set(BTreeIndexOptions.BTREE_INDEX_BLOOM_FILTER_ENABLED, true);
         DataField dataField = new DataField(1, "id", new IntType());
         globalIndexer = new BTreeGlobalIndexer(dataField, options);
         keySerializer = KeySerializer.create(new IntType());

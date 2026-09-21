@@ -75,12 +75,16 @@ def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
             try:
                 index_file = entry.index_file
                 file_name = index_file.file_name
-                path = (
-                    index_file.external_path
-                    or table.path_factory()
-                    .global_index_path_factory()
-                    .to_path(file_name)
-                )
+                if index_file.index_type == 'DELETION_VECTORS':
+                    path = table.path_factory().bucket_index_path(
+                        tuple(entry.partition.values), entry.bucket, index_file, table.file_io)
+                else:
+                    path = (
+                        index_file.external_path
+                        or table.path_factory()
+                        .global_index_path_factory()
+                        .to_path(file_name)
+                    )
                 table.file_io.delete_quietly(path)
             except Exception as error:
                 logger.warning(
@@ -116,8 +120,14 @@ def _manifest_file_key(manifest: ManifestFileMeta):
         GenericRowSerializer.to_bytes(stats.max_values),
         tuple(stats.null_counts) if stats.null_counts is not None else None,
         manifest.schema_id,
+        manifest.min_bucket,
+        manifest.max_bucket,
+        manifest.min_level,
+        manifest.max_level,
         manifest.min_row_id,
         manifest.max_row_id,
+        manifest.total_buckets,
+        tuple(manifest.extra_files) if manifest.extra_files is not None else None,
     )
 
 
@@ -258,7 +268,8 @@ class FileStoreCommit:
             commit_identifier: int,
             snapshot_properties: Optional[Dict[str, str]] = None):
         """Commit the given commit messages in normal append mode."""
-        if not commit_messages:
+        ignore_empty_commit = self.table.options.snapshot_ignore_empty_commit()
+        if not commit_messages and ignore_empty_commit:
             return
 
         # Extract the minimum check_from_snapshot from commit messages
@@ -341,7 +352,8 @@ class FileStoreCommit:
                          index_deletes=index_deletes,
                          index_adds=index_adds,
                          hash_index_base_snapshot=hash_index_base_snapshot,
-                         snapshot_properties=snapshot_properties)
+                         snapshot_properties=snapshot_properties,
+                         allow_empty_commit=not ignore_empty_commit)
 
     def overwrite(
             self,
@@ -501,7 +513,8 @@ class FileStoreCommit:
                     detect_conflicts=False, allow_rollback=False, index_deletes=None,
                     index_adds=None, changelog_entries=None,
                     hash_index_base_snapshot=None,
-                    snapshot_properties: Optional[Dict[str, str]] = None):
+                    snapshot_properties: Optional[Dict[str, str]] = None,
+                    allow_empty_commit=False):
 
         retry_count = 0
         retry_result = None
@@ -524,9 +537,10 @@ class FileStoreCommit:
                 else commit_entries_plan(latest_snapshot)
             )
 
-            # No entries to commit (e.g. drop_partitions with no matching
-            # data): skip an empty snapshot.
-            if not commit_entries and not index_deletes and not index_adds:
+            # Append can explicitly publish an empty snapshot for tagging.
+            # No-op overwrite/drop operations retain their existing behavior.
+            if (not allow_empty_commit and not commit_entries
+                    and not index_deletes and not index_adds):
                 break
 
             result = self._try_commit_once(

@@ -26,7 +26,11 @@ import numpy as np
 import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.index.dynamic_bucket import SHORT_MAX_VALUE, is_my_bucket
+from pypaimon.index.dynamic_bucket import (
+    MAX_DYNAMIC_BUCKETS,
+    is_my_bucket,
+    validate_max_buckets,
+)
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
@@ -353,7 +357,6 @@ class _SimplePartitionIndex:
             return assigned, max(max_bucket_id, assigned)
 
         if self.current_bucket not in self.bucket_information:
-            self.bucket_list.append(self.current_bucket)
             self.bucket_information[self.current_bucket] = 0
         num = self.bucket_information[self.current_bucket]
 
@@ -377,12 +380,13 @@ class _SimplePartitionIndex:
     def _load_new_bucket(
         self, max_buckets_num: int, num_assigners: int, assign_id: int
     ) -> None:
-        for i in range(SHORT_MAX_VALUE):
+        for i in range(MAX_DYNAMIC_BUCKETS):
             if is_my_bucket(i, num_assigners, assign_id) and (
                 i not in self.bucket_information
             ):
                 if max_buckets_num == -1 or i <= max_buckets_num - 1:
                     self.current_bucket = i
+                    self.bucket_list.append(i)
                     return
                 return
         raise RuntimeError(
@@ -392,6 +396,7 @@ class _SimplePartitionIndex:
 
 class SimpleHashBucketAssigner:
     def __init__(self, num_assigners, assign_id, target_bucket_row_number, max_buckets_num):
+        validate_max_buckets(max_buckets_num)
         self.num_assigners = num_assigners
         self.assign_id = assign_id
         self.target_bucket_row_number = target_bucket_row_number

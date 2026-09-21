@@ -16,6 +16,7 @@
 # under the License.
 
 import bisect
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -23,8 +24,10 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.read.scanner.data_evolution_split_generator import (
     DataEvolutionSplitGenerator,
 )
@@ -49,6 +52,13 @@ from pypaimon.write.row_utils import (
     value_for_arrow,
 )
 from pypaimon.write.writer.blob_writer import BlobWriter
+from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
+from pypaimon.write.writer.single_file_writer import SingleFileWriter
+from pypaimon.write.writer.write_buffer import WriteBuffer
+
+_ARROW_MAJOR = int(pa.__version__.split('.')[0])
+# Keep aligned with org.apache.parquet.hadoop.ParquetWriter.DEFAULT_BLOCK_SIZE.
+_DEFAULT_PARQUET_BLOCK_SIZE = 128 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -64,6 +74,135 @@ class _FilesInfo:
         field(default_factory=dict)
     )
     valid_row_id_ranges: List[Range] = field(default_factory=list)
+
+
+class _RowIdUpdateFileWriter:
+    """Write one plain-Parquet update file for a row-id file group."""
+
+    _ROW_GROUP_MAX_ROWS = 1024 * 1024
+
+    @staticmethod
+    def supports_table(table):
+        options = table.options
+        return (not table.is_primary_key_table
+                and options.file_format(CoreOptions.FILE_FORMAT_PARQUET)
+                == CoreOptions.FILE_FORMAT_PARQUET
+                and not (options.variant_shredding_enabled()
+                         and options.variant_shredding_schema())
+                and not options.data_evolution_row_sidecar_enabled(False)
+                and not options.with_vector_format()
+                and options.changelog_producer() == ChangelogProducer.NONE
+                and not any(options.map_storage_layout(f.name) == 'shared-shredding'
+                            for f in table.fields)
+                and not any(is_blob_file_field(f) for f in table.fields))
+
+    def __init__(self, table, partition, column_names):
+        if not self.supports_table(table):
+            raise ValueError('Row-id update file writer requires plain Parquet without sidecars')
+        configured = table.options.file_block_size()
+        self._target_bytes = (configured.get_bytes() if configured is not None
+                              else _DEFAULT_PARQUET_BLOCK_SIZE)
+        if self._target_bytes <= 0:
+            raise ValueError('file.block-size must be positive')
+        self._data_writer = AppendOnlyDataWriter(
+            table, partition, 0, 0, table.options, write_cols=column_names)
+
+    @staticmethod
+    def _row_group_slice(batch, offset, count):
+        piece = batch.slice(offset, count)
+        # Arrow 6 nbytes counts full backing buffers even for slices. Compact
+        # the slice there so both accounting and retained buffers stay bounded.
+        if _ARROW_MAJOR < 7:
+            piece = pa.RecordBatch.from_arrays(
+                [pa.concat_arrays([column]) for column in piece.columns], schema=piece.schema)
+        return piece
+
+    def _row_groups(self, batches):
+        """Bound row-group buffering using Arrow-side bytes, not encoded size."""
+        buffer = WriteBuffer(self._data_writer._merge_data)
+        try:
+            for batch in batches:
+                offset = 0
+                while offset < batch.num_rows:
+                    count = min(batch.num_rows - offset,
+                                self._ROW_GROUP_MAX_ROWS - buffer.num_rows)
+                    piece = self._row_group_slice(batch, offset, count)
+                    available = self._target_bytes - buffer.nbytes
+                    if piece.nbytes > available:
+                        low, high = 0, count
+                        while low < high:
+                            middle = (low + high + 1) // 2
+                            if self._row_group_slice(piece, 0, middle).nbytes <= available:
+                                low = middle
+                            else:
+                                high = middle - 1
+                        count = low
+                        if count == 0 and buffer.num_rows:
+                            yield buffer.take()
+                            continue
+                        count = max(1, count)
+                        piece = self._row_group_slice(piece, 0, count)
+                    buffer.append(pa.Table.from_batches([piece]))
+                    offset += count
+                    del piece
+                    if buffer.nbytes >= self._target_bytes or buffer.num_rows >= self._ROW_GROUP_MAX_ROWS:
+                        yield buffer.take()
+                del batch
+            if buffer.num_rows:
+                yield buffer.take()
+        finally:
+            buffer.reset()
+
+    def write_batches(self, batches):
+        """Write one file while keeping input and output row groups bounded."""
+        writer = self._data_writer
+        file_name = '{}{}-0.parquet'.format(
+            writer.options.data_file_prefix(), uuid.uuid4())
+        file_path = writer._generate_file_path(file_name)
+        fields = []
+        groups = self._row_groups(batches)
+        file_writer = None
+        try:
+            for batch in groups:
+                if not batch.num_rows:
+                    continue
+                if file_writer is None:
+                    if writer.options.metadata_stats_enabled():
+                        fields = PyarrowFieldParser.to_paimon_schema(batch.schema)
+                    file_writer = SingleFileWriter(
+                        writer.file_io, file_path, batch.schema, writer.file_format,
+                        writer.compression, writer.zstd_level,
+                        fields, writer._get_column_stats,
+                        parquet_options=writer.parquet_writer_options)
+                file_writer.write(batch, row_group_size=batch.num_rows)
+                del batch
+            if file_writer is None:
+                return []
+            file_writer.close()
+            meta = writer._create_data_file_meta(
+                file_name=file_name,
+                file_path=file_path,
+                row_count=file_writer.row_count,
+                min_key=GenericRow([], []), max_key=GenericRow([], []),
+                key_stats=SimpleStats.empty_stats(),
+                value_stats=writer._collect_value_stats(
+                    None, fields, file_writer.column_stats),
+                min_sequence_number=0, max_sequence_number=0,
+            )
+            writer._finish_data_file(meta)
+            return [meta]
+        except Exception:
+            if file_writer is not None:
+                file_writer.abort()
+            raise
+        finally:
+            groups.close()
+
+    def abort(self):
+        self._data_writer.abort()
+
+    def close(self):
+        self._data_writer.close()
 
 
 class TableUpdateByRowId:
@@ -211,6 +350,7 @@ class TableUpdateByRowId:
 
         if not column_names:
             raise ValueError("column_names cannot be empty")
+        column_names = list(dict.fromkeys(column_names))
 
         if SpecialFields.ROW_ID.name not in data.column_names:
             raise ValueError(f"Input data must contain {SpecialFields.ROW_ID.name} column")
@@ -257,6 +397,7 @@ class TableUpdateByRowId:
     ) -> List[CommitMessage]:
         if not column_names:
             raise ValueError("column_names cannot be empty")
+        column_names = list(dict.fromkeys(column_names))
         if len(rows) != len(row_ids_by_row):
             raise ValueError(
                 "rows and row_ids_by_row must have the same length: "
@@ -390,7 +531,7 @@ class TableUpdateByRowId:
                 group_blob_object_columns,
             )
 
-    def _read_original_file_data(self, first_row_id: int, column_names: List[str]) -> Optional[pa.Table]:
+    def _read_original_file_data(self, first_row_id: int, column_names: List[str]) -> pa.Table:
         """Read original file data for the given first_row_id.
 
         Only reads columns that exist in the original file and need to be updated.
@@ -402,16 +543,17 @@ class TableUpdateByRowId:
             column_names: The column names to update
 
         Returns:
-            PyArrow Table containing the original data for columns that exist in the file,
-            or None if no columns need to be read from the original file.
+            PyArrow Table containing the original values for the requested columns.
         """
+        table_read, origin_split = self._original_file_read(first_row_id, column_names)
+        original = table_read.to_arrow([origin_split])
+        return original.select(column_names)
+
+    def _original_file_read(self, first_row_id, column_names):
         wanted = set(column_names)
         read_fields: List[DataField] = [
             table_field for table_field in self.table.fields if table_field.name in wanted
         ]
-        if not read_fields:
-            return None
-
         entry = self._first_row_id_index.get(first_row_id)
         if entry is None:
             raise ValueError(f"No file found for first_row_id {first_row_id}")
@@ -432,8 +574,66 @@ class TableUpdateByRowId:
             predicate=None,
             read_type=read_fields + [SpecialFields.ROW_ID],
         )
-        original = table_read.to_arrow([origin_split])
-        return original.select([field.name for field in read_fields])
+        return table_read, origin_split
+
+    def _merged_batches(self, first_row_id, data, column_names):
+        """Merge ordinary columns a batch at a time in physical row order."""
+        table_read, split = self._original_file_read(first_row_id, column_names)
+        updates = sorted(enumerate(data[SpecialFields.ROW_ID.name].to_pylist()),
+                         key=lambda item: item[1])
+        update_index = 0
+        offset = first_row_id
+        with table_read._to_managed_arrow_batch_reader([split]) as reader:
+            for batch in reader:
+                if not batch.num_rows:
+                    continue
+                row_ids = batch[SpecialFields.ROW_ID.name]
+                if row_ids.null_count:
+                    raise ValueError(
+                        'Original file group contains null _ROW_ID values')
+                row_id_values = row_ids.to_numpy(zero_copy_only=True)
+                if (row_id_values[0] != offset
+                        or (len(row_id_values) > 1
+                            and not np.all(np.diff(row_id_values) == 1))):
+                    raise ValueError(
+                        f'Original file group is not contiguous at row ID {offset}')
+                end = offset + batch.num_rows
+                selected = []
+                while update_index < len(updates) and updates[update_index][1] < end:
+                    if updates[update_index][1] < offset:
+                        raise ValueError(
+                            'Update row IDs precede the original file group')
+                    selected.append(updates[update_index][0])
+                    update_index += 1
+                original = pa.Table.from_batches([batch]).select(column_names)
+                if selected:
+                    merged, _ = self._merge_update_with_original(
+                        original, data.take(selected), column_names, offset)
+                else:
+                    merged = original
+                yield from merged.to_batches()
+                offset = end
+                del batch, original, merged
+        if update_index != len(updates):
+            raise ValueError('Update row IDs extend past the original file group')
+
+    def _write_group_streaming(self, partition, first_row_id, data, column_names):
+        writer = _RowIdUpdateFileWriter(
+            self.table, tuple(partition.values), column_names)
+        batches = self._merged_batches(first_row_id, data, column_names)
+        try:
+            files = writer.write_batches(batches)
+            self._assign_update_file_metadata(files, first_row_id, column_names, {})
+            if files:
+                self.commit_messages.append(CommitMessage(
+                    partition=tuple(partition.values), bucket=0, new_files=files,
+                    check_from_snapshot=self.snapshot_id))
+        except Exception:
+            writer.abort()
+            raise
+        finally:
+            batches.close()
+            writer.close()
 
     def _merge_update_with_original(
             self,
@@ -533,7 +733,13 @@ class TableUpdateByRowId:
             merged_columns[col_name] = self._merge_chunked_column(
                 original_col, update_col, sorted_updates)
 
-        merged_table = pa.table(merged_columns) if merged_columns else None
+        merged_table = None
+        if merged_columns:
+            merged_schema = pa.schema([
+                original_data.schema.field(name)
+                for name in merged_columns
+            ])
+            merged_table = pa.table(merged_columns, schema=merged_schema)
 
         return merged_table, blob_columns
 
@@ -770,6 +976,10 @@ class TableUpdateByRowId:
         Reads the original file data, merges in the update values, and
         writes a single output file (rolling disabled) for the group.
         """
+        # Specialized writers still own their sidecars and physical encoding.
+        if _RowIdUpdateFileWriter.supports_table(self.table):
+            self._write_group_streaming(partition, first_row_id, data, column_names)
+            return
         original_data = self._read_original_file_data(first_row_id, column_names)
         _, target_files = self._first_row_id_index[first_row_id]
         blob_columns_with_baseline = {

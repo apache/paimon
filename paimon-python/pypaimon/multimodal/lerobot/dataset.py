@@ -18,18 +18,20 @@
 """LeRobot-compatible map-style reads from a multimodal Paimon table."""
 
 import bisect
-import io
 import json
 import math
 import operator
-import os
+import pickle
 import sys
+import zlib
+from abc import ABC, abstractmethod
 from collections import OrderedDict
+from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
 import pyarrow as pa
 
-from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.lerobot.metadata import (
     _companion_table_identifiers,
     _restore_pandas_metadata,
@@ -37,6 +39,7 @@ from pypaimon.multimodal.lerobot.metadata import (
     _validate_tag_name,
 )
 from pypaimon.multimodal.lerobot.loader import _DECLARED_NUMERIC_RANGES
+from pypaimon.multimodal.lerobot.reader import _PaimonTableFrameReader
 from pypaimon.multimodal.lerobot.schema import (
     _feature_shape,
     _require_v3,
@@ -45,7 +48,6 @@ from pypaimon.multimodal.lerobot.schema import (
 )
 from pypaimon.multimodal.table import _target_schema, _time_travel_table
 from pypaimon.multimodal.video import VideoFrameCollator
-from pypaimon.read.query_auth_split import QueryAuthSplit
 
 
 _TORCH_DTYPE_NAMES = {
@@ -64,6 +66,7 @@ _TORCH_DTYPE_NAMES = {
 }
 
 _IMAGE_READ_ATTEMPTS = 3
+_MAX_VISUAL_WORKERS = 8
 
 _CONTROL_FEATURES = frozenset({
     "index",
@@ -75,11 +78,12 @@ _CONTROL_FEATURES = frozenset({
 })
 
 
-class PaimonLeRobotDataset:
-    """Map-style LeRobot reader backed by indexed Paimon reads.
+class PaimonDatasetReader(ABC):
+    """Read-side implementation for Paimon-backed LeRobot datasets.
 
-    LeRobot metadata is resolved from the Paimon table group and remains
-    available through :attr:`meta`.
+    Subclasses provide batched ``read_indices``. Resolved LeRobot metadata
+    remains available through :attr:`meta`. Readers must be picklable for
+    DataLoader workers.
 
     Set ``return_uint8=True`` to keep 8-bit visual frames in their decoded
     ``torch.uint8`` representation instead of normalizing them to float32.
@@ -88,23 +92,68 @@ class PaimonLeRobotDataset:
 
     def __init__(
             self,
-            table,
+            meta,
             *,
-            tag_name=None,
+            schema=None,
+            file_io=None,
             episodes=None,
             image_transforms=None,
             delta_timestamps=None,
             tolerance_s=1e-4,
             blob_parallelism=16,
             video_backend=None,
-            return_uint8=False):
-        if sys.version_info < (3, 10):
-            raise RuntimeError(
-                "PaimonLeRobotDataset requires Python 3.10 or newer; "
-                "install and run 'pypaimon[lerobot]' on a supported Python "
-                "version.")
-        raw_table, self.meta = _load_dataset(table, tag_name)
-        self.tag_name = tag_name
+            return_uint8=False,
+            _resolved_meta=False):
+        _require_dataset_python()
+        metadata = meta if _resolved_meta else _reader_metadata(meta)
+        if schema is not None and not isinstance(schema, pa.Schema):
+            raise TypeError(
+                "PaimonDatasetReader schema must be a pyarrow.Schema.")
+        self.file_io = file_io
+        info = self._init_dataset(
+            metadata,
+            episodes,
+            image_transforms,
+            delta_timestamps,
+            tolerance_s,
+            blob_parallelism,
+            video_backend,
+            return_uint8,
+        )
+        schema = schema if schema is not None else _schema_from_info(info)
+        self.schema = schema
+        projection, validation_context, subtasks = \
+            self._init_frame_contract(
+                schema, info, self._validate_physical_metadata())
+        rows = self._open_frame_rows(projection)
+        self._set_frame_rows(
+            rows, projection, validation_context, subtasks)
+
+    @abstractmethod
+    def read_indices(self, indices, columns):
+        """Return one row per requested absolute index as a PyArrow Table.
+
+        ``indices`` are unique; result order is unrestricted. Result columns
+        must match ``schema`` and contain every requested index exactly once.
+        """
+
+    def _validate_physical_metadata(self):
+        return False
+
+    def _open_frame_rows(self, projection):
+        return None
+
+    def _init_dataset(
+            self,
+            metadata,
+            episodes,
+            image_transforms,
+            delta_timestamps,
+            tolerance_s,
+            blob_parallelism,
+            video_backend,
+            return_uint8):
+        self.meta = metadata
         self.repo_id = self.meta.repo_id
         self.image_transforms = image_transforms
         self.delta_timestamps = delta_timestamps
@@ -125,7 +174,7 @@ class PaimonLeRobotDataset:
 
         info = self._init_metadata()
         self._init_episodes(episodes)
-        self._init_reader(raw_table, info)
+        return info
 
     def _init_metadata(self):
         info = dict(_metadata_member(self.meta, "info", {}))
@@ -169,6 +218,11 @@ class PaimonLeRobotDataset:
     def _init_episodes(self, episodes):
         self._episode_ranges = _episode_ranges(
             self.meta, self._total_frames, self._total_episodes)
+        if (self._episode_ranges is None
+                and (self._total_frames or self._total_episodes)):
+            raise ValueError(
+                "LeRobot metadata must define episodes for a non-empty "
+                "dataset.")
         self._episode_ends = [end for _, end in self._episode_ranges] \
             if self._episode_ranges is not None else None
         self.episodes = _selected_episodes(episodes, self._total_episodes)
@@ -197,15 +251,45 @@ class PaimonLeRobotDataset:
         if self._delta_indices and self._episode_ranges is None:
             raise ValueError("delta_timestamps requires episode metadata.")
 
-    def _init_reader(self, raw_table, info):
-        target_schema = _target_schema(raw_table)
-        table_fields = set(target_schema.names)
+    def _set_frame_rows(
+            self, rows, projection, validation_context, subtasks):
+        self._frame_rows = rows
+        access = rows if rows is not None else self
+        self._snapshot_id = getattr(access, "snapshot_id", None)
+        self._read_table = getattr(access, "_table", None)
+        self._frame_locator = getattr(access, "_locator", None)
+        self._projection = projection
+        self._validation_context = validation_context
+        self._file_io = getattr(access, "file_io", None)
+        if self._video_keys and self._file_io is None:
+            raise ValueError(
+                "A video-backed PaimonDatasetReader must expose file_io.")
+        self._video_collators = [
+            VideoFrameCollator(
+                access,
+                video_column=key,
+                decoder_factory=partial(
+                    _open_video_decoder, backend=self.video_backend),
+                decode_batch_fn=_decode_video_frames,
+                output_column=key,
+                collate_fn=_identity,
+            )
+            for key in self._video_keys
+        ]
+        self._init_delta_projection(validation_context, subtasks)
+
+    def _init_frame_contract(self, target_schema, info, validate_metadata):
         tasks = _metadata_member(self.meta, "tasks")
         subtasks = _metadata_member(self.meta, "subtasks")
         _validate_component_metadata(
             self._features, self._total_tasks, tasks, subtasks)
         source_schema = _schema_from_info(info)
-        _validate_lerobot_schema(source_schema, target_schema, self.repo_id)
+        if validate_metadata:
+            _validate_lerobot_schema(
+                source_schema, target_schema, self.repo_id)
+        else:
+            _validate_reader_schema(
+                source_schema, target_schema, self.repo_id)
         validation_context = _build_frame_validation_context(
             self.meta,
             self._episode_ranges,
@@ -215,37 +299,14 @@ class PaimonLeRobotDataset:
             source_schema.field("timestamp").type,
         )
         projection = list(self._features)
-        missing = set(projection) - table_fields
+        missing = set(projection) - set(target_schema.names)
         if missing:
             raise ValueError(
-                "Paimon table is missing LeRobot fields: %s"
+                "LeRobot frame schema is missing fields: %s"
                 % sorted(missing))
+        return projection, validation_context, subtasks
 
-        self._read_table, self._snapshot_id, splits = _indexed_read_table(
-            raw_table, projection)
-        snapshot = self._read_table.snapshot_manager().get_snapshot_by_id(
-            self._snapshot_id)
-        if snapshot.next_row_id != self._total_frames:
-            raise ValueError(
-                "Paimon table has %d rows but metadata declares %d frames."
-                % (snapshot.next_row_id, self._total_frames))
-        self._projection = projection
-        self._frame_locator = _FrameLocator(
-            self._read_table, snapshot, splits)
-        self._validation_context = validation_context
-        self._file_io = self._read_table.file_io
-        self._video_collators = [
-            VideoFrameCollator(
-                self._read_table,
-                video_column=key,
-                decoder_factory=partial(
-                    _open_video_decoder, backend=self.video_backend),
-                decode_fn=_decode_video_frame,
-                output_column=key,
-                collate_fn=_identity,
-            )
-            for key in self._video_keys
-        ]
+    def _init_delta_projection(self, validation_context, subtasks):
         self._task_names = validation_context["task_names"]
         self._subtask_names = validation_context["subtask_names"]
         self._delta_projection = None
@@ -281,12 +342,24 @@ class PaimonLeRobotDataset:
     def __len__(self):
         return self.num_frames
 
-    def __getitem__(self, index):
-        if isinstance(index, slice):
-            return self.__getitems__(range(*index.indices(len(self))))
-        return self.__getitems__([index])[0]
+    @property
+    def absolute_to_relative_idx(self):
+        if self._selected_ranges is None:
+            return None
+        result = {}
+        relative = 0
+        for begin, end in self._selected_ranges:
+            for absolute in range(begin, end):
+                result[absolute] = relative
+                relative += 1
+        return result
 
-    def __getitems__(self, indices):
+    def get_item(self, index):
+        """Return one fully assembled frame."""
+        return self.get_items([index])[0]
+
+    def get_items(self, indices):
+        """Return fully assembled frames for one batch."""
         dataset_indices = [
             _normalize_index(index, len(self)) for index in indices
         ]
@@ -307,9 +380,7 @@ class PaimonLeRobotDataset:
             if position not in unique_frame_index_set
         })
         lookup_indices = sorted(unique_frame_index_set.union(delta_indices))
-        splits, needs_filter = self._frame_locator.locate(lookup_indices)
-        rows = self._read_rows(
-            lookup_indices, self._projection, splits, needs_filter)
+        rows = self._read_rows(lookup_indices, self._projection)
         base_rows = {
             index: rows[index] for index in unique_frame_indices
         }
@@ -323,29 +394,45 @@ class PaimonLeRobotDataset:
         _attach_task_labels(
             base_rows, self._task_names, self._subtask_names)
         row_groups = [base_rows, delta_rows]
-        image_sources = _image_blob_sources(
-            row_groups, self._image_keys)
-        for attempt in range(_IMAGE_READ_ATTEMPTS):
-            if attempt:
-                _restore_image_blob_sources(image_sources)
-            try:
-                _resolve_image_blobs(
-                    self._file_io,
-                    row_groups,
-                    self._image_keys,
-                    self.blob_parallelism,
-                )
-                _decode_image_rows(
-                    row_groups,
-                    self._image_keys,
-                    self._features,
-                    self.return_uint8,
-                )
-                break
-            except OSError:
-                if attempt + 1 == _IMAGE_READ_ATTEMPTS:
-                    raise
+        if self._file_io is not None:
+            image_sources = _image_blob_sources(
+                row_groups, self._image_keys)
+            for attempt in range(_IMAGE_READ_ATTEMPTS):
+                if attempt:
+                    _restore_image_blob_sources(image_sources)
+                try:
+                    _resolve_image_blobs(
+                        self._file_io,
+                        row_groups,
+                        self._image_keys,
+                        self.blob_parallelism,
+                    )
+                    _decode_image_rows(
+                        row_groups,
+                        self._image_keys,
+                        self._features,
+                        self.return_uint8,
+                    )
+                    break
+                except OSError:
+                    if attempt + 1 == _IMAGE_READ_ATTEMPTS:
+                        raise
+        else:
+            _decode_image_rows(
+                row_groups,
+                self._image_keys,
+                self._features,
+                self.return_uint8,
+            )
 
+        # Transforms may shrink frames; assemble those windows one sample at a time.
+        video_windows = {} if self.image_transforms is not None else _decode_video_windows(
+            plans, rows, getattr(self, "_video_collators", ()),
+            self._features, self.return_uint8)
+        for group in row_groups:
+            for row in group.values():
+                for key in video_windows:
+                    row.pop(key, None)
         _decode_video_rows(
             row_groups, getattr(self, "_video_collators", ()))
         converted = {
@@ -360,9 +447,14 @@ class PaimonLeRobotDataset:
         })
 
         import torch
+        visual_windows = _stack_visual_windows(
+            plans, converted, [key for key in self._visual_keys
+                               if key not in video_windows]
+        ) if self.image_transforms is None and plans[0]["windows"] else {}
+        visual_windows.update(video_windows)
         duplicates = _duplicate_indices(plans)
         result = []
-        for plan in plans:
+        for offset, plan in enumerate(plans):
             item = dict(converted[plan["index"]])
             if plan["index"] in duplicates:
                 item = {
@@ -370,9 +462,12 @@ class PaimonLeRobotDataset:
                     for key, value in item.items()
                 }
             for key, positions in plan["windows"].items():
-                item[key] = torch.stack([
-                    converted[position][key] for position in positions
-                ])
+                if key in visual_windows:
+                    item[key] = visual_windows[key][offset]
+                else:
+                    item[key] = torch.stack([
+                        converted[position][key] for position in positions
+                    ])
             item.update(plan["padding"])
             if self.image_transforms is not None:
                 for key in self._visual_keys:
@@ -380,17 +475,27 @@ class PaimonLeRobotDataset:
             result.append(item)
         return result
 
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return self.get_items(range(*index.indices(len(self))))
+        return self.get_item(index)
+
+    def __getitems__(self, indices):
+        return self.get_items(indices)
+
     def close(self):
         first_error = None
-        locator = getattr(self, "_frame_locator", None)
-        if locator is not None:
-            try:
-                locator.close()
-            except Exception as error:
-                first_error = error
         for collator in getattr(self, "_video_collators", ()):
             try:
                 collator.close()
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+        rows = getattr(self, "_frame_rows", None)
+        self._frame_rows = None
+        if rows is not None:
+            try:
+                rows.close()
             except Exception as error:
                 if first_error is None:
                     first_error = error
@@ -403,19 +508,18 @@ class PaimonLeRobotDataset:
         except Exception:
             pass
 
-    def _read_rows(
-            self, indices, projection, splits=None, needs_filter=True):
+    def _read_rows(self, indices, projection):
         if not indices:
             return {}
-        return _read_rows_by_index(
-            self._read_table,
+        rows = self._frame_rows if self._frame_rows is not None else self
+        return _read_reader_rows(
+            rows,
             projection,
             indices,
+            self.schema,
             self._validation_context,
             self.tolerance_s,
             self._features,
-            splits,
-            needs_filter,
         )
 
     def set_image_transforms(self, image_transforms):
@@ -458,113 +562,141 @@ class PaimonLeRobotDataset:
                self.num_frames, list(self.features)))
 
 
-class _FrameLocator:
-    """Locate LeRobot frame rows in one fixed Paimon snapshot."""
+class _PaimonTableDatasetReader(PaimonDatasetReader):
 
-    def __init__(self, table, snapshot, splits):
-        self._table = table
-        self._snapshot = snapshot
-        self._scanner = None
-        self._scanner_initialized = False
-        self._process_id = os.getpid()
-        self._set_splits(splits)
-
-    def _set_splits(self, splits):
-        from pypaimon.read.datasource.torch_dataset import (
-            SplitRangeIndex,
-            row_ranges_for_split,
+    def __init__(
+            self,
+            table,
+            *,
+            tag_name=None,
+            episodes=None,
+            image_transforms=None,
+            delta_timestamps=None,
+            tolerance_s=1e-4,
+            blob_parallelism=16,
+            video_backend=None,
+            return_uint8=False):
+        self._frames_table, meta = _load_dataset(table, tag_name)
+        self.tag_name = tag_name
+        super().__init__(
+            meta,
+            schema=_target_schema(self._frames_table),
+            episodes=episodes,
+            image_transforms=image_transforms,
+            delta_timestamps=delta_timestamps,
+            tolerance_s=tolerance_s,
+            blob_parallelism=blob_parallelism,
+            video_backend=video_backend,
+            return_uint8=return_uint8,
+            _resolved_meta=True,
         )
 
-        self._splits = splits
-        self._split_ranges = [
-            row_ranges_for_split(split) for split in splits
-        ]
-        self._split_range_index = SplitRangeIndex(self._split_ranges)
+    def read_indices(self, indices, columns):
+        return self._frame_rows.read_indices(indices, columns)
 
-    def locate(self, indices):
-        """Return narrowed splits and whether rows still need filtering."""
-        self._ensure_process()
-        predicate = _index_predicate(self._table, indices)
-        try:
-            scanner = self._index_scanner(predicate)
-        except Exception as error:
-            raise RuntimeError(
-                "Failed to open the Paimon global index for LeRobot frame "
-                "lookups.") from error
-        if scanner is None:
-            raise RuntimeError(
-                "PaimonLeRobotDataset requires a readable global index on "
-                "the frame 'index' column.")
-        try:
-            evaluation = scanner.scan_with_coverage(predicate)
-            if evaluation is None:
-                raise RuntimeError(
-                    "The Paimon global index could not evaluate the LeRobot "
-                    "frame index predicate.")
-            unindexed = scanner.unindexed_ranges(
-                predicate,
-                search_mode=self._table.options.scalar_index_search_mode(),
-                contributing_field_ids=evaluation.contributing_field_ids,
-            )
-            ranges = evaluation.result.results().to_range_list() + unindexed
-            from pypaimon.read.datasource.torch_dataset import (
-                select_indexed_splits,
-            )
-            from pypaimon.utils.range import Range
-            return select_indexed_splits(
-                self._splits,
-                self._split_ranges,
-                self._split_range_index,
-                Range.sort_and_merge_overlap(ranges, True),
-            ), bool(unindexed)
-        except RuntimeError:
-            raise
-        except Exception as error:
-            raise RuntimeError(
-                "Failed to query the Paimon global index for LeRobot "
-                "frames.") from error
+    def _validate_physical_metadata(self):
+        return True
 
-    def _ensure_process(self):
-        process_id = os.getpid()
-        if process_id == self._process_id:
-            return
-        self._scanner = None
-        self._scanner_initialized = False
-        self._set_splits(self._splits)
-        self._process_id = process_id
+    def _open_frame_rows(self, projection):
+        rows = _PaimonTableFrameReader(
+            self._frames_table, columns=projection)
+        if rows.num_rows != self._total_frames:
+            raise ValueError(
+                "Paimon table has %d rows but metadata declares %d frames."
+                % (rows.num_rows, self._total_frames))
+        return rows
 
-    def _index_scanner(self, predicate):
-        if not self._scanner_initialized:
-            from pypaimon.globalindex import DataEvolutionGlobalIndexScanner
-            self._scanner = DataEvolutionGlobalIndexScanner.create(
-                self._table,
-                predicate=predicate,
-                snapshot=self._snapshot,
+
+class PaimonLeRobotDataset:
+    """Map-style Dataset facade backed by :class:`PaimonDatasetReader`."""
+
+    def __init__(
+            self,
+            table,
+            *,
+            tag_name=None,
+            episodes=None,
+            image_transforms=None,
+            delta_timestamps=None,
+            tolerance_s=1e-4,
+            blob_parallelism=16,
+            video_backend=None,
+            return_uint8=False):
+        _require_dataset_python()
+        if isinstance(table, PaimonDatasetReader):
+            if (
+                tag_name is not None
+                or episodes is not None
+                or image_transforms is not None
+                or delta_timestamps is not None
+                or tolerance_s != 1e-4
+                or blob_parallelism != 16
+                or video_backend is not None
+                or return_uint8
+            ):
+                raise ValueError(
+                    "Configure Dataset options on PaimonDatasetReader.")
+            self.reader = table
+        else:
+            self.reader = _PaimonTableDatasetReader(
+                table,
+                tag_name=tag_name,
+                episodes=episodes,
+                image_transforms=image_transforms,
+                delta_timestamps=delta_timestamps,
+                tolerance_s=tolerance_s,
+                blob_parallelism=blob_parallelism,
+                video_backend=video_backend,
+                return_uint8=return_uint8,
             )
-            self._scanner_initialized = True
-        return self._scanner
+
+    def __len__(self):
+        return len(self.reader)
+
+    def __getitem__(self, index):
+        return self.reader[index]
+
+    def __getitems__(self, indices):
+        return self.reader.get_items(indices)
+
+    @property
+    def return_uint8(self):
+        return self.reader.return_uint8
+
+    @return_uint8.setter
+    def return_uint8(self, value):
+        if not isinstance(value, bool):
+            raise TypeError("return_uint8 must be a boolean.")
+        self.reader.return_uint8 = value
+
+    @property
+    def image_transforms(self):
+        return self.reader.image_transforms
+
+    @image_transforms.setter
+    def image_transforms(self, value):
+        self.reader.set_image_transforms(value)
+
+    def set_image_transforms(self, image_transforms):
+        self.reader.set_image_transforms(image_transforms)
+
+    def clear_image_transforms(self):
+        self.reader.clear_image_transforms()
 
     def close(self):
-        scanner = self._scanner
-        self._scanner = None
-        self._scanner_initialized = False
-        if scanner is not None and self._process_id == os.getpid():
-            scanner.close()
+        self.reader.close()
 
-    def __getstate__(self):
-        state = self.__dict__.copy()
-        state["_scanner"] = None
-        state["_scanner_initialized"] = False
-        state["_process_id"] = None
-        state["_split_ranges"] = None
-        state["_split_range_index"] = None
-        return state
+    def __getattr__(self, name):
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+        reader = self.__dict__.get("reader")
+        if reader is None:
+            raise AttributeError(name)
+        return getattr(reader, name)
 
-    def __del__(self):
-        try:
-            self.close()
-        except Exception:
-            pass
+    def __repr__(self):
+        return repr(self.reader).replace(
+            self.reader.__class__.__name__, self.__class__.__name__, 1)
 
 
 class _PaimonLeRobotMetadata:
@@ -579,6 +711,22 @@ class _PaimonLeRobotMetadata:
         self.episodes = episodes
         self.tasks = tasks
         self.subtasks = subtasks
+        self._compress_episodes = False
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        if state.get("_compress_episodes", False):
+            # Keep worker-startup payloads small without changing Dataset state.
+            state["episodes"] = zlib.compress(
+                pickle.dumps(self.episodes, protocol=pickle.HIGHEST_PROTOCOL),
+                level=1)
+            state["_episodes_zlib"] = True
+        return state
+
+    def __setstate__(self, state):
+        if state.pop("_episodes_zlib", False):
+            state["episodes"] = pickle.loads(zlib.decompress(state["episodes"]))
+        self.__dict__.update(state)
 
     def __getattr__(self, name):
         info = self.__dict__.get("info", {})
@@ -623,9 +771,40 @@ class _PaimonLeRobotMetadata:
         }
 
     def get_task_index(self, task):
-        if task not in self.tasks.index:
+        if hasattr(self.tasks, "loc"):
+            if task not in self.tasks.index:
+                return None
+            return int(self.tasks.loc[task].task_index)
+        try:
+            return list(self.tasks).index(task)
+        except ValueError:
             return None
-        return int(self.tasks.loc[task].task_index)
+
+
+def _reader_metadata(metadata):
+    info = _metadata_member(metadata, "info")
+    if not isinstance(info, Mapping):
+        raise TypeError(
+            "PaimonDatasetReader metadata must contain an info map.")
+    info = dict(info)
+    features = info.get("features")
+    if isinstance(features, Mapping):
+        info["features"] = {
+            name: dict(feature) for name, feature in features.items()
+        }
+        for feature in info["features"].values():
+            if "shape" in feature:
+                feature["shape"] = tuple(feature["shape"])
+    stats = _metadata_member(metadata, "stats")
+    return _PaimonLeRobotMetadata(
+        str(_metadata_member(metadata, "repo_id", "custom-reader")),
+        _metadata_member(metadata, "revision"),
+        info,
+        _numpy_stats(stats) if stats is not None else None,
+        _metadata_member(metadata, "episodes"),
+        _metadata_member(metadata, "tasks"),
+        _metadata_member(metadata, "subtasks"),
+    )
 
 
 def _load_dataset(table, tag_name):
@@ -661,6 +840,7 @@ def _load_dataset(table, tag_name):
     metadata = _PaimonLeRobotMetadata(
         str(table.identifier), tag_name, info, stats, episodes, tasks,
         subtasks)
+    metadata._compress_episodes = True
     return frames, metadata
 
 
@@ -729,7 +909,8 @@ def _numpy_stats(value):
 
 
 def _metadata_member(metadata, name, default=None):
-    value = getattr(metadata, name, None)
+    value = metadata.get(name) if isinstance(metadata, Mapping) \
+        else getattr(metadata, name, None)
     return default if value is None else value
 
 
@@ -905,59 +1086,54 @@ def _delta_indices(delta_timestamps, fps, tolerance_s, features):
     return result
 
 
-def _indexed_read_table(raw_table, projection):
-    read_table = raw_table.copy({
-        CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"
-    })
-    plan = read_table.new_read_builder().with_projection(
-        projection).new_scan().plan()
-    splits = plan.splits()
-    if any(
-            isinstance(split, QueryAuthSplit)
-            and (
-                getattr(split.auth_result, "filter", None)
-                or getattr(split.auth_result, "column_masking", None)
-            )
-            for split in splits):
+def _validate_reader_schema(expected_schema, actual_schema, source):
+    for expected_field in expected_schema:
+        target_index = actual_schema.get_field_index(expected_field.name)
+        if target_index < 0:
+            continue
+        target_type = actual_schema.field(target_index).type
+        if expected_field.type != target_type:
+            raise ValueError(
+                "LeRobot feature %s from %s expects %s, found %s."
+                % (expected_field.name, source, expected_field.type,
+                   target_type))
+
+
+def _read_reader_rows(
+        reader, projection, indices, expected_schema, validation_context,
+        tolerance_s, features):
+    values = reader.read_indices(tuple(indices), tuple(projection))
+    if not isinstance(values, pa.Table):
+        raise TypeError(
+            "PaimonDatasetReader.read_indices() must return a pyarrow.Table.")
+    missing = set(projection) - set(values.column_names)
+    if missing:
         raise ValueError(
-            "PaimonLeRobotDataset does not support query authorization "
-            "filters or column masking.")
-    if plan.snapshot_id is None:
-        raise ValueError("Paimon LeRobot frames table has no snapshot.")
-    if read_table.options.scan_tag_name() is None:
-        read_table = _time_travel_table(
-            read_table, snapshot_id=plan.snapshot_id)
-    return read_table, plan.snapshot_id, splits
-
-
-def _index_predicate(table, indices):
-    return table.new_read_builder().new_predicate_builder().is_in(
-        "index", indices)
-
-
-def _read_rows_by_index(
-        table, projection, indices, validation_context, tolerance_s, features,
-        splits=None, needs_filter=True):
-    builder = table.new_read_builder().with_projection(projection)
-    if needs_filter:
-        builder = builder.with_filter(_index_predicate(table, indices))
-    if splits is None:
-        splits = builder.new_scan().plan().splits()
-    rows = _arrow_rows(builder.new_read().to_arrow(splits), features)
+            "PaimonDatasetReader result is missing fields: %s"
+            % sorted(missing))
+    for name in projection:
+        expected_type = expected_schema.field(name).type
+        actual_type = values.schema.field(name).type
+        if actual_type != expected_type:
+            raise ValueError(
+                "PaimonDatasetReader field %s expects %s, found %s."
+                % (name, expected_type, actual_type))
+    rows = _arrow_rows(values.select(projection), features)
     expected = set(indices)
     result = {}
     for row in rows:
         index = _control_index(row, "index", -1)
         if index not in expected or index in result:
             raise ValueError(
-                "Paimon BTree returned an unexpected or duplicate LeRobot "
+                "PaimonDatasetReader returned an unexpected or duplicate "
                 "index: %d." % index)
-        _validate_control_row(index, row, validation_context, tolerance_s)
+        _validate_control_row(
+            index, row, validation_context, tolerance_s)
         result[index] = row
     missing = expected - set(result)
     if missing:
         raise RuntimeError(
-            "Paimon index lookup did not return LeRobot indices %s."
+            "PaimonDatasetReader did not return indices %s."
             % sorted(missing))
     return result
 
@@ -1167,6 +1343,96 @@ def _attach_task_labels(rows, task_names, subtask_names):
             row["subtask"] = subtask_names[subtask_index]
 
 
+def _decode_video_windows(plans, rows, collators, features, return_uint8):
+    import torch
+
+    tasks = [c for c in collators if c.video_column in plans[0]["windows"]]
+    if not tasks or torch.get_num_threads() > 1:
+        return {}
+    grad_enabled = torch.is_grad_enabled()
+    inference_enabled = torch.is_inference_mode_enabled()
+
+    def decode(collator):
+        collator._ensure_process_local_cache()
+        key = collator.video_column
+        descriptors = {
+            position: collator._prepare_row(row)[1]
+            for position, row in rows.items() if key in row
+        }
+        requests = {}
+        for offset, plan in enumerate(plans):
+            window = [descriptors[p] for p in plan["windows"][key]]
+            if not window or any(d is None for d in window):
+                return key, None
+            payload = window[0].payload_descriptor
+            # Cross-file windows use the regular frame assembly path.
+            if any(d.payload_descriptor != payload for d in window):
+                return key, None
+            requests.setdefault(payload, []).append((
+                offset, [d.frame_index for d in window]))
+
+        output = [None] * len(plans)
+        with torch.inference_mode(inference_enabled), \
+                torch.set_grad_enabled(grad_enabled):
+            for payload, windows in requests.items():
+                decoder = collator._decoder(payload)
+                get_frames = getattr(decoder, "get_frames_at", None)
+                if not callable(get_frames):
+                    return key, None
+                indices = sorted({i for _, window in windows for i in window})
+                frames = get_frames(indices=indices).data
+                if (not torch.is_tensor(frames) or frames.ndim != 4
+                        or len(frames) != len(indices)):
+                    raise ValueError("Video decoder must return one frame per index.")
+                _video_tensor(frames[0], features[key], return_uint8=True)
+                # Reorder reused frames once instead of once per window.
+                if sum(len(window) for _, window in windows) >= 2 * len(indices):
+                    frames = frames.contiguous()
+                positions = {index: pos for pos, index in enumerate(indices)}
+                for offset, window in windows:
+                    selection = [positions[index] for index in window]
+                    start = selection[0]
+                    if selection == list(range(start, start + len(selection))):
+                        output[offset] = frames[start:start + len(selection)].clone(
+                            memory_format=torch.contiguous_format)
+                    else:
+                        output[offset] = frames.index_select(0, torch.tensor(
+                            selection, dtype=torch.long, device=frames.device))
+                    if frames.dtype == torch.uint8 and not return_uint8:
+                        output[offset] = output[offset].float().div_(255)
+        return key, output
+
+    if len(tasks) == 1:
+        decoded = [decode(tasks[0])]
+    else:
+        with ThreadPoolExecutor(
+                max_workers=min(len(tasks), _MAX_VISUAL_WORKERS)) as executor:
+            decoded = list(executor.map(decode, tasks))
+    return {key: windows for key, windows in decoded if windows is not None}
+
+
+def _stack_visual_windows(plans, rows, visual_keys):
+    import torch
+
+    keys = [key for key in plans[0]["windows"] if key in visual_keys]
+    # Let PyTorch handle parallelism when its own thread pool is enabled.
+    if len(keys) < 2 or torch.get_num_threads() > 1:
+        return {}
+    grad_enabled = torch.is_grad_enabled()
+    inference_enabled = torch.is_inference_mode_enabled()
+
+    def stack(key):
+        with torch.inference_mode(inference_enabled), \
+                torch.set_grad_enabled(grad_enabled):
+            return [torch.stack([
+                rows[position][key] for position in plan["windows"][key]
+            ]) for plan in plans]
+
+    with ThreadPoolExecutor(
+            max_workers=min(len(keys), _MAX_VISUAL_WORKERS)) as executor:
+        return dict(zip(keys, executor.map(stack, keys)))
+
+
 def _torch_row(row, features, return_uint8=False):
     import torch
 
@@ -1190,14 +1456,10 @@ def _torch_row(row, features, return_uint8=False):
 def _image_tensor(payload, feature, return_uint8=False):
     if payload is None:
         raise ValueError("LeRobot image feature contains a null frame.")
-    import numpy as np
-    import torch
-    try:
-        from PIL import Image, ImageOps
-    except ImportError as error:
-        raise ImportError(
-            "PaimonLeRobotDataset requires Pillow from "
-            "'pypaimon[lerobot]'.") from error
+    from pypaimon.multimodal.window_transforms import (
+        _decode_image,
+        _image_array_to_tensor,
+    )
 
     expected_shape = _feature_shape(feature, "image")
     if len(expected_shape) != 3:
@@ -1207,21 +1469,12 @@ def _image_tensor(payload, feature, return_uint8=False):
     payload_shape = expected_shape[1:] + expected_shape[:1] \
         if names and names[0] in ("channel", "channels") \
         else expected_shape
-    with Image.open(io.BytesIO(payload)) as image:
-        array = np.array(ImageOps.exif_transpose(image), copy=True)
-    if array.ndim == 2:
-        array = array[:, :, None]
+    array = _decode_image(payload)
     if array.shape != payload_shape:
         raise ValueError(
             "LeRobot image payload has shape %s, expected %s."
             % (array.shape, payload_shape))
-    normalize = array.dtype == np.uint8
-    tensor = torch.from_numpy(array).permute(2, 0, 1)
-    if normalize and return_uint8:
-        return tensor
-    # Preserve high-bit-depth and floating-point images in native units.
-    tensor = tensor.float()
-    return tensor.div_(255) if normalize else tensor
+    return _image_array_to_tensor(array, return_uint8)
 
 
 def _video_tensor(frame, feature, return_uint8=False):
@@ -1397,8 +1650,11 @@ class _PyAVVideoDecoder:
         self._container.close()
 
 
-def _decode_video_frame(decoder, frame_index, unused_row):
-    return decoder[frame_index]
+def _decode_video_frames(decoder, frame_indices, unused_rows):
+    get_frames_at = getattr(decoder, "get_frames_at", None)
+    if get_frames_at is not None:
+        return get_frames_at(indices=frame_indices).data
+    return [decoder[index] for index in frame_indices]
 
 
 def _identity(values):
@@ -1406,17 +1662,33 @@ def _identity(values):
 
 
 def _decode_video_rows(row_groups, collators):
+    tasks = []
     for collator in collators:
+        targets = []
+        input_rows = []
         for rows in row_groups:
-            indices = [
-                index for index, row in rows.items()
-                if collator.video_column in row
-            ]
-            if not indices:
-                continue
-            decoded = collator([rows[index] for index in indices])
-            for index, row in zip(indices, decoded):
-                rows[index] = row
+            for index, row in rows.items():
+                if collator.video_column in row:
+                    targets.append((rows, index))
+                    input_rows.append(row)
+        if not input_rows:
+            continue
+        tasks.append((collator, targets, input_rows))
+
+    if not tasks:
+        return
+    if len(tasks) == 1:
+        decoded_groups = [tasks[0][0](tasks[0][2])]
+    else:
+        with ThreadPoolExecutor(
+                max_workers=min(
+                    len(tasks), _MAX_VISUAL_WORKERS)) as executor:
+            decoded_groups = list(executor.map(
+                lambda task: task[0](task[2]), tasks))
+
+    for (collator, targets, _), decoded in zip(tasks, decoded_groups):
+        for (rows, index), row in zip(targets, decoded):
+            rows[index][collator.output_column] = row[collator.output_column]
 
 
 def _normalize_index(index, size):
@@ -1426,6 +1698,14 @@ def _normalize_index(index, size):
     if index < 0 or index >= size:
         raise IndexError("PaimonLeRobotDataset index out of range")
     return index
+
+
+def _require_dataset_python():
+    if sys.version_info < (3, 10):
+        raise RuntimeError(
+            "PaimonLeRobotDataset requires Python 3.10 or newer; "
+            "install and run 'pypaimon[lerobot]' on a supported Python "
+            "version.")
 
 
 def _positive_int(value, name):

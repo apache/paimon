@@ -43,7 +43,7 @@ public interface InnerTableScan extends TableScan {
         return this;
     }
 
-    default InnerTableScan withLimit(int limit) {
+    default InnerTableScan withLimit(long limit) {
         return this;
     }
 

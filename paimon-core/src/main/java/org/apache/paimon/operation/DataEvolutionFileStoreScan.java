@@ -27,6 +27,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.reader.DataEvolutionArray;
 import org.apache.paimon.reader.DataEvolutionRow;
 import org.apache.paimon.schema.SchemaManager;
@@ -215,9 +216,9 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     /**
      * Per-file column pruning within a row-id-range group: drop files whose physical columns have
-     * no overlap with the query's {@code readType}. Necessary for columnar-split DE scenarios where
-     * a logical row is reconstructed from multiple files in the same row id range — a query that
-     * does not reference a file's columns has no reason to read it.
+     * no overlap with the query's {@code readType} or filter. Necessary for columnar-split DE
+     * scenarios where a logical row is reconstructed from multiple files in the same row id range —
+     * a query that does not reference a file's columns has no reason to read it.
      *
      * <p>When every file in the group lacks a requested column (e.g. an ADD COLUMN projection over
      * a row-disjoint pre-ALTER group), one file is kept as a row-count representative so the reader
@@ -230,15 +231,46 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         if (readType == null || group.size() <= 1) {
             return group;
         }
+        Set<Integer> filterFieldIds = Collections.emptySet();
+        if (inputFilter != null) {
+            // executeFilter may need columns absent from the output projection. Keep their latest
+            // files too, otherwise widening the reader could see an older value or a null.
+            filterFieldIds = new HashSet<>();
+            Set<String> filterFields = PredicateVisitor.collectFieldNames(inputFilter);
+            for (DataField field : schema.fields()) {
+                if (filterFields.contains(field.name())) {
+                    filterFieldIds.add(field.id());
+                }
+            }
+        }
+        return pruneByReadType(
+                group,
+                readType,
+                filterFieldIds,
+                deletionVectorsEnabled,
+                this::fileFieldIdsForEntry);
+    }
+
+    @VisibleForTesting
+    static List<ManifestEntry> pruneByReadType(
+            List<ManifestEntry> group,
+            RowType readType,
+            Set<Integer> filterFieldIds,
+            boolean deletionVectorsEnabled,
+            Function<ManifestEntry, Set<Integer>> fileFieldIds) {
         ManifestEntry anchor =
                 deletionVectorsEnabled ? retrieveAnchorFile(group, ManifestEntry::file) : null;
         Set<Integer> readFieldIds = new HashSet<>();
         for (DataField f : readType.getFields()) {
             readFieldIds.add(f.id());
         }
+        // The caller (which has the schema) folds in any fields referenced only by the filter, so
+        // their latest files are kept too; otherwise widening the reader could see an older value
+        // or a null.
+        readFieldIds.addAll(filterFieldIds);
         List<ManifestEntry> kept = new ArrayList<>(group.size());
         for (ManifestEntry entry : group) {
-            Set<Integer> fileIds = fileFieldIdsForEntry(entry);
+            Set<Integer> fileIds = fileFieldIds.apply(entry);
             for (int id : readFieldIds) {
                 if (fileIds.contains(id)) {
                     kept.add(entry);
@@ -250,8 +282,12 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             kept.add(anchor);
         }
         // Group must contribute at least one file so the reader sees rowCount and can NULL-fill
-        // missing columns for the projection's rows.
-        return kept.isEmpty() ? Collections.singletonList(group.get(0)) : kept;
+        // missing columns for the projection's rows. The representative must be a full-range
+        // normal file: a blob or vector-store file covers only a sub-range of the group's row
+        // ids, so the split would silently emit fewer rows than the group contains.
+        return kept.isEmpty()
+                ? Collections.singletonList(retrieveAnchorFile(group, ManifestEntry::file))
+                : kept;
     }
 
     private Set<Integer> fileFieldIdsForEntry(ManifestEntry entry) {

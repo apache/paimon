@@ -151,8 +151,8 @@ Format Options:
 | --- | --- | --- | --- |
 | `csv.field-delimiter` | `,` | String | Field delimiter character (`','` by default), must be single character. You can use backslash to specify special characters, e.g. `'\t'` represents the tab character. |
 | `csv.line-delimiter` | `\n` | String | The line delimiter for CSV format |
-| `csv.quote-character` | `"` | String | Quote character for enclosing field values (`"` by default). |
-| `csv.escape-character` | `\` | String | The escape character for CSV format. |
+| `csv.quote-character` | `"` | String | Quote character for enclosing field values (`"` by default), must be single character. |
+| `csv.escape-character` | `\` | String | The escape character for CSV format, must be single character. |
 | `csv.include-header` | false | Boolean | Whether to include header in CSV files. |
 | `csv.null-literal` | `""` | String | Null literal string that is interpreted as a null value (disabled by default). |
 | `csv.mode` | `PERMISSIVE` | String | Allows a mode for dealing with corrupt records during reading. Currently supported values are `'PERMISSIVE'`, `'DROPMALFORMED'` and `'FAILFAST'`: <ul> <li>Option `'PERMISSIVE'` sets malformed fields to null.</li> <li>Option `'DROPMALFORMED'` ignores the whole corrupted records.</li> <li>Option `'FAILFAST'` throws an exception when it meets corrupted records.</li> </ul> |

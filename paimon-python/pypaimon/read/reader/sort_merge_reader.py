@@ -149,19 +149,16 @@ class Element:
         self.reader = reader
 
     def update(self) -> bool:
-        next_kv = self.iterator.next()
-        if next_kv is not None:
-            self.kv = next_kv
-            return True
+        while True:
+            next_kv = self.iterator.next()
+            if next_kv is not None:
+                self.kv = next_kv
+                return True
 
-        self.iterator = self.reader.read_batch()
-        if self.iterator is None:
-            self.reader.close()
-            return False
-
-        next_kv_from_new_batch = self.iterator.next()
-        self.kv = next_kv_from_new_batch
-        return True
+            self.iterator = self.reader.read_batch()
+            if self.iterator is None:
+                self.reader.close()
+                return False
 
 
 class HeapEntry:

@@ -63,7 +63,8 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
         try {
             this.commitListeners = CommitListeners.create(context, table);
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException(
+                    "Failed to create commit listeners for table " + table.name(), e);
         }
 
         String[] tempDirs = context.tempDirs();

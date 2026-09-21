@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.SortValue;
@@ -55,7 +56,7 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
     private StartingScanner startingScanner;
     private boolean hasNext;
 
-    private Integer pushDownLimit;
+    private Long pushDownLimit;
     private TopN topN;
 
     @Nullable private String readProtectionTagName;
@@ -96,7 +97,7 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
     }
 
     @Override
-    public InnerTableScan withLimit(int limit) {
+    public InnerTableScan withLimit(long limit) {
         // Record it; applyPushDownLimit pushes the file-store limit only when safe.
         this.pushDownLimit = limit;
         return this;
@@ -161,6 +162,12 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
         return startingScanner.scanPartitions(snapshotReader);
     }
 
+    @Override
+    public List<BinaryRow> topNPartitions(int num, int partitionFieldCount) {
+        return PartitionTopNUtils.topNFileStorePartitions(
+                listPartitionEntries(), schema.logicalPartitionType(), num, partitionFieldCount);
+    }
+
     private Optional<StartingScanner.Result> applyPushDownLimit() {
         // A read-time filter (WHERE or auth) drops rows after scanning, so only push the limit down
         // when neither is present.
@@ -189,8 +196,8 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
             OptionalLong mergedRowCount = split.mergedRowCount();
             if (mergedRowCount.isPresent()) {
                 limitedSplits.add(split);
-                scannedRowCount += mergedRowCount.getAsLong();
-                if (scannedRowCount >= pushDownLimit) {
+                long splitRowCount = mergedRowCount.getAsLong();
+                if (scannedRowCount >= pushDownLimit - splitRowCount) {
                     SnapshotReader.Plan newPlan =
                             new PlanImpl(plan.watermark(), plan.snapshotId(), limitedSplits);
                     LOG.info(
@@ -200,6 +207,7 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
                             pushDownLimit);
                     return Optional.of(new ScannedResult(newPlan));
                 }
+                scannedRowCount += splitRowCount;
             }
         }
         return Optional.of(result);

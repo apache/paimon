@@ -77,10 +77,21 @@ for batch in aligned.to_arrow_batch_reader(batch_size=128):
 ```
 
 `direction` is `backward`, `forward`, or `nearest`; tolerance is inclusive and
-zero means exact. Nearest ties use the earlier time. For duplicate timestamps,
-backward uses the last row and forward uses the first. Nearest uses the last
+zero permits only exact matches. Nearest ties use the earlier time. For duplicate
+timestamps, backward uses the last row and forward uses the first. Nearest uses the last
 row for an exact match; otherwise it uses the backward or forward candidate's
 rule. Misses return null.
+
+Both top-level and chained `join_asof` calls accept `allow_exact_matches`, which
+defaults to `True`. Set it to `False` to exclude all right rows with the same
+timestamp as the left row. Backward then matches strictly earlier timestamps,
+forward matches strictly later timestamps, and nearest selects the closest
+non-equal timestamp, still preferring the earlier time on ties. For example,
+with a left time of `10` and right times `[9, 10]`, strict backward matches `9`.
+This is useful when aligning an event with a state from strictly before it.
+Combining `allow_exact_matches=False` with `tolerance=0` (or `timedelta(0)` for
+timestamp keys) produces no matches: left rows are preserved with null right
+values.
 
 Keys must be non-null with matching types. Use `right_on` for a different right
 timestamp and `suffix` for conflicts. Select the right timestamp to compute the
@@ -182,35 +193,37 @@ Notes:
 
 ### Contiguous windows for PyTorch
 
-Install the `torch` extra, then use `to_contiguous_window_dataset` to expose
-map-style windows without loading the selected rows or BLOB payloads into Python
-memory up front. The Dataset builds a compact index from the group column, order
-column, and Paimon row IDs. Each `__getitem__` call fetches only that window from
-the snapshot recorded in `dataset.snapshot_id`.
+Use `to_contiguous_window_dataset` to build map-style training samples from a
+single frame table. Each row represents one time step; task text, labels, and
+other context must already be materialized in that table. The Dataset does not
+read companion tables. It builds a compact index of group/order values and
+Paimon row IDs, then fetches requested columns and BLOB payloads on demand from
+the snapshot recorded in `dataset.snapshot_id`. Row tracking must be enabled.
 
 ```shell
 pip install 'pypaimon[torch]'
 ```
 
 ```python
+from functools import partial
+
 import torch
+from pypaimon.multimodal.window_transforms import images_to_tensor, to_tensor
 
-
-def float32_window(values):
-    return torch.tensor(values, dtype=torch.float32)
-
+float32_window = partial(to_tensor, dtype=torch.float32)
 
 windows = (
-    frames.scan()
+    frames.scan(tag_name="train-v1")
     .where("split = 'train'")
     .to_contiguous_window_dataset(
-        window_size=16,
-        columns=["state", "action"],
+        columns=["state", "image", "action"],
         group_key="episode_index",
         order_key="frame_index",
-        tail="pad",
+        frame_offsets={"state": [-2, -1, 0], "action": list(range(16))},
+        boundary="pad",
         column_transforms={
             "state": float32_window,
+            "image": images_to_tensor,
             "action": float32_window,
         },
     )
@@ -218,25 +231,86 @@ windows = (
 
 sample = windows[0]
 assert sample["action"].shape == (16, action_size)
-assert sample["is_pad"].shape == (16,)
+assert sample["action_is_pad"].shape == (16,)
+assert sample["state"].shape == (3, state_size)
+assert sample["image"].shape == (1, channels, height, width)
 ```
 
-The group and order keys in a sample identify the window anchor. Every projected
-column contains the whole window. With `tail="drop"`, only full windows are
-exposed. With `tail="pad"`, every real row is an anchor; missing suffix values
-repeat the last real value by default and `is_pad` is `True` exactly at those
-positions. With `tail="error"`, construction fails if any scheduled anchor is
-incomplete. Use `pad_values` to override the repeated value for individual
-columns. Anchors advance by `stride`, which defaults to one row.
+The group and order keys identify the anchor. `frame_offsets` defines each
+column's relative frame positions, including history, future, and sparse
+sampling. Offset order and duplicates are preserved. A selected column omitted
+from the mapping uses `[0]`, so the image above is read only at the anchor.
+Without any window definition, every selected column uses `[0]`. Each column
+has its own Boolean `<column>_is_pad` tensor, where `True` marks an out-of-group
+position. These generated names must not collide with other output fields.
+
+Anchors start at each group's first row and advance by `stride` (default one).
+The stride controls anchor spacing, not the spacing inside a window:
+
+| `boundary` | Behavior at either end of a group |
+|------------|----------------------------------|
+| `drop` (default) | Keep only anchors for which all requested offsets are valid. |
+| `pad` | Keep scheduled anchors and repeat the nearest endpoint for missing positions. |
+| `error` | Fail construction if any scheduled anchor has an incomplete window. |
+
+`pad_values={"action": [0.0, 0.0]}` overrides endpoint repetition for that
+column. Supply values in the same raw representation as a table cell. Padding
+happens before column transforms, so normalization also affects constant padding.
+Use the mask when excluding padded actions from a loss.
+
+As an alternative, specify seconds with `delta_timestamps`, an explicit positive
+`fps`, and optional `tolerance_s` (default `1e-4`). For example,
+`delta_timestamps={"state": [-0.1, 0.0]}, fps=10` selects offsets `[-1, 0]`.
+Both `fps` and `tolerance_s` are only accepted with `delta_timestamps`.
+Offsets must align to the regular frame grid within the tolerance; this API
+does not search actual timestamps or interpolate missing frames. Do not combine
+`delta_timestamps`, `frame_offsets`, and `window_size`.
 
 `column_transforms` receive one padded Python list per projected column. This is
-where applications define tensor dtype and shape or decode BLOB bytes. The
-optional `adapter` receives the resulting sample mapping and can rename or
-combine fields for a model-specific batch contract. The core Dataset does not
-know model field names, image formats, or normalization rules. Top-level
-functions and callable classes are recommended for transforms and adapters so
-the Dataset remains picklable by multi-worker `torch.utils.data.DataLoader`
-instances.
+where applications define tensor dtype and shape or decode BLOB bytes. Even
+singleton windows retain the time dimension. `images_to_tensor` returns TCHW
+images with EXIF orientation applied. Eight-bit pixels become float32 in
+`[0, 1]`; use `partial(images_to_tensor, return_uint8=True)` to keep uint8.
+Higher-bit-depth images become float32 in their original units. All images in
+a column window must have the same shape.
+
+The optional `adapter` receives the transformed sample and can normalize values,
+rename/combine fields, remove singleton time dimensions, or coordinate random
+augmentation across cameras and time. Statistics must be supplied explicitly;
+the Dataset never computes or discovers normalization statistics. For example:
+
+```python
+class NormalizeAction:
+    def __init__(self, mean, std):
+        self.mean = torch.as_tensor(mean, dtype=torch.float32)
+        self.std = torch.as_tensor(std, dtype=torch.float32)
+        if not torch.isfinite(self.std).all() or not (self.std > 0).all():
+            raise ValueError("Action standard deviations must be finite and positive.")
+
+    def __call__(self, sample):
+        sample["action"] = (sample["action"] - self.mean) / self.std
+        return sample
+```
+
+Pass `adapter=NormalizeAction(train_action_mean, train_action_std)` when
+constructing the Dataset. Use training-set statistics, with the same values for
+validation. Keep callbacks picklable (top-level functions, `partial`, or callable
+classes) for multi-worker DataLoader use. Physical reads are coalesced in
+`__getitems__`, while samples and transforms retain their requested order and
+duplicates. Negative indices and slices follow Python sequence semantics.
+
+Rows are sorted by group and order. Order values must be non-null integers
+increasing by exactly one within each group. Duplicate steps and internal gaps,
+including gaps introduced by a scan filter, fail validation. Windows never
+cross groups. A snapshot pin fixes the data being read; use retained tags for
+long-running training. Sampler progress and augmentation RNG state remain the
+training application's responsibility.
+
+Existing `window_size=16` calls remain supported, with `anchor_columns` selecting
+singleton fields and `tail="drop"/"pad"/"error"` controlling the old forward
+window. These calls preserve their single `is_pad` mask and previous shapes.
+`anchor_columns` and `tail` require `window_size`; do not combine `tail` and
+`boundary`. New applications should use field offsets and per-column masks.
 
 Columns configured by `video-frame-field` are rejected: a window read would drop
 the `frame_index` and other metadata carried by their `VideoFrameDescriptor`

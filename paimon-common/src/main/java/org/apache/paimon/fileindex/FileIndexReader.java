@@ -54,12 +54,27 @@ public abstract class FileIndexReader implements FunctionVisitor<FileIndexResult
     }
 
     @Override
+    public FileIndexResult visitNotStartsWith(FieldRef fieldRef, Object literal) {
+        return REMAIN;
+    }
+
+    @Override
     public FileIndexResult visitEndsWith(FieldRef fieldRef, Object literal) {
         return REMAIN;
     }
 
     @Override
+    public FileIndexResult visitNotEndsWith(FieldRef fieldRef, Object literal) {
+        return REMAIN;
+    }
+
+    @Override
     public FileIndexResult visitContains(FieldRef fieldRef, Object literal) {
+        return REMAIN;
+    }
+
+    @Override
+    public FileIndexResult visitNotContains(FieldRef fieldRef, Object literal) {
         return REMAIN;
     }
 
@@ -80,6 +95,11 @@ public abstract class FileIndexReader implements FunctionVisitor<FileIndexResult
 
     @Override
     public FileIndexResult visitLike(FieldRef fieldRef, Object literal) {
+        return REMAIN;
+    }
+
+    @Override
+    public FileIndexResult visitNotLike(FieldRef fieldRef, Object literal) {
         return REMAIN;
     }
 

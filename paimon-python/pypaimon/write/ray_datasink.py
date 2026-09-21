@@ -67,15 +67,17 @@ class _TaskCommitMessages(list):
 
 
 def _cast_binary_to_table_schema(table: pa.Table, target_schema: pa.Schema) -> pa.Table:
-    """Cast binary to large_binary for BLOB fields.
+    """Restore binary layouts using the table's BYTES/BLOB contract.
 
-    When map_batches returns Python dicts, PyArrow infers bytes as binary,
-    losing the original large_binary (BLOB) type. Cast back before writing.
+    Python dict inference loses BLOB's large_binary layout, while Ray block
+    promotion may widen BYTES. Neither transformation changes the table type.
     """
     cast_indices = []
     for i, field in enumerate(table.schema):
         target_field = target_schema.field(field.name) if field.name in target_schema.names else None
-        if target_field and pa.types.is_binary(field.type) and pa.types.is_large_binary(target_field.type):
+        if (target_field and field.type != target_field.type
+                and all(pa.types.is_binary(t) or pa.types.is_large_binary(t)
+                        for t in (field.type, target_field.type))):
             cast_indices.append(i)
 
     if not cast_indices:
@@ -83,10 +85,10 @@ def _cast_binary_to_table_schema(table: pa.Table, target_schema: pa.Schema) -> p
 
     columns = table.columns
     for i in cast_indices:
-        columns[i] = columns[i].cast(pa.large_binary())
+        columns[i] = columns[i].cast(target_schema.field(table.schema[i].name).type, safe=True)
     fields = [target_schema.field(f.name) if i in cast_indices else f
               for i, f in enumerate(table.schema)]
-    return pa.table(columns, schema=pa.schema(fields))
+    return pa.table(columns, schema=pa.schema(fields, metadata=table.schema.metadata))
 
 # Python 3.8 / Ray 2.10: Datasink is not subscriptable at runtime
 try:
@@ -395,7 +397,6 @@ def _write_postpone_primary_key_blocks(
     import pickle
 
     from pypaimon.ray.shuffle import (
-        _coerce_large_string_types,
         _sort_by_partition_bucket_primary_key,
     )
 
@@ -415,9 +416,7 @@ def _write_postpone_primary_key_blocks(
                 error_col: pa.array([], type=pa.string()),
             })
 
-        rows = _coerce_large_string_types(
-            batch.drop_columns(routing_columns)
-        )
+        rows = batch.drop_columns(routing_columns)
         worker_sink = PaimonDatasink(
             captured_table,
             overwrite=overwrite,
@@ -570,7 +569,6 @@ def _write_primary_key_groups(
     import pickle
 
     from pypaimon.ray.shuffle import (
-        _coerce_large_string_types,
         _group_by_partition_bucket,
     )
 
@@ -590,9 +588,7 @@ def _write_primary_key_groups(
                 error_col: pa.array([], type=pa.string()),
             })
 
-        rows = _coerce_large_string_types(
-            group.drop_columns([bucket_col])
-        )
+        rows = group.drop_columns([bucket_col])
         worker_sink = PaimonDatasink(
             captured_table,
             overwrite=overwrite,
