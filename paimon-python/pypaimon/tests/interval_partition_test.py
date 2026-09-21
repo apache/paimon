@@ -31,6 +31,7 @@ from pypaimon.read.interval_partition import IntervalPartition, default_key_comp
 from pypaimon.read.scanner.primary_key_table_split_generator import PrimaryKeyTableSplitGenerator
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer, GenericRowSerializer
+from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 
 
 def _key_fields(type_name):
@@ -60,7 +61,21 @@ def test_signed_zero_key_ranges_keep_versions_in_one_split(type_name):
     assert len(sections) == 1
     assert sorted([f.file_name for f in run.files] for run in sections[0]) == [['broad'], ['point']]
 
-    table = SimpleNamespace(table_path='/tmp/interval-test', options=CoreOptions(Options({})))
+    table = SimpleNamespace(
+        table_path="/tmp/interval-test",
+        options=CoreOptions(Options({})),
+        path_factory=lambda: FileStorePathFactory(
+            "/tmp/interval-test",
+            [],
+            "__DEFAULT_PARTITION__",
+            "parquet",
+            "data-",
+            "changelog-",
+            True,
+            False,
+            None,
+        ),
+    )
     entries = [ManifestEntry(0, GenericRow([], []), 0, 1, file) for file in files]
     splits = PrimaryKeyTableSplitGenerator(
         table, 1, 1, snapshot_id=7).create_splits(entries)

@@ -154,13 +154,15 @@ uses days since `1970-01-01`; `false` uses ISO dates. For example,
 remain dates. Date-shaped STRING values and separate integer year, month,
 and day columns are outside this DATE fix.
 
-Paths are derived from the table configuration without probing alternative
-partition directories. Explicit external file paths remain authoritative.
+The Python planner derives paths from the table configuration without probing
+alternative partition directories. The native planner retains its existing
+fallback: it lists historical Python partition directories and uses files found
+there. Both planners preserve explicit external file paths.
 
 Older Python writers used ISO dates even when `partition.legacy-name=true`.
-Such files require a separate migration before using the corrected reader;
-there is no automatic fallback to their historical directories. Upgrading the
-writer does not relocate old files, and older Python readers may not read new
-legacy-named files. Changing the option alone is not a general migration,
-particularly for tables containing both layouts. Plan reader/writer upgrades
-and historical data migration together.
+Reading such files with the Python planner requires separate compatibility
+handling or migration; the native planner can recover them through the fallback
+described above. Upgrading the writer does not relocate old files, and older
+Python readers may not read new legacy-named files. Changing the option alone
+is not a general migration, particularly for tables containing both layouts.
+Plan reader/writer upgrades and historical data migration together.
