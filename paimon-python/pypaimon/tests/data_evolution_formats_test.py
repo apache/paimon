@@ -197,6 +197,7 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         for file_meta in all_files:
             self.assertEqual([], self._row_sidecar_files(file_meta))
 
+    @pytest.mark.python_read
     def test_row_sidecar_serves_sparse_row_id_read(self):
         pa_schema = pa.schema([
             ('id', pa.int32()),
