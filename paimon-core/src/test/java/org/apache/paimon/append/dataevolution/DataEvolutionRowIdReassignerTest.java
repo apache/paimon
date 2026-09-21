@@ -673,7 +673,10 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         }
         assertThat(planFile(table.snapshotManager().latestSnapshot())).isNull();
         assertThat(planFile(reassigned)).isNotNull();
-        readPlan(table.fileIO(), table.store().pathFactory(), planFile(reassigned));
+        assertThat(
+                        readPlan(table.fileIO(), table.store().pathFactory(), planFile(reassigned))
+                                .snapshotId())
+                .isEqualTo(reassigned.id());
     }
 
     @Test
@@ -782,6 +785,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         Snapshot snapshot = Snapshot.fromJson(table.snapshotManager().latestSnapshot().toJson());
         SerializationAssignment assignment =
                 readPlan(table.fileIO(), table.store().pathFactory(), planFile(snapshot));
+        assertThat(assignment.snapshotId()).isEqualTo(snapshot.id());
         assertThat(assignment.firstAssignedRowId())
                 .isEqualTo(table.snapshotManager().snapshot(snapshot.id() - 1).nextRowId());
         assertThat(assignment.nextRowId()).isEqualTo(snapshot.nextRowId());

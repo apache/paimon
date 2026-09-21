@@ -58,23 +58,35 @@ public final class SerializationAssignment {
     private static final int VERSION = 1;
     private static final String FILE_PREFIX = "row-id-reassign-plan-";
 
+    private final long snapshotId;
     private final Map<BinaryRow, RowRangeMappingIndex> rowIdMappings;
     private final long firstAssignedRowId;
     private final long nextRowId;
 
     private SerializationAssignment(
+            long snapshotId,
             Map<BinaryRow, RowRangeMappingIndex> rowIdMappings,
             long firstAssignedRowId,
             long nextRowId) {
+        checkArgument(
+                snapshotId >= Snapshot.FIRST_SNAPSHOT_ID,
+                "Invalid reassignment snapshot ID: %s.",
+                snapshotId);
         checkArgument(!rowIdMappings.isEmpty(), "Reassignment mappings must not be empty.");
         checkArgument(
                 firstAssignedRowId >= 0 && nextRowId > firstAssignedRowId,
                 "Invalid assigned row-id range [%s, %s).",
                 firstAssignedRowId,
                 nextRowId);
+        this.snapshotId = snapshotId;
         this.rowIdMappings = Collections.unmodifiableMap(new LinkedHashMap<>(rowIdMappings));
         this.firstAssignedRowId = firstAssignedRowId;
         this.nextRowId = nextRowId;
+    }
+
+    /** The reassignment snapshot that references this plan file. */
+    public long snapshotId() {
+        return snapshotId;
     }
 
     public long firstAssignedRowId() {
@@ -122,7 +134,8 @@ public final class SerializationAssignment {
         String planFile;
         try {
             planFile =
-                    new SerializationAssignment(rowIdMappings, firstAssignedRowId, nextRowId)
+                    new SerializationAssignment(
+                                    snapshot.id() + 1, rowIdMappings, firstAssignedRowId, nextRowId)
                             .write(table.fileIO(), table.store().pathFactory());
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to persist row-id reassignment plan.", e);
@@ -155,6 +168,7 @@ public final class SerializationAssignment {
             DataOutputViewStreamWrapper payload =
                     new DataOutputViewStreamWrapper(new CheckedOutputStream(out, checksum));
             payload.writeInt(VERSION);
+            payload.writeLong(snapshotId);
             payload.writeLong(firstAssignedRowId);
             payload.writeLong(nextRowId);
             payload.writeInt(rowIdMappings.size());
@@ -184,6 +198,7 @@ public final class SerializationAssignment {
             if (version != VERSION) {
                 throw new IOException("Unsupported row-id reassignment plan version: " + version);
             }
+            long snapshotId = payload.readLong();
             long firstAssignedRowId = payload.readLong();
             long nextRowId = payload.readLong();
             int partitions = readCount(payload, "reassignment partitions");
@@ -201,7 +216,7 @@ public final class SerializationAssignment {
             if (in.read() != -1) {
                 throw new IOException("Unexpected trailing bytes in row-id reassignment plan.");
             }
-            return new SerializationAssignment(mappings, firstAssignedRowId, nextRowId);
+            return new SerializationAssignment(snapshotId, mappings, firstAssignedRowId, nextRowId);
         } catch (IllegalArgumentException e) {
             throw new IOException("Invalid row-id reassignment plan " + fileName, e);
         }
