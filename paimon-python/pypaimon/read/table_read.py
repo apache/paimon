@@ -420,7 +420,8 @@ class TableRead:
             return None
         if not splits:
             return []
-        if self._deferred_blob_limit_may_prune(splits):
+        if (self._deferred_blob_limit_may_prune(splits)
+                and not self._native_pruning_blob_limit_supported()):
             return None
         # Query authorization has additional filtering, masking and projection
         # semantics which are already implemented by the Python reader.
@@ -922,6 +923,29 @@ class TableRead:
                 and (self._deferred_blob_fields
                      or self._native_inline_blob_fields())
                 and not self._limit_covers_all_splits(splits))
+
+    def _native_pruning_blob_limit_supported(self) -> bool:
+        """Rust caps DE batches before payload resolution when no post-filter is needed.
+
+        A predicate on a managed BLOB or BLOB view can require payload I/O
+        before the output quota is known. Inline descriptors can still use
+        native reads if the predicate only references ordinary columns.
+        """
+        if not self.table.options.data_evolution_enabled():
+            return False
+        read_names = {field.name for field in self._scan_read_type}
+        if self.table.options.blob_view_fields() & read_names:
+            return False
+        if self.predicate is not None:
+            # Managed BLOBs are decoded by the physical file reader, before a
+            # residual filter. Inline descriptors are resolved later, so a
+            # predicate on ordinary columns can safely select rows first.
+            if self._deferred_blob_fields:
+                return False
+            from pypaimon.read.push_down_utils import predicate_field_names
+            if predicate_field_names(self.predicate) & self._native_inline_blob_fields():
+                return False
+        return True
 
     def _native_inline_blob_fields(self) -> set:
         """Return configured BLOB fields that native reads resolve eagerly."""
