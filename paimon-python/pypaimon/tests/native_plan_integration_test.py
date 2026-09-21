@@ -37,7 +37,7 @@ from pypaimon.read.native_plan import (
     native_split_from_python,
 )
 from pypaimon.schema.schema_change import SchemaChange
-from pypaimon.table.row.blob import BlobDescriptor, BlobRef
+from pypaimon.table.row.blob import BlobDescriptor
 from pypaimon.utils.range import Range
 
 
@@ -1009,25 +1009,23 @@ class NativePlanIntegrationTest(unittest.TestCase):
         table.new_batch_write_builder().new_commit().commit(write.prepare_commit())
         write.close()
 
-        native_table = table.copy({'read.native.enabled': 'true'})
+        native_table = table.copy({
+            'scan.native-plan.enabled': 'true', 'read.native.enabled': 'true'})
         builder = native_table.new_read_builder().with_limit(1)
         plan = builder.new_scan().plan()
-        fetched = []
-        original_to_data = BlobRef.to_data
+        self.assertTrue(all(getattr(split, '_native_split', None) is not None
+                            for split in plan.splits()))
 
-        def tracked_to_data(blob):
-            fetched.append(blob)
-            return original_to_data(blob)
-
-        with patch.object(BlobRef, 'to_data', tracked_to_data), patch(
+        with patch(
                 'pypaimon.read.native_plan.native_read',
-                return_value=[]) as native:
+                wraps=native_read) as native, patch(
+                'pypaimon.read.table_read.TableRead._create_split_read',
+                side_effect=AssertionError('Python reader used')):
             result = builder.new_read().to_arrow(
                 plan.splits(), parallelism=1)
 
-        native.assert_not_called()
+        native.assert_called_once()
         self.assertEqual(result.to_pydict(), {'id': [1], 'payload': [b'a']})
-        self.assertEqual(len(fetched), 1)
 
     @unittest.skipUnless(native_reader_available(),
                          "pypaimon-rust native reader API not installed")
@@ -1065,25 +1063,66 @@ class NativePlanIntegrationTest(unittest.TestCase):
                 write.prepare_commit())
             write.close()
 
-            native_table = table.copy({'read.native.enabled': 'true'})
+            native_table = table.copy({
+                'scan.native-plan.enabled': 'true', 'read.native.enabled': 'true'})
             builder = native_table.new_read_builder().with_limit(1)
             plan = builder.new_scan().plan()
-            fetched = []
-            original_to_data = BlobRef.to_data
+            self.assertTrue(all(getattr(split, '_native_split', None) is not None
+                                for split in plan.splits()))
 
-            def tracked_to_data(blob):
-                fetched.append(blob)
-                return original_to_data(blob)
-
-            with patch.object(BlobRef, 'to_data', tracked_to_data), patch(
+            with patch(
                     'pypaimon.read.native_plan.native_read',
-                    return_value=[]) as native:
+                    wraps=native_read) as native, patch(
+                    'pypaimon.read.table_read.TableRead._create_split_read',
+                    side_effect=AssertionError('Python reader used')):
                 result = builder.new_read().to_arrow(plan.splits())
 
-            native.assert_not_called()
+            native.assert_called_once()
             self.assertEqual(
                 result.to_pydict(), {'id': [1], 'payload': [b'first']})
-            self.assertEqual(len(fetched), 1)
+
+    @unittest.skipUnless(native_reader_available(),
+                         "pypaimon-rust native reader API not installed")
+    def test_native_read_limit_filters_before_descriptor_payload_io(self):
+        schema = pa.schema([('id', pa.int32()), ('payload', pa.large_binary())])
+        with tempfile.TemporaryDirectory() as payload_dir:
+            selected_path = os.path.join(payload_dir, 'selected')
+            with open(selected_path, 'wb') as output:
+                output.write(b'selected')
+            descriptors = [
+                BlobDescriptor('file://' + os.path.join(payload_dir, 'missing'), 0, 7).serialize(),
+                BlobDescriptor('file://' + selected_path, 0, 8).serialize(),
+            ]
+            self.cat.create_table('default.native_descriptor_filter_limit_t',
+                                  Schema.from_pyarrow_schema(schema, options={
+                                      'row-tracking.enabled': 'true',
+                                      'data-evolution.enabled': 'true',
+                                      'blob-descriptor-field': 'payload',
+                                  }), False)
+            table = self.cat.get_table('default.native_descriptor_filter_limit_t')
+            write = table.new_batch_write_builder().new_write()
+            write.write_arrow(pa.Table.from_pydict({
+                'id': [1, 2], 'payload': descriptors,
+            }, schema=schema))
+            table.new_batch_write_builder().new_commit().commit(write.prepare_commit())
+            write.close()
+
+            native_table = table.copy({
+                'scan.native-plan.enabled': 'true', 'read.native.enabled': 'true'})
+            builder = native_table.new_read_builder().with_limit(1)
+            builder.with_filter(builder.new_predicate_builder().equal('id', 2))
+            plan = builder.new_scan().plan()
+            self.assertTrue(all(getattr(split, '_native_split', None) is not None
+                                for split in plan.splits()))
+            with patch('pypaimon.read.native_plan.native_read',
+                       wraps=native_read) as native:
+                with patch('pypaimon.read.table_read.TableRead._create_split_read',
+                           side_effect=AssertionError('Python reader used')):
+                    result = builder.new_read().to_arrow(plan.splits())
+
+            native.assert_called_once()
+            self.assertEqual(result.to_pydict(),
+                             {'id': [2], 'payload': [b'selected']})
 
     @unittest.skipUnless(native_reader_available(),
                          "pypaimon-rust native reader API not installed")
