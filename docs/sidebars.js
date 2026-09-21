@@ -411,7 +411,6 @@ const sidebars = {
           "pypaimon/multimodal-search",
           "pypaimon/blob",
           "pypaimon/blob-store",
-          "pypaimon/dlf-blob-presigned-url",
           "pypaimon/data-evolution",
           "pypaimon/merge-into",
           "pypaimon/video",

@@ -162,10 +162,8 @@ video = table.blobs(column="video", key_column="id").get_object("video-001")
 video_url = video.to_presigned_url(timedelta(minutes=30))
 ```
 
-`video` is a `BlobObject`, not a table. It retains the table root and FileIO,
-including DLF STS credential refresh. The URL preserves the configured OSS endpoint.
-If `get_object` selects a byte range, the URL exposes only that range. Descriptors
-outside the table root are rejected.
+The URL preserves the configured OSS endpoint and any byte range selected by
+`get_object`. The descriptor must belong to the table.
 
 ### Delete Objects
 
