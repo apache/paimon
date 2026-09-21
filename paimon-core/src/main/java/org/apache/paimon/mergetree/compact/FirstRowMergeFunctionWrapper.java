@@ -22,6 +22,8 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.utils.Filter;
 
+import javax.annotation.Nullable;
+
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Wrapper for {@link MergeFunction}s to produce changelog by lookup for first row. */
@@ -31,8 +33,20 @@ public class FirstRowMergeFunctionWrapper implements MergeFunctionWrapper<Change
     private final FirstRowMergeFunction mergeFunction;
     private final ChangelogResult reusedResult = new ChangelogResult();
 
+    @Nullable
+    private final LookupChangelogMergeFunctionWrapper.EventMetadataAppendRow eventMetadata;
+
+    @Nullable private final KeyValue reusedChangelog;
+
     public FirstRowMergeFunctionWrapper(
             MergeFunctionFactory<KeyValue> mergeFunctionFactory, Filter<InternalRow> contains) {
+        this(mergeFunctionFactory, contains, null);
+    }
+
+    public FirstRowMergeFunctionWrapper(
+            MergeFunctionFactory<KeyValue> mergeFunctionFactory,
+            Filter<InternalRow> contains,
+            @Nullable int[] preserveFieldIndices) {
         this.contains = contains;
         MergeFunction<KeyValue> mergeFunction = mergeFunctionFactory.create();
         checkArgument(
@@ -40,6 +54,13 @@ public class FirstRowMergeFunctionWrapper implements MergeFunctionWrapper<Change
                 "Merge function should be a FirstRowMergeFunction, but is %s, there is a bug.",
                 mergeFunction.getClass().getName());
         this.mergeFunction = (FirstRowMergeFunction) mergeFunction;
+        boolean hasMetadata = preserveFieldIndices != null && preserveFieldIndices.length > 0;
+        this.eventMetadata =
+                hasMetadata
+                        ? new LookupChangelogMergeFunctionWrapper.EventMetadataAppendRow(
+                                preserveFieldIndices)
+                        : null;
+        this.reusedChangelog = hasMetadata ? new KeyValue() : null;
     }
 
     @Override
@@ -67,6 +88,17 @@ public class FirstRowMergeFunctionWrapper implements MergeFunctionWrapper<Change
         }
 
         // new record, output changelog
-        return reusedResult.setResult(result).addChangelog(result);
+        return reusedResult.setResult(result).addChangelog(withEventMetadata(result));
+    }
+
+    private KeyValue withEventMetadata(KeyValue result) {
+        LookupChangelogMergeFunctionWrapper.EventMetadataAppendRow metadata = eventMetadata;
+        KeyValue changelog = reusedChangelog;
+        if (metadata == null || changelog == null) {
+            return result;
+        }
+        metadata.replace(result.value(), result.value());
+        return changelog.replace(
+                result.key(), result.sequenceNumber(), result.valueKind(), metadata);
     }
 }

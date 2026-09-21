@@ -52,6 +52,7 @@ import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.system.ChangelogEventMetadata;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ProjectedRow;
@@ -119,6 +120,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                         CoreOptions.fromMap(tableSchema.options()), keyType, valueType, null);
         this.sequenceFields = options.sequenceField();
         this.sequenceOrder = options.sequenceFieldSortOrderIsAscending();
+        ChangelogEventMetadata.validate(tableSchema.logicalRowType(), options);
     }
 
     public Comparator<InternalRow> keyComparator() {
@@ -184,13 +186,11 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
             List<DataField> extraFields = new ArrayList<>();
             RowType logicalRowType = tableSchema.logicalRowType();
             for (String preserveColumn : preserveColumns) {
-                String metadataName = options.changelogMetadataFieldPrefix() + preserveColumn;
+                String metadataName =
+                        ChangelogEventMetadata.metadataFieldName(preserveColumn, options);
                 if (readFieldNames.contains(metadataName)
                         && !readFieldNames.contains(preserveColumn)) {
-                    int fieldIndex = logicalRowType.getFieldNames().indexOf(preserveColumn);
-                    if (fieldIndex >= 0) {
-                        extraFields.add(logicalRowType.getFields().get(fieldIndex));
-                    }
+                    extraFields.add(logicalRowType.getField(preserveColumn));
                 }
             }
             if (!extraFields.isEmpty()) {

@@ -32,6 +32,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
+import org.apache.paimon.table.system.ChangelogEventMetadata;
 import org.apache.paimon.table.system.ChangelogEventMetadataTable;
 import org.apache.paimon.table.system.RowTrackingTable;
 import org.apache.paimon.types.DataField;
@@ -189,16 +190,13 @@ public class DataTableSource extends BaseDataTableSource
         if (!preserveColumns.isEmpty() && table instanceof FileStoreTable) {
             org.apache.paimon.types.RowType valueType =
                     ((FileStoreTable) table).schema().logicalRowType();
-            List<String> fieldNames = valueType.getFieldNames();
-            for (String col : preserveColumns) {
-                int idx = fieldNames.indexOf(col);
-                if (idx >= 0) {
-                    DataField field = valueType.getFields().get(idx);
-                    DataType flinkType =
-                            TypeConversions.fromLogicalToDataType(
-                                    LogicalTypeConversion.toLogicalType(field.type().copy(true)));
-                    metadata.put(eventMetadataPrefix() + col, flinkType.nullable());
-                }
+            CoreOptions coreOptions = CoreOptions.fromMap(table.options());
+            for (DataField field :
+                    ChangelogEventMetadata.extraValueFields(valueType, coreOptions)) {
+                DataType flinkType =
+                        TypeConversions.fromLogicalToDataType(
+                                LogicalTypeConversion.toLogicalType(field.type()));
+                metadata.put(field.name(), flinkType.nullable());
             }
         }
 
@@ -208,7 +206,7 @@ public class DataTableSource extends BaseDataTableSource
     public void applyReadableMetadata(List<String> metadataKeys, DataType producedDataType) {
         for (String metadataKey : metadataKeys) {
             if (SpecialFields.ROW_ID.name().equals(metadataKey)
-                    || metadataKey.startsWith(eventMetadataPrefix())) {
+                    || eventMetadataFieldNames().contains(metadataKey)) {
                 continue;
             }
             throw new UnsupportedOperationException(
@@ -221,8 +219,17 @@ public class DataTableSource extends BaseDataTableSource
         return CoreOptions.fromMap(table.options()).changelogExposeFieldAsMetadata();
     }
 
-    private String eventMetadataPrefix() {
-        return CoreOptions.fromMap(table.options()).changelogMetadataFieldPrefix();
+    private List<String> eventMetadataFieldNames() {
+        if (!(table instanceof FileStoreTable)) {
+            return Collections.emptyList();
+        }
+        org.apache.paimon.types.RowType valueType =
+                ((FileStoreTable) table).schema().logicalRowType();
+        return ChangelogEventMetadata.extraValueFields(
+                        valueType, CoreOptions.fromMap(table.options()))
+                .stream()
+                .map(DataField::name)
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -278,7 +285,7 @@ public class DataTableSource extends BaseDataTableSource
 
     private Table wrapForEventMetadata(Table scanTable) {
         boolean hasEventMetadata =
-                metadataKeys.stream().anyMatch(k -> k.startsWith(eventMetadataPrefix()));
+                metadataKeys.stream().anyMatch(k -> eventMetadataFieldNames().contains(k));
         if (hasEventMetadata && scanTable instanceof FileStoreTable) {
             return new ChangelogEventMetadataTable((FileStoreTable) scanTable);
         }
@@ -300,15 +307,13 @@ public class DataTableSource extends BaseDataTableSource
             }
         }
 
-        List<String> preserveColumns = eventPreserveColumns();
+        List<String> metadataFieldNames = eventMetadataFieldNames();
         int[][] projection =
                 Arrays.copyOf(physicalProjection, physicalProjection.length + metadataKeys.size());
-        String metadataPrefix = eventMetadataPrefix();
         for (int i = 0; i < metadataKeys.size(); i++) {
             String key = metadataKeys.get(i);
-            if (key.startsWith(metadataPrefix)) {
-                String colName = key.substring(metadataPrefix.length());
-                int preserveIdx = preserveColumns.indexOf(colName);
+            if (metadataFieldNames.contains(key)) {
+                int preserveIdx = metadataFieldNames.indexOf(key);
                 if (preserveIdx < 0) {
                     throw new UnsupportedOperationException(
                             "Unknown event metadata column: " + key);

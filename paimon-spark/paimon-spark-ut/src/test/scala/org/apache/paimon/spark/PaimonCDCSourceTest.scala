@@ -25,6 +25,8 @@ import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.paimon.shims.memstream.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
 
+import scala.collection.JavaConverters._
+
 class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
 
   import testImplicits._
@@ -281,6 +283,44 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
           commit.close()
           ioManager.close()
         }
+    }
+  }
+
+  test("Paimon CDC Source: exposed event metadata is read-only for Spark writes") {
+    withTable("T") {
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        spark.sql("""
+                    |CREATE TABLE T (id INT, data INT, event_ts BIGINT)
+                    |TBLPROPERTIES (
+                    |  'primary-key' = 'id',
+                    |  'bucket' = '1',
+                    |  'changelog-producer' = 'lookup',
+                    |  'sequence.field' = 'event_ts',
+                    |  'changelog-producer.expose-field-as-metadata' = 'event_ts')
+                    |""".stripMargin)
+
+        // Positional writes must not require the generated metadata field as an input column.
+        spark.sql("INSERT INTO T VALUES (1, 10, 50)")
+
+        // A self-insert reads the generated field through SELECT *, so it also verifies that a
+        // readable metadata field is removed before write resolution and schema evolution.
+        spark.sql("INSERT INTO T SELECT * FROM T")
+
+        if (gteqSpark3_5) {
+          // The physical extra column should still participate in merge-schema evolution, while
+          // the generated metadata field must not be committed as a physical column.
+          spark.sql(
+            "INSERT INTO T BY NAME " +
+              "SELECT 2 AS id, 20 AS data, 200L AS event_ts, 'extra' AS extra")
+        }
+
+        val physicalFieldNames = loadTable("T").copyWithLatestSchema().schema().fieldNames().asScala
+        assert(!physicalFieldNames.contains("__internal__event_ts"))
+        if (gteqSpark3_5) {
+          assert(physicalFieldNames.contains("extra"))
+        }
+        assert(spark.table("T").schema.fieldNames.contains("__internal__event_ts"))
+      }
     }
   }
 
