@@ -365,6 +365,14 @@ class _PaimonPKSplitTask(DataSourceTask):
         for batch in iter(reader.read_next_batch, None):
             if self._output_columns is not None:
                 batch = batch.select(self._output_columns)
+            if batch.num_columns == 0:
+                # Daft cannot build a record batch without arrays, so carry the row
+                # count in a placeholder column and project it away.
+                rows = pa.RecordBatch.from_pydict(
+                    {"__rows": pa.nulls(batch.num_rows, pa.int8())})
+                yield RecordBatch.from_arrow_record_batches(
+                    [rows], rows.schema).eval_expression_list([])
+                continue
             if has_blob_columns:
                 batch = _convert_blob_columns(
                     batch,
@@ -769,7 +777,8 @@ class PaimonDataSource(DataSource):
                 split.files
                 if routing.use_native_reader
                 else self._blob_table_native_files(
-                    split.files, read_pushdowns.task_columns, has_deletion_vectors
+                    split.files, read_pushdowns.task_columns, has_deletion_vectors,
+                    has_auth,
                 )
             )
             if native_files is not None and self._has_incompatible_file_schema(
@@ -863,6 +872,7 @@ class PaimonDataSource(DataSource):
                     getattr(split, "data_files", None) or [],
                     read_pushdowns.task_columns,
                     split.has_deletion_vectors,
+                    paimon_scan.has_auth,
                 )
             )
             candidate_files = (
@@ -999,15 +1009,19 @@ class PaimonDataSource(DataSource):
         files: list[DataFileMeta],
         task_columns: list[str] | None,
         has_deletion_vectors: bool,
+        has_auth: bool,
     ) -> list[DataFileMeta] | None:
         """Files of a blob-table split that can be read via the native parquet
         reader because no BLOB column is projected, or ``None`` to keep the
         pypaimon fallback. Only applies to non-PK parquet blob tables without
-        deletion vectors and with an explicit projection."""
+        deletion vectors, without query authorization, and with an explicit
+        projection. A blob table never reaches ``use_native_reader``, so this is
+        where authorization has to stop the native reader."""
         if (
             not self._has_blob_columns
             or not self._is_parquet
             or has_deletion_vectors
+            or has_auth
             or self._table.is_primary_key_table
             or task_columns is None
         ):
