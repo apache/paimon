@@ -15,8 +15,11 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""
-IndexedSplit wraps a Split with row ranges and optional scores.
+"""IndexedSplit wraps a Split with row ranges and optional scores.
+
+Ranges use the coordinate system of the table read path: stable row IDs for
+row-tracked tables and split-local physical positions for tables without row
+tracking.
 """
 
 from typing import List, Optional
@@ -43,19 +46,17 @@ class IndexedSplit(Split):
         data_split: 'Split',
         row_ranges: List['Range'],
         scores: Optional[List[float]] = None,
-        exact_merged_row_count: Optional[int] = None,
     ):
         self._data_split = data_split
         self._row_ranges = row_ranges
         self._scores = scores
-        self._exact_merged_row_count = exact_merged_row_count
 
     def data_split(self) -> 'Split':
         """Return the underlying data split."""
         return self._data_split
 
     def row_ranges(self) -> List['Range']:
-        """Return the row ranges from global index."""
+        """Return ranges in the coordinate system of the read path."""
         return self._row_ranges
 
     def scores(self) -> Optional[List[float]]:
@@ -90,8 +91,6 @@ class IndexedSplit(Split):
         return sum(r.count() for r in self._row_ranges)
 
     def merged_row_count(self):
-        if self._exact_merged_row_count is not None:
-            return self._exact_merged_row_count
         return self.row_count
 
     # Delegate other properties to data_split
@@ -157,7 +156,6 @@ class IndexedSplit(Split):
             self._data_split == other._data_split
             and self._row_ranges == other._row_ranges
             and self._scores == other._scores
-            and self._exact_merged_row_count == other._exact_merged_row_count
         )
 
     def __hash__(self):
@@ -166,10 +164,8 @@ class IndexedSplit(Split):
             id(self._data_split),
             tuple(self._row_ranges),
             scores_hash,
-            self._exact_merged_row_count,
         ))
 
     def __repr__(self):
         return (f"IndexedSplit(data_split={self._data_split}, "
-                f"row_ranges={self._row_ranges}, scores={self._scores}, "
-                f"exact_merged_row_count={self._exact_merged_row_count})")
+                f"row_ranges={self._row_ranges}, scores={self._scores})")
