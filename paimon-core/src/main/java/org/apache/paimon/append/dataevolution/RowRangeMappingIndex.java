@@ -179,8 +179,14 @@ final class RowRangeMappingIndex {
         }
     }
 
-    static RowRangeMappingIndex deserialize(DataInputView in) throws IOException {
+    static RowRangeMappingIndex deserialize(DataInputView in, long remainingBytes)
+            throws IOException {
         int size = readCount(in, "row-id mappings");
+        if (size == 0
+                || remainingBytes < Integer.BYTES
+                || size > (remainingBytes - Integer.BYTES) / (3L * Long.BYTES)) {
+            throw new IOException("Invalid row-id mapping count: " + size);
+        }
         long[] oldStarts = new long[size];
         long[] oldEnds = new long[size];
         long[] newStarts = new long[size];

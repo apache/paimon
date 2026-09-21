@@ -28,6 +28,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Range;
 
+import org.apache.paimon.shade.guava30.com.google.common.io.CountingInputStream;
+
 import javax.annotation.Nullable;
 
 import java.io.BufferedInputStream;
@@ -35,11 +37,13 @@ import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.zip.CRC32;
 import java.util.zip.CheckedInputStream;
 import java.util.zip.CheckedOutputStream;
@@ -58,7 +62,10 @@ public final class SerializationAssignment {
     public static final String REASSIGN_SNAPSHOT_ID = "reassign-snapshot-id";
 
     private static final int VERSION = 1;
-    private static final String FILE_PREFIX = "row-id-reassign-plan-";
+    private static final String FILE_PREFIX = "snapshot-";
+
+    // Partition length, arity, null bits, mapping count, and at least one mapping triple.
+    private static final long MIN_PARTITION_SIZE = 3L * Integer.BYTES + 4L * Long.BYTES;
 
     private final long snapshotId;
     private final Map<BinaryRow, RowRangeMappingIndex> rowIdMappings;
@@ -158,7 +165,7 @@ public final class SerializationAssignment {
 
     /** Streams the effective mappings without materializing another copy of the plan. */
     private String write(FileIO fileIO, FileStorePathFactory pathFactory) throws IOException {
-        String fileName = FILE_PREFIX + snapshotId + ".plan";
+        String fileName = FILE_PREFIX + snapshotId + "-" + UUID.randomUUID() + ".plan";
         Path path = pathFactory.toManifestFilePath(fileName);
         // A failed create may mean another attempt owns this path. Do not delete its plan.
         OutputStream fileOut = fileIO.newOutputStream(path, false);
@@ -187,10 +194,12 @@ public final class SerializationAssignment {
 
     public static SerializationAssignment readPlan(
             FileIO fileIO, FileStorePathFactory pathFactory, String fileName) throws IOException {
-        try (DataInputViewStreamWrapper in =
-                new DataInputViewStreamWrapper(
-                        new BufferedInputStream(
-                                fileIO.newInputStream(pathFactory.toManifestFilePath(fileName))))) {
+        Path path = pathFactory.toManifestFilePath(fileName);
+        long payloadSize = fileIO.getFileSize(path) - Long.BYTES;
+        // Count bytes consumed by the decoder, rather than bytes prefetched by the buffer.
+        try (CountingInputStream input =
+                new CountingInputStream(new BufferedInputStream(fileIO.newInputStream(path)))) {
+            DataInputViewStreamWrapper in = new DataInputViewStreamWrapper(input);
             CRC32 checksum = new CRC32();
             DataInputViewStreamWrapper payload =
                     new DataInputViewStreamWrapper(new CheckedInputStream(in, checksum));
@@ -202,10 +211,33 @@ public final class SerializationAssignment {
             long firstAssignedRowId = payload.readLong();
             long nextRowId = payload.readLong();
             int partitions = readCount(payload, "reassignment partitions");
+            if (partitions == 0
+                    || partitions > (payloadSize - input.getCount()) / MIN_PARTITION_SIZE) {
+                throw new IOException("Invalid reassignment partition count: " + partitions);
+            }
             Map<BinaryRow, RowRangeMappingIndex> mappings = new LinkedHashMap<>();
             for (int i = 0; i < partitions; i++) {
-                BinaryRow partition = deserializeBinaryRow(payload);
-                if (mappings.put(partition, RowRangeMappingIndex.deserialize(payload)) != null) {
+                int partitionSize = readCount(payload, "reassignment partition bytes");
+                if (partitionSize < Integer.BYTES + Long.BYTES
+                        || partitionSize > payloadSize - input.getCount()) {
+                    throw new IOException(
+                            "Invalid reassignment partition byte length: " + partitionSize);
+                }
+                byte[] partitionBytes = new byte[partitionSize];
+                payload.readFully(partitionBytes);
+                int arity = ByteBuffer.wrap(partitionBytes).getInt();
+                long fixedSize =
+                        ((arity + 63L + BinaryRow.HEADER_SIZE_IN_BITS) / 64) * Long.BYTES
+                                + (long) arity * Long.BYTES;
+                if (arity < 0 || fixedSize > partitionSize - Integer.BYTES) {
+                    throw new IOException("Invalid reassignment partition arity: " + arity);
+                }
+                BinaryRow partition = deserializeBinaryRow(partitionBytes);
+                if (mappings.put(
+                                partition,
+                                RowRangeMappingIndex.deserialize(
+                                        payload, payloadSize - input.getCount()))
+                        != null) {
                     throw new IOException("Duplicate partition in row-id reassignment plan.");
                 }
             }

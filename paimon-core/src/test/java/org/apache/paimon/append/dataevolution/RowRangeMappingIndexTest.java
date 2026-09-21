@@ -100,8 +100,10 @@ public class RowRangeMappingIndexTest {
                         .shiftNewStarts(20);
         DataOutputSerializer out = new DataOutputSerializer(128);
         original.serialize(out);
+        byte[] serialized = out.getCopyOfBuffer();
         RowRangeMappingIndex restored =
-                RowRangeMappingIndex.deserialize(new DataInputDeserializer(out.getCopyOfBuffer()));
+                RowRangeMappingIndex.deserialize(
+                        new DataInputDeserializer(serialized), serialized.length);
 
         assertThat(restored.map(new Range(12, 17))).hasValue(new Range(122, 127));
         assertThat(restored.map(new Range(30, 39))).hasValue(new Range(130, 139));
