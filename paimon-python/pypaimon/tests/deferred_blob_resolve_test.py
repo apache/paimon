@@ -69,7 +69,7 @@ class _RejectScoreOneAuthResult(TableQueryAuthResult):
         super().__init__(filter=_RejectScoreOneAuthResult.filter, column_masking=None)
 
     @staticmethod
-    def get_extra_fields_for_filter(read_fields, table_fields):
+    def get_extra_fields(read_fields, table_fields):
         return []
 
     @staticmethod
@@ -96,7 +96,7 @@ class _PayloadAuthResult(TableQueryAuthResult):
         })], column_masking=None)
 
     @staticmethod
-    def get_extra_fields_for_filter(read_fields, table_fields):
+    def get_extra_fields(read_fields, table_fields):
         return []
 
     def extract_row_filter(self):
