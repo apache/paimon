@@ -37,11 +37,14 @@ import org.apache.spark.sql.types.IntegerType;
 import org.apache.spark.sql.types.LongType;
 import org.apache.spark.sql.types.ShortType;
 import org.apache.spark.sql.types.StringType;
+import org.apache.spark.sql.types.TimestampNTZType;
 import org.apache.spark.sql.types.TimestampType;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.Serializable;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 import scala.collection.JavaConverters;
 import scala.collection.Seq;
@@ -106,6 +109,18 @@ public class SparkHilbertUDF implements Serializable {
                                 },
                                 DataTypes.LongType)
                         .withName("INT_ORDERED_BYTES");
+
+        return udf;
+    }
+
+    private UserDefinedFunction timestampNtzToLongUDF() {
+        UserDefinedFunction udf =
+                functions
+                        .udf(
+                                (LocalDateTime value) ->
+                                        value == null ? null : value.toEpochSecond(ZoneOffset.UTC),
+                                DataTypes.LongType)
+                        .withName("TIMESTAMP_NTZ_LONG");
 
         return udf;
     }
@@ -227,6 +242,8 @@ public class SparkHilbertUDF implements Serializable {
             return booleanToOrderedLongUDF().apply(column);
         } else if (type instanceof TimestampType) {
             return longToOrderedLongUDF().apply(column.cast(DataTypes.LongType));
+        } else if (type instanceof TimestampNTZType) {
+            return longToOrderedLongUDF().apply(timestampNtzToLongUDF().apply(column));
         } else if (type instanceof DecimalType) {
             return longToOrderedLongUDF().apply(column.cast(DataTypes.LongType));
         } else if (type instanceof DateType) {
