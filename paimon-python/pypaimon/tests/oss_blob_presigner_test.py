@@ -400,7 +400,7 @@ def test_validity_must_be_positive_whole_seconds(validity):
             _bucket(), "oss://bucket/table", _descriptor(), validity)
 
 
-def test_internal_endpoint_is_rewritten_to_public_endpoint():
+def test_internal_endpoint_is_preserved():
     bucket = _bucket("https://oss-cn-hangzhou-internal.aliyuncs.com")
     bucket.head_object.return_value = _metadata()
 
@@ -411,8 +411,23 @@ def test_internal_endpoint_is_rewritten_to_public_endpoint():
         timedelta(minutes=5),
     )
 
-    assert url.startswith("https://bucket.oss-cn-hangzhou.aliyuncs.com/")
-    assert "-internal" not in url
+    assert url.startswith("https://bucket.oss-cn-hangzhou-internal.aliyuncs.com/")
+    assert url == bucket.sign_url.return_value
+
+
+@pytest.mark.parametrize("endpoint, generated_endpoint", [
+    ("https://oss-cn-hangzhou-internal.aliyuncs.com",
+     "https://oss-cn-hangzhou.aliyuncs.com"),
+    ("https://oss-cn-hangzhou.aliyuncs.com",
+     "https://oss-cn-hangzhou-internal.aliyuncs.com"),
+])
+def test_rejects_url_with_different_endpoint(endpoint, generated_endpoint):
+    bucket = _bucket(endpoint)
+    bucket.head_object.return_value = _metadata()
+    bucket.sign_url.return_value = _bucket(generated_endpoint).sign_url.return_value
+    with pytest.raises(OSError, match="invalid target"):
+        create_presigned_url(
+            bucket, "oss://bucket/table", _descriptor(), timedelta(minutes=5))
 
 
 def test_rejects_non_https_endpoint_after_cache_hit():

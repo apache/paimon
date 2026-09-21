@@ -21,13 +21,12 @@ import hashlib
 import posixpath
 import re
 from datetime import timedelta
-from urllib.parse import unquote, urlparse, urlsplit, urlunsplit
+from urllib.parse import unquote, urlparse, urlsplit
 
 
 _BLOB_FINGERPRINT_METADATA = "paimon-blob-descriptor-sha256"
 _BLOB_FINGERPRINT_HEADER = "x-oss-meta-" + _BLOB_FINGERPRINT_METADATA
 _BLOB_CONTENT_TYPE = "application/octet-stream"
-_OSS_INTERNAL_ENDPOINT_SUFFIX = "-internal.aliyuncs.com"
 _BLOB_COPY_MIN_PART_SIZE = 100 * 1024 * 1024
 _MAX_MULTIPART_UPLOAD_PARTS = 10_000
 
@@ -71,7 +70,6 @@ def create_presigned_url(
 
         url = bucket.sign_url(
             'GET', target_key, validity_seconds, slash_safe=True)
-        url = _use_public_endpoint(url)
         _validate_presigned_url(bucket, url, target_key)
         return url
     except (OSError, ValueError):
@@ -225,32 +223,13 @@ def _materialize(
         raise
 
 
-def _use_public_endpoint(url) -> str:
-    parsed = urlsplit(url)
-    public_host = _public_endpoint_host(parsed.hostname or '')
-    if public_host == parsed.hostname:
-        return url
-    netloc = public_host
-    if parsed.port is not None:
-        netloc += ':' + str(parsed.port)
-    return urlunsplit(
-        (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
-
-
 def _validate_presigned_url(bucket, url, target_key):
     endpoint = urlsplit(bucket.endpoint)
     actual = urlsplit(url)
-    expected_host = _public_endpoint_host(
-        bucket.bucket_name + '.' + (endpoint.hostname or ''))
+    expected_host = bucket.bucket_name + '.' + (endpoint.hostname or '')
     if (endpoint.scheme.lower() != 'https'
             or actual.scheme.lower() != 'https'
             or (actual.hostname or '').lower() != expected_host.lower()
             or unquote(actual.path) != '/' + target_key):
         raise OSError(
             "OSS client generated a presigned URL for an invalid target.")
-
-
-def _public_endpoint_host(host) -> str:
-    if not host.lower().endswith(_OSS_INTERNAL_ENDPOINT_SUFFIX):
-        return host
-    return host[:-len(_OSS_INTERNAL_ENDPOINT_SUFFIX)] + ".aliyuncs.com"

@@ -235,6 +235,10 @@ catalog_options.pop("dlf.access-key-secret", None)
 PyPaimon loads and refreshes the ECS role credential. DLF separately supplies
 the temporary OSS credential used to read the BLOB and create the URL.
 
+The signed URL uses the configured OSS endpoint. Use an Internal endpoint only
+when both the application materializing the BLOB and the URL consumer can reach
+that endpoint. PyPaimon does not replace Internal endpoints with public endpoints.
+
 ## How the temporary URL works
 
 A managed BLOB descriptor can point to a byte range inside a larger Paimon
