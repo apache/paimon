@@ -25,7 +25,7 @@ import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.deletionvectors.DeletionVector
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.index.GlobalIndexMeta
-import org.apache.paimon.io.{CompactIncrement, DataIncrement}
+import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
 import org.apache.paimon.manifest.IndexManifestEntry
 import org.apache.paimon.options.Options
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
@@ -303,7 +303,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       .map(_.asInstanceOf[DataSplit])
       .toSeq
 
-    val firstRowIds: immutable.IndexedSeq[Long] = tableSplits
+    val normalDataFiles: Seq[DataFileMeta] = tableSplits
       .flatMap(_.dataFiles().asScala)
       .filter {
         file =>
@@ -311,10 +311,19 @@ case class MergeIntoPaimonDataEvolutionTable(
           !isBlobFile(file.fileName()) &&
           !isVectorStoreFile(file.fileName())
       }
+    val firstRowIds: immutable.IndexedSeq[Long] = normalDataFiles
       .map(file => file.firstRowId().asInstanceOf[Long])
       .distinct
       .sorted
       .toIndexedSeq
+    // Exclusive end of the row-id range starting at each entry of `firstRowIds`. Files sharing a
+    // first row id are column groups of one range and end at the same row id.
+    val rowIdRangeEnds: immutable.IndexedSeq[Long] = {
+      val ends = normalDataFiles
+        .groupBy(_.firstRowId().longValue())
+        .map { case (first, files) => first -> files.map(file => first + file.rowCount()).max }
+      firstRowIds.map(ends)
+    }
 
     val firstRowIdToBlobFirstRowIds: Map[Long, List[Long]] = {
       val map = new mutable.HashMap[Long, List[Long]]()
@@ -353,6 +362,7 @@ case class MergeIntoPaimonDataEvolutionTable(
         sparkSession,
         tableSplits,
         firstRowIds,
+        rowIdRangeEnds,
         firstRowIdToBlobFirstRowIds,
         persistSourceDss)
       lazy val touchedFileTargetRelation =
@@ -498,6 +508,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       sparkSession: SparkSession,
       tableSplits: Seq[DataSplit],
       firstRowIds: immutable.IndexedSeq[Long],
+      rowIdRangeEnds: immutable.IndexedSeq[Long],
       firstRowIdToBlobFirstRowIds: Map[Long, List[Long]],
       persistSourceDss: Option[Dataset[Row]]): Seq[DataSplit] = {
     // Self-Merge shortcut:
@@ -523,6 +534,7 @@ case class MergeIntoPaimonDataEvolutionTable(
           sourceDss,
           sparkSession,
           firstRowIds,
+          rowIdRangeEnds,
           firstRowIdToBlobFirstRowIds,
           sourceRowIdAttr.name).toSet
 
@@ -533,6 +545,7 @@ case class MergeIntoPaimonDataEvolutionTable(
           targetDss.alias("_left").join(sourceDss, toColumn(matchedCondition), "inner"),
           sparkSession,
           firstRowIds,
+          rowIdRangeEnds,
           firstRowIdToBlobFirstRowIds,
           "_left." + ROW_ID_NAME
         ).toSet
@@ -1237,12 +1250,18 @@ case class MergeIntoPaimonDataEvolutionTable(
       dataset: Dataset[Row],
       sparkSession: SparkSession,
       firstRowIds: immutable.IndexedSeq[Long],
+      rowIdRangeEnds: immutable.IndexedSeq[Long],
       firstRowIdToBlobFirstRowIds: Map[Long, List[Long]],
       identifier: String): Array[Long] = {
     import sparkSession.implicits._
-    val firstRowIdUdf = udf((rowId: Long) => floorBinarySearch(firstRowIds, rowId))
+    // The column may come straight from the source table, so it can hold row ids that no longer
+    // exist (rows overwritten or dropped since the source was built) or arbitrary values. Those
+    // match no target row: they map to no file at all rather than to the nearest one.
+    val firstRowIdUdf =
+      udf((rowId: Long) => rowIdRangeStart(firstRowIds, rowIdRangeEnds, rowId))
     dataset
-      .select(firstRowIdUdf(col(identifier)))
+      .select(firstRowIdUdf(col(identifier)).as(FIRST_ROW_ID_NAME))
+      .filter(col(FIRST_ROW_ID_NAME).isNotNull)
       .distinct()
       .as[Long]
       .flatMap(
@@ -1507,6 +1526,21 @@ object MergeIntoPaimonDataEvolutionTable {
         leftAttr.sameRef(rightAttr)
       case _ => false
     }
+  }
+
+  /**
+   * The start of the row-id range `[firstRowIds(i), rowIdRangeEnds(i))` holding `rowId`, or `None`
+   * when no range does.
+   */
+  private def rowIdRangeStart(
+      firstRowIds: immutable.IndexedSeq[Long],
+      rowIdRangeEnds: immutable.IndexedSeq[Long],
+      rowId: Long): Option[Long] = {
+    val index = firstRowIds.search(rowId) match {
+      case Found(foundIndex) => foundIndex
+      case InsertionPoint(insertionIndex) => insertionIndex - 1
+    }
+    if (index >= 0 && rowId < rowIdRangeEnds(index)) Some(firstRowIds(index)) else None
   }
 
   private def floorBinarySearch(indexed: immutable.IndexedSeq[Long], value: Long): Long = {
