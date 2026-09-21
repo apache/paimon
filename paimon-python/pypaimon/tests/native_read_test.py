@@ -39,6 +39,7 @@ def _table_read(limit=None):
     read.table.options.blob_as_descriptor.return_value = False
     read.table.options.blob_descriptor_fields.return_value = set()
     read.table.options.blob_view_fields.return_value = set()
+    read.table.options.data_evolution_enabled.return_value = False
     read.predicate = None
     read.read_type = [DataField(0, 'id', AtomicType('INT'))]
     read.include_row_kind = False
@@ -47,6 +48,7 @@ def _table_read(limit=None):
     read._read_parallelism = 1
     read._deferred_blob_fields = set()
     read._predicate_extra_fields = []
+    read._scan_read_type = read.read_type
     read._output_column_names = ['id']
     return read
 
@@ -55,6 +57,7 @@ def _blob_table_read(limit=None):
     read = _table_read(limit)
     read.read_type = [DataField(0, 'payload', AtomicType('BLOB'))]
     read._output_column_names = ['payload']
+    read._scan_read_type = read.read_type
     return read
 
 
@@ -794,6 +797,100 @@ def test_native_read_defers_to_python_for_pruning_descriptor_blob_limit():
         assert read._try_native_batches(
             [split], pa.schema([('payload', pa.large_binary())]),
             blob_parallelism=1) is None
+
+    native.assert_not_called()
+
+
+@pytest.mark.parametrize('descriptor', [False, True])
+def test_native_read_pruning_blob_limit_uses_data_evolution_reader(descriptor):
+    read = _blob_table_read(limit=1)
+    read.table.options.data_evolution_enabled.return_value = True
+    if descriptor:
+        read.table.options.blob_descriptor_fields.return_value = {'payload'}
+    else:
+        read._deferred_blob_fields = {'payload'}
+    split = _Split('payload.parquet' if descriptor else 'payload.blob')
+    split._native_split = object()
+    split.merged_row_count = Mock(return_value=2)
+    batch = pa.record_batch(
+        [pa.array([b'first'], type=pa.large_binary())], names=['payload'])
+
+    with patch('pypaimon.read.native_plan.native_method_available',
+               return_value=True), patch('pypaimon.read.native_plan.native_read',
+                                         return_value=[batch]) as native:
+        actual = list(read._try_native_batches(
+            [split], pa.schema([('payload', pa.large_binary())]),
+            blob_parallelism=1))
+
+    assert actual == [batch]
+    native.assert_called_once()
+
+
+def test_native_read_pruning_blob_limit_keeps_predicate_and_view_fallback():
+    read = _blob_table_read(limit=1)
+    read.table.options.data_evolution_enabled.return_value = True
+    read._deferred_blob_fields = {'payload'}
+    split = _Split('payload.blob')
+    split._native_split = object()
+    split.merged_row_count = Mock(return_value=2)
+
+    with patch('pypaimon.read.native_plan.native_method_available',
+               return_value=True), patch('pypaimon.read.native_plan.native_read') as native:
+        read.predicate = Mock()
+        assert read._try_native_batches(
+            [split], pa.schema([('payload', pa.large_binary())])) is None
+        read.predicate = None
+        read.table.options.blob_view_fields.return_value = {'payload'}
+        assert read._try_native_batches(
+            [split], pa.schema([('payload', pa.large_binary())])) is None
+        read.table.options.blob_view_fields.return_value = set()
+        read.table.options.blob_descriptor_fields.return_value = {'payload'}
+        read._deferred_blob_fields = set()
+        read.predicate = Mock()
+        with patch('pypaimon.read.push_down_utils.predicate_field_names',
+                   return_value={'payload'}):
+            assert read._try_native_batches(
+                [split], pa.schema([('payload', pa.large_binary())])) is None
+
+    native.assert_not_called()
+
+
+def test_native_read_pruning_descriptor_limit_allows_non_blob_predicate():
+    read = _blob_table_read(limit=1)
+    read.table.options.data_evolution_enabled.return_value = True
+    read.table.options.blob_descriptor_fields.return_value = {'payload'}
+    read.predicate = Mock()
+    split = _Split('payload.parquet')
+    split._native_split = object()
+    split.merged_row_count = Mock(return_value=2)
+    batch = pa.record_batch(
+        [pa.array([b'selected'], type=pa.large_binary())], names=['payload'])
+
+    with patch('pypaimon.read.native_plan.native_method_available',
+               return_value=True):
+        with patch('pypaimon.read.push_down_utils.predicate_field_names',
+                   return_value={'id'}):
+            with patch('pypaimon.read.native_plan.native_read',
+                       return_value=[batch]) as native:
+                actual = list(read._try_native_batches(
+                    [split], pa.schema([('payload', pa.large_binary())])))
+
+    assert actual == [batch]
+    native.assert_called_once()
+
+
+def test_native_read_pruning_blob_limit_requires_rust_capability():
+    read = _blob_table_read(limit=1)
+    read.table.options.data_evolution_enabled.return_value = True
+    read._deferred_blob_fields = {'payload'}
+    split = _Split('payload.blob')
+    split._native_split = object()
+    split.merged_row_count = Mock(return_value=2)
+
+    with patch('pypaimon.read.native_plan.native_method_available',
+               return_value=False), patch('pypaimon.read.native_plan.native_read') as native:
+        assert read._try_native_batches(
+            [split], pa.schema([('payload', pa.large_binary())])) is None
 
     native.assert_not_called()
 
