@@ -25,6 +25,7 @@ from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import (
@@ -312,6 +313,7 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         return self
 
     def route_builders(self) -> List[HybridSearchRouteBuilder]:
+        reject_search_under_query_auth(self._table)
         self._validate_search()
         from pypaimon.snapshot.time_travel_util import TimeTravelUtil
         execution = copy(self)
