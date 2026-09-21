@@ -237,6 +237,49 @@ public class OrcFilterConverterTest {
                 true);
     }
 
+    /**
+     * {@link PredicateBuilder#in(int, List)} special-cases an empty literal list the same way it
+     * special-cases more than 20, building a raw {@code In} leaf rather than an OR chain - so an
+     * empty list reaches {@link OrcPredicateFunctionVisitor#visitIn} exactly like the many-values
+     * case above. Unlike parquet-mr, Hive's own {@code SearchArgument.Builder.in(...)} rejects a
+     * zero-length varargs call with {@code IllegalArgumentException("Can't create in expression
+     * with no arguments")}, so this predicate must never reach it - the visitor has to decline the
+     * pushdown for an empty literal list instead of building an {@code OrcFilters.In} with an empty
+     * array.
+     */
+    @Test
+    public void testInPredicateWithEmptyValuesIsNotPushedDown() {
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(0, "testField", new BigIntType()))));
+
+        assertThat(
+                        builder.in(0, Collections.emptyList())
+                                .visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+        assertThat(
+                        builder.notIn(0, Collections.emptyList())
+                                .visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+
+        // or()/and() only fold away AlwaysFalse.INSTANCE, not an empty In leaf, so the leaf
+        // survives into a compound; a declined child must decline the whole compound, not crash.
+        assertThat(
+                        PredicateBuilder.or(
+                                        builder.in(0, Collections.emptyList()),
+                                        builder.equal(0, 1L))
+                                .visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+        assertThat(
+                        PredicateBuilder.and(
+                                        builder.notIn(0, Collections.emptyList()),
+                                        builder.equal(0, 1L))
+                                .visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+    }
+
     @Test
     public void testIsNaN() {
         PredicateBuilder builder =
