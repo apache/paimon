@@ -132,7 +132,7 @@ CALL sys.remove_unexisting_files(`table` => 'mydb.myt', `dry_run` => true);
 
 Procedure to remove unexisting manifest file from manifset-list. for detailed use cases. Arguments:
 
-- `table`: the target table identifier. Cannot be empty, you can use database.table$branch_xx to remove branch table unexisting manifest file.
+- `tableId`: the target table identifier. Cannot be empty, you can use database.table$branch_xx to remove branch table unexisting manifest file.
 
 Note that user is on his own risk using this procedure, which may cause data loss when used outside from the use cases listed in Java docs.
 
