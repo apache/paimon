@@ -255,7 +255,7 @@ def _map_blob_batch(
         map_blob_cols=(), array_blob_cols=()):
     import pyarrow as pa
 
-    from pypaimon.multimodal.blob_read import fetch_blob_bodies
+    from pypaimon.multimodal.blob_read import _map_entries, fetch_blob_bodies
 
     missing = [name for name in blob_cols if name not in batch.schema.names]
     if missing:
@@ -280,8 +280,19 @@ def _map_blob_batch(
             or pa.types.is_large_list(batch.schema.field(name).type)
             or pa.types.is_fixed_size_list(batch.schema.field(name).type))
     }
+    data = batch.select(blob_cols).to_pydict()
+    # Ray row transforms may infer MAP pairs as list<list<string>> when the
+    # payload bytes are valid UTF-8. Restore the values without changing keys.
+    for name in map_blob_cols.intersection(blob_cols):
+        data[name] = [
+            None if row is None else [
+                (key, value.encode("utf-8") if isinstance(value, str) else value)
+                for key, value in _map_entries(row)
+            ]
+            for row in data[name]
+        ]
     bodies = fetch_blob_bodies(
-        file_io, batch.select(blob_cols).to_pydict(), blob_cols, parallelism,
+        file_io, data, blob_cols, parallelism,
         map_blob_cols, array_blob_cols)
     result = fn(batch.select(scalar_cols), bodies, **fn_kwargs)
     if result is None:
@@ -298,19 +309,21 @@ def _unknown_blob_descriptor_columns(batch, scalar_cols):
         if _looks_like_blob_descriptor(batch.column(name))]
 
 
-def _looks_like_blob_descriptor(column):
+def _looks_like_blob_descriptor(column, nested=False):
     import pyarrow as pa
     from pypaimon.table.row.blob import BlobDescriptorSerde
 
     chunks = getattr(column, "chunks", [column])
     if (pa.types.is_list(column.type) or pa.types.is_large_list(column.type)
             or pa.types.is_fixed_size_list(column.type)):
-        return any(_looks_like_blob_descriptor(chunk.flatten()) for chunk in chunks)
+        return any(_looks_like_blob_descriptor(chunk.flatten(), nested=True) for chunk in chunks)
     if pa.types.is_map(column.type):
         return any(
-            _looks_like_blob_descriptor(value.values.field(1))
+            _looks_like_blob_descriptor(value.values.field(1), nested=True)
             for value in column if value.is_valid)
     if isinstance(column.type, pa.ExtensionType):
+        return any(_contains_blob_descriptor(value.as_py()) for value in column if value.is_valid)
+    if nested and (pa.types.is_string(column.type) or pa.types.is_large_string(column.type)):
         return any(_contains_blob_descriptor(value.as_py()) for value in column if value.is_valid)
     if not (pa.types.is_binary(column.type) or pa.types.is_large_binary(column.type)):
         return False
@@ -324,6 +337,8 @@ def _looks_like_blob_descriptor(column):
 def _contains_blob_descriptor(value):
     from pypaimon.table.row.blob import BlobDescriptorSerde
 
+    if isinstance(value, str):
+        value = value.encode("utf-8")
     if isinstance(value, (bytes, bytearray, memoryview)):
         return BlobDescriptorSerde.is_descriptor(bytes(value))
     if isinstance(value, dict):

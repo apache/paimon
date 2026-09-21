@@ -1818,10 +1818,13 @@ class MultimodalTableTest(unittest.TestCase):
         for arrow_type, values in (
                 (pa.list_(pa.large_binary()), [None, [], [b"inline", descriptor]]),
                 (pa.map_(pa.string(), pa.large_binary()),
-                 [None, [], [("inline", b"inline"), ("foreign", descriptor)]])):
+                 [None, [], [("inline", b"inline"), ("foreign", descriptor)]]),
+                (pa.list_(pa.list_(pa.string())),
+                 [None, [], [("inline", "inline"), ("foreign", descriptor.decode("utf-8"))]])):
             with self.subTest(arrow_type=arrow_type):
                 batch = pa.table({
                     "image": [b"inline"] * 3,
+                    "text": [descriptor.decode("utf-8")] * 3,
                     "foreign": pa.array(values, type=arrow_type),
                 })
                 with self.assertRaisesRegex(ValueError, "does not own"):
@@ -1836,6 +1839,62 @@ class MultimodalTableTest(unittest.TestCase):
                 result = _map_blob_batch(empty, LocalFileIO(), ["image"], ["image"], 1,
                                          lambda scalar, blobs: scalar, {})
                 self.assertEqual(0, result.num_rows)
+
+    def test_map_with_blobs_restores_utf8_map_values(self):
+        from unittest.mock import Mock
+
+        from pypaimon.ray.ray_paimon import _map_blob_batch
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        descriptor = BlobDescriptor("test://blob", 0, 4).serialize()
+        entries = [("blob", descriptor.decode("utf-8")), ("text", "\u4f60\u597d"),
+                   ("empty", ""), ("missing", None), ("blob", descriptor.decode("utf-8"))]
+        batch = pa.table({"assets": pa.array([None, [], entries],
+                                             type=pa.list_(pa.list_(pa.string())))})
+        file_io = Mock()
+        file_io.read_ranges_coalesced.return_value = [b"body", None, None, None, b"body"]
+        actual = _map_blob_batch(
+            batch, file_io, ["assets"], ["assets"], 2, lambda scalar, blobs: blobs, {},
+            map_blob_cols=["assets"])
+        self.assertEqual({"assets": [None, [], [
+            ("blob", b"body"), ("text", "\u4f60\u597d".encode("utf-8")),
+            ("empty", b""), ("missing", None), ("blob", b"body"),
+        ]]}, actual)
+        file_io.read_ranges_coalesced.assert_called_once_with(
+            [("test://blob", 0, 4), None, None, None, ("test://blob", 0, 4)], 2)
+
+    @unittest.skipIf(ray is None, "ray is not installed")
+    def test_ray_filter_preserves_map_blob_bytes(self):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+        from pypaimon.ray import map_with_blobs
+
+        schema = _schema({"id": pa.int32(), "assets": pa.map_(pa.string(), pa.large_binary())})
+
+        def collect(scalar, blobs):
+            return pa.Table.from_pydict(dict(id=scalar["id"], **blobs), schema=schema)
+
+        started_ray = not ray.is_initialized()
+        if started_ray:
+            ray.init(ignore_reinit_error=True, num_cpus=2)
+        try:
+            # Exercise string inference and object fallback independently of descriptor URI length.
+            for payload in ("\u4f60\u597d\0".encode("utf-8"), b"\xff\0"):
+                with self.subTest(payload=payload):
+                    rows = [
+                        {"id": 1, "assets": None}, {"id": 2, "assets": []},
+                        {"id": 3, "assets": [("body", payload), ("empty", b""), ("missing", None)]},
+                    ]
+                    dataset = ray.data.from_arrow(pa.Table.from_pylist(rows, schema=schema))
+                    result = map_with_blobs(
+                        dataset.filter(lambda row: row["id"] > 0), "assets", collect,
+                        file_io=LocalFileIO(), all_blob_columns=["assets"], map_blob_columns=["assets"],
+                        batch_size=2)
+                    actual = [row for batch in result.iter_batches(batch_format="pyarrow")
+                              for row in batch.to_pylist()]
+                    self.assertEqual(rows, sorted(actual, key=lambda row: row["id"]))
+        finally:
+            if started_ray:
+                ray.shutdown()
 
     @unittest.skipIf(ray is None, "ray is not installed")
     def test_map_with_blobs_python_object_columns(self):
