@@ -154,6 +154,10 @@ class RESTTokenFileIO(FileIO):
     def try_to_write_atomic(self, path: str, content: str) -> bool:
         return self.file_io().try_to_write_atomic(path, content)
 
+    def create_blob_presigned_url(self, table_root, descriptor, validity) -> str:
+        return self.file_io().create_blob_presigned_url(
+            table_root, descriptor, validity)
+
     def write_parquet(self, path: str, data, compression: str = 'zstd',
                       zstd_level: int = 1, **kwargs):
         return self.file_io().write_parquet(path, data, compression, zstd_level, **kwargs)

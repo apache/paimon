@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""OSS conditional metadata creation, reusing the existing Arrow/Jindo FileIO."""
+"""OSS-specific operations, reusing the existing Arrow/Jindo FileIO."""
 
 import re
 from urllib.parse import urlparse
@@ -77,6 +77,26 @@ class OssFileIO(PyArrowFileIO):
         finally:
             session.session.close()
 
+    def create_blob_presigned_url(self, table_root, descriptor, validity) -> str:
+        try:
+            import oss2
+        except ImportError as error:
+            raise ImportError(
+                "OSS BLOB presigning requires oss2. Install pypaimon[oss] "
+                "or pypaimon[jindo]."
+            ) from error
+
+        from pypaimon.filesystem.oss_blob_presigner import create_presigned_url
+
+        session = oss2.Session()
+        try:
+            bucket = self._create_oss_bucket(
+                session, self._extract_oss_bucket(descriptor.uri))
+            return create_presigned_url(
+                bucket, table_root, descriptor, validity)
+        finally:
+            session.session.close()
+
     def _supports_atomic_write(self, bucket):
         """Cache the publication mode for this instance; failed queries remain retryable."""
         import oss2
@@ -97,7 +117,7 @@ class OssFileIO(PyArrowFileIO):
                     self._oss_bucket, versioning)
         return self._atomic_write_supported
 
-    def _create_oss_bucket(self, session):
+    def _create_oss_bucket(self, session, bucket_name=None):
         """Build the metadata client with one V4 credential path for both AK and STS."""
         import oss2
         from oss2.credentials import StaticCredentialsProvider
@@ -122,7 +142,13 @@ class OssFileIO(PyArrowFileIO):
             raise ValueError("Set fs.oss.region for OSS V4 signing when the endpoint is not regional")
         provider = StaticCredentialsProvider(access_key, secret_key, token)
         auth = oss2.ProviderAuthV4(provider)
-        return oss2.Bucket(auth, endpoint, self._oss_bucket, session=session, region=region)
+        return oss2.Bucket(
+            auth,
+            endpoint,
+            bucket_name or self._oss_bucket,
+            session=session,
+            region=region,
+        )
 
     def _sse_headers(self):
         """Match Java OSSFileIO's SSE resolution, including the native option fallback."""
