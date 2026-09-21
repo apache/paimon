@@ -142,7 +142,7 @@ class NativeFullTextGlobalIndexReader(GlobalIndexReader):
                 self._native_reader = FullTextIndexReader(PaimonFullTextInput(stream))
                 self._searcher = self._native_reader
                 self._stream = stream
-            except Exception:
+            except BaseException:
                 stream.close()
                 raise
 
