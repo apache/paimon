@@ -23,7 +23,8 @@ from pyarrow import RecordBatch
 
 from pypaimon.data.map_shared_shredding import \
     assemble_normal_map_selected_keys
-from pypaimon.read.reader.field_indices import blob_field_indices, vector_field_indices
+from pypaimon.read.reader.field_indices import (
+    blob_field_indices, descriptor_field_indices, vector_field_indices)
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 
@@ -48,7 +49,8 @@ class NestedLeafBatchReader(RecordBatchReader):
     """
 
     def __init__(self, inner: RecordBatchReader, name_paths: List[List[str]],
-                 output_fields: List[DataField]):
+                 output_fields: List[DataField],
+                 descriptor_field_names=None):
         if len(name_paths) != len(output_fields):
             raise ValueError(
                 "name_paths length {} does not match output_fields length {}".format(
@@ -58,6 +60,8 @@ class NestedLeafBatchReader(RecordBatchReader):
         self._schema = PyarrowFieldParser.from_paimon_schema(output_fields)
         self.file_io = inner.file_io
         self.blob_field_indices = blob_field_indices(output_fields)
+        self.descriptor_field_indices = descriptor_field_indices(
+            output_fields, descriptor_field_names or ())
         self.vector_field_indices = vector_field_indices(output_fields)
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:

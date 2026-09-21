@@ -44,6 +44,7 @@ class LimitedRecordReader(RecordReader):
         # Public so the iterator can read/write the shared counter without
         # going through accessor calls per row.
         self.count = 0
+        self._adopt_blob_metadata(inner)
 
     def read_batch(self) -> Optional[RecordIterator]:
         if self.count >= self._limit:
@@ -51,6 +52,7 @@ class LimitedRecordReader(RecordReader):
         batch = self._inner.read_batch()
         if batch is None:
             return None
+        self._refresh_blob_view_lookup(self._inner)
         return _LimitedRecordIterator(batch, self)
 
     def close(self) -> None:
@@ -96,6 +98,7 @@ class LimitedRecordBatchReader(RecordBatchReader):
         batch = self._inner.read_arrow_batch()
         if batch is None:
             return None
+        self._refresh_blob_view_lookup(self._inner)
         remaining = self._limit - self.count
         if batch.num_rows > remaining:
             batch = batch.slice(0, remaining)
