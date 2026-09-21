@@ -90,6 +90,7 @@ class _DistributionFixture:
               limit=None, predicate=None, projection=None):
         builder = table.copy({
             'scan.native-plan.enabled': str(native).lower(),
+            'read.native.enabled': str(native).lower(),
         }).new_read_builder()
         if limit is not None:
             builder.with_limit(limit)
@@ -108,7 +109,20 @@ class _DistributionFixture:
             'distributed native plan fell back to Python')) if native else ExitStack()
         with guard:
             plan = scan.plan()
-        return plan, builder.new_read().to_arrow(plan.splits(), parallelism=1).to_pylist()
+        if native:
+            self.assertTrue(all(
+                getattr(split, '_native_split', None) is not None
+                for split in plan.splits()))
+            read_guard = patch(
+                'pypaimon.read.table_read.TableRead._create_split_read',
+                side_effect=AssertionError(
+                    'distributed native read fell back to Python'))
+        else:
+            read_guard = ExitStack()
+        with read_guard:
+            rows = builder.new_read().to_arrow(
+                plan.splits(), parallelism=1).to_pylist()
+        return plan, rows
 
     def _assert_parity(self, table, expected, snapshot_id, ordered=True, **options):
         plans = []
@@ -181,6 +195,44 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
         for start, end in ((0, 1), (2, 7), (7, 100), (20, 22)):
             with self.subTest(start=start, end=end):
                 self._assert_parity(table, rows[start:end], 3, slice_=(start, end))
+
+    def test_row_tracked_append_uses_global_ranges_for_native_read(self):
+        table = self._create('append_row_tracking', {
+            'row-tracking.enabled': 'true',
+            'source.split.target-size': '1b',
+        })
+        rows = [{'k': k, 'v': str(k)} for k in range(9)]
+        for start in range(0, 9, 3):
+            self._write(table, rows[start:start + 3])
+
+        native = self._assert_parity(table, rows[2:7], 3, slice_=(2, 7))
+        selected_ranges = [
+            (range_.from_, range_.to)
+            for split in native.splits()
+            for range_ in getattr(split, 'row_ranges', lambda: [])()
+        ]
+        # The middle file is selected in full and stays a plain DataSplit;
+        # only partial boundary files need explicit global ranges.
+        self.assertEqual(selected_ranges, [(2, 2), (6, 6)])
+        for index, expected in enumerate((rows[:3], rows[3:5], rows[5:7], rows[7:])):
+            self._assert_parity(table, expected, 3, shard=(index, 4))
+
+    def test_append_positions_follow_partition_pruned_file_order(self):
+        schema = self.schema.append(pa.field('p', pa.string()))
+        table = self._create(
+            'append_partition_filter', {'source.split.target-size': '1b'},
+            schema, ['p'])
+        low = [{'k': k, 'v': str(k), 'p': 'low'} for k in range(3)]
+        high = [{'k': k, 'v': str(k), 'p': 'high'} for k in range(100, 103)]
+        self._write(table, low, schema)
+        self._write(table, high, schema)
+        predicate = (table.new_read_builder().new_predicate_builder()
+                     .equal('p', 'high'))
+
+        self._assert_parity(
+            table, high[1:], 2, slice_=(1, 3), predicate=predicate)
+        self._assert_parity(
+            table, high[1:2], 2, slice_=(1, 3), predicate=predicate, limit=1)
 
     def test_append_limit_is_applied_after_shard_or_slice(self):
         table = self._create('append_limit', {'source.split.target-size': '1b'})

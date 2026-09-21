@@ -88,6 +88,7 @@ def _read(table, native, window, predicate=None, limit=None, shard=None,
           slice_=None, row_ranges=None, with_stats=False):
     builder = table.copy({
         'scan.native-plan.enabled': str(native).lower(),
+        'read.native.enabled': str(native).lower(),
         'scan.mode': 'incremental',
         'incremental-between-timestamp': '%s,%s' % window,
     }).new_read_builder()
@@ -109,7 +110,17 @@ def _read(table, native, window, predicate=None, limit=None, shard=None,
                     scan.file_scanner, method, side_effect=AssertionError(
                         'incremental native plan fell back to Python')))
         plan = scan.scan_with_stats()[0] if with_stats else scan.plan()
-    result = builder.new_read().to_arrow(plan.splits(), parallelism=1).to_pydict()
+    with ExitStack() as stack:
+        if native:
+            assert all(
+                getattr(split, '_native_split', None) is not None
+                for split in plan.splits())
+            stack.enter_context(patch(
+                'pypaimon.read.table_read.TableRead._create_split_read',
+                side_effect=AssertionError(
+                    'incremental native read fell back to Python')))
+        result = builder.new_read().to_arrow(
+            plan.splits(), parallelism=1).to_pydict()
     return plan, [dict(zip(result, row)) for row in zip(*result.values())]
 
 

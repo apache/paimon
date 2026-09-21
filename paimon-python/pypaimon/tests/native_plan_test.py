@@ -903,7 +903,9 @@ class NativePlanTest(unittest.TestCase):
                     setattr(fs, selection, 0)
                     fs.scan.return_value = fallback = object()
                     with patch('pypaimon.read.native_plan.native_version_at_least',
-                               return_value=available):
+                               return_value=available), patch(
+                            'pypaimon.read.native_plan.native_method_available',
+                            return_value=True):
                         self.assertEqual(scan._native_plan_supported(), available)
                         if not available:
                             with patch('pypaimon.read.native_plan.native_plan') as native:

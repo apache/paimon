@@ -156,7 +156,9 @@ class TableScan:
             # 0.4.0 includes Python-written DV decoding and legacy bucket paths.
             if not native_version_at_least(0, 4, 0):
                 return False
-        if getattr(fs, 'data_evolution', False):
+        if (not self.table.is_primary_key_table
+                and (getattr(fs, 'idx_of_this_subtask', None) is not None
+                     or getattr(fs, 'start_pos_of_this_subtask', None) is not None)):
             if (getattr(fs, 'idx_of_this_subtask', None) is not None
                     and not native_method_available('TableScan', 'with_row_position_shard')):
                 return False
@@ -279,7 +281,8 @@ class TableScan:
                 if fs.idx_of_this_subtask is not None:
                     extra_options['shard'] = (
                         fs.idx_of_this_subtask, fs.number_of_para_subtasks)
-            if has_distribution and fs.data_evolution and chunk_shuffle is None:
+            if (has_distribution and not self.table.is_primary_key_table
+                    and chunk_shuffle is None):
                 if fs.idx_of_this_subtask is not None:
                     extra_options['row_position_shard'] = (
                         fs.idx_of_this_subtask, fs.number_of_para_subtasks)
@@ -329,16 +332,12 @@ class TableScan:
                 if self.table.is_primary_key_table:
                     splits = [s for s in splits
                               if s.bucket % fs.number_of_para_subtasks == fs.idx_of_this_subtask]
-                elif not fs.data_evolution:
-                    from pypaimon.read.scan_distribution import shard_range, slice_append_splits
-                    if fs.idx_of_this_subtask is not None:
-                        start, end = shard_range(
-                            sum(s.row_count for s in splits),
-                            fs.idx_of_this_subtask, fs.number_of_para_subtasks)
-                    else:
-                        start, end = fs.start_pos_of_this_subtask, fs.end_pos_of_this_subtask
-                    splits = slice_append_splits(splits, start, end)
-                splits = fs._apply_push_down_limit(splits)
+                # A partial IndexedSplit plus a file-wide DV cardinality cannot
+                # reveal how many deleted rows lie inside the selected range.
+                # Keep every selected split and let the reader enforce LIMIT.
+                if not (getattr(fs, 'deletion_vectors_enabled', False)
+                        and not self.table.is_primary_key_table):
+                    splits = fs._apply_push_down_limit(splits)
             # Attach scores to the row ranges retained by native planning.
             from pypaimon.globalindex.indexed_split import IndexedSplit, scores_for_ranges
             from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult

@@ -181,9 +181,11 @@ When using an unreleased 0.4.0 development wheel, rebuild it with these fixes;
 package version checks cannot distinguish local builds with identical versions.
 
 Append scans support `with_shard()` and `with_slice()` with Rust 0.4 or newer,
-which preserves the file order needed for positional selection; primary-key scans support
-bucket-based `with_shard()`. Data-evolution position selection requires the
-binding's `TableScan.with_row_position_slice()` and `with_row_position_shard()`.
+which plans positional selection directly into native-readable splits; primary-key
+scans support bucket-based `with_shard()`. Both append and data-evolution position
+selection require the binding's `TableScan.with_row_position_slice()` and
+`with_row_position_shard()`. Ordinary append positions follow the stats-pruned
+split/file order, while Data Evolution assigns positions before group pruning.
 Selection occurs before reader filtering and deletion vectors, so surviving row
 counts can differ between shards. Limits are applied after shard/slice selection.
 
