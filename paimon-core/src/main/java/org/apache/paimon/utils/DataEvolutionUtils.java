@@ -291,13 +291,13 @@ public class DataEvolutionUtils {
     /** Returns the latest sequence known for a physical field position in the file. */
     public static long fieldMaxSequenceNumber(
             DataFileMeta file,
-            @Nullable long[] columnSequences,
+            @Nullable long[] writeColsSequences,
             int fieldPosition,
             int physicalFieldCount) {
-        if (columnSequences == null || columnSequences.length != physicalFieldCount) {
+        if (writeColsSequences == null || writeColsSequences.length != physicalFieldCount) {
             return file.maxSequenceNumber();
         }
-        return columnSequences[fieldPosition];
+        return writeColsSequences[fieldPosition];
     }
 
     /**

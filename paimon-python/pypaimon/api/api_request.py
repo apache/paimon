@@ -41,7 +41,7 @@ class CreateDatabaseRequest(RESTRequest):
     FIELD_OPTIONS = "options"
 
     name: str = json_field(FIELD_NAME)
-    options: Dict[str, str] = json_field(FIELD_OPTIONS)
+    options: Optional[Dict[str, str]] = json_field(FIELD_OPTIONS)
 
 
 @dataclass

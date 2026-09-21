@@ -755,10 +755,23 @@ def _aggregate_values(selected, aggregation):
         return pc.min(selected).as_py()
     if aggregation == "max":
         return pc.max(selected).as_py()
-    items = selected.to_pylist()
-    if aggregation == "first":
-        return next((item for item in items if item is not None), None)
-    return next((item for item in reversed(items) if item is not None), None)
+    chunks = selected.chunks if isinstance(selected, pa.ChunkedArray) else (selected,)
+    if aggregation == "last":
+        chunks = reversed(chunks)
+    for chunk in chunks:
+        if chunk.null_count == len(chunk):
+            continue
+        indices = range(len(chunk))
+        if aggregation == "last":
+            indices = reversed(indices)
+        for index in indices:
+            scalar = chunk[index]
+            if scalar.is_valid:
+                value = scalar.as_py()
+                # A valid dictionary index can still reference a null value.
+                if value is not None:
+                    return value
+    return None
 
 
 def _window_bound_key(name, value, data_type):
@@ -1228,11 +1241,7 @@ class _RowIdFetcher:
             allowed = Range.and_(wanted, self._split_ranges[split_index])
             if not allowed:
                 continue
-            indexed = IndexedSplit(
-                split,
-                allowed,
-                exact_merged_row_count=sum(r.count() for r in allowed),
-            )
+            indexed = IndexedSplit(split, allowed)
             if auth_result is not None:
                 indexed = QueryAuthSplit(indexed, auth_result)
             selected_splits.append(indexed)

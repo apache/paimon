@@ -5484,9 +5484,11 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         from unittest import mock
 
         from pypaimon import Schema
+        from pypaimon.globalindex.indexed_split import IndexedSplit
         from pypaimon.read.split_read import RawFileSplitRead
         from pypaimon.read.table_read import TableRead
         from pypaimon.table.row.blob import BlobViewStruct
+        from pypaimon.utils.range import Range
 
         source_schema = pa.schema([
             ('id', pa.int32()),
@@ -5576,6 +5578,20 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         self.assertEqual(result.column('id').to_pylist(), [9])
         self.assertEqual(
             result.column('picture').to_pylist(), [b'raw-payload-9'])
+
+        # IndexedSplit selects the last row without a predicate. The view
+        # prescan must use the same row ranges before applying LIMIT.
+        with self.subTest(selection="indexed_split"):
+            indexed_read = raw_table.new_read_builder().with_limit(1)
+            indexed_splits = [
+                IndexedSplit(split, [Range(9, 9)])
+                for split in indexed_read.new_scan().plan().splits()
+            ]
+            result = indexed_read.new_read().to_arrow(indexed_splits)
+            self.assertEqual(result.num_rows, 1)
+            self.assertEqual(result.column('id').to_pylist(), [9])
+            self.assertEqual(
+                result.column('picture').to_pylist(), [b'raw-payload-9'])
 
 
 class GetBlobTest(unittest.TestCase):

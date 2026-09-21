@@ -82,7 +82,7 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
     }
 
     @Test
-    public void testPropagateColumnSequencesAcrossCompactions() throws Exception {
+    public void testPropagateWriteColsSequencesAcrossCompactions() throws Exception {
         write();
 
         int f0Id = getTableDefault().rowType().getField("f0").id();
@@ -93,22 +93,23 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
                         1,
                         CoreOptions.GlobalIndexColumnUpdateAction.IGNORE);
 
-        long f0Sequence = columnSequence(firstCompact, f0Id);
+        long f0Sequence = writeColSequence(firstCompact, f0Id);
         assertThat(f0Sequence).isLessThan(firstCompact.maxSequenceNumber());
-        assertThat(columnSequence(firstCompact, f1Id)).isEqualTo(firstCompact.maxSequenceNumber());
+        assertThat(writeColSequence(firstCompact, f1Id))
+                .isEqualTo(firstCompact.maxSequenceNumber());
 
         DataFileMeta secondCompact =
                 updateColumnsAndCompact(
                         Collections.singletonList("f1"),
                         2,
                         CoreOptions.GlobalIndexColumnUpdateAction.IGNORE);
-        assertThat(columnSequence(secondCompact, f0Id)).isEqualTo(f0Sequence);
-        assertThat(columnSequence(secondCompact, f1Id))
+        assertThat(writeColSequence(secondCompact, f0Id)).isEqualTo(f0Sequence);
+        assertThat(writeColSequence(secondCompact, f1Id))
                 .isEqualTo(secondCompact.maxSequenceNumber());
     }
 
     @Test
-    public void testOmitAndReconstructRedundantColumnSequences() throws Exception {
+    public void testOmitAndReconstructRedundantWriteColsSequences() throws Exception {
         write();
 
         DataFileMeta fullUpdate =
@@ -116,7 +117,7 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
                         Arrays.asList("f0", "f1"),
                         1,
                         CoreOptions.GlobalIndexColumnUpdateAction.IGNORE);
-        assertThat(fullUpdate.columnMaxSequenceNumbers()).isNull();
+        assertThat(fullUpdate.writeColsSequences()).isNull();
 
         int f0Id = getTableDefault().rowType().getField("f0").id();
         DataFileMeta partialUpdate =
@@ -124,13 +125,13 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
                         Collections.singletonList("f1"),
                         2,
                         CoreOptions.GlobalIndexColumnUpdateAction.IGNORE);
-        assertThat(columnSequence(partialUpdate, f0Id))
+        assertThat(writeColSequence(partialUpdate, f0Id))
                 .isEqualTo(fullUpdate.maxSequenceNumber())
                 .isLessThan(partialUpdate.maxSequenceNumber());
     }
 
     @Test
-    public void testOmitColumnSequencesUnlessUpdatesAreIgnored() throws Exception {
+    public void testOmitWriteColsSequencesUnlessUpdatesAreIgnored() throws Exception {
         write();
 
         DataFileMeta compacted =
@@ -138,7 +139,7 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
                         Collections.singletonList("f1"),
                         1,
                         CoreOptions.GlobalIndexColumnUpdateAction.THROW_ERROR);
-        assertThat(compacted.columnMaxSequenceNumbers()).isNull();
+        assertThat(compacted.writeColsSequences()).isNull();
     }
 
     @ParameterizedTest
@@ -221,9 +222,9 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
             assertThat(file.minSequenceNumber()).isEqualTo(original.minSequenceNumber());
             assertThat(file.maxSequenceNumber()).isEqualTo(maxSequenceNumber);
             if (updateColumn) {
-                assertThat(columnSequence(file, table.rowType().getField("f1").id()))
+                assertThat(writeColSequence(file, table.rowType().getField("f1").id()))
                         .isEqualTo(original.maxSequenceNumber());
-                assertThat(columnSequence(file, table.rowType().getField("f0").id()))
+                assertThat(writeColSequence(file, table.rowType().getField("f0").id()))
                         .isEqualTo(maxSequenceNumber);
             }
             nextRowId += file.rowCount();
@@ -793,12 +794,12 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
         return rowRangeFiles.get(0);
     }
 
-    private long columnSequence(DataFileMeta file, int fieldId) throws Exception {
+    private long writeColSequence(DataFileMeta file, int fieldId) throws Exception {
         TableSchema fileSchema = getTableDefault().schemaManager().schema(file.schemaId());
         boolean nestedFieldEnabled =
                 new CoreOptions(fileSchema.options()).dataEvolutionNestedFieldEnabled();
         List<DataField> fields = fileFields(fileSchema.fields(), file, nestedFieldEnabled);
-        long[] sequences = file.columnMaxSequenceNumbers();
+        long[] sequences = file.writeColsSequences();
         assertThat(sequences).hasSize(fields.size());
         for (int i = 0; i < fields.size(); i++) {
             if (fields.get(i).id() == fieldId) {

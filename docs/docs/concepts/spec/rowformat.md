@@ -182,11 +182,12 @@ To read a row by its zero-based row number within the file:
 
 1. **Read Footer**: Seek to file end - 32 bytes, read the 32-byte footer. Validate magic number.
 2. **Read Block Index**: Seek to `indexOffset`, read `indexLength` bytes, decode the three arrays. Compute block offsets by prefix sum of `blockCompressedSizes[]`.
-3. **Select Block**: Find block `b` where `blockRowStarts[b] <= rowNum < blockEnd`. For the last block, `blockEnd` is `totalRowCount`; otherwise it is `blockRowStarts[b + 1]`.
-4. **Read Block**: Seek to `blockOffset(b)`, read `blockCompressedSizes[b]` bytes.
-5. **Decompress**: ZSTD decompress into a buffer of size `blockUncompressedSizes[b]`.
-6. **Locate Row**: Compute `localIdx = rowNum - blockRowStarts[b]`. Read `offsets[localIdx]` from the offset array at the end of the decompressed block.
-7. **Deserialize**: Read the row starting at the computed offset using the row serialization format.
+3. **Check Consistency**: The three arrays must have the same length, that length must equal `blockCount`, and `blockCompressedSizes[]` must sum to `indexOffset`, because the blocks are written contiguously from position 0 and the index follows the last one. A reader that bounds its block loop by one of the two — the footer's `blockCount` or the index array length — must reject a file where they disagree rather than silently reading fewer blocks.
+4. **Select Block**: Find block `b` where `blockRowStarts[b] <= rowNum < blockEnd`. For the last block, `blockEnd` is `totalRowCount`; otherwise it is `blockRowStarts[b + 1]`.
+5. **Read Block**: Seek to `blockOffset(b)`, read `blockCompressedSizes[b]` bytes.
+6. **Decompress**: ZSTD decompress into a buffer of size `blockUncompressedSizes[b]`.
+7. **Locate Row**: Compute `localIdx = rowNum - blockRowStarts[b]`. Read `offsets[localIdx]` from the offset array at the end of the decompressed block.
+8. **Deserialize**: Read the row starting at the computed offset using the row serialization format.
 
 ## Projection
 

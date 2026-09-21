@@ -90,6 +90,14 @@ public class TopNDataSplitEvaluator {
         return results;
     }
 
+    /**
+     * Orders splits by their best row under the query's sort order and keeps the first {@code
+     * limit} ones. In the NULLS LAST branches a split whose sort column is provably all null
+     * ({@link RichSplit#allNull}, i.e. the null count equals the row count) is the worst candidate
+     * and sorts last. A null min/max that is not provably all-null means the bound is unknown — for
+     * example files written with {@code stats.mode=counts} — and {@link #ascCompare}/{@link
+     * #descCompare} order such a split first so it is read, conservatively.
+     */
     private List<DataSplit> pickTopNSplits(
             List<RichSplit> splits,
             DataType fieldType,
@@ -107,9 +115,12 @@ public class TopNDataSplitEvaluator {
                                 result = ascCompare(fieldType, x.min, y.min);
                             }
                         } else {
-                            result = ascCompare(fieldType, x.min, y.min);
+                            result = Boolean.compare(x.allNull, y.allNull);
                             if (result == 0) {
-                                result = nullsLastCompare(x.nullCount, y.nullCount);
+                                result = ascCompare(fieldType, x.min, y.min);
+                                if (result == 0) {
+                                    result = nullsLastCompare(x.nullCount, y.nullCount);
+                                }
                             }
                         }
                         return result;
@@ -124,9 +135,12 @@ public class TopNDataSplitEvaluator {
                                 result = descCompare(fieldType, x.max, y.max);
                             }
                         } else {
-                            result = descCompare(fieldType, x.max, y.max);
+                            result = Boolean.compare(x.allNull, y.allNull);
                             if (result == 0) {
-                                result = nullsLastCompare(x.nullCount, y.nullCount);
+                                result = descCompare(fieldType, x.max, y.max);
+                                if (result == 0) {
+                                    result = nullsLastCompare(x.nullCount, y.nullCount);
+                                }
                             }
                         }
                         return result;
@@ -141,7 +155,7 @@ public class TopNDataSplitEvaluator {
 
     private int nullsFirstCompare(Long left, Long right) {
         if (left == null) {
-            return -1;
+            return right == null ? 0 : -1;
         } else if (right == null) {
             return 1;
         } else {
@@ -151,7 +165,7 @@ public class TopNDataSplitEvaluator {
 
     private int nullsLastCompare(Long left, Long right) {
         if (left == null) {
-            return -1;
+            return right == null ? 0 : -1;
         } else if (right == null) {
             return 1;
         } else {
@@ -161,7 +175,7 @@ public class TopNDataSplitEvaluator {
 
     private int ascCompare(DataType type, Object left, Object right) {
         if (left == null) {
-            return -1;
+            return right == null ? 0 : -1;
         } else if (right == null) {
             return 1;
         } else {
@@ -171,7 +185,7 @@ public class TopNDataSplitEvaluator {
 
     private int descCompare(DataType type, Object left, Object right) {
         if (left == null) {
-            return -1;
+            return right == null ? 0 : -1;
         } else if (right == null) {
             return 1;
         } else {
@@ -191,12 +205,14 @@ public class TopNDataSplitEvaluator {
         private final Object min;
         private final Object max;
         private final Long nullCount;
+        private final boolean allNull;
 
         private RichSplit(DataSplit split, Object min, Object max, Long nullCount) {
             this.split = split;
             this.min = min;
             this.max = max;
             this.nullCount = nullCount;
+            this.allNull = nullCount != null && nullCount.longValue() == split.rowCount();
         }
 
         private DataSplit split() {

@@ -260,19 +260,26 @@ class SplitRead(ABC):
     def create_reader(self) -> RecordReader:
         """Create a record reader for the given split."""
 
-    # row_ranges: from IndexedSplit (ANN vector search), a list of discrete global row ID ranges.
+    # row_ranges: stable global row IDs for data-evolution reads.
+    # physical_row_ranges: file-local positions after resolving the table's
+    # IndexedSplit coordinate system.
     # shard_range: from SlicedSplit (parallel shard scan), a contiguous [start, end) row range within the file.
     def file_reader_supplier(self, file: DataFileMeta, for_merge_read: bool,
                              read_fields: List[str], row_tracking_enabled: bool,
                              row_ranges: Optional[List[Range]] = None,
+                             physical_row_ranges: Optional[List[Range]] = None,
                              shard_range: Optional[Tuple[int, int]] = None) -> RecordBatchReader:
+        if row_ranges is not None and physical_row_ranges is not None:
+            raise ValueError(
+                "row_ranges and physical_row_ranges cannot be used together")
         (
             read_file_fields,
             read_arrow_predicate,
             read_paimon_predicate,
         ) = self._get_fields_and_predicate(file.schema_id, read_fields)
         if (file.file_name in self.deletion_file_readers
-                or (for_merge_read and self.row_ranges is not None)):
+                or (for_merge_read and self.row_ranges is not None)
+                or physical_row_ranges is not None):
             # DVs and indexed PK ranges refer to physical file positions.
             # Filtering or skipping row groups here would renumber those rows.
             # Apply the residual predicate after position selection and merging.
@@ -286,18 +293,29 @@ class SplitRead(ABC):
         batch_size = self.table.options.read_batch_size()
 
         effective_row_ranges = None
+        row_range_base = file.first_row_id
         if row_ranges is not None:
             effective_row_ranges = Range.and_(row_ranges, [file.row_id_range()])
             if len(effective_row_ranges) == 0:
                 return EmptyRecordBatchReader()
+        elif physical_row_ranges is not None:
+            effective_row_ranges = Range.and_(
+                physical_row_ranges,
+                [Range(0, file.row_count - 1)],
+            )
+            row_range_base = 0
+            if len(effective_row_ranges) == 0:
+                return EmptyRecordBatchReader()
 
         row_sidecar_file = self._row_sidecar_file_name(file)
-        if row_sidecar_file is not None and self._should_read_row_sidecar(
-                file,
-                effective_row_ranges,
-                row_sidecar_file,
-                self.table.options.data_evolution_row_sidecar_max_selected_rows(),
-                self.table.options.data_evolution_row_sidecar_max_selection_ratio()):
+        if (physical_row_ranges is None
+                and row_sidecar_file is not None
+                and self._should_read_row_sidecar(
+                    file,
+                    effective_row_ranges,
+                    row_sidecar_file,
+                    self.table.options.data_evolution_row_sidecar_max_selected_rows(),
+                    self.table.options.data_evolution_row_sidecar_max_selection_ratio())):
             file_path = self._aligned_extra_file_path(file, row_sidecar_file)
             file_format = ROW_SIDECAR_FORMAT
 
@@ -314,7 +332,7 @@ class SplitRead(ABC):
                                  CoreOptions.FILE_FORMAT_ROW)
             if file_format in row_index_formats:
                 row_indices = [
-                    row_id - file.first_row_id
+                    row_id - row_range_base
                     for row_range in effective_row_ranges
                     for row_id in range(row_range.from_, row_range.to + 1)
                 ]
@@ -324,10 +342,10 @@ class SplitRead(ABC):
                 merged_ranges = Range.sort_and_merge_overlap(
                     effective_row_ranges, True)
                 for r in merged_ranges:
-                    start = max(0, r.from_ - file.first_row_id)
+                    start = max(0, r.from_ - row_range_base)
                     end = min(
                         file.row_count - 1,
-                        r.to - file.first_row_id,
+                        r.to - row_range_base,
                     )
                     if end >= start:
                         parquet_row_ranges.append((start, end))
@@ -525,10 +543,11 @@ class SplitRead(ABC):
                 target_data_fields=target_fields)
 
         # For non-Vortex formats, wrap with RowIdFilterRecordBatchReader
-        if (row_ranges is not None
+        if (effective_row_ranges is not None
                 and row_indices is None
                 and parquet_row_ranges is None):
-            reader = RowIdFilterRecordBatchReader(reader, file.first_row_id, effective_row_ranges)
+            reader = RowIdFilterRecordBatchReader(
+                reader, row_range_base, effective_row_ranges)
 
         # For formats without native shard support, wrap with ShardBatchReader
         if shard_range is not None and file_format not in (
@@ -859,6 +878,63 @@ class SplitRead(ABC):
                         self.table.file_io, df)
 
 
+def _split_local_row_ranges_by_file(
+        files: List[DataFileMeta],
+        row_ranges: List[Range]) -> Dict[str, List[Range]]:
+    """Map split-local physical positions to file-local ranges.
+
+    The split coordinate is the concatenation of ``files`` in list order for
+    tables without row tracking, matching the native reader.
+    """
+    ranges_by_file = {}
+    split_offset = 0
+    for file in files:
+        selected = Range.and_(
+            row_ranges,
+            [Range(split_offset, split_offset + file.row_count - 1)],
+        )
+        ranges_by_file[file.file_name] = [
+            Range(row_range.from_ - split_offset,
+                  row_range.to - split_offset)
+            for row_range in selected
+        ]
+        split_offset += file.row_count
+    return ranges_by_file
+
+
+def _row_ranges_by_file(
+        files: List[DataFileMeta],
+        row_ranges: List[Range],
+        ranges_use_row_ids: bool) -> Dict[str, List[Range]]:
+    """Map table-path row ranges to file-local physical positions.
+
+    Row-tracked append tables use stable global row IDs. Tables without row
+    tracking use the split-local concatenation handled by
+    :func:`_split_local_row_ranges_by_file`.
+    """
+    if not ranges_use_row_ids:
+        return _split_local_row_ranges_by_file(files, row_ranges)
+
+    ranges_by_file = {}
+    for file in files:
+        if file.first_row_id is None:
+            raise ValueError(
+                "Row-tracked file '%s' is missing first_row_id"
+                % file.file_name
+            )
+        first_row_id = file.first_row_id
+        selected = Range.and_(
+            row_ranges,
+            [Range(first_row_id, first_row_id + file.row_count - 1)],
+        )
+        ranges_by_file[file.file_name] = [
+            Range(row_range.from_ - first_row_id,
+                  row_range.to - first_row_id)
+            for row_range in selected
+        ]
+    return ranges_by_file
+
+
 class RawFileSplitRead(SplitRead):
     def __init__(
             self,
@@ -871,6 +947,16 @@ class RawFileSplitRead(SplitRead):
             outer_flat_read_type: Optional[List[DataField]] = None,
             limit: Optional[int] = None,
             _blob_view_prescan: bool = False):
+        self._physical_row_ranges = {}
+        actual_split = split
+        if isinstance(split, IndexedSplit):
+            self._physical_row_ranges = _row_ranges_by_file(
+                split.files,
+                split.row_ranges(),
+                row_tracking_enabled,
+            )
+            actual_split = split.data_split()
+        # Nested-leaf projection is NOT pushed down by name: a leaf path is
         # only valid against the latest schema, while each data file stores
         # its own (possibly renamed / retyped) sub-fields. Instead the read
         # widens to the full top-level columns, which the per-file field-id
@@ -880,7 +966,7 @@ class RawFileSplitRead(SplitRead):
             table=table,
             predicate=predicate,
             read_type=read_type,
-            split=split,
+            split=actual_split,
             row_tracking_enabled=row_tracking_enabled,
             nested_name_paths=None,
             limit=limit)
@@ -901,10 +987,17 @@ class RawFileSplitRead(SplitRead):
             limit=self._blob_view_prescan_limit(),
             _blob_view_prescan=True,
         )
+        # self.split is already unwrapped from IndexedSplit. Keep its physical
+        # selection so LIMIT preloads the same views as the main reader.
+        prescan_read._physical_row_ranges = self._physical_row_ranges
         return prescan_read.create_reader()
 
     def raw_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> Optional[RecordReader]:
         read_fields = self._get_final_read_data_fields()
+        physical_row_ranges = getattr(
+            self, '_physical_row_ranges', {}).get(file.file_name)
+        if physical_row_ranges == []:
+            return None
         # Check if this is a SlicedSplit to get shard_file_idx_map
         shard_file_idx_map = (
             self.split.shard_file_idx_map() if isinstance(self.split, SlicedSplit) else {}
@@ -918,16 +1011,27 @@ class RawFileSplitRead(SplitRead):
                 for_merge_read=False,
                 read_fields=read_fields,
                 row_tracking_enabled=True,
+                physical_row_ranges=physical_row_ranges,
                 shard_range=(start_pos, end_pos))
         else:
             file_batch_reader = self.file_reader_supplier(
                 file=file,
                 for_merge_read=False,
                 read_fields=read_fields,
-                row_tracking_enabled=True)
+                row_tracking_enabled=True,
+                physical_row_ranges=physical_row_ranges)
         dv = dv_factory() if dv_factory else None
         if dv:
-            if file.file_name in shard_file_idx_map:
+            if physical_row_ranges is not None:
+                dv = PositionMappedDeletionVector(
+                    dv,
+                    row_positions=[
+                        position
+                        for row_range in physical_row_ranges
+                        for position in range(row_range.from_, row_range.to + 1)
+                    ],
+                )
+            elif file.file_name in shard_file_idx_map:
                 dv = PositionMappedDeletionVector(
                     dv,
                     file_offset=start_pos,
@@ -961,6 +1065,7 @@ class RawFileSplitRead(SplitRead):
                 and (self.table.is_primary_key_table
                      or not self._arrow_filter_pushdown_enabled
                      or self.deletion_file_readers
+                     or self._physical_row_ranges
                      or any(file.schema_id != self.table.table_schema.id
                             for file in self.split.files))):
             reader = FilterRecordBatchReader(

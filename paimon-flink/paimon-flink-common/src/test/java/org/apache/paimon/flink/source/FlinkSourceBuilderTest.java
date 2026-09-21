@@ -24,15 +24,19 @@ import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.source.operator.MonitorSource;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.QueryAuthSplit;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.runtime.plugable.SerializationDelegate;
@@ -51,13 +55,21 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Answers.RETURNS_SELF;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Test for {@link FlinkSourceBuilder}. */
 public class FlinkSourceBuilderTest {
@@ -107,6 +119,110 @@ public class FlinkSourceBuilderTest {
     }
 
     @Test
+    public void testSplitFileSizeOrRowCountUsesDataSplitFileSize() {
+        FileStoreSourceSplit split =
+                new FileStoreSourceSplit(
+                        "split-1",
+                        DataSplit.builder()
+                                .withSnapshot(1L)
+                                .withPartition(org.apache.paimon.data.BinaryRow.EMPTY_ROW)
+                                .withBucket(0)
+                                .withBucketPath("bucket-0")
+                                .withDataFiles(
+                                        Arrays.asList(
+                                                dataFile("file-1", 10L, 1L),
+                                                dataFile("file-2", 25L, 1000L)))
+                                .build());
+
+        assertThat(SplitWeightUtils.splitFileSizeOrRowCount(split)).isEqualTo(35L);
+    }
+
+    @Test
+    public void testSplitFileSizeOrRowCountUnwrapsQueryAuthSplit() {
+        DataSplit dataSplit =
+                DataSplit.builder()
+                        .withSnapshot(1L)
+                        .withPartition(org.apache.paimon.data.BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(
+                                Arrays.asList(
+                                        dataFile("file-1", 10L, 1L),
+                                        dataFile("file-2", 25L, 1000L)))
+                        .build();
+        FileStoreSourceSplit split =
+                new FileStoreSourceSplit("split-1", new QueryAuthSplit(dataSplit, null));
+
+        assertThat(SplitWeightUtils.splitFileSizeOrRowCount(split)).isEqualTo(35L);
+    }
+
+    @Test
+    public void testSplitFileSizeOrRowCountFallsBackToRowCount() {
+        FileStoreSourceSplit split = new FileStoreSourceSplit("split-1", new TestSplit(123L));
+
+        assertThat(SplitWeightUtils.splitFileSizeOrRowCount(split)).isEqualTo(123L);
+    }
+
+    private static DataFileMeta dataFile(String fileName, long fileSize, long rowCount) {
+        return DataFileMeta.forAppend(
+                fileName,
+                fileSize,
+                rowCount,
+                null,
+                0L,
+                0L,
+                0L,
+                Collections.emptyList(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+    }
+
+    private static class TestSplit implements Split {
+
+        private final long rowCount;
+
+        private TestSplit(long rowCount) {
+            this.rowCount = rowCount;
+        }
+
+        @Override
+        public long rowCount() {
+            return rowCount;
+        }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.of(rowCount);
+        }
+    }
+
+    @Test
+    public void testFileSizeWeightModeOnlyWorksWithFairAssignMode() throws Exception {
+        Table table = createTable("file_size_preemptive", false, 2, false);
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_WEIGHT_MODE.key(),
+                FlinkConnectorOptions.SplitWeightMode.FILE_SIZE.toString());
+        options.put(
+                FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE.key(),
+                FlinkConnectorOptions.SplitAssignMode.PREEMPTIVE.toString());
+        table = table.copy(options);
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        FlinkSourceBuilder builder = new FlinkSourceBuilder(table).env(env).sourceBounded(true);
+
+        assertThatThrownBy(builder::build)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_WEIGHT_MODE.key())
+                .hasMessageContaining(
+                        FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE.key());
+    }
+
+    @Test
     public void testUnawareBucket() throws Exception {
         // pk table && bucket-append-ordered is true
         Table table = createTable("t1", true, 2, true);
@@ -151,6 +267,26 @@ public class FlinkSourceBuilderTest {
         SourceTransformation<?, ?, ?> transformation =
                 (SourceTransformation<?, ?, ?>) dataStream.getTransformation();
         assertThat(transformation.getSource()).isInstanceOf(PaimonDataStreamSource.class);
+    }
+
+    @Test
+    public void testLongLimitForwardedToReadBuilder() {
+        Table table = mock(Table.class);
+        when(table.name()).thenReturn("table");
+        when(table.options())
+                .thenReturn(Collections.singletonMap("path", tempDir.toUri().toString()));
+        when(table.primaryKeys()).thenReturn(Collections.emptyList());
+        when(table.rowType()).thenReturn(RowType.of(DataTypes.INT()));
+        ReadBuilder readBuilder = mock(ReadBuilder.class, RETURNS_SELF);
+        when(table.newReadBuilder()).thenReturn(readBuilder);
+
+        new FlinkSourceBuilder(table)
+                .env(StreamExecutionEnvironment.getExecutionEnvironment())
+                .sourceBounded(true)
+                .limit(4294967297L)
+                .build();
+
+        verify(readBuilder).withLimit(4294967297L);
     }
 
     @Test

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import pyarrow as pa
 
+from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import BlobConsumer
@@ -53,13 +54,13 @@ class TableWrite:
         )
 
     def write_arrow(self, table: pa.Table):
-        self._validate_pyarrow_schema(table.schema)
+        table = self._prepare_arrow_data(table)
         batches_iterator = table.to_batches()
         for batch in batches_iterator:
             self.write_arrow_batch(batch)
 
     def write_arrow_batch(self, data: pa.RecordBatch):
-        self._validate_pyarrow_schema(data.schema)
+        data = self._prepare_arrow_data(data)
 
         for partition, bucket, row_indices in \
                 self.row_key_extractor.extract_partition_bucket_groups(data):
@@ -141,7 +142,7 @@ class TableWrite:
         if not isinstance(self.row_key_extractor, DynamicBucketRowKeyExtractor):
             if bucket_mode == BucketMode.HASH_DYNAMIC:
                 raise RuntimeError("Dynamic bucket extractor is not configured")
-        self._validate_pyarrow_schema(data.schema)
+        data = self._prepare_arrow_data(data)
         if bucket_mode == BucketMode.HASH_DYNAMIC:
             if key_hashes is None:
                 partition = self.row_key_extractor.notify_precomputed_bucket_batch(
@@ -344,6 +345,10 @@ class TableWrite:
         if release is not None:
             release()
 
+    def _prepare_arrow_data(self, data):
+        self._validate_pyarrow_schema(data.schema)
+        return normalize_arrow_strings(data)
+
     def _validate_pyarrow_schema(self, data_schema: pa.Schema):
         if self._is_compatible_pyarrow_schema(data_schema, self.table_pyarrow_schema):
             return
@@ -358,18 +363,8 @@ class TableWrite:
 
     def _is_compatible_pyarrow_schema(
             self, data_schema: pa.Schema, expected_schema: pa.Schema) -> bool:
-        # Allow compatible binary types: binary, fixed_size_binary[N] are interchangeable
-        if data_schema.names != expected_schema.names:
-            return False
-        for i in range(len(data_schema)):
-            input_type = data_schema.field(i).type
-            expected_type = expected_schema.field(i).type
-            if input_type == expected_type:
-                continue
-            if self._is_binary_family(input_type) and self._is_binary_family(expected_type):
-                continue
-            return False
-        return True
+        return arrow_schemas_compatible(
+            data_schema, expected_schema, check_top_level_nullability=False, allow_binary_compatibility=True)
 
     def _write_cols_pyarrow_schema(self, write_cols: List[str]) -> pa.Schema:
         table_fields = {
@@ -382,10 +377,6 @@ class TableWrite:
                          f"Input schema is: {data_schema} "
                          f"Table schema is: {self.table_pyarrow_schema} "
                          f"Write cols is: {self.file_store_write.write_cols}")
-
-    @staticmethod
-    def _is_binary_family(arrow_type) -> bool:
-        return pa.types.is_binary(arrow_type) or pa.types.is_fixed_size_binary(arrow_type)
 
 
 class BatchTableWrite(TableWrite):

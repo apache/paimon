@@ -16,6 +16,9 @@
 # under the License.
 
 import datetime
+import importlib.util
+import io
+import json
 import os
 import pickle
 import tempfile
@@ -26,11 +29,14 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.read.native_plan import (
     native_family_search_modes_available, native_method_available, native_read,
-    native_reader_available,
+    native_reader_available, native_split_bridge_available,
+    native_split_from_python,
 )
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.blob import BlobDescriptor, BlobRef
 from pypaimon.utils.range import Range
 
@@ -49,6 +55,23 @@ def _has_native_row_ranges():
     except ImportError:
         return False
     return hasattr(ReadBuilder, 'with_row_ranges')
+
+
+def _mosaic_supports_nested_row():
+    if importlib.util.find_spec('mosaic') is None:
+        return False
+
+    import mosaic
+
+    schema = pa.schema([('nested', pa.struct([('value', pa.int32())]))])
+    table = pa.Table.from_pylist([{'nested': {'value': 1}}], schema=schema)
+    try:
+        mosaic.write_table(table, io.BytesIO())
+    except RuntimeError as error:
+        if 'unsupported DataType: Struct' in str(error):
+            return False
+        raise
+    return True
 
 
 @pytest.mark.native_plan
@@ -183,6 +206,112 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(streamed, rows)
         self.assertTrue(builder.explain().native_planned)
 
+    @unittest.skipUnless(native_split_bridge_available(),
+                         "pypaimon-rust split bridge API not installed")
+    def test_native_read_bridges_python_planned_splits(self):
+        self.cat.create_table(
+            'default.python_plan_native_read',
+            Schema.from_pyarrow_schema(self.schema), False)
+        self._write('python_plan_native_read', [
+            {'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}, {'k': 3, 'v': 'c'}])
+        table = self.cat.get_table('default.python_plan_native_read').copy({
+            'read.native.enabled': 'true',
+        })
+        builder = table.new_read_builder().with_projection(['k'])
+        scan = builder.new_scan()
+        # Force the capability branch that motivates this bridge: Python owns
+        # planning, while Rust still performs the physical read.
+        with patch.object(scan, '_native_plan_supported', return_value=False):
+            plan = scan.plan()
+        self.assertTrue(plan.splits())
+        self.assertTrue(all(
+            getattr(split, '_native_split', None) is None
+            for split in plan.splits()))
+
+        with patch(
+                'pypaimon.read.native_plan.native_split_from_python',
+                wraps=native_split_from_python) as bridge, patch(
+                    'pypaimon.read.native_plan.native_read',
+                    wraps=native_read) as rust_read, patch(
+                        'pypaimon.read.table_read.TableRead._create_split_read',
+                        side_effect=AssertionError('Python reader was used')):
+            rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+
+        self.assertEqual(rows, [{'k': 1}, {'k': 2}, {'k': 3}])
+        self.assertEqual(bridge.call_count, len(plan.splits()))
+        self.assertGreaterEqual(rust_read.call_count, 1)
+
+    @unittest.skipUnless(native_split_bridge_available(),
+                         "pypaimon-rust split bridge API not installed")
+    def test_native_read_bridges_python_indexed_data_evolution_split(self):
+        self.cat.create_table(
+            'default.python_indexed_native_read',
+            Schema.from_pyarrow_schema(self.schema, options={
+                'data-evolution.enabled': 'true',
+                'row-tracking.enabled': 'true',
+            }), False)
+        self._write('python_indexed_native_read', [
+            {'k': 10, 'v': 'a'}, {'k': 20, 'v': 'b'}, {'k': 30, 'v': 'c'}])
+        table = self.cat.get_table('default.python_indexed_native_read').copy({
+            'read.native.enabled': 'true',
+        })
+        builder = table.new_read_builder()
+        scan = builder.new_scan().with_row_ranges([Range(1, 1)])
+        with patch.object(scan, '_native_plan_supported', return_value=False):
+            plan = scan.plan()
+
+        with patch(
+                'pypaimon.read.table_read.TableRead._create_split_read',
+                side_effect=AssertionError('Python reader was used')), patch(
+                    'pypaimon.read.native_plan.native_read',
+                    wraps=native_read) as rust_read:
+            rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+
+        self.assertEqual(rows, [{'k': 20, 'v': 'b'}])
+        self.assertGreaterEqual(rust_read.call_count, 1)
+
+    def test_query_auth_uses_python_plan_and_reader(self):
+        self.cat.create_table(
+            'default.query_auth_native_read',
+            Schema.from_pyarrow_schema(self.schema), False)
+        self._write('query_auth_native_read', [
+            {'k': 1, 'v': 'sales'},
+            {'k': 2, 'v': 'eng'},
+            {'k': 3, 'v': 'eng'},
+        ])
+        table = self.cat.get_table('default.query_auth_native_read').copy({
+            'read.native.enabled': 'true',
+        })
+        auth_filter = json.dumps({
+            'kind': 'LEAF',
+            'transform': {
+                'name': 'FIELD_REF',
+                'fieldRef': {'index': 1, 'name': 'v', 'type': 'STRING'},
+            },
+            'function': 'EQUAL',
+            'literals': ['eng'],
+        })
+        auth = TableQueryAuthResult(
+            [auth_filter], {'k': json.dumps({'name': 'NULL'})})
+        table.catalog_environment.table_query_auth = (
+            lambda options, identifier: lambda select: auth)
+        builder = table.new_read_builder().with_projection(['k']).with_limit(1)
+        plan = builder.new_scan().plan()
+        self.assertTrue(all(
+            split.__class__.__name__ == 'QueryAuthSplit'
+            for split in plan.splits()))
+
+        with patch(
+                'pypaimon.read.native_plan.native_read',
+                wraps=native_read) as rust_read:
+            rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+            streamed = builder.new_read().to_arrow_batch_reader(
+                plan.splits()).read_all().to_pylist()
+
+        self.assertEqual(rows, [{'k': None}])
+        self.assertEqual(streamed, rows)
+        rust_read.assert_not_called()
+
     @unittest.skipUnless(native_reader_available(),
                          "pypaimon-rust native reader API not installed")
     def test_native_read_uses_effective_split_parallelism(self):
@@ -262,11 +391,312 @@ class NativePlanIntegrationTest(unittest.TestCase):
         with patch(
                 'pypaimon.read.table_read.TableRead._create_split_read',
                 side_effect=AssertionError('Python reader was used')):
+            native_read_instance = builder.new_read()
             native = sorted(
-                builder.new_read().to_arrow(plan.splits()).to_pylist(),
+                native_read_instance.to_arrow(plan.splits()).to_pylist(),
                 key=lambda row: row['k'])
+            native_read_instance.include_row_kind = True
+            with_row_kind = native_read_instance.to_arrow(
+                plan.splits()).to_pylist()
 
         self.assertEqual(native, normal)
+        self.assertEqual(
+            {row['_row_kind'] for row in with_row_kind}, {'+I'})
+        self.assertEqual(
+            sorted(({key: value for key, value in row.items()
+                     if key != '_row_kind'} for row in with_row_kind),
+                   key=lambda row: row['k']),
+            normal,
+        )
+
+    @unittest.skipUnless(
+        native_method_available('ReadBuilder', 'with_nested_projection'),
+        "pypaimon-rust nested native reader API not installed")
+    def test_native_read_nested_rows_and_map_keys_across_formats(self):
+        base_fields = [
+            ('id', pa.int64()),
+            ('payload', pa.struct([
+                ('details', pa.struct([
+                    ('score', pa.int32()),
+                    ('label', pa.string()),
+                ])),
+                ('ignored', pa.string()),
+            ])),
+        ]
+        rows = [
+            {'id': 1,
+             'payload': {'details': {'score': 7, 'label': 'a'}, 'ignored': 'x'},
+             'attrs': {'selected': 10, 'other': 11},
+             'top.with.dot': 'first'},
+            {'id': 2, 'payload': None, 'attrs': None, 'top.with.dot': 'second'},
+            {'id': 3,
+             'payload': {'details': None, 'ignored': 'z'},
+             'attrs': {},
+             'top.with.dot': 'third'},
+        ]
+        formats = ['parquet', 'orc', 'avro', 'row']
+        if _mosaic_supports_nested_row():
+            formats.append('mosaic')
+        for file_format in formats:
+            with self.subTest(file_format=file_format):
+                # PyPaimon's Avro writer has no MAP conversion; it still covers
+                # recursive ROW pruning. Other formats also exercise literal
+                # MAP-key extraction from the native batch.
+                include_map = file_format != 'avro'
+                include_dotted_name = file_format != 'avro'
+                nested_schema = pa.schema(
+                    base_fields
+                    + ([('attrs', pa.map_(pa.string(), pa.int32()))]
+                       if include_map else [])
+                    + ([('top.with.dot', pa.string())]
+                       if include_dotted_name else []))
+                projection = ['payload.details.score']
+                if include_map:
+                    projection.append("attrs['selected']")
+                if include_dotted_name:
+                    projection.append('top.with.dot')
+                projection.append('id')
+                expected = [
+                    {'payload_details_score': 7,
+                     'top.with.dot': 'first', 'id': 1},
+                    {'payload_details_score': None,
+                     'top.with.dot': 'second', 'id': 2},
+                    {'payload_details_score': None,
+                     'top.with.dot': 'third', 'id': 3},
+                ]
+                if include_map:
+                    for expected_row, value in zip(expected, [10, None, None]):
+                        expected_row['attrs_selected'] = value
+                if not include_dotted_name:
+                    for expected_row in expected:
+                        expected_row.pop('top.with.dot')
+                name = 'native_nested_' + file_format
+                options = {'file.format': file_format, 'bucket': '-1'}
+                if file_format == 'parquet':
+                    options.update({
+                        'fields.attrs.map.storage-layout': 'shared-shredding',
+                        'fields.attrs.map.shared-shredding.max-columns': '2',
+                    })
+                self.cat.create_table(
+                    'default.' + name,
+                    Schema.from_pyarrow_schema(
+                        nested_schema, options=options),
+                    False,
+                )
+                table = self.cat.get_table('default.' + name)
+                write_builder = table.new_batch_write_builder()
+                write = write_builder.new_write()
+                write.write_arrow(pa.Table.from_pylist(rows, schema=nested_schema))
+                write_builder.new_commit().commit(write.prepare_commit())
+                write.close()
+
+                native_table = table.copy({
+                    'scan.native-plan.enabled': 'true',
+                    'read.native.enabled': 'true',
+                })
+                builder = native_table.new_read_builder().with_projection(
+                    projection)
+                plan = builder.new_scan().plan()
+                with patch(
+                        'pypaimon.read.table_read.TableRead._create_split_read',
+                        side_effect=AssertionError(
+                            'nested native read fell back to Python')):
+                    actual = builder.new_read().to_arrow(
+                        plan.splits(), parallelism=2).to_pylist()
+
+                self.assertEqual(actual, expected)
+
+    @unittest.skipUnless(
+        native_method_available('ReadBuilder', 'with_nested_projection'),
+        "pypaimon-rust nested native reader API not installed")
+    def test_native_read_nested_projection_after_primary_key_merge(self):
+        nested_schema = pa.schema([
+            ('id', pa.int64()),
+            ('payload', pa.struct([
+                ('score', pa.int32()),
+                ('ignored', pa.string()),
+            ])),
+        ])
+        self.cat.create_table(
+            'default.native_nested_pk',
+            Schema.from_pyarrow_schema(
+                nested_schema, primary_keys=['id'], options={'bucket': '1'}),
+            False,
+        )
+        table = self.cat.get_table('default.native_nested_pk')
+        for rows in (
+            [{'id': 1, 'payload': {'score': 1, 'ignored': 'old'}},
+             {'id': 2, 'payload': {'score': 2, 'ignored': 'keep'}}],
+            [{'id': 1, 'payload': {'score': 10, 'ignored': 'new'}}],
+        ):
+            write_builder = table.new_batch_write_builder()
+            write = write_builder.new_write()
+            write.write_arrow(pa.Table.from_pylist(rows, schema=nested_schema))
+            write_builder.new_commit().commit(write.prepare_commit())
+            write.close()
+
+        native_table = table.copy({
+            'scan.native-plan.enabled': 'true',
+            'read.native.enabled': 'true',
+        })
+        builder = native_table.new_read_builder().with_projection(
+            ['id', 'payload.score'])
+        plan = builder.new_scan().plan()
+        with patch(
+                'pypaimon.read.table_read.TableRead._create_split_read',
+                side_effect=AssertionError('nested PK native read fell back')):
+            actual = sorted(
+                builder.new_read().to_arrow(plan.splits()).to_pylist(),
+                key=lambda row: row['id'])
+
+        self.assertEqual(actual, [
+            {'id': 1, 'payload_score': 10},
+            {'id': 2, 'payload_score': 2},
+        ])
+
+    @unittest.skipUnless(
+        native_method_available('ReadBuilder', 'with_nested_projection'),
+        "pypaimon-rust nested native reader API not installed")
+    def test_native_nested_projection_after_partial_update_merge(self):
+        nested_schema = pa.schema([
+            ('id', pa.int64()),
+            ('payload', pa.struct([
+                ('score', pa.int32()),
+                ('ignored', pa.string()),
+            ])),
+        ])
+        self.cat.create_table(
+            'default.native_nested_partial_update',
+            Schema.from_pyarrow_schema(
+                nested_schema,
+                primary_keys=['id'],
+                options={'bucket': '1', 'merge-engine': 'partial-update'},
+            ),
+            False,
+        )
+        table = self.cat.get_table('default.native_nested_partial_update')
+        for rows in (
+            [{'id': 1, 'payload': {'score': 1, 'ignored': 'old'}},
+             {'id': 2, 'payload': {'score': 2, 'ignored': 'keep'}}],
+            [{'id': 1, 'payload': {'score': 10, 'ignored': 'new'}}],
+        ):
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_write.write_arrow(pa.Table.from_pylist(rows, schema=nested_schema))
+            write_builder.new_commit().commit(table_write.prepare_commit())
+            table_write.close()
+
+        native_table = table.copy({
+            'scan.native-plan.enabled': 'true',
+            'read.native.enabled': 'true',
+        })
+        builder = native_table.new_read_builder().with_projection(
+            ['id', 'payload.score'])
+        plan = builder.new_scan().plan()
+        with patch(
+                'pypaimon.read.table_read.TableRead._create_split_read',
+                side_effect=AssertionError(
+                    'nested partial-update native read fell back')):
+            actual = sorted(
+                builder.new_read().to_arrow(plan.splits()).to_pylist(),
+                key=lambda row: row['id'])
+
+        self.assertEqual(actual, [
+            {'id': 1, 'payload_score': 10},
+            {'id': 2, 'payload_score': 2},
+        ])
+
+    @unittest.skipUnless(
+        native_method_available('ReadBuilder', 'with_nested_projection'),
+        "pypaimon-rust nested native reader API not installed")
+    def test_native_nested_projection_across_schema_rename_filter_and_limit(self):
+        name = 'default.native_nested_evolution'
+        old_schema = pa.schema([
+            ('id', pa.int64()),
+            ('payload', pa.struct([
+                ('old_score', pa.int32()),
+                ('ignored', pa.string()),
+            ])),
+        ])
+        self.cat.create_table(
+            name,
+            Schema.from_pyarrow_schema(old_schema, options={
+                'bucket': '-1',
+                'data-evolution.enabled': 'true',
+                'row-tracking.enabled': 'true',
+                'file.format': 'parquet',
+            }),
+            False,
+        )
+
+        def write(table, schema, rows):
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_write.write_arrow(pa.Table.from_pylist(rows, schema=schema))
+            write_builder.new_commit().commit(table_write.prepare_commit())
+            table_write.close()
+
+        table = self.cat.get_table(name)
+        write(table, old_schema, [
+            {'id': 1, 'payload': {'old_score': 10, 'ignored': 'old-1'}},
+            {'id': 2, 'payload': {'old_score': 20, 'ignored': 'old-2'}},
+        ])
+        self.cat.alter_table(
+            name,
+            [SchemaChange.rename_column(['payload', 'old_score'], 'score')],
+            False,
+        )
+        new_schema = pa.schema([
+            ('id', pa.int64()),
+            ('payload', pa.struct([
+                ('score', pa.int32()),
+                ('ignored', pa.string()),
+            ])),
+        ])
+        table = self.cat.get_table(name)
+        write(table, new_schema, [
+            {'id': 3, 'payload': {'score': 30, 'ignored': 'new-3'}},
+            {'id': 4, 'payload': None},
+        ])
+
+        native_table = table.copy({
+            'scan.native-plan.enabled': 'true',
+            'read.native.enabled': 'true',
+            'read.parallelism': '3',
+        })
+        builder = native_table.new_read_builder().with_projection(
+            ['payload.score', 'id'])
+        predicate = builder.new_predicate_builder().greater_or_equal('id', 2)
+        builder.with_filter(predicate)
+        plan = builder.new_scan().plan()
+        with patch(
+                'pypaimon.read.table_read.TableRead._create_split_read',
+                side_effect=AssertionError(
+                    'evolved nested native read fell back to Python')):
+            actual = sorted(
+                builder.new_read().to_arrow(
+                    plan.splits(), parallelism=3).to_pylist(),
+                key=lambda row: row['id'],
+            )
+
+        self.assertEqual(actual, [
+            {'payload_score': 20, 'id': 2},
+            {'payload_score': 30, 'id': 3},
+            {'payload_score': None, 'id': 4},
+        ])
+
+        limited = native_table.new_read_builder().with_projection(
+            ['payload.score', 'id']).with_limit(2)
+        limited_plan = limited.new_scan().plan()
+        with patch(
+                'pypaimon.read.table_read.TableRead._create_split_read',
+                side_effect=AssertionError(
+                    'limited nested native read fell back to Python')):
+            limited_rows = limited.new_read().to_arrow(
+                limited_plan.splits(), parallelism=3).to_pylist()
+        self.assertEqual(len(limited_rows), 2)
+        self.assertTrue(all(set(row) == {'payload_score', 'id'}
+                            for row in limited_rows))
 
     def test_append_distribution_matches_interleaved_partition_buckets(self):
         self.schema = pa.schema([('k', pa.int64()), ('v', pa.string()), ('p', pa.string())])
@@ -898,7 +1328,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         with patch('pypaimon.read.native_plan.native_read',
                    wraps=native_read) as read:
             rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
-        read.assert_not_called()
+        self.assertEqual(read.call_count, len(plan.splits()))
         self.assertEqual(sorted(rows, key=lambda row: row['k']), [
             {'k': 1, 'p': 'a/b'},
             {'k': 2, 'p': 'a/b'},

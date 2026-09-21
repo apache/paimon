@@ -185,6 +185,45 @@ class AuthFilterReader(RecordBatchReader):
         self._inner.close()
 
 
+def compile_auth_masking_rules(masking_rules: Dict[str, str], read_fields: List):
+    """Parse and validate masking transforms for batch and native readers."""
+    read_field_names = {f.name for f in read_fields}
+    parsed = {}
+    for col, transform_json in masking_rules.items():
+        if col not in read_field_names or not transform_json:
+            continue
+        transform = json.loads(transform_json)
+        if transform is not None:
+            parsed[col] = transform
+    for col_name, transform in parsed.items():
+        for ref_name in _collect_all_field_refs_from_transform(transform):
+            if ref_name not in read_field_names:
+                raise RuntimeError(
+                    f"Column masking refers to field '{ref_name}' which is not present "
+                    f"in output row type. Available fields: {read_field_names}"
+                )
+    return parsed
+
+
+def apply_auth_masking(batch: pa.RecordBatch, parsed_rules: Dict[str, dict]):
+    """Apply compiled masking rules against the same original input batch."""
+    original_batch = batch
+    masked_columns = {}
+    for col_name, transform in parsed_rules.items():
+        if col_name in original_batch.schema.names:
+            col_idx = original_batch.schema.get_field_index(col_name)
+            target_col_type = original_batch.schema.field(col_idx).type
+            masked_columns[col_idx] = _apply_predicate_transform(
+                transform, original_batch, null_type=target_col_type)
+    for col_idx, masked_array in masked_columns.items():
+        original_field = original_batch.schema.field(col_idx)
+        batch = batch.set_column(
+            col_idx,
+            pa.field(original_field.name, masked_array.type, nullable=True),
+            masked_array)
+    return batch
+
+
 class AuthMaskingReader(RecordBatchReader):
 
     def __init__(self, inner_reader: RecordBatchReader, masking_rules: Dict[str, str], read_fields: List):
@@ -192,57 +231,18 @@ class AuthMaskingReader(RecordBatchReader):
         self._masking_rules = masking_rules
         self._read_fields = read_fields
         self._adopt_metadata(inner_reader)
-        read_field_names = {f.name for f in read_fields}
-        parsed = {}
-        for col, tj in masking_rules.items():
-            if col not in read_field_names:
-                continue
-            if not tj:
-                continue
-            transform = json.loads(tj)
-            if transform is None:
-                continue
-            parsed[col] = transform
-        self._parsed_rules = parsed
-        for col_name, transform in self._parsed_rules.items():
-            for ref_name in _collect_all_field_refs_from_transform(transform):
-                if ref_name not in read_field_names:
-                    raise RuntimeError(
-                        f"Column masking refers to field '{ref_name}' which is not present "
-                        f"in output row type. Available fields: {read_field_names}"
-                    )
+        self._parsed_rules = compile_auth_masking_rules(
+            masking_rules, read_fields)
 
     def read_arrow_batch(self) -> Optional[pa.RecordBatch]:
         batch = self._inner.read_arrow_batch()
         if batch is None:
             return None
         self._refresh_blob_view_lookup(self._inner)
-        original_batch = batch
-        masked_columns = {}
-        for col_name, transform in self._parsed_rules.items():
-            if col_name in original_batch.schema.names:
-                col_idx = original_batch.schema.get_field_index(col_name)
-                target_col_type = original_batch.schema.field(col_idx).type
-                masked_columns[col_idx] = self._apply_masking_transform(transform, original_batch, target_col_type)
-        for col_idx, masked_array in masked_columns.items():
-            original_field = original_batch.schema.field(col_idx)
-            batch = batch.set_column(
-                col_idx,
-                pa.field(original_field.name, masked_array.type, nullable=True),
-                masked_array)
-        return batch
+        return apply_auth_masking(batch, self._parsed_rules)
 
     def close(self):
         self._inner.close()
-
-    def _apply_masking_transform(
-            self,
-            transform: dict,
-            original_batch: pa.RecordBatch,
-            target_col_type: pa.DataType,
-    ) -> pa.Array:
-        return _apply_predicate_transform(
-            transform, original_batch, null_type=target_col_type)
 
 
 class ColumnProjectReader(RecordBatchReader):
