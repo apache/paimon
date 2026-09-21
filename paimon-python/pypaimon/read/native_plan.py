@@ -370,6 +370,7 @@ def native_plan(
         projection: Optional[List[str]] = None,
         row_ranges: Optional[List[Tuple[int, int]]] = None,
         incremental_range: Optional[Tuple[int, int]] = None,
+        incremental_mode: str = 'delta',
         row_position_slice: Optional[Tuple[int, int]] = None,
         row_position_shard: Optional[Tuple[int, int]] = None,
         chunk_shuffle: Optional[Tuple[int, int]] = None,
@@ -379,6 +380,8 @@ def native_plan(
     Native conversion or planning failures are handled by TableScan, which
     falls back to the Python planner.
     """
+    if incremental_range is None and incremental_mode != 'delta':
+        raise ValueError('incremental_mode requires incremental_range')
     if not native_runtime_available():
         raise RuntimeError(
             "scan.native-plan.enabled needs pypaimon-rust>=0.3.0 (split planning API)")
@@ -386,8 +389,15 @@ def native_plan(
         _native_read_builder(table), predicate, limit, projection)
     if row_ranges is not None:
         builder = builder.with_row_ranges(row_ranges)
-    scan = (builder.new_scan() if incremental_range is None
-            else builder.new_incremental_scan(*incremental_range))
+    if incremental_range is None:
+        scan = builder.new_scan()
+    elif incremental_mode == 'delta':
+        # Keep the two-argument call compatible with runtimes predating the
+        # explicit mode API. Non-delta modes require the new binding.
+        scan = builder.new_incremental_scan(*incremental_range)
+    else:
+        scan = builder.new_incremental_scan(
+            *incremental_range, incremental_mode)
     if row_position_slice is not None:
         scan = scan.with_row_position_slice(*row_position_slice)
     if row_position_shard is not None:
