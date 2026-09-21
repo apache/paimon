@@ -53,6 +53,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.io.ObjectStreamClass;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -68,6 +69,12 @@ import static org.assertj.core.api.Assertions.assertThatNoException;
 public class FormatReadBuilderTest {
 
     @TempDir java.nio.file.Path tempPath;
+
+    @Test
+    public void testSerializedLimitFieldCompatibility() {
+        assertThat(ObjectStreamClass.lookup(FormatReadBuilder.class).getField("limit").getType())
+                .isEqualTo(Integer.class);
+    }
 
     @Test
     public void testSerializeAndDeserialize() throws IOException, ClassNotFoundException {
