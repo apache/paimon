@@ -43,7 +43,7 @@ object Compatibility {
   }
 
   def castByTableInsertionTag: TreeNodeTag[Unit] = {
-    TreeNodeTag[Unit]("by_table_insertion")
+    Cast.BY_TABLE_INSERTION
   }
 
   def cast(
