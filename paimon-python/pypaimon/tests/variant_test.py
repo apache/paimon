@@ -62,6 +62,7 @@ from pypaimon.data.variant_shredding import (
     _NULL_VALUE_BYTES,
     _build_array_value,
     _build_object_value,
+    _extract_overflow_fields,
     _encode_scalar_to_value_bytes,
     assemble_shredded_column,
     build_variant_schema,
@@ -745,6 +746,17 @@ class TestBuildBinary(unittest.TestCase):
         obj_bytes = _build_object_value([(key_dict['age'], age_val)])
         gv = GenericVariant(obj_bytes, meta)
         self.assertEqual(gv.to_python(), {'age': 30})
+
+    def test_build_object_orders_keys_not_metadata_ids(self):
+        metadata = _make_metadata('z', 'a')
+        key_dict = parse_metadata_dict(metadata)
+        scalar = _encode_scalar_to_value_bytes(1, pa.int64())
+        value = _build_object_value(
+            [(key_dict['z'], scalar), (key_dict['a'], scalar)], key_dict)
+        self.assertEqual(
+            [key_id for key_id, _ in _extract_overflow_fields(value)],
+            [key_dict['a'], key_dict['z']],
+        )
 
     def test_build_array_empty(self):
         arr_bytes = _build_array_value([])
