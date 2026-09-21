@@ -95,17 +95,16 @@ public class FileIndexProcessor {
         Map<String, Map<String, byte[]>> maintainers;
         // load
         if (!indexFiles.isEmpty()) {
-            String indexFile = indexFiles.get(0);
+            Path sourcePath = dataFilePathFactory.toAlignedPath(indexFiles.get(0), dataFileMeta);
+            long sourceLength = fileIO.getFileStatus(sourcePath).getLen();
             try (FileIndexFormat.Reader indexReader =
                     FileIndexFormat.createReader(
-                            fileIO.newInputStream(
-                                    dataFilePathFactory.toAlignedPath(indexFile, dataFileMeta)),
-                            schemaInfo.fileSchema)) {
+                            fileIO.newInputStream(sourcePath),
+                            schemaInfo.fileSchema,
+                            sourceLength)) {
                 maintainers = indexReader.readAll();
             }
-            newIndexPath =
-                    createNewFileIndexFilePath(
-                            dataFilePathFactory.toAlignedPath(indexFile, dataFileMeta));
+            newIndexPath = createNewFileIndexFilePath(sourcePath);
         } else {
             maintainers = new HashMap<>();
             newIndexPath = dataFileToFileIndexPath(dataFilePathFactory.toPath(dataFileMeta));
@@ -170,7 +169,8 @@ public class FileIndexProcessor {
         }
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (FileIndexFormat.Writer indexWriter = FileIndexFormat.createWriter(baos)) {
+        try (FileIndexFormat.Writer indexWriter =
+                FileIndexFormat.createWriter(baos, fileIndexOptions.formatVersion())) {
             if (!maintainers.isEmpty()) {
                 indexWriter.writeColumnIndexes(maintainers);
             }

@@ -242,7 +242,9 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
                         .noneMatch(s -> s.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX));
                 reader =
                         FileIndexFormat.createReader(
-                                new ByteArraySeekableStream(embeddedIndex), table.rowType());
+                                new ByteArraySeekableStream(embeddedIndex),
+                                table.rowType(),
+                                embeddedIndex.length);
             } else {
                 Assertions.assertThat(embeddedIndex).isNull();
                 String indexFile =
@@ -261,7 +263,9 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
                                 .toAlignedPath(indexFile, entry.file());
                 reader =
                         FileIndexFormat.createReader(
-                                table.fileIO().newInputStream(indexFilePath), table.rowType());
+                                table.fileIO().newInputStream(indexFilePath),
+                                table.rowType(),
+                                table.fileIO().getFileStatus(indexFilePath).getLen());
             }
             try (FileIndexFormat.Reader indexReader = reader) {
                 Map<String, Map<String, byte[]>> indexes = indexReader.readAll();
@@ -329,7 +333,9 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
                             .toAlignedPath(file, entry.file());
             try (FileIndexFormat.Reader reader =
                     FileIndexFormat.createReader(
-                            table.fileIO().newInputStream(indexFilePath), table.rowType())) {
+                            table.fileIO().newInputStream(indexFilePath),
+                            table.rowType(),
+                            table.fileIO().getFileStatus(indexFilePath).getLen())) {
                 Set<FileIndexReader> readerSetK = reader.readColumnIndex("v");
 
                 Assertions.assertThat(readerSetK.size()).isEqualTo(0);

@@ -45,7 +45,12 @@ public class FileIndexPredicateCloseTest {
         AtomicInteger closed = new AtomicInteger();
         byte[] notAnIndexFile = new byte[64];
 
-        assertThatThrownBy(() -> new FileIndexPredicate(tracking(notAnIndexFile, closed), ROW_TYPE))
+        assertThatThrownBy(
+                        () ->
+                                new FileIndexPredicate(
+                                        tracking(notAnIndexFile, closed),
+                                        ROW_TYPE,
+                                        notAnIndexFile.length))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Exception happens while construct file index reader.")
                 .hasRootCauseMessage("This file is not file index file.");

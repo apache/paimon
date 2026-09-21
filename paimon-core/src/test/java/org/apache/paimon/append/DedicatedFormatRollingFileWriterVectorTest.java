@@ -333,7 +333,9 @@ public class DedicatedFormatRollingFileWriterVectorTest {
         PredicateBuilder predicateBuilder = new PredicateBuilder(normalFileSchema);
         try (FileIndexPredicate index =
                 new FileIndexPredicate(
-                        new ByteArraySeekableStream(mainFile.embeddedIndex()), normalFileSchema)) {
+                        new ByteArraySeekableStream(mainFile.embeddedIndex()),
+                        normalFileSchema,
+                        mainFile.embeddedIndex().length)) {
             assertThat(((BitmapIndexResult) index.evaluate(predicateBuilder.equal(0, 2))).get())
                     .isEqualTo(RoaringBitmap32.bitmapOf(2));
             assertThat(index.evaluate(predicateBuilder.equal(0, 99)).remain()).isFalse();

@@ -44,6 +44,8 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -59,13 +61,15 @@ public class FileIndexProcessorTest {
 
     @TempDir java.nio.file.Path tempDir;
 
-    @Test
-    public void testProcessIndexesTwoKeysOfOneMapColumn() throws Exception {
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    public void testProcessIndexesTwoKeysOfOneMapColumn(int version) throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path warehouse = new Path(tempDir.toString());
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        options.put(CoreOptions.FILE_INDEX_FORMAT_VERSION.key(), Integer.toString(version));
         // both entries share the top level column "m"
         options.put(CoreOptions.FILE_INDEX + ".bloom-filter.columns", "m[k1],m[k2]");
         RowType rowType =
@@ -122,7 +126,10 @@ public class FileIndexProcessorTest {
                         table.store().pathFactory().bucketPath(entry.partition(), entry.bucket()),
                         indexFile);
         try (FileIndexFormat.Reader reader =
-                FileIndexFormat.createReader(fileIO.newInputStream(indexPath), rowType)) {
+                FileIndexFormat.createReader(
+                        fileIO.newInputStream(indexPath),
+                        rowType,
+                        fileIO.getFileStatus(indexPath).getLen())) {
             assertThat(reader.readAll().keySet()).containsExactlyInAnyOrder("m[k1]", "m[k2]");
         }
     }

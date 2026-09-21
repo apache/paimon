@@ -38,7 +38,7 @@ public class FixedLengthChunk extends AbstractChunk {
     private final int fixedLength;
 
     private int size;
-    private int keysBaseOffset;
+    private long keysBaseOffset;
     private int keysLength;
     private SeekableInputStream in;
     private ByteBuffer keys;
@@ -65,7 +65,7 @@ public class FixedLengthChunk extends AbstractChunk {
 
     public FixedLengthChunk(
             ByteBuffer headers,
-            int keysBaseOffset,
+            long keysBaseOffset,
             SeekableInputStream in,
             KeyFactory.KeyDeserializer deserializer,
             Comparator<Object> comparator) {

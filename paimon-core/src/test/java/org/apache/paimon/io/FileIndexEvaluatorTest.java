@@ -210,7 +210,7 @@ public class FileIndexEvaluatorTest {
                         BitmapFileIndexFactory.BITMAP_INDEX, indexWriter.serializedBytes()));
 
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(output)) {
+        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(output, 1)) {
             writer.writeColumnIndexes(indexes);
         }
         return output.toByteArray();

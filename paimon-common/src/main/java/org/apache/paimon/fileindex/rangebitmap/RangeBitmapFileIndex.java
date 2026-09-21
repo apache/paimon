@@ -60,7 +60,7 @@ public class RangeBitmapFileIndex implements FileIndexer {
     }
 
     @Override
-    public FileIndexReader createReader(SeekableInputStream in, int start, int length) {
+    public FileIndexReader createReader(SeekableInputStream in, long start, int length) {
         return new Reader(dataType, in, start);
     }
 
@@ -102,7 +102,7 @@ public class RangeBitmapFileIndex implements FileIndexer {
         private final Function<Object, Object> converter;
         private final RangeBitmap bitmap;
 
-        public Reader(DataType dataType, SeekableInputStream in, int start) {
+        public Reader(DataType dataType, SeekableInputStream in, long start) {
             KeyFactory factory = KeyFactory.create(dataType);
             this.converter = factory.createConverter();
             this.bitmap = new RangeBitmap(in, start, factory);
