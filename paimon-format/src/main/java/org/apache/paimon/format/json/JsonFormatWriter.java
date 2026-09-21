@@ -53,6 +53,8 @@ public class JsonFormatWriter extends AbstractTextFileWriter {
     private static final Base64.Encoder BASE64_ENCODER = Base64.getEncoder();
 
     private final String lineDelimiter;
+    private final JsonOptions.MapNullKeyMode mapNullKeyMode;
+    private final String mapNullKeyLiteral;
 
     public JsonFormatWriter(
             PositionOutputStream outputStream,
@@ -62,6 +64,8 @@ public class JsonFormatWriter extends AbstractTextFileWriter {
             throws IOException {
         super(outputStream, rowType, compression);
         this.lineDelimiter = options.getLineDelimiter();
+        this.mapNullKeyMode = options.getMapNullKeyMode();
+        this.mapNullKeyLiteral = options.getMapNullKeyLiteral();
     }
 
     @Override
@@ -156,10 +160,45 @@ public class JsonFormatWriter extends AbstractTextFileWriter {
 
         for (int i = 0; i < size; i++) {
             Object key = InternalRowUtils.get(keyArray, i, keyType);
+            String keyString;
+            if (key == null) {
+                switch (mapNullKeyMode) {
+                    case DROP:
+                        continue;
+                    case LITERAL:
+                        validateMapNullKeyLiteral(keyType);
+                        keyString = mapNullKeyLiteral;
+                        break;
+                    case FAIL:
+                        throw new IllegalArgumentException(
+                                "JSON format does not support null map keys when "
+                                        + "'json.map-null-key-mode' is 'FAIL'.");
+                    default:
+                        throw new IllegalStateException(
+                                "Unknown map null key mode: " + mapNullKeyMode);
+                }
+            } else {
+                keyString = convertToString(key, keyType);
+            }
             Object value = InternalRowUtils.get(valueArray, i, valueType);
-            result.put(convertToString(key, keyType), convertRowValue(value, valueType));
+            result.put(keyString, convertRowValue(value, valueType));
         }
         return result;
+    }
+
+    private void validateMapNullKeyLiteral(DataType keyType) {
+        try {
+            Object converted = JsonMapKeyConverter.convert(mapNullKeyLiteral, keyType);
+            if (converted == null) {
+                throw new IllegalArgumentException("Converted map key is null.");
+            }
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Cannot convert 'json.map-null-key-literal' value '%s' to map key type %s.",
+                            mapNullKeyLiteral, keyType),
+                    e);
+        }
     }
 
     private String convertToString(Object value, DataType dataType) {
