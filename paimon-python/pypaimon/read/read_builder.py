@@ -229,7 +229,8 @@ class ReadBuilder:
             if not candidates:
                 continue
             top = max(candidates, key=len)
-            parts = name[len(top) + 1 :].split(".")
+            prefix_length = len(top) + 1
+            parts = name[prefix_length:].split(".")
             path = _resolve_row_path(table_fields, top_index[top], parts)
             if path is not None:
                 paths.append(path)
@@ -300,7 +301,8 @@ def _map_key_selector(name, table_fields):
     for field in sorted(
         candidates, key=lambda candidate: len(candidate.name), reverse=True
     ):
-        selector = name[len(field.name) :]
+        prefix_length = len(field.name)
+        selector = name[prefix_length:]
         try:
             key = ast.literal_eval(selector[1:-1])
         except (SyntaxError, ValueError):
