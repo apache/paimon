@@ -1398,6 +1398,55 @@ class MultimodalTableTest(unittest.TestCase):
         _, selected = obs.scan().select(["id", "assets"]).read_blobs()
         self.assertEqual({"assets"}, set(selected))
 
+    def test_scan_read_and_stream_array_blobs(self):
+        schema = _schema({
+            "id": pa.int32(),
+            "preview": pa.large_binary(),
+            "pages": pa.list_(pa.large_binary()),
+            "assets": pa.map_(pa.string(), pa.large_binary()),
+        })
+        obs = self.conn.create_table(
+            "array_blobs", schema=schema,
+            options=dict(_PARQUET_OPTIONS, **{"read.batch-size": "2"}))
+        data = {
+            "id": [1, 2, 3, 4],
+            "preview": [b"p1", None, b"p3", b"p4"],
+            "pages": [[b"first", None, b"", b"last", b"first"], None, [], [b"fourth"]],
+            "assets": [[("cover", b"c1")], None, [], [("missing", None)]],
+        }
+        obs.add(pa.Table.from_pydict(data, schema=schema))
+        expected = dict(zip(data["id"], data["pages"]))
+
+        scalar, blobs = obs.scan().read_blobs()
+        self.assertEqual(["id"], scalar.column_names)
+        self.assertEqual({"preview", "pages", "assets"}, set(blobs))
+        for name in blobs:
+            self.assertEqual(dict(zip(data["id"], data[name])),
+                             dict(zip(scalar.column("id").to_pylist(), blobs[name])))
+
+        streamed = {}
+        for scalar_batch, blob_batch in obs.scan().stream_blobs("pages"):
+            self.assertEqual(["id"], scalar_batch.schema.names)
+            self.assertLessEqual(scalar_batch.num_rows, 2)
+            streamed.update(zip(scalar_batch.column("id").to_pylist(), blob_batch["pages"]))
+        self.assertEqual(expected, streamed)
+
+        # Projection hides the filter column and other BLOBs, but keeps row IDs.
+        query = obs.scan().select(["pages"]).with_row_id().where("id = 4").limit(1)
+        for scalar, blobs in [query.read_blobs(), *list(query.stream_blobs())]:
+            self.assertEqual(["_ROW_ID"], scalar.schema.names)
+            self.assertEqual(1, scalar.num_rows)
+            self.assertEqual({"pages": [[b"fourth"]]}, blobs)
+
+        scalar, blobs = obs.scan().where("id < 0").read_blobs("pages")
+        self.assertEqual(0, scalar.num_rows)
+        self.assertEqual({"pages": []}, blobs)
+        self.assertEqual([], list(obs.scan().where("id < 0").stream_blobs("pages")))
+        _, blobs = obs.scan().read_blobs(["pages", "pages"])
+        self.assertEqual({"pages"}, set(blobs))
+        scalar, _ = obs.scan().read_blobs("preview")
+        self.assertEqual(["id"], scalar.column_names)
+
     def test_scan_read_blobs_filter_column_not_selected(self):
         # The row filter must apply even when its column is not in select().
         obs = self.conn.create_table(
@@ -1758,6 +1807,33 @@ class MultimodalTableTest(unittest.TestCase):
         cells = [BlobDescriptor("oss://bucket/x", 4, 10).serialize(), b"inline-blob", None]
         bodies = ScanQuery._fetch_bodies(_FakeIO(), {"img": cells}, ["img"], 8)
         self.assertEqual([b"BODY:oss://bucket/x", b"inline-blob", None], bodies["img"])
+
+    def test_fetch_bodies_coalesces_mixed_array_map_and_scalar_blobs(self):
+        from pypaimon.multimodal.blob_read import fetch_blob_bodies
+        from pypaimon.common.file_io import FileIO
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        path = os.path.join(self.temp_dir, "array-blob.bin")
+        with open(path, "wb") as stream:
+            stream.write(b"0123456789")
+        file_io = FileIO.get("file://" + self.temp_dir, {})
+        descriptor = BlobDescriptor(path, 2, 3).serialize()
+        cells = {
+            "image": [descriptor],
+            "pages": [[descriptor, None, b"", b"inline", descriptor], [], None],
+            "assets": [[("cover", descriptor), ("missing", None)]],
+        }
+        with patch.object(file_io, "read_ranges_coalesced",
+                          wraps=file_io.read_ranges_coalesced) as read:
+            bodies = fetch_blob_bodies(
+                file_io, cells, list(cells), 2,
+                map_blob_cols=["assets"], array_blob_cols=["pages"])
+        self.assertEqual(1, read.call_count)
+        self.assertEqual({
+            "image": [b"234"],
+            "pages": [[b"234", None, b"", b"inline", b"234"], [], None],
+            "assets": [[("cover", b"234"), ("missing", None)]],
+        }, bodies)
 
     def test_fetch_bodies_rejects_unresolved_blob_view(self):
         from pypaimon.multimodal.query import ScanQuery
