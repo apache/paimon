@@ -280,6 +280,31 @@ class RayReadByRowIdTest(unittest.TestCase):
                     2: {"id": 2, "age": 20, "_ROW_ID": rid[2]},
                 })
 
+    def test_rejects_tag_schema_change_during_snapshot_resolution(self):
+        import importlib
+        from pypaimon.schema.schema_change import SchemaChange
+
+        module = importlib.import_module("pypaimon.ray.read_by_row_id")
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["a"], "age": [10]}, schema=self.pa_schema))
+        table = self.catalog.get_table(target)
+        table.create_tag("training", 1)
+        self.catalog.alter_table(target, [SchemaChange.rename_column("age", "years")])
+        schema = pa.schema([("id", pa.int32()), ("name", pa.string()), ("years", pa.int32())])
+        self._write(target, pa.table({"id": [2], "name": ["b"], "years": [20]}, schema=schema))
+        resolve = module._read_snapshot
+
+        def resolve_after_tag_moves(read_table):
+            table.replace_tag("training")
+            return resolve(read_table)
+
+        with mock.patch.object(module, "_read_snapshot", resolve_after_tag_moves):
+            with self.assertRaisesRegex(ValueError, "schema changed.*retry"):
+                read_by_row_id(
+                    target, pa.table({"_ROW_ID": [0]}), self.catalog_options,
+                    projection=["age"], dynamic_options={"scan.tag-name": "training"})
+
     def test_lazy_tag_read_keeps_resolved_snapshot(self):
         target = self._create()
         self._write(target, pa.Table.from_pydict(

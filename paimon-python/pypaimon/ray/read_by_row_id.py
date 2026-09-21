@@ -169,6 +169,10 @@ def read_by_row_id(
         from pypaimon.common.options.core_options import CoreOptions
         from pypaimon.common.options.options import Options
         base_schema = table.schema_manager.get_schema(base.schema_id)
+        if table.table_schema.id != base_schema.id:
+            raise ValueError(
+                "The time-travel schema changed while resolving the read snapshot; "
+                "retry read_by_row_id.")
         if not CoreOptions(Options(base_schema.options)).row_tracking_enabled():
             raise ValueError(
                 f"the resolved snapshot ({base.id}) predates row-tracking; read_by_row_id needs it.")
