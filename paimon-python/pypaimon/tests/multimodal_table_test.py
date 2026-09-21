@@ -609,6 +609,73 @@ class MultimodalTableTest(unittest.TestCase):
         store.delete_object("images/cat.jpg")
         self.assertEqual([], store.list_objects(prefix="images/"))
 
+    def test_blob_store_list_reads_batches_and_stops_at_limit(self):
+        from pypaimon.read.table_read import TableRead
+
+        table = self.conn.create_table(
+            "list_batches", schema=_schema({
+                "key": pa.string(), "image": pa.large_binary(), "owner": pa.string(),
+            }), options=dict(_PARQUET_OPTIONS, **{"read.batch-size": "2"}))
+        table.add([
+            {"key": key, "image": b"body", "owner": "alice"}
+            for key in ("other/a", "other/b", "images/a", "images/b", "images/c", "images/d")
+        ])
+        store = table.blobs(column="image")
+        original = TableRead._arrow_batch_generator
+        batches, closed = [], []
+
+        def tracked_read(read, *args, **kwargs):
+            reader = original(read, *args, **kwargs)
+            try:
+                for batch in reader:
+                    batches.append(batch.num_rows)
+                    yield batch
+            finally:
+                reader.close()
+                closed.append(True)
+
+        with patch.object(TableRead, "to_arrow", side_effect=AssertionError("full read")), \
+                patch.object(TableRead, "_arrow_batch_generator", tracked_read):
+            self.assertEqual([], store.list_objects(limit=0))
+            self.assertEqual([], batches)
+            listed = store.list_objects(prefix="images/", limit=1, columns=["owner"])
+            self.assertEqual(["images/a"], [obj.key for obj in listed])
+            self.assertEqual({"owner": "alice"}, listed[0].columns)
+            self.assertEqual(4, listed[0].size)
+            self.assertEqual([2, 2], batches)
+            self.assertEqual([True], closed)
+
+            batches.clear()
+            listed = store.list_objects(limit=1, columns=[])
+            self.assertEqual(1, len(listed))
+            self.assertEqual({}, listed[0].columns)
+            self.assertEqual([1], batches)
+            self.assertEqual(2, len(closed))
+
+            with patch.object(store, "_row_to_info", side_effect=ValueError("invalid descriptor")):
+                try:
+                    store.list_objects()
+                except ValueError as error:
+                    self.assertEqual("invalid descriptor", str(error))
+                    # Check while the traceback still holds the reader's frame.
+                    self.assertEqual(3, len(closed))
+                else:
+                    self.fail("Expected invalid descriptor")
+            self.assertEqual([], store.list_objects(prefix="absent/"))
+            self.assertEqual(4, len(closed))
+
+    def test_blob_store_list_preserves_non_string_prefix_semantics(self):
+        table = self.conn.create_table(
+            "numeric_keys", schema=_schema({"key": pa.int32(), "image": pa.large_binary()}),
+            options=_PARQUET_OPTIONS)
+        table.add([
+            {"key": value, "image": b"body"} for value in (None, 10, 20, 21)
+        ])
+        store = table.blobs(column="image")
+        self.assertEqual([None], [obj.key for obj in store.list_objects(prefix="N", limit=1)])
+        self.assertEqual([20], [obj.key for obj in store.list_objects(prefix="2", limit=1)])
+        self.assertEqual(4, len(store.list_objects(prefix="")))
+
     def test_blob_store_put_object_accepts_blob_without_materializing(self):
         from pypaimon.table.row.blob import Blob, BlobDescriptor
 
