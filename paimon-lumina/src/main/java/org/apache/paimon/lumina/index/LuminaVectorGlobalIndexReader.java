@@ -38,6 +38,7 @@ import org.aliyun.lumina.LuminaFileInput;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -250,9 +251,8 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
     private Map<String, String> buildSearchOptions(
             boolean withFilter, int effectiveK, Map<String, String> queryOptions) {
-        Map<String, String> searchOptions = options.toLuminaOptions();
-        searchOptions.putAll(indexMeta.options());
-        searchOptions.putAll(queryOptions);
+        Map<String, String> searchOptions =
+                mergeOptions(options.toLuminaOptions(), indexMeta.options(), queryOptions);
         if (withFilter) {
             searchOptions.put("search.thread_safe_filter", "true");
         }
@@ -260,6 +260,12 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         return searchOptions;
     }
 
+    /**
+     * Resolves the options a search runs with. The index metadata wins over the current table
+     * configuration, because it records what the index was actually built with; a per-query option
+     * wins over both. Every caller must go through here: reading the table's value for an option
+     * the metadata also carries would search an index with parameters it was not built for.
+     */
     static Map<String, String> mergeOptions(
             Map<String, String> baseOptions,
             Map<String, String> indexOptions,
@@ -374,8 +380,11 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                     SeekableInputStream in = fileReader.getInputStream(ioMeta);
                     try {
                         InputStreamFileInput fileInput = new InputStreamFileInput(in);
-                        Map<String, String> searcherOptions = options.toLuminaOptions();
-                        searcherOptions.putAll(indexMeta.options());
+                        Map<String, String> searcherOptions =
+                                mergeOptions(
+                                        options.toLuminaOptions(),
+                                        indexMeta.options(),
+                                        Collections.emptyMap());
                         index =
                                 LuminaIndex.fromStream(
                                         indexMeta.indexType(),
