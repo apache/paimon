@@ -988,8 +988,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(streamed.to_pydict(), expected)
         self.assertTrue(builder.explain().native_planned)
 
-    @unittest.skipUnless(native_method_available('TableRead', 'supports_pruning_blob_limit'),
-                         "pypaimon-rust BLOB limit support not installed")
+    @unittest.skipUnless(native_reader_available(),
+                         "pypaimon-rust native reader API not installed")
     def test_native_read_pruning_limit_defers_blob_payload_io(self):
         schema = pa.schema([
             ('id', pa.int32()),
@@ -1027,8 +1027,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         native.assert_called_once()
         self.assertEqual(result.to_pydict(), {'id': [1], 'payload': [b'a']})
 
-    @unittest.skipUnless(native_method_available('TableRead', 'supports_pruning_blob_limit'),
-                         "pypaimon-rust BLOB limit support not installed")
+    @unittest.skipUnless(native_reader_available(),
+                         "pypaimon-rust native reader API not installed")
     def test_native_read_pruning_limit_defers_descriptor_blob_payload_io(self):
         schema = pa.schema([
             ('id', pa.int32()),
@@ -1081,8 +1081,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
             self.assertEqual(
                 result.to_pydict(), {'id': [1], 'payload': [b'first']})
 
-    @unittest.skipUnless(native_method_available('TableRead', 'supports_pruning_blob_limit'),
-                         "pypaimon-rust BLOB limit support not installed")
+    @unittest.skipUnless(native_reader_available(),
+                         "pypaimon-rust native reader API not installed")
     def test_native_read_limit_filters_before_descriptor_payload_io(self):
         schema = pa.schema([('id', pa.int32()), ('payload', pa.large_binary())])
         with tempfile.TemporaryDirectory() as payload_dir:

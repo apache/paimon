@@ -931,9 +931,7 @@ class TableRead:
         before the output quota is known. Inline descriptors can still use
         native reads if the predicate only references ordinary columns.
         """
-        from pypaimon.read.native_plan import native_method_available
-        if (not native_method_available('TableRead', 'supports_pruning_blob_limit')
-                or not self.table.options.data_evolution_enabled()):
+        if not self.table.options.data_evolution_enabled():
             return False
         read_names = {field.name for field in self._scan_read_type}
         if self.table.options.blob_view_fields() & read_names:
