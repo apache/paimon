@@ -52,8 +52,9 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RoaringBitmap32;
 
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.HashMap;
 import java.util.List;
@@ -75,8 +76,9 @@ public class DataFileIndexWriterTest {
     boolean bsiExist = false;
     boolean bloomExists = false;
 
-    @Test
-    public void testCreatingMultipleIndexesOnOneColumn() throws Exception {
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    public void testCreatingMultipleIndexesOnOneColumn(int version) throws Exception {
 
         String tableName = "test";
         String col1 = "f0";
@@ -84,6 +86,7 @@ public class DataFileIndexWriterTest {
         Identifier identifier = Identifier.create(tableName, tableName);
 
         Map<String, String> optionsMap = new HashMap<>();
+        optionsMap.put("file-index.format.version", Integer.toString(version));
         optionsMap.put("file-index.bitmap.columns", col1);
         optionsMap.put("file-index.bsi.columns", col1);
         optionsMap.put("file-index.bloom-filter.columns", col2);
@@ -197,12 +200,12 @@ public class DataFileIndexWriterTest {
                                 .collect(Collectors.toList());
                 // assert index file exist and only one index file
                 assert indexFiles.size() == 1;
+                Path indexPath = dataFilePathFactory.toAlignedPath(indexFiles.get(0), dataFileMeta);
                 try (FileIndexFormat.Reader reader =
                         FileIndexFormat.createReader(
-                                fileIO.newInputStream(
-                                        dataFilePathFactory.toAlignedPath(
-                                                indexFiles.get(0), dataFileMeta)),
-                                tableSchema.logicalRowType())) {
+                                fileIO.newInputStream(indexPath),
+                                tableSchema.logicalRowType(),
+                                fileIO.getFileStatus(indexPath).getLen())) {
                     Set<FileIndexReader> fileIndexReaders = reader.readColumnIndex(columnName);
                     for (FileIndexReader fileIndexReader : fileIndexReaders) {
                         consumer.accept(fileIndexReader);

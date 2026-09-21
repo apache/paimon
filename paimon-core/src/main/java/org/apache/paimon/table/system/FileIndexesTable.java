@@ -327,7 +327,7 @@ public class FileIndexesTable implements ReadonlyTable {
             if (embeddedIndex != null) {
                 try (FileIndexFormat.Reader reader =
                         FileIndexFormat.createMetadataReader(
-                                new ByteArraySeekableStream(embeddedIndex))) {
+                                new ByteArraySeekableStream(embeddedIndex), embeddedIndex.length)) {
                     return toRows(
                             dataSplit,
                             file,
@@ -365,7 +365,7 @@ public class FileIndexesTable implements ReadonlyTable {
                 long containerSize = storeTable.fileIO().getFileStatus(indexPath).getLen();
                 try (FileIndexFormat.Reader reader =
                         FileIndexFormat.createMetadataReader(
-                                storeTable.fileIO().newInputStream(indexPath))) {
+                                storeTable.fileIO().newInputStream(indexPath), containerSize)) {
                     return toRows(
                             dataSplit,
                             file,
@@ -420,7 +420,7 @@ public class FileIndexesTable implements ReadonlyTable {
                                 BinaryString.fromString(indexMeta.indexType()),
                                 BinaryString.fromString(storageType),
                                 indexFilePath,
-                                (long) indexMeta.sizeInBytes(),
+                                indexMeta.sizeInBytes(),
                                 containerSize,
                                 indexMeta.empty()));
             }

@@ -32,7 +32,7 @@ public interface FileIndexer {
 
     FileIndexWriter createWriter();
 
-    FileIndexReader createReader(SeekableInputStream inputStream, int start, int length);
+    FileIndexReader createReader(SeekableInputStream inputStream, long start, int length);
 
     static FileIndexer create(String type, DataType dataType, Options options) {
         FileIndexerFactory fileIndexerFactory = FileIndexerFactoryUtils.load(type);

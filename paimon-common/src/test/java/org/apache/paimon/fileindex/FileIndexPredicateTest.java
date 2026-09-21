@@ -72,7 +72,7 @@ public class FileIndexPredicateTest {
                 .put(BLOOM_FILTER, indexWriter.serializedBytes());
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos)) {
+        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos, 1)) {
             writer.writeColumnIndexes(indexes);
         }
 
@@ -91,7 +91,7 @@ public class FileIndexPredicateTest {
 
     private static FileIndexPredicate emptyFileIndexPredicate() throws Exception {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos);
+        FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos, 1);
         writer.writeColumnIndexes(new HashMap<String, java.util.Map<String, byte[]>>());
         writer.close();
         return new FileIndexPredicate(baos.toByteArray(), RowType.builder().build());

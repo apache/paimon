@@ -59,6 +59,7 @@ public final class DataFileIndexWriter implements Closeable {
 
     // if the filter size greater than fileIndexInManifestThreshold, we put it in file
     private final long inManifestThreshold;
+    private final int formatVersion;
 
     // index type, column name -> index maintainer
     private final Map<String, Map<String, IndexMaintainer>> indexMaintainers = new HashMap<>();
@@ -146,6 +147,7 @@ public final class DataFileIndexWriter implements Closeable {
             }
         }
         this.inManifestThreshold = fileIndexOptions.fileIndexInManifestThreshold();
+        this.formatVersion = fileIndexOptions.formatVersion();
     }
 
     public void write(InternalRow row) {
@@ -160,8 +162,9 @@ public final class DataFileIndexWriter implements Closeable {
     public void close() throws IOException {
         Map<String, Map<String, byte[]>> indexMaps = serializeMaintainers();
 
+        // TODO: Use streaming writes to support file index containers larger than int32.
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(out)) {
+        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(out, formatVersion)) {
             writer.writeColumnIndexes(indexMaps);
         }
 

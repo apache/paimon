@@ -49,8 +49,8 @@ public class RangeBitmap {
     @Nullable private final Object min;
     @Nullable private final Object max;
     private final int cardinality;
-    private final int dictionaryOffset;
-    private final int bsiOffset;
+    private final long dictionaryOffset;
+    private final long bsiOffset;
 
     private final SeekableInputStream in;
     private final KeyFactory factory;
@@ -59,7 +59,7 @@ public class RangeBitmap {
     private Dictionary dictionary;
     private BitSliceIndexBitmap bsi;
 
-    public RangeBitmap(SeekableInputStream in, int offset, KeyFactory factory) {
+    public RangeBitmap(SeekableInputStream in, long offset, KeyFactory factory) {
         ByteBuffer headers;
         int headerLength;
         try {

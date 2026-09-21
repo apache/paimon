@@ -434,6 +434,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("500 B"))
                     .withDescription("The threshold to store file index bytes in manifest.");
 
+    public static final ConfigOption<Integer> FILE_INDEX_FORMAT_VERSION =
+            key("file-index.format.version")
+                    .intType()
+                    .defaultValue(1)
+                    .withDescription(
+                            "File index container version to write (1 or 2). Version 2 supports 64-bit payload positions.");
+
     public static final ConfigOption<Boolean> FILE_INDEX_READ_ENABLED =
             key("file-index.read.enabled")
                     .booleanType()
@@ -4455,6 +4462,14 @@ public class CoreOptions implements Serializable {
 
     public FileIndexOptions indexColumnsOptions() {
         return new FileIndexOptions(this);
+    }
+
+    public int fileIndexFormatVersion() {
+        int version = options.get(FILE_INDEX_FORMAT_VERSION);
+        if (version != 1 && version != 2) {
+            throw new IllegalArgumentException("file-index.format.version must be 1 or 2");
+        }
+        return version;
     }
 
     public long fileIndexInManifestThreshold() {

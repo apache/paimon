@@ -27,84 +27,31 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.DataInputStream;
-import java.io.DataOutput;
-import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/**
- * File index file format. Put all column and offset in the header.
- *
- * <pre>
- *  ______________________________________    _____________________
- * |     magic    ｜version｜head length  |
- * |--------------------------------------|
- * |            column number             |
- * |--------------------------------------|
- * |   column 1        ｜ index number    |
- * |--------------------------------------|
- * |  index name 1 ｜start pos ｜length   |
- * |--------------------------------------|
- * |  index name 2 ｜start pos ｜length   |
- * |--------------------------------------|
- * |  index name 3 ｜start pos ｜length   |
- * |--------------------------------------|            HEAD
- * |   column 2        ｜ index number    |
- * |--------------------------------------|
- * |  index name 1 ｜start pos ｜length   |
- * |--------------------------------------|
- * |  index name 2 ｜start pos ｜length   |
- * |--------------------------------------|
- * |  index name 3 ｜start pos ｜length   |
- * |--------------------------------------|
- * |                 ...                  |
- * |--------------------------------------|
- * |                 ...                  |
- * |--------------------------------------|
- * |  redundant length ｜redundant bytes  |
- * |--------------------------------------|    ---------------------
- * |                BODY                  |
- * |                BODY                  |
- * |                BODY                  |             BODY
- * |                BODY                  |
- * |______________________________________|    _____________________
- *
- * magic:                            8 bytes long
- * version:                          4 bytes int
- * head length:                      4 bytes int
- * column number:                    4 bytes int
- * column x:                         var bytes utf (length + bytes)
- * index number:                     4 bytes int (how many column items below)
- * index name x:                     var bytes utf
- * start pos:                        4 bytes int
- * length:                           4 bytes int
- * redundant length:                 4 bytes int (for compatibility with later versions, in this version, content is zero)
- * redundant bytes:                  var bytes (for compatibility with later version, in this version, is empty)
- * BODY:                             column index bytes + column index bytes + column index bytes + .......
- *
- * </pre>
- */
+import static org.apache.paimon.fileindex.FileIndexFormatUtils.EMPTY_INDEX_FLAG;
+import static org.apache.paimon.fileindex.FileIndexFormatUtils.MAGIC;
+import static org.apache.paimon.fileindex.FileIndexFormatUtils.VERSION_1;
+import static org.apache.paimon.fileindex.FileIndexFormatUtils.VERSION_2;
+
+/** Version-dispatching entry point and shared payload access for file index containers. */
 public final class FileIndexFormat {
 
-    private static final long MAGIC = 1493475289347502L;
-    private static final int EMPTY_INDEX_FLAG = -1;
-
     enum Version {
-        V_1(1);
+        V_1(VERSION_1),
+        V_2(VERSION_2);
 
         private final int version;
 
@@ -117,17 +64,18 @@ public final class FileIndexFormat {
         }
     }
 
-    public static Writer createWriter(OutputStream outputStream) {
-        return new Writer(outputStream);
+    public static Writer createWriter(OutputStream outputStream, int version) {
+        return new Writer(outputStream, version);
     }
 
-    public static Reader createReader(SeekableInputStream inputStream, RowType fileRowType) {
-        return new Reader(inputStream, fileRowType);
+    public static Reader createReader(
+            SeekableInputStream inputStream, RowType fileRowType, long length) {
+        return new Reader(inputStream, fileRowType, length);
     }
 
-    /** Creates a reader for accessing header metadata without reading index payloads. */
-    public static Reader createMetadataReader(SeekableInputStream inputStream) {
-        return new Reader(inputStream, RowType.builder().build());
+    /** Creates a reader for accessing index metadata without reading index payloads. */
+    public static Reader createMetadataReader(SeekableInputStream inputStream, long length) {
+        return createReader(inputStream, RowType.builder().build(), length);
     }
 
     /** Metadata of one column index stored in a file index container. */
@@ -135,10 +83,11 @@ public final class FileIndexFormat {
 
         private final String columnName;
         private final String indexType;
-        private final int sizeInBytes;
+        private final long sizeInBytes;
         private final boolean empty;
 
-        private FileIndexMeta(String columnName, String indexType, int sizeInBytes, boolean empty) {
+        private FileIndexMeta(
+                String columnName, String indexType, long sizeInBytes, boolean empty) {
             this.columnName = columnName;
             this.indexType = indexType;
             this.sizeInBytes = sizeInBytes;
@@ -153,7 +102,7 @@ public final class FileIndexFormat {
             return indexType;
         }
 
-        public int sizeInBytes() {
+        public long sizeInBytes() {
             return sizeInBytes;
         }
 
@@ -165,109 +114,26 @@ public final class FileIndexFormat {
     /** Writer for file index file. */
     public static class Writer implements Closeable {
 
-        private final DataOutputStream dataOutputStream;
+        private final FileIndexFormatUtils.FormatWriter writer;
 
-        // for version compatible
-        private static final int REDUNDANT_LENGTH = 0;
-
-        public Writer(OutputStream outputStream) {
-            this.dataOutputStream = new DataOutputStream(outputStream);
+        private Writer(OutputStream outputStream, int version) {
+            if (version == Version.V_1.version()) {
+                this.writer = new FileIndexFormatV1.Writer(outputStream);
+            } else if (version == Version.V_2.version()) {
+                this.writer = new FileIndexFormatV2.Writer(outputStream);
+            } else {
+                throw new IllegalArgumentException("Unsupported file index version: " + version);
+            }
         }
 
         public void writeColumnIndexes(Map<String, Map<String, byte[]>> indexes)
                 throws IOException {
-
-            Map<String, Map<String, Pair<Integer, Integer>>> bodyInfo = new LinkedHashMap<>();
-
-            // construct body
-            ByteArrayOutputStream baos = new ByteArrayOutputStream(256);
-            for (Map.Entry<String, Map<String, byte[]>> columnMap : indexes.entrySet()) {
-                Map<String, Pair<Integer, Integer>> innerMap =
-                        bodyInfo.computeIfAbsent(columnMap.getKey(), k -> new LinkedHashMap<>());
-                Map<String, byte[]> bytesMap = columnMap.getValue();
-                for (Map.Entry<String, byte[]> entry : bytesMap.entrySet()) {
-                    int startPosition = baos.size();
-                    byte[] v = entry.getValue();
-                    if (v == null) {
-                        innerMap.put(entry.getKey(), Pair.of(EMPTY_INDEX_FLAG, 0));
-                    } else {
-                        baos.write(entry.getValue());
-                        innerMap.put(
-                                entry.getKey(),
-                                Pair.of(startPosition, baos.size() - startPosition));
-                    }
-                }
-            }
-            byte[] body = baos.toByteArray();
-            writeHead(bodyInfo);
-
-            // writeBody
-            dataOutputStream.write(body);
-        }
-
-        private void writeHead(Map<String, Map<String, Pair<Integer, Integer>>> bodyInfo)
-                throws IOException {
-
-            int headLength = calculateHeadLength(bodyInfo);
-
-            // writeMagic
-            dataOutputStream.writeLong(MAGIC);
-            // writeVersion
-            dataOutputStream.writeInt(Version.V_1.version());
-            // writeHeadLength
-            dataOutputStream.writeInt(headLength);
-            // writeColumnSize
-            dataOutputStream.writeInt(bodyInfo.size());
-            for (Map.Entry<String, Map<String, Pair<Integer, Integer>>> entry :
-                    bodyInfo.entrySet()) {
-                // writeColumnName
-                dataOutputStream.writeUTF(entry.getKey());
-                // writeIndexTypeSize
-                dataOutputStream.writeInt(entry.getValue().size());
-                // writeColumnInfo, offset = headLength
-                for (Map.Entry<String, Pair<Integer, Integer>> indexEntry :
-                        entry.getValue().entrySet()) {
-                    dataOutputStream.writeUTF(indexEntry.getKey());
-                    int start = indexEntry.getValue().getLeft();
-                    dataOutputStream.writeInt(
-                            start == EMPTY_INDEX_FLAG ? EMPTY_INDEX_FLAG : start + headLength);
-                    dataOutputStream.writeInt(indexEntry.getValue().getRight());
-                }
-            }
-            // writeRedundantLength
-            dataOutputStream.writeInt(REDUNDANT_LENGTH);
-        }
-
-        private int calculateHeadLength(Map<String, Map<String, Pair<Integer, Integer>>> bodyInfo)
-                throws IOException {
-            // magic 8 bytes, version 4 bytes, head length 4 bytes,
-            // column number 4 bytes, body info start&length 8 bytes per
-            // column-index, index number size 4 bytes per column, redundant length 4 bytes;
-            int baseLength =
-                    8
-                            + 4
-                            + 4
-                            + 4
-                            + bodyInfo.values().stream().mapToInt(Map::size).sum() * 8
-                            + bodyInfo.size() * 4
-                            + 4;
-
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            DataOutput dataOutput = new DataOutputStream(baos);
-            for (Map.Entry<String, Map<String, Pair<Integer, Integer>>> entry :
-                    bodyInfo.entrySet()) {
-                dataOutput.writeUTF(entry.getKey());
-                for (String s : entry.getValue().keySet()) {
-                    dataOutput.writeUTF(s);
-                }
-            }
-
-            return baseLength + baos.size();
+            writer.writeColumnIndexes(indexes);
         }
 
         @Override
         public void close() throws IOException {
-            IOUtils.closeQuietly(dataOutputStream);
+            writer.close();
         }
     }
 
@@ -275,11 +141,11 @@ public final class FileIndexFormat {
     public static class Reader implements Closeable {
 
         private final SeekableInputStream seekableInputStream;
-        // get header and cache it.
-        private final Map<String, Map<String, Pair<Integer, Integer>>> header = new HashMap<>();
+        // Cache the index entries.
+        private final Map<String, Map<String, Pair<Long, Long>>> indexEntries = new HashMap<>();
         private final Map<String, DataField> fields = new HashMap<>();
 
-        public Reader(SeekableInputStream seekableInputStream, RowType fileRowType) {
+        private Reader(SeekableInputStream seekableInputStream, RowType fileRowType, long length) {
             this.seekableInputStream = seekableInputStream;
             DataInputStream dataInputStream = new DataInputStream(seekableInputStream);
             fileRowType.getFields().forEach(field -> this.fields.put(field.name(), field));
@@ -290,33 +156,20 @@ public final class FileIndexFormat {
                 }
 
                 int version = dataInputStream.readInt();
-                if (version != Version.V_1.version()) {
+                if (version == Version.V_2.version()) {
+                    indexEntries.putAll(
+                            FileIndexFormatV2.readIndexEntries(seekableInputStream, length));
+                } else if (version == Version.V_1.version()) {
+                    indexEntries.putAll(FileIndexFormatV1.readIndexEntries(dataInputStream));
+                } else {
                     throw new RuntimeException(
                             "This index file is version of "
                                     + version
                                     + ", not in supported version list ["
                                     + Version.V_1.version()
+                                    + ", "
+                                    + Version.V_2.version()
                                     + "]");
-                }
-
-                int headLength = dataInputStream.readInt();
-                byte[] head = new byte[headLength - 8 - 4 - 4];
-                dataInputStream.readFully(head);
-
-                try (DataInputStream dataInput =
-                        new DataInputStream(new ByteArrayInputStream(head))) {
-                    int columnSize = dataInput.readInt();
-                    for (int i = 0; i < columnSize; i++) {
-                        String columnName = dataInput.readUTF();
-                        int indexSize = dataInput.readInt();
-                        Map<String, Pair<Integer, Integer>> indexMap =
-                                this.header.computeIfAbsent(columnName, n -> new HashMap<>());
-                        for (int j = 0; j < indexSize; j++) {
-                            indexMap.put(
-                                    dataInput.readUTF(),
-                                    Pair.of(dataInput.readInt(), dataInput.readInt()));
-                        }
-                    }
                 }
             } catch (IOException | RuntimeException e) {
                 // Callers wrap the constructor in try-with-resources on the stream,
@@ -329,7 +182,7 @@ public final class FileIndexFormat {
         }
 
         public Set<FileIndexReader> readColumnIndex(String columnName) {
-            return Optional.ofNullable(header.getOrDefault(columnName, null))
+            return Optional.ofNullable(indexEntries.getOrDefault(columnName, null))
                     .map(
                             f ->
                                     f.entrySet().stream()
@@ -343,14 +196,14 @@ public final class FileIndexFormat {
                     .orElse(Collections.emptySet());
         }
 
-        /** Returns the index metadata parsed from the header without reading index payloads. */
+        /** Returns the parsed index metadata without reading index payloads. */
         public List<FileIndexMeta> indexMetas() {
             List<FileIndexMeta> metas = new ArrayList<>();
-            for (Map.Entry<String, Map<String, Pair<Integer, Integer>>> columnEntry :
-                    header.entrySet()) {
-                for (Map.Entry<String, Pair<Integer, Integer>> indexEntry :
+            for (Map.Entry<String, Map<String, Pair<Long, Long>>> columnEntry :
+                    indexEntries.entrySet()) {
+                for (Map.Entry<String, Pair<Long, Long>> indexEntry :
                         columnEntry.getValue().entrySet()) {
-                    Pair<Integer, Integer> startAndLength = indexEntry.getValue();
+                    Pair<Long, Long> startAndLength = indexEntry.getValue();
                     metas.add(
                             new FileIndexMeta(
                                     columnEntry.getKey(),
@@ -363,7 +216,7 @@ public final class FileIndexFormat {
         }
 
         private FileIndexReader getFileIndexReader(
-                String columnName, String indexType, Pair<Integer, Integer> startAndLength) {
+                String columnName, String indexType, Pair<Long, Long> startAndLength) {
             if (startAndLength.getLeft() == EMPTY_INDEX_FLAG) {
                 return EmptyFileIndexReader.INSTANCE;
             }
@@ -374,11 +227,11 @@ public final class FileIndexFormat {
                     .createReader(
                             seekableInputStream,
                             startAndLength.getLeft(),
-                            startAndLength.getRight());
+                            checkedPayloadLength(startAndLength.getRight()));
         }
 
-        private byte[] getBytesWithStartAndLength(Pair<Integer, Integer> startAndLength) {
-            byte[] b = new byte[startAndLength.getRight()];
+        private byte[] getBytesWithStartAndLength(Pair<Long, Long> startAndLength) {
+            byte[] b = new byte[checkedPayloadLength(startAndLength.getRight())];
             try {
                 seekableInputStream.seek(startAndLength.getLeft());
                 int n = 0;
@@ -397,11 +250,20 @@ public final class FileIndexFormat {
             return b;
         }
 
+        // TODO: support 64-bit payload length in version 2, and remove this method.
+        private static int checkedPayloadLength(long length) {
+            if (length > Integer.MAX_VALUE) {
+                throw new IllegalArgumentException(
+                        "File index payload length exceeds int32: " + length);
+            }
+            return (int) length;
+        }
+
         public Map<String, Map<String, byte[]>> readAll() {
             Map<String, Map<String, byte[]>> result = new HashMap<>();
-            for (Map.Entry<String, Map<String, Pair<Integer, Integer>>> entryOuter :
-                    header.entrySet()) {
-                for (Map.Entry<String, Pair<Integer, Integer>> entryInner :
+            for (Map.Entry<String, Map<String, Pair<Long, Long>>> entryOuter :
+                    indexEntries.entrySet()) {
+                for (Map.Entry<String, Pair<Long, Long>> entryInner :
                         entryOuter.getValue().entrySet()) {
                     result.computeIfAbsent(entryOuter.getKey(), key -> new HashMap<>())
                             .put(
@@ -415,7 +277,7 @@ public final class FileIndexFormat {
         @VisibleForTesting
         // only for test yet
         Optional<byte[]> getBytesWithNameAndType(String columnName, String indexType) {
-            return Optional.ofNullable(header.getOrDefault(columnName, null))
+            return Optional.ofNullable(indexEntries.getOrDefault(columnName, null))
                     .map(i -> i.getOrDefault(indexType, null))
                     .map(this::getBytesWithStartAndLength);
         }

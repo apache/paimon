@@ -59,18 +59,19 @@ public class FileIndexPredicate implements Closeable {
     @Nullable private Path path;
 
     public FileIndexPredicate(Path path, FileIO fileIO, RowType fileRowType) throws IOException {
-        this(fileIO.newInputStream(path), fileRowType);
+        this(fileIO.newInputStream(path), fileRowType, fileIO.getFileStatus(path).getLen());
         this.path = path;
     }
 
     public FileIndexPredicate(byte[] serializedBytes, RowType fileRowType) {
-        this(new ByteArraySeekableStream(serializedBytes), fileRowType);
+        this(new ByteArraySeekableStream(serializedBytes), fileRowType, serializedBytes.length);
     }
 
-    public FileIndexPredicate(SeekableInputStream inputStream, RowType fileRowType) {
+    public FileIndexPredicate(
+            SeekableInputStream inputStream, RowType fileRowType, long containerLength) {
         // createReader itself closes the stream when the header fails validation, so
         // there is no stream to release here anymore.
-        this.reader = FileIndexFormat.createReader(inputStream, fileRowType);
+        this.reader = FileIndexFormat.createReader(inputStream, fileRowType, containerLength);
     }
 
     public FileIndexResult evaluate(@Nullable Predicate predicate) {

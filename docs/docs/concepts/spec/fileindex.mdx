@@ -37,7 +37,7 @@ deletion vectors, see [Table Index](./tableindex).
 
 | Encoding | Section |
 | --- | --- |
-| Shared header and column offsets | [Index File](#index-file) |
+| File index container | [Index File](#index-file) |
 | Bloom filter | [BloomFilter](#index-bloomfilter) |
 | Bitmap | [Bitmap](#index-bitmap) |
 | Range bitmap | [Range Bitmap](#index-range-bitmap) |
@@ -45,7 +45,13 @@ deletion vectors, see [Table Index](./tableindex).
 
 ## Index File
 
-File index file format. Put all column and offset in the header.
+The container version is selected by `file-index.format.version` (default: `1`). Readers support
+both versions. Enable version `2` after upgrading the readers of the table. The container
+version is independent of each index type's payload version.
+
+### V1
+
+V1 puts the index entries in the header before the payloads.
 
 <pre>
  ______________________________________    _____________________
@@ -94,6 +100,64 @@ redundant length:                 4 bytes int (for compatibility with later vers
 redundant bytes:                  var bytes (for compatibility with later version, in this version, is empty)
 BODY:                             column index bytes + column index bytes + column index bytes + .......
 </pre>
+
+### V2
+
+V2 stores the byte-array payloads first, followed by the footer containing the index entries and a
+fixed 12-byte trailer.
+All integers are signed and big-endian; strings use Java `writeUTF` encoding.
+
+<pre>
+ ______________________________________    _____________________
+|     magic    |        version        |          PREFIX
+|--------------------------------------|    ---------------------
+|                BODY                  |
+|                BODY                  |           BODY
+|                BODY                  |
+|--------------------------------------|    ---------------------
+|            column number             |
+|--------------------------------------|
+|   column 1        |  index number    |
+|--------------------------------------|
+|  index name 1 | start pos | length   |
+|--------------------------------------|
+|  index name 2 | start pos | length   |
+|--------------------------------------|
+|   column 2        |  index number    |
+|--------------------------------------|
+|  index name 1 | start pos | length   |
+|--------------------------------------|
+|  index name 2 | start pos | length   |
+|--------------------------------------|
+|                 ...                  |          FOOTER
+|--------------------------------------|
+|                 ...                  |
+|--------------------------------------|    ---------------------
+| footer length |      tail magic      |          TRAILER
+|______________________________________|    _____________________
+
+magic:                            8 bytes long, value is 1493475289347502L, BIG_ENDIAN
+version:                          4 bytes int, BIG_ENDIAN
+BODY:                             column index bytes + column index bytes + .......
+column number:                    4 bytes int, BIG_ENDIAN
+column x name:                    var bytes, Java modified-utf-8
+index number:                     4 bytes int (how many column items below), BIG_ENDIAN
+index name x:                     var bytes, Java modified-utf-8
+start pos:                        8 bytes long, BIG_ENDIAN
+length:                           8 bytes long, BIG_ENDIAN
+footer length:                    4 bytes int, BIG_ENDIAN
+tail magic:                       8 bytes long, value is PAFIDX02
+</pre>
+
+`start pos` is relative to the container start. For a container of length `F`, the footer starts at
+`F - 12 - footer length`.
+`FileIndexFormat.createReader` receives the container length so it can locate the trailer and
+footer.
+
+V2 supports a container larger than 2 GiB by storing payload positions and lengths as 64-bit
+values. Each index still serializes to a `byte[]`. `FileIndexer.createReader` receives a 64-bit
+start position and an int length. Before reading an index, the reader rejects a payload whose
+length exceeds `Integer.MAX_VALUE`.
 
 ## Index: BloomFilter 
 
