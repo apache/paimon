@@ -221,9 +221,9 @@ public class FileIndexFormatFormatTest {
     @Test
     public void testV2RejectPayloadLengthOverInt32() throws Exception {
         byte[] bytes = writeSmallV2();
-        // The first index length starts at byte 37: 12-byte prefix, 3-byte payload,
-        // 4-byte column count, writeUTF("a"), 4-byte index count, writeUTF("t"), and 8-byte start.
-        ByteBuffer.wrap(bytes).putLong(37, (long) Integer.MAX_VALUE + 1);
+        // The only payload length is the last long in the footer, before the 12-byte trailer.
+        ByteBuffer.wrap(bytes)
+                .putLong(bytes.length - 12 - Long.BYTES, (long) Integer.MAX_VALUE + 1);
         try (FileIndexFormat.Reader reader =
                 FileIndexFormat.createReader(
                         new ByteArraySeekableStream(bytes), ROW_TYPE, bytes.length)) {
@@ -232,7 +232,7 @@ public class FileIndexFormatFormatTest {
             assertThatThrownBy(reader::readAll)
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("payload length exceeds int32");
-            assertThatThrownBy(() -> reader.readColumnIndex("a"))
+            assertThatThrownBy(() -> reader.readColumnIndex("f0"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("payload length exceeds int32");
         }
@@ -255,7 +255,7 @@ public class FileIndexFormatFormatTest {
         try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(bytes, 2)) {
             writer.writeColumnIndexes(
                     Collections.singletonMap(
-                            "a", Collections.singletonMap("t", new byte[] {1, 2, 3})));
+                            "f0", Collections.singletonMap("bitmap", new byte[] {1, 2, 3})));
         }
         return bytes.toByteArray();
     }
