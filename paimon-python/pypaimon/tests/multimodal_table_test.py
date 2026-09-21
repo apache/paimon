@@ -21,6 +21,8 @@ import os
 import shutil
 import tempfile
 import unittest
+from dataclasses import replace
+from datetime import timedelta
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -518,6 +520,25 @@ class MultimodalTableTest(unittest.TestCase):
 
         cat = store.get_object("images/cat.jpg")
         self.assertEqual(b"cat-image-v1", cat.read())
+        self.assertEqual(table.raw_table.table_path, cat.table_root)
+        with patch.object(cat.file_io, 'create_blob_presigned_url',
+                          return_value="https://signed-url") as presign:
+            validity = timedelta(minutes=30)
+            self.assertEqual("https://signed-url", cat.to_presigned_url(validity))
+            presign.assert_called_once_with(cat.table_root, cat.descriptor, validity)
+            presign.reset_mock()
+            ranged = store.get_object("images/cat.jpg", range="bytes=1-4")
+            self.assertEqual("https://signed-url", ranged.to_presigned_url(validity))
+            root, descriptor, expiry = presign.call_args[0]
+            self.assertEqual(cat.table_root, root)
+            self.assertEqual(cat.descriptor.uri, descriptor.uri)
+            self.assertEqual(cat.descriptor.offset + 1, descriptor.offset)
+            self.assertEqual(4, descriptor.length)
+            self.assertEqual(validity, expiry)
+            presign.reset_mock()
+            with self.assertRaisesRegex(ValueError, "bound to a table root"):
+                replace(cat, table_root=None).to_presigned_url(validity)
+            presign.assert_not_called()
         self.assertEqual(b"at-i", store.get_object(
             "images/cat.jpg", range="bytes=1-4").read())
         clipped = store.get_object("images/cat.jpg", range="bytes=10-999")
