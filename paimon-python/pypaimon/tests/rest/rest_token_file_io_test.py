@@ -20,6 +20,7 @@ import pickle
 import tempfile
 import time
 import unittest
+from datetime import timedelta
 from unittest.mock import patch, MagicMock
 
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
@@ -29,6 +30,7 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO
+from pypaimon.table.row.blob import BlobDescriptor
 
 
 class RESTTokenFileIOTest(unittest.TestCase):
@@ -46,6 +48,30 @@ class RESTTokenFileIOTest(unittest.TestCase):
         import shutil
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
+
+    def test_blob_presigned_url_bound_table_root(self):
+        root = "oss://bucket/table-a"
+        file_io = RESTTokenFileIO(self.identifier, root, self.catalog_options)
+        descriptor = BlobDescriptor(root + "/data/video.blob", 10, 20)
+        validity = timedelta(minutes=30)
+        with patch.object(file_io, 'file_io') as resolve:
+            resolve.return_value.create_blob_presigned_url.return_value = "https://signed-url"
+            self.assertEqual(
+                file_io.create_blob_presigned_url(root, descriptor, validity),
+                "https://signed-url")
+            resolve.return_value.create_blob_presigned_url.assert_called_once_with(
+                root, descriptor, validity)
+
+    def test_blob_presigned_url_rejects_other_table_before_resolving_io(self):
+        file_io = RESTTokenFileIO(
+            self.identifier, "oss://bucket/table-a", self.catalog_options)
+        other_root = "oss://bucket/table-b"
+        descriptor = BlobDescriptor(other_root + "/data/video.blob", 10, 20)
+        with patch.object(file_io, 'file_io') as resolve:
+            with self.assertRaisesRegex(ValueError, "bound table root"):
+                file_io.create_blob_presigned_url(
+                    other_root, descriptor, timedelta(minutes=30))
+            resolve.assert_not_called()
 
     def test_new_output_stream_path_conversion_and_parent_creation(self):
         """Test new_output_stream correctly handles URI paths and creates parent directories."""

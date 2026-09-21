@@ -486,6 +486,7 @@ def test_file_io_wrappers_delegate_presigning():
         get_file_io.assert_called_once_with(descriptor.uri)
 
     rest = RESTTokenFileIO.__new__(RESTTokenFileIO)
+    rest.path = "oss://bucket/table"
     with mock.patch.object(rest, 'file_io', return_value=delegate):
         assert rest.create_blob_presigned_url(
             "oss://bucket/table", descriptor, validity) == "https://example"

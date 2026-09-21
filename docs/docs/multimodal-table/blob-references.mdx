@@ -186,9 +186,10 @@ scheme and authority. For a descriptor forwarded from another table, pass the
 original owning table as `source_table`; using the downstream descriptor table or
 an arbitrary external object path fails this check.
 
-Configure the catalog with the standard public HTTPS OSS endpoint. Internal endpoints and
-endpoints without the `https` scheme are rejected because external consumers must be able to fetch
-the returned URL:
+Use an HTTPS OSS endpoint. The Java implementation used by SQL converts Internal endpoints
+to their public equivalents in the returned URL. PyPaimon preserves the configured endpoint,
+including Internal endpoints; both the Python process and the URL consumer must be able to
+reach that endpoint. For consumers that require public access, configure a public endpoint:
 
 ```properties
 fs.oss.endpoint=https://oss-cn-hangzhou.aliyuncs.com
