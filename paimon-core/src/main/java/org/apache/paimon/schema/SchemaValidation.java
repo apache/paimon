@@ -41,6 +41,7 @@ import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFa
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.system.ChangelogEventMetadata;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
@@ -199,6 +200,7 @@ public class SchemaValidation {
                             "Can not set %s on table without primary keys, please define primary keys.",
                             CHANGELOG_PRODUCER.key()));
         }
+        ChangelogEventMetadata.validate(new RowType(schema.fields()), options);
         if (options.streamingReadOverwrite()
                 && (changelogProducer == ChangelogProducer.FULL_COMPACTION
                         || changelogProducer == ChangelogProducer.LOOKUP)) {

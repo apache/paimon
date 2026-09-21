@@ -122,7 +122,8 @@ physical Paimon column and is not automatically visible to Spark.
 The metadata values come from the merge result, which equals the incoming value for the `deduplicate`
 merge engine but may differ for aggregation engines. This option is supported only by the `lookup`
 changelog producer. Set `'changelog-producer.metadata-field-prefix'` if the default prefix conflicts
-with an existing column name.
+with an existing column name. Changelog files written before this option was enabled expose these
+metadata fields as `NULL`.
 
 ```sql
 -- Source table with event metadata preservation
