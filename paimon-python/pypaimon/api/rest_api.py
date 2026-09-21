@@ -191,7 +191,7 @@ class RESTApi:
         databases = response.data() or []
         return PagedList(databases, response.get_next_page_token())
 
-    def create_database(self, name: str, properties: Dict[str, str]) -> None:
+    def create_database(self, name: str, properties: Optional[Dict[str, str]]) -> None:
         if not name or not name.strip():
             raise ValueError("Database name cannot be empty")
 
