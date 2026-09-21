@@ -79,6 +79,7 @@ Choose a group, then use the page contents to jump to a procedure:
 
 [`create_tag`](./procedures/versions#create_tag),
 [`create_tag_from_timestamp`](./procedures/versions#create_tag_from_timestamp),
+[`create_tag_from_watermark`](./procedures/versions#create_tag_from_watermark),
 [`replace_tag`](./procedures/versions#replace_tag),
 [`rename_tag`](./procedures/versions#rename_tag),
 [`delete_tag`](./procedures/versions#delete_tag),
