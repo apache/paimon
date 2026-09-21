@@ -218,11 +218,7 @@ def select_indexed_splits(
         if not allowed:
             continue
 
-        indexed = IndexedSplit(
-            split,
-            allowed,
-            exact_merged_row_count=sum(r.count() for r in allowed),
-        )
+        indexed = IndexedSplit(split, allowed)
         selected.append(
             QueryAuthSplit(indexed, auth_result)
             if auth_result is not None else indexed

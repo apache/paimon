@@ -1228,11 +1228,7 @@ class _RowIdFetcher:
             allowed = Range.and_(wanted, self._split_ranges[split_index])
             if not allowed:
                 continue
-            indexed = IndexedSplit(
-                split,
-                allowed,
-                exact_merged_row_count=sum(r.count() for r in allowed),
-            )
+            indexed = IndexedSplit(split, allowed)
             if auth_result is not None:
                 indexed = QueryAuthSplit(indexed, auth_result)
             selected_splits.append(indexed)

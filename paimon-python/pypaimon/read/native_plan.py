@@ -371,7 +371,9 @@ def native_plan(
         row_ranges: Optional[List[Tuple[int, int]]] = None,
         incremental_range: Optional[Tuple[int, int]] = None,
         row_position_slice: Optional[Tuple[int, int]] = None,
-        row_position_shard: Optional[Tuple[int, int]] = None) -> Plan:
+        row_position_shard: Optional[Tuple[int, int]] = None,
+        chunk_shuffle: Optional[Tuple[int, int]] = None,
+        shard: Optional[Tuple[int, int]] = None) -> Plan:
     """Plan with pypaimon_rust, preserving snapshot metadata.
 
     Native conversion or planning failures are handled by TableScan, which
@@ -390,12 +392,20 @@ def native_plan(
         scan = scan.with_row_position_slice(*row_position_slice)
     if row_position_shard is not None:
         scan = scan.with_row_position_shard(*row_position_shard)
+    if chunk_shuffle is not None:
+        seed, chunk_size = chunk_shuffle
+        scan = scan.with_chunk_shuffle(str(seed), chunk_size)
+    if shard is not None:
+        scan = scan.with_shard(*shard)
     rust_plan = scan.plan()
     rust_splits = rust_plan.splits()
     pfields = _partition_fields(table)
     # Trimmed primary keys decode per-file min/max keys (PK merge-on-read).
     kfields = table.trimmed_primary_keys_fields
-    splits = [deserialize_split_v1(split.serialize(), pfields, kfields) for split in rust_splits]
+    splits = [
+        deserialize_split_v1(split.serialize(), pfields, kfields)
+        for split in rust_splits
+    ]
     if table.options.native_read_enabled():
         # Retain the opaque Rust split next to the Python metadata view. The
         # normal planner/reader contract remains a Python Split list, while
