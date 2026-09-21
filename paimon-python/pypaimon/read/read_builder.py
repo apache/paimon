@@ -16,7 +16,7 @@
 # under the License.
 
 import ast
-from typing import List, Optional
+from typing import List, Optional, Sequence, Union
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -31,6 +31,9 @@ from pypaimon.read.table_scan import TableScan
 from pypaimon.schema.data_types import AtomicType, DataField, MapType
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.projection import MapKey, Projection, is_row_type
+
+
+ProjectionPath = Sequence[Union[int, MapKey]]
 
 
 class _ReadPredicateBuilder(PredicateBuilder):
@@ -60,7 +63,7 @@ class ReadBuilder:
         # ``_nested_paths`` is also populated and takes precedence
         # in ``read_type()`` and downstream consumers.
         self._projection: Optional[List[str]] = None
-        self._nested_paths: Optional[List[List[int]]] = None
+        self._nested_paths: Optional[List[ProjectionPath]] = None
         self._partition_filter: Optional[Predicate] = None
         self._limit: Optional[int] = None
 
@@ -183,31 +186,14 @@ class ReadBuilder:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _resolve_projection_paths(self, names: List[str]) -> List[List[int]]:
+    def _resolve_projection_paths(self, names: List[str]) -> List[ProjectionPath]:
         """Translate ROW paths and MAP-key selectors into internal paths."""
         table_fields = self.table.fields
         if self.table.options.row_tracking_enabled():
             table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
         top_index = {f.name: i for i, f in enumerate(table_fields)}
 
-        def resolve_row_path(top, parts):
-            path = [top_index[top]]
-            current_field = table_fields[path[0]]
-            for part in parts:
-                if not is_row_type(current_field.type):
-                    return None
-                child_fields = current_field.type.fields
-                child_idx = next(
-                    (i for i, f in enumerate(child_fields)
-                     if f.name == part),
-                    -1)
-                if child_idx < 0:
-                    return None
-                path.append(child_idx)
-                current_field = child_fields[child_idx]
-            return path
-
-        paths: List[List[int]] = []
+        paths: List[ProjectionPath] = []
         for name in names:
             # Dot can be part of a top-level field name, not only a struct path
             # separator. Top-level match takes precedence over struct walk.
@@ -221,29 +207,30 @@ class ReadBuilder:
                 paths.append([top_index[top], MapKey(key)])
                 continue
 
-            if '.' not in name:
+            if "." not in name:
                 continue
 
             # Preserve the original ROW-path semantics before considering a
             # dotted top-level field name as the path prefix.
-            parts = name.split('.')
+            parts = name.split(".")
             top = parts[0]
             if top in top_index:
-                path = resolve_row_path(top, parts[1:])
+                path = _resolve_row_path(table_fields, top_index[top], parts[1:])
                 if path is not None:
                     paths.append(path)
                     continue
 
             candidates = [
-                field_name for field_name in top_index
-                if name.startswith(field_name + '.')
+                field_name
+                for field_name in top_index
+                if name.startswith(field_name + ".")
                 and is_row_type(table_fields[top_index[field_name]].type)
             ]
             if not candidates:
                 continue
             top = max(candidates, key=len)
-            parts = name[len(top) + 1:].split('.')
-            path = resolve_row_path(top, parts)
+            parts = name[len(top) + 1 :].split(".")
+            path = _resolve_row_path(table_fields, top_index[top], parts)
             if path is not None:
                 paths.append(path)
         return paths
@@ -284,25 +271,43 @@ class ReadBuilder:
         return fields
 
 
+def _resolve_row_path(
+    table_fields: List[DataField], top_index: int, parts: List[str]
+) -> Optional[List[int]]:
+    """Walk ROW children from a top-level field; return None for invalid paths."""
+    path = [top_index]
+    current_field = table_fields[top_index]
+    for part in parts:
+        if not is_row_type(current_field.type):
+            return None
+        child_fields = current_field.type.fields
+        child_idx = next((i for i, f in enumerate(child_fields) if f.name == part), -1)
+        if child_idx < 0:
+            return None
+        path.append(child_idx)
+        current_field = child_fields[child_idx]
+    return path
+
+
 def _map_key_selector(name, table_fields):
+    if not name.endswith("]"):
+        return None
     candidates = [
-        field for field in table_fields
-        if _is_string_key_map(field.type)
-        and name.startswith(field.name + '[')
+        field
+        for field in table_fields
+        if _is_string_key_map(field.type) and name.startswith(field.name + "[")
     ]
-    if not candidates:
-        return None
-    field = max(candidates, key=lambda candidate: len(candidate.name))
-    selector = name[len(field.name):]
-    if not selector.endswith(']'):
-        return None
-    try:
-        key = ast.literal_eval(selector[1:-1])
-    except (SyntaxError, ValueError):
-        return None
-    if not isinstance(key, str):
-        return None
-    return field.name, key
+    for field in sorted(
+        candidates, key=lambda candidate: len(candidate.name), reverse=True
+    ):
+        selector = name[len(field.name) :]
+        try:
+            key = ast.literal_eval(selector[1:-1])
+        except (SyntaxError, ValueError):
+            continue
+        if isinstance(key, str):
+            return field.name, key
+    return None
 
 
 def _is_string_key_map(data_type) -> bool:
