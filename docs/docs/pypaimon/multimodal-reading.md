@@ -142,8 +142,10 @@ steps_with_imu = aligned.join_window(
 rows using concurrent, same-file coalesced ranged reads. This is much faster than
 a per-row loop and avoids the slow row-by-row blob resolution on data-evolution
 tables. It returns `(scalar_table, {column: rows})`, row-aligned. Scalar BLOB
-rows are `bytes | None`; `MAP<K, BLOB>` rows are `None` or ordered lists of
-`(key, bytes | None)` pairs. The scalar table drops the readable BLOB columns.
+rows are `bytes | None`; `ARRAY<BLOB>` rows are `None` or ordered lists of
+`bytes | None`; `MAP<K, BLOB>` rows are `None` or ordered lists of
+`(key, bytes | None)` pairs. Empty arrays and maps remain empty lists. The scalar
+table drops the readable BLOB columns, including unrequested ARRAY and MAP BLOBs.
 
 ```python
 scalar, blobs = (
@@ -165,12 +167,13 @@ scalar, blobs = docs.scan().where(f"id IN ({in_clause})").read_blobs("image")
 `where()` is a SQL string, so build the `IN (...)` clause only from trusted,
 already-escaped ids -- do not interpolate untrusted external input.
 
-Read several BLOB columns at once, including `MAP<K, BLOB>`:
+Read several BLOB columns at once, including `ARRAY<BLOB>` and `MAP<K, BLOB>`:
 
 ```python
 scalar, blobs = docs.scan().where("category = 'lake'").read_blobs(
-    ["image", "audio", "renditions"]
+    ["image", "audio", "pages", "renditions"]
 )
+pages = blobs["pages"]  # row-aligned lists of page payloads, or None
 renditions = [None if row is None else dict(row) for row in blobs["renditions"]]
 ```
 
