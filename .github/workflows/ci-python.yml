@@ -196,10 +196,11 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build paimon-rust main
+      # Restore @main after apache/paimon-rust#907 is merged.
+      - name: Build paimon-rust native-read parity PR
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade "git+https://github.com/apache/paimon-rust.git@main#subdirectory=bindings/python"
+          python -m pip install --upgrade "git+https://github.com/JingsongLi/paimon-rust.git@codex/native-read-ci-parity#subdirectory=bindings/python"
 
       - name: Install Python test dependencies
         run: |
