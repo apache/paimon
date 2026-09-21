@@ -213,3 +213,86 @@ def test_first_row_level_zero_merges_before_filtering(tmp_path, target_size, com
                 actual = builder.new_read().to_arrow(
                     plan.splits()).column('id').to_pylist()
             assert sorted(actual) == expected
+
+
+@pytest.mark.parametrize('engine,merged_value', [
+    ('partial-update', 5), ('aggregation', 15),
+])
+def test_pk_merge_engines_read_deletion_vectors_natively(tmp_path, engine, merged_value):
+    schema = pa.schema([('id', pa.int64()), ('value', pa.int64())])
+    options = {
+        'bucket': '1', 'merge-engine': engine, 'file.format': 'parquet',
+        'deletion-vectors.enabled': 'true', 'deletion-vectors.merge-on-read': 'true',
+    }
+    if engine == 'aggregation':
+        options['fields.value.aggregate-function'] = 'sum'
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(
+        schema, primary_keys=['id'], options=options), False)
+    table = catalog.get_table('default.t')
+    # Each run has unique keys, so the Python writer's aggregation fallback
+    # leaves its physical rows intact; aggregation happens across the runs.
+    first_file = None
+    for rows, level in (([{'id': 1, 'value': 10}, {'id': 2, 'value': 20}], 1),
+                        ([{'id': 1, 'value': 5}, {'id': 3, 'value': 30}], 0)):
+        builder = table.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        try:
+            writer.write_arrow(pa.Table.from_pylist(rows, schema=schema))
+            messages = writer.prepare_commit()
+            for message in messages:
+                message.new_files = [replace(file, level=level)
+                                     for file in message.new_files]
+                if first_file is None:
+                    first_file = message.new_files[0]
+            commit.commit(messages)
+        finally:
+            writer.close()
+            commit.close()
+
+    first_path = table.path_factory().bucket_path((), 0) + '/' + first_file.file_name
+    deleted_position = pq.read_table(first_path).column('id').to_pylist().index(2)
+    vector = BitmapDeletionVector()
+    vector.delete(deleted_position)
+    entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+        GenericRow([], []), 0, {first_file.file_name: vector})
+    commit = table.new_batch_write_builder().new_commit()
+    try:
+        commit.commit([CommitMessage(partition=(), bucket=0, new_files=[], index_adds=[entry])])
+    finally:
+        commit.close()
+
+    expected = [{'id': 1, 'value': merged_value}, {'id': 3, 'value': 30}]
+    for predicate_value, projection in ((None, None), (merged_value, ['id'])):
+        for native in (False, True):
+            candidate = table.copy({
+                'scan.native-plan.enabled': str(native).lower(),
+                'read.native.enabled': str(native).lower(),
+            })
+            predicates = candidate.new_read_builder().new_predicate_builder()
+            builder = candidate.new_read_builder()
+            if projection is not None:
+                builder.with_projection(projection)
+            if predicate_value is not None:
+                builder.with_filter(predicates.equal('value', predicate_value))
+            scan = builder.new_scan()
+            if native:
+                with patch.object(scan.file_scanner, 'scan',
+                                  side_effect=AssertionError('native plan fell back')):
+                    plan = scan.plan()
+                assert all(getattr(split, '_native_split', None) is not None
+                           for split in plan.splits())
+                guard = patch('pypaimon.read.table_read.TableRead._create_split_read',
+                              side_effect=AssertionError('native read fell back'))
+            else:
+                plan = scan.plan()
+                guard = ExitStack()
+            with guard:
+                actual = builder.new_read().to_arrow(plan.splits()).to_pylist()
+            wanted = (expected if predicate_value is None
+                      else [{'id': 1}])
+            assert sorted(actual, key=lambda row: row['id']) == wanted
+            assert any(deletion is not None
+                       for split in plan.splits()
+                       for deletion in split.data_deletion_files or [])

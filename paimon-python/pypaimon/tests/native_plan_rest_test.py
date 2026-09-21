@@ -25,6 +25,7 @@ from pypaimon.api.api_response import ConfigResponse, ErrorResponse, GetTableSna
 from pypaimon.api.auth import BearTokenAuthProvider
 from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.snapshot.table_snapshot import TableSnapshot
+from pypaimon.table.row.blob import BlobViewStruct
 from pypaimon.tests.rest.rest_server import RESTCatalogServer
 
 
@@ -149,3 +150,49 @@ def test_rest_dotted_database_and_table_keep_identity(rest_catalog, branch):
         _assert_parity(table, [{'id': 1, 'value': 'old'}], 1)
         assert all((call.args[1].get_database_name(), call.args[1].get_table_name())
                    == ('namespace.database', 'table.with.dots') for call in load.call_args_list)
+
+
+def test_rest_blob_view_limit_filters_before_resolving_unselected_view(rest_catalog):
+    catalog, _ = rest_catalog
+    schema = pa.schema([('id', pa.int32()), ('payload', pa.large_binary())])
+    options = {'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'}
+    catalog.create_table('default.source', Schema.from_pyarrow_schema(
+        schema, options=options), False)
+    source = catalog.get_table('default.source')
+    writer = source.new_batch_write_builder().new_write()
+    writer.write_arrow(pa.Table.from_pydict({
+        'id': [1, 2], 'payload': [b'first', b'selected'],
+    }, schema=schema))
+    source.new_batch_write_builder().new_commit().commit(writer.prepare_commit())
+    writer.close()
+    payload_id = next(field.id for field in source.table_schema.fields
+                      if field.name == 'payload')
+
+    catalog.create_table('default.views', Schema.from_pyarrow_schema(
+        schema, options=dict(options, **{'blob-view-field': 'payload'})), False)
+    views = catalog.get_table('default.views')
+    writer = views.new_batch_write_builder().new_write()
+    writer.write_arrow(pa.Table.from_pydict({
+        'id': [10, 11], 'payload': [
+            BlobViewStruct('default.source', payload_id, 99).serialize(),
+            BlobViewStruct('default.source', payload_id, 1).serialize(),
+        ],
+    }, schema=schema))
+    views.new_batch_write_builder().new_commit().commit(writer.prepare_commit())
+    writer.close()
+
+    views = views.copy({
+        'scan.native-plan.enabled': 'true', 'read.native.enabled': 'true',
+    })
+    builder = views.new_read_builder().with_limit(1)
+    builder.with_filter(builder.new_predicate_builder().equal('id', 11))
+    scan = builder.new_scan()
+    with patch.object(scan.file_scanner, 'scan',
+                      side_effect=AssertionError('native view plan fell back')):
+        plan = scan.plan()
+    assert all(getattr(split, '_native_split', None) is not None
+               for split in plan.splits())
+    with patch('pypaimon.read.table_read.TableRead._create_split_read',
+               side_effect=AssertionError('native view read fell back')):
+        assert builder.new_read().to_arrow(plan.splits()).to_pylist() == [
+            {'id': 11, 'payload': b'selected'}]

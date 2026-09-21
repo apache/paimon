@@ -37,7 +37,7 @@ from pypaimon.read.native_plan import (
     native_split_from_python,
 )
 from pypaimon.schema.schema_change import SchemaChange
-from pypaimon.table.row.blob import BlobDescriptor
+from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
 from pypaimon.utils.range import Range
 
 
@@ -125,6 +125,35 @@ class NativePlanIntegrationTest(unittest.TestCase):
                 'pypaimon.read.table_read.TableRead._create_split_read',
                 side_effect=AssertionError('Python reader was used')):
             return builder.new_read().to_arrow(plan.splits()).to_pylist()
+
+    def test_row_id_predicate_uses_native_plan_and_read(self):
+        for data_evolution in (False, True):
+            with self.subTest(data_evolution=data_evolution):
+                name = 'row_id_predicate_de' if data_evolution else 'row_id_predicate_append'
+                self.cat.create_table('default.' + name, Schema.from_pyarrow_schema(
+                    self.schema, options={
+                        'row-tracking.enabled': 'true',
+                        'data-evolution.enabled': str(data_evolution).lower(),
+                    }), False)
+                self._write(name, [
+                    {'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}, {'k': 3, 'v': 'c'},
+                ])
+                table = self.cat.get_table('default.' + name).copy({
+                    'scan.native-plan.enabled': 'true', 'read.native.enabled': 'true',
+                })
+                predicates = (table.new_read_builder()
+                              .with_projection(['k', '_ROW_ID'])
+                              .new_predicate_builder())
+                builder = table.new_read_builder().with_projection(['k', '_ROW_ID'])
+                builder.with_filter(predicates.and_predicates([
+                    predicates.equal('_ROW_ID', 1), predicates.equal('k', 2),
+                ]))
+                plan = builder.new_scan().plan()
+                self.assertTrue(builder.explain().native_planned)
+                self.assertTrue(all(getattr(split, '_native_split', None) is not None
+                                    for split in plan.splits()))
+                self.assertEqual(self._native_rows(builder, plan),
+                                 [{'k': 2, '_ROW_ID': 1}])
 
     def test_primary_key_matches_normal_plan(self):
         self.cat.create_table('default.pk_t', Schema.from_pyarrow_schema(
@@ -1026,6 +1055,78 @@ class NativePlanIntegrationTest(unittest.TestCase):
 
         native.assert_called_once()
         self.assertEqual(result.to_pydict(), {'id': [1], 'payload': [b'a']})
+
+    @unittest.skipUnless(native_reader_available(),
+                         "pypaimon-rust native reader API not installed")
+    def test_native_read_pruning_blob_limit_with_predicates(self):
+        schema = pa.schema([('id', pa.int32()), ('payload', pa.large_binary())])
+        self.cat.create_table('default.native_blob_predicate_t',
+                              Schema.from_pyarrow_schema(schema, options={
+                                  'row-tracking.enabled': 'true',
+                                  'data-evolution.enabled': 'true',
+                              }), False)
+        table = self.cat.get_table('default.native_blob_predicate_t')
+        writer = table.new_batch_write_builder().new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2, 3], 'payload': [b'skip', b'selected', b'late'],
+        }, schema=schema))
+        table.new_batch_write_builder().new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        table = table.copy({
+            'scan.native-plan.enabled': 'true', 'read.native.enabled': 'true',
+        })
+        for field, value in (('id', 2), ('payload', b'selected')):
+            with self.subTest(predicate_field=field):
+                builder = table.new_read_builder().with_limit(1)
+                builder.with_filter(builder.new_predicate_builder().equal(field, value))
+                plan = builder.new_scan().plan()
+                self.assertTrue(builder.explain().native_planned)
+                self.assertTrue(all(getattr(split, '_native_split', None) is not None
+                                    for split in plan.splits()))
+                self.assertEqual(self._native_rows(builder, plan),
+                                 [{'id': 2, 'payload': b'selected'}])
+
+    @unittest.skipUnless(native_reader_available(),
+                         "pypaimon-rust native reader API not installed")
+    def test_filesystem_blob_view_without_limit_stays_on_python_reader(self):
+        schema = pa.schema([('id', pa.int32()), ('payload', pa.large_binary())])
+        options = {'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'}
+        self.cat.create_table('default.fs_blob_source',
+                              Schema.from_pyarrow_schema(schema, options=options), False)
+        source = self.cat.get_table('default.fs_blob_source')
+        writer = source.new_batch_write_builder().new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1], 'payload': [b'from-source'],
+        }, schema=schema))
+        source.new_batch_write_builder().new_commit().commit(writer.prepare_commit())
+        writer.close()
+        payload_id = next(field.id for field in source.table_schema.fields
+                          if field.name == 'payload')
+
+        self.cat.create_table('default.fs_blob_view', Schema.from_pyarrow_schema(
+            schema, options=dict(options, **{'blob-view-field': 'payload'})), False)
+        view = self.cat.get_table('default.fs_blob_view')
+        writer = view.new_batch_write_builder().new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [10],
+            'payload': [BlobViewStruct(
+                'default.fs_blob_source', payload_id, 0).serialize()],
+        }, schema=schema))
+        view.new_batch_write_builder().new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        view = view.copy({
+            'scan.native-plan.enabled': 'true', 'read.native.enabled': 'true',
+        })
+        builder = view.new_read_builder()
+        plan = builder.new_scan().plan()
+        self.assertTrue(builder.explain().native_planned)
+        with patch('pypaimon.read.native_plan.native_read',
+                   side_effect=AssertionError('native view read should not run')) as native:
+            self.assertEqual(builder.new_read().to_arrow(plan.splits()).to_pylist(),
+                             [{'id': 10, 'payload': b'from-source'}])
+        native.assert_not_called()
 
     @unittest.skipUnless(native_reader_available(),
                          "pypaimon-rust native reader API not installed")
