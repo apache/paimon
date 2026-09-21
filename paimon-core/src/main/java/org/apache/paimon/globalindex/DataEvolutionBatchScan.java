@@ -70,7 +70,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     private Predicate filter;
     private TopN topN;
-    private Integer pushDownLimit;
+    private Long pushDownLimit;
     // set when part of the filter reaches the reader only, so limit/TopN must not prune ahead of it
     private boolean rowIdFilterDeferred;
     private RowRangeIndex pushedRowRangeIndex;
@@ -184,7 +184,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
     }
 
     @Override
-    public InnerTableScan withLimit(int limit) {
+    public InnerTableScan withLimit(long limit) {
         // forwarded in plan(), once withFilter has said whether a row-id part was deferred
         this.pushDownLimit = limit;
         return this;

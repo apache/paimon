@@ -468,7 +468,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         }
 
         @Override
-        public FallbackReadScan withLimit(int limit) {
+        public FallbackReadScan withLimit(long limit) {
             mainScan.withLimit(limit);
             fallbackScan.withLimit(limit);
             return this;
