@@ -600,8 +600,7 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         deleteRows(table, 50);
 
         FileStoreTable latest = getTable(identifier(table.name()));
-        DataSplit split =
-                (DataSplit) latest.newReadBuilder().newScan().plan().splits().get(0);
+        DataSplit split = (DataSplit) latest.newReadBuilder().newScan().plan().splits().get(0);
         Path deletionVectorPath =
                 split.deletionFiles().get().stream()
                         .filter(Objects::nonNull)
