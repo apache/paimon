@@ -603,9 +603,26 @@ class TestRowFileIndexConsistency:
         with pytest.raises(IOError, match="row count 5 does not reach"):
             reader._validate_block_index()
 
+    def test_compressed_sizes_must_sum_to_the_index_offset(self):
+        # two blocks of 10 and 20 compressed bytes occupy [0, 30), so the index starts at 30
+        reader = self._reader_with(compressed=[10, 20], row_starts=[0, 5], total_rows=30,
+                                   index_offset=30)
+        reader._validate_block_index()
+
+        reader = self._reader_with(compressed=[10, 20], row_starts=[0, 5], total_rows=30,
+                                   index_offset=31)
+        with pytest.raises(IOError, match="blocks end at 30"):
+            reader._validate_block_index()
+
+        # the sum has to be checked for an empty index too, where it is the only thing left
+        reader = self._reader_with(compressed=[], row_starts=[], total_rows=0, index_offset=7)
+        with pytest.raises(IOError, match="blocks end at 0"):
+            reader._validate_block_index()
+
     def test_negative_compressed_size_is_rejected(self):
         # the sizes sum to the declared index_offset only because the second cancels the first
-        reader = self._reader_with(compressed=[200, -100], row_starts=[0, 5], total_rows=30)
+        reader = self._reader_with(compressed=[200, -100], row_starts=[0, 5], total_rows=30,
+                                   index_offset=100)
         with pytest.raises(IOError, match="block 1 has a negative compressed size -100"):
             reader._validate_block_index()
 
@@ -622,11 +639,12 @@ class TestRowFileIndexConsistency:
         with pytest.raises(IOError, match="empty, but the footer declares 7 rows"):
             reader._validate_block_index()
 
-    def _reader_with(self, compressed, row_starts, total_rows):
+    def _reader_with(self, compressed, row_starts, total_rows, index_offset=None):
         reader = FormatRowReader.__new__(FormatRowReader)
         reader._block_compressed_sizes = compressed
         reader._block_uncompressed_sizes = [100] * len(compressed)
         reader._block_row_starts = row_starts
         reader._block_count = len(compressed)
         reader._total_row_count = total_rows
+        reader._index_offset = sum(compressed) if index_offset is None else index_offset
         return reader

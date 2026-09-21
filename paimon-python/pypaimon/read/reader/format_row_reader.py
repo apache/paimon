@@ -178,7 +178,8 @@ class FormatRowReader(RecordBatchReader):
 
         self._total_row_count = struct.unpack_from('<q', footer_bytes, 0)[0]
         self._block_count = struct.unpack_from('<i', footer_bytes, 8)[0]
-        index_offset = struct.unpack_from('<q', footer_bytes, 12)[0]
+        self._index_offset = struct.unpack_from('<q', footer_bytes, 12)[0]
+        index_offset = self._index_offset
         index_length = struct.unpack_from('<i', footer_bytes, 20)[0]
 
         # the block index has to lie inside the file and ahead of the footer, and these are the
@@ -256,9 +257,14 @@ class FormatRowReader(RecordBatchReader):
             raise IOError(f"Row file block index holds {counts[0]} blocks, but the footer "
                           f"declares {self._block_count}")
 
+        blocks_end = 0
         for i, size in enumerate(self._block_compressed_sizes):
             if size < 0:
                 raise IOError(f"Row file block {i} has a negative compressed size {size}")
+            blocks_end += size
+        if blocks_end != self._index_offset:
+            raise IOError(f"Row file blocks end at {blocks_end}, but the footer puts the "
+                          f"block index at {self._index_offset}")
 
         if self._block_count == 0:
             if self._total_row_count != 0:
