@@ -77,6 +77,78 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
     @Test
+    public void testBTreeEqualityLimitStopsAfterEnoughMatches() throws Exception {
+        createTableDefault();
+        appendDogRows(0, 40);
+        createIndex("f1");
+
+        FileStoreTable table =
+                tableWithSearchMode((FileStoreTable) catalog.getTable(identifier()), "full");
+        Predicate predicate =
+                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("dog"));
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate).withLimit(3);
+
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        assertThat(plan.splits()).allMatch(IndexedSplit.class::isInstance);
+        assertThat(plan.splits().stream().mapToLong(Split::rowCount).sum()).isEqualTo(3);
+        assertThat(readF1(readBuilder, plan)).containsExactly("dog", "dog", "dog");
+    }
+
+    @Test
+    public void testBTreeEqualityLimitReturnsAllMatchesBelowLimit() throws Exception {
+        createTableDefault();
+        appendRows(0, 20);
+        appendDogRows(20, 22);
+        createIndex("f1");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        Predicate predicate =
+                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("dog"));
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate).withLimit(3);
+
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        assertThat(plan.splits().stream().mapToLong(Split::rowCount).sum()).isEqualTo(2);
+        assertThat(readF1(readBuilder, plan)).containsExactly("dog", "dog");
+    }
+
+    @Test
+    public void testBTreeEqualityLimitFallsBackWithUnindexedRows() throws Exception {
+        createTableDefault();
+        appendDogRows(0, 40);
+        createIndex("f1");
+        appendDogRows(40, 45);
+
+        FileStoreTable table =
+                tableWithSearchMode((FileStoreTable) catalog.getTable(identifier()), "full");
+        Predicate predicate =
+                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("dog"));
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate).withLimit(3);
+
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        assertThat(plan.splits().stream().mapToLong(Split::rowCount).sum()).isGreaterThan(3);
+        assertThat(readF1(readBuilder, plan)).hasSize(45);
+    }
+
+    @Test
+    public void testBTreeEqualityLimitFallsBackWithResidualFilter() throws Exception {
+        createTableDefault();
+        appendDogRows(0, 40);
+        createIndex("f1");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.equal(1, BinaryString.fromString("dog")),
+                        builder.greaterOrEqual(0, 35));
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate).withLimit(3);
+
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        assertThat(plan.splits().stream().mapToLong(Split::rowCount).sum()).isGreaterThan(3);
+        assertThat(readF1(readBuilder, plan)).hasSize(5);
+    }
+
+    @Test
     public void testBTreeGlobalIndex() throws Exception {
         write(100000L);
         createIndex("f1");

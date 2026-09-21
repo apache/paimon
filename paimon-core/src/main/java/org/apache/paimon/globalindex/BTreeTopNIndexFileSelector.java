@@ -24,6 +24,7 @@ import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -38,9 +39,9 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  *
  * <p>Every BTree file must have sorted metadata, matching the predicate reader contract. Retaining
  * the first {@code N} files ordered by their best value is safe because every BTree file
- * contributes at least one row at that value. Fewer files can be retained when one file alone
- * contains at least {@code N} rows and its worst value is not worse than the best value of every
- * remaining file.
+ * contributes at least one row at that value. Fewer files can be retained when selected files with
+ * disjoint row ranges contain at least {@code N} rows whose worst values are not worse than the
+ * best value of every remaining file.
  */
 class BTreeTopNIndexFileSelector {
 
@@ -74,14 +75,46 @@ class BTreeTopNIndexFileSelector {
             RankedIndexFile current = rankedFiles.get(i);
             selected.add(current.file);
             if (i + 1 < rankedFiles.size()
-                    && current.file.rowCount() >= limit
-                    // Equal boundary keys are safe because this TopN has no secondary ordering or
-                    // WITH TIES semantics, and the current file alone supplies enough rows.
-                    && selector.compareWorstToBest(current, rankedFiles.get(i + 1)) <= 0) {
+                    && ((current.file.rowCount() >= limit
+                                    && selector.compareWorstToBest(current, rankedFiles.get(i + 1))
+                                            <= 0)
+                            || selector.hasEnoughGuaranteedRows(
+                                    rankedFiles.subList(0, i + 1),
+                                    rankedFiles.get(i + 1),
+                                    limit))) {
                 break;
             }
         }
         return selected;
+    }
+
+    private boolean hasEnoughGuaranteedRows(
+            List<RankedIndexFile> selected, RankedIndexFile next, int limit) {
+        List<Range> countedRanges = new ArrayList<>();
+        long guaranteedRows = 0;
+        for (RankedIndexFile candidate : selected) {
+            // Equal boundary keys are safe: TopN has no secondary ordering or WITH TIES semantics.
+            if (compareWorstToBest(candidate, next) > 0) {
+                continue;
+            }
+
+            Range rowRange = candidate.file.globalIndexMeta().rowRange();
+            boolean overlaps = false;
+            for (Range countedRange : countedRanges) {
+                if (countedRange.hasIntersection(rowRange)) {
+                    overlaps = true;
+                    break;
+                }
+            }
+            if (!overlaps) {
+                countedRanges.add(rowRange);
+                guaranteedRows += Math.min(candidate.file.rowCount(), (long) limit);
+                if (guaranteedRows >= limit) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private RankedIndexFile rank(IndexFileMeta file) {

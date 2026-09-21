@@ -332,6 +332,25 @@ public class BTreeIndexReader implements Closeable {
         return createResult(() -> pointQuery(literal));
     }
 
+    /** Reads at most {@code limit} row ids for an exact equality lookup. */
+    public Optional<GlobalIndexResult> visitEqualWithLimit(Object literal, int limit) {
+        Preconditions.checkArgument(limit >= 0, "Limit must not be negative.");
+        return createResult(
+                () -> {
+                    RoaringNavigableMap64 result = new RoaringNavigableMap64();
+                    if (limit == 0) {
+                        return result;
+                    }
+                    byte[] rowIds = reader.lookup(keySerializer.serialize(literal));
+                    if (rowIds != null) {
+                        for (long rowId : deserializeRowIds(MemorySlice.wrap(rowIds), limit)) {
+                            result.add(rowId);
+                        }
+                    }
+                    return result;
+                });
+    }
+
     public Optional<GlobalIndexResult> visitGreaterThan(Object literal) {
         return createResult(() -> rangeQuery(literal, maxKey, false, true));
     }

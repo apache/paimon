@@ -73,6 +73,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
     private Long pushDownLimit;
     // set when part of the filter reaches the reader only, so limit/TopN must not prune ahead of it
     private boolean rowIdFilterDeferred;
+    private boolean additionalDataPruning;
     private RowRangeIndex pushedRowRangeIndex;
     private GlobalIndexResult globalIndexResult;
 
@@ -83,6 +84,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     @Override
     public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+        additionalDataPruning = true;
         batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
         return this;
     }
@@ -161,6 +163,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     @Override
     public InnerTableScan withBucket(int bucket) {
+        additionalDataPruning = true;
         batchScan.withBucket(bucket);
         return this;
     }
@@ -216,12 +219,14 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     @Override
     public InnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
+        additionalDataPruning = true;
         batchScan.withBucketFilter(bucketFilter);
         return this;
     }
 
     @Override
     public InnerTableScan withLevelFilter(Filter<Integer> levelFilter) {
+        additionalDataPruning = true;
         batchScan.withLevelFilter(levelFilter);
         return this;
     }
@@ -288,7 +293,10 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 indexResult = evalGlobalIndexTopN();
                 globalIndexTopNCandidatesFound = indexResult.isPresent();
             } else {
-                indexResult = evalGlobalIndex();
+                indexResult = evalBTreeIndexLimit();
+                if (!indexResult.isPresent()) {
+                    indexResult = evalGlobalIndex();
+                }
             }
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
@@ -383,6 +391,28 @@ public class DataEvolutionBatchScan implements DataTableScan {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private Optional<GlobalIndexResult> evalBTreeIndexLimit() {
+        if (pushDownLimit == null
+                || topN != null
+                || globalIndexResult != null
+                || rowIdFilterDeferred
+                || additionalDataPruning
+                || !(filter instanceof LeafPredicate)) {
+            return Optional.empty();
+        }
+        CoreOptions options = table.coreOptions();
+        if (!options.globalIndexEnabled()
+                || options.deletionVectorsEnabled()
+                || options.queryAuthEnabled()
+                || !supportsGlobalIndexTopN(options)) {
+            return Optional.empty();
+        }
+        PartitionPredicate partitionFilter =
+                batchScan.snapshotReader().manifestsReader().partitionFilter();
+        return DataEvolutionBTreeLimitScanner.scan(
+                table, partitionFilter, (LeafPredicate) filter, pushDownLimit);
     }
 
     private Optional<GlobalIndexResult> evalGlobalIndexTopN() {

@@ -148,6 +148,57 @@ public class BTreeTopNIndexFileSelectorTest {
     }
 
     @Test
+    public void testMultipleFilesTogetherCoverTopN() {
+        List<IndexFileMeta> files =
+                Arrays.asList(
+                        file("top", 90, 100, false, 2, 0, 1),
+                        file("second", 80, 89, false, 2, 2, 3),
+                        file("third", 70, 79, false, 2, 4, 5),
+                        file("fourth", 60, 69, false, 2, 6, 7));
+
+        assertThat(fileNames(select(files, NULLS_LAST, 4))).containsExactly("top", "second");
+    }
+
+    @Test
+    public void testMultipleFilesTogetherCoverAscendingTopN() {
+        List<IndexFileMeta> files =
+                Arrays.asList(
+                        file("bottom", 0, 10, false, 2, 0, 1),
+                        file("second", 11, 20, false, 2, 2, 3),
+                        file("third", 21, 30, false, 2, 4, 5),
+                        file("fourth", 31, 40, false, 2, 6, 7));
+
+        assertThat(fileNames(select(files, ASCENDING, NULLS_LAST, 4)))
+                .containsExactly("bottom", "second");
+    }
+
+    @Test
+    public void testOverlappingFileDoesNotCountAsCoveredRows() {
+        List<IndexFileMeta> files =
+                Arrays.asList(
+                        file("top", 90, 100, false, 2, 0, 1),
+                        file("overlap", 60, 95, false, 2, 2, 3),
+                        file("third", 80, 89, false, 2, 4, 5),
+                        file("fourth", 70, 79, false, 2, 6, 7));
+
+        assertThat(fileNames(select(files, NULLS_LAST, 4)))
+                .containsExactly("top", "overlap", "third");
+    }
+
+    @Test
+    public void testOverlappingRowRangesDoNotDoubleCount() {
+        List<IndexFileMeta> files =
+                Arrays.asList(
+                        file("top-a", 90, 100, false, 2, 0, 1),
+                        file("top-b", 90, 100, false, 2, 0, 1),
+                        file("next", 80, 89, false, 2, 2, 3),
+                        file("lower", 70, 79, false, 2, 4, 5));
+
+        assertThat(fileNames(select(files, NULLS_LAST, 4)))
+                .containsExactly("top-a", "top-b", "next");
+    }
+
+    @Test
     public void testDoesNotStopAtOverlappingRange() {
         List<IndexFileMeta> files =
                 Arrays.asList(
@@ -202,6 +253,17 @@ public class BTreeTopNIndexFileSelectorTest {
 
     private IndexFileMeta file(
             String fileName, Integer firstKey, Integer lastKey, boolean hasNulls, long rowCount) {
+        return file(fileName, firstKey, lastKey, hasNulls, rowCount, 0, 0);
+    }
+
+    private IndexFileMeta file(
+            String fileName,
+            Integer firstKey,
+            Integer lastKey,
+            boolean hasNulls,
+            long rowCount,
+            long rowRangeStart,
+            long rowRangeEnd) {
         SortedIndexFileMeta sortedMeta =
                 new SortedIndexFileMeta(serialize(firstKey), serialize(lastKey), hasNulls);
         return new IndexFileMeta(
@@ -209,7 +271,8 @@ public class BTreeTopNIndexFileSelectorTest {
                 fileName,
                 1,
                 rowCount,
-                new GlobalIndexMeta(0, 0, FIELD.id(), null, sortedMeta.serialize()),
+                new GlobalIndexMeta(
+                        rowRangeStart, rowRangeEnd, FIELD.id(), null, sortedMeta.serialize()),
                 null);
     }
 
