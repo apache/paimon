@@ -56,6 +56,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -368,13 +369,14 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public List<PartitionEntry> readPartitionEntries() {
         List<ManifestFileMeta> manifests = readManifests().filteredManifests;
-        Map<BinaryRow, PartitionEntry> partitions = new ConcurrentHashMap<>();
-        Consumer<ManifestFileMeta> processor =
-                m ->
-                        PartitionEntry.merge(
-                                readManifest(m, PartitionEntry::fromManifestEntry, null, null),
-                                partitions);
-        randomlyOnlyExecute(getExecutorService(parallelism), processor, manifests);
+        Map<BinaryRow, PartitionEntry> partitions = new HashMap<>();
+        Iterator<ManifestEntry> entries =
+                readAndMergeFileEntries(manifests, Function.identity(), false);
+        while (entries.hasNext()) {
+            PartitionEntry entry = PartitionEntry.fromManifestEntry(entries.next());
+            partitions.compute(
+                    entry.partition(), (partition, old) -> old == null ? entry : old.merge(entry));
+        }
         return partitions.values().stream()
                 .filter(p -> p.fileCount() > 0)
                 .collect(Collectors.toList());
