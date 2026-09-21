@@ -222,10 +222,13 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
             return expire;
         }
 
+        FileStoreTable snapshotTable = switchToBranch(options.scanFallbackSnapshotBranch());
+        // Use the Snapshot branch's own retention and changelog lifecycle settings, not the
+        // Delta writer's runtime overrides.
         ExpireSnapshots snapshotBranchExpire =
-                switchToBranch(options.scanFallbackSnapshotBranch())
+                snapshotTable
                         .newExpireSnapshots()
-                        .config(options.expireConfig());
+                        .config(snapshotTable.coreOptions().expireConfig());
         return () -> {
             expire.run();
             snapshotBranchExpire.expire();

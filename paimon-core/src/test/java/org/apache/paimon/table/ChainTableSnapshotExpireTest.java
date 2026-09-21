@@ -38,6 +38,8 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -63,7 +65,7 @@ public class ChainTableSnapshotExpireTest {
     public void testDeltaCommitExpiresSnapshotBranchSnapshotsAfterPartitionExpiration()
             throws Exception {
         Path tablePath = new Path(tempDir.toUri().toString(), "chain_snapshot_expire");
-        createChainTable(tablePath);
+        createChainTable(tablePath, Collections.emptyMap());
 
         FileStoreTable mainTable = loadTable(tablePath);
         FileStoreTable snapshotTable = mainTable.switchToBranch("snapshot");
@@ -85,6 +87,17 @@ public class ChainTableSnapshotExpireTest {
         assertThat(snapshotTable.snapshotManager().snapshotCount()).isEqualTo(3);
         long latestSnapshotBeforeExpiration = snapshotTable.snapshotManager().latestSnapshotId();
 
+        // Configure Snapshot retention on that branch itself, independently of the Delta writer.
+        new FileSystemSchemaManager(LocalFileIO.create(), tablePath, "snapshot")
+                .commitChanges(
+                        Arrays.asList(
+                                SchemaChange.setOption(
+                                        CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1"),
+                                SchemaChange.setOption(
+                                        CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1"),
+                                SchemaChange.setOption(
+                                        CoreOptions.SNAPSHOT_TIME_RETAINED.key(), "0 ms")));
+
         Map<String, String> expireOptions = new HashMap<>();
         expireOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
         expireOptions.put(CoreOptions.PARTITION_EXPIRATION_TIME.key(), "30 d");
@@ -98,7 +111,7 @@ public class ChainTableSnapshotExpireTest {
         // A bounded Delta commit deterministically triggers ChainTablePartitionExpire. The two
         // oldest snapshot anchors are expired and the latest expired-time anchor (day40) is kept.
         // Dropping those Snapshot-branch partitions creates a new Snapshot-branch metadata
-        // snapshot, which must then be expired according to the same snapshot retention policy.
+        // snapshot, which must then be expired according to the Snapshot branch's own policy.
         write(deltaTable, commitUser, day10, "v4");
 
         snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
@@ -108,11 +121,86 @@ public class ChainTableSnapshotExpireTest {
         assertThat(snapshotTable.snapshotManager().snapshotCount()).isEqualTo(1);
     }
 
-    private void createChainTable(Path tablePath) throws Exception {
+    @ParameterizedTest
+    @CsvSource({"3, 3, false, 3", "1, 10, false, 4", "3, 3, true, 3"})
+    public void testDeltaCommitPreservesSnapshotBranchRetentionPolicy(
+            int retainMin, int retainMax, boolean decoupledChangelog, int expectedSnapshots)
+            throws Exception {
+        Path tablePath = new Path(tempDir.toUri().toString(), "chain_snapshot_retention");
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), String.valueOf(retainMin));
+        tableOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), String.valueOf(retainMax));
+        tableOptions.put(CoreOptions.SNAPSHOT_TIME_RETAINED.key(), "365 d");
+        if (decoupledChangelog) {
+            tableOptions.put(CoreOptions.CHANGELOG_NUM_RETAINED_MIN.key(), "5");
+            tableOptions.put(CoreOptions.CHANGELOG_NUM_RETAINED_MAX.key(), "5");
+            tableOptions.put(CoreOptions.CHANGELOG_TIME_RETAINED.key(), "365 d");
+        }
+        // Persist the same policy on all branches. Only the Delta writer will override it.
+        createChainTable(tablePath, tableOptions);
+
+        FileStoreTable mainTable = loadTable(tablePath);
+        FileStoreTable snapshotTable = mainTable.switchToBranch("snapshot");
+        FileStoreTable deltaTable = mainTable.switchToBranch("delta");
+        String commitUser = UUID.randomUUID().toString();
+        String day90 = partitionDate(-90);
+        String day65 = partitionDate(-65);
+        String day40 = partitionDate(-40);
+
+        // Seed both branches without triggering maintenance before the commit under test.
+        Map<String, String> writeOnly =
+                Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true");
+        FileStoreTable snapshotWriter = snapshotTable.copy(writeOnly);
+        write(snapshotWriter, commitUser, day90, "v1");
+        write(snapshotWriter, commitUser, day65, "v2");
+        write(snapshotWriter, commitUser, day40, "v3");
+        FileStoreTable deltaWriter = deltaTable.copy(writeOnly);
+        write(deltaWriter, commitUser, partitionDate(-10), "v4");
+        write(deltaWriter, commitUser, partitionDate(-9), "v5");
+        write(deltaWriter, commitUser, partitionDate(-8), "v6");
+
+        assertThat(snapshotTable.snapshotManager().snapshotCount()).isEqualTo(3);
+        assertThat(deltaTable.snapshotManager().snapshotCount()).isEqualTo(3);
+        long earliestSnapshot = snapshotTable.snapshotManager().earliestSnapshotId();
+        long latestSnapshot = snapshotTable.snapshotManager().latestSnapshotId();
+        assertThat(snapshotTable.coreOptions().changelogLifecycleDecoupled())
+                .isEqualTo(decoupledChangelog);
+
+        Map<String, String> expireOptions = new HashMap<>();
+        expireOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
+        expireOptions.put(CoreOptions.PARTITION_EXPIRATION_TIME.key(), "30 d");
+        expireOptions.put(CoreOptions.END_INPUT_CHECK_PARTITION_EXPIRE.key(), "true");
+        expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
+        expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
+        expireOptions.put(CoreOptions.SNAPSHOT_TIME_RETAINED.key(), "0 ms");
+        expireOptions.put(CoreOptions.CHANGELOG_NUM_RETAINED_MIN.key(), "1");
+        expireOptions.put(CoreOptions.CHANGELOG_NUM_RETAINED_MAX.key(), "1");
+        expireOptions.put(CoreOptions.CHANGELOG_TIME_RETAINED.key(), "0 ms");
+        expireOptions.put(CoreOptions.SNAPSHOT_EXPIRE_EXECUTION_MODE.key(), "sync");
+        deltaWriter = deltaTable.copy(expireOptions);
+        assertThat(deltaWriter.coreOptions().changelogLifecycleDecoupled()).isFalse();
+        write(deltaWriter, commitUser, partitionDate(-7), "v7");
+
+        snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
+        // Partition expiration still creates a metadata snapshot, but Delta's shorter retention
+        // must not remove Snapshot history protected by its count or time retention settings.
+        assertThat(listPartitions(snapshotTable)).containsExactly(day40);
+        assertThat(snapshotTable.snapshotManager().latestSnapshotId())
+                .isGreaterThan(latestSnapshot);
+        assertThat(snapshotTable.snapshotManager().snapshotCount()).isEqualTo(expectedSnapshots);
+        assertThat(deltaTable.snapshotManager().snapshotCount()).isEqualTo(1);
+        // A decoupled Snapshot lifecycle must archive the expired snapshot as a changelog even
+        // though the Delta writer uses a coupled lifecycle.
+        assertThat(snapshotTable.changelogManager().longLivedChangelogExists(earliestSnapshot))
+                .isEqualTo(decoupledChangelog);
+    }
+
+    private void createChainTable(Path tablePath, Map<String, String> tableOptions)
+            throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
 
-        Map<String, String> options = new HashMap<>();
+        Map<String, String> options = new HashMap<>(tableOptions);
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.MERGE_ENGINE.key(), "deduplicate");
         options.put(CoreOptions.SEQUENCE_FIELD.key(), "v");
