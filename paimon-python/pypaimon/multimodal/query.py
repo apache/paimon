@@ -22,7 +22,7 @@ import pyarrow as pa
 
 from pypaimon.common.where_parser import parse_where_clause
 from pypaimon.multimodal.blob_read import fetch_blob_bodies
-from pypaimon.schema.data_types import is_blob_type, is_map_blob_type
+from pypaimon.schema.data_types import is_array_blob_type, is_blob_type, is_map_blob_type
 from pypaimon.table.special_fields import SpecialFields
 
 
@@ -281,13 +281,14 @@ class ScanQuery:
     def read_blobs(
             self, columns=None, *, parallelism: int = 64
     ) -> Tuple[pa.Table, Dict[str, List[Any]]]:
-        """Materialise BLOB or MAP BLOB column(s) for the filtered rows with concurrent,
+        """Materialise BLOB, MAP BLOB or ARRAY BLOB columns with concurrent,
         coalesced ranged reads. Reads via blob-as-descriptor to skip the slow
         row-by-row blob resolution on multi-group data-evolution splits.
 
         ``columns`` picks the BLOB column(s) (default: all, intersected with
-        ``select(...)``). Scalar BLOB values are ``bytes|None``; MAP BLOB rows
-        are ``None`` or key-value pairs with ``bytes|None`` values. Returns a
+        ``select(...)``). Scalar BLOB values are ``bytes|None``; ARRAY BLOB rows
+        are ``None`` or lists of these values; MAP BLOB rows are ``None`` or
+        key-value pairs with ``bytes|None`` values. Returns a
         row-aligned ``(scalar_arrow_table, blobs_by_column)`` tuple. Use
         :meth:`stream_blobs` for a memory-bounded read.
 
@@ -297,10 +298,10 @@ class ScanQuery:
         read_builder, file_io = self._blob_descriptor_read_builder(blob_cols)
         arrow = read_builder.new_read().to_arrow(
             read_builder.new_scan().plan().splits())
-        map_blob_cols = set(blob_cols) - set(self._all_blob_columns())
+        map_blob_cols, array_blob_cols = self._nested_blob_columns()
         bodies = self._fetch_bodies(
             file_io, arrow.select(blob_cols).to_pydict(), blob_cols,
-            parallelism, map_blob_cols)
+            parallelism, map_blob_cols, array_blob_cols)
         scalar = arrow.select(self._scalar_columns(arrow.column_names))
         return scalar, bodies
 
@@ -316,12 +317,12 @@ class ScanQuery:
     def _iter_blobs(self, read_builder, file_io, blob_cols, parallelism):
         reader = read_builder.new_read().to_arrow_batch_reader(
             read_builder.new_scan().plan().splits())
-        map_blob_cols = set(blob_cols) - set(self._all_blob_columns())
+        map_blob_cols, array_blob_cols = self._nested_blob_columns()
         try:
             for batch in reader:
                 bodies = self._fetch_bodies(
                     file_io, batch.select(blob_cols).to_pydict(), blob_cols,
-                    parallelism, map_blob_cols)
+                    parallelism, map_blob_cols, array_blob_cols)
                 scalar = batch.select(self._scalar_columns(batch.schema.names))
                 yield scalar, bodies
         finally:
@@ -378,7 +379,7 @@ class ScanQuery:
 
     @staticmethod
     def _fetch_bodies(
-            file_io, data, blob_cols, parallelism, map_blob_cols=()):
+            file_io, data, blob_cols, parallelism, map_blob_cols=(), array_blob_cols=()):
         # Decode each descriptor to a (uri, offset, length) range and read them all in
         # one coalesced pass on ``file_io`` -- the read table's FileIO, which already
         # carries the merged DLF/OSS token. Going through Blob.from_bytes here would
@@ -387,7 +388,13 @@ class ScanQuery:
         # failing with "endpoint should be non-empty" / "Init credential failed" unless
         # the caller also passes fs.oss.* -- which users should not have to.
         return fetch_blob_bodies(
-            file_io, data, blob_cols, parallelism, map_blob_cols)
+            file_io, data, blob_cols, parallelism, map_blob_cols, array_blob_cols)
+
+    def _nested_blob_columns(self):
+        return (
+            [field.name for field in self._table.fields if is_map_blob_type(field.type)],
+            [field.name for field in self._table.fields if is_array_blob_type(field.type)],
+        )
 
     def _all_blob_columns(self) -> List[str]:
         return [
@@ -398,7 +405,8 @@ class ScanQuery:
     def _readable_blob_columns(self) -> List[str]:
         return [
             field.name for field in self._table.fields
-            if is_blob_type(field.type) or is_map_blob_type(field.type)
+            if (is_blob_type(field.type) or is_map_blob_type(field.type)
+                or is_array_blob_type(field.type))
         ]
 
     def _resolve_blob_columns(self, columns) -> List[str]:
