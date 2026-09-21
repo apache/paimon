@@ -171,8 +171,10 @@ class RESTTokenFileIO(FileIO):
             raise TypeError("Blob presigned URL validity must be datetime.timedelta.")
         if validity <= timedelta(0) or validity.microseconds != 0:
             raise ValueError("Blob presigned URL validity must be positive whole seconds.")
-        # Allow for rounding to whole seconds when the URL is signed.
-        minimum_validity_millis = int(validity.total_seconds() * 1000) + 1000
+        # Reserve the normal refresh safety window for materialization and signing.
+        minimum_validity_millis = (
+            int(validity.total_seconds() * 1000)
+            + RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS)
         return self.file_io(minimum_validity_millis).create_blob_presigned_url(
             table_root, descriptor, validity)
 

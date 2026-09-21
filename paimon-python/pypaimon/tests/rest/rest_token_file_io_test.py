@@ -79,16 +79,26 @@ class RESTTokenFileIOTest(unittest.TestCase):
     def test_presigned_url_reuses_credentials_for_short_validity(self):
         self._check_presigned_url_lifetime(0.5, 4, False)
 
+    def test_presigned_url_refreshes_when_only_one_second_exceeds_validity(self):
+        self._check_presigned_url_lifetime(
+            1.5, 3, True, current_token_extra_seconds=1)
+
     def test_presigned_url_rejects_insufficient_refreshed_lifetime(self):
         self._check_presigned_url_lifetime(3, 2, True, rejected=True)
 
     def _check_presigned_url_lifetime(
-            self, requested_hours, refreshed_hours, should_refresh, rejected=False):
+            self, requested_hours, refreshed_hours, should_refresh, rejected=False,
+            current_token_extra_seconds=None):
         root = "oss://bucket/table"
         file_io = RESTTokenFileIO(self.identifier, root, self.catalog_options)
         now = 1700000000
         token_properties = {OssOptions.OSS_SECURITY_TOKEN.key(): "test-token"}
-        old_token = RESTToken(token_properties, (now + 2 * 3600) * 1000)
+        if current_token_extra_seconds is None:
+            old_expiry = now + 2 * 3600
+        else:
+            old_expiry = (
+                now + requested_hours * 3600 + current_token_extra_seconds)
+        old_token = RESTToken(token_properties, int(old_expiry * 1000))
         new_token = RESTToken(token_properties, (now + refreshed_hours * 3600) * 1000)
         file_io.token = old_token
         descriptor = BlobDescriptor(root + "/video.blob", 0, 10)

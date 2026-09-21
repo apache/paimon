@@ -100,21 +100,38 @@ class RESTTokenFileIOTest {
 
     @Test
     void testPresigningRefreshesForRequestedLifetime() throws IOException {
-        checkPresignedLifetime(Duration.ofHours(3), 4, true, false);
+        checkPresignedLifetime(
+                Duration.ofHours(3), Duration.ofHours(2), Duration.ofHours(5), true, false);
     }
 
     @Test
     void testPresigningReusesSufficientLifetime() throws IOException {
-        checkPresignedLifetime(Duration.ofMinutes(30), 4, false, false);
+        checkPresignedLifetime(
+                Duration.ofMinutes(30), Duration.ofHours(2), Duration.ofHours(4), false, false);
+    }
+
+    @Test
+    void testPresigningRefreshesWhenOnlyOneSecondExceedsValidity() throws IOException {
+        checkPresignedLifetime(
+                Duration.ofMinutes(90),
+                Duration.ofMinutes(90).plusSeconds(1),
+                Duration.ofHours(3),
+                true,
+                false);
     }
 
     @Test
     void testPresigningRejectsInsufficientRefreshedLifetime() throws IOException {
-        checkPresignedLifetime(Duration.ofHours(3), 2, true, true);
+        checkPresignedLifetime(
+                Duration.ofHours(3), Duration.ofHours(2), Duration.ofHours(2), true, true);
     }
 
     private void checkPresignedLifetime(
-            Duration validity, int refreshedHours, boolean refresh, boolean rejected)
+            Duration validity,
+            Duration initialLifetime,
+            Duration refreshedLifetime,
+            boolean refresh,
+            boolean rejected)
             throws IOException {
         Path root = new Path("oss://bucket/table");
         BlobDescriptor descriptor = new BlobDescriptor("oss://bucket/table/data.blob", 0, 1);
@@ -133,11 +150,11 @@ class RESTTokenFileIOTest {
                         new GetTableTokenResponse(
                                 Collections.singletonMap(
                                         "test.token", UUID.randomUUID().toString()),
-                                now + Duration.ofHours(2).toMillis()),
+                                now + initialLifetime.toMillis()),
                         new GetTableTokenResponse(
                                 Collections.singletonMap(
                                         "test.token", UUID.randomUUID().toString()),
-                                now + Duration.ofHours(refreshedHours).toMillis()));
+                                now + refreshedLifetime.toMillis()));
         RESTTokenFileIO fileIO =
                 new RESTTokenFileIO(
                         CatalogContext.create(new Options(), loader, null), api, identifier, root);

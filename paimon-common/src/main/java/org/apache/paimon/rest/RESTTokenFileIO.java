@@ -199,7 +199,9 @@ public class RESTTokenFileIO implements FileIO {
         }
         final long minimumValidityMillis;
         try {
-            minimumValidityMillis = Math.addExact(validity.toMillis(), 1000);
+            // Reserve the normal refresh safety window for materialization and signing.
+            minimumValidityMillis =
+                    Math.addExact(validity.toMillis(), TOKEN_EXPIRATION_SAFE_TIME_MILLIS);
         } catch (ArithmeticException e) {
             throw new IOException("Blob presigned URL validity is too large.", e);
         }
