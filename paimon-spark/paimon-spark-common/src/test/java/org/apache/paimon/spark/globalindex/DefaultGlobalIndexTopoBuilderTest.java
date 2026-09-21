@@ -28,7 +28,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_BUILD_MAX_PARALLELISM;
-import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD;
+import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_FILE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -50,9 +50,9 @@ public class DefaultGlobalIndexTopoBuilderTest {
     @Test
     void testRowsPerShardUsesMergedBuildOptions() {
         Map<String, String> tableOptions = new HashMap<>();
-        tableOptions.put(GLOBAL_INDEX_ROW_COUNT_PER_SHARD.key(), "1000");
+        tableOptions.put(GLOBAL_INDEX_ROW_COUNT_PER_FILE.key(), "1000");
         Map<String, String> buildOptions = new HashMap<>();
-        buildOptions.put(GLOBAL_INDEX_ROW_COUNT_PER_SHARD.key(), "25");
+        buildOptions.put(GLOBAL_INDEX_ROW_COUNT_PER_FILE.key(), "25");
 
         assertThat(
                         DefaultGlobalIndexTopoBuilder.rowsPerShard(
@@ -73,12 +73,12 @@ public class DefaultGlobalIndexTopoBuilderTest {
     @Test
     void testRowsPerShardMustBePositive() {
         Options options =
-                new Options(Collections.singletonMap(GLOBAL_INDEX_ROW_COUNT_PER_SHARD.key(), "0"));
+                new Options(Collections.singletonMap(GLOBAL_INDEX_ROW_COUNT_PER_FILE.key(), "0"));
 
         assertThatThrownBy(() -> DefaultGlobalIndexTopoBuilder.rowsPerShard(options))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(
-                        "Option 'global-index.row-count-per-shard' must be greater than 0.");
+                        "Option 'global-index.row-count-per-file' must be greater than 0.");
     }
 
     @Test

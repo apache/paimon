@@ -61,7 +61,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_BUILD_MAX_PARALLELISM;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION;
-import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD;
+import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_FILE;
 import static org.apache.paimon.CoreOptions.GlobalIndexColumnUpdateAction.IGNORE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -196,10 +196,10 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
     }
 
     static long rowsPerShard(Options options) {
-        long rowsPerShard = options.get(GLOBAL_INDEX_ROW_COUNT_PER_SHARD);
+        long rowsPerShard = options.get(GLOBAL_INDEX_ROW_COUNT_PER_FILE);
         checkArgument(
                 rowsPerShard > 0,
-                "Option 'global-index.row-count-per-shard' must be greater than 0.");
+                "Option 'global-index.row-count-per-file' must be greater than 0.");
         return rowsPerShard;
     }
 

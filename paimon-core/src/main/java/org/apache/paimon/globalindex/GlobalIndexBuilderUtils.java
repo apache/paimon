@@ -413,7 +413,7 @@ public class GlobalIndexBuilderUtils {
             @Nullable List<Range> rowRangesToBuild) {
         checkArgument(
                 rowsPerShard > 0,
-                "Option 'global-index.row-count-per-shard' must be greater than 0.");
+                "Option 'global-index.row-count-per-file' must be greater than 0.");
         if (rowRangesToBuild != null) {
             rowRangesToBuild = Range.sortAndMergeOverlap(rowRangesToBuild, true);
             if (rowRangesToBuild.isEmpty()) {

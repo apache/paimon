@@ -2969,11 +2969,12 @@ public class CoreOptions implements Serializable {
                             "Target postpone file size per bucket when estimating the required bucket number from staged or committed postpone files. "
                                     + "This option is ignored when 'postpone.target-row-num-per-bucket' is configured.");
 
-    public static final ConfigOption<Long> GLOBAL_INDEX_ROW_COUNT_PER_SHARD =
-            key("global-index.row-count-per-shard")
+    public static final ConfigOption<Long> GLOBAL_INDEX_ROW_COUNT_PER_FILE =
+            key("global-index.row-count-per-file")
                     .longType()
-                    .defaultValue(100000L)
-                    .withDescription("Row count per shard for global index.");
+                    .defaultValue(25_000_000L)
+                    .withFallbackKeys("global-index.row-count-per-shard")
+                    .withDescription("Row count per file for global index.");
 
     public static final ConfigOption<Integer> GLOBAL_INDEX_BUILD_MAX_SHARD =
             key("global-index.build.max-shard")
@@ -2981,10 +2982,10 @@ public class CoreOptions implements Serializable {
                     .defaultValue(32)
                     .withDescription(
                             "The preferred max number of shards for building global index. "
-                                    + "If the number of shards calculated by 'global-index.row-count-per-shard' "
+                                    + "If the number of shards calculated by 'global-index.row-count-per-file' "
                                     + "exceeds this value, max-shard will be automatically increased "
                                     + "to accommodate the data volume while keeping "
-                                    + "'global-index.row-count-per-shard' unchanged.");
+                                    + "'global-index.row-count-per-file' unchanged.");
 
     public static final ConfigOption<Integer> GLOBAL_INDEX_BUILD_MAX_PARALLELISM =
             key("global-index.build.max-parallelism")
@@ -4813,7 +4814,7 @@ public class CoreOptions implements Serializable {
     }
 
     public long globalIndexRowCountPerShard() {
-        return options.get(GLOBAL_INDEX_ROW_COUNT_PER_SHARD);
+        return options.get(GLOBAL_INDEX_ROW_COUNT_PER_FILE);
     }
 
     public boolean globalIndexEnabled() {
