@@ -24,7 +24,29 @@ under the License.
 
 # Data Evolution
 
-PyPaimon for Data Evolution mode. See [Data Evolution](../multimodal-table/data-evolution).
+Data evolution lets you update selected columns while preserving the remaining
+columns and media payloads. This page covers the lower-level Python update and
+commit APIs; use [Multimodal Tables](./multimodal-tables#update) for the compact
+interface. See [Data Evolution](../multimodal-table/data-evolution) for the storage
+model.
+
+| You have… | Use |
+| --- | --- |
+| Row IDs and replacement values | [Update by row ID](#update-columns-by-row-id) |
+| A filter and assignments | [Update by predicate](#update-columns-by-predicate) |
+| Rows to remove | [Delete rows](#delete-rows) |
+| Business keys with new values | [Upsert by key](#upsert-by-key) |
+| Conditional update, delete, and insert rules | [Merge into](#merge-into) |
+| A derived column to compute in batches | [Update by shards](#update-columns-by-shards) |
+
+For distributed updates, see [Ray Data](./ray-data).
+
+Each complete example creates a table in `/tmp/warehouse`; use a fresh warehouse
+or choose new table names when rerunning it. Shorter follow-up blocks reuse the
+objects from the preceding example. Schema and data types must match when using
+the lower-level Arrow write API.
+
+![A committed column update is combined with unchanged columns and media payloads by row ID.](../../static/img/pypaimon/data-evolution.svg)
 
 ## Prerequisites
 
@@ -164,6 +186,16 @@ instead of scanning `_ROW_ID` values; that partition-only fast path does not
 require deletion vectors.
 
 ```python
+import pyarrow as pa
+from pypaimon import CatalogFactory, Schema
+
+catalog = CatalogFactory.create({'warehouse': '/tmp/warehouse'})
+catalog.create_database('default', True)
+pa_schema = pa.schema([
+    ('id', pa.int32()),
+    ('name', pa.string()),
+    ('age', pa.int32()),
+])
 schema = Schema.from_pyarrow_schema(
     pa_schema,
     options={
@@ -175,7 +207,19 @@ schema = Schema.from_pyarrow_schema(
 catalog.create_table('default.users_delete', schema, False)
 table = catalog.get_table('default.users_delete')
 
-# ... write initial data ...
+# Write three rows; their row IDs in this fresh table are 0, 1, and 2.
+write_builder = table.new_batch_write_builder()
+writer = write_builder.new_write()
+commit = write_builder.new_commit()
+try:
+    writer.write_arrow(pa.Table.from_pydict(
+        {'id': [1, 2, 3], 'name': ['Alice', 'Bob', 'Charlie'], 'age': [25, 30, 40]},
+        schema=pa_schema,
+    ))
+    commit.commit(writer.prepare_commit())
+finally:
+    writer.close()
+    commit.close()
 
 write_builder = table.new_batch_write_builder()
 table_update = write_builder.new_update()
@@ -189,11 +233,18 @@ table_commit.close()
 ```
 
 If you already have `_ROW_ID` values, use `delete_by_row_id` to write deletion
-vectors directly:
+vectors directly. This follow-up deletes the first row from the fresh table
+above; use row IDs obtained from your target table in an existing dataset.
 
 ```python
-messages = table_update.delete_by_row_id([0, 2, 4])
-table_commit.commit(messages)
+write_builder = table.new_batch_write_builder()
+table_update = write_builder.new_update()
+table_commit = write_builder.new_commit()
+messages = table_update.delete_by_row_id([0])
+try:
+    table_commit.commit(messages)
+finally:
+    table_commit.close()
 ```
 
 ## Filter by _ROW_ID
@@ -208,281 +259,11 @@ result = rb.new_read().to_arrow(rb.new_scan().plan().splits())
 
 ## Upsert By Key
 
-If you want to **upsert** (update-or-insert) rows by one or more business key columns — without manually providing
-`_ROW_ID` — use `upsert_by_arrow_with_key`. For each input row:
-
-- **Key matches** an existing row → update that row in place.
-- **No match** → append as a new row.
-
-**Requirements**
-
-- The table must have `data-evolution.enabled = true` and `row-tracking.enabled = true`.
-- All `upsert_keys` must exist in both the table schema and the input data.
-- For **partitioned tables**, the input data must contain all partition key columns. Partition keys are
-  **automatically stripped** from `upsert_keys` during matching (since each partition is processed independently),
-  so you do **not** need to include them in `upsert_keys`.
-
-**Example: basic upsert**
-
-```python
-import pyarrow as pa
-from pypaimon import CatalogFactory, Schema
-
-catalog = CatalogFactory.create({'warehouse': '/tmp/warehouse'})
-catalog.create_database('default', False)
-
-pa_schema = pa.schema([
-    ('id', pa.int32()),
-    ('name', pa.string()),
-    ('age', pa.int32()),
-])
-schema = Schema.from_pyarrow_schema(
-    pa_schema,
-    options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'},
-)
-catalog.create_table('default.users', schema, False)
-table = catalog.get_table('default.users')
-
-# write initial data
-write_builder = table.new_batch_write_builder()
-write = write_builder.new_write()
-commit = write_builder.new_commit()
-write.write_arrow(pa.Table.from_pydict(
-    {'id': [1, 2], 'name': ['Alice', 'Bob'], 'age': [30, 25]},
-    schema=pa_schema,
-))
-commit.commit(write.prepare_commit())
-write.close()
-commit.close()
-
-# upsert: update id=1, insert id=3
-write_builder = table.new_batch_write_builder()
-table_update = write_builder.new_update()
-table_commit = write_builder.new_commit()
-
-upsert_data = pa.Table.from_pydict(
-    {'id': [1, 3], 'name': ['Alice_v2', 'Charlie'], 'age': [31, 28]},
-    schema=pa_schema,
-)
-cmts = table_update.upsert_by_arrow_with_key(upsert_data, upsert_keys=['id'])
-table_commit.commit(cmts)
-table_commit.close()
-
-# content should be:
-#   id=1: name='Alice_v2', age=31   (updated)
-#   id=2: name='Bob',      age=25   (unchanged)
-#   id=3: name='Charlie',  age=28   (new)
-```
-
-**Example: partial-column upsert with `update_cols`**
-
-Combine `with_update_type` with `upsert_by_arrow_with_key` to update only specific columns for
-matched rows while still appending full rows for new keys:
-
-```python
-write_builder = table.new_batch_write_builder()
-table_update = write_builder.new_update().with_update_type(['age'])
-table_commit = write_builder.new_commit()
-
-upsert_data = pa.Table.from_pydict(
-    {'id': [1, 4], 'name': ['ignored', 'David'], 'age': [99, 22]},
-    schema=pa_schema,
-)
-cmts = table_update.upsert_by_arrow_with_key(upsert_data, upsert_keys=['id'])
-table_commit.commit(cmts)
-table_commit.close()
-
-# id=1: only 'age' is updated to 99; 'name' remains 'Alice_v2'
-# id=4: appended as a full new row
-```
-
-**Example: partitioned table with composite key**
-
-```python
-partitioned_schema = pa.schema([
-    ('id', pa.int32()),
-    ('name', pa.string()),
-    ('region', pa.string()),
-])
-schema = Schema.from_pyarrow_schema(
-    partitioned_schema,
-    partition_keys=['region'],
-    options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'},
-)
-catalog.create_table('default.users_partitioned', schema, False)
-table = catalog.get_table('default.users_partitioned')
-
-# ... write initial data ...
-
-write_builder = table.new_batch_write_builder()
-table_update = write_builder.new_update()
-table_commit = write_builder.new_commit()
-
-upsert_data = pa.Table.from_pydict(
-    {'id': [1, 3], 'name': ['Alice_v2', 'Charlie'], 'region': ['US', 'EU']},
-    schema=partitioned_schema,
-)
-# upsert_keys=['id'] only; partition key 'region' is auto-stripped
-cmts = table_update.upsert_by_arrow_with_key(upsert_data, upsert_keys=['id'])
-table_commit.commit(cmts)
-table_commit.close()
-```
-
-**Notes**
-
-- Execution is driven **partition-by-partition**: only one partition's key set is loaded into memory at a time.
-- Duplicate keys in the input data are automatically deduplicated — the **last occurrence** is kept.
-- The upsert is atomic per commit — all matched updates and new appends are included in the same commit.
+See [upsert by key](./merge-into#upsert-by-key) for the full example, key matching rules, and commit lifecycle.
 
 ## Merge Into
 
-Use `merge_into` when your source data should update or delete matched target
-rows and optionally insert rows that do not match, similar to SQL `MERGE INTO`.
-`merge_into` is exposed from `TableUpdate`, so it follows the same
-commit-message lifecycle as other PyPaimon update APIs. The PyPaimon
-implementation runs in a single process and materializes the rows it needs
-locally.
-
-Matched rows are updated by `_ROW_ID` internally, or deleted through deletion
-vectors for delete clauses. Only the columns touched by update clauses are
-rewritten. `merge_into` derives the update columns from the `WhenMatched`
-clauses; `with_update_type` is not needed.
-
-**Requirements**
-
-- The target table must have `data-evolution.enabled = true` and
-  `row-tracking.enabled = true`.
-- Matched delete clauses require `deletion-vectors.enabled = true`.
-- `source` must be a `pyarrow.Table`, `pandas.DataFrame`, or another PyPaimon
-  table object.
-- `on` can be a list of same-named key columns, or `{target_col: source_col}`
-  for renamed source keys.
-- If multiple source rows match the same target `_ROW_ID`, `merge_into` raises
-  an error. Deduplicate the source before merging.
-
-```python
-import pyarrow as pa
-from pypaimon import CatalogFactory, Schema
-from pypaimon.table.data_evolution_merge_into import (
-    WhenMatched,
-    WhenNotMatched,
-)
-
-catalog = CatalogFactory.create({'warehouse': '/tmp/warehouse'})
-catalog.create_database('default', False)
-
-pa_schema = pa.schema([
-    ('id', pa.int32()),
-    ('name', pa.string()),
-    ('age', pa.int32()),
-])
-schema = Schema.from_pyarrow_schema(
-    pa_schema,
-    options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'},
-)
-catalog.create_table('default.users_merge', schema, False)
-table = catalog.get_table('default.users_merge')
-
-# write initial data
-write_builder = table.new_batch_write_builder()
-write = write_builder.new_write()
-commit = write_builder.new_commit()
-write.write_arrow(pa.Table.from_pydict(
-    {'id': [1, 2], 'name': ['Alice', 'Bob'], 'age': [30, 25]},
-    schema=pa_schema,
-))
-commit.commit(write.prepare_commit())
-write.close()
-commit.close()
-
-# merge: update id=2, insert id=3
-source = pa.Table.from_pydict(
-    {'id': [2, 3], 'name': ['Bob_v2', 'Charlie'], 'age': [26, 28]},
-    schema=pa_schema,
-)
-
-write_builder = table.new_batch_write_builder()
-table_update = write_builder.new_update()
-table_commit = write_builder.new_commit()
-
-messages = table_update.merge_into(
-    source,
-    on=['id'],
-    when_matched=[WhenMatched.update('*')],
-    when_not_matched=[WhenNotMatched(insert='*')],
-)
-table_commit.commit(messages)
-table_commit.close()
-```
-
-`WhenMatched` and `WhenNotMatched` clauses can use `'*'` to copy same-named
-columns from source, or a mapping for explicit assignments:
-
-```python
-from pypaimon.table.data_evolution_merge_into import (
-    WhenMatched,
-    WhenNotMatched,
-    lit,
-    source_col,
-    target_col,
-)
-
-messages = table_update.merge_into(
-    source,
-    on={'id': 'source_id'},
-    when_matched=[
-        WhenMatched.update({
-            'age': source_col('new_age'),
-            'name': target_col('name'),
-        }),
-    ],
-    when_not_matched=[
-        WhenNotMatched(insert={
-            'id': source_col('source_id'),
-            'name': source_col('name'),
-            'age': lit(0),
-        }),
-    ],
-)
-```
-
-Conditions use SQL-style expressions with `s.` (source) and `t.` (target)
-column prefixes. `WhenNotMatched` conditions may only reference source columns
-(`s.*`). Condition evaluation uses DataFusion through the PyPaimon SQL extra.
-Install the extra before using conditions: `pip install pypaimon[sql]`.
-
-```python
-messages = table_update.merge_into(
-    source,
-    on=['id'],
-    when_matched=[WhenMatched.update('*', condition='s.age > t.age')],
-    when_not_matched=[WhenNotMatched(insert='*', condition='s.age > 18')],
-)
-```
-
-Use `WhenMatched.delete()` to delete matched rows:
-
-```python
-messages = table_update.merge_into(
-    source,
-    on=['id'],
-    when_matched=[
-        WhenMatched.delete(condition='s.deleted = TRUE'),
-        WhenMatched.update('*'),
-    ],
-)
-```
-
-**Notes**
-
-- Multiple clauses are evaluated in order; the first matching condition wins.
-- Matched clauses cannot update partition key columns, because cross-partition
-  row movement is not implemented.
-- Matched delete clauses use deletion vectors, so the target table must enable
-  `deletion-vectors.enabled`.
-- Blob columns can be updated and inserted by `merge_into`. With `update="*"`
-  or `insert="*"`, the source must include the corresponding blob columns.
-  If an insert mapping omits a blob column, that column is written as `NULL`.
+See [merge into](./merge-into#merge-into) for the full example, key matching rules, and commit lifecycle.
 
 ## Update Columns By Shards
 
@@ -523,7 +304,10 @@ table = catalog.get_table('default.t')
 write_builder = table.new_batch_write_builder()
 write = write_builder.new_write().with_write_type(['a', 'b', 'c'])
 commit = write_builder.new_commit()
-write.write_arrow(pa.Table.from_pydict({'a': [1, 2], 'b': [10, 20], 'c': [100, 200]}))
+write.write_arrow(pa.Table.from_pydict(
+    {'a': [1, 2], 'b': [10, 20], 'c': [100, 200]},
+    schema=pa.schema([table_schema.field(name) for name in ['a', 'b', 'c']]),
+))
 commit.commit(write.prepare_commit())
 write.close()
 commit.close()

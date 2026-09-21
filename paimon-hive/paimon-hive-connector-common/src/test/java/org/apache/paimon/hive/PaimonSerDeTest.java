@@ -24,8 +24,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.hive.objectinspector.PaimonInternalRowObjectInspector;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -123,7 +123,7 @@ public class PaimonSerDeTest {
     }
 
     private PaimonSerDe createInitializedSerDe(RowType rowType) throws Exception {
-        new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()))
+        new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()))
                 .createTable(
                         new Schema(
                                 rowType.getFields(),

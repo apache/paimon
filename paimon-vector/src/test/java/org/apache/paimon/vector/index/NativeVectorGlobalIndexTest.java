@@ -27,6 +27,7 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.index.vector.IvfPqBatchTableReuseMode;
 import org.apache.paimon.index.vector.VectorSearchParams;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.BatchVectorSearch;
@@ -253,6 +254,55 @@ public class NativeVectorGlobalIndexTest {
                 NativeVectorGlobalIndexReader.searchParams(
                         Collections.singletonMap("diskann.l_search", "80"), 10);
         assertThat(diskAnnParams.topK()).isEqualTo(10);
+    }
+
+    @Test
+    public void testIvfInitialFilterExpansionFactorValidationIsPropagated() {
+        assertThatThrownBy(
+                        () ->
+                                NativeVectorGlobalIndexReader.searchParams(
+                                        Collections.singletonMap(
+                                                "ivf.max_initial_filter_expansion_factor", "0"),
+                                        10))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("greater than 0");
+
+        Map<String, String> parameters = new HashMap<>();
+        parameters.put("ivf.nprobe", "16");
+        parameters.put("ivf.max_initial_filter_expansion_factor", "4");
+        assertThatThrownBy(() -> NativeVectorGlobalIndexReader.searchParams(parameters, 10))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("requires automatic IVF search");
+    }
+
+    @Test
+    public void testIvfPqBatchTableReuseIsPropagatedToBatchSearchParams() {
+        VectorSearchParams params =
+                NativeVectorGlobalIndexReader.batchSearchParams(
+                        Collections.singletonMap("ivf_pq.batch_table_reuse", "on"), 10);
+
+        assertThat(params.ivfPqBatchTableReuse()).isEqualTo(IvfPqBatchTableReuseMode.ON);
+    }
+
+    @Test
+    public void testIvfPqBatchTableReuseMaxBytesIsPropagated() {
+        VectorSearchParams params =
+                NativeVectorGlobalIndexReader.batchSearchParams(
+                        Collections.singletonMap("ivf_pq.batch_table_reuse.max_bytes", "134217728"),
+                        10);
+
+        assertThat(params.ivfPqBatchTableReuseMaxBytes()).isEqualTo(128L * 1024 * 1024);
+    }
+
+    @Test
+    public void testIvfPqBatchTableReuseMaxBytesSupportsLongValues() {
+        VectorSearchParams params =
+                NativeVectorGlobalIndexReader.batchSearchParams(
+                        Collections.singletonMap(
+                                "ivf_pq.batch_table_reuse.max_bytes", "5368709120"),
+                        10);
+
+        assertThat(params.ivfPqBatchTableReuseMaxBytes()).isEqualTo(5L * 1024 * 1024 * 1024);
     }
 
     @Test

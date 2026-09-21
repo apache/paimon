@@ -94,6 +94,12 @@ public class LocalTableQuery implements TableQuery {
 
     public LocalTableQuery(FileStoreTable table) {
         this.options = table.coreOptions();
+        if (options.queryAuthEnabled()) {
+            // the lookup cache serves rows straight from the store, past the auth reader
+            throw new UnsupportedOperationException(
+                    "Local table query is not supported on a query-auth table: it returns raw "
+                            + "values, outside row filters and column masks.");
+        }
         this.tableView = new ConcurrentHashMap<>();
         FileStore<?> tableStore = table.store();
         if (!(tableStore instanceof KeyValueFileStore)) {

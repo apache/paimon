@@ -118,6 +118,7 @@ public abstract class ConflictDetection {
             BucketMode bucketMode,
             boolean deletionVectorsEnabled,
             boolean dataEvolutionEnabled,
+            boolean dataEvolutionNestedFieldEnabled,
             boolean pkClusteringOverride,
             IndexFileHandler indexFileHandler,
             SnapshotManager snapshotManager,
@@ -130,6 +131,7 @@ public abstract class ConflictDetection {
                     pathFactory,
                     bucketMode,
                     deletionVectorsEnabled,
+                    dataEvolutionNestedFieldEnabled,
                     indexFileHandler,
                     snapshotManager,
                     commitScanner);
@@ -285,6 +287,14 @@ public abstract class ConflictDetection {
             @Nullable RowIdConflictChecker rowIdConflictChecker,
             CommitKind commitKind,
             String baseCommitUser);
+
+    public boolean canSkipDataFileConflictDetection(
+            Snapshot latestSnapshot,
+            List<ManifestEntry> deltaFiles,
+            List<IndexManifestEntry> indexFiles,
+            CommitKind commitKind) {
+        return false;
+    }
 
     public List<SimpleFileEntry> scanBaseDataFiles(
             Snapshot latestSnapshot,

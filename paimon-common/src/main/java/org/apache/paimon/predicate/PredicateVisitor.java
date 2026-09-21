@@ -40,6 +40,16 @@ public interface PredicateVisitor<T> {
         return predicate.visit(new FieldNameCollector());
     }
 
+    static Set<String> collectTransformFieldNames(Transform transform) {
+        Set<String> fieldNames = new HashSet<>();
+        for (Object input : transform.inputs()) {
+            if (input instanceof FieldRef) {
+                fieldNames.add(((FieldRef) input).name());
+            }
+        }
+        return fieldNames;
+    }
+
     static Set<Integer> collectFieldIds(RowType rowType, @Nullable Predicate predicate) {
         if (predicate == null) {
             return Collections.emptySet();
@@ -58,13 +68,7 @@ public interface PredicateVisitor<T> {
 
         @Override
         public Set<String> visit(LeafPredicate predicate) {
-            Set<String> fieldNames = new HashSet<>();
-            for (Object input : predicate.transform().inputs()) {
-                if (input instanceof FieldRef) {
-                    fieldNames.add(((FieldRef) input).name());
-                }
-            }
-            return fieldNames;
+            return collectTransformFieldNames(predicate.transform());
         }
 
         @Override

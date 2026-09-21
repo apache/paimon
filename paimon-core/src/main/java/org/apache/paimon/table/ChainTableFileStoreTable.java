@@ -30,6 +30,7 @@ import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.Splits;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
@@ -217,7 +218,9 @@ public class ChainTableFileStoreTable extends FallbackReadFileStoreTable {
                 // FallbackSplit (including FallbackDataSplit): use inherited fallback read logic
                 return fallbackRead.createReader(split);
             }
-            if (split instanceof ChainSplit || split instanceof DataSplit) {
+            // Route on what the wrapper carries, so the wrapper still reaches the read.
+            Split inner = Splits.underlying(split);
+            if (inner instanceof ChainSplit || inner instanceof DataSplit) {
                 return chainGroupRead.createReader(split);
             }
             // Other split types: use inherited fallback read logic

@@ -1,8 +1,7 @@
 ---
 title: "Rust API"
-sidebar_position: 7
+sidebar_position: 9
 ---
-
 
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -25,5 +24,23 @@ under the License.
 
 # Rust API
 
-- [Paimon Rust Docs](https://paimon.apache.org/docs/rust/).
-- [Paimon Rust Repo](https://github.com/apache/paimon-rust).
+[Paimon Rust](https://github.com/apache/paimon-rust) provides native access to the Paimon table format
+from Rust applications. It has its own release cycle and dependency configuration.
+
+## Get started
+
+Follow the [Rust getting-started guide](https://paimon.apache.org/docs/rust/getting-started/) to add
+the crate, select storage features, create a catalog, and read a table. Use the crate version and
+feature flags from that guide for your chosen release.
+
+## Choose a guide
+
+| Task | Documentation |
+| --- | --- |
+| Install the crate and read a table | [Getting Started](https://paimon.apache.org/docs/rust/getting-started/) |
+| Explore supported features and integrations | [Rust Documentation](https://paimon.apache.org/docs/rust/) |
+| Build from source or contribute | [Paimon Rust Repository](https://github.com/apache/paimon-rust) |
+
+Catalog and table concepts are shared across implementations. See [Catalogs](../concepts/catalog)
+and the [Storage Specification](../concepts/spec/) for the format, then check the Rust documentation
+for the APIs and features supported by the version you use.

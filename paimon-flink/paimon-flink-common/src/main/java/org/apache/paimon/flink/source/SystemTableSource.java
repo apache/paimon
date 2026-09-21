@@ -40,6 +40,8 @@ import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
+
 /** A {@link FlinkTableSource} for system table. */
 public class SystemTableSource extends FlinkTableSource {
 
@@ -166,7 +168,8 @@ public class SystemTableSource extends FlinkTableSource {
                     return dataStreamSource;
                 },
                 tableIdentifier.asSummaryString(),
-                table);
+                table,
+                options.getOptional(SCAN_PARALLELISM));
     }
 
     @Override

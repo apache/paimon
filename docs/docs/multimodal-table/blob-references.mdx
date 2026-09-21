@@ -1,0 +1,259 @@
+---
+title: "BLOB References and Sharing"
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# BLOB References and Sharing
+
+A reference lets a table reuse payloads without writing another managed `.blob`
+file. Choose the reference according to what the downstream table needs to follow:
+
+| Mode | Reference stored inline | Dependency |
+| --- | --- | --- |
+| Descriptor-only | URI, byte offset, and length | The referenced object and byte range must stay readable. |
+| BLOB view | Upstream table, BLOB field, and row ID | The upstream table and addressed row must stay resolvable. |
+| Presigned URL export | Temporary URL returned to the caller | OSS credentials and a valid URL lifetime; this is an export API, not a column storage mode. |
+
+For column declarations and the managed storage mode, see [BLOB Storage](./blob#storage-modes).
+Descriptor and view fields accept scalar BLOBs only; collections use managed storage.
+
+## Prepare a Source Table
+
+The reference examples below use Flink SQL with a configured Paimon catalog and
+the `default` database selected. Run them in order with fresh table names. Batch
+mode and synchronous inserts make each write visible before the next query:
+
+```sql
+SET 'execution.runtime-mode' = 'batch';
+SET 'table.dml-sync' = 'true';
+USE default;
+
+CREATE TABLE source_images (
+    id INT,
+    name STRING,
+    image BYTES COMMENT '__BLOB_FIELD'
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+
+-- Short test payloads, not complete image files.
+INSERT INTO source_images VALUES
+    (1, 'sample one', X'010203'),
+    (2, 'sample two', X'040506');
+```
+
+## Descriptor-Only Storage
+
+If you want downstream tables to **reuse** upstream blob files (no copying and no new `.blob` files), use `__BLOB_DESCRIPTOR_FIELD`:
+
+```sql
+CREATE TABLE descriptor_table (
+    id INT,
+    image BYTES COMMENT '__BLOB_DESCRIPTOR_FIELD; reused image'
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+
+INSERT INTO descriptor_table
+SELECT id, image
+FROM source_images /*+ OPTIONS('blob-as-descriptor'='true') */;
+
+-- Resolves the original payload bytes from source_images.
+SELECT id, image FROM descriptor_table ORDER BY id;
+```
+
+Paimon stores only serialized `BlobDescriptor` bytes in normal data files. Reading the blob follows the descriptor URI to access bytes, and non-null values require descriptor input for those fields.
+The source read must return descriptors: writing its ordinary payload bytes to
+`__BLOB_DESCRIPTOR_FIELD` is rejected. Retain the referenced files for as long as
+the downstream table needs them; a descriptor records a physical location and does
+not follow an upstream row to a replacement file.
+
+## Blob View
+
+Blob view is useful when a downstream table should reference BLOB values already stored in an upstream table, without copying the bytes or creating new `.blob` files. A blob view field stores only a small `BlobViewStruct` inline. When the field is read, Paimon resolves the referenced BLOB from the upstream table.
+
+Blob view requires:
+
+- the upstream table to have row tracking enabled, so each row can be addressed by `_ROW_ID`
+- the downstream field to be declared with `__BLOB_VIEW_FIELD` comment directive
+- writes to provide a serialized `BlobViewStruct`; in Flink SQL, use the built-in `sys.blob_view` function
+
+The Flink SQL function signature is:
+
+```sql
+sys.blob_view(table_name, field_name, row_id)
+```
+
+Arguments:
+
+- `table_name`: the upstream table name. It must be fully qualified as `database.table` or `catalog.database.table`. Unqualified table names are rejected.
+- `field_name`: the upstream BLOB field name.
+- `row_id`: the `_ROW_ID` value from the upstream row-tracking table.
+
+The following example writes a downstream table whose `image_ref` field views the
+`image` field in the populated `source_images` table:
+
+```sql
+CREATE TABLE image_view_table (
+    id INT,
+    label STRING,
+    image_ref BYTES COMMENT '__BLOB_VIEW_FIELD'
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+
+INSERT INTO image_view_table
+SELECT
+    id,
+    name AS label,
+    sys.blob_view('default.source_images', 'image', _ROW_ID)
+FROM `source_images$row_tracking`;
+
+SELECT id, label, image_ref FROM image_view_table ORDER BY id;
+```
+
+If the current Paimon catalog name is included in the table name, the function also accepts `catalog.database.table`:
+
+```sql
+SELECT sys.blob_view('my_catalog.default.source_images', 'image', _ROW_ID)
+FROM `source_images$row_tracking`;
+```
+
+Reads from `image_view_table.image_ref` return the referenced BLOB bytes in the same way as normal blob fields. The referenced upstream table and row must remain available for the view to be resolved.
+Row IDs can change during [maintenance](./data-evolution-maintenance#row-id-lifetime);
+coordinate those operations with tables that hold BLOB view references.
+
+### Forward Blob View References
+
+By default, reading a blob view field resolves the `BlobViewStruct` and returns the upstream BLOB
+content. If you want to import data from one blob view table into another blob view table without
+copying the BLOB bytes, read the source table with `blob-view.resolve.enabled=false` and write the
+result into a target field declared with `__BLOB_VIEW_FIELD`.
+
+With this option disabled, Paimon preserves the serialized `BlobViewStruct` during reads. When the
+preserved value is written to another blob view field, the target table stores the same upstream
+reference instead of creating a chained view reference.
+
+Continuing the example, `copied_image_view_table` keeps referencing `source_images`
+directly, using the references already stored in `image_view_table`:
+
+```sql
+CREATE TABLE copied_image_view_table (
+    id INT,
+    image_ref BYTES COMMENT '__BLOB_VIEW_FIELD'
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+
+INSERT INTO copied_image_view_table
+SELECT id, image_ref
+FROM image_view_table /*+ OPTIONS('blob-view.resolve.enabled'='false') */;
+
+SELECT id, image_ref FROM copied_image_view_table ORDER BY id;
+```
+
+## Presigned URLs for OSS Blobs
+
+Paimon can create a temporary HTTPS URL for an OSS-backed `BlobDescriptor`. The descriptor may
+refer to a byte range inside a larger `.blob` file. Paimon first materializes exactly that range as
+a separate OSS object without a file extension, sets its content type to
+`application/octet-stream`, and then returns a presigned GET URL.
+
+The descriptor must point below the source table's storage root, with the same URI
+scheme and authority. For a descriptor forwarded from another table, pass the
+original owning table as `source_table`; using the downstream descriptor table or
+an arbitrary external object path fails this check.
+
+Configure the catalog with the standard public HTTPS OSS endpoint. Internal endpoints and
+endpoints without the `https` scheme are rejected because external consumers must be able to fetch
+the returned URL:
+
+```properties
+fs.oss.endpoint=https://oss-cn-hangzhou.aliyuncs.com
+```
+
+This section requires an existing OSS-backed managed BLOB table named
+`default.image_table`. The local reference examples above do not provide an OSS
+table or upload files to OSS.
+
+To obtain descriptors from a regular BLOB column, read the source table with
+`blob-as-descriptor=true`. The SQL functions have strict and error-tolerant forms:
+
+```sql
+-- Flink SQL
+SELECT sys.descriptor_to_presigned_url(
+    'default.image_table',
+    image,
+    INTERVAL '5' MINUTE)
+FROM image_table /*+ OPTIONS('blob-as-descriptor'='true') */;
+
+SELECT sys.try_descriptor_to_presigned_url(
+    'default.image_table',
+    image,
+    INTERVAL '5' MINUTE)
+FROM image_table /*+ OPTIONS('blob-as-descriptor'='true') */;
+```
+
+```sql
+-- Spark SQL
+ALTER TABLE image_table SET TBLPROPERTIES ('blob-as-descriptor' = 'true');
+
+SELECT sys.descriptor_to_presigned_url(
+    'default.image_table',
+    image,
+    INTERVAL '5' MINUTE)
+FROM image_table;
+
+ALTER TABLE image_table SET TBLPROPERTIES ('blob-as-descriptor' = 'false');
+```
+
+In both Flink and Spark, `source_table` must be a non-null string literal in
+`database.table` form. `catalog.database.table` is also accepted when the catalog matches the
+catalog that owns the function. Dynamic columns and `CASE` expressions are rejected during
+planning. The strict function propagates row errors; `try_descriptor_to_presigned_url` returns
+`NULL` for row-level errors. The validity interval must be positive whole seconds.
+
+The Java API applies the same table-root check. Use a descriptor-backed `Blob`
+read from the owning table:
+
+```java
+DataTable table = ...;
+Blob blob = ...;
+String url =
+        blob.toPresignedUrl(
+                table.fileIO(), table.location(), Duration.ofMinutes(5));
+```
+
+The materialized object's bytes are unchanged. Consumers must inspect the content instead of
+relying on a URL suffix or a format-specific content type. For direct model `image_url` inputs, use
+only formats verified with the target model; PDF is not covered by this entry point.
+
+Materialized objects are keyed by the complete descriptor fingerprint. Repeated short-term calls
+for the same descriptor reuse an object whose length, content type, and fingerprint still match,
+while generating a fresh URL. The first version does not resolve races with stale-cache cleanup or
+orphan-file cleaning.
+
+Treat the returned URL as a bearer credential: submit it immediately to the external service, do
+not persist it, and never write the URL or its signature/security-token query parameters to logs.

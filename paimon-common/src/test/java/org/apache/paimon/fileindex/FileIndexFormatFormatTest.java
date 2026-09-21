@@ -20,6 +20,7 @@ package org.apache.paimon.fileindex;
 
 import org.apache.paimon.fileindex.empty.EmptyFileIndexReader;
 import org.apache.paimon.fs.ByteArraySeekableStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -35,6 +36,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.paimon.utils.RandomUtil.randomBytes;
 import static org.apache.paimon.utils.RandomUtil.randomString;
@@ -44,6 +46,29 @@ import static org.assertj.core.api.Assertions.tuple;
 public class FileIndexFormatFormatTest {
 
     private static final Random RANDOM = new Random();
+
+    @Test
+    public void testCreateReaderClosesStreamOnBadMagic() {
+        byte[] notIndexFile = "this is definitely not a file index".getBytes();
+        AtomicBoolean closed = new AtomicBoolean();
+        SeekableInputStream counting =
+                new ByteArraySeekableStream(notIndexFile) {
+                    @Override
+                    public void close() throws IOException {
+                        closed.set(true);
+                        super.close();
+                    }
+                };
+        Throwable thrown =
+                Assertions.catchThrowable(
+                        () -> FileIndexFormat.createReader(counting, RowType.builder().build()));
+        // A throwing constructor never assigns the caller's try-with-resources resource,
+        // so closing the stream is the constructor's job.
+        Assertions.assertThat(closed.get()).isTrue();
+        Assertions.assertThat(thrown)
+                .isInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage("This file is not file index file.");
+    }
 
     @Test
     public void testWriteRead() throws IOException {

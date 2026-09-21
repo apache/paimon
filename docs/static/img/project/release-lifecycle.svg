@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="448" viewBox="0 0 960 448" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">A candidate becomes a release after approval</title>
+<desc id="desc">The Release Manager prepares an immutable signed RC tag, stages source and convenience artifacts, and calls the community vote. After verification and approval, the approved candidate is published. Problems require fixes, a new RC number, and a new vote.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="1" y="1" width="958" height="446" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">A candidate becomes a release after approval</text>
+<text x="28" y="76" font-size="18" fill="#526277" font-weight="400" text-anchor="start">One shared Paimon / PyPaimon version; one immutable candidate per vote.</text>
+<rect x="28" y="117" width="199" height="153" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="127.5" y="150" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">1  Prepare</text>
+<text x="127.5" y="180" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Agree on the scope</text>
+<text x="127.5" y="205" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Set both versions</text>
+<text x="127.5" y="230" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Sign the RC tag</text>
+<rect x="263" y="117" width="199" height="153" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="362.5" y="150" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">2  Stage</text>
+<text x="362.5" y="180" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Sign source archives</text>
+<text x="362.5" y="205" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Close Java staging</text>
+<text x="362.5" y="230" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Publish to TestPyPI</text>
+<rect x="498" y="117" width="199" height="153" rx="8" fill="#fff6e5" stroke="#946200" stroke-width="1.5"/>
+<text x="597.5" y="150" font-size="21" fill="#946200" font-weight="700" text-anchor="middle">3  Verify + vote</text>
+<text x="597.5" y="180" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Check the candidate</text>
+<text x="597.5" y="205" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Build and test source</text>
+<text x="597.5" y="230" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Record the result</text>
+<rect x="733" y="117" width="199" height="153" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/>
+<text x="832.5" y="150" font-size="21" fill="#087f6e" font-weight="700" text-anchor="middle">4  Publish</text>
+<text x="832.5" y="180" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Promote artifacts</text>
+<text x="832.5" y="205" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Verify final packages</text>
+<text x="832.5" y="230" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Docs, then announce</text>
+<path d="M 227 192 H 263" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 462 192 H 498" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 697 192 H 733" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 597 270 V 318 H 127 V 270" fill="none" stroke="#526277" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+<text x="362" y="347" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Problem found: fix it, increment RC, and vote again</text>
+<rect x="28" y="378" width="904" height="42" rx="8" fill="#f5f7fb" stroke="#c6d1df" stroke-width="1.5"/>
+<text x="480" y="405" font-size="18" fill="#172b4d" font-weight="400" text-anchor="middle">Keep the approved source archives, Java repository, and commit unchanged.</text>
+</g>
+</svg>

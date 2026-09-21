@@ -24,6 +24,18 @@ from typing import List, Optional
 from pypaimon.read.split import Split
 
 
+def scores_for_ranges(score_getter, row_ranges):
+    """Scores follow row-id order, as in Java IndexedSplit, not relevance order."""
+    scores = []
+    for row_range in row_ranges:
+        for row_id in range(row_range.from_, row_range.to + 1):
+            score = score_getter(row_id)
+            if score is None:
+                raise ValueError("Missing score for selected row id %s" % row_id)
+            scores.append(score)
+    return scores
+
+
 class IndexedSplit(Split):
 
     def __init__(
@@ -93,6 +105,10 @@ class IndexedSplit(Split):
     def file_size(self):
         """Delegate to data_split."""
         return self._data_split.file_size
+
+    @property
+    def is_streaming(self):
+        return getattr(self._data_split, 'is_streaming', False)
 
     @property
     def raw_convertible(self):

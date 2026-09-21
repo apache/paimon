@@ -47,7 +47,7 @@ public class CommitMessageSerializerTest {
                         dataIncrement
                                 .newFiles()
                                 .get(0)
-                                .withColumnMaxSequenceNumbers(new long[] {3L, 42L}));
+                                .withWriteColsSequences(new long[] {3L, 42L}));
         dataIncrement.newIndexFiles().addAll(Arrays.asList(randomIndexFile(), randomIndexFile()));
         dataIncrement
                 .deletedIndexFiles()

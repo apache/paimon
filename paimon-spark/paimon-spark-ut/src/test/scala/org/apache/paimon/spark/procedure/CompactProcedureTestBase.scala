@@ -35,6 +35,7 @@ import org.apache.paimon.spark.commands.{DataEvolutionCompactMergeConflictRewrit
 import org.apache.paimon.spark.commands.CompactRowIdRangeIndex
 import org.apache.paimon.spark.utils.SparkProcedureUtils
 import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.sink.CommitMessageImpl
 import org.apache.paimon.table.source.{DataSplit, EndOfScanException, IncrementalSplit}
 import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.utils.Range
@@ -1764,6 +1765,75 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
+  test("Paimon Procedure: split oversized files once per compact invocation across batches") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value STRING, picture BINARY, pt STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'file.format' = 'avro',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'blob-field' = 'picture',
+            |  'compaction.min.file-num' = '2')
+            |PARTITIONED BY (pt)
+            |""".stripMargin)
+      for (pt <- Seq("p0", "p1")) {
+        sql(s"""
+               |INSERT INTO T SELECT /*+ REPARTITION(1) */
+               |id, concat('value-', id), CAST('blob' AS BINARY), '$pt' FROM range(0, 1)
+               |""".stripMargin)
+        sql(s"""
+               |INSERT INTO T SELECT /*+ REPARTITION(1) */
+               |id, concat('value-', id), CAST('blob' AS BINARY), '$pt' FROM range(1, 100)
+               |""".stripMargin)
+      }
+      val initial = loadTable("T")
+      CompactProcedure.executeDataEvolutionCompaction(
+        initial,
+        null,
+        null,
+        new JavaSparkContext(spark.sparkContext),
+        spark,
+        Int.box(2))
+      val targetSize = normalDataFiles(initial).map(_.fileSize()).min / 4
+      // Each normal file retains BLOB ranges for one row and 99 rows. The estimated
+      // cut lands inside the latter, so the safe output remains the full 100 rows.
+      val table = initial.copy(
+        Map(
+          "target-file-size" -> s"$targetSize b",
+          "compaction.min.file-num" -> "10",
+          "data-evolution.compaction.split-large-files" -> "true").asJava)
+      assert(normalDataFiles(table).size == 2)
+      for (_ <- 0 until 2) {
+        val beforeFiles = normalDataFiles(table).map(_.fileName()).toSet
+        val beforeSnapshot = lastSnapshotId(table)
+        val attempts = new AtomicInteger()
+        CompactProcedure.executeDataEvolutionCompaction(
+          table,
+          null,
+          null,
+          null,
+          new JavaSparkContext(spark.sparkContext),
+          spark,
+          Int.box(1),
+          _ => assert(attempts.incrementAndGet() <= 2, "Recompacted this invocation's output")
+        )
+
+        val afterFiles = normalDataFiles(table)
+        assert(attempts.get() == 2)
+        assert(lastSnapshotId(table) == beforeSnapshot + 2)
+        assert(afterFiles.size == 2)
+        assert(
+          afterFiles.forall(file => file.rowCount() == 100 && file.fileSize() > 2 * targetSize))
+        assert(afterFiles.forall(file => !beforeFiles.contains(file.fileName())))
+      }
+      checkAnswer(
+        sql("SELECT id, value, pt FROM T ORDER BY id, pt"),
+        (0 until 100).flatMap(id => Seq("p0", "p1").map(pt => Row(id, s"value-$id", pt))))
+    }
+  }
+
   test("Paimon Procedure: materialize deletion vectors across planner batches") {
     withTable("T") {
       sql("""
@@ -1969,6 +2039,8 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
         PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
       val javaSparkContext = new JavaSparkContext(spark.sparkContext)
       val attempts = new AtomicInteger()
+      val observedCommits = new AtomicInteger()
+      val observedFiles = new util.HashSet[String]()
       val rewriteSnapshotId = new AtomicLong(-1L)
       val mergeFileAfterRewrite = new AtomicReference[DataFileMeta]()
       partialUpdate(table, "SELECT * FROM VALUES (1, 10), (2, 20) AS S(id, value)")
@@ -2023,7 +2095,19 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
         javaSparkContext,
         spark,
         configurer,
-        messageRewriter
+        messageRewriter,
+        messages => {
+          observedCommits.incrementAndGet()
+          messages.asScala.foreach {
+            message =>
+              message
+                .asInstanceOf[CommitMessageImpl]
+                .compactIncrement()
+                .compactAfter()
+                .asScala
+                .foreach(file => observedFiles.add(file.fileName()))
+          }
+        }
       )
 
       Assertions.assertThat(attempts.get()).isEqualTo(2)
@@ -2036,6 +2120,10 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             file.fileName() != mergeFile.fileName())
       assert(bridgeFiles.size == 1, bridgeFiles)
       val bridgeFile = bridgeFiles.head
+      assert(observedCommits.get() == 1)
+      assert(observedFiles.size() == 2)
+      assert(observedFiles.contains(bridgeFile.fileName()))
+      assert(!observedFiles.contains(mergeFile.fileName()))
       assert(bridgeFile.maxSequenceNumber() == rewriteSnapshotId.get())
       assert(bridgeFile.maxSequenceNumber() < mergeFile.maxSequenceNumber())
       assert(mergeFile.maxSequenceNumber() < table.latestSnapshot().get().id())
@@ -2091,6 +2179,143 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
         )
       assert(!rewritten.isPresent)
       checkAnswer(sql("SELECT id, value FROM T ORDER BY id"), Seq(Row(1, 11), Row(2, 21)))
+    }
+  }
+
+  test("Paimon Procedure: compact rebase preserves nested sub-field merge updates") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value INT, nest STRUCT<a: INT, b: STRING>)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'data-evolution.nested-field.enabled' = 'true',
+            |  'compaction.min.file-num' = '2',
+            |  'commit.max-retries' = '3',
+            |  'commit.min-retry-wait' = '1 ms',
+            |  'commit.max-retry-wait' = '1 ms')
+            |""".stripMargin)
+      sql("""
+            |INSERT INTO T
+            |SELECT /*+ REPARTITION(1) */ id, value, named_struct('a', a, 'b', b)
+            |FROM VALUES (1, 10, 100, 'x'), (2, 20, 200, 'y') AS S(id, value, a, b)
+            |""".stripMargin)
+      val table = loadTable("T")
+      val relation =
+        PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
+
+      // a whole-column partial update, so the staged compact task has two files to merge
+      nestedPartialUpdate(
+        table,
+        "T.value = S.value",
+        "SELECT * FROM VALUES (1, 11), (2, 21) AS S(id, value)")
+      val normalFiles = normalDataFiles(table)
+      assert(normalFiles.size == 2)
+
+      val stagedTask = new DataEvolutionNormalCompactTask(BinaryRow.EMPTY_ROW, normalFiles.asJava)
+      val stagedMessage = stagedTask.doCompact(table, "staged-compact")
+      val baseSnapshot = table.latestSnapshot().get()
+
+      // a MERGE landing after the compact was staged, touching a top-level column AND a sub-field
+      val mergeFile = nestedPartialUpdate(
+        table,
+        "T.value = S.value, T.nest.a = S.value * 10",
+        "SELECT * FROM VALUES (1, 12), (2, 22) AS S(id, value)")
+      assert(
+        mergeFile.writeCols().asScala == Seq("value", "nest.a"),
+        s"unexpected write cols: ${mergeFile.writeCols()}")
+      val beforeRebase = sql("SELECT id, value, nest.a, nest.b FROM T ORDER BY id").collect().toSeq
+      assert(
+        beforeRebase == Seq(Row(1, 12, 120, "x"), Row(2, 22, 220, "y")),
+        s"the MERGE itself is wrong before any rebase: $beforeRebase")
+
+      val latestSnapshot = table.latestSnapshot().get()
+      val rewritten = new DataEvolutionCompactMergeConflictRewriter(table, relation)
+        .rewrite(spark, baseSnapshot, latestSnapshot, util.Collections.singletonList(stagedMessage))
+      assert(rewritten.isPresent)
+
+      val commit = table.newCommit("rebased-compact")
+      try {
+        commit.commit(rewritten.get())
+      } finally {
+        commit.close()
+      }
+
+      // the rebased compact output must still carry the merged nest.a values
+      checkAnswer(
+        sql("SELECT id, value, nest.a, nest.b FROM T ORDER BY id"),
+        Seq(Row(1, 12, 120, "x"), Row(2, 22, 220, "y")))
+    }
+  }
+
+  test("Paimon Procedure: compact rebase covers a column written both whole and per sub-field") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value INT, nest STRUCT<a: INT, b: STRING>)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'data-evolution.nested-field.enabled' = 'true',
+            |  'compaction.min.file-num' = '2',
+            |  'commit.max-retries' = '3',
+            |  'commit.min-retry-wait' = '1 ms',
+            |  'commit.max-retry-wait' = '1 ms')
+            |""".stripMargin)
+      sql("""
+            |INSERT INTO T
+            |SELECT /*+ REPARTITION(1) */ id, value, named_struct('a', a, 'b', b)
+            |FROM VALUES (1, 10, 100, 'x'), (2, 20, 200, 'y') AS S(id, value, a, b)
+            |""".stripMargin)
+      val table = loadTable("T")
+      val relation =
+        PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
+
+      nestedPartialUpdate(
+        table,
+        "T.value = S.value",
+        "SELECT * FROM VALUES (1, 11), (2, 21) AS S(id, value)")
+      val normalFiles = normalDataFiles(table)
+      assert(normalFiles.size == 2)
+
+      val stagedTask = new DataEvolutionNormalCompactTask(BinaryRow.EMPTY_ROW, normalFiles.asJava)
+      val stagedMessage = stagedTask.doCompact(table, "staged-compact")
+      val baseSnapshot = table.latestSnapshot().get()
+
+      // one MERGE writes only the sub-field nest.a, a later one replaces the WHOLE nest column;
+      // the write paths of the two staged files must collapse to the whole column
+      val subFieldFile = nestedPartialUpdate(
+        table,
+        "T.nest.a = S.value * 10",
+        "SELECT * FROM VALUES (1, 12), (2, 22) AS S(id, value)")
+      assert(subFieldFile.writeCols().asScala == Seq("nest.a"))
+      val wholeColumnFile = nestedPartialUpdate(
+        table,
+        "T.nest = named_struct('a', S.value * 100, 'b', 'z')",
+        "SELECT * FROM VALUES (1, 13), (2, 23) AS S(id, value)")
+      assert(wholeColumnFile.writeCols().asScala == Seq("nest"))
+
+      val beforeRebase = sql("SELECT id, value, nest.a, nest.b FROM T ORDER BY id").collect().toSeq
+      assert(
+        beforeRebase == Seq(Row(1, 11, 1300, "z"), Row(2, 21, 2300, "z")),
+        s"the MERGEs themselves are wrong before any rebase: $beforeRebase")
+
+      val latestSnapshot = table.latestSnapshot().get()
+      val rewritten = new DataEvolutionCompactMergeConflictRewriter(table, relation)
+        .rewrite(spark, baseSnapshot, latestSnapshot, util.Collections.singletonList(stagedMessage))
+      assert(rewritten.isPresent)
+
+      val commit = table.newCommit("rebased-compact")
+      try {
+        commit.commit(rewritten.get())
+      } finally {
+        commit.close()
+      }
+
+      checkAnswer(
+        sql("SELECT id, value, nest.a, nest.b FROM T ORDER BY id"),
+        Seq(Row(1, 11, 1300, "z"), Row(2, 21, 2300, "z")))
     }
   }
 
@@ -2496,6 +2721,35 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             |ON T.id = S.id
             |WHEN MATCHED THEN UPDATE SET T.id = S.id, T.value = S.value
             |""".stripMargin)
+    } finally {
+      spark.catalog.dropTempView("merge_source")
+    }
+    table
+      .newSnapshotReader()
+      .withSnapshot(table.latestSnapshot().get())
+      .readIncrementalDiff(beforeMerge)
+      .splits()
+      .asScala
+      .collect { case split: IncrementalSplit => split }
+      .flatMap(_.afterFiles().asScala)
+      .find(file => !BlobFileFormat.isBlobFile(file.fileName()))
+      .get
+  }
+
+  /** Like [[partialUpdate]] but with an explicit SET list, so sub-field targets can be used. */
+  private def nestedPartialUpdate(
+      table: FileStoreTable,
+      setList: String,
+      sourceQuery: String): DataFileMeta = {
+    val beforeMerge = table.latestSnapshot().get()
+    sql(sourceQuery).createOrReplaceTempView("merge_source")
+    try {
+      sql(s"""
+             |MERGE INTO T
+             |USING merge_source AS S
+             |ON T.id = S.id
+             |WHEN MATCHED THEN UPDATE SET $setList
+             |""".stripMargin)
     } finally {
       spark.catalog.dropTempView("merge_source")
     }

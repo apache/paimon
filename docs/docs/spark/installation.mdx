@@ -1,0 +1,107 @@
+---
+title: "Installation"
+---
+
+import Stable from '@site/src/components/Stable';
+import Unstable from '@site/src/components/Unstable';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Installation
+
+Match the connector to the Spark minor version and Scala binary version of your distribution.
+The Java versions below describe how the connector artifacts are built; your Spark distribution
+may require a newer Java runtime. Check its runtime requirements before starting Spark.
+
+- Spark 4.x (including 4.1, 4.0) : Pre-built with Java 17 and Scala 2.13
+
+- Spark 3.x (including 3.5, 3.4, 3.3, 3.2) : Pre-built with Java 8 and Scala 2.12/2.13
+
+## Download the Connector
+
+Choose the JAR matching your Spark and Scala versions:
+
+<Stable>
+
+| Version   | Jar (Scala 2.12)                                                                                                                                                                    | Jar (Scala 2.13)                                                                                                                                                                    |
+|-----------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Spark 4.1 | -                                                                                                                                                                                   | [JAR](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-4.1_2.13/@@VERSION@@/paimon-spark-4.1_2.13-@@VERSION@@.jar) |
+| Spark 4.0 | -                                                                                                                                                                                   | [JAR](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-4.0_2.13/@@VERSION@@/paimon-spark-4.0_2.13-@@VERSION@@.jar) |
+| Spark 3.5 | [JAR](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.5_2.12/@@VERSION@@/paimon-spark-3.5_2.12-@@VERSION@@.jar) | [JAR](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.5_2.13/@@VERSION@@/paimon-spark-3.5_2.13-@@VERSION@@.jar) |
+| Spark 3.4 | [JAR](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.4_2.12/@@VERSION@@/paimon-spark-3.4_2.12-@@VERSION@@.jar) | [JAR](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.4_2.13/@@VERSION@@/paimon-spark-3.4_2.13-@@VERSION@@.jar) |
+| Spark 3.3 | [JAR](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.3_2.12/@@VERSION@@/paimon-spark-3.3_2.12-@@VERSION@@.jar) | [JAR](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.3_2.13/@@VERSION@@/paimon-spark-3.3_2.13-@@VERSION@@.jar) |
+| Spark 3.2 | [JAR](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.2_2.12/@@VERSION@@/paimon-spark-3.2_2.12-@@VERSION@@.jar) | [JAR](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.2_2.13/@@VERSION@@/paimon-spark-3.2_2.13-@@VERSION@@.jar) |
+
+</Stable>
+
+<Unstable>
+
+| Version   | Jar (Scala 2.12)                                                                                                                              | Jar (Scala 2.13)                                                                                                                              |
+|-----------|-----------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| Spark 4.1 | -                                                                                                                                             | [JAR](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-4.1_2.13/@@VERSION@@/) |
+| Spark 4.0 | -                                                                                                                                             | [JAR](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-4.0_2.13/@@VERSION@@/) |
+| Spark 3.5 | [JAR](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.5_2.12/@@VERSION@@/) | [JAR](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.5_2.13/@@VERSION@@/) |
+| Spark 3.4 | [JAR](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.4_2.12/@@VERSION@@/) | [JAR](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.4_2.13/@@VERSION@@/) |
+| Spark 3.3 | [JAR](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.3_2.12/@@VERSION@@/) | [JAR](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.3_2.13/@@VERSION@@/) |
+| Spark 3.2 | [JAR](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.2_2.12/@@VERSION@@/) | [JAR](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.2_2.13/@@VERSION@@/) |
+
+</Unstable>
+
+## Build from Source
+
+You can also build the bundled JAR from source.
+
+To build from source code, [clone the git repository](@@GITHUB_REPO@@), then build the bundled jar with the following command.
+
+```bash
+# build paimon spark 3.5 with scala 2.12
+mvn clean package -DskipTests -pl paimon-spark/paimon-spark-3.5 -am -Pspark3
+
+# build paimon spark 3.5 with scala 2.13
+mvn clean package -DskipTests -pl paimon-spark/paimon-spark-3.5 -am -Pspark3,scala-2.13
+
+# build paimon spark 4.0
+mvn clean package -DskipTests -pl paimon-spark/paimon-spark-4.0 -am -Pspark4
+
+# build paimon spark 4.1
+mvn clean package -DskipTests -pl paimon-spark/paimon-spark-4.1 -am -Pspark4
+```
+
+For Spark 3.5, you can find the bundled jar in `./paimon-spark/paimon-spark-3.5/target/paimon-spark-3.5_2.12-@@VERSION@@.jar`.
+
+## Add the Connector to Spark
+
+Pass `--jars /path/to/paimon-connector.jar` when starting `spark-sql` or `spark-shell`, or put the
+JAR in your Spark installation's `jars` directory. For published releases, Maven coordinates
+are another option:
+
+```bash
+spark-sql --packages org.apache.paimon:paimon-spark-3.5_2.12:@@VERSION@@
+```
+
+Snapshot artifacts are hosted in the Apache snapshot repository linked above. Download the
+snapshot JAR and use `--jars` for the local quick start.
+
+## Configure Storage and a Catalog
+
+Use the complete command in [Quick Start](./quick-start#setup) for local storage, or configure
+[Catalogs](./catalogs) for your deployment. When using HDFS, set `HADOOP_HOME` or `HADOOP_CONF_DIR`
+so Spark can load the Hadoop configuration. Add the filesystem dependencies required by your
+warehouse as described in [Filesystems](../maintenance/filesystems).

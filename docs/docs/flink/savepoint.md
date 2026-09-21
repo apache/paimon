@@ -24,18 +24,24 @@ under the License.
 
 # Savepoint
 
-Paimon has its own snapshot management, this may conflict with Flink's checkpoint management, causing exceptions when
-restoring from savepoint (don't worry, it will not cause the storage to be damaged).
+A Flink savepoint preserves job state; a Paimon snapshot preserves table state. Restoring a
+writer requires these two states to agree. A savepoint alone does not retain the Paimon snapshot
+or undo commits made after it.
 
-It is recommended that you use the following methods to savepoint:
+| Recovery task | Approach |
+| --- | --- |
+| Stop a writer and resume from its stopping point | [Stop with savepoint](#stop-with-savepoint). |
+| Retain a recovery point while the job continues writing | [Create a tag with the savepoint](#tag-with-savepoint), then roll the table back before restoring. |
+| Restart a streaming reader using stored table progress | See [Consumer ID](./consumer-id). |
 
-1. Use Flink [Stop with savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/savepoints/#stopping-a-job-with-savepoint).
-2. Use Paimon Tag with Flink Savepoint, and rollback-to-tag before restoring from savepoint.
+![Savepoint and Paimon tag preserve matching job and table states; recovery stops writers, rolls back the table, then restores the job.](/img/flink-savepoint-recovery.svg)
 
 ## Stop with savepoint
 
-This feature of Flink ensures that the last checkpoint is fully processed, which means there will be no more uncommitted
-metadata left. This is very safe, so we recommend using this feature to stop and start job.
+Use Flink's [stop-with-savepoint operation](https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/savepoints/#stopping-a-job-with-savepoint)
+to stop the writer after processing its final checkpoint. Wait for the operation to finish
+successfully before resuming the job. If the table has advanced through another writer, account
+for those commits before restoring the saved writer state.
 
 ## Tag with Savepoint
 
@@ -49,7 +55,13 @@ savepoint to achieve incremental recovery of job from the specified savepoint.
 
 **Step 1: Enable automatically create tags for savepoint.**
 
-You can set `sink.savepoint.auto-tag` to `true` to enable the feature of automatically creating tags for savepoint.
+Set the option before submitting the writer:
+
+```sql
+ALTER TABLE my_table SET ('sink.savepoint.auto-tag' = 'true');
+```
+
+Restart an existing writer so it picks up the changed option.
 
 **Step 2: Trigger savepoint.**
 
@@ -58,13 +70,17 @@ to learn how to configure and trigger savepoint.
 
 **Step 3: Choose the tag corresponding to the savepoint.**
 
-The tag corresponding to the savepoint will be named in the form of `savepoint-${savepointID}`. You can refer to
-[Tags Table](../concepts/system-tables#tags-table) to query.
+The tag is named `savepoint-<checkpoint-id>`, where the suffix is the numeric Flink checkpoint
+ID associated with the savepoint, not its directory name. Inspect the
+[Tags Table](../concepts/system-tables#tags-table) and match the tag to the savepoint you retained.
 
 **Step 4: Rollback the paimon table.**
 
-[Rollback](../maintenance/manage-tags#rollback-to-tag) the Paimon table to the specified tag.
+Stop writers to the affected table, then [roll back](../maintenance/manage-tags#rollback-to-tag)
+to the matching tag. Rollback removes later snapshots and can remove later tags; verify the
+chosen recovery point before executing it. Coordinate this for each Paimon table written by the job.
 
 **Step 5: Restart from the savepoint.**
 
-You can refer to [here](https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/savepoints/#resuming-from-savepoints) to learn how to restart from a specified savepoint.
+[Resume the job from the matching savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/savepoints/#resuming-from-savepoints).
+Verify that checkpoints complete and new Paimon snapshots appear before resuming dependent work.

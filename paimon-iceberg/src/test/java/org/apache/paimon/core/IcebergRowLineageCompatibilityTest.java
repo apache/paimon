@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
@@ -76,6 +77,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for Iceberg format-version 3 row-lineage metadata fields. */
 public class IcebergRowLineageCompatibilityTest {
@@ -232,6 +234,52 @@ public class IcebergRowLineageCompatibilityTest {
         IcebergMetadata metadata = readIcebergMetadata(table, 2);
         assertThat(metadata.refs()).containsKey("t1");
         assertThat(metadata.nextRowId()).isEqualTo(3L);
+    }
+
+    @Test
+    public void testVariantPublishableWithFormatVersion3() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.VARIANT()},
+                        new String[] {"k", "payload"});
+        FileStoreTable table = createPaimonTable(rowType, formatVersionOptions(3), "parquet");
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, GenericVariant.fromJson("{\"a\": 1}")));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        IcebergMetadata metadata = readIcebergMetadata(table, 1);
+        assertThat(metadata.nextRowId()).isEqualTo(1L);
+        assertThat(metadata.schemas().get(metadata.currentSchemaId()).fields().get(1).type())
+                .isEqualTo("variant");
+    }
+
+    @Test
+    public void testVariantRejectedWithFormatVersion2() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.VARIANT()},
+                        new String[] {"k", "payload"});
+        FileStoreTable table = createPaimonTable(rowType, formatVersionOptions(2), "parquet");
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, GenericVariant.fromJson("{\"a\": 1}")));
+        // hasStackTraceContaining: robust whether or not the commit path wraps the
+        // IllegalArgumentException from the guard
+        assertThatThrownBy(() -> commit.commit(1, write.prepareCommit(false, 1)))
+                .hasStackTraceContaining("VARIANT");
+        write.close();
+        commit.close();
     }
 
     @Test

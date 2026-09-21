@@ -1,0 +1,161 @@
+---
+title: "Quick Start"
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Quick Start
+
+This Spark SQL walkthrough creates a small media table, enriches it, and uses a
+scalar index to find records. It assumes a [configured Paimon Spark catalog](../spark/quick-start)
+is selected and the current database already exists. Use a fresh table name if
+`media_samples` already exists.
+
+For other engines, use the [Flink examples](./blob#creating-a-table) or
+[PyPaimon multimodal API](../pypaimon/multimodal-api). SQL engine support and
+dependencies are described in their setup guides.
+
+## 1. Create the Table
+
+Keep searchable metadata beside the payload. `image` is a managed BLOB column;
+`embedding` starts as an ordinary float array. Using a float array here avoids
+requiring the dedicated Vortex storage format for this walkthrough.
+
+```sql
+CREATE TABLE media_samples (
+    id BIGINT,
+    category STRING,
+    image BINARY COMMENT '__BLOB_FIELD; source image',
+    caption STRING,
+    embedding ARRAY<FLOAT>
+) TBLPROPERTIES (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+```
+
+`id` is a business identifier, not a primary key. Inserting the same identifier
+again appends another row. Paimon assigns its own row IDs for column alignment.
+
+## 2. Append Sample Records
+
+The short binary values below are test payloads, not encoded image files. In a
+real pipeline, supply the image bytes or supported descriptors through the
+[BLOB write APIs](./blob#inserting-blob-data).
+
+```sql
+INSERT INTO media_samples VALUES
+    (1, 'animals', X'010203', NULL, NULL),
+    (2, 'travel',  X'040506', NULL, NULL);
+
+SELECT id, category FROM media_samples ORDER BY id;
+-- (1, animals), (2, travel)
+```
+
+This query projects only normal columns and does not load the BLOB payloads.
+
+## 3. Enrich Selected Columns
+
+Assume a model has produced the caption and three-dimensional example embedding.
+Write those values to the existing row:
+
+```sql
+UPDATE media_samples
+SET caption = 'A cat on a chair', embedding = array(1.0f, 0.0f, 0.0f)
+WHERE id = 1;
+
+SELECT id, caption, embedding FROM media_samples WHERE id = 1;
+-- (1, A cat on a chair, [1.0, 0.0, 0.0])
+```
+
+The update writes the selected normal columns over the affected file range.
+Existing image payloads remain in their BLOB files. Use
+[Data Evolution](./data-evolution#partial-updates) for batch backfills, merges,
+deletes, and concurrency behavior.
+
+## 4. Build and Use a Scalar Index
+
+Build the index after loading data:
+
+```sql
+CALL sys.create_global_index(
+    table => 'media_samples',
+    index_column => 'category',
+    index_type => 'btree'
+);
+
+SELECT id, caption FROM media_samples WHERE category = 'animals';
+-- (1, A cat on a chair)
+```
+
+Inspect the recorded row-ID coverage:
+
+```sql
+SELECT index_type, index_field_name, row_range_start, row_range_end
+FROM `media_samples$table_indexes`
+WHERE index_field_name = 'category';
+```
+
+The default search mode is `fast`, which searches indexed coverage. If you append
+more records, build again before expecting indexed queries to include them, or
+select an appropriate [search mode](./global-index/manage-indexes#coverage-and-freshness).
+Updates to an indexed column also have a separate
+[update policy](./global-index/manage-indexes#update-indexed-columns); this example enriches
+the data before building the index.
+
+## 5. Refresh After an Append
+
+Append another matching record after the first index build. With the default
+`scalar-index.search-mode=fast`, the indexed query still searches the original
+coverage:
+
+```sql
+INSERT INTO media_samples VALUES (3, 'animals', X'070809', NULL, NULL);
+
+SELECT id FROM media_samples WHERE category = 'animals' ORDER BY id;
+-- 1 (the new row is outside the current index coverage)
+```
+
+Build again to cover the new row, then repeat the query:
+
+```sql
+CALL sys.create_global_index(
+    table => 'media_samples',
+    index_column => 'category',
+    index_type => 'btree'
+);
+
+SELECT id FROM media_samples WHERE category = 'animals' ORDER BY id;
+-- 1, 3
+```
+
+The second build adds missing coverage. It does not make later appends refresh
+automatically. For reads that must include uncovered rows before the next build,
+see the `full` and `detail` [search modes](./global-index/manage-indexes#coverage-and-freshness).
+
+## Next Steps
+
+| Goal | Next guide |
+| --- | --- |
+| Store fixed-dimension vectors in dedicated files | [Vector Storage](./vector) |
+| Search similar embeddings | [Vector Index](./global-index/vector) |
+| Search captions by text relevance | [Full-Text Index](./global-index/full-text) |
+| Combine vector and text results | [Hybrid Search](./global-index/hybrid-search) |
+| Consolidate files after repeated enrichment | [Data Evolution Maintenance](./data-evolution-maintenance) |

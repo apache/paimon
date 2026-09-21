@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -78,7 +79,7 @@ public class MultiTableUpdatedDataFieldsProcessFunction
                             } catch (Catalog.TableNotExistException e) {
                                 return null;
                             }
-                            return new SchemaManager(table.fileIO(), table.location());
+                            return new FileSystemSchemaManager(table.fileIO(), table.location());
                         });
         if (Objects.isNull(schemaManager)) {
             LOG.error("Failed to get schema manager for table " + tableId);

@@ -67,6 +67,9 @@ public class SnapshotManager implements Serializable {
 
     public static final int EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM = 300;
 
+    private static final int SNAPSHOT_EXISTS_MAX_ATTEMPTS = 3;
+    private static final long SNAPSHOT_EXISTS_RETRY_INTERVAL_MILLIS = 1_000L;
+
     private final FileIO fileIO;
     private final Path tablePath;
     private final String branch;
@@ -147,13 +150,44 @@ public class SnapshotManager implements Serializable {
 
     public boolean snapshotExists(long snapshotId) {
         Path path = snapshotPath(snapshotId);
-        try {
-            return fileIO.exists(path);
-        } catch (IOException e) {
-            throw new RuntimeException(
-                    "Failed to determine if snapshot #" + snapshotId + " exists in path " + path,
-                    e);
+        IOException failure = null;
+        for (int attempt = 1; attempt <= SNAPSHOT_EXISTS_MAX_ATTEMPTS; attempt++) {
+            try {
+                return fileIO.exists(path);
+            } catch (IOException e) {
+                failure = e;
+                if (attempt == SNAPSHOT_EXISTS_MAX_ATTEMPTS) {
+                    break;
+                }
+                LOG.warn(
+                        "Failed to check whether snapshot #{} exists at {} (attempt {}/{}). Retrying.",
+                        snapshotId,
+                        path,
+                        attempt,
+                        SNAPSHOT_EXISTS_MAX_ATTEMPTS,
+                        e);
+                try {
+                    Thread.sleep(SNAPSHOT_EXISTS_RETRY_INTERVAL_MILLIS);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(
+                            "Interrupted while checking whether snapshot #"
+                                    + snapshotId
+                                    + " exists at "
+                                    + path,
+                            ie);
+                }
+            }
         }
+        throw new RuntimeException(
+                "Failed to check whether snapshot #"
+                        + snapshotId
+                        + " exists at "
+                        + path
+                        + " after "
+                        + SNAPSHOT_EXISTS_MAX_ATTEMPTS
+                        + " attempts.",
+                failure);
     }
 
     public void deleteSnapshot(long snapshotId) {
@@ -185,7 +219,20 @@ public class SnapshotManager implements Serializable {
 
     public @Nullable Snapshot latestSnapshotFromFileSystem() {
         Long snapshotId = latestSnapshotIdFromFileSystem();
-        return snapshotId == null ? null : snapshot(snapshotId);
+        while (snapshotId != null) {
+            try {
+                return tryGetSnapshot(snapshotId);
+            } catch (FileNotFoundException e) {
+                Long newSnapshotId = latestSnapshotIdFromFileSystem();
+                if (snapshotId.equals(newSnapshotId)) {
+                    // Retry once to preserve the existing exception when the latest snapshot is
+                    // genuinely missing instead of being concurrently expired.
+                    return snapshot(snapshotId);
+                }
+                snapshotId = newSnapshotId;
+            }
+        }
+        return null;
     }
 
     public @Nullable Long latestSnapshotId() {

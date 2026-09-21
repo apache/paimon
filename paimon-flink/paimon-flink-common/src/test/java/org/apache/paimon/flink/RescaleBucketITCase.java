@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.SnapshotManager;
@@ -74,7 +75,7 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
                         "CREATE TABLE IF NOT EXISTS `T3` (f0 INT) WITH ('bucket' = '2', 'bucket-key' = 'f0')",
                         "CREATE TABLE IF NOT EXISTS `T4` (f0 INT)"));
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), getTableDirectory("T3"));
+                new FileSystemSchemaManager(LocalFileIO.create(), getTableDirectory("T3"));
         assertLatestSchema(schemaManager, 0L, 2);
 
         String streamSql =
@@ -187,7 +188,7 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
         assertThat(snapshot).isNotNull();
 
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), getTableDirectory(tableName));
+                new FileSystemSchemaManager(LocalFileIO.create(), getTableDirectory(tableName));
         assertSnapshotSchema(schemaManager, snapshot.schemaId(), 0L, 2);
 
         // for managed table schema id remains unchanged, for catalog table id increase from 0 to 1

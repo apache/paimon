@@ -63,6 +63,8 @@ class LookupMergeTreeCompactRewriterTest {
                         mock(MergeSorter.class),
                         mock(LookupMergeTreeCompactRewriter.MergeFunctionWrapperFactory.class),
                         false,
+                        false,
+                        false,
                         null,
                         options,
                         null);

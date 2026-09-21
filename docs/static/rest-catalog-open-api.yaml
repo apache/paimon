@@ -984,6 +984,9 @@ paths:
       tags:
         - partition
       summary: Create partitions
+      description: >
+        Creates partitions with optional position-aligned options. The server validates and stores
+        the partitions, options, and statistics atomically.
       operationId: createPartitions
       parameters:
         - name: prefix
@@ -1014,6 +1017,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CreatePartitionsResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
@@ -1022,6 +1027,12 @@ paths:
           $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+        "501":
+          description: The catalog provider does not support partition options
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/partitions/drop:
     post:
       tags:
@@ -2214,11 +2225,231 @@ paths:
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
 
+  /v1/{prefix}/databases/{database}/semantic-views:
+    parameters:
+      - name: prefix
+        in: path
+        required: true
+        description: Opaque catalog prefix returned by config.
+        schema:
+          type: string
+          minLength: 1
+      - name: database
+        in: path
+        required: true
+        description: Database name encoded as one UTF-8 path segment.
+        schema:
+          type: string
+          minLength: 1
+    get:
+      tags: [ semantic-view ]
+      summary: List Semantic Views
+      operationId: listSemanticViews
+      description: >-
+        Lists visible semantic view names only. Ordinary SQL view lists do not include these objects.
+        Missing databases return 404. Empty pages terminate pagination and omit nextPageToken.
+      parameters:
+        - name: maxResults
+          in: query
+          description: Maximum page size; omission uses the server default.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 1000
+        - name: pageToken
+          in: query
+          description: Opaque continuation token from the preceding response.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSemanticViewsResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
+        "404":
+          $ref: '#/components/responses/SemanticViewNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+        "501":
+          $ref: '#/components/responses/SemanticViewNotImplementedErrorResponse'
+  /v1/{prefix}/databases/{database}/semantic-views/{semanticView}:
+    parameters:
+      - name: prefix
+        in: path
+        required: true
+        description: Opaque catalog prefix returned by config.
+        schema:
+          type: string
+          minLength: 1
+      - name: database
+        in: path
+        required: true
+        description: Database name encoded as one UTF-8 path segment.
+        schema:
+          type: string
+          minLength: 1
+      - name: semanticView
+        in: path
+        required: true
+        description: Semantic view name encoded as one UTF-8 path segment, including dot-only names.
+        schema:
+          type: string
+          minLength: 1
+    get:
+      tags: [ semantic-view ]
+      summary: Get Semantic View
+      operationId: getSemanticView
+      description: Returns the name and complete stored definition.
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetSemanticViewResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
+        "404":
+          $ref: '#/components/responses/SemanticViewNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+        "501":
+          $ref: '#/components/responses/SemanticViewNotImplementedErrorResponse'
+    post:
+      tags: [ semantic-view ]
+      summary: Upsert Semantic View
+      operationId: upsertSemanticView
+      description: >-
+        Creates or atomically replaces the complete definition in an existing database.
+        Replacements preserve identity, creation metadata, owner, permissions, and labels.
+        Upserts are unconditional; the last successful write takes effect.
+        Ordinary SQL views share the view namespace;
+        both SQL view creation and semantic view upsert reject cross-type name collisions with 409.
+        The server validates supported model formats, syntax versions, and model features,
+        rejecting unsupported semantics without side effects or silently dropping fields.
+        Registration does not imply query engine support or grant access to sources.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertSemanticViewRequest'
+            example:
+              definition:
+                format: databricks-yaml
+                content: |
+                  version: "1.1"
+                  source: main.sales.orders
+                  measures:
+                    - name: revenue
+                      expr: SUM(paid_amount)
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetSemanticViewResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
+        "404":
+          $ref: '#/components/responses/SemanticViewNotExistErrorResponse'
+        "409":
+          $ref: '#/components/responses/SemanticViewConflictErrorResponse'
+        "413":
+          $ref: '#/components/responses/SemanticViewTooLargeErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+        "501":
+          $ref: '#/components/responses/SemanticViewNotImplementedErrorResponse'
+    delete:
+      tags: [ semantic-view ]
+      summary: Delete Semantic View
+      operationId: deleteSemanticView
+      description: >-
+        Deletes the object and its direct labels and permissions, never referenced sources.
+        Missing objects return 404. Dependencies may prevent deletion with 409.
+        No query parameters or request body are accepted.
+      responses:
+        "200":
+          description: Success, no content
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
+        "404":
+          $ref: '#/components/responses/SemanticViewNotExistErrorResponse'
+        "409":
+          $ref: '#/components/responses/SemanticViewConflictErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+        "501":
+          $ref: '#/components/responses/SemanticViewNotImplementedErrorResponse'
+
 components:
   #############################
   # Reusable Response Objects #
   #############################
   responses:
+    SemanticViewNotExistErrorResponse:
+      description: Database or semantic view does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: Database or semantic view does not exist.
+            code: 404
+            resourceType: SEMANTIC_VIEW
+    SemanticViewConflictErrorResponse:
+      description: SQL view name collision or dependency prevents deletion.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: SQL view name collision or dependency prevents deletion.
+            code: 409
+            resourceType: SEMANTIC_VIEW
+    SemanticViewTooLargeErrorResponse:
+      description: Definition content exceeds 1 MiB in UTF-8 bytes; no content is stored or truncated.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: Definition content exceeds 1 MiB in UTF-8 bytes; no content is stored or truncated.
+            code: 413
+            resourceType: SEMANTIC_VIEW
+    SemanticViewNotImplementedErrorResponse:
+      description: The server does not implement semantic view management.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: The server does not implement semantic view management.
+            code: 501
+            resourceType: SEMANTIC_VIEW
     BadRequestErrorResponse:
       description:
         Used for 400 errors, means illegal request.
@@ -2434,6 +2665,53 @@ components:
             message: Internal Server Error
             code: 500
   schemas:
+    SemanticViewDefinition:
+      type: object
+      required: [ format, content ]
+      properties:
+        format:
+          type: string
+          minLength: 1
+          description: >-
+            Nonblank, extensible model document format identifying both model syntax and encoding,
+            for example databricks-yaml, snowflake-yaml, or ossie-yaml. These are Paimon format
+            identifiers; servers decide which formats they support and reject unsupported ones.
+            Model syntax versions and expression dialects belong inside the content.
+          examples: [ databricks-yaml, snowflake-yaml, ossie-yaml ]
+        content:
+          type: string
+          minLength: 1
+          description: >-
+            Complete nonblank document, preserved verbatim, including future fields.
+            Maximum 1048576 UTF-8 bytes (not characters). Servers must never silently truncate.
+            A version inside the document identifies model syntax.
+          x-max-utf8-bytes: 1048576
+    UpsertSemanticViewRequest:
+      type: object
+      required: [ definition ]
+      properties:
+        definition:
+          $ref: '#/components/schemas/SemanticViewDefinition'
+    GetSemanticViewResponse:
+      type: object
+      required: [ name, definition ]
+      properties:
+        name:
+          type: string
+        definition:
+          $ref: '#/components/schemas/SemanticViewDefinition'
+    ListSemanticViewsResponse:
+      type: object
+      required: [ semanticViews ]
+      properties:
+        semanticViews:
+          type: array
+          items:
+            type: string
+          description: Visible semantic view names only, without full definitions.
+        nextPageToken:
+          type: string
+          description: Opaque continuation token; omitted on the last or an empty page.
     CreateDatabaseRequest:
       type: object
       properties:
@@ -2495,8 +2773,15 @@ components:
           items:
             $ref: '#/components/schemas/PartitionStatistics'
         replaceStatistics:
-          description: Whether partitionStatistics replace the stored values rather than add to them; required whenever partitionStatistics is present, and absent otherwise. Replacing overwrites recordCount, fileSizeInBytes, fileCount and lastFileCreationTime; adding sums the three counts and keeps the later lastFileCreationTime, since two timestamps do not add. A field reported as unknown leaves the stored one alone either way, and totalBuckets is never combined. A client that reports only the files it just wrote adds; one that reports a whole partition, such as an overwrite or a directory rescan, replaces.
+          description: Whether partitionStatistics replace the stored values rather than add to them; required whenever partitionStatistics is present, and absent otherwise. Replacing overwrites recordCount, fileSizeInBytes, fileCount and lastFileCreationTime; adding sums the three counts and keeps the later lastFileCreationTime, since two timestamps do not add. A field reported as unknown leaves the stored one alone either way, and totalBuckets is never combined. A client that reports only the files it just wrote adds; one that reports a whole partition, such as an overwrite or a directory rescan, replaces. An additive report is rejected for a Format Table partition that already has a custom path; registering a new custom path together with its first statistics is allowed.
           type: [ boolean, "null" ]
+        partitionOptions:
+          description: Optional options aligned with partitionSpecs by position. The list must have the same length as partitionSpecs; use an empty object when a partition has no options. A custom location is stored under the path key. Omitting path keeps the stored location; a path outside the table location registers a custom location for a new partition and must equal the stored path for an existing one; the partition's own default directory under the table location returns the partition there, dropping the stored path without deleting data. Returning a partition to its default directory requires replaceStatistics=true and a partitionStatistics entry with the same spec, applied in the same request. Any other path under the table location is invalid, so a provider that does not implement this rejects the request instead of storing it.
+          type: [ array, "null" ]
+          items:
+            type: object
+            additionalProperties:
+              type: string
     CreatePartitionsResponse:
       type: object
       required:
@@ -2573,7 +2858,7 @@ components:
           type: string
         resourceType:
           type: [ string, "null" ]
-          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "DIALECT", "FUNCTION", "DEFINITION", "UNKNOWN", null ]
+          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "SEMANTIC_VIEW", "DIALECT", "FUNCTION", "DEFINITION", "UNKNOWN", null ]
         resourceName:
           type: [ string, "null" ]
         code:

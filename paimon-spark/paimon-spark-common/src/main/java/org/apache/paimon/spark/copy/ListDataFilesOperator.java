@@ -26,6 +26,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -37,8 +38,10 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 /** List data files. */
 public class ListDataFilesOperator extends CopyFilesOperator {
@@ -70,14 +73,24 @@ public class ListDataFilesOperator extends CopyFilesOperator {
                         .readFileIterator();
 
         List<CopyFileInfo> dataFiles = new ArrayList<>();
+        Map<Long, TableSchema> sourceSchemas = new HashMap<>();
         while (manifestEntries.hasNext()) {
             ManifestEntry manifestEntry = manifestEntries.next();
+            DataFileMeta sourceFile = manifestEntry.file();
+            TableSchema sourceFileSchema =
+                    sourceSchemas.computeIfAbsent(
+                            sourceFile.schemaId(),
+                            id ->
+                                    id == sourceTable.schema().id()
+                                            ? sourceTable.schema()
+                                            : sourceTable.schemaManager().schema(id));
             CopyFileInfo dataFile =
                     pickDataFiles(
                             manifestEntry,
                             sourceTable.store().pathFactory(),
                             targetTable.store().pathFactory(),
-                            targetTable.schema().id());
+                            targetTable.schema().id(),
+                            sourceFileSchema);
             dataFiles.add(dataFile);
         }
         return dataFiles;
@@ -87,7 +100,8 @@ public class ListDataFilesOperator extends CopyFilesOperator {
             ManifestEntry manifestEntry,
             FileStorePathFactory sourceFileStorePathFactory,
             FileStorePathFactory targetFileStorePathFactory,
-            long newSchemaId)
+            long newSchemaId,
+            TableSchema sourceFileSchema)
             throws IOException {
         Path dataFilePath =
                 sourceFileStorePathFactory
@@ -102,7 +116,7 @@ public class ListDataFilesOperator extends CopyFilesOperator {
         DataFileMeta fileMeta = manifestEntry.file();
         DataFileMeta targetFileMeta =
                 CopyFilesUtil.toNewDataFileMeta(
-                        fileMeta, targetDataFilePath.getName(), newSchemaId);
+                        fileMeta, targetDataFilePath.getName(), newSchemaId, sourceFileSchema);
         return new CopyFileInfo(
                 dataFilePath.toString(),
                 targetDataFilePath.toString(),

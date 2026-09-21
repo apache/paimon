@@ -33,7 +33,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Sets;
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.thrift.TException;
@@ -146,7 +145,7 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
         // generate key elements in a certain order, so that the Key instances are comparable
         List<Object> elements = Lists.newArrayList();
         elements.add(clientClassName);
-        elements.add(conf.get(HiveConf.ConfVars.METASTOREURIS.varname, ""));
+        elements.add(conf.get("hive.metastore.uris", ""));
         elements.add(HiveCatalogOptions.IDENTIFIER);
         if (cacheKeys == null || cacheKeys.isEmpty()) {
             return Key.of(elements);

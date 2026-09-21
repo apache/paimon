@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.parquet;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.predicate.Predicate;
@@ -69,6 +70,20 @@ import java.util.stream.LongStream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ParquetFiltersTest {
+
+    @Test
+    public void testNotLikeIsNotPushedDown() {
+        RowType rowType =
+                new RowType(
+                        Collections.singletonList(new DataField(0, "string1", new VarCharType())));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        Predicate predicate =
+                new PredicateBuilder(rowType).notLike(0, BinaryString.fromString("%unsupported%"));
+
+        FilterCompat.Filter filter =
+                ParquetFilters.convert(PredicateBuilder.splitAnd(predicate), schema, true);
+        assertThat(filter).isEqualTo(FilterCompat.NOOP);
+    }
 
     @Test
     public void testBoolean() {
@@ -213,6 +228,44 @@ class ParquetFiltersTest {
                 builder.notIn(0, Arrays.asList("1", "2", "3")),
                 "and(and(noteq(string1, Binary{\"1\"}), noteq(string1, Binary{\"2\"})), noteq(string1, Binary{\"3\"}))",
                 true);
+    }
+
+    @Test
+    public void testStartsWithIsPushedToParquet() {
+        RowType rowType =
+                new RowType(
+                        Collections.singletonList(new DataField(0, "string1", new VarCharType())));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        FilterCompat.Filter filter =
+                ParquetFilters.convert(
+                        Collections.singletonList(builder.startsWith(0, "abc")), schema, true);
+        assertThat(filter).isInstanceOf(FilterPredicateCompat.class);
+        FilterPredicate parquetPredicate = ((FilterPredicateCompat) filter).getFilterPredicate();
+        assertThat(parquetPredicate)
+                .isEqualTo(
+                        FilterApi.and(
+                                FilterApi.gtEq(
+                                        FilterApi.binaryColumn("string1"),
+                                        Binary.fromString("abc")),
+                                FilterApi.lt(
+                                        FilterApi.binaryColumn("string1"),
+                                        Binary.fromString("abd"))));
+    }
+
+    @Test
+    public void testEndsWithIsNotPushedToParquet() {
+        RowType rowType =
+                new RowType(
+                        Collections.singletonList(new DataField(0, "string1", new VarCharType())));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        FilterCompat.Filter filter =
+                ParquetFilters.convert(
+                        Collections.singletonList(builder.endsWith(0, "abc")), schema, true);
+        assertThat(filter).isEqualTo(FilterCompat.NOOP);
     }
 
     @Test

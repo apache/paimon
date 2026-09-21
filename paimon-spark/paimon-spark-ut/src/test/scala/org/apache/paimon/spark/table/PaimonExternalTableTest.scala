@@ -21,7 +21,7 @@ package org.apache.paimon.spark.table
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.fs.Path
 import org.apache.paimon.fs.local.LocalFileIO
-import org.apache.paimon.schema.{Schema, SchemaManager}
+import org.apache.paimon.schema.{FileSystemSchemaManager, Schema}
 import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.types.DataTypes
@@ -62,7 +62,7 @@ class PaimonExternalTableTest extends PaimonSparkTestWithRestCatalogBase {
             .option("path", externalTbLocation)
             .option("type", "table")
             .build()
-          new SchemaManager(schemaFileIO, schemaTablePath).createTable(schema, true)
+          new FileSystemSchemaManager(schemaFileIO, schemaTablePath).createTable(schema, true)
 
           // create external table
           sql(
@@ -146,7 +146,7 @@ class PaimonExternalTableTest extends PaimonSparkTestWithRestCatalogBase {
             .option("path", externalTbLocation)
             .option("type", "table")
             .build()
-          new SchemaManager(schemaFileIO, schemaTablePath).createTable(schema, true)
+          new FileSystemSchemaManager(schemaFileIO, schemaTablePath).createTable(schema, true)
 
           sql(s"""
                  |CREATE TABLE external_tbl (id INT, name STRING, value DOUBLE) USING paimon
@@ -219,7 +219,7 @@ class PaimonExternalTableTest extends PaimonSparkTestWithRestCatalogBase {
             .option("path", externalTbLocation)
             .option("type", "table")
             .build()
-          new SchemaManager(schemaFileIO, schemaTablePath).createTable(schema, true)
+          new FileSystemSchemaManager(schemaFileIO, schemaTablePath).createTable(schema, true)
 
           // create external table
           sql(
@@ -267,7 +267,7 @@ class PaimonExternalTableTest extends PaimonSparkTestWithRestCatalogBase {
             .option("path", externalTbLocation)
             .option("type", "table")
             .build()
-          new SchemaManager(schemaFileIO, schemaTablePath).createTable(schema, true)
+          new FileSystemSchemaManager(schemaFileIO, schemaTablePath).createTable(schema, true)
 
           // First create a table with schema and data
           sql(s"""
@@ -378,7 +378,7 @@ class PaimonExternalTableTest extends PaimonSparkTestWithRestCatalogBase {
             .option("path", externalTbLocation)
             .option("type", "table")
             .build()
-          new SchemaManager(schemaFileIO, schemaTablePath).createTable(schema, true)
+          new FileSystemSchemaManager(schemaFileIO, schemaTablePath).createTable(schema, true)
 
           sql(
             s"CREATE TABLE external_tbl (age INT, name STRING) USING paimon LOCATION '$externalTbLocation'")
@@ -416,7 +416,7 @@ class PaimonExternalTableTest extends PaimonSparkTestWithRestCatalogBase {
             .option("path", externalTbLocation)
             .option("type", "table")
             .build()
-          new SchemaManager(schemaFileIO, schemaTablePath).createTable(schema, true)
+          new FileSystemSchemaManager(schemaFileIO, schemaTablePath).createTable(schema, true)
 
           sql(s"""
                  |CREATE TABLE external_tbl (age INT, name STRING) USING paimon
@@ -462,7 +462,7 @@ class PaimonExternalTableTest extends PaimonSparkTestWithRestCatalogBase {
             .option("path", externalTbLocation)
             .option("type", "table")
             .build()
-          new SchemaManager(schemaFileIO, schemaTablePath).createTable(schema, true)
+          new FileSystemSchemaManager(schemaFileIO, schemaTablePath).createTable(schema, true)
 
           sql(s"""
                  |CREATE TABLE external_tbl (id INT, p1 INT, p2 STRING) USING paimon

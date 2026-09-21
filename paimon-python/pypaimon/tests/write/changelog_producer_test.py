@@ -267,6 +267,72 @@ class ChangelogProducerTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
+    def test_failed_changelog_write_leaves_nothing_to_commit(self):
+        """A data file and its changelog are committed together or not at all.
+
+        The data file used to be recorded before its changelog was written, so a
+        changelog failure left the meta committed while the rows stayed buffered
+        for the retry -- and the retry then wrote a second data file covering
+        rows the first meta already claimed. Committing both metas would double
+        every row in the snapshot.
+        """
+        table = self._create_table(
+            'test_changelog_atomic',
+            options={'changelog-producer': 'input', 'bucket': '1'}
+        )
+        # Streaming write: ``BatchTableWrite`` refuses a second prepare_commit,
+        # and the retry is the whole point here.
+        write_builder = table.new_stream_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        original_write_parquet = table.file_io.write_parquet
+        state = {'failed': False}
+
+        def failing_write_parquet(path, data, **kwargs):
+            if not state['failed'] and '/changelog-' in str(path):
+                state['failed'] = True
+                raise IOError('transient storage failure')
+            return original_write_parquet(path, data, **kwargs)
+
+        table.file_io.write_parquet = failing_write_parquet
+        try:
+            table_write.write_arrow(self._sample_data())
+            with self.assertRaises(IOError):
+                table_write.prepare_commit(0)
+
+            bucket_dir = os.path.join(
+                self.warehouse, 'default.db', 'test_changelog_atomic',
+                'dt=p1', 'bucket-0')
+            self.assertEqual(glob.glob(os.path.join(bucket_dir, 'data-*')), [],
+                             "The data file must not outlive its failed changelog")
+            self.assertEqual(glob.glob(os.path.join(bucket_dir, 'changelog-*')), [],
+                             "A half-written changelog must not be left behind")
+
+            messages = table_write.prepare_commit(0)
+        finally:
+            table.file_io.write_parquet = original_write_parquet
+
+        self.assertTrue(state['failed'], "the changelog write never failed")
+        # One data file and one changelog for the 3 rows, not two of each.
+        self.assertEqual(len(glob.glob(os.path.join(bucket_dir, 'data-*'))), 1)
+        self.assertEqual(len(glob.glob(os.path.join(bucket_dir, 'changelog-*'))), 1)
+        new_files = [meta for msg in messages for meta in msg.new_files]
+        changelog_files = [meta for msg in messages for meta in msg.changelog_files]
+        self.assertEqual(len(new_files), 1)
+        self.assertEqual(len(changelog_files), 1)
+        self.assertEqual(sum(meta.row_count for meta in new_files), 3)
+
+        table_commit.commit(messages, 0)
+        read_builder = table.new_read_builder()
+        actual = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual(actual.num_rows, 3, "the retry must not duplicate rows")
+        self.assertEqual(sorted(actual.column('user_id').to_pylist()), [1, 2, 3])
+
+        table_write.close()
+        table_commit.close()
+
     def test_reject_changelog_producer_on_append_only_table(self):
         append_schema = pa.schema([
             ('user_id', pa.int32()),

@@ -509,6 +509,23 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
       }
   }
 
+  test("Paimon Delete: partial update with remove record on sequence group") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, g INT, v BIGINT)
+                 |TBLPROPERTIES (
+                 |  'primary-key' = 'id',
+                 |  'bucket' = '2',
+                 |  'merge-engine' = 'partial-update',
+                 |  'fields.g.sequence-group' = 'v',
+                 |  'partial-update.remove-record-on-sequence-group' = 'g')
+                 |""".stripMargin)
+
+    spark.sql("INSERT INTO T VALUES (1, 1, 10), (2, 1, 20)")
+    spark.sql("DELETE FROM T WHERE id = 1")
+
+    checkAnswer(spark.sql("SELECT * FROM T"), Row(2, 1, 20L))
+  }
+
   test("Paimon delete: non pk table commit kind") {
     for (dvEnabled <- Seq(true, false)) {
       withTable("t") {

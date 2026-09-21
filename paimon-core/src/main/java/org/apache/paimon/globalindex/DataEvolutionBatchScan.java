@@ -37,6 +37,7 @@ import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -70,6 +71,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
     private Predicate filter;
     private TopN topN;
     private Integer pushDownLimit;
+    // set when part of the filter reaches the reader only, so limit/TopN must not prune ahead of it
+    private boolean rowIdFilterDeferred;
     private RowRangeIndex pushedRowRangeIndex;
     private GlobalIndexResult globalIndexResult;
 
@@ -90,12 +93,26 @@ public class DataEvolutionBatchScan implements DataTableScan {
             return this;
         }
 
-        Optional<List<Range>> rowRanges = predicate.visit(new RowIdPredicateVisitor());
-        if (rowRanges.isPresent()) {
-            withRowRanges(rowRanges.get());
+        // a mask on _ROW_ID makes the predicate's ids the masked ones, so they must not become
+        // a raw row range; the rules are not known yet, so skip the extraction altogether
+        if (!queryAuthEnabled()) {
+            Optional<List<Range>> rowRanges = predicate.visit(new RowIdPredicateVisitor());
+            if (rowRanges.isPresent()) {
+                withRowRanges(rowRanges.get());
+            }
         }
         this.filter = predicate;
 
+        if (queryAuthEnabled()) {
+            // the wrapped scan defers the filter but strips only masked columns; row ids must
+            // go here, since data-evolution statistics carry logical columns only
+            Predicate residual = rowIdSafeResidualFilter(predicate);
+            rowIdFilterDeferred = containsRowId(predicate);
+            if (residual != null) {
+                batchScan.withFilter(residual);
+            }
+            return this;
+        }
         batchScan.snapshotReader().withFilter(predicate, rowIdSafeResidualFilter(predicate));
         return this;
     }
@@ -168,8 +185,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     @Override
     public InnerTableScan withLimit(int limit) {
+        // forwarded in plan(), once withFilter has said whether a row-id part was deferred
         this.pushDownLimit = limit;
-        batchScan.withLimit(limit);
         return this;
     }
 
@@ -255,6 +272,11 @@ public class DataEvolutionBatchScan implements DataTableScan {
     }
 
     @Override
+    public List<BinaryRow> topNPartitions(int num, int partitionFieldCount) {
+        return batchScan.topNPartitions(num, partitionFieldCount);
+    }
+
+    @Override
     public Plan plan() {
         RowRangeIndex rowRangeIndex = this.pushedRowRangeIndex;
         ScoreGetter scoreGetter = null;
@@ -270,7 +292,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
             }
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
-                rowRangeIndex = RowRangeIndex.create(result.results().toRangeList());
+                rowRangeIndex = RowRangeIndex.fromBitmap(result.results());
                 if (result instanceof ScoredGlobalIndexResult) {
                     scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
                 }
@@ -279,7 +301,11 @@ public class DataEvolutionBatchScan implements DataTableScan {
             }
         }
 
-        if (!globalIndexTopNCandidatesFound && topN != null) {
+        if (pushDownLimit != null && !rowIdFilterDeferred) {
+            batchScan.withLimit(pushDownLimit);
+        }
+
+        if (!globalIndexTopNCandidatesFound && topN != null && !rowIdFilterDeferred) {
             batchScan.withTopN(topN);
         }
 
@@ -291,7 +317,19 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return wrapToIndexSplits(splits, rowRangeIndex, scoreGetter);
     }
 
+    private boolean queryAuthEnabled() {
+        // the table is absent in tests that exercise withFilter in isolation
+        CoreOptions options = table == null ? null : table.coreOptions();
+        return options != null && options.queryAuthEnabled();
+    }
+
     private Optional<GlobalIndexResult> evalGlobalIndex() {
+        // the index ranks raw values, which a mask may invalidate; fall back to a full scan.
+        // Checked before the supplied result too: withGlobalIndexResult is public, so a caller
+        // can hand in one that was computed off the raw values.
+        if (queryAuthEnabled()) {
+            return Optional.empty();
+        }
         if (this.globalIndexResult != null) {
             return Optional.of(globalIndexResult);
         }
@@ -418,18 +456,24 @@ public class DataEvolutionBatchScan implements DataTableScan {
     public static Plan wrapToIndexSplits(
             List<Split> splits, RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
         List<Split> indexedSplits = new ArrayList<>();
-        Function<Split, List<IndexedSplit>> process =
-                split ->
-                        Collections.singletonList(
-                                split instanceof IndexedSplit
-                                        ? (IndexedSplit) split
-                                        : wrap((DataSplit) split, rowRangeIndex, scoreGetter));
+        Function<Split, List<Split>> process =
+                split -> Collections.singletonList(wrap(split, rowRangeIndex, scoreGetter));
         randomlyExecuteSequentialReturn(process, splits, null).forEachRemaining(indexedSplits::add);
         return () -> indexedSplits;
     }
 
-    private static IndexedSplit wrap(
-            DataSplit dataSplit, final RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
+    private static Split wrap(
+            Split split, final RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
+        if (split instanceof QueryAuthSplit) {
+            QueryAuthSplit authSplit = (QueryAuthSplit) split;
+            return new QueryAuthSplit(
+                    wrap(authSplit.split(), rowRangeIndex, scoreGetter), authSplit.authResult());
+        }
+        if (split instanceof IndexedSplit) {
+            return split;
+        }
+
+        DataSplit dataSplit = (DataSplit) split;
         List<DataFileMeta> files = dataSplit.dataFiles();
 
         List<Range> expected = new ArrayList<>();

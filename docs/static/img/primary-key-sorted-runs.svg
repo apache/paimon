@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="425" viewBox="0 0 960 425" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Sorted within a run, overlapping across runs</title>
+<desc id="desc">Run A contains files for key ranges 1–4 and 7–10. Run B contains files for ranges 3–8 and 11–14. Key 7 appears in both runs with values 4 and 5; deduplicate retains value 5 from the newer record.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="958" height="423" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">Sorted within a run, overlapping across runs</text>
+<text x="28" y="76" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Example: deduplicate, with a newer value for key 7 in run B.</text>
+<text x="30" y="130" font-size="18" font-weight="700" text-anchor="start" fill="#526277">Key range</text>
+<text x="196" y="130" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">1</text>
+<text x="246" y="130" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">2</text>
+<text x="296" y="130" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">3</text>
+<text x="346" y="130" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">4</text>
+<text x="396" y="130" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">5</text>
+<text x="446" y="130" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">6</text>
+<text x="496" y="130" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">7</text>
+<text x="546" y="130" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">8</text>
+<text x="596" y="130" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">9</text>
+<text x="646" y="130" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">10</text>
+<text x="696" y="130" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">11</text>
+<text x="746" y="130" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">12</text>
+<text x="796" y="130" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">13</text>
+<text x="846" y="130" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">14</text>
+<text x="30" y="191" font-size="21" font-weight="700" text-anchor="start" fill="#2463b4">Run A</text>
+<rect x="176" y="160" width="190" height="49" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="271.0" y="191" font-size="18" font-weight="400" text-anchor="middle" fill="#2463b4">File [1, 4]</text>
+<rect x="476" y="160" width="190" height="49" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="571.0" y="191" font-size="18" font-weight="400" text-anchor="middle" fill="#2463b4">File [7, 10]</text>
+<text x="30" y="271" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Run B</text>
+<rect x="276" y="240" width="290" height="49" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="421.0" y="271" font-size="18" font-weight="400" text-anchor="middle" fill="#10705d">File [3, 8]</text>
+<rect x="676" y="240" width="190" height="49" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="771.0" y="271" font-size="18" font-weight="400" text-anchor="middle" fill="#10705d">File [11, 14]</text>
+<rect x="28" y="325" width="340" height="72" rx="8" fill="#f1ebfa" stroke="#7051a3" stroke-width="1.5"/>
+<text x="44" y="356" font-size="21" font-weight="700" text-anchor="start" fill="#7051a3">Key 7: value 4 → value 5</text>
+<text x="46" y="382" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Compare versions across both runs</text>
+<path d="M 374 361 L 462 361" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="480" y="325" width="452" height="72" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="496" y="356" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Merged row: key 7, value 5</text>
+<text x="498" y="382" font-size="18" font-weight="400" text-anchor="start" fill="#526277">The merge engine resolves the logical row</text>
+</g>
+</svg>

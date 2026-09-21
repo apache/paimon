@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileEntry;
@@ -1560,6 +1561,280 @@ class ConflictDetectionTest {
         return (DataEvolutionConflictDetection) createConflictDetection(null, true, false);
     }
 
+    @Test
+    void testIndexOnlyCompactionSkipsDataFileConflictDetection() {
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        CommitScanner scanner = mock(CommitScanner.class);
+        DataEvolutionConflictDetection detection = indexCompactionDetection(handler, scanner);
+        Snapshot snapshot = indexSnapshot("indexes");
+        IndexManifestEntry first = createGlobalIndexEntry("first", ADD, EMPTY_ROW, 0, 49);
+        IndexManifestEntry second = createGlobalIndexEntry("second", ADD, EMPTY_ROW, 50, 99);
+        when(handler.readManifest("indexes"))
+                .thenReturn(
+                        Arrays.asList(
+                                first,
+                                second,
+                                createGlobalIndexEntry("retained", ADD, EMPTY_ROW, 100, 199)));
+
+        assertThat(
+                        detection.canSkipDataFileConflictDetection(
+                                snapshot,
+                                Collections.emptyList(),
+                                Arrays.asList(
+                                        first.toDeleteEntry(),
+                                        second.toDeleteEntry(),
+                                        createGlobalIndexEntry("output-1", ADD, EMPTY_ROW, 0, 99),
+                                        createGlobalIndexEntry("output-2", ADD, EMPTY_ROW, 0, 99)),
+                                Snapshot.CommitKind.COMPACT))
+                .isTrue();
+        verify(handler).readManifest("indexes");
+        verifyNoInteractions(scanner);
+    }
+
+    @Test
+    void testIndexOnlyCompactionRechecksInputsForEverySnapshot() {
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        DataEvolutionConflictDetection detection = indexCompactionDetection(handler, null);
+        IndexManifestEntry input = createGlobalIndexEntry("input", ADD, EMPTY_ROW, 0, 99);
+        List<IndexManifestEntry> changes =
+                Arrays.asList(
+                        input.toDeleteEntry(),
+                        createGlobalIndexEntry("output", ADD, EMPTY_ROW, 0, 99));
+        when(handler.readManifest("before")).thenReturn(Collections.singletonList(input));
+        when(handler.readManifest("after-append")).thenReturn(Collections.singletonList(input));
+        when(handler.readManifest("after-reassign"))
+                .thenReturn(
+                        Collections.singletonList(
+                                createGlobalIndexEntry("input", ADD, EMPTY_ROW, 1000, 1099)));
+        when(handler.readManifest("after-replacement"))
+                .thenReturn(
+                        Collections.singletonList(
+                                createGlobalIndexEntry("other", ADD, EMPTY_ROW, 0, 99)));
+
+        for (String manifest : Arrays.asList("before", "after-append")) {
+            assertThat(
+                            detection.canSkipDataFileConflictDetection(
+                                    indexSnapshot(manifest),
+                                    Collections.emptyList(),
+                                    changes,
+                                    Snapshot.CommitKind.COMPACT))
+                    .isTrue();
+        }
+        for (String manifest : Arrays.asList("after-reassign", "after-replacement")) {
+            assertThat(
+                            detection.canSkipDataFileConflictDetection(
+                                    indexSnapshot(manifest),
+                                    Collections.emptyList(),
+                                    changes,
+                                    Snapshot.CommitKind.COMPACT))
+                    .isFalse();
+        }
+    }
+
+    @Test
+    void testIndexOnlyCompactionRequiresMatchingInputMetadata() {
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        DataEvolutionConflictDetection detection = indexCompactionDetection(handler, null);
+        IndexManifestEntry input = createGlobalIndexEntry("input", ADD, EMPTY_ROW, 0, 99);
+        List<IndexManifestEntry> changes =
+                Arrays.asList(
+                        input.toDeleteEntry(),
+                        createGlobalIndexEntry("output", ADD, EMPTY_ROW, 0, 99));
+        List<IndexManifestEntry> changedInputs =
+                Arrays.asList(
+                        new IndexManifestEntry(
+                                ADD, BinaryRow.singleColumn(1), 0, input.indexFile()),
+                        new IndexManifestEntry(ADD, EMPTY_ROW, 1, input.indexFile()),
+                        input.toDeleteEntry(),
+                        indexEntryWithMeta(
+                                "input", "btree", new GlobalIndexMeta(0, 99, 1, null, null)),
+                        indexEntryWithMeta(
+                                "input",
+                                "btree",
+                                new GlobalIndexMeta(0, 99, 0, new int[] {1}, null)),
+                        indexEntryWithMeta(
+                                "input",
+                                "btree",
+                                new GlobalIndexMeta(0, 99, 0, null, new byte[] {1})),
+                        indexEntryWithMeta(
+                                "input",
+                                "btree",
+                                new GlobalIndexMeta(0, 99, 0, null, null, new byte[] {1})),
+                        indexEntryWithMeta(
+                                "input", "bitmap", new GlobalIndexMeta(0, 99, 0, null, null)));
+        for (IndexManifestEntry changedInput : changedInputs) {
+            when(handler.readManifest("indexes"))
+                    .thenReturn(Collections.singletonList(changedInput));
+            assertThat(
+                            detection.canSkipDataFileConflictDetection(
+                                    indexSnapshot("indexes"),
+                                    Collections.emptyList(),
+                                    changes,
+                                    Snapshot.CommitKind.COMPACT))
+                    .as("changed input: %s", changedInput)
+                    .isFalse();
+        }
+    }
+
+    @Test
+    void testIndexOnlyCompactionRequiresMatchingOutputScope() {
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        DataEvolutionConflictDetection detection = indexCompactionDetection(handler, null);
+        IndexManifestEntry input = createGlobalIndexEntry("input", ADD, EMPTY_ROW, 0, 99);
+        IndexManifestEntry output = createGlobalIndexEntry("output", ADD, EMPTY_ROW, 0, 99);
+        List<IndexManifestEntry> changedOutputs =
+                Arrays.asList(
+                        new IndexManifestEntry(
+                                ADD, BinaryRow.singleColumn(1), 0, output.indexFile()),
+                        new IndexManifestEntry(ADD, EMPTY_ROW, 1, output.indexFile()),
+                        indexEntryWithMeta(
+                                "output", "bitmap", new GlobalIndexMeta(0, 99, 0, null, null)),
+                        indexEntryWithMeta(
+                                "output", "btree", new GlobalIndexMeta(0, 99, 1, null, null)),
+                        indexEntryWithMeta(
+                                "output",
+                                "btree",
+                                new GlobalIndexMeta(0, 99, 0, new int[] {1}, null)));
+        for (IndexManifestEntry changedOutput : changedOutputs) {
+            assertThat(
+                            detection.canSkipDataFileConflictDetection(
+                                    indexSnapshot("indexes"),
+                                    Collections.emptyList(),
+                                    Arrays.asList(input.toDeleteEntry(), changedOutput),
+                                    Snapshot.CommitKind.COMPACT))
+                    .isFalse();
+        }
+        verifyNoInteractions(handler);
+    }
+
+    @Test
+    void testIndexOnlyCompactionDoesNotFillGapsOrChangeCoverage() {
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        DataEvolutionConflictDetection detection = indexCompactionDetection(handler, null);
+        IndexManifestEntry first = createGlobalIndexEntry("first", DELETE, EMPTY_ROW, 0, 49);
+        IndexManifestEntry second = createGlobalIndexEntry("second", DELETE, EMPTY_ROW, 60, 99);
+        for (Range output : Arrays.asList(new Range(0, 99), new Range(0, 49), new Range(0, 109))) {
+            assertThat(
+                            detection.canSkipDataFileConflictDetection(
+                                    indexSnapshot("indexes"),
+                                    Collections.emptyList(),
+                                    Arrays.asList(
+                                            first,
+                                            second,
+                                            createGlobalIndexEntry(
+                                                    "output",
+                                                    ADD,
+                                                    EMPTY_ROW,
+                                                    output.from,
+                                                    output.to)),
+                                    Snapshot.CommitKind.COMPACT))
+                    .isFalse();
+        }
+        verifyNoInteractions(handler);
+    }
+
+    @Test
+    void testIndexOnlyCompactionFallsBackForOtherIndexChanges() {
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        DataEvolutionConflictDetection detection = indexCompactionDetection(handler, null);
+        IndexManifestEntry input = createGlobalIndexEntry("input", DELETE, EMPTY_ROW, 0, 99);
+        IndexManifestEntry output = createGlobalIndexEntry("output", ADD, EMPTY_ROW, 0, 99);
+        List<List<IndexManifestEntry>> changes =
+                Arrays.asList(
+                        Collections.emptyList(),
+                        Collections.singletonList(input),
+                        Collections.singletonList(output),
+                        Arrays.asList(input, input, output),
+                        Arrays.asList(input, output, output),
+                        Arrays.asList(
+                                input, createGlobalIndexEntry("input", ADD, EMPTY_ROW, 0, 99)),
+                        Arrays.asList(
+                                input,
+                                output,
+                                createDvIndexEntry("dv", ADD, Collections.singletonList("data"))));
+        for (List<IndexManifestEntry> change : changes) {
+            assertThat(
+                            detection.canSkipDataFileConflictDetection(
+                                    indexSnapshot("indexes"),
+                                    Collections.emptyList(),
+                                    change,
+                                    Snapshot.CommitKind.COMPACT))
+                    .isFalse();
+        }
+        verifyNoInteractions(handler);
+    }
+
+    @Test
+    void testIndexOnlyCompactionDoesNotBypassDataOrHistoricalChecks() {
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        DataEvolutionConflictDetection detection = indexCompactionDetection(handler, null);
+        List<IndexManifestEntry> changes =
+                Arrays.asList(
+                        createGlobalIndexEntry("input", DELETE, EMPTY_ROW, 0, 99),
+                        createGlobalIndexEntry("output", ADD, EMPTY_ROW, 0, 99));
+        for (Snapshot.CommitKind kind :
+                Arrays.asList(Snapshot.CommitKind.APPEND, Snapshot.CommitKind.OVERWRITE)) {
+            assertThat(
+                            detection.canSkipDataFileConflictDetection(
+                                    indexSnapshot("indexes"),
+                                    Collections.emptyList(),
+                                    changes,
+                                    kind))
+                    .isFalse();
+        }
+        assertThat(
+                        detection.canSkipDataFileConflictDetection(
+                                indexSnapshot("indexes"),
+                                Collections.singletonList(
+                                        manifestEntry(ADD, "data", 0L, new Range(0, 99))),
+                                changes,
+                                Snapshot.CommitKind.COMPACT))
+                .isFalse();
+        assertThat(
+                        detection.canSkipDataFileConflictDetection(
+                                snapshot(1),
+                                Collections.emptyList(),
+                                changes,
+                                Snapshot.CommitKind.COMPACT))
+                .isFalse();
+        detection.setRowIdCheckFromSnapshot(1L);
+        assertThat(
+                        detection.canSkipDataFileConflictDetection(
+                                indexSnapshot("indexes"),
+                                Collections.emptyList(),
+                                changes,
+                                Snapshot.CommitKind.COMPACT))
+                .isFalse();
+        verifyNoInteractions(handler);
+    }
+
+    private DataEvolutionConflictDetection indexCompactionDetection(
+            IndexFileHandler handler, @Nullable CommitScanner scanner) {
+        return new DataEvolutionConflictDetection(
+                "test-table",
+                "test-user",
+                RowType.of(),
+                null,
+                BucketMode.BUCKET_UNAWARE,
+                false,
+                false,
+                handler,
+                null,
+                scanner);
+    }
+
+    private Snapshot indexSnapshot(String manifest) {
+        Snapshot snapshot = mock(Snapshot.class);
+        when(snapshot.indexManifest()).thenReturn(manifest);
+        return snapshot;
+    }
+
+    private IndexManifestEntry indexEntryWithMeta(
+            String fileName, String indexType, GlobalIndexMeta meta) {
+        return new IndexManifestEntry(
+                ADD, EMPTY_ROW, 0, new IndexFileMeta(indexType, fileName, 11, 1, meta, null));
+    }
+
     private ConflictDetection createConflictDetection(
             @Nullable CommitScanner scanner,
             boolean dataEvolutionEnabled,
@@ -1582,6 +1857,7 @@ class ConflictDetectionTest {
                 BucketMode.HASH_FIXED,
                 false,
                 dataEvolutionEnabled,
+                false,
                 pkClusteringOverride,
                 null,
                 snapshotManager,

@@ -28,6 +28,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
 
 import org.apache.hadoop.conf.Configuration;
@@ -37,6 +38,7 @@ import org.apache.parquet.example.data.simple.SimpleGroupFactory;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.example.ExampleParquetWriter;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
+import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.MessageTypeParser;
@@ -46,6 +48,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -66,6 +70,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * pushdown have to cope.
  *
  * <p>Column names mirror midas_prod.tbl_imp, where this was found.
+ *
+ * <p>The same harness covers the other way a foreign file can surprise the reader: a physical
+ * encoding Paimon's own writer never produces, with the declared and stored types agreeing.
  */
 class ParquetTypeWideningTest {
 
@@ -629,6 +636,42 @@ class ParquetTypeWideningTest {
         assertThat(longs(rows, 1)).containsExactly(100L, 200L, 300L);
     }
 
+    @Test
+    void testBinaryDecimalReadsEveryRowOfAPage() throws Exception {
+        // Paimon's own writer never emits DECIMAL on BINARY, so this shape only comes from
+        // external writers, and dictionary encoding has to be off: a dictionary page is
+        // decoded by decodeSingleDictionaryId, which does not go through the updater's
+        // scratch vector.
+        for (int precision : new int[] {5, 20}) {
+            MessageType schema =
+                    new MessageType(
+                            "root",
+                            Collections.singletonList(
+                                    Types.optional(PrimitiveTypeName.BINARY)
+                                            .as(LogicalTypeAnnotation.decimalType(2, precision))
+                                            .named("price")));
+            Path path =
+                    writeGroups(
+                            schema,
+                            (group, i) ->
+                                    group.append(
+                                            "price",
+                                            Binary.fromConstantByteArray(
+                                                    BigInteger.valueOf((i + 1) * 100L)
+                                                            .toByteArray())),
+                            false);
+
+            RowType readType =
+                    RowType.builder().field("price", DataTypes.DECIMAL(precision, 2)).build();
+            List<Object[]> rows = read(readType, path, null);
+
+            assertThat(rows).hasSize(3);
+            assertThat(rows.get(0)[0]).isEqualTo(new BigDecimal("1.00"));
+            assertThat(rows.get(1)[0]).isEqualTo(new BigDecimal("2.00"));
+            assertThat(rows.get(2)[0]).isEqualTo(new BigDecimal("3.00"));
+        }
+    }
+
     // ------------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------------
@@ -707,6 +750,12 @@ class ParquetTypeWideningTest {
                 case DOUBLE:
                     values[i] = row.getDouble(i);
                     break;
+                case DECIMAL:
+                    DecimalType decimalType = (DecimalType) readType.getTypeAt(i);
+                    values[i] =
+                            row.getDecimal(i, decimalType.getPrecision(), decimalType.getScale())
+                                    .toBigDecimal();
+                    break;
                 default:
                     throw new UnsupportedOperationException(
                             "Unhandled type in test: " + readType.getTypeAt(i));
@@ -750,6 +799,12 @@ class ParquetTypeWideningTest {
 
     private Path writeGroups(MessageType schema, BiConsumer<Group, Integer> appender)
             throws Exception {
+        return writeGroups(schema, appender, true);
+    }
+
+    private Path writeGroups(
+            MessageType schema, BiConsumer<Group, Integer> appender, boolean dictionaryEncoding)
+            throws Exception {
         Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
         Configuration conf = new Configuration();
         try (ParquetWriter<Group> writer =
@@ -758,6 +813,7 @@ class ParquetTypeWideningTest {
                                         new org.apache.hadoop.fs.Path(path.toString()), conf))
                         .withType(schema)
                         .withConf(conf)
+                        .withDictionaryEncoding(dictionaryEncoding)
                         .withWriterVersion(ParquetProperties.WriterVersion.PARQUET_1_0)
                         .build()) {
             for (int i = 0; i < 3; i++) {

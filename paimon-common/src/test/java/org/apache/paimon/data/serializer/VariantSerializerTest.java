@@ -18,11 +18,48 @@
 
 package org.apache.paimon.data.serializer;
 
+import org.apache.paimon.data.variant.BufferOnlyVariant;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.io.DataInputDeserializer;
+import org.apache.paimon.io.DataOutputSerializer;
+
+import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.time.ZoneId;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link VariantSerializer}. */
 public class VariantSerializerTest extends SerializerTestBase<Variant> {
+
+    @Test
+    public void testSerializeFromBuffers() throws IOException {
+        GenericVariant expected = GenericVariant.fromJson("{\"age\":27,\"city\":\"Beijing\"}");
+        DataOutputSerializer output = new DataOutputSerializer(32);
+
+        VariantSerializer.INSTANCE.serialize(new BufferOnlyVariant(expected), output);
+        Variant actual =
+                VariantSerializer.INSTANCE.deserialize(
+                        new DataInputDeserializer(output.getSharedBuffer(), 0, output.length()));
+
+        assertThat(actual.toJson()).isEqualTo(expected.toJson());
+    }
+
+    @Test
+    public void testLegacyVariantUsesBufferDefaults() throws IOException {
+        GenericVariant expected = GenericVariant.fromJson("{\"age\":27}");
+        DataOutputSerializer output = new DataOutputSerializer(32);
+
+        VariantSerializer.INSTANCE.serialize(new LegacyVariant(expected), output);
+        Variant actual =
+                VariantSerializer.INSTANCE.deserialize(
+                        new DataInputDeserializer(output.getSharedBuffer(), 0, output.length()));
+
+        assertThat(actual).isEqualTo(expected);
+    }
 
     @Override
     protected Serializer<Variant> createSerializer() {
@@ -37,5 +74,58 @@ public class VariantSerializerTest extends SerializerTestBase<Variant> {
     @Override
     protected Variant[] getTestData() {
         return new Variant[] {GenericVariant.fromJson("{\"age\":27,\"city\":\"Beijing\"}")};
+    }
+
+    /** Mimics an implementation compiled against the original Variant interface. */
+    private static class LegacyVariant implements Variant {
+
+        private final Variant delegate;
+
+        private LegacyVariant(Variant delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public byte[] metadata() {
+            return delegate.metadata();
+        }
+
+        @Override
+        public ByteBuffer metadataBuffer() {
+            return delegate.metadataBuffer();
+        }
+
+        @Override
+        public byte[] value() {
+            return delegate.value();
+        }
+
+        @Override
+        public ByteBuffer valueBuffer() {
+            return delegate.valueBuffer();
+        }
+
+        @Override
+        public String toJson(ZoneId zoneId) {
+            return delegate.toJson(zoneId);
+        }
+
+        @Override
+        public Object variantGet(
+                String path,
+                org.apache.paimon.types.DataType dataType,
+                org.apache.paimon.data.variant.VariantCastArgs castArgs) {
+            return delegate.variantGet(path, dataType, castArgs);
+        }
+
+        @Override
+        public long sizeInBytes() {
+            return delegate.sizeInBytes();
+        }
+
+        @Override
+        public Variant copy() {
+            return delegate.copy();
+        }
     }
 }

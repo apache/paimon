@@ -39,12 +39,14 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.PartitionTopNUtils;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
+import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PartitionPathUtils;
 
@@ -53,6 +55,7 @@ import javax.annotation.Nullable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -102,6 +105,59 @@ public class FormatTableScan implements InnerTableScan {
     @Override
     public List<PartitionEntry> listPartitionEntries() {
         return splitEnumerator.listPartitionEntries(partitionFilter);
+    }
+
+    @Override
+    public List<BinaryRow> topNPartitions(int num, int partitionFieldCount) {
+        if (table.partitionKeys().isEmpty()) {
+            throw new UnsupportedOperationException(
+                    "Cannot find top partitions for a non-partitioned table.");
+        }
+
+        RowType partitionType = table.partitionType();
+        PartitionTopNUtils.validateParameters(partitionType, num, partitionFieldCount);
+        List<List<BinaryRow>> candidateGroups =
+                PartitionTopNUtils.partitionGroupsDescending(
+                        listPartitionEntries(), partitionType, partitionFieldCount);
+        List<BinaryRow> result = new ArrayList<>();
+        PredicateBuilder builder = new PredicateBuilder(partitionType);
+        for (List<BinaryRow> candidateGroup : candidateGroups) {
+            BinaryRow candidate = candidateGroup.get(0);
+            List<Predicate> prefixPredicates = new ArrayList<>();
+            for (int i = 0; i < partitionFieldCount; i++) {
+                Object value = InternalRowUtils.get(candidate, i, partitionType.getTypeAt(i));
+                prefixPredicates.add(value == null ? builder.isNull(i) : builder.equal(i, value));
+            }
+            PartitionPredicate candidateFilter =
+                    PartitionPredicate.fromPredicate(
+                            partitionType, PredicateBuilder.and(prefixPredicates));
+            PartitionPredicate combinedFilter =
+                    partitionFilter == null
+                            ? candidateFilter
+                            : PartitionPredicate.and(
+                                    Arrays.asList(partitionFilter, candidateFilter));
+            try {
+                List<BinaryRow> nonEmptyPartitions = new ArrayList<>();
+                for (Split split : splitEnumerator.plan(combinedFilter).splits()) {
+                    BinaryRow partition = ((FormatDataSplit) split).partition();
+                    if (partition != null) {
+                        nonEmptyPartitions.add(partition);
+                    }
+                }
+                nonEmptyPartitions =
+                        PartitionTopNUtils.distinctPartitionsDescending(
+                                nonEmptyPartitions, partitionType);
+                if (!nonEmptyPartitions.isEmpty()) {
+                    result.addAll(nonEmptyPartitions);
+                    if (--num == 0) {
+                        return result;
+                    }
+                }
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to scan files", e);
+            }
+        }
+        return result;
     }
 
     @Override

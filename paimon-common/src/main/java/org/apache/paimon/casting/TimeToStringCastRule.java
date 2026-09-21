@@ -23,9 +23,9 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.BinaryStringUtils;
 import org.apache.paimon.utils.DateTimeUtils;
-
-import static org.apache.paimon.types.VarCharType.STRING_TYPE;
 
 /**
  * {@link DataTypeRoot#TIME_WITHOUT_TIME_ZONE} to {@link DataTypeFamily#CHARACTER_STRING} cast rule.
@@ -38,15 +38,20 @@ class TimeToStringCastRule extends AbstractCastRule<Integer, BinaryString> {
         super(
                 CastRulePredicate.builder()
                         .input(DataTypeRoot.TIME_WITHOUT_TIME_ZONE)
-                        .target(STRING_TYPE)
+                        .target(DataTypeFamily.CHARACTER_STRING)
                         .build());
     }
 
     @Override
     public CastExecutor<Integer, BinaryString> create(DataType inputType, DataType targetType) {
-        return value ->
-                BinaryString.fromString(
-                        DateTimeUtils.formatTimestampMillis(
-                                value, DataTypeChecks.getPrecision(inputType)));
+        final int precision = DataTypeChecks.getPrecision(inputType);
+        boolean padOrTrim =
+                targetType.is(DataTypeRoot.CHAR)
+                        || DataTypeChecks.getLength(targetType) != VarCharType.MAX_LENGTH;
+        return value -> {
+            BinaryString result =
+                    BinaryString.fromString(DateTimeUtils.formatTimestampMillis(value, precision));
+            return padOrTrim ? BinaryStringUtils.toCharacterString(result, targetType) : result;
+        };
     }
 }

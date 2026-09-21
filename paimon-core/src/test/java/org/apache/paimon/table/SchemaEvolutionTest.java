@@ -30,6 +30,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -93,7 +94,7 @@ public class SchemaEvolutionTest {
     public void beforeEach() {
         tablePath = new Path(tempDir.toUri());
         identifier = SchemaManager.identifierFromPath(tablePath.toString(), true);
-        schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
+        schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), tablePath);
         commitUser = UUID.randomUUID().toString();
     }
 

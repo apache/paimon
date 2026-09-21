@@ -28,6 +28,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
+import java.beans.ConstructorProperties;
+
 /** Request for listing partitions by filter. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -38,7 +40,15 @@ public class ListPartitionsByFilterRequest implements RESTRequest {
     private static final String FIELD_MAX_RESULTS = "maxResults";
     private static final String FIELD_PAGE_TOKEN = "pageToken";
 
-    /** JSON serialization of a Paimon {@code Predicate} tree over the partition columns. */
+    /**
+     * JSON serialization of a Paimon {@code Predicate} tree over the partition columns.
+     *
+     * <p>Wire encoding of the literals a server has to parse: DATE, TIME, TIMESTAMP and
+     * TIMESTAMP_LTZ are ISO-8601 strings (e.g. {@code "2026-01-15"}, {@code "12:34:56.789"}, {@code
+     * "2026-01-15T12:34:56.789"}, {@code "2026-01-15T04:34:56.789Z"}); DECIMAL is a plain
+     * (non-scientific) decimal string. Older clients emitted these as JSON arrays and numbers that
+     * no Paimon server could read back, so no previously working request encoding changes meaning.
+     */
     @JsonProperty(FIELD_FILTER)
     private final String filter;
 
@@ -55,6 +65,12 @@ public class ListPartitionsByFilterRequest implements RESTRequest {
     private final String pageToken;
 
     @JsonCreator
+    @ConstructorProperties({
+        FIELD_FILTER,
+        FIELD_PARTITION_NAME_PATTERN,
+        FIELD_MAX_RESULTS,
+        FIELD_PAGE_TOKEN
+    })
     public ListPartitionsByFilterRequest(
             @JsonProperty(FIELD_FILTER) String filter,
             @JsonProperty(FIELD_PARTITION_NAME_PATTERN) @Nullable String partitionNamePattern,

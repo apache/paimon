@@ -22,6 +22,7 @@ import shutil
 import tempfile
 import unittest
 import uuid
+from dataclasses import replace
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
@@ -41,7 +42,7 @@ except ImportError:
     _HAS_DATAFUSION = False
 
 _SKIP_CONDITION = not _HAS_DATAFUSION
-_SKIP_REASON = "pypaimon[sql] is required for condition expressions"
+_SKIP_REASON = "pypaimon[datafusion] is required for condition expressions"
 
 _TEST_NUM_PARTITIONS = 2
 
@@ -153,6 +154,48 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             writer.close()
             commit.close()
 
+    def _reassign_partition_row_ids(self, table, partition_value):
+        """Commit the metadata-only OVERWRITE produced by row-id reassignment."""
+        from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+        from pypaimon.manifest.manifest_list_manager import ManifestListManager
+        from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
+
+        latest = table.snapshot_manager().get_latest_snapshot()
+        manifest_file = ManifestFileManager(table)
+        manifest_list = ManifestListManager(table)
+        entries = manifest_file.read_entries_parallel(
+            manifest_list.read_all(latest), drop_stats=False)
+        next_row_id = latest.next_row_id
+        reassigned = []
+        for entry in entries:
+            if entry.partition.values[0] == partition_value:
+                entry = entry.assign_first_row_id(next_row_id)
+                next_row_id += entry.file.row_count
+            reassigned.append(entry)
+
+        token = str(uuid.uuid4())
+        manifests = manifest_file.rolling_write(
+            reassigned, 1 << 30, 'manifest-{}'.format(token))
+        base_manifest_list = 'manifest-list-{}-0'.format(token)
+        delta_manifest_list = 'manifest-list-{}-1'.format(token)
+        manifest_list.write(base_manifest_list, manifests)
+        manifest_list.write(delta_manifest_list, [])
+        snapshot = replace(
+            latest,
+            id=latest.id + 1,
+            base_manifest_list=base_manifest_list,
+            delta_manifest_list=delta_manifest_list,
+            delta_record_count=0,
+            commit_user='reassign-row-id-test',
+            commit_identifier=0,
+            commit_kind='OVERWRITE',
+            time_millis=latest.time_millis + 1,
+            next_row_id=next_row_id,
+            uuid=str(uuid.uuid4()),
+        )
+        self.assertTrue(RenamingSnapshotCommit(
+            table.snapshot_manager()).commit(latest.uuid, snapshot, []))
+
     def _merge_and_capture_self_merge_plan(self, **kwargs):
         from pypaimon.ray.data_evolution_merge_join import (
             build_self_merge_update_plan as real_build_plan,
@@ -202,6 +245,140 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             self.catalog_options,
             snapshot_id=expected_snapshot_id,
             projection=['id', 'name', 'age'],
+        )
+
+    def test_paimon_source_does_not_use_compressed_size(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+
+        target = self._create_table()
+        source = self._create_table()
+        self._write(target, self._source(ids=(0,)))
+        value = 'x' * 1_000_000
+        source_data = pa.Table.from_pydict(
+            {
+                'id': pa.array(list(range(16)), type=pa.int32()),
+                'name': [value] * 16,
+                'age': [10] * 16,
+            },
+            schema=self.pa_schema,
+        )
+        self._write(source, source_data)
+        source_table = self.catalog.get_table(source)
+        splits = source_table.new_read_builder().new_scan().plan().splits()
+        compressed_size = sum(split.file_size for split in splits)
+        self.assertLess(compressed_size * 10, source_data.nbytes)
+
+        real_resolve = m._resolve_num_partitions
+        resolved = []
+
+        def capture(*args, **kwargs):
+            result = real_resolve(*args, **kwargs)
+            resolved.append((args, kwargs, result))
+            return result
+
+        with patch(
+                'ray.cluster_resources', return_value={'CPU': 320},
+        ), patch.object(
+                m, '_resolve_num_partitions', side_effect=capture,
+        ), patch.object(
+                m, '_build_datasets', return_value=(None, None, None, set()),
+        ), patch.object(
+                m, '_execute_and_commit', return_value={},
+        ):
+            merge_into(
+                target=target,
+                source=source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+            )
+
+        self.assertEqual(len(resolved), 1)
+        args, kwargs, result = resolved[0]
+        self.assertEqual(args, (None, None))
+        self.assertIsNotNone(kwargs.pop('data_context'))
+        self.assertEqual(kwargs, {
+            'min_partitions': 200,
+            'unknown_num_partitions': 200,
+        })
+        self.assertEqual(result, 200)
+
+    def test_matched_execution_uses_target_context(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+
+        source_context = Mock(
+            target_max_block_size=512,
+            default_hash_shuffle_parallelism=7,
+        )
+        target_context = Mock(
+            target_max_block_size=128,
+            default_hash_shuffle_parallelism=3,
+        )
+        source_ds = Mock(context=source_context)
+        update_ds = Mock(context=target_context)
+        delete_ds = Mock(context=target_context)
+        ctx = Mock(is_self_merge=False)
+        snapshot = Mock(total_record_count=1)
+        table = Mock()
+        table.snapshot_manager().get_latest_snapshot.return_value = snapshot
+
+        with patch.object(
+                m, '_prepare',
+                return_value=(table, source_ds, [], [], ctx),
+        ), patch.object(
+                m, '_estimate_merge_input_size_bytes', return_value=512,
+        ), patch.object(
+                m, '_build_datasets',
+                return_value=(update_ds, delete_ds, None, ['age']),
+        ) as build_datasets, patch.object(
+                m, 'distributed_update_apply', return_value=([], 0, []),
+        ) as update_apply, patch.object(
+                m, 'distributed_delete_apply', return_value=([], 0, []),
+        ) as delete_apply, patch(
+                'ray.cluster_resources', return_value={'CPU': 320},
+        ):
+            merge_into(
+                target='default.target',
+                source=source_ds,
+                catalog_options={'warehouse': '/tmp/warehouse'},
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+            )
+            default_source_partitions = build_datasets.call_args.args[7]
+            default_update_partitions = (
+                update_apply.call_args.kwargs['num_partitions']
+            )
+            default_delete_partitions = (
+                delete_apply.call_args.kwargs['num_partitions']
+            )
+
+            build_datasets.reset_mock()
+            update_apply.reset_mock()
+            delete_apply.reset_mock()
+            merge_into(
+                target='default.target',
+                source=source_ds,
+                catalog_options={'warehouse': '/tmp/warehouse'},
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+                num_partitions=11,
+            )
+
+        # The source-left branch would use 7 partitions.
+        self.assertEqual(default_source_partitions, 7)
+        # Both matched results inherit the target-left context: 512 / 128 = 4.
+        self.assertEqual(default_update_partitions, 4)
+        self.assertEqual(default_delete_partitions, 4)
+        # An explicit value still applies to every branch and execution stage.
+        self.assertEqual(build_datasets.call_args.args[7], 11)
+        self.assertEqual(
+            build_datasets.call_args.kwargs['requested_num_partitions'], 11
+        )
+        self.assertEqual(
+            update_apply.call_args.kwargs['num_partitions'], 11
+        )
+        self.assertEqual(
+            delete_apply.call_args.kwargs['num_partitions'], 11
         )
 
     def test_no_clause_raises(self):
@@ -565,6 +742,94 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['id'], [1, 2, 3])
         self.assertEqual(out['name'], ['a', 'b', 'c'])
         self.assertEqual(out['age'], [10, 20, 30])
+
+    def test_insert_into_truncated_target_uses_empty_fast_path(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(0,)))
+        table = self.catalog.get_table(target)
+        commit = table.new_batch_write_builder().new_commit()
+        commit.truncate_table()
+        commit.close()
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot.total_record_count, 0)
+
+        real_resolve = m._resolve_num_partitions
+        resolved = []
+
+        def capture(*args, **kwargs):
+            result = real_resolve(*args, **kwargs)
+            resolved.append((args, kwargs, result))
+            return result
+
+        with patch(
+                'ray.cluster_resources', return_value={'CPU': 320},
+        ), patch.object(
+                m, '_resolve_num_partitions', side_effect=capture,
+        ), patch.object(
+                ray.data.Dataset,
+                'join',
+                side_effect=AssertionError('empty target must not be joined'),
+        ):
+            metrics = merge_into(
+                target=target,
+                source=self._source(ids=(1,)),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+                when_not_matched=[WhenNotMatched(insert='*')],
+            )
+
+        self.assertEqual(metrics['num_inserted'], 1)
+        self.assertEqual(self._read_sorted(target)['id'], [1])
+        self.assertEqual(len(resolved), 1)
+        args, kwargs, result = resolved[0]
+        self.assertIsNone(args[0])
+        self.assertGreater(args[1], 0)
+        self.assertIsNotNone(kwargs.pop('data_context'))
+        self.assertEqual(kwargs, {
+            'min_partitions': 1,
+            'unknown_num_partitions': 200,
+        })
+        self.assertEqual(result, 1)
+
+    def test_insert_into_truncated_target_preserves_write_parallelism(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(0,)))
+        table = self.catalog.get_table(target)
+        commit = table.new_batch_write_builder().new_commit()
+        commit.truncate_table()
+        commit.close()
+
+        real_write = m.distributed_write_collect_msgs
+        write_blocks = []
+
+        def capture(insert_ds, *args, **kwargs):
+            insert_ds = insert_ds.materialize()
+            write_blocks.append(insert_ds.num_blocks())
+            return real_write(insert_ds, *args, **kwargs)
+
+        with patch.object(
+                m, 'distributed_write_collect_msgs', side_effect=capture,
+        ):
+            metrics = merge_into(
+                target=target,
+                source=self._source(ids=range(1, 31)),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_not_matched=[WhenNotMatched(insert='*')],
+                num_partitions=3,
+            )
+
+        self.assertEqual(metrics['num_inserted'], 30)
+        self.assertEqual(write_blocks, [3])
+        self.assertEqual(
+            self._read_sorted(target)['id'], list(range(1, 31))
+        )
 
     def test_multi_source_match_raises_by_default(self):
         # One target row matched by several source rows: the winning value is
@@ -2097,6 +2362,69 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['age'], [99, 99, 99])
         self.assertEqual(out['name'], ['a', 'b', 'c'])
 
+    def test_self_merge_rejects_concurrent_row_id_reassignment(self):
+        from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
+
+        schema = pa.schema([
+            ('id', pa.int32()),
+            ('pt', pa.string()),
+            ('value', pa.int32()),
+        ])
+        target = 'default.tbl_{}'.format(uuid.uuid4().hex[:8])
+        self.catalog.create_table(
+            target,
+            Schema.from_pyarrow_schema(
+                schema,
+                partition_keys=['pt'],
+                options=self.de_options,
+            ),
+            False,
+        )
+        self._write(target, pa.table({
+            'id': pa.array([1, 2], type=pa.int32()),
+            'pt': ['p1', 'p2'],
+            'value': pa.array([10, 20], type=pa.int32()),
+        }, schema=schema))
+        table = self.catalog.get_table(target)
+        self.assertEqual(table.primary_keys, [])
+        real_atomic_commit = RenamingSnapshotCommit.commit
+        injected = [False]
+
+        def reassign_then_fail_cas(commit, base_uuid, snapshot, statistics):
+            if not injected[0] and snapshot.commit_kind == 'APPEND':
+                injected[0] = True
+                self._reassign_partition_row_ids(table, 'p1')
+                return False
+            return real_atomic_commit(
+                commit, base_uuid, snapshot, statistics)
+
+        error = None
+        with patch.object(
+                RenamingSnapshotCommit,
+                'commit',
+                new=reassign_then_fail_cas,
+        ):
+            try:
+                merge_into(
+                    target=target,
+                    source=target,
+                    catalog_options=self.catalog_options,
+                    on=['_ROW_ID'],
+                    when_matched=[WhenMatched.update({'value': lit(99)})],
+                    num_partitions=_TEST_NUM_PARTITIONS,
+                )
+            except RuntimeError as exc:
+                error = exc
+
+        self.assertTrue(injected[0])
+        output = self._read_sorted(target)
+        self.assertIsNotNone(
+            error,
+            'commit silently succeeded with partial result {}'.format(output),
+        )
+        self.assertRegex(str(error), 'Row ID existence conflict')
+        self.assertEqual(output['value'], [10, 20])
+
     def test_self_merge_update_bypasses_routing_shuffle(self):
         options = dict(self.de_options)
         options.update({
@@ -2137,6 +2465,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         options.update({
             'commit.max-retries': '0',
             'data-evolution.row-id-conflict-rewrite.max-size': '1 B',
+            'global-index.enabled': 'true',
+            'bucket': '-1',
         })
         variant_type = pa.struct([
             pa.field('value', pa.binary(), nullable=False),
@@ -2144,6 +2474,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         ])
         schema = pa.schema([
             ('id', pa.int32()),
+            ('content_key', pa.string()),
+            ('clip_id', pa.string()),
             ('payload', variant_type),
             ('topic_schema', pa.string()),
         ])
@@ -2170,19 +2502,28 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             target,
             pa.table({
                 'id': pa.array([1, 2], type=pa.int32()),
+                'content_key': ['topic.imu', 'topic.imu'],
+                'clip_id': ['clip-a', 'clip-b'],
                 'payload': payload([1.0, 10.0]),
-                'topic_schema': ['old', 'old'],
+                'topic_schema': [None, None],
             }, schema=schema),
         )
+        table = self.catalog.get_table(target)
+        self.assertGreater(table.create_global_index('content_key'), 0)
+
+        # Keep the second content key outside the existing global index.
         self._write(
             target,
             pa.table({
                 'id': pa.array([3, 4], type=pa.int32()),
+                'content_key': [
+                    'topic.imu_filtered', 'topic.imu_filtered',
+                ],
+                'clip_id': ['clip-a', 'clip-b'],
                 'payload': payload([20.0, 30.0]),
-                'topic_schema': ['old', 'old'],
+                'topic_schema': [None, None],
             }, schema=schema),
         )
-        table = self.catalog.get_table(target)
         real_apply = merge_module.distributed_self_merge_update_apply
         stale_paths = []
 
@@ -2229,8 +2570,14 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 read_columns=['payload'],
                 when_matched=[WhenMatched.update({
                     'payload': negate_imu_yz,
-                    'topic_schema': lit('imu-yz-negated-v1'),
-                })],
+                    'topic_schema': lit('imu_yz_negated_v1'),
+                }, condition=(
+                    "t.content_key IN "
+                    "('topic.imu', 'topic.imu_filtered') "
+                    "AND t.clip_id IN ('clip-a', 'clip-b') "
+                    "AND (t.topic_schema IS NULL OR "
+                    "t.topic_schema <> 'imu_yz_negated_v1')"
+                ))],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
 
@@ -2246,7 +2593,14 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         )
         self.assertEqual(
             output['topic_schema'],
-            ['imu-yz-negated-v1'] * 4,
+            ['imu_yz_negated_v1'] * 4,
+        )
+        self.assertEqual(
+            output['content_key'],
+            [
+                'topic.imu', 'topic.imu',
+                'topic.imu_filtered', 'topic.imu_filtered',
+            ],
         )
         self.assertTrue(stale_paths)
         # Match Spark: replaced staging files are left for orphan cleanup.
@@ -4121,6 +4475,74 @@ class TargetProjectionTest(unittest.TestCase):
             'id': 's.id',
             'name': 's.name',
         })
+        self.assertEqual(
+            target_renamed.join.call_args.kwargs['num_partitions'], 1
+        )
+
+    def test_matched_update_uses_target_left_context(self):
+        from pypaimon.ray.data_evolution_merge_join import (
+            build_matched_update_ds,
+        )
+        from pypaimon.ray.data_evolution_merge_transform import SourceColumnRef
+
+        source_ds = Mock()
+        source_ds.schema.return_value = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+        selected_ds = Mock()
+        source_renamed = Mock()
+        source_renamed.context = Mock(
+            target_max_block_size=512,
+            default_hash_shuffle_parallelism=7,
+        )
+        source_ds.select_columns.return_value = selected_ds
+        selected_ds.rename_columns.return_value = source_renamed
+
+        target_ds = Mock()
+        target_ds.schema.return_value = pa.schema([
+            ('_ROW_ID', pa.int64()),
+            ('id', pa.int32()),
+        ])
+        target_renamed = Mock()
+        target_renamed.context = Mock(
+            target_max_block_size=128,
+            default_hash_shuffle_parallelism=3,
+        )
+        joined = Mock()
+        target_ds.rename_columns.return_value = target_renamed
+        target_renamed.join.return_value = joined
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                return_value=target_ds,
+        ), patch(
+                'ray.cluster_resources', return_value={'CPU': 320},
+        ), patch(
+                'ray.data.context.DataContext.get_current',
+                side_effect=AssertionError('must use target Dataset context'),
+        ):
+            build_matched_update_ds(
+                target_identifier='default.target',
+                source_ds=source_ds,
+                target_on=['id'],
+                source_on=['id'],
+                clauses=[self._clause({'name': SourceColumnRef('name')})],
+                target_field_names=['id', 'name'],
+                target_pa_schema=pa.schema([
+                    ('id', pa.int32()),
+                    ('name', pa.string()),
+                ]),
+                update_cols=['name'],
+                catalog_options={'warehouse': '/tmp/warehouse'},
+                num_partitions=None,
+                estimated_size_bytes=512,
+                resolve_target_projection=lambda *args: ['id'],
+            )
+
+        join_kwargs = target_renamed.join.call_args.kwargs
+        # Target context: ceil(512 / 128) = 4. Source context would resolve 7.
+        self.assertEqual(join_kwargs['num_partitions'], 4)
 
     def test_not_matched_insert_selects_needed_source_cols(self):
         from pypaimon.ray.data_evolution_merge_join import (
@@ -4136,10 +4558,12 @@ class TargetProjectionTest(unittest.TestCase):
         ])
         selected_ds = Mock()
         source_renamed = Mock()
+        repartitioned = Mock()
         result = object()
         source_ds.select_columns.return_value = selected_ds
         selected_ds.rename_columns.return_value = source_renamed
-        source_renamed.map_batches.return_value = result
+        source_renamed.repartition.return_value = repartitioned
+        repartitioned.map_batches.return_value = result
 
         out = build_not_matched_insert_ds(
             target_identifier='default.target',
@@ -4163,6 +4587,7 @@ class TargetProjectionTest(unittest.TestCase):
             'id': 's.id',
             'name': 's.name',
         })
+        source_renamed.repartition.assert_called_once_with(1)
 
 
 class MergeConditionUnitTest(unittest.TestCase):
@@ -4402,6 +4827,60 @@ class MergeConditionUnitTest(unittest.TestCase):
         })
         result = filter_batch(batch, 's.age > t.age')
         self.assertEqual(result.column('s.id').to_pylist(), [2, 3])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_filter_batch_preserves_partition_order(self):
+        from pypaimon.ray.merge_condition import filter_batch
+
+        batch_size = 20_000
+        expected = list(range(4 * batch_size))
+        source = pa.table({
+            't.id': pa.chunked_array([
+                pa.array(
+                    range(i * batch_size, (i + 1) * batch_size),
+                    type=pa.int64(),
+                )
+                for i in range(4)
+            ]),
+        })
+
+        result = filter_batch(
+            source, '"t.id" >= 0', _pre_rewritten=True,
+        )
+
+        self.assertEqual(result.column('t.id').to_pylist(), expected)
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_filter_batch_preserves_large_offset_chunks(self):
+        from pypaimon.ray.merge_condition import filter_batch
+
+        child_count = 1_100_000_000
+
+        def large_list():
+            return pa.ListArray.from_arrays(
+                pa.array([0, child_count], type=pa.int32()),
+                pa.nulls(child_count),
+            )
+
+        batch = pa.table({
+            't._ROW_ID': pa.chunked_array([
+                pa.array([0], type=pa.int64()),
+                pa.array([1], type=pa.int64()),
+            ]),
+            't.payload': pa.chunked_array([large_list(), large_list()]),
+        })
+
+        result = filter_batch(
+            batch, '"t._ROW_ID" >= 0', _pre_rewritten=True,
+        )
+
+        self.assertEqual(result.column('t._ROW_ID').to_pylist(), [0, 1])
+        payload = result.column('t.payload')
+        self.assertEqual(payload.num_chunks, 2)
+        self.assertEqual(
+            [len(chunk.values) for chunk in payload.chunks],
+            [child_count, child_count],
+        )
 
 
 if __name__ == '__main__':

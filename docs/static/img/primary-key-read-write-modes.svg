@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="542" viewBox="0 0 960 542" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Where row versions are resolved</title>
+<desc id="desc">Three paths for an update from value 4 to 5 for the same key. MOR keeps versions and merges on read. COW fully compacts modified buckets before committing. MOW looks up old rows and marks invalid positions, then reads valid rows.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="958" height="540" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">Where row versions are resolved</text>
+<text x="28" y="76" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Same logical update: key 7 changes from value 4 to value 5. Different work on the path.</text>
+<rect x="28" y="103" width="284" height="410" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="44" y="137" font-size="25" font-weight="700" text-anchor="start" fill="#2463b4">MOR</text>
+<rect x="40" y="155" width="260" height="99" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="56" y="186" font-size="21" font-weight="700" text-anchor="start" fill="#2463b4">Write sorted files</text>
+<text x="56" y="216" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Old and new versions</text>
+<text x="56" y="241" font-size="18" font-weight="400" text-anchor="start" fill="#526277">can coexist in separate runs</text>
+<path d="M 170 255 L 170 277" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="40" y="279" width="260" height="99" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="56" y="310" font-size="21" font-weight="700" text-anchor="start" fill="#2463b4">Read overlapping runs</text>
+<text x="56" y="340" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Merge by key</text>
+<text x="56" y="365" font-size="18" font-weight="400" text-anchor="start" fill="#526277">and record ordering</text>
+<path d="M 170 379 L 170 401" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="40" y="403" width="260" height="77" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="56" y="434" font-size="21" font-weight="700" text-anchor="start" fill="#2463b4">Return logical row</text>
+<text x="56" y="464" font-size="18" font-weight="400" text-anchor="start" fill="#526277">key 7 → value 5</text>
+<text x="40" y="498" font-size="16" font-weight="400" text-anchor="start" fill="#526277">Cost: merge work during reads</text>
+<rect x="338" y="103" width="284" height="410" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="354" y="137" font-size="25" font-weight="700" text-anchor="start" fill="#7051a3">COW</text>
+<rect x="350" y="155" width="260" height="99" rx="8" fill="#f1ebfa" stroke="#7051a3" stroke-width="1.5"/>
+<text x="366" y="186" font-size="21" font-weight="700" text-anchor="start" fill="#7051a3">Full compaction</text>
+<text x="366" y="216" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Merge modified buckets</text>
+<text x="366" y="241" font-size="18" font-weight="400" text-anchor="start" fill="#526277">before the commit completes</text>
+<path d="M 480 255 L 480 277" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="350" y="279" width="260" height="99" rx="8" fill="#f1ebfa" stroke="#7051a3" stroke-width="1.5"/>
+<text x="366" y="310" font-size="21" font-weight="700" text-anchor="start" fill="#7051a3">Read compacted files</text>
+<text x="366" y="340" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Versions already resolved</text>
+<text x="366" y="365" font-size="18" font-weight="400" text-anchor="start" fill="#526277">by full compaction</text>
+<path d="M 480 379 L 480 401" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="350" y="403" width="260" height="77" rx="8" fill="#f1ebfa" stroke="#7051a3" stroke-width="1.5"/>
+<text x="366" y="434" font-size="21" font-weight="700" text-anchor="start" fill="#7051a3">Return logical row</text>
+<text x="366" y="464" font-size="18" font-weight="400" text-anchor="start" fill="#526277">key 7 → value 5</text>
+<text x="350" y="498" font-size="16" font-weight="400" text-anchor="start" fill="#526277">Cost: full-compaction rewrites</text>
+<rect x="648" y="103" width="284" height="410" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="664" y="137" font-size="25" font-weight="700" text-anchor="start" fill="#10705d">MOW</text>
+<rect x="660" y="155" width="260" height="99" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="676" y="186" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Lookup compaction</text>
+<text x="676" y="216" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Find old row positions</text>
+<text x="676" y="241" font-size="18" font-weight="400" text-anchor="start" fill="#526277">and mark them invalid</text>
+<path d="M 790 255 L 790 277" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="660" y="279" width="260" height="99" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="676" y="310" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Read files + vectors</text>
+<text x="676" y="340" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Skip obsolete positions</text>
+<text x="676" y="365" font-size="18" font-weight="400" text-anchor="start" fill="#526277">without merging versions</text>
+<path d="M 790 379 L 790 401" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="660" y="403" width="260" height="77" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="676" y="434" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Return logical row</text>
+<text x="676" y="464" font-size="18" font-weight="400" text-anchor="start" fill="#526277">key 7 → value 5</text>
+<text x="660" y="498" font-size="16" font-weight="400" text-anchor="start" fill="#526277">Cost: lookups + deletion vectors</text>
+</g>
+</svg>

@@ -1,0 +1,142 @@
+---
+title: "PostgreSQL CDC"
+sidebar_position: 2
+---
+
+import ConfigTable from '@site/src/components/ConfigTable';
+import postgresSyncTableHtml from '@site/generated/postgres_sync_table.html';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# PostgreSQL CDC {#postgres-cdc}
+
+Synchronize one or more PostgreSQL tables into one Paimon table. Tables may come from multiple schemas in the same source database.
+
+See [CDC Action Configuration](./action-configuration) for command syntax, computed columns, and job settings,
+and [Schema Evolution and Type Mapping](./schema-evolution) for shared behavior.
+
+## Prerequisites {#prepare-cdc-bundled-jar}
+
+Place these dependencies in `<FLINK_HOME>/lib/` alongside the Paimon Flink bundled jar.
+The dependency baseline for this Paimon version is Flink CDC **3.5.0**.
+
+- [flink-sql-connector-postgres-cdc-3.5.0.jar](https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-postgres-cdc/3.5.0/flink-sql-connector-postgres-cdc-3.5.0.jar)
+
+All source tables selected by the table action must have primary keys, including when you supply
+`--primary_keys` for the target. Schemas must be compatible when merging multiple source tables.
+The partitioned examples below assume each source table has `id` and a non-null `create_time`.
+Set `REPLICA IDENTITY FULL` on each selected source table so update and delete events include
+the old `create_time` needed to locate the previous partition. For example:
+
+```sql
+ALTER TABLE public.source_table1 REPLICA IDENTITY FULL;
+ALTER TABLE public.source_table2 REPLICA IDENTITY FULL;
+```
+
+Use a replication slot appropriate for the source job; the examples set `slot.name=paimon_cdc`.
+This page covers `postgres_sync_table`; Paimon does not provide a PostgreSQL database action.
+
+## Synchronizing Tables
+
+By using [PostgresSyncTableAction](https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/cdc/postgres/PostgresSyncTableAction.html) in a Flink DataStream job or directly through `flink run`, users can synchronize one or multiple tables from PostgreSQL into one Paimon table.
+
+If the Paimon table you specify does not exist, this action will automatically create the table. Its schema will be derived from all specified PostgreSQL tables. If the Paimon table already exists, its schema will be compared against the schema of all specified PostgreSQL tables.
+
+### Example 1: synchronize tables into one Paimon table
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    postgres_sync_table \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --table test_table \
+    --partition_keys pt \
+    --primary_keys id,pt \
+    --computed_column 'pt=date_format(create_time,yyyy-MM-dd)' \
+    --postgres_conf hostname=127.0.0.1 \
+    --postgres_conf username=root \
+    --postgres_conf password=123456 \
+    --postgres_conf database-name='source_db' \
+    --postgres_conf schema-name='public' \
+    --postgres_conf table-name='source_table1|source_table2' \
+    --postgres_conf slot.name='paimon_cdc' \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
+```
+
+As example shows, the postgres_conf's table-name supports regular expressions to monitor multiple tables that satisfy
+the regular expressions. The schemas of all the tables will be merged into one Paimon table schema.
+
+### Example 2: synchronize shards into one Paimon table
+
+You can also set 'schema-name' with a regular expression to capture multiple schemas. A typical scenario is that a
+table 'source_table' is split into schema 'source_schema1', 'source_schema2' ..., then you can synchronize data of all the
+'source_table's into one Paimon table.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    postgres_sync_table \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --table test_table \
+    --partition_keys pt \
+    --primary_keys id,pt \
+    --computed_column 'pt=date_format(create_time,yyyy-MM-dd)' \
+    --postgres_conf hostname=127.0.0.1 \
+    --postgres_conf username=root \
+    --postgres_conf password=123456 \
+    --postgres_conf database-name='source_db' \
+    --postgres_conf schema-name='source_schema.+' \
+    --postgres_conf table-name='source_table' \
+    --postgres_conf slot.name='paimon_cdc' \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
+```
+
+### Table Action Reference
+
+Command syntax (square brackets indicate optional arguments):
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    postgres_sync_table \
+    --warehouse <warehouse_path> \
+    --database <database_name> \
+    --table <table_name> \
+    [--partition_keys <partition_keys>] \
+    [--primary_keys <primary_keys>] \
+    [--type_mapping <option1,option2...>] \
+    [--computed_column <'column-name=expr-name(args[, ...])'> [--computed_column ...]] \
+    [--metadata_column <metadata_column>] \
+    [--postgres_conf <postgres_cdc_source_conf> [--postgres_conf <postgres_cdc_source_conf> ...]] \
+    [--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] \
+    [--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]
+```
+
+<ConfigTable html={postgresSyncTableHtml} />

@@ -113,6 +113,15 @@ public class BloomFilter {
     }
 
     public boolean testHash(int hash1) {
+        return testHash(hash1, bitSet.getMemorySegment(), bitSet.memoryOffset());
+    }
+
+    /** Probes a cached filter without retaining or mutating its backing segment. */
+    boolean testHash(int hash1, MemorySegment segment) {
+        return testHash(hash1, segment, 0);
+    }
+
+    private boolean testHash(int hash1, MemorySegment segment, int offset) {
         int hash2 = hash1 >>> 16;
 
         for (int i = 1; i <= numHashFunctions; i++) {
@@ -122,7 +131,7 @@ public class BloomFilter {
                 combinedHash = ~combinedHash;
             }
             int pos = combinedHash % bitSet.bitSize();
-            if (!bitSet.get(pos)) {
+            if ((segment.get(offset + (pos >>> 3)) & (1 << (pos & 7))) == 0) {
                 return false;
             }
         }

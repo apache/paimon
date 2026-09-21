@@ -198,8 +198,11 @@ class ChunkShuffleSplitGeneratorBase(AbstractSplitGenerator):
         deletion_files_map=None,
         seed: int = 0,
         chunk_size: int = 0,
+        snapshot_id: Optional[int] = None,
     ):
-        super().__init__(table, target_split_size, open_file_cost, deletion_files_map)
+        super().__init__(
+            table, target_split_size, open_file_cost, deletion_files_map,
+            snapshot_id)
         self.seed = seed
         self.chunk_size = chunk_size
 
@@ -230,12 +233,13 @@ class ChunkShuffleSplitGeneratorBase(AbstractSplitGenerator):
                 if f.file_name in seen_paths:
                     continue
                 seen_paths.add(f.file_name)
-                f.set_file_path(
-                    self.table.table_path,
-                    partition_row,
-                    bucket,
-                    self.default_part_value,
-                )
+                if not f.file_path:
+                    f.set_file_path(
+                        self.table.table_path,
+                        partition_row,
+                        bucket,
+                        self.default_part_value,
+                    )
             for segments in self._slice_group_into_chunks(entries_in_group):
                 all_chunks.append(_Chunk(partition_row, bucket, segments))
 
@@ -428,6 +432,7 @@ class AppendChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
             bucket=chunk.bucket,
             raw_convertible=True,
             data_deletion_files=data_deletion_files,
+            snapshot_id=self.snapshot_id,
         )
 
         exact_merged_row_count = sum(
@@ -588,6 +593,7 @@ class DataEvolutionChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
             bucket=chunk.bucket,
             raw_convertible=False,
             data_deletion_files=data_deletion_files,
+            snapshot_id=self.snapshot_id,
         )
         return IndexedSplit(
             data_split,

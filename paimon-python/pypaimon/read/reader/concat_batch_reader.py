@@ -23,7 +23,6 @@ import pyarrow as pa
 from pyarrow import RecordBatch
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.read.reader.format_blob_reader import BlobRecordIterator
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.blob import Blob
@@ -294,11 +293,16 @@ class BlobFallbackBatchReader(RecordBatchReader):
     def __init__(self, file_reader_suppliers: List[Tuple[DataFileMeta, Callable]],
                  field_name: str, output_type, row_ranges: Optional[List[Range]] = None,
                  blob_as_descriptor: bool = False, deletion_vector=None, batch_size: int = 1024,
-                 blob_parallelism: int = 1):
+                 blob_parallelism: int = 1,
+                 logical_ranges: Optional[List[Range]] = None):
         self._file_reader_suppliers = file_reader_suppliers
         self._field_name = field_name
         self._output_type = output_type
         self._row_ranges = Range.sort_and_merge_overlap(row_ranges) if row_ranges else None
+        self._logical_ranges = (
+            Range.sort_and_merge_overlap(logical_ranges)
+            if logical_ranges is not None else None
+        )
         self._blob_as_descriptor = blob_as_descriptor
         self._is_array_blob = pa.types.is_list(output_type) or pa.types.is_large_list(output_type)
         self._is_map_blob = pa.types.is_map(output_type)
@@ -386,14 +390,15 @@ class BlobFallbackBatchReader(RecordBatchReader):
             if state.selected_range_index >= len(state.selected_ranges):
                 self._close_state_reader(state)
 
-        if not groups:
-            return None
-
+        groups_by_sequence = [
+            groups[sequence]
+            for sequence in sorted(groups.keys(), reverse=True)
+        ]
         result = []
         for row_id in batch_row_ids:
             found = False
-            for max_sequence_number in sorted(groups.keys(), reverse=True):
-                candidate = groups[max_sequence_number].get(row_id)
+            for group in groups_by_sequence:
+                candidate = group.get(row_id)
                 if candidate is None:
                     continue
                 value, is_placeholder = candidate
@@ -402,7 +407,7 @@ class BlobFallbackBatchReader(RecordBatchReader):
                     found = True
                     break
             if not found:
-                raise ValueError("All blob files at the same row id store a placeholder.")
+                result.append(None)
 
         if resolve_blobs_concurrently:
             result = self._resolve_selected_blobs(result)
@@ -492,10 +497,12 @@ class BlobFallbackBatchReader(RecordBatchReader):
         return resolved
 
     def _compute_target_ranges(self) -> List[Range]:
-        ranges = Range.sort_and_merge_overlap([
-            file.row_id_range()
-            for file, _ in self._file_reader_suppliers
-        ])
+        ranges = self._logical_ranges
+        if ranges is None:
+            ranges = Range.sort_and_merge_overlap([
+                file.row_id_range()
+                for file, _ in self._file_reader_suppliers
+            ])
         if self._row_ranges is not None:
             ranges = Range.and_(ranges, self._row_ranges)
         return ranges
@@ -579,30 +586,18 @@ class BlobFallbackBatchReader(RecordBatchReader):
         if reader is None:
             return {}
 
-        try:
-            blob_lengths = [reader.blob_lengths[pos] for pos, _ in positions_and_row_ids]
-            blob_offsets = [reader.blob_offsets[pos] for pos, _ in positions_and_row_ids]
-            iterator = BlobRecordIterator(
-                reader._file_io,
-                reader.file_path,
-                blob_lengths,
-                blob_offsets,
-                self._data_field,
-                reader._input_stream,
-                blob_as_descriptor=(
-                    self._blob_as_descriptor or self._blob_parallelism > 1
-                ),
+        read_values_at = getattr(reader, "read_values_at", None)
+        if not callable(read_values_at):
+            raise TypeError(
+                "Blob fallback reader expects readers with read_values_at()."
             )
-
-            blobs = []
-            for row in iterator:
-                blobs.append(row.values[0])
-            return {
-                row_id: blob
-                for (_, row_id), blob in zip(positions_and_row_ids, blobs)
-            }
-        except AttributeError as e:
-            raise TypeError("Blob fallback reader expects FormatBlobReader suppliers.") from e
+        blobs = read_values_at(
+            [position for position, _ in positions_and_row_ids]
+        )
+        return {
+            row_id: blob
+            for (_, row_id), blob in zip(positions_and_row_ids, blobs)
+        }
 
     @staticmethod
     def _selected_positions_and_row_ids(
@@ -639,7 +634,11 @@ class BlobFallbackBatchReader(RecordBatchReader):
         if reader is None:
             state.reader_initialized = True
             return None
-        actual_rows = len(reader.blob_lengths)
+        actual_rows = (
+            reader.record_count
+            if hasattr(reader, "record_count")
+            else len(reader.blob_lengths)
+        )
         expected_rows = state.selected_count
         if actual_rows != expected_rows:
             reader.close()

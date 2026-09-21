@@ -1,0 +1,127 @@
+---
+title: "Installation"
+sidebar_position: 2
+---
+
+import Stable from '@site/src/components/Stable';
+import Unstable from '@site/src/components/Unstable';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Installation
+
+Choose the Paimon connector that matches your Flink **minor version**. This branch contains
+connectors for Flink 1.16–1.20 and 2.0–2.2. Use the documentation for your Paimon release when
+installing a released connector.
+
+## Prerequisites
+
+Install a [Flink distribution](https://flink.apache.org/downloads/) and a Java version supported
+by that distribution. In the commands below, `<FLINK_HOME>` is the extracted Flink directory.
+The local quick start uses Paimon's built-in local filesystem; distributed jobs need shared
+storage and the dependencies listed below.
+
+## Choose an Artifact
+
+| Artifact | Use it for | How to use it |
+| --- | --- | --- |
+| `paimon-flink-<flink-version>-@@VERSION@@.jar` | Flink SQL, Table API, and DataStream reads and writes | Put the matching bundled connector in Flink's `lib` directory. |
+| `paimon-flink-action-@@VERSION@@.jar` | Compaction, ingestion, and other command-line actions | Submit it with `flink run`; see [Action Jars](./action-jars). |
+
+Install one matching Paimon bundled connector in each Flink process. Restart existing Flink
+processes after changing the jars. Snapshot links below point to artifact directories; choose
+the timestamped jar available there. A directory may be empty until that version is published.
+
+<Stable>
+
+| Version      | Type        | Jar                                                                                                                                                                           |
+|--------------|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 2.2    | Bundled Jar | [paimon-flink-2.2-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-2.2/@@VERSION@@/paimon-flink-2.2-@@VERSION@@.jar)          |
+| Flink 2.1    | Bundled Jar | [paimon-flink-2.1-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-2.1/@@VERSION@@/paimon-flink-2.1-@@VERSION@@.jar)          |
+| Flink 2.0    | Bundled Jar | [paimon-flink-2.0-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-2.0/@@VERSION@@/paimon-flink-2.0-@@VERSION@@.jar)          |
+| Flink 1.20   | Bundled Jar | [paimon-flink-1.20-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.20/@@VERSION@@/paimon-flink-1.20-@@VERSION@@.jar)       |
+| Flink 1.19   | Bundled Jar | [paimon-flink-1.19-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.19/@@VERSION@@/paimon-flink-1.19-@@VERSION@@.jar)       |
+| Flink 1.18   | Bundled Jar | [paimon-flink-1.18-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.18/@@VERSION@@/paimon-flink-1.18-@@VERSION@@.jar)       |
+| Flink 1.17   | Bundled Jar | [paimon-flink-1.17-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.17/@@VERSION@@/paimon-flink-1.17-@@VERSION@@.jar)       |
+| Flink 1.16   | Bundled Jar | [paimon-flink-1.16-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.16/@@VERSION@@/paimon-flink-1.16-@@VERSION@@.jar)       |
+| Flink Action | Action Jar  | [paimon-flink-action-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-action/@@VERSION@@/paimon-flink-action-@@VERSION@@.jar) |
+
+</Stable>
+
+<Unstable>
+
+| Version      | Type        | Jar                                                                                                                                       |
+|--------------|-------------|-------------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 2.2 | Bundled Jar | [paimon-flink-2.2-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-2.2/@@VERSION@@/) |
+| Flink 2.1 | Bundled Jar | [paimon-flink-2.1-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-2.1/@@VERSION@@/) |
+| Flink 2.0 | Bundled Jar | [paimon-flink-2.0-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-2.0/@@VERSION@@/) |
+| Flink 1.20   | Bundled Jar | [paimon-flink-1.20-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.20/@@VERSION@@/)     |
+| Flink 1.19   | Bundled Jar | [paimon-flink-1.19-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.19/@@VERSION@@/)     |
+| Flink 1.18   | Bundled Jar | [paimon-flink-1.18-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.18/@@VERSION@@/)     |
+| Flink 1.17   | Bundled Jar | [paimon-flink-1.17-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.17/@@VERSION@@/)     |
+| Flink 1.16   | Bundled Jar | [paimon-flink-1.16-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.16/@@VERSION@@/)     |
+| Flink Action | Action Jar  | [paimon-flink-action-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-action/@@VERSION@@/) |
+
+</Unstable>
+
+
+## Configure Dependencies
+
+```bash
+cp paimon-flink-@@FLINK_VERSION@@-@@VERSION@@.jar <FLINK_HOME>/lib/
+```
+
+The warehouse filesystem and catalog determine the additional dependencies:
+
+| Dependency | When it is needed | Setup |
+| --- | --- | --- |
+| Hadoop libraries | Hadoop-backed filesystem access | Expose installed Hadoop libraries through `HADOOP_CLASSPATH`, or use the [Paimon Hadoop uber jar](../maintenance/filesystems#paimon-hadoop-uber-package). |
+| Filesystem connector | HDFS or object storage such as S3 and OSS | Follow [Filesystems](../maintenance/filesystems) for the chosen storage. |
+| Hive connector | Hive-backed catalogs | Follow [Creating Hive Catalog](./sql-ddl#creating-hive-catalog). |
+| JDBC driver | JDBC-backed catalogs | Follow [Creating JDBC Catalog](./sql-ddl#creating-jdbc-catalog). |
+
+For a machine with Hadoop installed:
+
+```bash
+export HADOOP_CLASSPATH="$(hadoop classpath)"
+```
+
+Set this before starting Flink processes and the SQL client. Use a warehouse on shared storage
+for a distributed cluster. A `file:/tmp/...` warehouse is suitable for the single-machine tutorial.
+
+## Build from Source
+
+Clone the [Paimon repository](@@GITHUB_REPO@@), then build the connector and its dependencies
+from the repository root. Select the profile for your Flink major version:
+
+```bash
+# Flink 1.20 example
+mvn -pl paimon-flink/paimon-flink-1.20 -am -Pflink1 -DskipTests install
+
+# Flink 2.2 example
+mvn -pl paimon-flink/paimon-flink-2.2 -am -Pflink2 -DskipTests install
+```
+
+The bundled jar is written to
+`paimon-flink/paimon-flink-<flink-version>/target/paimon-flink-<flink-version>-@@VERSION@@.jar`.
+To build the action jar, use `-pl paimon-flink/paimon-flink-action` with the corresponding profile.
+Its output is in `paimon-flink/paimon-flink-action/target/`.
+
+Continue with [Quick Start](./quick-start) to create, write, and query a table.

@@ -140,9 +140,8 @@ public class PhysicalFsWriter implements PhysicalWriter {
         CompressionCodec codec = OrcCodecPool.getCodec(opts.getCompress());
         if (codec != null) {
             CompressionCodec.Options tempOptions = codec.getDefaultOptions();
-            if (codec instanceof ZstdCodec
-                    && codec.getDefaultOptions() instanceof ZstdCodec.ZstdOptions) {
-                ZstdCodec.ZstdOptions options = (ZstdCodec.ZstdOptions) codec.getDefaultOptions();
+            if (codec instanceof ZstdCodec && tempOptions instanceof ZstdCodec.ZstdOptions) {
+                ZstdCodec.ZstdOptions options = (ZstdCodec.ZstdOptions) tempOptions;
                 OrcFile.ZstdCompressOptions zstdCompressOptions = opts.getZstdCompressOptions();
                 if (zstdCompressOptions != null) {
                     options.setLevel(zstdCompressOptions.getCompressionZstdLevel());

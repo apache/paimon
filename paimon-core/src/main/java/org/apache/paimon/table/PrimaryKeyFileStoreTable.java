@@ -45,8 +45,10 @@ import org.apache.paimon.utils.RowKindFilter;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
@@ -81,11 +83,24 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                     PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR;
 
             RowType keyType = new RowType(extractor.keyFields(tableSchema));
+            List<String> deleteNotNullFields = deleteNotNullFields(options);
+            RowType valueType =
+                    deleteNotNullFields == null
+                            ? rowType
+                            : rowType.copy(
+                                    rowType.getFields().stream()
+                                            .map(
+                                                    field ->
+                                                            deleteNotNullFields.contains(
+                                                                            field.name())
+                                                                    ? field
+                                                                    : field.copy(true))
+                                            .collect(Collectors.toList()));
 
             MergeFunctionFactory<KeyValue> mfFactory =
                     PrimaryKeyTableUtils.createMergeFunctionFactory(tableSchema);
             if (options.needLookup()) {
-                mfFactory = LookupMergeFunction.wrap(mfFactory, options, keyType, rowType);
+                mfFactory = LookupMergeFunction.wrap(mfFactory, options, keyType, valueType);
             }
 
             lazyStore =
@@ -97,7 +112,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             options,
                             tableSchema.logicalPartitionType(),
                             keyType,
-                            rowType,
+                            valueType,
                             extractor,
                             mfFactory,
                             name(),
@@ -189,6 +204,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     private TableWriteImpl<KeyValue> newWrite(AbstractFileStoreWrite<KeyValue> storeWrite) {
         KeyValue kv = new KeyValue();
+        List<String> deleteNotNullFields = deleteNotNullFields(coreOptions());
         return new TableWriteImpl<>(
                 rowType(),
                 storeWrite,
@@ -200,7 +216,20 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                                 rowKind,
                                 record.row()),
                 rowKindGenerator(),
-                RowKindFilter.of(coreOptions()));
+                RowKindFilter.of(coreOptions()),
+                deleteNotNullFields);
+    }
+
+    @Nullable
+    private List<String> deleteNotNullFields(CoreOptions options) {
+        if (options.mergeEngine() != CoreOptions.MergeEngine.DEDUPLICATE
+                || schema().crossPartitionUpdate()) {
+            return null;
+        }
+
+        List<String> fields = new ArrayList<>(schema().primaryKeys());
+        fields.addAll(options.sequenceField());
+        return fields;
     }
 
     @Override

@@ -23,6 +23,8 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.flink.source.FlinkSourceBuilder;
+import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
@@ -34,11 +36,16 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.connector.source.SourceReader;
+import org.apache.flink.connector.testutils.source.reader.TestingReaderOutput;
+import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.event.WatermarkEvent;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.operators.SourceOperator;
+import org.apache.flink.streaming.api.transformations.SourceTransformation;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.io.PushingAsyncDataInput;
 import org.apache.flink.streaming.runtime.streamrecord.LatencyMarker;
@@ -68,8 +75,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.apache.paimon.CoreOptions.CONSUMER_EXPIRATION_TIME;
 import static org.apache.paimon.CoreOptions.CONSUMER_ID;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_MAX_SNAPSHOT_COUNT;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link MonitorSource} and {@link ReadOperator}. */
 public class OperatorSourceTest {
@@ -92,6 +102,8 @@ public class OperatorSourceTest {
                         .column("c", DataTypes.INT())
                         .primaryKey("a")
                         .option(CONSUMER_ID.key(), "my_consumer")
+                        .option(CONSUMER_EXPIRATION_TIME.key(), "1 d")
+                        .option(SCAN_MAX_SNAPSHOT_COUNT.key(), "1")
                         .option("bucket", "1")
                         .build();
         Identifier identifier = Identifier.create("default", "t");
@@ -193,6 +205,116 @@ public class OperatorSourceTest {
             testHarnessCopy2.open();
             testReadSplit(operatorCopy2, () -> null, 3, 3, 3);
         }
+    }
+
+    @Test
+    public void testMonitorSourceSnapshotLimitRequiresCheckpointing() {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        assertThatThrownBy(
+                        () -> new FlinkSourceBuilder(table).env(env).sourceBounded(false).build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(SCAN_MAX_SNAPSHOT_COUNT.key())
+                .hasMessageContaining("checkpoint");
+    }
+
+    @Test
+    public void testMonitorSourceLimitsSnapshotsUntilCheckpointCompletes() throws Exception {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.enableCheckpointing(10);
+        DataStream<RowData> dataStream =
+                new FlinkSourceBuilder(table).env(env).sourceBounded(false).build();
+        SourceTransformation<?, ?, ?> sourceTransformation =
+                dataStream.getTransformation().getTransitivePredecessors().stream()
+                        .filter(SourceTransformation.class::isInstance)
+                        .map(SourceTransformation.class::cast)
+                        .findFirst()
+                        .orElseThrow(AssertionError::new);
+        @SuppressWarnings("unchecked")
+        SourceReader<Split, SimpleSourceSplit> reader =
+                (SourceReader<Split, SimpleSourceSplit>)
+                        sourceTransformation.getSource().createReader(null);
+        TestingReaderOutput<Split> output = new TestingReaderOutput<>();
+
+        writeToTable(1, 1, 1);
+        assertThat(reader.pollNext(output)).isEqualTo(InputStatus.NOTHING_AVAILABLE);
+        assertThat(output.getEmittedRecords()).hasSize(1);
+
+        writeToTable(2, 2, 2);
+        assertThat(reader.isAvailable()).isNotDone();
+        assertThat(reader.pollNext(output)).isEqualTo(InputStatus.NOTHING_AVAILABLE);
+        assertThat(output.getEmittedRecords()).hasSize(1);
+
+        reader.snapshotState(1L);
+        reader.notifyCheckpointComplete(1L);
+
+        assertThat(reader.isAvailable()).isDone();
+        assertThat(reader.pollNext(output)).isEqualTo(InputStatus.NOTHING_AVAILABLE);
+        assertThat(output.getEmittedRecords()).hasSize(2);
+    }
+
+    @Test
+    public void testCheckpointBeforeSnapshotDoesNotReleaseSnapshotLimit() throws Exception {
+        MonitorSource source = new MonitorSource(table.newReadBuilder(), 10, false, false, 1);
+        SourceReader<Split, SimpleSourceSplit> reader = source.createReader(null);
+        TestingReaderOutput<Split> output = new TestingReaderOutput<>();
+
+        reader.snapshotState(1L);
+        writeToTable(1, 1, 1);
+        assertThat(reader.pollNext(output)).isEqualTo(InputStatus.NOTHING_AVAILABLE);
+
+        reader.notifyCheckpointComplete(1L);
+        assertThat(reader.isAvailable()).isNotDone();
+
+        reader.snapshotState(2L);
+        reader.notifyCheckpointComplete(2L);
+        assertThat(reader.isAvailable()).isDone();
+    }
+
+    @Test
+    public void testCompletedCheckpointReleasesCoveredSnapshotCredits() throws Exception {
+        MonitorSource source = new MonitorSource(table.newReadBuilder(), 10, false, false, 2);
+        SourceReader<Split, SimpleSourceSplit> reader = source.createReader(null);
+        TestingReaderOutput<Split> output = new TestingReaderOutput<>();
+
+        writeToTable(1, 1, 1);
+        assertThat(reader.pollNext(output)).isEqualTo(InputStatus.MORE_AVAILABLE);
+        reader.snapshotState(1L);
+
+        writeToTable(2, 2, 2);
+        assertThat(reader.pollNext(output)).isEqualTo(InputStatus.NOTHING_AVAILABLE);
+        assertThat(output.getEmittedRecords()).hasSize(2);
+
+        reader.notifyCheckpointComplete(1L);
+        assertThat(reader.isAvailable()).isDone();
+
+        writeToTable(3, 3, 3);
+        assertThat(reader.pollNext(output)).isEqualTo(InputStatus.NOTHING_AVAILABLE);
+        assertThat(output.getEmittedRecords()).hasSize(3);
+    }
+
+    @Test
+    public void testMonitorSourceSnapshotLimitIsOpenAfterRestore() throws Exception {
+        MonitorSource source = new MonitorSource(table.newReadBuilder(), 10, false, false, 1);
+        SourceReader<Split, SimpleSourceSplit> reader = source.createReader(null);
+
+        writeToTable(1, 1, 1);
+        assertThat(reader.pollNext(new TestingReaderOutput<>()))
+                .isEqualTo(InputStatus.NOTHING_AVAILABLE);
+        List<SimpleSourceSplit> checkpoint = reader.snapshotState(1L);
+
+        MonitorSource restoredSource =
+                new MonitorSource(table.newReadBuilder(), 10, false, false, 1);
+        SourceReader<Split, SimpleSourceSplit> restoredReader = restoredSource.createReader(null);
+        restoredReader.addSplits(checkpoint);
+        assertThat(restoredReader.isAvailable()).isDone();
+
+        writeToTable(2, 2, 2);
+        TestingReaderOutput<Split> output = new TestingReaderOutput<>();
+        assertThat(restoredReader.pollNext(output)).isEqualTo(InputStatus.NOTHING_AVAILABLE);
+        assertThat(output.getEmittedRecords()).hasSize(1);
+        assertThat(readSplit(output.getEmittedRecords().get(0)))
+                .containsExactlyInAnyOrder(Arrays.asList(2, 2, 2));
     }
 
     @Test

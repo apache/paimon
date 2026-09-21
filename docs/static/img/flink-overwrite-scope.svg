@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="584" viewBox="0 0 960 584" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">The overwrite mode determines what is replaced</title>
+<desc id="desc">The initial table has partitions September 1 with order 1 and September 2 with order 2. New input contains only September 2 with order 3. Dynamic overwrite retains September 1 and replaces September 2. Static overwrite without a partition specification removes September 1 and replaces the table with the input.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="958" height="582" rx="12" fill="#fff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">The overwrite mode determines what is replaced</text>
+<text x="28" y="78" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Same initial table and incoming rows; two alternative overwrite operations.</text>
+<rect x="28" y="104" width="440" height="122" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="44" y="136" font-size="21" fill="#2463b4" font-weight="700" text-anchor="start">Initial table</text>
+<text x="44" y="165" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Sep 1: order 1, amount 100</text>
+<text x="44" y="190" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Sep 2: order 2, amount 200</text>
+<rect x="492" y="104" width="440" height="122" rx="8" fill="#f1ebfa" stroke="#7051a3" stroke-width="1.5"/>
+<text x="508" y="136" font-size="21" fill="#7051a3" font-weight="700" text-anchor="start">Incoming rows</text>
+<text x="508" y="165" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Sep 2: order 3, amount 300</text>
+<text x="508" y="190" font-size="18" fill="#526277" font-weight="400" text-anchor="start">No incoming rows for Sep 1</text>
+<text x="28" y="266" font-size="16" fill="#526277" font-weight="700" text-anchor="start">RESULT AFTER EACH ALTERNATIVE</text>
+<rect x="28" y="287" width="440" height="213" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<rect x="492" y="287" width="440" height="213" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="322" font-size="23" fill="#10705d" font-weight="700" text-anchor="start">Dynamic overwrite (default)</text>
+<text x="46" y="349" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Replace partitions present in the input.</text>
+<rect x="46" y="368" width="404" height="45" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="61" y="397" font-size="20" fill="#2463b4" font-weight="700" text-anchor="start">Sep 1: order 1 retained</text>
+<rect x="46" y="430" width="404" height="45" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="61" y="459" font-size="20" fill="#10705d" font-weight="700" text-anchor="start">Sep 2: order 3 replaces order 2</text>
+<text x="510" y="322" font-size="23" fill="#7051a3" font-weight="700" text-anchor="start">Static overwrite</text>
+<text x="510" y="349" font-size="17" fill="#526277" font-weight="400" text-anchor="start">No PARTITION clause: replace the whole table.</text>
+<rect x="510" y="368" width="404" height="45" rx="8" fill="#f3f5f8" stroke="#526277" stroke-width="1.5"/>
+<text x="525" y="397" font-size="20" fill="#526277" font-weight="700" text-anchor="start">Sep 1: removed from the result</text>
+<rect x="510" y="430" width="404" height="45" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="525" y="459" font-size="20" fill="#10705d" font-weight="700" text-anchor="start">Sep 2: order 3 is the new content</text>
+<rect x="28" y="520" width="904" height="40" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="44" y="546" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Empty input: dynamic overwrite deletes nothing; static overwrite clears its selected scope.</text>
+</g>
+</svg>

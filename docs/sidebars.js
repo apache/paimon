@@ -11,46 +11,70 @@ const sidebars = {
       "id": "concepts/index"
     },
     "items": [
-      "concepts/basic-concepts",
-      "concepts/concurrency-control",
-      "concepts/catalog",
-      "concepts/system-tables",
-      "concepts/data-types",
-      "concepts/functions",
-      "concepts/views",
       {
         type: "category",
-        "label": "RESTCatalog",
-        "collapsed": true,
-        "link": {
-          type: "doc",
-          "id": "concepts/rest/index"
-        },
+        "label": "Core Concepts",
+        "collapsed": false,
         "items": [
-          "concepts/rest/bear",
-          "concepts/rest/dlf",
-          "concepts/rest/tables",
-          "concepts/rest/pvfs",
-          "concepts/rest/rest-api"
+          "concepts/basic-concepts",
+          "concepts/concurrency-control"
         ]
       },
       {
         type: "category",
-        "label": "Specification",
-        "collapsed": true,
-        "link": {
-          type: "doc",
-          "id": "concepts/spec/index"
-        },
+        "label": "Catalog & Metadata",
         "items": [
-          "concepts/spec/schema",
-          "concepts/spec/snapshot",
-          "concepts/spec/manifest",
-          "concepts/spec/datafile",
-          "concepts/spec/fileformat",
-          "concepts/spec/rowformat",
-          "concepts/spec/tableindex",
-          "concepts/spec/fileindex"
+          "concepts/catalog",
+          "concepts/data-types",
+          "concepts/views",
+          "concepts/functions",
+          "concepts/system-tables"
+        ]
+      },
+      {
+        type: "category",
+        "label": "REST Catalog",
+        "link": {type: "doc", "id": "concepts/rest/index"},
+        "items": [
+          {
+            type: "category",
+            "label": "Authentication",
+            "items": ["concepts/rest/bear", "concepts/rest/dlf"]
+          },
+          "concepts/rest/tables",
+          "concepts/rest/pvfs",
+          "concepts/rest/rest-api",
+          "concepts/rest/management-api"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Storage Specification",
+        "link": {type: "doc", "id": "concepts/spec/index"},
+        "items": [
+          {
+            type: "category",
+            "label": "Metadata",
+            "items": [
+              "concepts/spec/schema",
+              "concepts/spec/snapshot",
+              "concepts/spec/manifest"
+            ]
+          },
+          {
+            type: "category",
+            "label": "Data Files & Formats",
+            "items": [
+              "concepts/spec/datafile",
+              "concepts/spec/fileformat",
+              "concepts/spec/rowformat"
+            ]
+          },
+          {
+            type: "category",
+            "label": "Indexes",
+            "items": ["concepts/spec/tableindex", "concepts/spec/fileindex"]
+          }
         ]
       }
     ]
@@ -64,42 +88,73 @@ const sidebars = {
       "id": "append-table/index"
     },
     "items": [
-      "append-table/incremental-clustering",
+      "append-table/streaming",
+      "append-table/query-performance",
       "append-table/bucketed",
+      "append-table/incremental-clustering",
+      "append-table/row-level-operations",
       "append-table/row-tracking"
     ]
   },
   {
     type: "category",
-    "label": "PrimaryKey Table",
+    "label": "Primary-Key Table",
     "collapsed": true,
     "link": {
       type: "doc",
       "id": "primary-key-table/index"
     },
     "items": [
-      "primary-key-table/data-distribution",
-      "primary-key-table/table-mode",
-      "primary-key-table/changelog-producer",
-      "primary-key-table/sequence-rowkind",
-      "primary-key-table/compaction",
-      "primary-key-table/query-performance",
-      "primary-key-table/global-index",
-      "primary-key-table/chain-table",
-      "primary-key-table/pk-clustering-override",
-      "primary-key-table/blob-storage",
       {
         type: "category",
-        "label": "Merge Engine",
+        "label": "Data Layout",
         "collapsed": true,
-        "link": {
-          type: "doc",
-          "id": "primary-key-table/merge-engine/index"
-        },
         "items": [
-          "primary-key-table/merge-engine/partial-update",
-          "primary-key-table/merge-engine/aggregation",
-          "primary-key-table/merge-engine/first-row"
+          "primary-key-table/data-distribution",
+          "primary-key-table/table-mode"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Updates & Changelogs",
+        "collapsed": true,
+        "items": [
+          {
+            type: "category",
+            "label": "Merge Engines",
+            "collapsed": true,
+            "link": {
+              type: "doc",
+              "id": "primary-key-table/merge-engine/index"
+            },
+            "items": [
+              "primary-key-table/merge-engine/partial-update",
+              "primary-key-table/merge-engine/aggregation",
+              "primary-key-table/merge-engine/first-row"
+            ]
+          },
+          "primary-key-table/sequence-rowkind",
+          "primary-key-table/changelog-producer"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Compaction & Querying",
+        "collapsed": true,
+        "items": [
+          "primary-key-table/compaction",
+          "primary-key-table/query-performance"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Advanced Features",
+        "collapsed": true,
+        "items": [
+          "primary-key-table/global-index",
+          "primary-key-table/pk-clustering-override",
+          "primary-key-table/chain-table",
+          "primary-key-table/blob-storage"
         ]
       }
     ]
@@ -113,10 +168,32 @@ const sidebars = {
       "id": "multimodal-table/index"
     },
     "items": [
-      "multimodal-table/data-evolution",
-      "multimodal-table/variant",
-      "multimodal-table/blob",
-      "multimodal-table/vector",
+      "multimodal-table/quick-start",
+      {
+        type: "category",
+        "label": "Storage Types",
+        "collapsed": true,
+        "items": [
+          "multimodal-table/blob",
+          "multimodal-table/blob-references",
+          "multimodal-table/video",
+          "multimodal-table/vector",
+          "multimodal-table/variant"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Data Evolution",
+        "collapsed": true,
+        "link": {
+          type: "doc",
+          "id": "multimodal-table/data-evolution"
+        },
+        "items": [
+          "multimodal-table/data-evolution-file-layout",
+          "multimodal-table/data-evolution-maintenance"
+        ]
+      },
       {
         type: "category",
         "label": "Global Index",
@@ -126,9 +203,11 @@ const sidebars = {
           "id": "multimodal-table/global-index"
         },
         "items": [
+          "multimodal-table/global-index/manage-indexes",
           "multimodal-table/global-index/btree",
           "multimodal-table/global-index/bitmap",
           "multimodal-table/global-index/multivalue",
+          "multimodal-table/global-index/fm",
           "multimodal-table/global-index/vector",
           "multimodal-table/global-index/full-text",
           "multimodal-table/global-index/hybrid-search"
@@ -145,18 +224,67 @@ const sidebars = {
       "id": "flink/index"
     },
     "items": [
-      "flink/quick-start",
-      "flink/sql-ddl",
-      "flink/sql-write",
-      "flink/sql-query",
-      "flink/consumer-id",
-      "flink/sql-lookup",
-      "flink/sql-alter",
-      "flink/default-value",
-      "flink/procedures",
-      "flink/action-jars",
-      "flink/savepoint",
-      "flink/lineage"
+      {
+        "type": "category",
+        "label": "Getting Started",
+        "collapsed": true,
+        "items": [
+          "flink/quick-start",
+          "flink/installation"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Tables and Schemas",
+        "collapsed": true,
+        "items": [
+          "flink/sql-ddl",
+          "flink/sql-alter",
+          "flink/default-value"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Reads and Writes",
+        "collapsed": true,
+        "items": [
+          "flink/sql-write",
+          "flink/sql-query",
+          "flink/sql-lookup"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Operations",
+        "collapsed": true,
+        "items": [
+          "flink/configuration",
+          "flink/consumer-id",
+          "flink/savepoint",
+          "flink/lineage",
+          "flink/troubleshooting"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Procedures",
+        "collapsed": true,
+        "link": {
+          "type": "doc",
+          "id": "flink/procedures"
+        },
+        "items": [
+          "flink/procedures/compaction",
+          "flink/procedures/snapshots",
+          "flink/procedures/tags-and-branches",
+          "flink/procedures/table-operations",
+          "flink/procedures/indexes",
+          "flink/procedures/consumers",
+          "flink/procedures/repair",
+          "flink/procedures/catalog"
+        ]
+      },
+      "flink/action-jars"
     ]
   },
   {
@@ -169,16 +297,68 @@ const sidebars = {
     },
     "items": [
       "spark/quick-start",
-      "spark/sql-ddl",
-      "spark/sql-functions",
-      "spark/sql-write",
-      "spark/sql-query",
-      "spark/sql-alter",
-      "spark/auxiliary",
-      "spark/default-value",
-      "spark/dataframe",
-      "spark/structured-streaming",
-      "spark/procedures"
+      {
+        "type": "category",
+        "label": "Setup and Configuration",
+        "items": [
+          "spark/installation",
+          "spark/catalogs",
+          "spark/configuration"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Tables and Schemas",
+        "items": [
+          "spark/sql-ddl",
+          "spark/sql-alter",
+          "spark/format-table",
+          "spark/data-types",
+          "spark/default-value"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Reading and Writing",
+        "items": [
+          "spark/sql-query",
+          "spark/sql-write",
+          "spark/dataframe",
+          "spark/copy-into",
+          "spark/schema-evolution",
+          "spark/sql-functions"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Streaming",
+        "items": [
+          "spark/structured-streaming",
+          "spark/streaming-recovery"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Operations",
+        "items": [
+          "spark/auxiliary",
+          {
+            "type": "category",
+            "label": "Procedures",
+            "link": {
+              "type": "doc",
+              "id": "spark/procedures"
+            },
+            "items": [
+              "spark/procedures/maintenance",
+              "spark/procedures/versions",
+              "spark/procedures/migration",
+              "spark/procedures/indexes",
+              "spark/procedures/metadata"
+            ]
+          }
+        ]
+      }
     ]
   },
   {
@@ -190,18 +370,111 @@ const sidebars = {
       "id": "pypaimon/index"
     },
     "items": [
-      "pypaimon/python-api",
-      "pypaimon/multimodal-api",
-      "pypaimon/manage-tags",
-      "pypaimon/ray-data",
-      "pypaimon/daft",
-      "pypaimon/pytorch",
-      "pypaimon/data-evolution",
-      "pypaimon/system-tables",
-      "pypaimon/fuse-support",
-      "pypaimon/pyjindosdk-support",
-      "pypaimon/sql",
-      "pypaimon/cli"
+      {
+        "type": "category",
+        "label": "Getting Started",
+        "collapsed": true,
+        "items": [
+          "pypaimon/installation",
+          "pypaimon/quick-start"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Python API",
+        "collapsed": true,
+        "link": {
+          "type": "doc",
+          "id": "pypaimon/python-api"
+        },
+        "items": [
+          "pypaimon/catalogs",
+          "pypaimon/writing",
+          "pypaimon/reading",
+          "pypaimon/streaming",
+          "pypaimon/data-types",
+          "pypaimon/manage-tags",
+          "pypaimon/branches"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Multimodal & AI",
+        "collapsed": true,
+        "link": {
+          "type": "doc",
+          "id": "pypaimon/multimodal-api"
+        },
+        "items": [
+          "pypaimon/multimodal-tables",
+          "pypaimon/multimodal-reading",
+          "pypaimon/multimodal-search",
+          "pypaimon/blob",
+          "pypaimon/blob-store",
+          "pypaimon/data-evolution",
+          "pypaimon/merge-into",
+          "pypaimon/video",
+          "pypaimon/dataset-ingestion",
+          "pypaimon/lerobot",
+          {
+            "type": "category",
+            "label": "Examples & Benchmarks",
+            "collapsed": true,
+            "items": [
+              "pypaimon/robomind-agilex",
+              "pypaimon/robomind-act-benchmark"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Compute & Training",
+        "collapsed": true,
+        "items": [
+          {
+            "type": "category",
+            "label": "Ray Data",
+            "collapsed": true,
+            "link": {
+              "type": "doc",
+              "id": "pypaimon/ray-data"
+            },
+            "items": [
+              "pypaimon/ray-joins",
+              "pypaimon/ray-row-ids"
+            ]
+          },
+          "pypaimon/daft",
+          "pypaimon/pytorch"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Tools & Storage",
+        "collapsed": true,
+        "items": [
+          "pypaimon/sql",
+          {
+            "type": "category",
+            "label": "Command Line Interface",
+            "collapsed": true,
+            "link": {
+              "type": "doc",
+              "id": "pypaimon/cli"
+            },
+            "items": [
+              "pypaimon/cli-query",
+              "pypaimon/cli-tables",
+              "pypaimon/cli-catalogs",
+              "pypaimon/cli-versions"
+            ]
+          },
+          "pypaimon/system-tables",
+          "pypaimon/fuse-support",
+          "pypaimon/pyjindosdk-support"
+        ]
+      }
     ]
   },
   {
@@ -213,10 +486,17 @@ const sidebars = {
       "id": "ecosystem/index"
     },
     "items": [
-      "ecosystem/starrocks",
-      "ecosystem/doris",
-      "ecosystem/hive",
-      "ecosystem/trino",
+      "ecosystem/connecting-engines",
+      {
+        type: "category",
+        "label": "Query Engines",
+        "items": [
+          "ecosystem/starrocks",
+          "ecosystem/doris",
+          "ecosystem/hive",
+          "ecosystem/trino"
+        ]
+      },
       "ecosystem/amoro"
     ]
   },
@@ -229,11 +509,27 @@ const sidebars = {
       "id": "cdc-ingestion/index"
     },
     "items": [
-      "cdc-ingestion/mysql-cdc",
-      "cdc-ingestion/postgres-cdc",
-      "cdc-ingestion/kafka-cdc",
-      "cdc-ingestion/mongo-cdc",
-      "cdc-ingestion/pulsar-cdc",
+      {
+        type: "category",
+        label: "Source Guides",
+        collapsed: false,
+        items: [
+          "cdc-ingestion/mysql-cdc",
+          "cdc-ingestion/postgres-cdc",
+          "cdc-ingestion/mongo-cdc",
+          "cdc-ingestion/kafka-cdc",
+          "cdc-ingestion/pulsar-cdc"
+        ]
+      },
+      {
+        type: "category",
+        label: "Configuration and Formats",
+        items: [
+          "cdc-ingestion/schema-evolution",
+          "cdc-ingestion/action-configuration",
+          "cdc-ingestion/kafka-debezium-bson"
+        ]
+      },
       "cdc-ingestion/flink-cdc"
     ]
   },
@@ -246,16 +542,44 @@ const sidebars = {
       "id": "maintenance/index"
     },
     "items": [
-      "maintenance/filesystems",
-      "maintenance/write-performance",
-      "maintenance/dedicated-compaction",
-      "maintenance/manage-snapshots",
-      "maintenance/rescale-bucket",
-      "maintenance/manage-tags",
-      "maintenance/metrics",
-      "maintenance/manage-branches",
-      "maintenance/manage-partitions",
-      "maintenance/configurations"
+      {
+        type: "category",
+        "label": "Data Lifecycle & Versioning",
+        "collapsed": true,
+        "items": [
+          "maintenance/manage-snapshots",
+          "maintenance/manage-tags",
+          "maintenance/manage-branches",
+          "maintenance/manage-partitions"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Compaction & Data Layout",
+        "collapsed": true,
+        "items": [
+          "maintenance/dedicated-compaction",
+          "maintenance/rescale-bucket"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Performance & Monitoring",
+        "collapsed": true,
+        "items": [
+          "maintenance/write-performance",
+          "maintenance/metrics"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Storage & Configuration",
+        "collapsed": true,
+        "items": [
+          "maintenance/filesystems",
+          "maintenance/configurations"
+        ]
+      }
     ]
   },
   {
@@ -267,12 +591,27 @@ const sidebars = {
       "id": "program-api/index"
     },
     "items": [
-      "program-api/rest-api",
+      {
+        type: "category",
+        "label": "Java API",
+        "link": {type: "doc", "id": "program-api/java-api"},
+        "items": [
+          "program-api/catalog-api",
+          "program-api/java-reading",
+          "program-api/java-writing",
+          "program-api/java-types"
+        ]
+      },
       "program-api/flink-api",
-      "program-api/java-api",
-      "program-api/catalog-api",
-      "program-api/cpp-api",
-      "program-api/rust-api",
+      {
+        type: "category",
+        "label": "Other Clients",
+        "items": [
+          "program-api/rest-api",
+          "program-api/cpp-api",
+          "program-api/rust-api"
+        ]
+      },
       "program-api/file-cache"
     ]
   },
@@ -286,25 +625,39 @@ const sidebars = {
     },
     "items": [
       "migration/migration-from-hive",
-      "migration/upsert-to-partitioned",
-      "migration/clone-to-paimon"
+      "migration/clone-to-paimon",
+      "migration/upsert-to-partitioned"
     ]
   },
   {
     type: "category",
-    "label": "Iceberg Metadata",
+    "label": "Iceberg Compatibility",
     "collapsed": true,
     "link": {
       type: "doc",
       "id": "iceberg/index"
     },
     "items": [
-      "iceberg/append-table",
-      "iceberg/primary-key-table",
+      {
+        type: "category",
+        "label": "Read Tables",
+        "items": [
+          "iceberg/append-table",
+          "iceberg/primary-key-table"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Catalogs",
+        "link": { type: "doc", "id": "iceberg/catalogs" },
+        "items": [
+          "iceberg/hive-catalog",
+          "iceberg/rest-catalog"
+        ]
+      },
       "iceberg/iceberg-tags",
-      "iceberg/hive-catalog",
-      "iceberg/rest-catalog",
       "iceberg/ecosystem",
+      "iceberg/data-types",
       "iceberg/configurations"
     ]
   },
@@ -318,11 +671,25 @@ const sidebars = {
     },
     "items": [
       "project/download",
-      "project/creating-a-release",
-      "project/verifying-a-release-candidate",
-      "project/contributing",
-      "project/committer",
-      "project/security"
+      "project/security",
+      {
+        type: "category",
+        "label": "Community",
+        "items": [
+          "project/contributing",
+          "project/committer"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Releases",
+        "link": { type: "doc", "id": "project/releases" },
+        "items": [
+          "project/creating-a-release",
+          "project/verifying-a-release-candidate",
+          "project/publishing-a-release"
+        ]
+      }
     ]
   },
   {
@@ -334,8 +701,10 @@ const sidebars = {
       "id": "learn-paimon/index"
     },
     "items": [
+      "learn-paimon/scenario-guide",
+      "learn-paimon/ai-pipelines",
       "learn-paimon/understand-files",
-      "learn-paimon/scenario-guide"
+      "learn-paimon/small-files"
     ]
   }
 ],

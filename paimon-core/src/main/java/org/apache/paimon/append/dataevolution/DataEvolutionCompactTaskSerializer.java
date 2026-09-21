@@ -27,6 +27,7 @@ import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.utils.Range;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -34,13 +35,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
+import static org.apache.paimon.utils.SerializationUtils.presizedCapacity;
+import static org.apache.paimon.utils.SerializationUtils.readCount;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** Serializer for {@link DataEvolutionCompactTask}. */
 public class DataEvolutionCompactTaskSerializer
         implements VersionedSerializer<DataEvolutionCompactTask> {
 
-    private static final int CURRENT_VERSION = 3;
+    private static final int CURRENT_VERSION = 4;
 
     private final DataFileMetaSerializer dataFileSerializer;
 
@@ -73,7 +76,14 @@ public class DataEvolutionCompactTaskSerializer
         serializeBinaryRow(task.partition(), view);
         dataFileSerializer.serializeList(task.compactBefore(), view);
         view.writeInt(task.type().code());
-        if (task.type() == DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION) {
+        if (task.type() == DataEvolutionCompactTask.TaskType.NORMAL) {
+            List<Range> ranges = ((DataEvolutionNormalCompactTask) task).protectedRanges();
+            view.writeInt(ranges.size());
+            for (Range range : ranges) {
+                view.writeLong(range.from);
+                view.writeLong(range.to);
+            }
+        } else if (task.type() == DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION) {
             DeletionFile.serializeList(
                     view, ((DataEvolutionMaterializeDeletionCompactTask) task).deletionFiles());
         }
@@ -89,8 +99,8 @@ public class DataEvolutionCompactTaskSerializer
     public List<DataEvolutionCompactTask> deserializeList(int version, DataInputView view)
             throws IOException {
         checkVersion(version);
-        int length = view.readInt();
-        List<DataEvolutionCompactTask> list = new ArrayList<>(length);
+        int length = readCount(view, getClass().getSimpleName());
+        List<DataEvolutionCompactTask> list = new ArrayList<>(presizedCapacity(length));
         for (int i = 0; i < length; i++) {
             list.add(deserialize(version, view));
         }
@@ -117,7 +127,12 @@ public class DataEvolutionCompactTaskSerializer
                 DataEvolutionCompactTask.TaskType.fromCode(view.readInt());
         switch (type) {
             case NORMAL:
-                return new DataEvolutionNormalCompactTask(partition, files);
+                int rangeCount = readCount(view, getClass().getSimpleName());
+                List<Range> ranges = new ArrayList<>(presizedCapacity(rangeCount));
+                for (int i = 0; i < rangeCount; i++) {
+                    ranges.add(new Range(view.readLong(), view.readLong()));
+                }
+                return new DataEvolutionNormalCompactTask(partition, files, ranges);
             case BLOB:
                 return new DataEvolutionBlobCompactTask(partition, files);
             case MATERIALIZE_DELETION:

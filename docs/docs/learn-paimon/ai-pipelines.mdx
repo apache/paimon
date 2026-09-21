@@ -1,0 +1,253 @@
+---
+title: "AI Data Pipelines"
+sidebar_position: 2
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+# AI Data Pipelines
+
+Build an AI pipeline by separating payload storage, feature updates, and search indexes. This
+guide uses append tables with Data Evolution for managed BLOBs and column updates. Python
+readers and some other multimodal capabilities do not require this storage mode.
+
+![Ingest payloads and metadata, compute selected features, commit column updates, and build or refresh indexes before serving search; training can read projected columns directly.](/img/learn-paimon-ai-pipeline.svg)
+
+## Choose the Pieces
+
+| Requirement | Use | Follow-up |
+| --- | --- | --- |
+| Store images, audio, documents, or video with metadata | Managed BLOB columns | [BLOB Storage](../multimodal-table/blob) |
+| Backfill or replace selected feature columns | Data Evolution | [Partial Updates](../multimodal-table/data-evolution#partial-updates) |
+| Store fixed-dimension embeddings separately | VECTOR columns and Vortex files | [Vector Storage](../multimodal-table/vector) |
+| Find similar embeddings | Explicitly built vector index | [Vector Index](../multimodal-table/global-index/vector) |
+| Filter scalar metadata or search text | BTree or full-text index | [Global Index](../multimodal-table/global-index) |
+| Read training batches or run distributed computation | PyPaimon with PyTorch or Ray | [PyPaimon](../pypaimon/) |
+
+Create Data Evolution tables without a primary key, using the default unaware-bucket layout
+(`bucket = -1`), and enable both `row-tracking.enabled` and `data-evolution.enabled`. The `id`
+columns below are application join keys; these append tables do not enforce their uniqueness.
+See [Data Evolution requirements](../multimodal-table/data-evolution#create-a-table).
+
+## Store Payloads and Metadata
+
+The examples assume a configured Paimon catalog. This DDL creates a table used by the Ray
+walkthrough below; load uniquely identified payloads before running that walkthrough.
+
+<Tabs groupId="engine">
+<TabItem value="flink" label="Flink SQL">
+
+```sql
+CREATE TABLE item_features (
+    id BIGINT,
+    label STRING,
+    payload BYTES COMMENT '__BLOB_FIELD',
+    feature BIGINT
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+```
+
+</TabItem>
+<TabItem value="spark" label="Spark SQL">
+
+```sql
+CREATE TABLE item_features (
+    id BIGINT,
+    label STRING,
+    payload BINARY COMMENT '__BLOB_FIELD',
+    feature BIGINT
+) USING paimon
+TBLPROPERTIES (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+```
+
+</TabItem>
+</Tabs>
+
+BLOB values use dedicated `.blob` files. A query projecting only `id` and `label` can avoid reading
+the payload bytes. For ingestion and lazy access to large objects, see
+[PyPaimon BLOBs](../pypaimon/blob). JVM primary-key tables have a separate
+[BLOB storage design](../primary-key-table/blob-storage) with different constraints.
+
+## Backfill a Feature Column
+
+The following **Spark SQL** example is self-contained after catalog setup:
+
+```sql
+CREATE TABLE feature_store (
+    user_id BIGINT,
+    age INT
+) USING paimon
+TBLPROPERTIES (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+
+INSERT INTO feature_store VALUES (1, 28), (2, 35);
+ALTER TABLE feature_store ADD COLUMNS (score DOUBLE);
+
+MERGE INTO feature_store AS t
+USING (SELECT CAST(1 AS BIGINT) AS user_id, CAST(0.8 AS DOUBLE) AS score) AS s
+ON t.user_id = s.user_id
+WHEN MATCHED THEN UPDATE SET t.score = s.score;
+
+SELECT * FROM feature_store ORDER BY user_id;
+-- (1, 28, 0.8)
+-- (2, 35, NULL)
+```
+
+The update writes the selected column over each affected normal-file row-ID range. Unmatched
+rows in the range keep their existing values. It saves rewriting untouched columns, but does
+not imply writing only the one matched row. See
+[File Layout and Reads](../multimodal-table/data-evolution-file-layout).
+
+### Distributed Feature Backfill with Ray
+
+For expensive feature computation, select the records in Ray, compute a value, and merge only
+that column. Install the [Ray integration](../pypaimon/ray-data) first. The join/merge workflow
+requires **Ray 2.50 or newer** on the driver and workers. This example assumes:
+
+- `default.item_features` was created above and populated with unique `id` values.
+- The Parquet selection dataset contains only `id`, with one row per selected key and a type
+  matching the target's `BIGINT`.
+- All Ray workers can access the warehouse and input path. Replace the example paths for your environment.
+- Resources cover the target payload scan and distributed join as well as inference batches.
+  This eager example reads payloads before selecting rows through the join. Default BLOB reads
+  materialize bytes; `batch_size` below limits only the inference batch, not scan or shuffle
+  memory. Use the [lazy BLOB APIs](../pypaimon/blob) when designing a pipeline for larger objects.
+
+```python
+import ray
+from pypaimon.ray import read_paimon, merge_into, WhenMatched, source_col
+
+catalog_options = {"warehouse": "/path/to/shared/warehouse"}
+target = "default.item_features"
+num_partitions = 8  # Tune for the cluster and input size.
+
+records_to_process = ray.data.read_parquet("/path/to/selected-ids/")
+target_rows = read_paimon(
+    target,
+    catalog_options=catalog_options,
+    projection=["id", "payload"],
+)
+selected = records_to_process.join(
+    target_rows,
+    join_type="inner",
+    num_partitions=num_partitions,
+    on=["id"],
+)
+
+
+def compute_feature(batch):
+    # Byte length is a deterministic stand-in for model inference.
+    payloads = batch["payload"].to_pylist()
+    return {
+        "id": batch["id"].to_pylist(),
+        "new_feature": [len(value) if value is not None else 0 for value in payloads],
+    }
+
+
+updates = selected.map_batches(
+    compute_feature,
+    batch_format="pyarrow",
+    batch_size=32,
+)
+merge_into(
+    target=target,
+    source=updates,
+    catalog_options=catalog_options,
+    on=["id"],
+    when_matched=[WhenMatched.update({"feature": source_col("new_feature")})],
+    num_partitions=num_partitions,
+)
+```
+
+The update source contains keys and new feature values. The merge updates `feature` while
+leaving existing BLOB files unchanged. Target normal-file ranges still need alignment, and
+selection plus merge can involve distributed joins. See [Ray Joins and Merge](../pypaimon/ray-joins)
+for duplicate-match behavior, resource controls, and supported update expressions.
+
+Coordinate concurrent changes to payloads with feature computation so the result represents the
+intended input version. If a workflow persists physical row IDs, also account for
+[maintenance that can reassign them](../multimodal-table/data-evolution-maintenance#row-id-lifetime).
+
+## Store and Search Embeddings
+
+This **Spark SQL** example uses three-dimensional vectors so the inserts and query are complete.
+Configure the [Spark integration](../spark/quick-start) and the
+[vector index prerequisites](../multimodal-table/global-index/vector) first. Use your model's
+actual dimension in an application.
+
+```sql
+CREATE TABLE doc_embeddings (
+    doc_id BIGINT,
+    title STRING,
+    embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;3'
+) USING paimon
+TBLPROPERTIES (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true',
+    'vector.file.format' = 'vortex'
+);
+
+INSERT INTO doc_embeddings VALUES
+    (1, 'doc_a', array(1.0f, 0.0f, 0.0f)),
+    (2, 'doc_b', array(0.9f, 0.1f, 0.0f)),
+    (3, 'doc_c', array(0.0f, 1.0f, 0.0f));
+
+CALL sys.create_global_index(
+    table => 'doc_embeddings',
+    index_column => 'embedding',
+    index_type => 'ivf-flat',
+    options => 'ivf-flat.dimension=3,ivf-flat.distance.metric=cosine,ivf-flat.nlist=1'
+);
+
+SELECT *
+FROM vector_search('doc_embeddings', 'embedding', array(1.0f, 0.0f, 0.0f), 2);
+```
+
+The comment declares a fixed-dimension vector; `vector.file.format = vortex` selects dedicated
+vector storage. Building the index is a separate operation after data ingestion. One IVF cluster
+is appropriate only for this tiny example. For larger datasets, select index type, training size,
+and build/search parameters from the [Vector Index guide](../multimodal-table/global-index/vector).
+Vector indexes can also use ordinary `ARRAY<FLOAT>` columns without dedicated vector files.
+
+New writes do not automatically refresh an existing index. The default `fast` search mode can
+omit rows outside index coverage. Decide on a [coverage and freshness policy](../multimodal-table/global-index/manage-indexes#coverage-and-freshness)
+before serving queries, and validate recall as well as latency.
+
+## Read Training and Analysis Data
+
+Use projection and filtering to avoid loading unused payloads. PyPaimon can feed
+[PyTorch](../pypaimon/pytorch), [Ray](../pypaimon/ray-data), and
+[Pandas or Arrow](../pypaimon/reading). These reader integrations are not limited to Data
+Evolution tables; check the supported table layout and read mode for your pipeline.
+
+For a reproducible training run, select a retained snapshot or tag and record it with the model
+inputs. For continuously updated datasets, make freshness and index coverage explicit. Use
+[Understand Files](./understand-files) and [Data Evolution Maintenance](../multimodal-table/data-evolution-maintenance)
+to understand the resulting storage and retention costs.

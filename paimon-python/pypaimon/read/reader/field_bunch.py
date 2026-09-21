@@ -22,7 +22,7 @@ These classes help organize DataFileMeta objects into groups based on their fiel
 supporting both regular data files and blob files.
 """
 from abc import ABC
-from typing import List
+from typing import List, Optional
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.utils.range import Range
@@ -144,8 +144,13 @@ class _SpecialFieldBunch(FieldBunch):
 class BlobBunch(_SpecialFieldBunch):
     """Files for partial field (blob files)."""
 
-    def __init__(self, expected_row_count: int, row_id_push_down: bool = False):
+    def __init__(self, expected_row_count: int, row_id_push_down: bool = False,
+                 expected_row_range: Optional[Range] = None):
         super().__init__(expected_row_count, row_id_push_down)
+        # The normal file is the logical anchor. A Blob column added later may
+        # physically cover only part of its row-id range.
+        self.expected_row_range = expected_row_range
+        self._merged_ranges: List[Range] = []
         self._finished = False
 
     def add(self, file: DataFileMeta) -> None:
@@ -162,18 +167,25 @@ class BlobBunch(_SpecialFieldBunch):
         if self._finished:
             return
 
-        merged = Range.sort_and_merge_overlap(
-            [blob_file.row_id_range() for blob_file in self._files],
-            True,
-            True,
-        )
-        self._row_count = sum(row_range.count() for row_range in merged)
-        if self.expected_row_count >= 0 and self._row_count > self.expected_row_count:
-            raise ValueError(
-                f"Blob files row count exceed the expect {self.expected_row_count}"
-            )
+        merged = self._merged_physical_ranges()
+        physical_row_count = sum(row_range.count() for row_range in merged)
+        if self.expected_row_range is not None:
+            for row_range in merged:
+                if (row_range.from_ < self.expected_row_range.from_
+                        or row_range.to > self.expected_row_range.to):
+                    raise ValueError(
+                        f"Blob file range {row_range} should be within normal "
+                        f"file range {self.expected_row_range}."
+                    )
+            self._row_count = self.expected_row_range.count()
+        else:
+            self._row_count = physical_row_count
+            if self.expected_row_count >= 0 and self._row_count > self.expected_row_count:
+                raise ValueError(
+                    f"Blob files row count exceed the expect {self.expected_row_count}"
+                )
 
-        if not self.row_id_push_down:
+        if not self.row_id_push_down and self.expected_row_range is None:
             if len(merged) != 1:
                 raise ValueError("Blob file bunch should always contain a contiguous row range.")
             if self.expected_row_count >= 0 and self._row_count != self.expected_row_count:
@@ -181,20 +193,38 @@ class BlobBunch(_SpecialFieldBunch):
                     "The merged row count of blob file bunch should be aligned "
                     f"with normal files, expect {self.expected_row_count}, got {self._row_count}."
                 )
+        self._merged_ranges = merged
         self._finished = True
 
     def row_count(self) -> int:
         self.finish()
         return self._row_count
 
+    def logical_range(self) -> Range:
+        if self.expected_row_range is not None:
+            return self.expected_row_range
+        merged = self._merged_physical_ranges()
+        if not merged:
+            raise ValueError("Blob bunch should not be empty.")
+        return Range(merged[0].from_, merged[-1].to)
+
     def sequential_read_optimize(self) -> bool:
         if not self._files:
             raise ValueError("Blob bunch should not be empty.")
         max_sequence_number = self._files[0].max_sequence_number
-        return all(
+        same_sequence = all(
             file.max_sequence_number == max_sequence_number
             for file in self._files
         )
+        merged = self._merged_physical_ranges()
+        return (same_sequence and len(merged) == 1
+                and merged[0] == self.logical_range())
+
+    def _merged_physical_ranges(self) -> List[Range]:
+        if self._finished:
+            return self._merged_ranges
+        return Range.sort_and_merge_overlap(
+            [blob_file.row_id_range() for blob_file in self._files], True, True)
 
     def _is_special_file(self, file_name: str) -> bool:
         return DataFileMeta.is_blob_file(file_name)

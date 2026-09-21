@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -217,7 +218,7 @@ public class DynamicPartitionLevelLoaderTest {
     private FileStoreTable createFileStoreTable(
             List<String> partitionKeys, List<String> primaryKeys, Map<String, String> customOptions)
             throws Exception {
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         Options conf = new Options(customOptions);
         conf.set(CoreOptions.BUCKET, 2);
         conf.set(CoreOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));

@@ -28,6 +28,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -47,7 +48,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -59,6 +62,7 @@ public class CdcMultiplexRecordChannelComputerTest {
     private Path warehouse;
     private String databaseName;
     private Identifier tableWithPartition;
+    private Schema tableWithPartitionSchema;
     private Catalog catalog;
     private Identifier tableWithoutPartition;
 
@@ -92,16 +96,16 @@ public class CdcMultiplexRecordChannelComputerTest {
                         },
                         new String[] {"k", "v"});
 
+        tableWithPartitionSchema =
+                new Schema(
+                        rowTypeWithPartition.getFields(),
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "k"),
+                        conf.toMap(),
+                        "");
         List<Tuple2<Identifier, Schema>> tables =
                 Arrays.asList(
-                        Tuple2.of(
-                                tableWithPartition,
-                                new Schema(
-                                        rowTypeWithPartition.getFields(),
-                                        Collections.singletonList("pt"),
-                                        Arrays.asList("pt", "k"),
-                                        conf.toMap(),
-                                        "")),
+                        Tuple2.of(tableWithPartition, tableWithPartitionSchema),
                         Tuple2.of(
                                 tableWithoutPartition,
                                 new Schema(
@@ -140,7 +144,7 @@ public class CdcMultiplexRecordChannelComputerTest {
     }
 
     @Test
-    public void testSchemaNoPartition() {
+    public void testSchemaNoPartition() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int numInputs = random.nextInt(1000) + 1;
         List<Map<String, String>> input = new ArrayList<>();
@@ -154,19 +158,80 @@ public class CdcMultiplexRecordChannelComputerTest {
         testImpl(tableWithoutPartition, input);
     }
 
-    private void testImpl(Identifier tableId, List<Map<String, String>> input) {
+    @Test
+    public void testWaitForTableBeforeComputingChannel() throws Exception {
+        int numChannels = 3;
+        Map<String, String> data = new HashMap<>();
+        data.put("pt", "1");
+        data.put("k", "2");
+        data.put("v", "3");
+        CdcRecord record = new CdcRecord(RowKind.INSERT, data);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(tableWithPartition);
+        CdcRecordKeyAndBucketExtractor extractor =
+                new CdcRecordKeyAndBucketExtractor(table.schema());
+        extractor.setRecord(record);
+        int expectedChannel =
+                CdcMultiplexRecordChannelComputer.computeChannel(
+                        databaseName,
+                        tableWithPartition.getObjectName(),
+                        extractor.partition(),
+                        extractor.bucket(),
+                        numChannels);
+
+        catalog.dropTable(tableWithPartition, false);
+        CdcMultiplexRecordChannelComputer channelComputer =
+                new CdcMultiplexRecordChannelComputer(catalogLoader);
+        channelComputer.setup(numChannels);
+        CompletableFuture<Integer> channelFuture =
+                CompletableFuture.supplyAsync(
+                        () ->
+                                channelComputer.channel(
+                                        CdcMultiplexRecord.fromCdcRecord(
+                                                databaseName,
+                                                tableWithPartition.getObjectName(),
+                                                record)));
+
+        try {
+            Thread.sleep(50);
+            assertThat(channelFuture.isDone()).isFalse();
+        } finally {
+            catalog.createTable(tableWithPartition, tableWithPartitionSchema, false);
+        }
+        assertThat(channelFuture.get(5, TimeUnit.SECONDS)).isEqualTo(expectedChannel);
+    }
+
+    private void testImpl(Identifier tableId, List<Map<String, String>> input) throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         int numChannels = random.nextInt(10) + 1;
         CdcMultiplexRecordChannelComputer channelComputer =
                 new CdcMultiplexRecordChannelComputer(catalogLoader);
         channelComputer.setup(numChannels);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(tableId);
+        CdcRecordKeyAndBucketExtractor extractor =
+                new CdcRecordKeyAndBucketExtractor(table.schema());
 
         // assert that insert and delete records are routed into same channel
 
         for (Map<String, String> data : input) {
             CdcRecord insertRecord = new CdcRecord(RowKind.INSERT, data);
             CdcRecord deleteRecord = new CdcRecord(RowKind.DELETE, data);
+
+            extractor.setRecord(insertRecord);
+            assertThat(
+                            channelComputer.channel(
+                                    CdcMultiplexRecord.fromCdcRecord(
+                                            tableId.getDatabaseName(),
+                                            tableId.getObjectName(),
+                                            insertRecord)))
+                    .isEqualTo(
+                            CdcMultiplexRecordChannelComputer.computeChannel(
+                                    tableId.getDatabaseName(),
+                                    tableId.getObjectName(),
+                                    extractor.partition(),
+                                    extractor.bucket(),
+                                    numChannels));
 
             assertThat(
                             channelComputer.channel(

@@ -90,6 +90,14 @@ class SlicedSplit(Split):
         return self._data_split.file_size
 
     @property
+    def is_streaming(self):
+        return getattr(self._data_split, 'is_streaming', False)
+
+    @property
+    def snapshot_id(self):
+        return self._data_split.snapshot_id
+
+    @property
     def raw_convertible(self):
         return self._data_split.raw_convertible
 
@@ -108,6 +116,12 @@ class SlicedSplit(Split):
             return self._exact_merged_row_count
         if not self._shard_file_idx_map:
             return self._data_split.merged_row_count()
+
+        if (any(deletion is not None for deletion in self.data_deletion_files or [])
+                and any(self._get_sliced_file_row_count(file) != file.row_count
+                        for file in self.files)):
+            # File-wide deletion counts cannot locate deletions inside a slice.
+            return None
         
         underlying_merged = self._data_split.merged_row_count()
         if underlying_merged is not None:

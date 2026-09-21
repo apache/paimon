@@ -197,17 +197,53 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
 
   test("Format table: CTAS with partitioned table") {
     withTable("t1", "t2") {
-      sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv PARTITIONED BY (p1, p2)")
-      sql("INSERT INTO t1 VALUES (1, 2, 3)")
+      sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv")
+      sql("INSERT INTO t1 VALUES (1, 2, 3), (2, 2, 4), (3, 5, 6)")
 
-      assertThrows[UnsupportedOperationException] {
-        sql("""
-              |CREATE TABLE t2
-              |USING csv
-              |PARTITIONED BY (p1, p2)
-              |AS SELECT * FROM t1
-              |""".stripMargin)
+      sql("""
+            |CREATE TABLE t2
+            |USING parquet
+            |PARTITIONED BY (p1, p2)
+            |AS SELECT * FROM t1
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM t2 ORDER BY id"),
+        Seq(Row(1, 2, 3), Row(2, 2, 4), Row(3, 5, 6)))
+      checkAnswer(
+        sql("SHOW PARTITIONS t2"),
+        Seq(Row("p1=2/p2=3"), Row("p1=2/p2=4"), Row("p1=5/p2=6")))
+
+      val filtered = sql("SELECT * FROM t2 WHERE p1 = 2 AND p2 = 4")
+      checkAnswer(filtered, Seq(Row(2, 2, 4)))
+      assert(collectFilteredInputSplits(filtered.queryExecution.executedPlan, "t2").size == 1)
+    }
+  }
+
+  test("Format table: CTAS with partitioned engine table") {
+    def checkRejected(tableProperties: String): Unit = {
+      withTable("t1", "t2") {
+        sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv")
+        sql("INSERT INTO t1 VALUES (1, 2, 3)")
+
+        val exception = intercept[UnsupportedOperationException] {
+          sql(s"""
+                 |CREATE TABLE t2
+                 |USING parquet
+                 |PARTITIONED BY (p1, p2)
+                 |$tableProperties
+                 |AS SELECT * FROM t1
+                 |""".stripMargin)
+        }
+        assert(exception.getMessage.contains("partitioned engine format table"))
+        assert(!spark.catalog.tableExists("t2"))
       }
+    }
+
+    checkRejected("TBLPROPERTIES ('format-table.implementation'='engine')")
+    withSparkSQLConf("spark.paimon.format-table.implementation" -> "engine") {
+      checkRejected("")
+      checkRejected("TBLPROPERTIES ('format-table.implementation'='paimon')")
     }
   }
 

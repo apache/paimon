@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.{CoreOptions, Snapshot}
-import org.apache.paimon.CoreOptions.{COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT, PartitionSinkStrategy, WRITE_ONLY}
+import org.apache.paimon.CoreOptions.{COMMIT_LAST_SAFE_SNAPSHOT, PartitionSinkStrategy, WRITE_ONLY}
 import org.apache.paimon.codegen.CodeGenUtils
 import org.apache.paimon.crosspartition.{IndexBootstrap, KeyPartOrRow}
 import org.apache.paimon.data.BinaryRow
@@ -141,7 +141,7 @@ case class PaimonSparkWriter(
       case Some(_) =>
         val directWriteOptions = new java.util.HashMap[String, String]()
         directWriteOptions.put(
-          COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(),
+          COMMIT_LAST_SAFE_SNAPSHOT.key(),
           postponeBaseSnapshotId.getOrElse(0L).toString)
         val builder = table.copy(directWriteOptions).newPostponeFixedBucketWriteBuilder()
         overwritePartitionSpec.foreach(spec => builder.withOverwrite(spec.asJava))

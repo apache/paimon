@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -128,6 +129,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     @Override
     public VectorScan newVectorScan() {
+        rejectUnderQueryAuth();
         if (isPrimaryKeyVectorSearch()) {
             return new PrimaryKeyVectorScan(
                     table,
@@ -143,6 +145,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     @Override
     public VectorRead newVectorRead() {
+        rejectUnderQueryAuth();
         checkNotNull(vector, "vector must be set via withVector()");
         if (isPrimaryKeyVectorSearch()) {
             return new PrimaryKeyVectorRead(table, vectorColumn, vector, limit, options, filter);
@@ -159,5 +162,9 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     public VectorSearchBuilderImpl withSnapshot(Snapshot snapshot) {
         this.pinnedSnapshot = snapshot;
         return this;
+    }
+
+    protected void rejectUnderQueryAuth() {
+        TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
     }
 }

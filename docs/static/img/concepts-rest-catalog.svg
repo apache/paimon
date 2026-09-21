@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 578" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">REST Catalog: metadata and storage access</title>
+<desc id="desc">The client resolves tables through the service and accesses files through the storage implementation.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<rect width="1040" height="578" rx="16" fill="#ffffff"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<text x="32" y="44" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">REST Catalog: metadata and storage access</text>
+<text x="32" y="75" font-size="18" font-weight="400" text-anchor="start" fill="#526277">The client resolves tables through the service and accesses files through the storage implementation.</text>
+<rect x="32" y="126" width="284" height="134" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="50" y="157" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Compute engine</text>
+<text x="50" y="186" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Paimon REST client</text>
+<text x="50" y="213" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Catalog, database, table names</text>
+<rect x="514" y="126" width="494" height="134" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="532" y="157" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">REST catalog service</text>
+<text x="532" y="186" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Authentication and catalog operations</text>
+<text x="532" y="213" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Backend-specific metadata logic</text>
+<path d="M 316 166 H 514" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="415" y="151" font-size="17" font-weight="400" text-anchor="middle" fill="#526277">HTTP requests</text>
+<path d="M 514 231 H 316" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="415" y="217" font-size="17" font-weight="400" text-anchor="middle" fill="#526277">Table metadata</text>
+<rect x="514" y="363" width="494" height="112" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="532" y="394" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Catalog backend</text>
+<text x="532" y="423" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Metadata store chosen by the service</text>
+<path d="M 762 260 V 363" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="782" y="317" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Metadata operations</text>
+<rect x="32" y="363" width="368" height="112" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="50" y="394" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Filesystem / object store</text>
+<text x="50" y="423" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Data files and file metadata</text>
+<path d="M 174 260 V 363" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="195" y="317" font-size="19" font-weight="400" text-anchor="start" fill="#10705d">File I/O</text>
+<rect x="32" y="514" width="976" height="38" rx="10" fill="#f5f8fc" stroke="#cfd9e6" stroke-width="1.5"/>
+<text x="520" y="540" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">Temporary storage credentials can come from the service when supported and enabled.</text>
+</g>
+</svg>

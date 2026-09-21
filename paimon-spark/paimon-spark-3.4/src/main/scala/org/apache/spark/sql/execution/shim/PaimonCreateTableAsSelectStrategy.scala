@@ -20,7 +20,6 @@ package org.apache.spark.sql.execution.shim
 
 import org.apache.paimon.Snapshot
 import org.apache.paimon.spark.SparkCatalog
-import org.apache.paimon.spark.catalog.FormatTableCatalog
 import org.apache.paimon.spark.write.PaimonWriteOptions
 
 import org.apache.spark.sql.{SparkSession, Strategy}
@@ -53,18 +52,11 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
         splitTableAndWriteOptions(options)
       val qualifiedSpec = qualifyTableSpec(tableSpec, tableOptions)
 
-      val isPartitionedFormatTable = {
-        catalog match {
-          case formatCatalog: FormatTableCatalog =>
-            formatCatalog.isFormatTable(qualifiedSpec.provider.orNull) && parts.nonEmpty
-          case _ => false
-        }
-      }
-
-      if (isPartitionedFormatTable) {
-        throw new UnsupportedOperationException(
-          "Using CTAS with partitioned format table is not supported yet.")
-      }
+      catalog.checkPartitionedFormatTableCtas(
+        ident,
+        qualifiedSpec.provider.orNull,
+        parts.nonEmpty,
+        qualifiedSpec.properties.asJava)
 
       CreateTableAsSelectExec(
         catalog.asTableCatalog,

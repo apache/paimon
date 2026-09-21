@@ -24,32 +24,112 @@ under the License.
 
 # Views
 
-A view is a logical table that encapsulates business logic and domain-specific semantics.
-While most compute engines support views natively, each engine stores view metadata in proprietary formats, creating interoperability challenges across different platforms.
-Paimon views abstracting engine-specific query dialects and establishing unified metadata standards.
-View metadata could enable centralized view management that facilitates cross-engine sharing and reduces maintenance complexity in heterogeneous computing environments.
+A view is a named SQL query stored in the catalog. It lets users reuse query logic without
+materializing another copy of the data. Paimon view metadata can hold multiple SQL dialect
+representations so that engines can use a definition written for their dialect.
+
+Start by checking catalog support, then use the operations below to create a view or manage its
+SQL representations. Storing multiple dialects does not translate SQL automatically.
 
 ## Catalog support
 
-View metadata is persisted only when the catalog implementation supports it:
+| Catalog | View storage | Dialect changes |
+| --- | --- | --- |
+| REST | Managed by the REST service. | Supported through the view API, subject to server support. |
+| JDBC | Stored in the `paimon_views` metadata table. | Supported. |
+| Hive | Stored as a Hive metastore `VIRTUAL_VIEW`. | Only the default query is persisted; altering dialects is not supported. |
+| Filesystem | View operations are not implemented. | Not supported. |
 
-- **Hive metastore catalog** – view metadata is stored together with table metadata inside the
-  metastore warehouse.
-- **REST catalog** – view metadata is kept in the REST backend and exposed through the catalog API.
-- **JDBC catalog** – view metadata is stored in the catalog database in the `paimon_views`
-  metadata table. The table is created automatically when the JDBC catalog is initialized.
-
-File-system catalogs do not currently support views because they lack persistent metadata storage.
+See [JDBC catalog notes](#jdbc-catalog-notes) for initialization and concurrency behavior.
 
 ### Representation structure
 
-| Field     | Type | Description |
-|-----------|------|-------------|
-| `query`   | `string` | Canonical SQL `SELECT` statement that defines the view. |
-| `dialect` | `string` | SQL dialect identifier (for example, `spark` or `flink`). |
+The Paimon view schema contains the following fields. How this metadata is persisted depends on
+the catalog implementation.
 
-Multiple representations can be stored for the same version so that different engines can access the
-view using their native dialect.
+| Field | Type | Description |
+| --- | --- | --- |
+| `fields` | List of data fields | The output columns of the view. |
+| `query` | String | The default SQL query. |
+| `dialects` | Map of strings to strings | Queries keyed by dialect identifier, such as `spark` or `flink`. |
+| `comment` | Optional string | A description of the view. |
+| `options` | Map of strings to strings | View properties. |
+
+When an engine requests a dialect that is absent from `dialects`, Paimon returns the default
+`query`. It does not translate that query into another SQL dialect. Dropping a dialect entry
+therefore restores the default query for that dialect; it does not remove the view.
+
+## Operations
+
+### Create or replace view
+
+Use `CREATE VIEW` in a catalog that supports views. The compute engine parses the SQL and resolves
+the view's output schema; the catalog persists the resulting definition.
+
+For an existing `my_db.sales` table with `region` and `amount` columns:
+
+```sql
+CREATE VIEW my_db.sales_view AS
+SELECT region, SUM(amount) AS total_amount
+FROM my_db.sales
+GROUP BY region;
+```
+
+Replacement behavior depends on the engine. Paimon's Spark integration implements
+`CREATE OR REPLACE VIEW` by dropping the existing view and creating a new one. This is not an
+atomic replacement, and previously added dialect entries are not retained. To change one stored
+dialect, use the procedure below.
+
+### Alter view dialect via procedure
+
+Use `sys.alter_view_dialect` with a REST or JDBC catalog to add, update, or drop a dialect query.
+Use `add` when the dialect is absent and `update` when it already exists. SQL created in Flink or
+Spark includes that engine's dialect, so the examples update it first.
+
+#### Flink example
+
+Run these statements in the Paimon catalog containing the view:
+
+```sql
+-- Update the Flink query while keeping the output columns unchanged.
+CALL sys.alter_view_dialect(
+    'my_db.sales_view', 'update', 'flink',
+    'SELECT region, SUM(amount) AS total_amount FROM my_db.sales WHERE amount > 0 GROUP BY region'
+);
+
+-- Fall back to the default query.
+CALL sys.alter_view_dialect('my_db.sales_view', 'drop', 'flink');
+
+-- Add a Flink query again.
+CALL sys.alter_view_dialect(
+    'my_db.sales_view', 'add', 'flink',
+    'SELECT region, SUM(amount) AS total_amount FROM my_db.sales GROUP BY region'
+);
+```
+
+#### Spark example
+
+For a view created in Spark, use the `spark` dialect:
+
+```sql
+CALL sys.alter_view_dialect(
+    'my_db.sales_view', 'update', 'spark',
+    'SELECT region, SUM(amount) AS total_amount FROM my_db.sales WHERE amount > 0 GROUP BY region'
+);
+
+CALL sys.alter_view_dialect('my_db.sales_view', 'drop', 'spark');
+
+CALL sys.alter_view_dialect(
+    'my_db.sales_view', 'add', 'spark',
+    'SELECT region, SUM(amount) AS total_amount FROM my_db.sales GROUP BY region'
+);
+```
+
+### Drop view
+
+```sql
+DROP VIEW my_db.sales_view;
+```
 
 ### JDBC catalog notes
 
@@ -77,59 +157,6 @@ initialization. A few things are worth knowing when running on top of an existin
 - **Cross-database rename.** `renameView(from, to)` and `renameTable(from, to)` raise an
   `IllegalArgumentException` (`Database X does not exist.`) when the target database is missing,
   matching the BadRequest semantics of the REST catalog.
-
-## Operations
-
-### Create or replace view
-
-Use `CREATE VIEW` or `CREATE OR REPLACE VIEW` to register a view. Paimon assigns a UUID, writes the
-first metadata file, and records version `1`.
-
-The catalog stores the view definition. It does not resolve or validate referenced tables when the
-view is created, so missing or cross-database table references are checked by the compute engine when
-the view is queried.
-
-```sql
-CREATE VIEW sales_view AS
-SELECT region, SUM(amount) AS total_amount
-FROM sales
-GROUP BY region;
-```
-
-### Alter view dialect via procedure
-
-Paimon provides the `sys.alter_view_dialect` procedure so that engines can manage multiple SQL
-representations for the same view version.
-
-#### Flink example
-
-```sql
--- Add a Flink dialect
-CALL [catalog.]sys.alter_view_dialect('view_identifier', 'add', 'flink', 'SELECT ...');
-
--- Update the stored Flink dialect
-CALL [catalog.]sys.alter_view_dialect('view_identifier', 'update', 'flink', 'SELECT ...');
-
--- Drop the Flink dialect representation
-CALL [catalog.]sys.alter_view_dialect('view_identifier', 'drop', 'flink');
-```
-
-#### Spark example
-
-```sql
--- Add a Spark dialect
-CALL sys.alter_view_dialect('view_identifier', 'add', 'spark', 'SELECT ...');
-
--- Update the Spark dialect
-CALL sys.alter_view_dialect('view_identifier', 'update', 'spark', 'SELECT ...');
-
--- Drop the Spark dialect
-CALL sys.alter_view_dialect('view_identifier', 'drop', 'spark');
-```
-
-### Drop view
-
-`DROP VIEW view_name;`
 
 ## See also
 

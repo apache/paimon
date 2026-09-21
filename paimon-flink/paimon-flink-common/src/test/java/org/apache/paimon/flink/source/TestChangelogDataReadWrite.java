@@ -37,6 +37,7 @@ import org.apache.paimon.operation.KeyValueFileStoreWrite;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -121,7 +122,7 @@ public class TestChangelogDataReadWrite {
     }
 
     public KeyValueTableRead createReadWithKey() {
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), tablePath);
         CoreOptions options = new CoreOptions(new HashMap<>());
         TableSchema schema = schemaManager.schema(0);
         MergeFileSplitRead read =
@@ -175,7 +176,7 @@ public class TestChangelogDataReadWrite {
         CoreOptions options =
                 new CoreOptions(Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "avro"));
 
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), tablePath);
         KeyValueFileStoreWrite write =
                 new KeyValueFileStoreWrite(
                         LocalFileIO.create(),

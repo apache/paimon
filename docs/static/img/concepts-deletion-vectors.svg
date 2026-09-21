@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 738" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Deletion vectors: file and payload layout</title>
+<desc id="desc">A vector stores deleted row positions. File names and vector ranges live in index metadata.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<rect width="1080" height="738" rx="16" fill="#ffffff"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<text x="32" y="44" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">Deletion vectors: file and payload layout</text>
+<text x="32" y="75" font-size="18" font-weight="400" text-anchor="start" fill="#526277">A vector stores deleted row positions. File names and vector ranges live in index metadata.</text>
+<rect x="32" y="106" width="1016" height="83" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="50" y="137" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Index manifest metadata</text>
+<text x="50" y="166" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Data file name → deletion file + offset + length + cardinality</text>
+<text x="32" y="232" font-size="21" font-weight="700" text-anchor="start" fill="#172b4d">Deletion file  ·  fields in byte order  ·  not to scale</text>
+<rect x="32" y="253" width="118" height="84" rx="0" fill="#f5f8fc" stroke="#cfd9e6" stroke-width="1.5"/>
+<text x="91.0" y="286" font-size="19" font-weight="700" text-anchor="middle" fill="#172b4d">Version</text>
+<text x="91.0" y="314" font-size="17" font-weight="400" text-anchor="middle" fill="#526277">1 byte</text>
+<rect x="150" y="253" width="160" height="84" rx="0" fill="#f5f8fc" stroke="#cfd9e6" stroke-width="1.5"/>
+<text x="230.0" y="286" font-size="19" font-weight="700" text-anchor="middle" fill="#172b4d">Payload size</text>
+<text x="230.0" y="314" font-size="17" font-weight="400" text-anchor="middle" fill="#526277">4 bytes · BE</text>
+<rect x="310" y="253" width="298" height="84" rx="0" fill="#f5f8fc" stroke="#cfd9e6" stroke-width="1.5"/>
+<text x="459.0" y="286" font-size="19" font-weight="700" text-anchor="middle" fill="#172b4d">Serialized payload</text>
+<text x="459.0" y="314" font-size="17" font-weight="400" text-anchor="middle" fill="#526277">Magic + bitmap</text>
+<rect x="608" y="253" width="160" height="84" rx="0" fill="#f5f8fc" stroke="#cfd9e6" stroke-width="1.5"/>
+<text x="688.0" y="286" font-size="19" font-weight="700" text-anchor="middle" fill="#172b4d">CRC32</text>
+<text x="688.0" y="314" font-size="17" font-weight="400" text-anchor="middle" fill="#526277">4 bytes · BE</text>
+<rect x="768" y="253" width="280" height="84" rx="0" fill="#f5f8fc" stroke="#cfd9e6" stroke-width="1.5"/>
+<text x="908.0" y="286" font-size="19" font-weight="700" text-anchor="middle" fill="#172b4d">Next vector block</text>
+<text x="908.0" y="314" font-size="17" font-weight="400" text-anchor="middle" fill="#526277">Size | payload | CRC32</text>
+<text x="32" y="370" font-size="21" font-weight="700" text-anchor="start" fill="#172b4d">Each serialized payload uses one of these encodings</text>
+<rect x="32" y="392" width="492" height="232" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="50" y="425" font-size="22" font-weight="700" text-anchor="start" fill="#2166b1">32-bit bitmap  ·  default</text>
+<rect x="50" y="447" width="456" height="76" rx="10" fill="#ffffff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="68" y="478" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Magic number: 1581511376</text>
+<text x="68" y="507" font-size="18" font-weight="400" text-anchor="start" fill="#526277">4 bytes · big-endian</text>
+<rect x="50" y="542" width="456" height="62" rx="10" fill="#ffffff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="278" y="580" font-size="19" font-weight="400" text-anchor="middle" fill="#172b4d">Serialized 32-bit Roaring bitmap</text>
+<rect x="548" y="392" width="500" height="232" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="566" y="425" font-size="22" font-weight="700" text-anchor="start" fill="#10705d">64-bit bitmap</text>
+<rect x="566" y="447" width="464" height="76" rx="10" fill="#ffffff" stroke="#10705d" stroke-width="1.5"/>
+<text x="584" y="478" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Magic number: 1681511377</text>
+<text x="584" y="507" font-size="18" font-weight="400" text-anchor="start" fill="#526277">4 bytes · little-endian</text>
+<rect x="566" y="542" width="464" height="62" rx="10" fill="#ffffff" stroke="#10705d" stroke-width="1.5"/>
+<text x="798" y="567" font-size="18" font-weight="400" text-anchor="middle" fill="#172b4d">Array size (8 bytes LE), then each</text>
+<text x="798" y="592" font-size="18" font-weight="400" text-anchor="middle" fill="#172b4d">index (4 bytes LE) + 32-bit bitmap</text>
+<text x="32" y="667" font-size="18" font-weight="400" text-anchor="start" fill="#526277">BE = big-endian; LE = little-endian. Payload size includes the magic number and bitmap.</text>
+<text x="32" y="694" font-size="18" font-weight="400" text-anchor="start" fill="#526277">The binary payload-size field and the index metadata length are distinct; see the text for details.</text>
+</g>
+</svg>

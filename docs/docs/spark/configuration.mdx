@@ -1,0 +1,93 @@
+---
+title: "Configuration"
+---
+
+import ConfigTable from '@site/src/components/ConfigTable';
+import sparkCatalogConfigurationHtml from '@site/generated/spark_catalog_configuration.html';
+import sparkConnectorConfigurationHtml from '@site/generated/spark_connector_configuration.html';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Configuration
+
+Use the scope that matches the setting you want to change:
+
+| Scope | How to set it | Example |
+| --- | --- | --- |
+| Catalog connection | Startup `--conf spark.sql.catalog.<name>.<key>=<value>` | `spark.sql.catalog.paimon.warehouse=file:/tmp/paimon` |
+| Default options for newly created tables | Catalog option `table-default.<key>` | `spark.sql.catalog.paimon.table-default.file.format=parquet` |
+| Persistent table options | `CREATE TABLE ... TBLPROPERTIES` or `ALTER TABLE ... SET TBLPROPERTIES` | `'bucket' = '4'` |
+| Session options | `SET spark.paimon.<key>=<value>` | `spark.paimon.scan.snapshot-id=1` |
+| Table-specific session options | `SET spark.paimon.<catalog>.<database>.<table>.<key>=<value>` | `spark.paimon.paimon.default.t.scan.snapshot-id=1` |
+| Individual reads or writes | DataFrame `.option("<key>", "<value>")` for options supported by that path | `.option("scan.snapshot-id", "1")` |
+
+Session and operation options are temporary; use table properties for persistent settings.
+Some connector options are session-only. Follow the scope in the option description and the
+relevant feature guide, such as [Schema Evolution on Write](./schema-evolution).
+
+## Set and Reset Session Options
+
+The SET command sets a property, returns the value of an existing property or returns all SQLConf properties with value and meaning.
+The RESET command resets runtime configurations specific to the current session which were set via the SET command to their default values.
+
+To set dynamic options globally, you need add the `spark.paimon.` prefix. You can also set dynamic table options at this format:
+`spark.paimon.${catalogName}.${dbName}.${tableName}.${config_key}`. The catalogName/dbName/tableName can be `*`, which means matching all
+the specific parts. Dynamic table options will override global options if there are conflicts.
+
+```sql
+-- set spark conf
+SET spark.sql.sources.partitionOverwriteMode=dynamic;
+
+-- set paimon conf
+SET spark.paimon.file.block-size=512M;
+
+-- reset conf
+RESET spark.paimon.file.block-size;
+
+-- set scan.snapshot-id=1 for the table default.T in any catalogs
+SET spark.paimon.*.default.T.scan.snapshot-id=1;
+SELECT * FROM default.T;
+
+-- set scan.snapshot-id=1 for the table T in any databases and catalogs
+SET spark.paimon.*.*.T.scan.snapshot-id=1;
+SELECT * FROM default.T;
+
+-- set scan.snapshot-id=2 for the table default.T1 in any catalogs and scan.snapshot-id=1 on other tables
+SET spark.paimon.scan.snapshot-id=1;
+SET spark.paimon.*.default.T1.scan.snapshot-id=2;
+SELECT * FROM default.T1 JOIN default.T2 ON xxxx;
+```
+
+## Spark Catalog Options
+
+<ConfigTable html={sparkCatalogConfigurationHtml} />
+
+## Spark Connector Options
+
+Streaming admission limits operate on whole splits. See [Triggers and Read Limits](./structured-streaming#triggers-and-read-limits)
+for how byte, row, and file thresholds are applied.
+
+<ConfigTable html={sparkConnectorConfigurationHtml} />
+
+## Shared Paimon Options
+
+See [CatalogOptions](../maintenance/configurations#catalogoptions) for catalog settings and
+[CoreOptions](../maintenance/configurations#coreoptions) for storage, scan, retention, and
+other table options.

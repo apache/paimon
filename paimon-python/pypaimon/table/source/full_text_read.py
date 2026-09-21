@@ -18,6 +18,7 @@
 """Full-text read to read index files."""
 
 from abc import ABC, abstractmethod
+from copy import copy
 from concurrent.futures import wait
 from io import BytesIO
 from typing import Dict, List
@@ -71,6 +72,11 @@ class DataEvolutionFullTextRead(FullTextRead):
                 % self._text_columns)
         self._query = query
         self._partition_filter = partition_filter
+
+    def read_plan(self, plan: FullTextScanPlan) -> GlobalIndexResult:
+        reader = copy(self)
+        reader._table = global_index_live_row_filter.table_at_snapshot(self._table, plan.snapshot())
+        return reader.read(plan.splits())
 
     def read(self, splits: List[FullTextSearchSplit]) -> GlobalIndexResult:
         index_splits, raw_splits = _split_search_splits(splits)
@@ -156,7 +162,11 @@ class DataEvolutionFullTextRead(FullTextRead):
             full_text_search = full_text_search.with_include_row_ids(include_row_ids)
 
         offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
-        future = offset_reader.visit_full_text_search(full_text_search)
+        try:
+            future = offset_reader.visit_full_text_search(full_text_search)
+        except BaseException:
+            reader.close()
+            raise
         future.add_done_callback(lambda _: reader.close())
         return future
 

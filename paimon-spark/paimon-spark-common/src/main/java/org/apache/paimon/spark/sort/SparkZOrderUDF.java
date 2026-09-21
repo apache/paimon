@@ -254,7 +254,8 @@ public class SparkZOrderUDF implements Serializable {
                                             inputBuffer(
                                                     position,
                                                     ZOrderByteUtils.PRIMITIVE_BUFFER_SIZE);
-                                    buffer.put(0, (byte) (value ? -127 : 0));
+                                    // FALSE must not encode to the all-zero sentinel.
+                                    buffer.put(0, (byte) (value ? -127 : 1));
                                     return buffer.array();
                                 },
                                 DataTypes.BinaryType)

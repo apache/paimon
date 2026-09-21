@@ -34,6 +34,8 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.read.split_read import SplitRead
+from pypaimon.schema.data_types import AtomicType
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
 
@@ -239,6 +241,115 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         self.assertEqual(actual.column('val').to_pylist(), ['v5'])
         self.assertEqual(actual.column('_ROW_ID').to_pylist(), [5])
 
+    def test_row_sidecar_map_key_uses_full_map_fallback(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('attributes', pa.map_(pa.string(), pa.int64())),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'data-evolution.row-sidecar.enabled': 'true',
+            'file.format': 'parquet',
+        })
+        identifier = 'default.fmt_row_sidecar_map_key'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(pa.Table.from_arrays([
+            pa.array(list(range(100)), type=pa.int32()),
+            pa.array(
+                [[('first', i)] for i in range(100)],
+                type=pa_schema.field('attributes').type),
+        ], schema=pa_schema))
+        cmts = tw.prepare_commit()
+        tc.commit(cmts)
+        tw.close()
+        tc.close()
+
+        data_file = next(
+            nf for manifest in cmts for nf in manifest.new_files
+            if nf.file_name.endswith('.parquet'))
+        self.assertEqual(1, len(self._row_sidecar_files(data_file)))
+        os.remove(self._file_path(data_file))
+
+        rb = table.new_read_builder().with_projection([
+            "attributes['first']", '_ROW_ID',
+        ])
+        pb = rb.new_predicate_builder()
+        rb.with_filter(pb.equal('_ROW_ID', 5))
+        actual = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+
+        self.assertEqual(
+            {'attributes_first': [5], '_ROW_ID': [5]},
+            actual.to_pydict(),
+        )
+
+    def test_row_sidecar_map_key_with_schema_evolution(self):
+        for evolution in ('rename', 'value_type'):
+            with self.subTest(evolution=evolution):
+                pa_schema = pa.schema([
+                    ('id', pa.int32()),
+                    ('attributes', pa.map_(pa.string(), pa.int32())),
+                ])
+                identifier = 'default.fmt_row_sidecar_map_' + evolution
+                schema = Schema.from_pyarrow_schema(pa_schema, options={
+                    'row-tracking.enabled': 'true',
+                    'data-evolution.enabled': 'true',
+                    'data-evolution.row-sidecar.enabled': 'true',
+                    'file.format': 'parquet',
+                })
+                self.catalog.create_table(identifier, schema, False)
+                table = self.catalog.get_table(identifier)
+
+                wb = table.new_batch_write_builder()
+                tw = wb.new_write()
+                tc = wb.new_commit()
+                tw.write_arrow(pa.Table.from_arrays([
+                    pa.array(list(range(100)), type=pa.int32()),
+                    pa.array(
+                        [[('first', i)] for i in range(100)],
+                        type=pa_schema.field('attributes').type),
+                ], schema=pa_schema))
+                cmts = tw.prepare_commit()
+                tc.commit(cmts)
+                tw.close()
+                tc.close()
+
+                data_file = next(
+                    nf for manifest in cmts for nf in manifest.new_files
+                    if nf.file_name.endswith('.parquet'))
+                self.assertEqual(
+                    1, len(self._row_sidecar_files(data_file)))
+                os.remove(self._file_path(data_file))
+
+                if evolution == 'rename':
+                    change = SchemaChange.rename_column(
+                        'attributes', 'renamed_attributes')
+                    projection = "renamed_attributes['first']"
+                else:
+                    change = SchemaChange.update_column_type(
+                        ['attributes', 'value'], AtomicType('BIGINT'))
+                    projection = "attributes['first']"
+                self.catalog.alter_table(identifier, [change], False)
+                table = self.catalog.get_table(identifier)
+
+                rb = table.new_read_builder().with_projection([
+                    projection, '_ROW_ID',
+                ])
+                pb = rb.new_predicate_builder()
+                rb.with_filter(pb.equal('_ROW_ID', 5))
+                actual = rb.new_read().to_arrow(
+                    rb.new_scan().plan().splits())
+
+                self.assertEqual([5], actual.column(0).to_pylist())
+                if evolution == 'value_type':
+                    self.assertEqual(
+                        pa.int64(), actual.schema.field(0).type)
+
     def test_parquet_column_subset_write_and_merge_read(self):
         """Write disjoint column subsets as parquet, merge-read via data evolution."""
         pa_schema = pa.schema([
@@ -383,7 +494,9 @@ class DataEvolutionFormatsTest(unittest.TestCase):
             {'a': [1, 2, 3, 4], 'b': ['x', 'y', 'z', 'w'],
              'c': [0.1, 0.2, 0.3, 0.4]},
             schema=pa_schema)
-        self.assertEqual(actual, expect)
+        # Table scans are unordered; native planning may emit merged groups
+        # before raw groups.
+        self.assertEqual(actual.sort_by('a'), expect.sort_by('a'))
 
     # ------------------------------------------------------------------
     # Blob-format data evolution

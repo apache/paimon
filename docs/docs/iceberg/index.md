@@ -1,5 +1,5 @@
 ---
-title: "Iceberg Metadata"
+title: "Iceberg Compatibility"
 sidebar_position: 98
 ---
 
@@ -22,99 +22,71 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Overview
+# Iceberg Compatibility
 
-Paimon supports generating Iceberg compatible metadata,
-so that Paimon tables can be consumed directly by Iceberg readers.
+Paimon can publish Iceberg metadata that points to its existing data files. This lets applications
+query a Paimon table through an Iceberg connector while Paimon continues to manage writes,
+compaction, and data retention.
 
-Set the following table options, so that Paimon tables can generate Iceberg compatible metadata.
+![Paimon commits publish Iceberg metadata; both readers access the same data files.](/img/iceberg-publication.svg)
 
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style={{width: "20%"}}>Option</th>
-      <th class="text-left" style={{width: "5%"}}>Default</th>
-      <th class="text-left" style={{width: "10%"}}>Type</th>
-      <th class="text-left" style={{width: "60%"}}>Description</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><h5>metadata.iceberg.storage</h5></td>
-      <td style={{wordWrap: "break-word"}}>disabled</td>
-      <td>Enum</td>
-      <td>
-        When set, produce Iceberg metadata after a snapshot is committed, so that Iceberg readers can read Paimon's raw data files.
-        <ul>
-          <li><code>disabled</code>: Disable Iceberg compatibility support.</li>
-          <li><code>table-location</code>: Store Iceberg metadata in each table's directory.</li>
-          <li><code>hadoop-catalog</code>: Store Iceberg metadata in a separate directory. This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog.</li>
-          <li><code>hive-catalog</code>: Not only store Iceberg metadata like hadoop-catalog, but also create Iceberg external table in Hive.</li>
-        </ul>
-      </td>
-    </tr>
-    <tr>
-      <td><h5>metadata.iceberg.storage-location</h5></td>
-      <td style={{wordWrap: "break-word"}}>(none)</td>
-      <td>Enum</td>
-      <td>
-        Specifies where to store Iceberg metadata files. If not set, the storage location will default based on the selected metadata.iceberg.storage type.
-        <ul>
-          <li><code>table-location</code>: Store Iceberg metadata in each table's directory. Useful for standalone Iceberg tables or Iceberg Java API access. Can also be used with Hive Catalog.</li>
-          <li><code>catalog-location</code>: Store Iceberg metadata in a separate directory. This is the default behavior when using Hive Catalog or Hadoop Catalog.</li>
-        </ul>
-      </td>
-    </tr>
-    </tbody>
-</table>
+## Start Here
 
-For most SQL users, we recommend setting `'metadata.iceberg.storage' = 'hadoop-catalog'`
-or `'metadata.iceberg.storage' = 'hive-catalog'`,
-so that all tables can be visited as an Iceberg warehouse.
-For Iceberg Java API users, you might consider setting `'metadata.iceberg.storage' = 'table-location'`,
-so you can visit each table with its table path.
-When using `metadata.iceberg.storage = hadoop-catalog` or `hive-catalog`,
-you can optionally configure `metadata.iceberg.storage-location` to control where the metadata is stored.
-If not set, the default behavior depends on the storage type.
+| Task | Guide |
+| --- | --- |
+| Read your first Paimon table through Flink or Spark's Iceberg connector | [Append tables](./append-table.mdx) |
+| Read updates and deletes from a primary key table | [Primary key tables](./primary-key-table.mdx) |
+| Choose Hadoop, Hive, REST, or path-based access | [Catalogs and metadata layout](./catalogs.md) |
+| Query a named historical snapshot | [Tags](./iceberg-tags.md) |
+| Connect Trino, Athena, or DuckDB | [Query engines](./ecosystem.mdx) |
+| Check column types and format requirements | [Data types](./data-types.md) |
+| Look up table options | [Configuration reference](./configurations.mdx) |
+
+## How Publication Works
+
+1. A writer commits a Paimon snapshot.
+2. Paimon generates Iceberg manifests and snapshot metadata for the files eligible for Iceberg reads.
+3. With Hive or REST storage, Paimon also publishes the metadata to the external catalog.
+4. An Iceberg reader loads the published metadata and reads the referenced data files directly.
+
+Enable publication with the Paimon table option `metadata.iceberg.storage`; its default is `disabled`.
+For a first example, use `hadoop-catalog`. The Iceberg warehouse is then
+`<paimon-warehouse>/iceberg`, using the default metadata layout.
+
+```sql
+'metadata.iceberg.storage' = 'hadoop-catalog'
+```
+
+Metadata publication does not copy the table's data. Iceberg readers therefore need access to both
+the metadata location and the original Paimon data files, including the required filesystem
+configuration and credentials.
+
+## What Iceberg Readers See
+
+| Paimon table | Files eligible for incremental publication | When changes become visible |
+| --- | --- | --- |
+| Append table | Data files in the committed snapshot | After metadata publication and reader refresh |
+| Primary key table without Iceberg deletion vectors | Files at the highest LSM level | After full compaction, metadata publication, and reader refresh |
+| Primary key table with Iceberg v3 deletion vectors | Files above L0, together with deletion vectors | After changes reach those files and metadata is published and refreshed |
+
+Initial publication and metadata rebuilds use snapshot splits that can be read directly without
+Paimon's merge logic. The table above describes subsequent incremental publication. Use compaction
+to establish a predictable visibility boundary for primary key tables.
+
+The [primary key guide](./primary-key-table.mdx) explains both modes and their configuration.
+Disabling an Iceberg catalog's cache can help with interactive verification, but cannot make
+uncompacted or unpublished changes visible.
+
+:::caution Manage the table through Paimon
+
+Use the Iceberg representation for reads. Perform writes, schema changes, compaction, snapshot
+expiration, and file cleanup through Paimon. Both representations refer to shared data files;
+independent Iceberg mutations or cleanup can invalidate Paimon's view of the table.
+
+:::
 
 ## Supported Types
 
-Paimon Iceberg compatibility currently supports the following data types.
-
-| Paimon Data Type | Iceberg Data Type |
-|----------------|-------------------|
-| `BOOLEAN`      | `boolean`         |
-| `INT`          | `int`             |
-| `BIGINT`       | `long`            |
-| `FLOAT`        | `float`           |
-| `DOUBLE`       | `double`          |
-| `DECIMAL`      | `decimal`         |
-| `CHAR`         | `string`          |
-| `VARCHAR`      | `string`          |
-| `BINARY`       | `binary`          |
-| `VARBINARY`    | `binary`          |
-| `DATE`         | `date`            |
-| `TIMESTAMP` (precision 3-6)   | `timestamp`       |
-| `TIMESTAMP_LTZ` (precision 3-6) | `timestamptz`     |
-| `TIMESTAMP` (precision 7-9)  | `timestamp_ns`    |
-| `TIMESTAMP_LTZ` (precision 7-9) | `timestamptz_ns`  |
-| `GEOMETRY(crs)` | `geometry(crs)` |
-| `GEOGRAPHY(crs, algorithm)` | `geography(crs, algorithm)` |
-| `ARRAY`        | `list`            |
-| `MAP`          | `map`             |
-| `ROW`          | `struct`          |
-
-:::info
-
-**Note on Timestamp Types:**
-- `TIMESTAMP` and `TIMESTAMP_LTZ` types with precision from 3 to 6 are mapped to standard Iceberg timestamp types
-- `TIMESTAMP` and `TIMESTAMP_LTZ` types with precision from 7 to 9 use nanosecond precision and require Iceberg v3 format
-
-**Note on Geospatial Types:**
-- `GEOMETRY` and `GEOGRAPHY` values use OGC Well-Known Binary (WKB). The default CRS is `OGC:CRS84`, and the default geography edge algorithm is `spherical`.
-- Geospatial columns require Parquet for data, per-level, and changelog files. When Iceberg metadata is enabled, set `metadata.iceberg.format-version` to `3`.
-- Spark SQL supports geospatial columns in Spark 4.1 when `spark.sql.geospatial.enabled=true`, for CRSs recognized by Spark, with the `spherical` geography edge algorithm. Spark 3.x, Spark 4.0, and Flink SQL reject these columns instead of exposing them as binary and losing the CRS or edge algorithm.
-- When Iceberg metadata is enabled, a `GEOGRAPHY` CRS cannot contain a comma, including in nested columns, because Iceberg's geospatial type grammar uses commas to separate parameters.
-- Iceberg REST catalog publication does not yet support geospatial columns. Use `table-location`, `hadoop-catalog`, or `hive-catalog` metadata storage instead.
-
-:::
+Compatibility depends on the column types, data file format, Iceberg format version, and reader.
+See [supported data types and precision limits](./data-types.md) before enabling publication on an
+existing table. Primary key deletion vectors and geospatial columns require Iceberg format v3.

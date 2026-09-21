@@ -54,11 +54,177 @@ for batch_idx, batch_data in enumerate(dataloader):
 #   {'user_id': tensor([7, 8]), 'behavior': ['g', 'h']}
 ```
 
-When the `streaming` parameter is true, it will iteratively read;
-when it is false, it will read the full amount of data into memory.
+When the `streaming` parameter is true, it will iteratively read. When it is
+false, eligible data-evolution reads fetch each DataLoader batch lazily by row
+ID; other reads retain an Arrow table in memory for map-style access.
 
-**`prefetch_concurrency`** (default: 1): When streaming is true, number of threads used for parallel prefetch within each DataLoader worker. Set to a value greater than 1 to partition splits across threads and increase read throughput. Has no effect when streaming is false.
+**`prefetch_concurrency`** (default: 1): In streaming row mode, controls
+reader threads per DataLoader worker. It has no effect in non-streaming mode.
 
+### Distributed Sharding
+
+Streaming reads shard splits across DDP ranks and DataLoader workers:
+
+```python
+def main():
+    dataset = table_read.to_torch(
+        splits,
+        streaming=True,
+        auto_detect_rank=True,
+    )
+    dataloader = DataLoader(
+        dataset,
+        batch_size=32,
+        num_workers=2,
+        multiprocessing_context="spawn",
+    )
+
+    with model.join():
+        for batch in dataloader:
+            train(batch)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Automatic rank sharding is opt-in. Enable it only when every rank receives the
+same ordered, complete splits from one snapshot; leave it disabled for splits
+already sharded by the application.
+Automatic detection uses the default process group. For subgroup DDP, resolve
+the context from the group before creating the DataLoader:
+
+```python
+import torch.distributed as dist
+
+dataset = table_read.to_torch(
+    splits,
+    streaming=True,
+    sharding_rank=dist.get_rank(ddp_group),
+    sharding_world_size=dist.get_world_size(ddp_group),
+)
+```
+
+With multi-worker DDP, use `spawn` (or `forkserver`) and create and iterate the
+DataLoader through an `if __name__ == "__main__":` guarded entry point.
+A rank may receive fewer rows because splits have different sizes; `join()`
+keeps DDP collectives aligned while preserving every row without duplication.
+A limit that may truncate the input is rejected when multiple ranks are active.
+
+### Batch Streaming
+
+For batch-oriented training, make the streaming dataset yield batches directly:
+
+```python
+dataset = table_read.to_torch(
+    splits,
+    streaming=True,
+    batch_format="torch",
+    batch_size=1024,
+)
+dataloader = DataLoader(dataset, batch_size=None, num_workers=2)
+
+for batch in dataloader:
+    train(batch["features"], batch["label"])
+```
+
+`batch_format="pyarrow"` yields PyArrow `RecordBatch` objects instead;
+`batch_format="torch"` yields dictionaries of tensors. The default Tensor
+converter supports non-null numeric, boolean, and numeric fixed-size-list
+columns. Use `to_tensor_fn` for other types or custom conversion.
+
+Omit `batch_size` to preserve native reader batches. Otherwise, batches are
+combined or sliced to the requested size. Use `DataLoader(batch_size=None)` to
+disable a second batching step. Batch streaming does not support `shuffle=True`.
+Numeric tensors may share read-only Arrow buffers; clone them before in-place
+mutation. Batch formats currently require `prefetch_concurrency=1`.
+
+## Video frame descriptors
+
+For a multimodal frame table, use the higher-level scan API:
+
+```python
+dataset = (
+    frames.scan()
+    .select(["episode_id", "state", "action", "video"])
+    .to_torch(streaming=True)
+)
+```
+
+The `.video` column yields serialized `VideoFrameDescriptor` values whose
+embedded frame ordinals keep frame mapping out of the normal data file. Use
+`pypaimon.multimodal.VideoFrameCollator` as the DataLoader `collate_fn` to open
+physical video ranges and cache decoder sessions per worker. See
+[Multimodal API: Video Frame Storage](video#video-frame-storage)
+for the write path and a complete decoder example.
+## Contiguous Windows
+
+Use a map-style `ContiguousWindowDataset` to construct training samples from
+one materialized frame table. Each field can have its own history or future
+window, and windows never cross a sequence boundary. The dataset builds an index
+from only the group column, order column, and Paimon row IDs. Projected values,
+including BLOB payloads, are read from the pinned snapshot when a sample is
+requested; they are not retained in the index.
+
+```python
+from functools import partial
+
+import torch
+from torch.utils.data import DataLoader
+from pypaimon.multimodal.window_transforms import images_to_tensor, to_tensor
+
+dataset = (
+    frames.scan()
+    .to_contiguous_window_dataset(
+        columns=["state", "image", "action"],
+        frame_offsets={"state": [-2, -1, 0], "action": list(range(16))},
+        group_key="episode_index",
+        order_key="frame_index",
+        boundary="pad",
+        column_transforms={
+            "state": partial(to_tensor, dtype=torch.float32),
+            "action": partial(to_tensor, dtype=torch.float32),
+            "image": images_to_tensor,
+        },
+    )
+)
+
+loader = DataLoader(dataset, batch_size=32, num_workers=4, shuffle=True)
+```
+
+Each raw item contains scalar group/order keys, a list for every selected column,
+and a Boolean `<column>_is_pad` tensor where `True` marks padding. Unspecified
+field offsets default to `[0]`. The example produces state/action tensors with
+time lengths 3/16 and an image tensor of shape `(1, C, H, W)`; DataLoader adds the
+batch dimension. `pad_values` can replace endpoint repetition for individual
+columns, before any transforms. `adapter` can normalize or rename fields and
+produce a model-specific mapping. Keep callbacks picklable for multiple workers.
+
+Scheduled anchors start at each group's first row and advance by `stride`
+(default `1`). `boundary="drop"` (default) omits anchors incomplete for any
+field, `boundary="pad"` pads either end, and `boundary="error"` rejects any
+scheduled incomplete window. `delta_timestamps` with an explicit `fps` is an
+alternative to integer offsets, with frame-grid alignment checked against
+`tolerance_s`. Existing `window_size`/`anchor_columns`/`tail` calls retain their
+single `is_pad` output. See [multimodal reading](multimodal-reading#contiguous-windows-for-pytorch)
+for the full sample and conversion contract.
+Rows are sorted by `order_key` inside each `group_key` value. Order values must
+be integers which increase by exactly one; duplicates and missing steps are
+rejected, and windows never cross groups. The resolved Paimon
+snapshot is pinned for the lifetime of the dataset, so later commits cannot
+change its index or sample contents. A dataset pinned through `tag_name` fails
+its reads if the tag is moved to another snapshot, rather than mixing rows from
+the two snapshots.
+
+Use normal PyTorch samplers for shuffling and distributed training. For DDP,
+pass `DistributedSampler(dataset)` to DataLoader, omit `shuffle=True`, and call
+the sampler's `set_epoch(epoch)` each epoch. Its padding or drop behavior still
+applies when the sample count is not divisible by the number of ranks. Dataset
+version pinning does not save sampler progress or random augmentation state.
+
+Columns configured by `video-frame-field` are rejected: a window read would drop
+the `frame_index` and other metadata carried by their `VideoFrameDescriptor`
+values. Read those columns with `to_torch()` instead.
 ## File Format Metadata Cache
 
 Reusable PyArrow Dataset metadata is cached across reads. Configure its estimated

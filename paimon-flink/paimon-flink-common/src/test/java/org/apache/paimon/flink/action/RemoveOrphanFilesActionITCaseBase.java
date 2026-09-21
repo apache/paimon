@@ -25,6 +25,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -274,7 +275,8 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
 
         // create first branch and write some data
         table.createBranch("br");
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location(), "br");
+        SchemaManager schemaManager =
+                new FileSystemSchemaManager(table.fileIO(), table.location(), "br");
         TableSchema branchSchema =
                 schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.INT()));
         Options branchOptions = new Options(branchSchema.options());

@@ -1,10 +1,6 @@
 ---
 title: "Multimodal Table"
-sidebar_position: 4
 ---
-
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
 
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -27,23 +23,68 @@ under the License.
 
 # Overview
 
-Multimodal Table extends the Append Table with capabilities for storing and querying multimodal data — images, videos,
-audio, vectors, and full-text content — all within a single table. It is built on top of the
-[Data Evolution](./data-evolution) mode, which enables efficient partial column updates and schema evolution without
-rewriting entire data files.
+A multimodal table keeps metadata, binary payloads, embeddings, and text in one
+logical table. An ingestion pipeline can append records, enrich selected columns,
+and build indexes for filtering or retrieval.
 
-Key capabilities:
+This chapter focuses on append tables with **Data Evolution**: column files share
+row IDs, so adding captions or replacing embeddings can leave large media payloads
+in their existing files. It is an append table with additional storage and update
+capabilities, not a primary-key table that deduplicates records by a business key.
 
-- **[Data Evolution](./data-evolution)**: Update partial columns without rewriting entire files, enabling efficient schema evolution.
-- **[Variant Storage](./variant)**: Store and query schema-flexible semi-structured data with optional typed sub-column shredding.
-- **[Blob Storage](./blob)**: Store large binary objects (images, videos, audio) in dedicated `.blob` files with efficient column projection.
-- **[Vector Storage](./vector)**: Store and manage vector embeddings in dedicated Vortex-format files optimized for vector workloads.
-- **[Global Index](./global-index)**: Build BTree, Bitmap, Multivalue, vector, and full-text indexes for efficient lookups and similarity search.
+![One logical record combines normal columns, dedicated BLOB payloads, and optional dedicated vectors by row ID; indexes select matching row IDs for reads.](/img/multimodal-table-overview.svg)
 
-Data Evolution, Blob Storage, Vector Storage, and Global Index require the following table properties.
-Variant Storage can also be used in a regular Paimon table without these properties:
+## Start Here
+
+Follow the [Quick Start](./quick-start) to create a table, write sample data, update
+selected columns, and build a scalar index. It uses Spark SQL in a configured
+Paimon catalog. The topic pages also provide Flink, Java, and Python examples where
+supported.
+
+| If you need to… | Read |
+| --- | --- |
+| Store images, audio, documents, or collections of binary objects | [BLOB Storage](./blob) |
+| Reuse payloads across tables or export a temporary URL | [BLOB References and Sharing](./blob-references) |
+| Address video frames while storing complete encoded videos | [Video Frame Storage](./video) |
+| Store fixed-dimension embeddings | [Vector Storage](./vector) |
+| Query metadata whose structure varies between rows | [Variant Storage](./variant) |
+| Backfill or replace selected columns; update and delete rows | [Data Evolution](./data-evolution) |
+| Understand file ranges, column versions, and row reconstruction | [File Layout and Reads](./data-evolution-file-layout) |
+| Compact column files or materialize logical deletions | [Data Evolution Maintenance](./data-evolution-maintenance) |
+| Choose an index and retrieve matching records | [Global Index](./global-index) |
+
+## Choose Storage and Indexing Separately
+
+Storage determines how values are represented and read. Indexes determine how
+queries find matching row IDs. A stored vector does not automatically have an ANN
+index, and a text column does not automatically have a full-text index.
+
+| Capability | Setup for this append-table workflow |
+| --- | --- |
+| Partial-column updates and managed BLOB storage | Enable `row-tracking.enabled` and `data-evolution.enabled` at table creation. |
+| Dedicated vector files | Enable both properties above and set `vector.file.format = vortex`. |
+| Global indexes | Use a Data Evolution table, load data, then explicitly build indexes. |
+| Variant | Use Parquet and a supported engine; Data Evolution is optional. |
+
+Data Evolution requires no primary key and `bucket = -1`, the default for append
+tables. The basic properties are:
 
 ```sql
 'row-tracking.enabled' = 'true',
 'data-evolution.enabled' = 'true'
 ```
+
+For JVM primary-key workloads, use the separate guides for
+[BLOB storage](../primary-key-table/blob-storage) and
+[indexes](../primary-key-table/global-index). Their requirements differ from this chapter.
+
+## Plan for Updates and Freshness
+
+- A normal-column update writes the selected columns over complete affected file
+  ranges. It saves I/O on untouched columns; it can still process more rows than
+  the update predicate matches.
+- Appending data does not refresh existing indexes. The default `fast` search mode
+  can omit uncovered rows; choose a [coverage policy](./global-index/manage-indexes#coverage-and-freshness).
+- Ordinary updates and compaction preserve row IDs. Some maintenance operations
+  reassign them; coordinate [row-ID lifetime](./data-evolution-maintenance#row-id-lifetime)
+  with BLOB views or applications that persist row references.

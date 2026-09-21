@@ -37,6 +37,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -52,8 +53,8 @@ import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.ColStats;
@@ -363,6 +364,45 @@ public class FileStoreCommitTest {
                                             .map(ManifestCommittable::new)
                                             .collect(Collectors.toList())))
                     .isEmpty();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"commit.last-safe-snapshot", "commit.strict-mode.last-safe-snapshot"})
+    public void testFilterCommittedWithStrictModeDisabled(String lastSafeKey) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(lastSafeKey, "2");
+        options.put(CoreOptions.COMMIT_STRICT_MODE_ENABLED.key(), "false");
+        TestFileStore store = createStore(false, options);
+        try (FileStoreCommit commit = store.newCommit("older-user", null)) {
+            commit.ignoreEmptyCommit(false);
+            commit.commit(new ManifestCommittable(1), false);
+            commit.commit(new ManifestCommittable(2), false);
+        }
+
+        // A disabled strict checker must still honor the search bound. Fail if the lookup
+        // reaches old history, rather than relying on timing to detect a full history scan.
+        Path oldSnapshot = store.snapshotManager().snapshotPath(1);
+        store.fileIO().deleteQuietly(oldSnapshot);
+        store.fileIO().writeFile(oldSnapshot, "not a snapshot", false);
+        store.snapshotManager().invalidateCache();
+        ManifestCommittable pending = new ManifestCommittable(10);
+        try (FileStoreCommit commit = store.newCommit("new-user", null)) {
+            assertThat(commit.filterCommitted(Collections.singletonList(pending)))
+                    .containsExactly(pending);
+            commit.ignoreEmptyCommit(false);
+            commit.commit(pending, false);
+        }
+        try (FileStoreCommit commit = store.newCommit("other-user", null)) {
+            commit.ignoreEmptyCommit(false);
+            commit.commit(new ManifestCommittable(1), false);
+        }
+
+        // Recovery after a successful commit with a lost response still deduplicates it.
+        try (FileStoreCommit recovered = store.newCommit("new-user", null)) {
+            ManifestCommittable next = new ManifestCommittable(11);
+            assertThat(recovered.filterCommitted(Arrays.asList(pending, next)))
+                    .containsExactly(next);
         }
     }
 
@@ -1127,6 +1167,66 @@ public class FileStoreCommitTest {
         assertThat(store.fileIO().exists(compactDeletedPath)).isTrue();
     }
 
+    @Test
+    public void testAbortDataFileWithExtraFiles() throws Exception {
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        BinaryRow partition = gen.getPartition(gen.next());
+        DataFilePathFactory pathFactory =
+                store.pathFactory().createDataFilePathFactory(partition, 0);
+
+        Path dataNewPath = pathFactory.newPath();
+        DataFileMeta dataNew = createDataFileWithExtraFile(store, dataNewPath, false);
+        Path compactNewPath = new Path(tempDir.resolve("external-compact-new.orc").toUri());
+        DataFileMeta compactNew = createDataFileWithExtraFile(store, compactNewPath, true);
+
+        CommitMessage commitMessage =
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        store.options().bucket(),
+                        new DataIncrement(
+                                Collections.singletonList(dataNew),
+                                Collections.emptyList(),
+                                Collections.emptyList()),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.singletonList(compactNew),
+                                Collections.emptyList()));
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.abort(Collections.singletonList(commitMessage));
+        }
+
+        for (Path path : dataNew.collectFiles(pathFactory)) {
+            assertThat(store.fileIO().exists(path)).isFalse();
+        }
+        for (Path path : compactNew.collectFiles(pathFactory)) {
+            assertThat(store.fileIO().exists(path)).isFalse();
+        }
+    }
+
+    private static DataFileMeta createDataFileWithExtraFile(
+            TestAppendFileStore store, Path path, boolean external) throws Exception {
+        store.fileIO().newOutputStream(path, false).close();
+        Path extraPath = new Path(path.getParent(), path.getName() + ".index");
+        store.fileIO().newOutputStream(extraPath, false).close();
+        return DataFileMeta.forAppend(
+                path.getName(),
+                0,
+                0,
+                EMPTY_STATS,
+                0,
+                0,
+                0,
+                Collections.singletonList(extraPath.getName()),
+                null,
+                null,
+                null,
+                external ? path.toString() : null,
+                null,
+                null);
+    }
+
     private static IndexFileMeta createIndexFile(
             TestAppendFileStore store, Path path, boolean external) throws Exception {
         store.fileIO().newOutputStream(path, false).close();
@@ -1275,9 +1375,71 @@ public class FileStoreCommitTest {
                 .isEqualTo(store.toKvMap(Collections.singletonList(original)));
     }
 
-    @Test
-    public void testManifestCompact() throws Exception {
-        TestFileStore store = createStore(false);
+    @ParameterizedTest
+    @CsvSource({
+        "false,false,default",
+        "false,true,default",
+        "true,false,default",
+        "true,true,default",
+        "false,false,true",
+        "false,true,true",
+        "true,false,true",
+        "true,true,true",
+        "false,false,false",
+        "false,true,false",
+        "true,false,false",
+        "true,true,false"
+    })
+    public void testCommitManifestMerge(
+            boolean sortEnabled, boolean writeOnly, String skipOnWriteOnly) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MANIFEST_MERGE_MIN_COUNT.key(), "2");
+        options.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), String.valueOf(sortEnabled));
+        options.put(CoreOptions.WRITE_ONLY.key(), String.valueOf(writeOnly));
+        if (!"default".equals(skipOnWriteOnly)) {
+            options.put(CoreOptions.MANIFEST_MERGE_SKIP_ON_WRITE_ONLY.key(), skipOnWriteOnly);
+        }
+        TestFileStore store = createStore(false, options);
+        // Override the randomized manifest size in TestFileStore to keep both files under budget.
+        store.options().toConfiguration().set(CoreOptions.MANIFEST_TARGET_FILE_SIZE.key(), "8 mb");
+        List<KeyValue> expected = new ArrayList<>();
+        List<ManifestFileMeta> previousManifests = Collections.emptyList();
+        for (int i = 0; i < 3; i++) {
+            KeyValue kv = gen.nextInsert("20211110", 8, (long) i, null, "value-" + i);
+            expected.add(kv);
+            Snapshot snapshot =
+                    store.commitData(Collections.singletonList(kv), gen::getPartition, value -> 0)
+                            .get(0);
+            if (i == 1) {
+                previousManifests =
+                        store.manifestListFactory().create().readDataManifests(snapshot);
+            }
+        }
+
+        Snapshot latest = store.snapshotManager().latestSnapshot();
+        List<ManifestFileMeta> baseManifests =
+                store.manifestListFactory()
+                        .create()
+                        .read(latest.baseManifestList(), latest.baseManifestListSize());
+        if (writeOnly && "true".equals(skipOnWriteOnly)) {
+            assertThat(baseManifests).hasSize(2).containsExactlyElementsOf(previousManifests);
+        } else {
+            assertThat(baseManifests).hasSize(1);
+            assertThat(baseManifests.get(0).numAddedFiles()).isEqualTo(2);
+        }
+        assertThat(store.toKvMap(store.readKvsFromSnapshot(latest.id())))
+                .isEqualTo(store.toKvMap(expected));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"true,false", "false,false", "true,true", "false,true"})
+    public void testManifestCompact(boolean skipOnWriteOnly, boolean writeOnly) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                CoreOptions.MANIFEST_MERGE_SKIP_ON_WRITE_ONLY.key(),
+                String.valueOf(skipOnWriteOnly));
+        options.put(CoreOptions.WRITE_ONLY.key(), String.valueOf(writeOnly));
+        TestFileStore store = createStore(false, options);
 
         List<KeyValue> keyValues = generateDataList(1);
         BinaryRow partition = gen.getPartition(keyValues.get(0));
@@ -1307,21 +1469,17 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testManifestSortCompactManifestRespectsCompactionThresholds() {
+    public void testManifestSortCompactManifestUsesFullCompactionThresholds() {
         Options options = new Options();
         options.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
         options.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 100);
         options.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), Long.MAX_VALUE + "B");
 
         CoreOptions compactOptions =
-                FileStoreCommitImpl.manifestCompactionOptions(
-                        new CoreOptions(options),
-                        Collections.emptyList(),
-                        TestKeyValueGenerator.DEFAULT_PART_TYPE);
+                FileStoreCommitImpl.manifestCompactionOptions(new CoreOptions(options));
 
-        assertThat(compactOptions.manifestMergeMinCount()).isEqualTo(100);
-        assertThat(compactOptions.manifestFullCompactionThresholdSize().getBytes())
-                .isEqualTo(Long.MAX_VALUE);
+        assertThat(compactOptions.manifestMergeMinCount()).isEqualTo(1);
+        assertThat(compactOptions.manifestFullCompactionThresholdSize().getBytes()).isEqualTo(1);
     }
 
     @Test
@@ -2037,7 +2195,7 @@ public class FileStoreCommitTest {
         return new FileStoreCommitImpl(
                 snapshotCommit,
                 store.fileIO(),
-                new SchemaManager(store.fileIO(), store.options().path()),
+                new FileSystemSchemaManager(store.fileIO(), store.options().path()),
                 tableName,
                 commitUser,
                 store.partitionType(),
@@ -2062,6 +2220,7 @@ public class FileStoreCommitTest {
                                 store.bucketMode(),
                                 options.deletionVectorsEnabled(),
                                 dataEvolutionEnabled,
+                                options.dataEvolutionNestedFieldEnabled(),
                                 options.pkClusteringOverride(),
                                 store.newIndexFileHandler(),
                                 store.snapshotManager(),
@@ -2369,7 +2528,7 @@ public class FileStoreCommitTest {
                                 TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(new LocalFileIO(), path),
+                        new FileSystemSchemaManager(new LocalFileIO(), path),
                         new Schema(
                                 TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
                                 TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),

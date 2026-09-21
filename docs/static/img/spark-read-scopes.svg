@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="490" viewBox="0 0 900 490" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Choose the scope of a read</title>
+<desc id="desc">A snapshot query reads the complete table state at one snapshot. A bounded incremental query uses an exclusive start and inclusive end. A latest-full stream reads initial state and subsequent changes. Incremental output depends on scan mode and commit kind.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="1" y="1" width="898" height="488" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">Choose the scope of a read</text>
+<text x="28" y="76" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Table state and change intervals answer different questions</text>
+<text x="28" y="144" font-size="22" fill="#172b4d" font-weight="700" text-anchor="start">Snapshot</text>
+<text x="28" y="173" font-size="17" fill="#526277" font-weight="400" text-anchor="start">One table state</text>
+<text x="28" y="254" font-size="22" fill="#172b4d" font-weight="700" text-anchor="start">Incremental</text>
+<text x="28" y="283" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Bounded changes</text>
+<text x="28" y="364" font-size="22" fill="#172b4d" font-weight="700" text-anchor="start">Streaming</text>
+<text x="28" y="393" font-size="17" fill="#526277" font-weight="400" text-anchor="start">latest-full startup</text>
+<path d="M 250 143 H 858" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 250 253 H 858" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 250 363 H 858" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="250" y="119" width="66" height="48" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="283" y="149" font-size="20" fill="#526277" font-weight="400" text-anchor="middle">S5</text>
+<rect x="382" y="119" width="66" height="48" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="415" y="149" font-size="20" fill="#526277" font-weight="400" text-anchor="middle">S6</text>
+<rect x="514" y="119" width="66" height="48" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="547" y="149" font-size="20" fill="#526277" font-weight="400" text-anchor="middle">S7</text>
+<rect x="646" y="119" width="66" height="48" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/>
+<text x="679" y="149" font-size="20" fill="#087f6e" font-weight="700" text-anchor="middle">S8</text>
+<rect x="778" y="119" width="66" height="48" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="811" y="149" font-size="20" fill="#526277" font-weight="400" text-anchor="middle">S9</text>
+<text x="679" y="194" font-size="17" fill="#087f6e" font-weight="700" text-anchor="middle">full state</text>
+<rect x="375" y="225" width="344" height="55" rx="8" fill="#e8f7f2" stroke="#b8dcd2" stroke-width="1.5"/>
+<rect x="250" y="229" width="66" height="48" rx="8" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="283" y="259" font-size="20" fill="#526277" font-weight="400" text-anchor="middle">S5</text>
+<rect x="382" y="229" width="66" height="48" rx="8" fill="#ffffff" stroke="#087f6e" stroke-width="1.5"/>
+<text x="415" y="259" font-size="20" fill="#087f6e" font-weight="400" text-anchor="middle">S6</text>
+<rect x="514" y="229" width="66" height="48" rx="8" fill="#ffffff" stroke="#087f6e" stroke-width="1.5"/>
+<text x="547" y="259" font-size="20" fill="#087f6e" font-weight="400" text-anchor="middle">S7</text>
+<rect x="646" y="229" width="66" height="48" rx="8" fill="#ffffff" stroke="#087f6e" stroke-width="1.5"/>
+<text x="679" y="259" font-size="20" fill="#087f6e" font-weight="400" text-anchor="middle">S8</text>
+<rect x="778" y="229" width="66" height="48" rx="8" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="811" y="259" font-size="20" fill="#526277" font-weight="400" text-anchor="middle">S9</text>
+<text x="283" y="308" font-size="16" fill="#526277" font-weight="400" text-anchor="middle">start excluded</text>
+<text x="679" y="308" font-size="16" fill="#087f6e" font-weight="400" text-anchor="middle">end included</text>
+<rect x="250" y="339" width="66" height="48" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/>
+<text x="283" y="369" font-size="20" fill="#087f6e" font-weight="700" text-anchor="middle">S8</text>
+<rect x="382" y="339" width="66" height="48" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="415" y="369" font-size="20" fill="#2463b4" font-weight="700" text-anchor="middle">S9</text>
+<rect x="514" y="339" width="66" height="48" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="547" y="369" font-size="20" fill="#2463b4" font-weight="700" text-anchor="middle">S10</text>
+<rect x="646" y="339" width="66" height="48" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="679" y="369" font-size="20" fill="#2463b4" font-weight="700" text-anchor="middle">S11</text>
+<text x="811" y="369" font-size="24" fill="#2463b4" font-weight="700" text-anchor="middle">…</text>
+<text x="283" y="418" font-size="16" fill="#087f6e" font-weight="400" text-anchor="middle">initial full state</text>
+<text x="546" y="418" font-size="17" fill="#2463b4" font-weight="400" text-anchor="middle">then keep reading changes</text>
+<text x="28" y="460" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Incremental output depends on scan mode and commit kind; it is not a replay of every commit.</text>
+</g>
+</svg>

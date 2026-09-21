@@ -25,6 +25,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.beans.ConstructorProperties;
 import java.util.Map;
 
 /** Request for creating database. */
@@ -41,6 +42,7 @@ public class CreateDatabaseRequest implements RESTRequest {
     private final Map<String, String> options;
 
     @JsonCreator
+    @ConstructorProperties({FIELD_NAME, FIELD_OPTIONS})
     public CreateDatabaseRequest(
             @JsonProperty(FIELD_NAME) String name,
             @JsonProperty(FIELD_OPTIONS) Map<String, String> options) {

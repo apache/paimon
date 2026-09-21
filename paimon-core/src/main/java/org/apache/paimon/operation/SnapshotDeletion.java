@@ -29,6 +29,8 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.utils.FileStorePathFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -47,7 +49,8 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
             StatsFileHandler statsFileHandler,
             boolean produceChangelog,
             boolean cleanEmptyDirectories,
-            int fileOperationThreadNum) {
+            int fileOperationThreadNum,
+            @Nullable Integer manifestReadParallelism) {
         super(
                 fileIO,
                 pathFactory,
@@ -56,7 +59,8 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
                 indexFileHandler,
                 statsFileHandler,
                 cleanEmptyDirectories,
-                fileOperationThreadNum);
+                fileOperationThreadNum,
+                manifestReadParallelism);
         this.produceChangelog = produceChangelog;
     }
 
@@ -66,8 +70,8 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
     }
 
     @Override
-    public List<Path> planDeletedInDeltaManifest(
-            Snapshot snapshot, Predicate<ExpireFileEntry> skipper) {
+    public List<Path> dataFilesToDelete(
+            DataFileDeletionPlan plan, Predicate<ExpireFileEntry> skipper) {
         Predicate<ExpireFileEntry> enriched = skipper;
         if (changelogDecoupled && !produceChangelog) {
             // Skip clean the 'APPEND' data files.If we do not have the file source information
@@ -79,7 +83,7 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
                                     || (manifestEntry.fileSource().orElse(FileSource.APPEND)
                                             == FileSource.APPEND);
         }
-        return super.planDeletedInDeltaManifest(snapshot, enriched);
+        return super.dataFilesToDelete(plan, enriched);
     }
 
     @Override

@@ -19,6 +19,9 @@
 package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.PagedList;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -39,6 +42,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -55,6 +59,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -63,6 +68,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -91,8 +98,9 @@ class FormatTableCommitStatisticsTest {
                 .commit(Collections.singletonList(message));
         long after = System.currentTimeMillis();
 
-        Reported reported = capture(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.replaceStatistics).isFalse();
+        assertThat(reported.partitionOptions).isNull();
         assertThat(reported.specs).containsExactly(spec("2025", "10"));
         assertThat(reported.statistics).hasSize(1);
         PartitionStatistics statistics = reported.statistics.get(0);
@@ -118,7 +126,7 @@ class FormatTableCommitStatisticsTest {
 
         commit(tablePath, fileIO, partitionManager, false, null).commit(messages);
 
-        Reported reported = capture(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.statistics)
                 .hasSize(2)
                 .anySatisfy(
@@ -152,7 +160,8 @@ class FormatTableCommitStatisticsTest {
 
         commit(tablePath, fileIO, partitionManager, false, null).commit(messages);
 
-        PartitionStatistics statistics = capture(partitionManager).statistics.get(0);
+        PartitionStatistics statistics =
+                captureAndValidateReport(partitionManager, tablePath).statistics.get(0);
         // A sum missing a file must not be presented as an exact count.
         assertThat(statistics.recordCount()).isEqualTo(PartitionStatistics.UNKNOWN);
         assertThat(statistics.fileSizeInBytes()).isEqualTo(PartitionStatistics.UNKNOWN);
@@ -166,14 +175,20 @@ class FormatTableCommitStatisticsTest {
         Path tablePath = new Path(tempDir.toUri());
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         // Something was there before this commit replaced it.
+        Path oldWrittenPartitionData = new Path(tablePath, "year=2025/month=10/old-data.csv");
         writeDataFile(fileIO, tablePath, "year=2025/month=10", "old-data.csv", 4096);
         CommitMessage message = writtenFile(fileIO, tablePath, "year=2025/month=10", 3, 128);
 
         commit(tablePath, fileIO, partitionManager, true, null)
                 .commit(Collections.singletonList(message));
 
-        Reported reported = capture(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.replaceStatistics).isTrue();
+        assertThat(reported.partitionOptions)
+                .containsExactly(returnsToDefault(tablePath, spec("2025", "10")));
+        assertThat(fileIO.exists(oldWrittenPartitionData)).isFalse();
+        verify(partitionManager, never()).listPartitions(any(), isNull());
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
         assertThat(reported.statistics).hasSize(1);
         PartitionStatistics statistics = reported.statistics.get(0);
         assertThat(statistics.recordCount()).isEqualTo(3);
@@ -182,21 +197,50 @@ class FormatTableCommitStatisticsTest {
     }
 
     @Test
-    void testStaticPrefixOverwriteZeroesAClearedPartitionAndKeepsItRegistered() throws Exception {
+    void testEmptyStaticOverwriteReportsZeroAndResetsLocationWithoutRegistryRead()
+            throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
-        // Two sibling partitions hold data; the overwrite writes only one of them.
+        Map<String, String> target = spec("2025", "10");
+
+        commit(tablePath, fileIO, partitionManager, true, target).commit(Collections.emptyList());
+
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
+        assertThat(reported.specs).containsExactly(target);
+        assertThat(reported.statistics).hasSize(1);
+        assertThat(reported.statistics.get(0).spec()).isEqualTo(target);
+        assertThat(reported.statistics.get(0).recordCount()).isZero();
+        assertThat(reported.statistics.get(0).fileSizeInBytes()).isZero();
+        assertThat(reported.statistics.get(0).fileCount()).isZero();
+        assertThat(reported.replaceStatistics).isTrue();
+        assertThat(reported.partitionOptions)
+                .containsExactly(returnsToDefault(tablePath, spec("2025", "10")));
+        verify(partitionManager, never()).listPartitions(any(), isNull());
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
+    }
+
+    @Test
+    void testStaticPrefixOverwriteReportsRegistryAndWrittenTargets() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        Map<String, String> prefix = Collections.singletonMap("year", "2025");
+        // The catalog has one unwritten partition with data and one whose directory is missing.
+        // The written partition is not registered yet, so the target set has to include both the
+        // prefix lookup and the commit messages.
+        registered(partitionManager, spec("2025", "11"), spec("2025", "12"), spec("2024", "09"));
+        Path oldWrittenPartitionData = new Path(tablePath, "year=2025/month=10/old-data.csv");
         writeDataFile(fileIO, tablePath, "year=2025/month=10", "old-data.csv", 4096);
         writeDataFile(fileIO, tablePath, "year=2025/month=11", "old-data.csv", 2048);
         CommitMessage message = writtenFile(fileIO, tablePath, "year=2025/month=10", 3, 128);
 
         long before = System.currentTimeMillis();
-        commit(tablePath, fileIO, partitionManager, true, Collections.singletonMap("year", "2025"))
+        commit(tablePath, fileIO, partitionManager, true, prefix)
                 .commit(Collections.singletonList(message));
         long after = System.currentTimeMillis();
 
-        Reported reported = capture(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         long commitTime =
                 reported.statistics.stream()
                         .filter(s -> s.spec().equals(spec("2025", "10")))
@@ -205,9 +249,13 @@ class FormatTableCommitStatisticsTest {
                         .lastFileCreationTime();
         assertThat(commitTime).isBetween(before, after);
         assertThat(reported.replaceStatistics).isTrue();
+        assertThat(fileIO.exists(oldWrittenPartitionData)).isFalse();
         // Red line: emptying a partition zeroes its statistics, it never unregisters it.
         assertThat(reported.specs)
-                .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
+                .containsExactlyInAnyOrder(
+                        spec("2025", "10"), spec("2025", "11"), spec("2025", "12"));
+        verify(partitionManager).listPartitions(prefix, null);
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
         verify(partitionManager, never()).dropPartitions(anyList());
         assertThat(reported.statistics)
                 .anySatisfy(
@@ -219,6 +267,14 @@ class FormatTableCommitStatisticsTest {
                             // Emptying is dated to the commit that did it. Reporting the time as
                             // unknown would leave the stored one describing files that are gone,
                             // since an unknown replaces nothing.
+                            assertThat(statistics.lastFileCreationTime()).isEqualTo(commitTime);
+                        })
+                .anySatisfy(
+                        statistics -> {
+                            assertThat(statistics.spec()).isEqualTo(spec("2025", "12"));
+                            assertThat(statistics.recordCount()).isZero();
+                            assertThat(statistics.fileSizeInBytes()).isZero();
+                            assertThat(statistics.fileCount()).isZero();
                             assertThat(statistics.lastFileCreationTime()).isEqualTo(commitTime);
                         });
     }
@@ -237,7 +293,7 @@ class FormatTableCommitStatisticsTest {
         overwritingTheWholeTable(tablePath, fileIO, partitionManager)
                 .commit(Collections.singletonList(message));
 
-        Reported reported = capture(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.replaceStatistics).isTrue();
         assertThat(reported.specs)
                 .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
@@ -258,6 +314,8 @@ class FormatTableCommitStatisticsTest {
                             assertThat(statistics.fileSizeInBytes()).isZero();
                             assertThat(statistics.fileCount()).isZero();
                         });
+        verify(partitionManager).listPartitions(Collections.emptyMap(), null);
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
     }
 
     @Test
@@ -279,8 +337,10 @@ class FormatTableCommitStatisticsTest {
                 .isTrue();
         // Nor does the overwrite register it: reporting a zero for it would make a partition the
         // catalog never had, out of a directory that still holds rows.
-        Reported reported = capture(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.specs).containsExactly(spec("2025", "10"));
+        verify(partitionManager).listPartitions(Collections.emptyMap(), null);
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
     }
 
     @Test
@@ -288,25 +348,28 @@ class FormatTableCommitStatisticsTest {
         LocalFileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
-        registered(partitionManager, spec("2025", "10"), spec("2025", "11"));
+        registered(partitionManager, spec("2025", "10"), spec("2025", "11"), spec("2024", "12"));
         writeDataFile(fileIO, tablePath, "year=2025/month=10", "data.csv", 4096);
         writeDataFile(fileIO, tablePath, "year=2025/month=11", "data.csv", 2048);
+        writeDataFile(fileIO, tablePath, "year=2024/month=12", "data.csv", 1024);
 
         long before = System.currentTimeMillis();
         commit(tablePath, fileIO, partitionManager, false, null)
                 .truncatePartitions(Arrays.asList(spec("2025", "10"), spec("2025", "11")));
         long after = System.currentTimeMillis();
 
-        Reported reported = capture(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         // What a truncated partition holds is zero, not zero fewer rows than before.
         assertThat(reported.replaceStatistics).isTrue();
         assertThat(reported.specs)
                 .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
         // Red line: emptying a partition zeroes its statistics, it never unregisters it.
         verify(partitionManager, never()).dropPartitions(anyList());
-        // One catalog request for the complete specs, not one per partition.
-        verify(partitionManager).listPartitionsByNames(anyList());
-        verify(partitionManager, never()).listPartitions(any(), any());
+        // Complete names are resolved directly; truncating them never loads the full registry.
+        verify(partitionManager)
+                .listPartitionsByNames(Arrays.asList(spec("2025", "10"), spec("2025", "11")));
+        verify(partitionManager, never()).listPartitions(any(), isNull());
+        assertThat(fileIO.exists(new Path(tablePath, "year=2024/month=12/data.csv"))).isTrue();
         // Statistics route by the spec they carry, so every partition needs its own.
         assertThat(reported.statistics)
                 .extracting(PartitionStatistics::spec)
@@ -337,15 +400,17 @@ class FormatTableCommitStatisticsTest {
         commit(tablePath, fileIO, partitionManager, false, null)
                 .truncatePartitions(Collections.singletonList(spec("2025", "10")));
 
-        Reported reported = capture(partitionManager);
-        // Unlike an overwrite, which reports only the files it removed itself, truncation states
-        // that the partition holds nothing.
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
+        // A registered exact target remains a target even when it already holds no files.
         assertThat(reported.replaceStatistics).isTrue();
         assertThat(reported.specs).containsExactly(spec("2025", "10"));
         assertThat(reported.statistics).hasSize(1);
         assertThat(reported.statistics.get(0).spec()).isEqualTo(spec("2025", "10"));
         assertThat(reported.statistics.get(0).recordCount()).isZero();
         assertThat(reported.statistics.get(0).fileCount()).isZero();
+        verify(partitionManager)
+                .listPartitionsByNames(Collections.singletonList(spec("2025", "10")));
+        verify(partitionManager, never()).listPartitions(any(), isNull());
     }
 
     @Test
@@ -361,7 +426,7 @@ class FormatTableCommitStatisticsTest {
 
         commit(tablePath, fileIO, partitionManager, false, null).truncateTable();
 
-        Reported reported = capture(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.replaceStatistics).isTrue();
         assertThat(reported.specs)
                 .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
@@ -371,6 +436,8 @@ class FormatTableCommitStatisticsTest {
                             assertThat(statistics.recordCount()).isZero();
                             assertThat(statistics.fileCount()).isZero();
                         });
+        verify(partitionManager).listPartitions(Collections.emptyMap(), null);
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
     }
 
     @Test
@@ -379,12 +446,10 @@ class FormatTableCommitStatisticsTest {
         Path tablePath = new Path(tempDir.toUri());
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         Map<String, String> prefix = Collections.singletonMap("year", "2025");
-        when(partitionManager.listPartitions(prefix, null))
-                .thenReturn(
-                        Arrays.asList(
-                                partition(spec("2025", "10")), partition(spec("2025", "11"))));
+        registered(partitionManager, spec("2025", "10"), spec("2025", "11"), spec("2024", "12"));
         writeDataFile(fileIO, tablePath, "year=2025/month=10", "data.csv", 4096);
         writeDataFile(fileIO, tablePath, "year=2025/month=11", "data.csv", 2048);
+        // Registered but outside the requested prefix.
         writeDataFile(fileIO, tablePath, "year=2024/month=12", "data.csv", 1024);
         // Under the prefix but not registered: a directory still waiting for MSCK REPAIR TABLE is
         // not a partition of the table, so truncating neither empties nor registers it.
@@ -393,7 +458,7 @@ class FormatTableCommitStatisticsTest {
         commit(tablePath, fileIO, partitionManager, false, null)
                 .truncatePartitions(Collections.singletonList(prefix));
 
-        Reported reported = capture(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         // The prefix names no partition of its own; the partitions it empties are the registered
         // ones underneath it.
         assertThat(reported.specs)
@@ -402,6 +467,9 @@ class FormatTableCommitStatisticsTest {
         assertThat(reported.statistics)
                 .allSatisfy(statistics -> assertThat(statistics.recordCount()).isZero());
         assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=12/data.csv"))).isTrue();
+        assertThat(fileIO.exists(new Path(tablePath, "year=2024/month=12/data.csv"))).isTrue();
+        verify(partitionManager).listPartitions(prefix, null);
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
     }
 
     @Test
@@ -417,13 +485,15 @@ class FormatTableCommitStatisticsTest {
 
         commit(tablePath, fileIO, partitionManager, false, null).truncateTable();
 
-        Reported reported = capture(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.replaceStatistics).isTrue();
         assertThat(reported.specs)
                 .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
         assertThat(reported.statistics)
                 .allSatisfy(statistics -> assertThat(statistics.fileCount()).isZero());
         assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=12/data.csv"))).isTrue();
+        verify(partitionManager).listPartitions(Collections.emptyMap(), null);
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
     }
 
     @Test
@@ -445,7 +515,7 @@ class FormatTableCommitStatisticsTest {
         // A Format Table has no snapshot to make the whole truncation atomic, so what it emptied
         // before the failure is reported anyway: the catalog must not keep describing files that
         // are gone.
-        Reported reported = capture(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.specs).containsExactly(spec("2025", "10"));
         assertThat(reported.statistics.get(0).fileCount()).isZero();
     }
@@ -469,7 +539,7 @@ class FormatTableCommitStatisticsTest {
         // A refused deletion is not a concurrent one: the rows are still readable, so reporting
         // the partition as holding nothing would hide them.
         verify(partitionManager, never())
-                .createPartitions(anyList(), anyBoolean(), anyList(), anyBoolean());
+                .createPartitions(anyList(), anyBoolean(), anyList(), anyBoolean(), any());
         assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=10/data.csv"))).isTrue();
     }
 
@@ -481,7 +551,7 @@ class FormatTableCommitStatisticsTest {
         registered(partitionManager, spec("2025", "10"), spec("2025", "11"));
         doThrow(new RuntimeException("the catalog is unreachable"))
                 .when(partitionManager)
-                .createPartitions(anyList(), anyBoolean(), anyList(), anyBoolean());
+                .createPartitions(anyList(), anyBoolean(), anyList(), anyBoolean(), any());
         writeDataFile(fileIO, tablePath, "year=2025/month=10", "data.csv", 4096);
         writeDataFile(fileIO, tablePath, "year=2025/month=11", "data.csv", 2048);
 
@@ -503,11 +573,12 @@ class FormatTableCommitStatisticsTest {
     }
 
     @Test
-    void testAClearedPartitionIsFoundEvenWhenTheListingAnswersUnderAnotherScheme()
+    void testARegisteredTargetIsReportedWhenFileListingAnswersUnderAnotherScheme()
             throws Exception {
         RescopingFileIO fileIO = new RescopingFileIO();
         Path tablePath = new Path(tempDir.toUri());
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        registered(partitionManager, spec("2025", "11"));
         writeDataFile(fileIO, tablePath, "year=2025/month=10", "old-data.csv", 4096);
         writeDataFile(fileIO, tablePath, "year=2025/month=11", "old-data.csv", 2048);
         CommitMessage message = writtenFile(fileIO, tablePath, "year=2025/month=10", 3, 128);
@@ -515,10 +586,10 @@ class FormatTableCommitStatisticsTest {
         commit(tablePath, fileIO, partitionManager, true, Collections.singletonMap("year", "2025"))
                 .commit(Collections.singletonList(message));
 
-        // A listing does not have to answer under the URI it was asked with, and matching whole
-        // paths would then throw away a directory this very listing produced — leaving an emptied
-        // partition holding stale statistics.
-        assertThat(capture(partitionManager).statistics)
+        // The registry, not a filesystem path parsed after deletion, defines month=11 as a target.
+        // A listing may still answer under a different URI scheme, and deletion must handle that
+        // without losing the target's replacement statistics.
+        assertThat(captureAndValidateReport(partitionManager, tablePath).statistics)
                 .anySatisfy(
                         statistics -> {
                             assertThat(statistics.spec()).isEqualTo(spec("2025", "11"));
@@ -532,10 +603,10 @@ class FormatTableCommitStatisticsTest {
         LocalFileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
-        // The key=value layout, where a directory that is not a partition of this table has no
-        // spec at all rather than a plausible wrong one: the prefix directory itself, and a
-        // directory nested below a partition. Clearing the prefix deletes the files in both,
-        // because the listing collects data files at every level, not only the partition one.
+        registered(partitionManager, spec("2025", "11"));
+        // The registry contributes month=11 and the commit contributes month=10. A file directly
+        // under the prefix is outside both complete partition targets; a nested directory is data
+        // inside month=10, not a third partition inferred from its path.
         writeDataFile(fileIO, tablePath, "year=2025/month=11", "old-data.csv", 2048);
         writeDataFile(fileIO, tablePath, "year=2025", "orphan.csv", 512);
         writeDataFile(fileIO, tablePath, "year=2025/month=10/nested", "old-data.csv", 1024);
@@ -544,13 +615,16 @@ class FormatTableCommitStatisticsTest {
         commit(tablePath, fileIO, partitionManager, true, Collections.singletonMap("year", "2025"))
                 .commit(Collections.singletonList(message));
 
-        // The commit succeeds and reports only the two real partitions. A directory with no spec
-        // is left alone: its statistics go stale, which beats failing the commit that just wrote
-        // the data, or accounting the files to a partition that does not exist.
-        Reported reported = capture(partitionManager);
+        // The commit reports only the registry-defined and written targets. It leaves the foreign
+        // prefix file alone and deletes the nested file as part of month=10 without inventing a
+        // partition for either path.
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.specs)
                 .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
         assertThat(reported.statistics).hasSize(2);
+        assertThat(fileIO.exists(new Path(tablePath, "year=2025/orphan.csv"))).isTrue();
+        assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=10/nested/old-data.csv")))
+                .isFalse();
     }
 
     @Test
@@ -558,8 +632,10 @@ class FormatTableCommitStatisticsTest {
         LocalFileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
-        // In the value-only layout a partition directory is the bare value, so the trailing two
-        // components of 2025/10/nested read as the plausible partition {year=10, month=nested}.
+        registered(partitionManager, spec("2025", "11"));
+        // In the value-only layout the trailing components of 2025/10/nested could look like the
+        // plausible partition {year=10, month=nested}. Targets must still come only from the
+        // registry and the commit's written specs.
         writeDataFile(fileIO, tablePath, "2025/10", "old-data.csv", 4096);
         writeDataFile(fileIO, tablePath, "2025/10/nested", "old-data.csv", 4096);
         writeDataFile(fileIO, tablePath, "2025/11", "old-data.csv", 2048);
@@ -574,9 +650,8 @@ class FormatTableCommitStatisticsTest {
                         true)
                 .commit(Collections.singletonList(message));
 
-        // Only directories the spec rebuilds are reported: accounting 2025/10/nested to a partition
-        // named {year=10, month=nested} would zero a partition this commit never touched.
-        Reported reported = capture(partitionManager);
+        // The nested path is deleted as data under month=10, but is never reported as a partition.
+        Reported reported = captureAndValidateReport(partitionManager, tablePath, true);
         assertThat(reported.specs)
                 .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
         assertThat(reported.statistics)
@@ -733,10 +808,19 @@ class FormatTableCommitStatisticsTest {
         List<Partition> partitions = new ArrayList<>();
         for (Map<String, String> spec : specs) {
             partitions.add(partition(spec));
-            when(partitionManager.listPartitions(spec, null))
-                    .thenReturn(Collections.singletonList(partition(spec)));
         }
-        when(partitionManager.listPartitions(Collections.emptyMap(), null)).thenReturn(partitions);
+        when(partitionManager.listPartitions(any(), isNull()))
+                .thenAnswer(
+                        invocation -> {
+                            Map<String, String> prefix = invocation.getArgument(0);
+                            List<Partition> found = new ArrayList<>();
+                            for (Partition partition : partitions) {
+                                if (partition.spec().entrySet().containsAll(prefix.entrySet())) {
+                                    found.add(partition);
+                                }
+                            }
+                            return found;
+                        });
         when(partitionManager.listPartitionsByNames(anyList()))
                 .thenAnswer(
                         invocation -> {
@@ -758,29 +842,61 @@ class FormatTableCommitStatisticsTest {
         return spec;
     }
 
+    /** What a replacement sends for a partition: the directory the partition belongs in. */
+    private static Map<String, String> returnsToDefault(Path tablePath, Map<String, String> spec) {
+        return returnsToDefault(tablePath, spec, false);
+    }
+
+    private static Map<String, String> returnsToDefault(
+            Path tablePath, Map<String, String> spec, boolean onlyValueInPath) {
+        return FormatTableCommitTest.defaultDirectoryOption(tablePath, spec, onlyValueInPath);
+    }
+
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private static Reported capture(FormatTablePartitionManager partitionManager) {
+    private static Reported captureAndValidateReport(
+            FormatTablePartitionManager partitionManager, Path tablePath) {
+        return captureAndValidateReport(partitionManager, tablePath, false);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static Reported captureAndValidateReport(
+            FormatTablePartitionManager partitionManager, Path tablePath, boolean onlyValueInPath) {
         ArgumentCaptor<List<Map<String, String>>> specs =
                 ArgumentCaptor.forClass((Class) List.class);
         ArgumentCaptor<List<PartitionStatistics>> statistics =
                 ArgumentCaptor.forClass((Class) List.class);
         ArgumentCaptor<Boolean> replaceStatistics = ArgumentCaptor.forClass(Boolean.class);
+        ArgumentCaptor<List<Map<String, String>>> partitionOptions =
+                ArgumentCaptor.forClass((Class) List.class);
         verify(partitionManager)
                 .createPartitions(
                         specs.capture(),
                         eq(true),
                         statistics.capture(),
-                        replaceStatistics.capture());
+                        replaceStatistics.capture(),
+                        partitionOptions.capture());
+        List<Map<String, String>> capturedSpecs = specs.getValue();
+        List<Map<String, String>> capturedOptions = partitionOptions.getValue();
+        if (replaceStatistics.getValue()) {
+            assertThat(capturedOptions)
+                    .as("replacement options must align with every target spec")
+                    .hasSameSizeAs(capturedSpecs);
+            for (int i = 0; i < capturedSpecs.size(); i++) {
+                assertThat(capturedOptions.get(i))
+                        .as("a replacement names the partition's own default directory")
+                        .isEqualTo(
+                                returnsToDefault(tablePath, capturedSpecs.get(i), onlyValueInPath));
+            }
+        } else {
+            assertThat(capturedOptions).as("append must not change partition options").isNull();
+        }
         return new Reported(
-                new ArrayList<>(specs.getValue()),
+                new ArrayList<>(capturedSpecs),
                 new ArrayList<>(statistics.getValue()),
-                replaceStatistics.getValue());
+                replaceStatistics.getValue(),
+                capturedOptions == null ? null : new ArrayList<>(capturedOptions));
     }
 
-    /**
-     * A {@link FileIO} that answers a listing with paths stripped of their scheme, the way a
-     * delegating one does when it resolves the caller's scheme to the one it really uses.
-     */
     /** A file IO whose deletions all report failure, leaving the files in place. */
     private static class RefusingFileIO extends LocalFileIO {
 
@@ -812,6 +928,10 @@ class FormatTableCommitStatisticsTest {
         }
     }
 
+    /**
+     * A {@link FileIO} that answers a listing with paths stripped of their scheme, the way a
+     * delegating one does when it resolves the caller's scheme to the one it really uses.
+     */
     private static class RescopingFileIO extends LocalFileIO {
 
         private static final long serialVersionUID = 1L;
@@ -873,7 +993,8 @@ class FormatTableCommitStatisticsTest {
                 List<Map<String, String>> partitions,
                 boolean ignoreIfExists,
                 @Nullable List<PartitionStatistics> statistics,
-                boolean replaceStatistics) {
+                boolean replaceStatistics,
+                @Nullable List<Map<String, String>> partitionOptions) {
             createPartitions(partitions, ignoreIfExists);
             if (statistics == null) {
                 return;
@@ -907,12 +1028,28 @@ class FormatTableCommitStatisticsTest {
         @Override
         public List<Partition> listPartitions(
                 Map<String, String> prefix, @Nullable Predicate filter) {
-            throw new UnsupportedOperationException();
+            List<Partition> found = new ArrayList<>();
+            for (Map<String, String> partitionSpec : registered) {
+                if (prefix.entrySet().stream()
+                        .allMatch(
+                                entry ->
+                                        entry.getValue()
+                                                .equals(partitionSpec.get(entry.getKey())))) {
+                    found.add(partition(partitionSpec));
+                }
+            }
+            return found;
         }
 
         @Override
         public List<Partition> listPartitionsByNames(List<Map<String, String>> partitions) {
-            throw new UnsupportedOperationException();
+            List<Partition> found = new ArrayList<>();
+            for (Map<String, String> partitionSpec : partitions) {
+                if (registered.contains(partitionSpec)) {
+                    found.add(partition(partitionSpec));
+                }
+            }
+            return found;
         }
 
         @Override
@@ -953,7 +1090,7 @@ class FormatTableCommitStatisticsTest {
         List<CommitMessage> messages = write.prepareCommit();
         writeBuilder.newCommit().commit(messages);
 
-        Reported reported = capture(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.replaceStatistics).isFalse();
         assertThat(reported.specs).containsExactly(Collections.singletonMap("year", "2025"));
         assertThat(reported.statistics).hasSize(1);
@@ -971,37 +1108,140 @@ class FormatTableCommitStatisticsTest {
     }
 
     @Test
-    void testAFailedReportFailsTheCommitAndDiscardsWhatItWrote() throws Exception {
+    void testAppendRegistrationLoaderFailureDeletesPublishedTarget() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
-        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
-        RuntimeException failure = new RuntimeException("catalog says 429");
-        doThrow(failure)
-                .when(partitionManager)
-                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean());
+        RuntimeException failure = new RuntimeException("catalog loader failed");
+        AtomicInteger loads = new AtomicInteger();
+        CatalogLoader loader =
+                () -> {
+                    loads.incrementAndGet();
+                    throw failure;
+                };
+        FormatTablePartitionManager partitionManager =
+                FormatTablePartitionManager.create(TABLE, PARTITION_KEYS, loader);
         CommitMessage message = writtenFile(fileIO, tablePath, "year=2025/month=10", 3, 128);
         Path written = ((TwoPhaseCommitMessage) message).getCommitter().targetPath();
 
-        // Registration and statistics ride in one request, so a failure says nothing about
-        // whether the partition was registered. Committing anyway would leave data behind that
-        // nothing points at.
         assertThatThrownBy(
                         () ->
                                 commit(tablePath, fileIO, partitionManager, false, null)
                                         .commit(Collections.singletonList(message)))
                 .hasRootCause(failure);
 
+        // No catalog request ran, so abort can safely delete this attempt's published file.
+        assertThat(loads).hasValue(1);
         assertThat(fileIO.exists(written)).isFalse();
     }
 
     @Test
-    void testAFailedReportOfAnOverwriteLeavesThePartitionEmpty() throws Exception {
+    void testEmptyStaticAppendOnlyRegistersPartition() {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        Map<String, String> staticPartition = spec("2025", "10");
+
+        commit(tablePath, fileIO, partitionManager, false, staticPartition)
+                .commit(Collections.emptyList());
+
+        verify(partitionManager).createPartitions(Collections.singletonList(staticPartition), true);
+        verify(partitionManager, never())
+                .createPartitions(anyList(), eq(true), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void testAppendRegistrationBatchFailureDeletesAllTargetsWithoutReportingStatistics()
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Catalog catalog = mock(Catalog.class);
+        Catalog.TableNoPermissionException failure = new Catalog.TableNoPermissionException(TABLE);
+        AtomicInteger requests = new AtomicInteger();
+        List<Map<String, String>> registered = new ArrayList<>();
+        List<PartitionStatistics> appliedStatistics = new ArrayList<>();
+        when(catalog.listPartitionsPaged(TABLE, 1000, null, null))
+                .thenReturn(new PagedList<>(Collections.emptyList(), null));
+        when(catalog.listPartitionsByNames(eq(TABLE), anyList()))
+                .thenReturn(Collections.emptyList());
+        doAnswer(
+                        invocation -> {
+                            @SuppressWarnings("unchecked")
+                            List<Map<String, String>> batch = invocation.getArgument(1);
+                            @SuppressWarnings("unchecked")
+                            List<PartitionStatistics> statistics = invocation.getArgument(3);
+                            if (requests.incrementAndGet() == 2) {
+                                // Permission is checked before the catalog mutation, so the second
+                                // batch was not applied.
+                                throw failure;
+                            }
+                            registered.addAll(batch);
+                            if (statistics != null) {
+                                appliedStatistics.addAll(statistics);
+                            }
+                            return null;
+                        })
+                .when(catalog)
+                .createPartitions(any(), anyList(), anyBoolean(), any(), anyBoolean(), isNull());
+        FormatTablePartitionManager partitionManager =
+                FormatTablePartitionManager.create(TABLE, PARTITION_KEYS, () -> catalog);
+        List<CommitMessage> messages = new ArrayList<>();
+        List<Path> targets = new ArrayList<>();
+        for (int i = 0; i < 1001; i++) {
+            CommitMessage message =
+                    writtenFile(fileIO, tablePath, String.format("year=2025/month=%04d", i), 1, 1);
+            messages.add(message);
+            targets.add(((TwoPhaseCommitMessage) message).getCommitter().targetPath());
+        }
+
+        assertThatThrownBy(
+                        () ->
+                                commit(tablePath, fileIO, partitionManager, false, null)
+                                        .commit(messages))
+                .hasRootCause(failure);
+
+        assertThat(requests).hasValue(2);
+        assertThat(registered).hasSize(1000);
+        // Partition rows left by a successful registration batch are harmlessly empty. Applying
+        // additive statistics before every registration succeeds would instead leave them
+        // describing files this failed attempt rolls back.
+        assertThat(appliedStatistics).isEmpty();
+        assertThat(targets).allSatisfy(target -> assertThat(fileIO.exists(target)).isFalse());
+    }
+
+    @Test
+    void testAppendStatisticsResponseLossIsNotRetriedAndDoesNotFailCommit() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        ApplyingThenFailingStatisticsManager partitionManager =
+                new ApplyingThenFailingStatisticsManager();
+        CommitMessage message = writtenFile(fileIO, tablePath, "year=2025/month=10", 3, 128);
+        Path written = ((TwoPhaseCommitMessage) message).getCommitter().targetPath();
+
+        // The catalog may have applied an additive report before its response was lost. Retrying
+        // that report would double count it, so the data commit succeeds after one best-effort try.
+        commit(tablePath, fileIO, partitionManager, false, null)
+                .commit(Collections.singletonList(message));
+
+        assertThat(partitionManager.calls).containsExactly("registration", "statistics");
+        assertThat(partitionManager.statisticsAttempts).isOne();
+        assertThat(partitionManager.appliedRecordCount).isEqualTo(3);
+        assertThat(fileIO.exists(written)).isTrue();
+
+        TwoPhaseCommitMessage roundTripped =
+                InstantiationUtil.clone((TwoPhaseCommitMessage) message);
+        commit(tablePath, fileIO, partitionManager, false, null)
+                .abort(Collections.singletonList(roundTripped));
+        assertThat(fileIO.exists(written)).isTrue();
+    }
+
+    @Test
+    void testFailedOverwriteReportPreservesReplacementAfterDeletingOldData() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         doThrow(new RuntimeException("catalog says 429"))
                 .when(partitionManager)
-                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean());
+                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), any());
         writeDataFile(fileIO, tablePath, "year=2025/month=10", "old-data.csv", 4096);
         CommitMessage message = writtenFile(fileIO, tablePath, "year=2025/month=10", 3, 128);
         Path written = ((TwoPhaseCommitMessage) message).getCommitter().targetPath();
@@ -1017,11 +1257,57 @@ class FormatTableCommitStatisticsTest {
                                         .commit(Collections.singletonList(message)))
                 .hasRootCauseMessage("catalog says 429");
 
-        // The state this leaves is worth stating rather than discovering: the overwrite already
-        // deleted what the partition held, and the abort takes back what it wrote, so the
-        // partition is empty on disk while the catalog still describes what used to be there.
-        assertThat(fileIO.exists(written)).isFalse();
+        // The old file cannot be restored. Keep the replacement because the failed catalog call
+        // may already have made its metadata durable.
+        assertThat(fileIO.exists(written)).isTrue();
         assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=10/old-data.csv"))).isFalse();
+    }
+
+    /** A catalog whose additive report takes effect before its response is lost. */
+    private static class ApplyingThenFailingStatisticsManager
+            implements FormatTablePartitionManager {
+
+        private static final long serialVersionUID = 1L;
+
+        private final List<String> calls = new ArrayList<>();
+        private int statisticsAttempts;
+        private long appliedRecordCount;
+
+        @Override
+        public void createPartitions(
+                List<Map<String, String>> partitions,
+                boolean ignoreIfExists,
+                @Nullable List<PartitionStatistics> statistics,
+                boolean replaceStatistics,
+                @Nullable List<Map<String, String>> partitionOptions) {
+            if (statistics == null) {
+                calls.add("registration");
+                return;
+            }
+
+            calls.add("statistics");
+            statisticsAttempts++;
+            for (PartitionStatistics statistic : statistics) {
+                appliedRecordCount += statistic.recordCount();
+            }
+            throw new RuntimeException("statistics response lost");
+        }
+
+        @Override
+        public List<Partition> listPartitions(
+                Map<String, String> prefix, @Nullable Predicate filter) {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public List<Partition> listPartitionsByNames(List<Map<String, String>> partitions) {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public void dropPartitions(List<Map<String, String>> partitions) {
+            throw new UnsupportedOperationException();
+        }
     }
 
     /** What one call reported to the catalog. */
@@ -1029,14 +1315,17 @@ class FormatTableCommitStatisticsTest {
         private final List<Map<String, String>> specs;
         private final List<PartitionStatistics> statistics;
         private final boolean replaceStatistics;
+        @Nullable private final List<Map<String, String>> partitionOptions;
 
         private Reported(
                 List<Map<String, String>> specs,
                 List<PartitionStatistics> statistics,
-                boolean replaceStatistics) {
+                boolean replaceStatistics,
+                @Nullable List<Map<String, String>> partitionOptions) {
             this.specs = specs;
             this.statistics = statistics;
             this.replaceStatistics = replaceStatistics;
+            this.partitionOptions = partitionOptions;
         }
     }
 }

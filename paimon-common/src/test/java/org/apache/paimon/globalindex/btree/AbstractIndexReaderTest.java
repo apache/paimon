@@ -277,6 +277,30 @@ public abstract class AbstractIndexReaderTest {
     }
 
     @TestTemplate
+    public void testInPredicateWithNullLiteral() throws Exception {
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+
+        try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+            // Mixed null literal: SQL IN never matches NULL, so the null is ignored
+            // and the remaining literals drive the result (previously NPE'd).
+            List<Object> literals =
+                    new ArrayList<>(
+                            data.get(0).getKey() == null
+                                    ? Collections.emptyList()
+                                    : Collections.singletonList(data.get(0).getKey()));
+            literals.add(null);
+            GlobalIndexResult result = reader.visitIn(ref, literals).join().get();
+            List<Object> finalLiterals = literals;
+            assertResult(result, filter(finalLiterals::contains));
+
+            // All-null list matches nothing.
+            GlobalIndexResult allNull =
+                    reader.visitIn(ref, Collections.singletonList(null)).join().get();
+            assertThat(allNull.results().isEmpty()).isTrue();
+        }
+    }
+
+    @TestTemplate
     public void testStartsWith() throws Exception {
         if (!dataType.is(DataTypeFamily.CHARACTER_STRING)) {
             return;
@@ -310,7 +334,12 @@ public abstract class AbstractIndexReaderTest {
     protected abstract GlobalIndexReader prepareDataAndCreateReader() throws Exception;
 
     protected GlobalIndexIOMeta writeData(List<Pair<Object, Long>> data) throws IOException {
-        GlobalIndexSingleColumnWriter indexWriter = globalIndexer.createWriter(fileWriter);
+        return writeData(data, globalIndexer.createWriter(fileWriter));
+    }
+
+    protected GlobalIndexIOMeta writeData(
+            List<Pair<Object, Long>> data, GlobalIndexSingleColumnWriter indexWriter)
+            throws IOException {
         for (Pair<Object, Long> pair : data) {
             indexWriter.write(pair.getKey(), pair.getValue());
         }
@@ -322,6 +351,7 @@ public abstract class AbstractIndexReaderTest {
         return new GlobalIndexIOMeta(
                 new Path(new Path(tempPath.toUri()), fileName),
                 fileIO.getFileSize(new Path(new Path(tempPath.toUri()), fileName)),
+                resultEntry.rowCount(),
                 resultEntry.meta());
     }
 

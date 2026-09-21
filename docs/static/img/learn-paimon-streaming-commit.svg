@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 676" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">From Flink records to a visible snapshot</title>
+<desc id="desc">Writers buffer input, flush data files and prepare committables. The commit path publishes manifests and snapshots in coordination with successful checkpoint completion. Compaction also supplies file changes to the commit path. Snapshot expiration reclaims eligible old files later. A file existing on storage alone does not make it readable.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<rect width="1080" height="676" rx="16" fill="#ffffff"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<text x="32" y="48" font-size="28" font-weight="700" text-anchor="start" fill="#172b4d">From Flink records to a visible snapshot</text>
+<text x="32" y="80" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Publication follows checkpoint success; file creation alone does not publish table data.</text>
+<rect x="32" y="126" width="300" height="116" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="50" y="158" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">1  Receive and buffer</text>
+<text x="50" y="188" font-size="19" font-weight="400" text-anchor="start" fill="#526277">CDC / stream records</text>
+<text x="50" y="215" font-size="19" font-weight="400" text-anchor="start" fill="#526277">Writer memory and local spill</text>
+<rect x="390" y="126" width="300" height="116" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="408" y="158" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">2  Flush and prepare</text>
+<text x="408" y="188" font-size="17" font-weight="400" text-anchor="start" fill="#526277">Write pending data files</text>
+<text x="408" y="215" font-size="17" font-weight="400" text-anchor="start" fill="#526277">Prepare file-change committables</text>
+<rect x="748" y="126" width="300" height="116" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="766" y="158" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">3  Publish commit</text>
+<text x="766" y="188" font-size="19" font-weight="400" text-anchor="start" fill="#526277">Manifests + snapshot</text>
+<text x="766" y="215" font-size="19" font-weight="400" text-anchor="start" fill="#526277">After checkpoint success</text>
+<path d="M 332 184 H 390" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 690 184 H 748" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="407" y="274" font-size="17" font-weight="400" text-anchor="start" fill="#946200">Pending files are not yet visible.</text>
+<rect x="390" y="342" width="300" height="116" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="408" y="374" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Compaction</text>
+<text x="408" y="404" font-size="17" font-weight="400" text-anchor="start" fill="#526277">Merge or promote files</text>
+<text x="408" y="431" font-size="17" font-weight="400" text-anchor="start" fill="#526277">Produce replacement file changes</text>
+<path d="M 540 342 V 302 H 716 V 224 H 748" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="733" y="307" font-size="17" font-weight="400" text-anchor="start" fill="#526277">Same commit path</text>
+<rect x="748" y="342" width="300" height="116" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="766" y="374" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Readers</text>
+<text x="766" y="404" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Select committed snapshot</text>
+<text x="766" y="431" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Apply table-mode read rules</text>
+<path d="M 898 242 V 342" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="748" y="530" width="300" height="106" rx="10" fill="#f1f4f8" stroke="#64748b" stroke-width="1.5"/>
+<text x="766" y="562" font-size="21" font-weight="700" text-anchor="start" fill="#64748b">Snapshot expiration</text>
+<text x="766" y="592" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Reclaim eligible old files</text>
+<path d="M 1048 222 H 1062 V 583 H 1048" fill="none" stroke="#526277" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+<text x="32" y="360" font-size="21" font-weight="700" text-anchor="start" fill="#172b4d">Two different maintenance jobs</text>
+<text x="32" y="400" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Compaction reduces live-file work.</text>
+<text x="32" y="430" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Expiration reclaims retained history.</text>
+<text x="32" y="460" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Neither is guaranteed by a fixed</text>
+<text x="32" y="490" font-size="18" font-weight="400" text-anchor="start" fill="#526277">snapshot count per checkpoint.</text>
+<text x="32" y="562" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Lookup and postpone layouts can add</text>
+<text x="32" y="590" font-size="18" font-weight="400" text-anchor="start" fill="#526277">a compaction dependency for visibility.</text>
+<text x="32" y="618" font-size="18" font-weight="400" text-anchor="start" fill="#526277">See the table-mode requirements.</text>
+</g>
+</svg>

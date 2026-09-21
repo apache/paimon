@@ -46,8 +46,6 @@ import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 
 import java.time.Duration;
 import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -278,10 +276,10 @@ public class KafkaActionUtils {
                                     + "'topic' and 'bootstrap.servers' config.",
                             topic));
         }
-        int firstPartition =
-                partitionInfos.stream().map(PartitionInfo::partition).sorted().findFirst().get();
-        Collection<TopicPartition> topicPartitions =
-                Collections.singletonList(new TopicPartition(topic, firstPartition));
+        List<TopicPartition> topicPartitions =
+                partitionInfos.stream()
+                        .map(partition -> new TopicPartition(topic, partition.partition()))
+                        .collect(Collectors.toList());
         consumer.assign(topicPartitions);
         consumer.seekToBeginning(topicPartitions);
 

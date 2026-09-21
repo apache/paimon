@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="592" viewBox="0 0 960 592" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Resume a row-ID backfill from committed data</title>
+<desc id="desc">Plan row-ID file groups, then process each range batch with a fresh scan, Ray computation, and a commit. In the embedding example, rerunning the job skips rows with a non-null embedding. The application owns retries and source or model version checks.</desc>
+<defs>
+  <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+    <path d="M0 0L9 4L0 8Z" fill="#63788e"/>
+  </marker>
+</defs>
+<rect width="960" height="592" rx="16" fill="#ffffff"/>
+<g font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
+  <text x="32" y="43" font-size="25" fill="#142c40" font-weight="650">Resume a row-ID backfill from committed data</text>
+  <text x="32" y="77" font-size="18" fill="#526176">Example: fill a nullable embedding column from image BLOBs.</text>
+  <rect x="32" y="105" width="896" height="100" rx="12" fill="#f3f0fb" stroke="#d7cdec" stroke-width="1.5"/>
+  <text x="52" y="138" font-size="21" fill="#4a3674" font-weight="600">Plan row-ID ranges once per run</text>
+  <text x="52" y="171" font-size="18" fill="#526176">Keep overlapping files together; rows_per_commit is a target batch size.</text>
+  <path d="M480 205V247" fill="none" stroke="#63788e" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="32" y="248" width="896" height="207" rx="12" fill="#f8fafc" stroke="#d4dde7" stroke-width="1.5"/>
+  <text x="52" y="278" font-size="17" fill="#526176" font-weight="600">FOR EACH RANGE BATCH</text>
+  <rect x="52" y="297" width="256" height="126" rx="12" fill="#eef6f8" stroke="#b7d8de" stroke-width="1.5"/>
+  <text x="72" y="330" font-size="21" fill="#153d49" font-weight="600">1  Fresh scan</text>
+  <text x="72" y="362" font-size="18" fill="#526176">embedding IS NULL</text>
+  <text x="72" y="389" font-size="18" fill="#526176">Read image + _ROW_ID</text>
+  <path d="M308 360H352" fill="none" stroke="#63788e" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="352" y="297" width="256" height="126" rx="12" fill="#eef6f8" stroke="#b7d8de" stroke-width="1.5"/>
+  <text x="372" y="330" font-size="21" fill="#153d49" font-weight="600">2  Ray actors</text>
+  <text x="372" y="362" font-size="18" fill="#526176">Compute embeddings</text>
+  <text x="372" y="389" font-size="18" fill="#526176">Return row IDs + values</text>
+  <path d="M608 360H652" fill="none" stroke="#63788e" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="652" y="297" width="256" height="126" rx="12" fill="#eef7f0" stroke="#b7d9c3" stroke-width="1.5"/>
+  <text x="672" y="330" font-size="21" fill="#245d3d" font-weight="600">3  Commit update</text>
+  <text x="672" y="362" font-size="18" fill="#526176">update_by_row_id</text>
+  <text x="672" y="389" font-size="18" fill="#526176">Publish completed rows</text>
+  <path d="M780 423V515H180V423" fill="none" stroke="#63788e" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+  <text x="480" y="494" text-anchor="middle" font-size="18" fill="#526176">Rerun after failure; completed rows are filtered out.</text>
+  <text x="32" y="558" font-size="17" fill="#526176">The application owns retries and source/model version checks.</text>
+</g>
+</svg>

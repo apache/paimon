@@ -28,6 +28,7 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -78,7 +79,7 @@ public class AlignedContinuousFileSplitEnumeratorTest
     public void before() throws Exception {
         Path tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
         FileIO fileIO = FileIOFinder.find(tablePath);
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         TableSchema tableSchema =
                 schemaManager.createTable(
                         new Schema(

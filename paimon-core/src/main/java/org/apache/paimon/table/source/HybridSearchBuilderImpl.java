@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.HybridSearchRanker;
@@ -128,6 +129,7 @@ public class HybridSearchBuilderImpl implements HybridSearchBuilder {
 
     @Override
     public List<Route> routeBuilders() {
+        TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
         validateSearch();
 
         Snapshot snapshot = null;
@@ -162,16 +164,6 @@ public class HybridSearchBuilderImpl implements HybridSearchBuilder {
         }
         if (limit <= 0) {
             throw new IllegalArgumentException("Limit must be positive, got: " + limit);
-        }
-        if (filter != null) {
-            for (HybridSearchRoute route : routes) {
-                if (!route.isVector()) {
-                    throw new UnsupportedOperationException(
-                            "Hybrid search with full-text routes does not support non-partition "
-                                    + "filters because full-text indexes cannot apply row-id "
-                                    + "pre-filters before top-k ranking.");
-                }
-            }
         }
     }
 
@@ -374,6 +366,9 @@ public class HybridSearchBuilderImpl implements HybridSearchBuilder {
                         .withLimit(route.limit());
         if (partitionFilter != null) {
             fullTextSearchBuilder.withPartitionFilter(partitionFilter);
+        }
+        if (filter != null) {
+            fullTextSearchBuilder.withFilter(filter);
         }
         return fullTextSearchBuilder;
     }

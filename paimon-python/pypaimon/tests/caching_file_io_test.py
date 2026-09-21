@@ -20,6 +20,7 @@
 
 import io
 import os
+import pickle
 import shutil
 import tempfile
 import threading
@@ -384,6 +385,21 @@ class CachingFileIOTest(unittest.TestCase):
 
         caching_io.new_output_stream("/out")
         delegate.new_output_stream.assert_called_once_with("/out")
+
+    def test_pickle_drops_cache(self):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+        from pypaimon.utils.file_type import FileType
+
+        cache = LocalDiskCacheManager(
+            self.cache_dir, 2 ** 63 - 1, block_size=64)
+        caching_io = CachingFileIO(
+            LocalFileIO(), cache, {FileType.META, FileType.DATA})
+
+        restored = pickle.loads(pickle.dumps(caching_io))
+
+        self.assertIsNone(restored._cache)
+        self.assertEqual({FileType.META, FileType.DATA}, restored._whitelist)
+        self.assertIsInstance(restored._delegate, LocalFileIO)
 
     def test_to_filesystem_path_forwarded_to_delegate(self):
         delegate = MagicMock()

@@ -348,38 +348,94 @@ class AsyncStreamingTableScan:
     def _create_initial_plan(self, snapshot: Snapshot) -> Plan:
         """Create a Plan for the initial full scan of the latest snapshot."""
         auth_result = self.__auth_query()
-        plan = self.__create_initial_plan_raw(snapshot, auth_result)
+        plan = None
+        if auth_result is None:
+            plan = self._try_native_plan(snapshot.id)
+        if plan is None:
+            plan = self.__create_initial_plan_raw(snapshot, auth_result)
         return wrap_plan_with_auth(auth_result, plan)
 
     def _create_delta_plan(self, snapshot: Snapshot) -> Plan:
         """Read new files from delta_manifest_list (changelog-producer=none)."""
+        plan = self._try_native_plan(
+            snapshot.id, incremental_range=(snapshot.id - 1, snapshot.id))
+        if plan is not None:
+            return plan
         manifest_files = self._manifest_list_manager.read_delta(snapshot)
-        return self._create_plan_from_manifests(manifest_files)
+        return self._create_plan_from_manifests(manifest_files, snapshot.id)
+
+    def _try_native_plan(self, expected_snapshot_id: int,
+                         incremental_range=None) -> Optional[Plan]:
+        """Plan an initial or delta streaming frame with pypaimon-rust.
+
+        An arbitrary Python bucket predicate cannot be represented by the Rust
+        planner, so sharded stream consumers retain the Python plan. Any native
+        setup or planning error is an optimization miss and falls back before
+        a plan is returned.
+        """
+        if (not self.table.options.native_plan_enabled()
+                or self._bucket_filter is not None):
+            return None
+        # Rust's full-snapshot scan currently has batch visibility semantics.
+        # For first-row and non-MOR deletion-vector tables it hides level-0
+        # files, while an initial streaming scan must include those files.
+        # Incremental scans already use Rust's streaming split mode and do not
+        # need this fallback.
+        if (incremental_range is None
+                and self.table.options.batch_scan_skip_level0()):
+            return None
+        try:
+            from pypaimon.read.native_plan import native_plan
+            plan = native_plan(
+                self.table,
+                predicate=self.predicate,
+                projection=(
+                    [field.name for field in self._read_type]
+                    if self._read_type is not None else None),
+                incremental_range=incremental_range,
+            )
+            if plan.snapshot_id != expected_snapshot_id:
+                logging.warning(
+                    "Native streaming plan resolved snapshot %s, expected %s; "
+                    "falling back to Python planning",
+                    plan.snapshot_id, expected_snapshot_id)
+                return None
+            return plan
+        except Exception as error:
+            logging.warning(
+                "Native streaming plan failed, falling back to Python planning: %s",
+                error)
+            return None
 
     def _create_changelog_plan(self, snapshot: Snapshot) -> Plan:
         """Read from changelog_manifest_list (changelog-producer=input/full-compaction/lookup)."""
         manifest_files = self._manifest_list_manager.read_changelog(snapshot)
-        return self._create_plan_from_manifests(manifest_files)
+        return self._create_plan_from_manifests(manifest_files, snapshot.id)
 
-    def _create_plan_from_manifests(self, manifest_files: List) -> Plan:
+    def _create_plan_from_manifests(self, manifest_files: List, snapshot_id=None) -> Plan:
         """Create splits from manifest files, applying shard filtering."""
         if not manifest_files:
-            return Plan([])
+            return Plan([], snapshot_id=snapshot_id)
 
         # Use configurable parallelism from table options
         max_workers = max(8, self.table.options.scan_manifest_parallelism(os.cpu_count() or 8))
 
-        # Read manifest entries from manifest files
+        def require_add(entry):
+            if entry.kind != 0:
+                raise ValueError("Incremental manifests must contain only ADD entries")
+            return True
+
+        # Validate before the manifest reader reconciles ADD/DELETE entries.
         entries = self._manifest_file_manager.read_entries_parallel(
             manifest_files,
-            manifest_entry_filter=None,
+            manifest_entry_filter=require_add,
             max_workers=max_workers
         )
 
         # Apply shard/bucket filtering for parallel consumption
         entries = self._filter_entries_for_shard(entries) if entries else []
         if not entries:
-            return Plan([])
+            return Plan([], snapshot_id=snapshot_id)
 
         # Get split options from table
         options = self.table.options
@@ -392,18 +448,22 @@ class AsyncStreamingTableScan:
                 self.table,
                 target_split_size,
                 open_file_cost,
-                deletion_files_map={}
+                deletion_files_map={},
+                snapshot_id=snapshot_id,
             )
         else:
             split_generator = AppendTableSplitGenerator(
                 self.table,
                 target_split_size,
                 open_file_cost,
-                deletion_files_map={}
+                deletion_files_map={},
+                snapshot_id=snapshot_id,
             )
 
         splits = split_generator.create_splits(entries)
-        return Plan(splits)
+        for split in splits:
+            split.is_streaming = True
+        return Plan(splits, snapshot_id=snapshot_id)
 
     def _should_use_diff_catch_up(self) -> bool:
         """Check if diff-based catch-up should be used (large gap to latest)."""

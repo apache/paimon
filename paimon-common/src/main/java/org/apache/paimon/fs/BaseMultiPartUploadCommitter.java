@@ -24,6 +24,7 @@ import org.apache.paimon.rest.RESTTokenFileIO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -71,10 +72,23 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
     @Override
     public void discard(FileIO fileIO) throws IOException {
         try {
-            MultiPartUploadStore<T, C> multiPartUploadStore = multiPartUploadStore(fileIO);
-            multiPartUploadStore.abortMultipartUpload(objectName, uploadId);
+            abortMultipartUpload(fileIO);
         } catch (Exception e) {
             LOG.warn("Failed to discard multipart upload with ID: {}", uploadId, e);
+        }
+    }
+
+    @Override
+    public void discardStaging(FileIO fileIO) throws IOException {
+        try {
+            // A completed or already-aborted upload has no staging left to release, so a
+            // not-found upload (e.g. S3 NoSuchUpload) is nothing to discard rather than a
+            // failure. Aborting never deletes a completed object, so the target stays intact.
+            abortMultipartUpload(fileIO);
+        } catch (FileNotFoundException e) {
+            LOG.debug("Multipart upload {} already gone; nothing to discard.", uploadId);
+        } catch (Exception e) {
+            throw new IOException("Failed to discard multipart upload with ID: " + uploadId, e);
         }
     }
 
@@ -91,10 +105,20 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
     @Override
     public void clean(FileIO fileIO) throws IOException {}
 
+    private void abortMultipartUpload(FileIO fileIO) throws IOException {
+        MultiPartUploadStore<T, C> multiPartUploadStore = multiPartUploadStore(fileIO);
+        multiPartUploadStore.abortMultipartUpload(objectName, uploadId);
+    }
+
     private MultiPartUploadStore<T, C> multiPartUploadStore(FileIO fileIO) throws IOException {
         if (fileIO instanceof RESTTokenFileIO) {
             RESTTokenFileIO restTokenFileIO = (RESTTokenFileIO) fileIO;
             fileIO = restTokenFileIO.fileIO();
+        }
+        if (fileIO instanceof ResolvingFileIO) {
+            // The upload was started on the FileIO this resolver resolved to, and
+            // multiPartUploadStore casts to that concrete type, so resolve again here.
+            fileIO = ((ResolvingFileIO) fileIO).fileIO(targetPath());
         }
         return multiPartUploadStore(fileIO, targetPath());
     }

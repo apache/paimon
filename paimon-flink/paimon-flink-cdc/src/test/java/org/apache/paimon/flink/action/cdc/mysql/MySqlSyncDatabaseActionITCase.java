@@ -71,6 +71,45 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
+    public void testTableConfigByTable() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "paimon_sync_database");
+        MySqlSyncDatabaseAction action =
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .includingTables("t1|t2")
+                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfigByTable("t1:bucket=2", "t2:bucket=4")
+                        .build();
+        runActionWithDefaultEnv(action);
+        assertThat(getFileStoreTable("t1").options()).containsEntry("bucket", "2");
+        assertThat(getFileStoreTable("t2").options()).containsEntry("bucket", "4");
+    }
+
+    @Test
+    @Timeout(60)
+    public void testTableConfigByTableInCombinedMode() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "paimon_sync_database");
+        try (Statement statement = getStatement()) {
+            statement.execute("USE paimon_sync_database");
+            statement.executeUpdate(
+                    "CREATE TABLE config_default (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
+        }
+        MySqlSyncDatabaseAction action =
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withMode(COMBINED.configString())
+                        .includingTables("t1|t2|config_default")
+                        .withTableConfig(Collections.singletonMap("bucket", "3"))
+                        .withTableConfigByTable("t1:bucket=2", "t2:bucket=4")
+                        .build();
+        runActionWithDefaultEnv(action);
+        assertThat(getFileStoreTable("t1").options()).containsEntry("bucket", "2");
+        assertThat(getFileStoreTable("t2").options()).containsEntry("bucket", "4");
+        assertThat(getFileStoreTable("config_default").options()).containsEntry("bucket", "3");
+    }
+
+    @Test
+    @Timeout(60)
     public void testSchemaEvolution() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "paimon_sync_database");
@@ -1028,6 +1067,22 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                     rowType,
                     Collections.singletonList("k"));
 
+            // Use records from both shards as a barrier before altering t2. Waiting for t1 alone
+            // does not guarantee that the t2 snapshot readers have loaded their schemas.
+            statement.executeUpdate("INSERT INTO database_shard_1.t2 VALUES (-1, -1.1)");
+            statement.executeUpdate("INSERT INTO database_shard_2.t2 VALUES (-2, -2.2)");
+            table = getFileStoreTable("t2");
+            rowType =
+                    RowType.of(
+                            new DataType[] {DataTypes.BIGINT().notNull(), DataTypes.DOUBLE()},
+                            new String[] {"k", "v1"});
+            waitForResult(
+                    client,
+                    Arrays.asList("+I[-1, -1.1]", "+I[-2, -2.2]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("k"));
+
             // test schema evolution of t2
             statement.executeUpdate("ALTER TABLE database_shard_1.t2 ADD COLUMN v2 INT");
             statement.executeUpdate("ALTER TABLE database_shard_2.t2 ADD COLUMN v3 VARCHAR(10)");
@@ -1048,6 +1103,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             waitForResult(
                     client,
                     Arrays.asList(
+                            "+I[-1, -1.1, NULL, NULL]",
+                            "+I[-2, -2.2, NULL, NULL]",
                             "+I[1, 1.1, 1, NULL]",
                             "+I[2, 2.2, 2, NULL]",
                             "+I[3, 3.3, NULL, db2_3]",

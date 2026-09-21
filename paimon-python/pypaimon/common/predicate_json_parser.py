@@ -23,6 +23,26 @@ from typing import Callable
 import pyarrow as pa
 import pyarrow.compute as pc
 
+# utf8_slice_codeunits needs an explicit integer stop on pyarrow 6
+_MAX_STOP = 2 ** 31 - 1
+
+_INT_MIN, _INT_MAX = -2 ** 31, 2 ** 31 - 1
+
+# Integer.parseInt syntax: an optional sign and Unicode decimal digits, which
+# Character.digit accepts, but no whitespace or underscore, which int() would.
+# Java reads UTF-16 chars, so a supplementary-plane digit fails there.
+_JAVA_INT = re.compile(r"[+-]?\d+\Z")
+
+# an omitted third input, as opposed to one that is explicitly null
+_ABSENT = object()
+
+# per trimFlag: the Arrow kernel, and the str method for the per-row form
+_TRIM_OPS = {
+    "BOTH": (pc.utf8_trim, str.strip),
+    "LEADING": (pc.utf8_ltrim, str.lstrip),
+    "TRAILING": (pc.utf8_rtrim, str.rstrip),
+}
+
 
 def parse_predicate_to_batch_filter(json_str: str) -> Callable[[pa.RecordBatch], pa.Array]:
     data = json.loads(json_str)
@@ -103,10 +123,225 @@ def _apply_predicate_transform(transform: dict, batch: pa.RecordBatch,
             return pa.nulls(len(batch), type=pa.string())
         return _concat_ws(sep, values)
 
+    elif name == "SUBSTRING":
+        return _substring(transform["inputs"], batch)
+
+    elif name == "TRIM":
+        flag = transform.get("trimFlag")
+        if flag is None:
+            raise ValueError("TRIM rule is missing trimFlag")
+        return _trim(transform["inputs"], flag, batch)
+
     elif name == "NULL":
         return pa.nulls(len(batch), type=null_type)
 
     raise ValueError(f"Unknown transform type: {name}")
+
+
+def _substring(inputs, batch: pa.RecordBatch) -> pa.Array:
+    if not isinstance(inputs, list):
+        raise ValueError(f"SUBSTRING inputs must be a list, got {inputs!r}")
+    if len(inputs) not in (2, 3):
+        raise ValueError(f"SUBSTRING takes 2 or 3 inputs, got {len(inputs)}")
+    source = _resolve_transform_input(inputs[0], batch)
+    begin = inputs[1]
+    length = inputs[2] if len(inputs) == 3 else _ABSENT
+
+    _check_string_input("SUBSTRING source", inputs[0], batch)
+
+    # Jackson refuses a non-integral number, a boolean or an array when the rule is
+    # read; a null is not malformed and propagates to a null result, as in SQL
+    for position in (begin,) + ((length,) if length is not _ABSENT else ()):
+        if position is None or isinstance(position, dict):
+            continue
+        if isinstance(position, bool) or not isinstance(position, (int, str)):
+            raise ValueError(f"SUBSTRING position must be an integer: {position!r}")
+
+    # a malformed literal is left to the per-row path, which raises where Java does
+    begin_literal = _literal_position(begin)
+    length_literal = _literal_position(length) if length is not _ABSENT else None
+
+    # the kernel only matches the SQL semantics for a positive begin and length
+    if begin_literal is not None and begin_literal >= 1:
+        if length is _ABSENT:
+            return pc.utf8_slice_codeunits(source, start=begin_literal - 1, stop=_MAX_STOP)
+        if (
+            length_literal is not None
+            and length_literal > 0
+            and begin_literal + length_literal - 1 <= _INT_MAX
+        ):
+            start = begin_literal - 1
+            return pc.utf8_slice_codeunits(source, start=start, stop=start + length_literal)
+
+    return _substring_per_row(source, begin, length, batch)
+
+
+def _int_position(value):
+    """A SUBSTRING begin/length, with Java's tolerance and no more: Integer.parseInt
+    takes "+2" and "007" but not "1_0" or " 2 ", which int() accepts."""
+    if isinstance(value, bool) or isinstance(value, float):
+        raise ValueError(f"SUBSTRING position must be an integer: {value!r}")
+    if isinstance(value, str):
+        if not _JAVA_INT.match(value) or any(ord(c) > 0xFFFF for c in value):
+            raise ValueError(f"SUBSTRING position must be an integer: {value!r}")
+        position = int(value)
+    elif isinstance(value, int):
+        position = value
+    else:
+        raise ValueError(f"SUBSTRING position must be an integer: {value!r}")
+    if not _INT_MIN <= position <= _INT_MAX:
+        raise ValueError(f"SUBSTRING position is out of the integer range: {value!r}")
+    return position
+
+
+def _literal_position(value):
+    """The value of a literal position, or None when it is a field or unusable here."""
+    if value is None or isinstance(value, dict):
+        return None
+    try:
+        return _int_position(value)
+    except ValueError:
+        return None
+
+
+def _field_column(inp, batch: pa.RecordBatch):
+    """The column a field reference names. Java rebuilds the reference from the schema
+    before a rule runs, so the index it carries and, for SUBSTRING, the type it carries
+    never decide anything; only the name is used to find the column."""
+    name = inp.get("name")
+    if not isinstance(name, str) or name not in batch.schema.names:
+        raise ValueError(f"Column masking refers to a field that is not present: {inp!r}")
+    return batch.column(name)
+
+
+# StringTransform validates a stored FieldRef type when the rule is read, before
+# TableQueryAuthResult replaces it from the schema. The whole spelling has to match:
+# Java parses "STRING ARRAY" as an array type, accepts an explicit NULL as well as
+# NOT NULL, needs no space after a ")" but does after a bare keyword, and rejects a
+# length outside CharType and VarCharType's [1, MAX_VALUE].
+_CHARACTER_TYPE = re.compile(
+    r"\s*(?:STRING(?=\s|\Z)|(?:CHAR|VARCHAR)\s*(?:\(\s*(\d+)\s*\)|(?=\s|\Z)))"
+    r"(?:\s*(?:NOT\s+)?NULL)?\s*\Z",
+    re.IGNORECASE,
+)
+
+
+def _check_stored_character_type(slot: str, inp) -> None:
+    stored = inp.get("type")
+    matched = _CHARACTER_TYPE.match(stored) if isinstance(stored, str) else None
+    length = matched.group(1) if matched else None
+    if matched is None or (length is not None and not 1 <= int(length) <= _INT_MAX):
+        raise ValueError(f"{slot} field must be a string: {stored!r}")
+
+
+def _check_string_input(slot: str, value, batch: pa.RecordBatch, stored: bool = False) -> None:
+    """A string input is a literal or a field reference to a string column."""
+    if value is None or isinstance(value, str):
+        return
+    if not isinstance(value, dict):
+        raise ValueError(f"{slot} must be a string or a field: {value!r}")
+    if stored:
+        _check_stored_character_type(slot, value)
+    column = _field_column(value, batch)
+    if not pa.types.is_string(column.type) and not pa.types.is_large_string(column.type):
+        raise ValueError(f"{slot} field must be a string: {column.type}")
+
+
+class _Positions:
+    """A position slot resolved lazily, as Java reads one only when a row reaches it."""
+
+    def __init__(self, inp, batch: pa.RecordBatch):
+        self._inp = inp
+        self._batch = batch
+        self._values = None
+
+    def value(self, index: int):
+        if self._values is None:
+            self._values = self._resolve()
+        return self._values[index]
+
+    def _resolve(self) -> list:
+        inp = self._inp
+        if not isinstance(inp, dict):
+            return [inp] * len(self._batch)
+        column = _field_column(inp, self._batch)
+        if not pa.types.is_integer(column.type):
+            raise ValueError(
+                f"SUBSTRING position field must be an integer type: {column.type}")
+        return column.to_pylist()
+
+
+def _substring_sql(value: str, pos: int, length: int) -> str:
+    """BinaryString.substringSQL: one-based, zero means one, negative counts from the end."""
+    chars = len(value)
+    start = pos - 1 if pos > 0 else (chars + pos if pos < 0 else 0)
+    end = start + length
+    # Java computes the end in long arithmetic and saturates it into an int
+    end = min(max(end, _INT_MIN), _INT_MAX)
+    if end <= start or start >= chars:
+        return ""
+    return value[max(start, 0):min(max(end, 0), chars)]
+
+
+def _substring_per_row(source: pa.Array, begin, length, batch: pa.RecordBatch) -> pa.Array:
+    # mirrors SubstringTransform.transform, including the order of its checks
+    begins = _Positions(begin, batch)
+    has_length = length is not _ABSENT
+    lengths = _Positions(length, batch) if has_length else None
+    result = []
+    for i, value in enumerate(source.to_pylist()):
+        if value is None:
+            result.append(None)
+            continue
+        raw_begin = begins.value(i)
+        # SQL null propagation: every position is checked before any is parsed
+        if raw_begin is None or (has_length and lengths.value(i) is None):
+            result.append(None)
+            continue
+        pos = _int_position(raw_begin)
+        length_value = _int_position(lengths.value(i)) if has_length else _INT_MAX
+        result.append(_substring_sql(value, pos, length_value))
+    return pa.array(result, type=source.type)
+
+
+def _trim(inputs, flag: str, batch: pa.RecordBatch) -> pa.Array:
+    if not isinstance(inputs, list):
+        raise ValueError(f"TRIM inputs must be a list, got {inputs!r}")
+    if len(inputs) not in (1, 2):
+        raise ValueError(f"TRIM takes 1 or 2 inputs, got {len(inputs)}")
+    _check_string_input("TRIM source", inputs[0], batch, stored=True)
+    if len(inputs) == 2:
+        _check_string_input("TRIM characters", inputs[1], batch, stored=True)
+    source = _resolve_transform_input(inputs[0], batch)
+    # Java's one-input TRIM trims spaces only, not every whitespace character.
+    chars = " " if len(inputs) == 1 else inputs[1]
+
+    # validated first: Jackson rejects an unknown flag when the rule is read
+    kernel = _trim_ops(flag)[0]
+
+    if isinstance(chars, dict):
+        return _trim_per_row(source, flag, batch.column(chars["name"]).to_pylist())
+
+    if chars is None:
+        # Java masks the whole column to null for a null charsToTrim
+        return pa.nulls(len(batch), type=source.type)
+
+    return kernel(source, characters=chars)
+
+
+def _trim_ops(flag: str):
+    ops = _TRIM_OPS.get(flag)
+    if ops is None:
+        raise ValueError(f"Unknown trimFlag: {flag}")
+    return ops
+
+
+def _trim_per_row(source: pa.Array, flag: str, chars_per_row: list) -> pa.Array:
+    strip = _trim_ops(flag)[1]
+    result = []
+    for value, chars in zip(source.to_pylist(), chars_per_row):
+        result.append(None if value is None or chars is None else strip(value, chars))
+    return pa.array(result, type=source.type)
 
 
 def _resolve_transform_input(inp, batch: pa.RecordBatch) -> pa.Array:

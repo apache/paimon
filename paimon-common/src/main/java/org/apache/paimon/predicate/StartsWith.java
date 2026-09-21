@@ -59,7 +59,7 @@ public class StartsWith extends LeafBinaryFunction {
 
     @Override
     public Optional<LeafFunction> negate() {
-        return Optional.empty();
+        return Optional.of(NotStartsWith.INSTANCE);
     }
 
     @Override

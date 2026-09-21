@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.orc.filter;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -250,6 +251,20 @@ public class OrcFilterConverterTest {
         assertThat(builder.isNaN(0).visit(OrcPredicateFunctionVisitor.VISITOR))
                 .isEqualTo(Optional.empty());
         assertThat(builder.isNaN(1).visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+    }
+
+    @Test
+    public void testNotLike() {
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(0, "stringField", new VarCharType()))));
+
+        assertThat(
+                        builder.notLike(0, BinaryString.fromString("%value%"))
+                                .visit(OrcPredicateFunctionVisitor.VISITOR))
                 .isEqualTo(Optional.empty());
     }
 

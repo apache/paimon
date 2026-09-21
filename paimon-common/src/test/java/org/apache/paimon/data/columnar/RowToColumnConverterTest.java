@@ -43,7 +43,9 @@ import org.apache.paimon.data.columnar.heap.HeapShortVector;
 import org.apache.paimon.data.columnar.heap.HeapTimestampVector;
 import org.apache.paimon.data.columnar.heap.HeapVectorColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
+import org.apache.paimon.data.variant.BufferOnlyVariant;
 import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -316,17 +318,34 @@ public class RowToColumnConverterTest {
     public void testConvertVariantType() {
         RowType rowType = RowType.of(new DataField(0, "f", DataTypes.VARIANT()));
         RowToColumnConverter converter = new RowToColumnConverter(rowType);
-        GenericVariant variant = GenericVariant.fromJson("{\"a\":1}");
+        GenericVariant prefix = GenericVariant.fromJson("null");
+        GenericVariant expected = GenericVariant.fromJson("{\"a\":1}");
+        Variant variant = new BufferOnlyVariant(expected);
 
         HeapRowVector rowVector =
-                new HeapRowVector(1, new HeapBytesVector(1), new HeapBytesVector(1));
+                new HeapRowVector(2, new HeapBytesVector(2), new HeapBytesVector(2));
         WritableColumnVector[] vectors = new WritableColumnVector[] {rowVector};
 
+        converter.convert(GenericRow.of(prefix), vectors);
         converter.convert(GenericRow.of(variant), vectors);
 
-        assertThat(rowVector.isNullAt(0)).isFalse();
-        assertThat(rowVector.getRow(0).getBinary(0)).isEqualTo(variant.value());
-        assertThat(rowVector.getRow(0).getBinary(1)).isEqualTo(variant.metadata());
+        assertThat(rowVector.isNullAt(1)).isFalse();
+        assertThat(rowVector.getRow(1).getBinary(0)).isEqualTo(expected.value());
+        assertThat(rowVector.getRow(1).getBinary(1)).isEqualTo(expected.metadata());
+
+        VectorizedColumnBatch batch = new VectorizedColumnBatch(new ColumnVector[] {rowVector});
+        Variant columnarVariant = batch.getVariant(1, 0);
+        BytesColumnVector.Bytes valueBytes =
+                ((HeapBytesVector) rowVector.getChildren()[0]).getBytes(1);
+        BytesColumnVector.Bytes metadataBytes =
+                ((HeapBytesVector) rowVector.getChildren()[1]).getBytes(1);
+        assertThat(columnarVariant).isInstanceOf(GenericVariant.class);
+        assertThat(columnarVariant.valueBuffer().array()).isSameAs(valueBytes.data);
+        assertThat(columnarVariant.valueBuffer().arrayOffset()).isEqualTo(valueBytes.offset);
+        assertThat(columnarVariant.valueBuffer().remaining()).isEqualTo(valueBytes.len);
+        assertThat(columnarVariant.metadataBuffer().array()).isSameAs(metadataBytes.data);
+        assertThat(columnarVariant.metadataBuffer().arrayOffset()).isEqualTo(metadataBytes.offset);
+        assertThat(columnarVariant.metadataBuffer().remaining()).isEqualTo(metadataBytes.len);
     }
 
     @Test

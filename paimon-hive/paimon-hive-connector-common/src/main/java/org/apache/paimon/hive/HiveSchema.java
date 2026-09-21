@@ -24,7 +24,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.utils.HiveUtils;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -202,7 +202,7 @@ public class HiveSchema {
         options.set(CoreOptions.PATH, location);
         CatalogContext context = CatalogContext.create(options, configuration);
         try {
-            return new SchemaManager(FileIO.get(path, context), path).latest();
+            return new FileSystemSchemaManager(FileIO.get(path, context), path).latest();
         } catch (IOException e) {
             LOG.warn(
                     "Failed to fetch Paimon table schema from path "

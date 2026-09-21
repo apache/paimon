@@ -25,6 +25,12 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.ColumnVectorUtils;
+import org.apache.paimon.data.columnar.ColumnarRow;
+import org.apache.paimon.data.columnar.RowToColumnConverter;
+import org.apache.paimon.data.columnar.VectorizedColumnBatch;
+import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.variant.PaimonShreddingUtils.FieldToExtract;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -38,7 +44,9 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -56,6 +64,66 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for PaimonShreddingUtils. */
 public class PaimonShreddingUtilsTest {
+
+    @Test
+    void testBuildVariantSchemaAcceptsEmptyInnerStruct() {
+        // An empty typed_value struct shreds no field, and stays a legal schema.
+        RowType physicalType = variantShreddingSchema(RowType.of(new DataType[0], new String[0]));
+        assertThat(buildVariantSchema(physicalType).objectSchema).isEmpty();
+    }
+
+    @Test
+    void testBuildVariantSchemaRejectsNonStructInnerField() {
+        RowType physicalType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.BYTES(),
+                            DataTypes.BYTES(),
+                            RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"x"})
+                        },
+                        new String[] {"metadata", "value", "typed_value"});
+        // Everything except the inner field's type is valid here, and the message is what
+        // separates the two outcomes: before, the cast below raised a bare ClassCastException.
+        assertThatThrownBy(() -> buildVariantSchema(physicalType))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Invalid variant shredding schema");
+    }
+
+    @Test
+    void testAssembleColumnarShreddedVariant() {
+        RowType shreddedType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"a"});
+        RowType physicalType = variantShreddingSchema(shreddedType);
+        VariantSchema variantSchema = buildVariantSchema(physicalType);
+        RowToColumnConverter converter = new RowToColumnConverter(physicalType);
+        WritableColumnVector[] writableVectors =
+                physicalType.getFieldTypes().stream()
+                        .map(type -> ColumnVectorUtils.createWritableColumnVector(2, type))
+                        .toArray(WritableColumnVector[]::new);
+        converter.convert(
+                castShredded(GenericVariant.fromJson("{\"a\":0}"), variantSchema), writableVectors);
+        GenericVariant expected =
+                GenericVariant.fromJson("{\"a\":1,\"leftover\":{\"payload\":\"value\"}}");
+        converter.convert(castShredded(expected, variantSchema), writableVectors);
+
+        ColumnVector[] vectors =
+                ColumnVectorUtils.createReadableColumnVectors(
+                        physicalType.getFieldTypes(), writableVectors);
+        ColumnarRow row = new ColumnarRow(new VectorizedColumnBatch(vectors), 1);
+        ByteBuffer metadata = row.getBinaryBuffer(variantSchema.topLevelMetadataIdx);
+
+        assertThat(metadata.arrayOffset()).isGreaterThan(0);
+        assertThat(assembleVariant(row, variantSchema).toJson()).isEqualTo(expected.toJson());
+        FieldToExtract[] fields =
+                new FieldToExtract[] {
+                    buildFieldsToExtract(
+                            DataTypes.STRING(),
+                            "$.leftover.payload",
+                            new VariantCastArgs(true, ZoneOffset.UTC),
+                            variantSchema)
+                };
+        assertThat(assembleVariantStruct(row, variantSchema, fields))
+                .isEqualTo(GenericRow.of(BinaryString.fromString("value")));
+    }
 
     @Test
     void testAssembleAllTypes() {
@@ -152,10 +220,11 @@ public class PaimonShreddingUtilsTest {
                         BinaryString.fromString("true"),
                         null,
                         BinaryString.fromString(DateTimeUtils.formatDate(20000)),
+                        // rendered in the zone castArgs asks for, not the JVM default
                         BinaryString.fromString(
                                 DateTimeUtils.formatTimestamp(
                                         Timestamp.fromMicros(1_234_567_890_123_456L),
-                                        TimeZone.getDefault(),
+                                        DateTimeUtils.UTC_ZONE,
                                         6)),
                         BinaryString.fromString(
                                 DateTimeUtils.formatTimestamp(
@@ -222,6 +291,116 @@ public class PaimonShreddingUtilsTest {
                                                         BinaryString.fromString("Apache Paimon"));
                                             }
                                         })));
+    }
+
+    @Test
+    public void testShreddedDecimalCastsLikeUnshredded() {
+        // A shredded typed_value carries the scale of the file schema, e.g. 10.0 as
+        // DECIMAL(18, 1), while the unshredded leg strips trailing zeros; both legs must
+        // produce the same string, and numeric targets must stay unaffected.
+        GenericVariant v =
+                GenericVariant.fromJson(
+                        "{\"price\": 10.0, \"amount\": 1.50, \"tiny\": 0.05, \"zero\": 0.00}");
+        VariantCastArgs castArgs = new VariantCastArgs(true, ZoneOffset.UTC);
+
+        RowType shredded =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.DECIMAL(18, 2),
+                            DataTypes.DECIMAL(18, 1),
+                            DataTypes.DECIMAL(18, 2),
+                            DataTypes.DECIMAL(18, 2)
+                        },
+                        new String[] {"amount", "price", "tiny", "zero"});
+        RowType unshredded = RowType.of();
+
+        for (RowType shape : new RowType[] {shredded, unshredded}) {
+            VariantSchema variantSchema = buildVariantSchema(variantShreddingSchema(shape));
+            FieldToExtract[] fieldsToExtract = {
+                buildFieldsToExtract(DataTypes.STRING(), "$.price", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.STRING(), "$.amount", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.STRING(), "$.tiny", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.STRING(), "$.zero", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.DECIMAL(10, 2), "$.price", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.DOUBLE(), "$.amount", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.BIGINT(), "$.price", castArgs, variantSchema)
+            };
+
+            assertThat(
+                            assembleVariantStruct(
+                                    castShredded(v, variantSchema), variantSchema, fieldsToExtract))
+                    .as("shape %s", shape)
+                    .isEqualTo(
+                            GenericRow.of(
+                                    BinaryString.fromString("10"),
+                                    BinaryString.fromString("1.5"),
+                                    BinaryString.fromString("0.05"),
+                                    BinaryString.fromString("0"),
+                                    Decimal.fromBigDecimal(new BigDecimal("10.00"), 10, 2),
+                                    1.5,
+                                    10L));
+        }
+    }
+
+    @Test
+    public void testShreddedTimestampCastsUseRequestedZone() {
+        // A shredded typed_value timestamp goes through the scalar reader, an unshredded one
+        // through VariantGet; both must convert with the requested zone, not the JVM default.
+        Map<String, Object> values = new HashMap<>();
+        values.put("ts", 1700000000500000L); // 2023-11-14 22:13:20.5 UTC
+        RowType valueType =
+                RowType.of(
+                        new DataType[] {DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE()},
+                        new String[] {"ts"});
+        GenericVariant v = GenericVariantBuilderHelper.build(valueType, values);
+        VariantCastArgs shanghai = new VariantCastArgs(true, ZoneId.of("Asia/Shanghai"));
+
+        TimeZone original = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("America/Los_Angeles"));
+            for (RowType shape : new RowType[] {valueType, RowType.of()}) {
+                VariantSchema variantSchema = buildVariantSchema(variantShreddingSchema(shape));
+                FieldToExtract[] fieldsToExtract = {
+                    buildFieldsToExtract(DataTypes.STRING(), "$.ts", shanghai, variantSchema),
+                    buildFieldsToExtract(DataTypes.TIMESTAMP(), "$.ts", shanghai, variantSchema),
+                    buildFieldsToExtract(DataTypes.DATE(), "$.ts", shanghai, variantSchema)
+                };
+                assertThat(
+                                assembleVariantStruct(
+                                        castShredded(v, variantSchema),
+                                        variantSchema,
+                                        fieldsToExtract))
+                        .as("shape %s", shape)
+                        .isEqualTo(
+                                GenericRow.of(
+                                        BinaryString.fromString("2023-11-15 06:13:20.5"),
+                                        Timestamp.fromMicros(1700000000500000L + 8 * 3600_000_000L),
+                                        19676));
+            }
+        } finally {
+            TimeZone.setDefault(original);
+        }
+    }
+
+    @Test
+    public void testAssembleDecimalWithScaleAbovePrecision() {
+        // the unshredded leg extracts through VariantGet, which used to build an invalid
+        // DecimalType for a value below 0.1 or one whose trailing zeros were stripped off
+        GenericVariant v = GenericVariant.fromJson("{\"round\": 100.00, \"small\": 0.05}");
+        VariantCastArgs castArgs = new VariantCastArgs(true, ZoneOffset.UTC);
+
+        VariantSchema variantSchema = buildVariantSchema(variantShreddingSchema(RowType.of()));
+        FieldToExtract[] fieldsToExtract = {
+            buildFieldsToExtract(DataTypes.STRING(), "$.round", castArgs, variantSchema),
+            buildFieldsToExtract(DataTypes.STRING(), "$.small", castArgs, variantSchema)
+        };
+
+        assertThat(
+                        assembleVariantStruct(
+                                castShredded(v, variantSchema), variantSchema, fieldsToExtract))
+                .isEqualTo(
+                        GenericRow.of(
+                                BinaryString.fromString("100"), BinaryString.fromString("0.05")));
     }
 
     private static void assertVariantStructEquals(

@@ -22,11 +22,11 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.reader.LimitRecordReader;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.source.ReadTransform;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
@@ -34,7 +34,7 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Optional;
+import java.util.Collections;
 
 /** A {@link TableRead} implementation for {@link FormatTable}. */
 public class FormatTableRead implements TableRead {
@@ -55,7 +55,7 @@ public class FormatTableRead implements TableRead {
             Predicate predicate,
             Integer limit) {
         this.tableRowType = tableRowType;
-        this.readType = readType;
+        this.readType = readType == null ? tableRowType : readType;
         this.read = read;
         this.predicate = predicate;
         this.limit = limit;
@@ -89,30 +89,16 @@ public class FormatTableRead implements TableRead {
         // Capture the binding per TableRead so lazy file suppliers cannot observe another read's
         // sizer.
         ReadBatchSizer sizer = this.readBatchSizer;
-        RecordReader<InternalRow> reader = read.createReader(dataSplit, sizer);
-        if (executeFilter) {
-            reader = executeFilter(reader);
-        }
+        ReadTransform transform =
+                ReadTransform.create(
+                        tableRowType,
+                        readType,
+                        predicate,
+                        executeFilter,
+                        null,
+                        Collections.emptySet());
+        RecordReader<InternalRow> reader =
+                transform.apply(read.createReader(dataSplit, sizer, transform.readType()));
         return LimitRecordReader.limit(reader, limit);
-    }
-
-    private RecordReader<InternalRow> executeFilter(RecordReader<InternalRow> reader) {
-        if (predicate == null) {
-            return reader;
-        }
-
-        Predicate predicate = this.predicate;
-        if (readType != null) {
-            int[] projection = tableRowType.getFieldIndices(readType.getFieldNames());
-            Optional<Predicate> optional =
-                    predicate.visit(PredicateProjectionConverter.fromProjection(projection));
-            if (!optional.isPresent()) {
-                return reader;
-            }
-            predicate = optional.get();
-        }
-
-        Predicate finalFilter = predicate;
-        return reader.filter(finalFilter::test);
     }
 }

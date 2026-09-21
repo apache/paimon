@@ -72,9 +72,18 @@ public class RangeBitmapFileIndex implements FileIndexer {
         public Writer(DataType dataType, Options options) {
             KeyFactory factory = KeyFactory.create(dataType);
             String chunkSize = options.getString(CHUNK_SIZE, factory.defaultChunkSize());
+            long bytes = MemorySize.parse(chunkSize).getBytes();
+            // the chunk size becomes an eagerly allocated per-chunk buffer, so it has to fit an
+            // int. Narrowing it silently substitutes a different size: "2g" becomes negative and
+            // fails only once the writer allocates, "4g" becomes 0 and "5g" becomes 1g.
+            if (bytes > Integer.MAX_VALUE) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "The '%s' option must not exceed 2147483647 bytes, but was '%s'.",
+                                CHUNK_SIZE, chunkSize));
+            }
             this.converter = factory.createConverter();
-            this.appender =
-                    new RangeBitmap.Appender(factory, (int) MemorySize.parse(chunkSize).getBytes());
+            this.appender = new RangeBitmap.Appender(factory, (int) bytes);
         }
 
         @Override

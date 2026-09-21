@@ -32,6 +32,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.index.pk.PrimaryKeyIndexDefinition;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourcePolicy;
 import org.apache.paimon.index.pksorted.PkSortedBucketIndexState;
 import org.apache.paimon.index.pksorted.PkSortedIndexGroup;
 import org.apache.paimon.io.DataFileMeta;
@@ -137,9 +138,7 @@ public final class PrimaryKeySortedIndexScan {
 
         List<PrimaryKeyIndexDefinition> scalarDefinitions = new ArrayList<>();
         for (PrimaryKeyIndexDefinition definition : definitions) {
-            if (definition.family() == PrimaryKeyIndexDefinition.Family.BTREE
-                    || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP
-                    || definition.family() == PrimaryKeyIndexDefinition.Family.MULTI_VALUE) {
+            if (definition.family().isScalar()) {
                 scalarDefinitions.add(definition);
             }
         }
@@ -171,10 +170,15 @@ public final class PrimaryKeySortedIndexScan {
             Pair<BinaryRow, Integer> bucket = bucketEntry.getKey();
             List<IndexFileMeta> bucketPayloads =
                     payloadsByBucket.getOrDefault(bucket, Collections.emptyList());
-            Set<PrimaryKeyIndexSourceFile> activeSourceFiles = new HashSet<>();
+            Map<Integer, Set<PrimaryKeyIndexSourceFile>> activeSourceFilesByLevel = new HashMap<>();
             for (DataFileMeta dataFile : bucketEntry.getValue()) {
-                activeSourceFiles.add(
-                        new PrimaryKeyIndexSourceFile(dataFile.fileName(), dataFile.rowCount()));
+                if (PrimaryKeyIndexSourcePolicy.shouldRead(dataFile)) {
+                    activeSourceFilesByLevel
+                            .computeIfAbsent(dataFile.level(), ignored -> new HashSet<>())
+                            .add(
+                                    new PrimaryKeyIndexSourceFile(
+                                            dataFile.fileName(), dataFile.rowCount()));
+                }
             }
             Map<String, Map<Integer, PkSortedIndexGroup>> groupsBySource = new LinkedHashMap<>();
             for (PrimaryKeyIndexDefinition definition : scalarDefinitions) {
@@ -195,8 +199,11 @@ public final class PrimaryKeySortedIndexScan {
                                     bucketEntry.getValue(),
                                     definitionPayloads);
                     for (PkSortedIndexGroup group : state.groups()) {
+                        Set<PrimaryKeyIndexSourceFile> activeGroupSources =
+                                activeSourceFilesByLevel.getOrDefault(
+                                        group.dataLevel(), Collections.emptySet());
                         for (PrimaryKeyIndexSourceFile sourceFile : group.sourceFiles()) {
-                            if (!activeSourceFiles.contains(sourceFile)) {
+                            if (!activeGroupSources.contains(sourceFile)) {
                                 continue;
                             }
                             groupsBySource
@@ -242,9 +249,7 @@ public final class PrimaryKeySortedIndexScan {
             ReaderFactory readerFactory) {
         Map<Integer, PrimaryKeyIndexDefinition> definitionsByField = new LinkedHashMap<>();
         for (PrimaryKeyIndexDefinition definition : definitions) {
-            if (definition.family() == PrimaryKeyIndexDefinition.Family.BTREE
-                    || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP
-                    || definition.family() == PrimaryKeyIndexDefinition.Family.MULTI_VALUE) {
+            if (definition.family().isScalar()) {
                 definitionsByField.put(definition.fieldId(), definition);
             }
         }

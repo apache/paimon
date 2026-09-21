@@ -63,6 +63,12 @@ public abstract class ObjectsCache<K, V, S extends Segments> {
         this.cacheMetrics = cacheMetrics;
     }
 
+    /** Shares the byte cache with consumers using distinct whole-file and block keys. */
+    @SuppressWarnings("unchecked")
+    public SegmentsCache<Object> segmentsCache() {
+        return (SegmentsCache<Object>) (SegmentsCache<?>) cache;
+    }
+
     public List<V> read(K key, @Nullable Long fileSize, Filters<V> filters) throws IOException {
         return read(key, fileSize, filters, Function.identity());
     }
@@ -90,13 +96,19 @@ public abstract class ObjectsCache<K, V, S extends Segments> {
                 return readFromSegments(segments, filters, convertor);
             } else {
                 return readFromIterator(
-                        reader.apply(key, fileSize),
+                        createFilteredIterator(key, fileSize, filters),
                         projectedSerializer,
                         filters.readFilter(),
                         filters.readVFilter(),
                         convertor);
             }
         }
+    }
+
+    /** Iterator for a file too large to cache; subclasses may push {@code filters} into it. */
+    protected CloseableIterator<InternalRow> createFilteredIterator(
+            K key, @Nullable Long fileSize, Filters<V> filters) throws IOException {
+        return reader.apply(key, fileSize);
     }
 
     protected abstract <R> List<R> readFromSegments(

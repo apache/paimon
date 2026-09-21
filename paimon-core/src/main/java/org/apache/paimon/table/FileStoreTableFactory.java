@@ -24,7 +24,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.StringUtils;
@@ -63,7 +63,7 @@ public class FileStoreTableFactory {
         Path tablePath = CoreOptions.path(options);
         String branchName = CoreOptions.branch(options.toMap());
         TableSchema tableSchema =
-                new SchemaManager(fileIO, tablePath, branchName)
+                new FileSystemSchemaManager(fileIO, tablePath, branchName)
                         .latest()
                         .orElseThrow(
                                 () ->
@@ -158,7 +158,7 @@ public class FileStoreTableFactory {
         Options snapshotBranchOptions = new Options(dynamicOptions.toMap());
         snapshotBranchOptions.set(CoreOptions.BRANCH, scanFallbackSnapshotBranch);
         Optional<TableSchema> snapshotSchema =
-                new SchemaManager(fileIO, tablePath, scanFallbackSnapshotBranch).latest();
+                new FileSystemSchemaManager(fileIO, tablePath, scanFallbackSnapshotBranch).latest();
         AbstractFileStoreTable snapshotTable =
                 (AbstractFileStoreTable)
                         createWithoutFallbackBranch(
@@ -170,7 +170,7 @@ public class FileStoreTableFactory {
         Options deltaBranchOptions = new Options(dynamicOptions.toMap());
         deltaBranchOptions.set(CoreOptions.BRANCH, scanFallbackDeltaBranch);
         Optional<TableSchema> deltaSchema =
-                new SchemaManager(fileIO, tablePath, scanFallbackDeltaBranch).latest();
+                new FileSystemSchemaManager(fileIO, tablePath, scanFallbackDeltaBranch).latest();
         AbstractFileStoreTable deltaTable =
                 (AbstractFileStoreTable)
                         createWithoutFallbackBranch(
@@ -192,7 +192,8 @@ public class FileStoreTableFactory {
             CatalogEnvironment catalogEnvironment) {
         Options branchOptions = new Options(dynamicOptions.toMap());
         branchOptions.set(CoreOptions.BRANCH, branchName);
-        Optional<TableSchema> schema = new SchemaManager(fileIO, tablePath, branchName).latest();
+        Optional<TableSchema> schema =
+                new FileSystemSchemaManager(fileIO, tablePath, branchName).latest();
         if (schema.isPresent()) {
             Identifier identifier = catalogEnvironment.identifier();
             CatalogEnvironment branchCatalogEnvironment = catalogEnvironment;

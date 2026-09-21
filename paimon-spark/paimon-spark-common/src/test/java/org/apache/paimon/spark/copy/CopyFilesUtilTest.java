@@ -18,8 +18,12 @@
 
 package org.apache.paimon.spark.copy;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
@@ -32,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class CopyFilesUtilTest {
 
     @Test
-    void testClearColumnSequencesWhenChangingSchemaId() {
+    void testClearWriteColsSequencesWhenChangingSchemaId() {
         DataFileMeta source =
                 DataFileMeta.forAppend(
                                 "source.parquet",
@@ -49,13 +53,87 @@ public class CopyFilesUtilTest {
                                 null,
                                 null,
                                 Arrays.asList("a", "b"))
-                        .withColumnMaxSequenceNumbers(new long[] {2L, 3L});
+                        .withWriteColsSequences(new long[] {2L, 3L});
 
         DataFileMeta copied = CopyFilesUtil.toNewDataFileMeta(source, "copied.parquet", 6L);
 
         assertThat(copied.fileName()).isEqualTo("copied.parquet");
         assertThat(copied.schemaId()).isEqualTo(6L);
         assertThat(copied.writeCols()).containsExactly("a", "b");
-        assertThat(copied.columnMaxSequenceNumbers()).isNull();
+        assertThat(copied.writeColsSequences()).isNull();
+    }
+
+    @Test
+    void testMaterializeCompactWriteColsWhenChangingSchemaId() {
+        DataFileMeta source =
+                DataFileMeta.forAppend(
+                        "source.parquet",
+                        10L,
+                        2L,
+                        SimpleStats.EMPTY_STATS,
+                        1L,
+                        3L,
+                        5L,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+        TableSchema sourceSchema =
+                TableSchema.create(
+                        5L,
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .column("blob", DataTypes.BLOB())
+                                .column("name", DataTypes.STRING())
+                                .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                                .option(
+                                        CoreOptions.DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED
+                                                .key(),
+                                        "true")
+                                .build());
+
+        DataFileMeta copied =
+                CopyFilesUtil.toNewDataFileMeta(source, "copied.parquet", 9L, sourceSchema);
+
+        assertThat(copied.schemaId()).isEqualTo(9L);
+        assertThat(copied.writeCols()).containsExactly("id", "name");
+    }
+
+    @Test
+    void testMaterializeLegacyFullSchemaWriteColsWhenChangingSchemaId() {
+        DataFileMeta source =
+                DataFileMeta.forAppend(
+                        "source.parquet",
+                        10L,
+                        2L,
+                        SimpleStats.EMPTY_STATS,
+                        1L,
+                        3L,
+                        5L,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+        TableSchema sourceSchema =
+                TableSchema.create(
+                        5L,
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .column("blob", DataTypes.BLOB())
+                                .column("name", DataTypes.STRING())
+                                .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                                .build());
+
+        DataFileMeta copied =
+                CopyFilesUtil.toNewDataFileMeta(source, "copied.parquet", 9L, sourceSchema);
+
+        assertThat(copied.schemaId()).isEqualTo(9L);
+        assertThat(copied.writeCols()).containsExactly("id", "blob", "name");
     }
 }

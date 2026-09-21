@@ -1,0 +1,227 @@
+---
+title: "File Layout and Reads"
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# File Layout and Reads
+
+Data Evolution assembles a logical row from column files aligned by row ID.
+This reference explains the range constraints, version selection, and metadata
+that writers and readers must preserve. For table creation and update examples,
+start with [Data Evolution](./data-evolution).
+
+## Row IDs and File Metadata
+
+Within a Data Evolution file, logical row positions are contiguous and ordered.
+For a file with `firstRowId = s` and `rowCount = n`, its inclusive **RowId Range**
+is:
+
+```text
+R(file) = [s, s + n - 1]
+row ID at zero-based position i = s + i
+```
+
+The row count includes positions hidden by deletion vectors. A logical delete
+does not shrink this range or shift the remaining positions.
+
+Paimon assigns new row IDs at commit time. A new normal file establishes the
+rows; dedicated files written alongside it receive the corresponding IDs,
+not additional row IDs. Partial updates reuse the existing IDs. Row IDs are
+independent of business keys, physical file names, and SQL result ordering.
+
+The metadata needed to reconstruct a row includes:
+
+| Metadata | Contract |
+| --- | --- |
+| `firstRowId`, `rowCount` | Identify the complete logical row interval represented by the file. |
+| `schemaId` | Identifies the schema used to write the file. Resolve its columns against this schema, not just the latest table schema. |
+| `writeCols` | Lists the columns physically written, in their write order. An omitted column supplies no new value. A missing list has a schema-dependent meaning described [below](#compact-write-column-metadata). |
+| `minSequenceNumber`, `maxSequenceNumber` | Track file versions. New writes receive the committing snapshot's sequence number; ordinary compaction preserves the source version bounds. Normal files are considered in descending `maxSequenceNumber` order. |
+
+Column names in `writeCols` are resolved through the file's schema to field
+IDs. This allows readers to distinguish a column that was renamed from a new
+column added after the file was written.
+
+## Normal Files: Equal or Disjoint Ranges
+
+Normal files use the table's ordinary `file.format`, such as Parquet or ORC.
+They can contain all normal columns or only the columns selected by an update.
+For two live normal files, their RowId Ranges must be either **identical** or
+**disjoint**. Partial overlap and strict containment are both invalid.
+
+Normal files with the same range form the normal part of a file group. They
+must have both the same `firstRowId` and the same `rowCount`. Matching only
+`firstRowId` is insufficient.
+
+For example, after updating `b` in a normal file covering `[0, 5]`, the new
+normal file for `b` must also cover `[0, 5]`. It cannot contain only `[2, 3]`,
+even if the update predicate matched only those two rows. The writer supplies
+the old values of `b` for the other positions.
+
+## Dedicated Files: Contained Within One Normal Range
+
+Dedicated files store columns in specialized formats: a BLOB file belongs to
+one BLOB field, while a dedicated vector file can contain a set of vector
+fields. Their file boundaries can differ from normal-file boundaries.
+
+For **every live dedicated file**, there must be a normal file in the same
+partition whose range contains the dedicated file's **entire** range:
+
+```text
+R(dedicated) is a subset of R(normal)
+normal.firstRowId <= dedicated.firstRowId
+dedicated.lastRowId <= normal.lastRowId
+```
+
+Equality is allowed. The reverse containment is not sufficient. A dedicated
+file must not span two adjacent normal ranges, even if their union covers all
+its rows. Consequently, one normal range can own many smaller dedicated
+files, but each dedicated file belongs to exactly one distinct normal range.
+
+During an append, dedicated writers may roll into smaller files independently.
+When the normal writer closes its file, the associated dedicated writers close
+as well. For each written BLOB field, the sum of its dedicated file row counts
+matches the normal file's row count; the same holds for the written vector
+file set. This maintains row alignment without forcing large payloads into
+one physical file.
+
+For a complete vector-column read, the selected vector files must concatenate
+to the normal group's full range in row-ID order, without gaps. BLOB reads
+also support partial coverage: gaps in a newer BLOB version mean “look in an
+older version,” and a row with no value in any version reads as `NULL`. This
+supports backfilling a newly added nullable BLOB column for only some rows.
+
+## Valid and Invalid Layouts
+
+The following is one valid snapshot. Both normal files in group A cover all
+six positions; its BLOB files cover smaller intervals. Group B is adjacent
+and independent.
+
+![Two file groups on a shared row-ID axis: normal versions have identical ranges, while smaller BLOB and vector files stay inside their owning normal range.](/img/data-evolution-file-layout.svg)
+
+The normal/dedicated distinction changes which ranges are legal. Each
+candidate in the next figure is checked separately against the same two
+normal ranges; the candidates are not files committed together.
+
+![Range checks: a normal subset is invalid, a contained or equal dedicated range is valid, and a dedicated range crossing the boundary between normal ranges is invalid.](/img/data-evolution-range-contract.svg)
+
+With normal ranges `[0, 5]` and `[6, 9]`:
+
+| Proposed file | Valid? | Reason |
+| --- | --- | --- |
+| Normal update `[0, 5]` | Yes | Exactly matches group A. |
+| Normal update `[0, 3]` | No | Shares the start, but not the full range. |
+| Normal update `[2, 5]` | No | A normal update cannot cover only a subset. |
+| Normal update `[4, 8]` | No | Partially overlaps existing normal ranges. |
+| Dedicated file `[2, 4]` | Yes | Entirely contained in group A; its column's coverage rules must also hold. |
+| Dedicated file `[0, 5]` | Yes | Equality with a normal range is allowed. |
+| Dedicated file `[4, 7]` | No | Crosses from group A to group B. |
+| Dedicated file `[0, 9]` | No | The union of two normal ranges is not one owning range. |
+| Dedicated file `[10, 12]` | No | No normal file establishes those rows. |
+
+These constraints apply to the **live files in a snapshot**, not to all files
+still retained on storage. Compaction can replace both groups with a new
+normal range `[0, 9]` atomically. Once the old normal files have been removed
+from the new snapshot, existing dedicated files inside `[0, 9]` remain valid,
+and a dedicated file covering `[0, 9]` can be valid too.
+
+## How Reads Reconstruct Rows
+
+A reader first groups live files by overlapping RowId Ranges. Under the above
+contracts, each group has one distinct normal range and its contained
+dedicated files. It then:
+
+1. Resolves each file's written columns using its schema version.
+2. Selects the newest normal file that supplies each requested column. An
+   older file is still needed if it supplies another requested column.
+3. Concatenates the selected vector files and resolves BLOB versions for the
+   same logical row positions.
+4. Combines the selected columns by row position and applies logical deletions
+   consistently across the group. Columns absent from all files are filled
+   with `NULL` if nullable; a missing non-nullable column is an error.
+
+This is a positional column merge, not a join on a user key. Readers can skip
+column files that contribute no requested values. Filtering and index pruning
+must use the current column providers: statistics in an old file cannot be
+used to discard rows based on a column that a newer file has overwritten.
+
+For example, these normal files all cover `[0, 2]`:
+
+![Column merge: id comes from N0 version 1, b from N1 version 2, and c from N2 version 3. Matching row-ID positions form the output rows.](/img/data-evolution-column-merge.svg)
+
+The result is `(10, 1, 101), (20, 22, 200), (30, 3, 300)`. N1 replaces `b`
+for the whole range, including the preserved values for rows 0 and 2. N2
+does not replace `b`, because `b` is absent from its written columns.
+
+There are three different meanings to keep separate:
+
+| Representation | Meaning during a read |
+| --- | --- |
+| Column absent from a normal file's written schema | This file does not update the column; use another provider. |
+| Explicit `NULL` in a written column | The current value is `NULL`; do not fall back to an older non-null value. |
+| Internal BLOB placeholder | Preserve the older BLOB value for this row. Continue through older BLOB versions until a non-placeholder value, including explicit `NULL`, is found. |
+
+BLOB placeholders let an update preserve unchanged payloads without copying
+them into the new BLOB file. They are managed by the writer; applications
+should not substitute `NULL` for “leave unchanged.” Descriptor-only and BLOB
+view fields stored inline follow normal-column storage rules.
+
+![BLOB fallback for three rows: a placeholder preserves image A, explicit NULL replaces image B, and a new image Z replaces image C.](/img/data-evolution-blob-fallback.svg)
+
+## Compact Write-Column Metadata
+
+With `data-evolution.write-cols-optimization.enabled = true`, a normal file
+that contains **all non-dedicated columns** can omit the repeated `writeCols`
+list. Partial subsets and dedicated files keep explicit written columns.
+The option is disabled by default and affects new writes.
+
+A reader interprets a missing list using the file's `schemaId`:
+
+- For a schema without this optimization, missing `writeCols` means the full
+  schema used to write that file.
+- For a schema with the optimization and dedicated columns, it means all
+  non-dedicated columns in that schema.
+
+Persist this option with `CREATE TABLE` or `ALTER TABLE` so the file schema
+records the interpretation. Upgrade all readers and maintenance jobs before
+enabling it: older readers treat a missing list as all table columns. Readers
+support both encodings without a read option. Before rolling back to an older
+reader, rewrite the files produced with this option or keep the readers
+upgraded.
+
+## Inspect the Layout
+
+Use the `$files` system table to inspect the live file metadata:
+
+```sql
+SELECT file_path, schema_id, write_cols,
+       first_row_id,
+       first_row_id + record_count - 1 AS last_row_id,
+       record_count, max_sequence_number
+FROM default.`target_table$files`
+ORDER BY first_row_id, max_sequence_number;
+```
+
+Compare both endpoints when checking normal-file alignment, and compare each
+dedicated range against a **single** normal range. Summing `record_count`
+across all files overcounts logical rows because column versions and dedicated
+files can represent the same positions; deletion vectors reduce visible rows
+further. Use a table query for the logical row count.

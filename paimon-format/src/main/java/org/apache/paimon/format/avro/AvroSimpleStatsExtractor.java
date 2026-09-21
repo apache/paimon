@@ -25,6 +25,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
@@ -58,7 +59,15 @@ public class AvroSimpleStatsExtractor implements SimpleStatsExtractor {
             FileIO fileIO, Path path, long length) throws IOException {
 
         SeekableInputStream fileInputStream = fileIO.newInputStream(path);
-        long rowCount = getRowCount(fileInputStream);
+        long rowCount;
+        try {
+            rowCount = getRowCount(fileInputStream);
+        } catch (Throwable t) {
+            // DataFileStream closes the stream it was given, but only once it has been
+            // constructed, and a corrupt header throws before that.
+            IOUtils.closeQuietly(fileInputStream);
+            throw t;
+        }
 
         return Pair.of(
                 IntStream.range(0, rowType.getFieldCount())

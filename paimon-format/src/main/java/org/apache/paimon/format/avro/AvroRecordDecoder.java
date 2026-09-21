@@ -35,6 +35,7 @@ import java.nio.ByteBuffer;
  */
 public final class AvroRecordDecoder {
 
+    private final Schema writerSchema;
     private final Schema recordSchema;
     private final int recordBranch;
 
@@ -44,6 +45,7 @@ public final class AvroRecordDecoder {
     private int blockLength;
 
     AvroRecordDecoder(Schema writerSchema) {
+        this.writerSchema = writerSchema;
         if (writerSchema.getType() == Schema.Type.UNION) {
             int branchIndex = -1;
             Schema record = null;
@@ -71,6 +73,11 @@ public final class AvroRecordDecoder {
         }
     }
 
+    /** Creates an independent decoder with the same writer schema and no current block. */
+    public AvroRecordDecoder copy() {
+        return new AvroRecordDecoder(writerSchema);
+    }
+
     /** Returns the number of fields in the writer record. */
     public int fieldCount() {
         return recordSchema.getFields().size();
@@ -84,6 +91,16 @@ public final class AvroRecordDecoder {
     /** Returns the Avro type of the writer field at the given position. */
     public FieldType fieldType(int position) {
         return FieldType.valueOf(recordSchema.getFields().get(position).schema().getType().name());
+    }
+
+    /** Returns the field type after resolving a nullable union, without changing its decoder. */
+    public FieldType nonNullFieldType(int position) {
+        Schema schema = recordSchema.getFields().get(position).schema();
+        if (schema.getType() == Schema.Type.UNION) {
+            int nullIndex = FieldReaderFactory.nullableUnionNullIndex(schema);
+            schema = schema.getTypes().get(1 - nullIndex);
+        }
+        return FieldType.valueOf(schema.getType().name());
     }
 
     /** Creates a decoder for one writer field. */

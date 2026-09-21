@@ -28,7 +28,7 @@ import org.apache.paimon.flink.sink.TableFilter;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
@@ -185,15 +185,10 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         DataStream<CdcMultiplexRecord> converted =
                 CaseSensitiveUtils.cdcMultiplexRecordConvert(catalogLoader, newlyAddedTableStream);
 
-        DataStream<CdcMultiplexRecord> partitioned =
-                partition(
-                        converted,
-                        new CdcMultiplexRecordChannelComputer(catalogLoader),
-                        parallelism);
-
         FlinkCdcMultiTableSink sink =
                 new FlinkCdcMultiTableSink(
                         catalogLoader,
+                        database,
                         writerCpu,
                         writerMemory,
                         committerCpu,
@@ -201,7 +196,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                         commitUser,
                         eagerInit,
                         tableFilter);
-        sink.sinkFrom(partitioned);
+        // the sink shuffles by bucket itself
+        sink.sinkFrom(converted, parallelism);
     }
 
     private void buildForFixedBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
@@ -239,7 +235,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                                             table.name()))
                             .process(
                                     new UpdatedDataFieldsProcessFunction(
-                                            new SchemaManager(table.fileIO(), table.location()),
+                                            new FileSystemSchemaManager(
+                                                    table.fileIO(), table.location()),
                                             Identifier.create(database, table.name()),
                                             catalogLoader,
                                             typeMapping))
