@@ -19,6 +19,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.MemorySize;
 
 import static org.apache.paimon.options.ConfigOptions.key;
 
@@ -180,4 +181,23 @@ public class SparkConnectorOptions {
                     .withDescription(
                             "Whether to adjust the target split size based on pruned (projected) columns. "
                                     + "If enabled, split size estimation uses only the columns actually being read.");
+
+    public static final ConfigOption<String> SOURCE_SPLIT_METADATA_EXTERNALIZATION_PATH =
+            key("source.split.metadata.externalization.path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "A seekable shared file-system directory used to externalize oversized "
+                                    + "Spark batch input-partition metadata. The feature is disabled when "
+                                    + "this option is not set. Configure it as a Spark session option with "
+                                    + "the 'spark.paimon.' prefix.");
+
+    public static final ConfigOption<MemorySize> SOURCE_SPLIT_METADATA_INLINE_THRESHOLD =
+            key("source.split.metadata.inline-threshold")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(128))
+                    .withDescription(
+                            "Maximum serialized size of one Spark batch input partition kept inline. "
+                                    + "Larger metadata is stored under "
+                                    + "'source.split.metadata.externalization.path'.");
 }

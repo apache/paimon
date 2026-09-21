@@ -84,6 +84,20 @@ SELECT * FROM default.T1 JOIN default.T2 ON xxxx;
 Streaming admission limits operate on whole splits. See [Triggers and Read Limits](./structured-streaming#triggers-and-read-limits)
 for how byte, row, and file thresholds are applied.
 
+For scans whose individual Spark input partitions contain very large split metadata, set
+`spark.paimon.source.split.metadata.externalization.path` to a seekable file-system directory
+shared by every executor. Paimon then stores input-partition metadata larger than
+`spark.paimon.source.split.metadata.inline-threshold` in a scan-level container and each task reads
+only its versioned byte range. Split frames carry length and checksum metadata so truncated or
+corrupted ranges fail the task instead of returning partial data. The option reduces
+task-serialization pressure; it does not bound the memory needed to plan or decode one input
+partition. Enabled scans perform an extra serialization pass to measure each partition. Temporary
+files and broadcasts are normally removed when the Spark application ends. An abruptly terminated
+driver can leave files behind, so use a dedicated directory and clean orphaned application
+directories only after confirming that no application still references them. Restrict write access
+to trusted Spark applications; frame checksums detect accidental corruption but do not authenticate
+the metadata writer.
+
 <ConfigTable html={sparkConnectorConfigurationHtml} />
 
 ## Shared Paimon Options

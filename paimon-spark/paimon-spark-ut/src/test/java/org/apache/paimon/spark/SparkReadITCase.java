@@ -62,6 +62,33 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testExternalizedSplitMetadataRead() {
+        spark.conf()
+                .set(
+                        "spark.paimon.source.split.metadata.externalization.path",
+                        new Path(warehousePath, "split-metadata").toString());
+        spark.conf().set("spark.paimon.source.split.metadata.inline-threshold", "1 b");
+        try {
+            innerTestSimpleType(spark.table("t1"));
+
+            spark.sql(
+                    "CREATE TABLE externalized_data_evolution (id BIGINT, feature STRING) "
+                            + "TBLPROPERTIES ('data-evolution.enabled' = 'true', "
+                            + "'row-tracking.enabled' = 'true')");
+            spark.sql("INSERT INTO externalized_data_evolution VALUES (1, 'a'), (2, 'b')");
+            spark.sql("UPDATE externalized_data_evolution SET feature = 'updated' WHERE id = 1");
+            assertThat(
+                            spark.sql("SELECT id, feature FROM externalized_data_evolution")
+                                    .collectAsList())
+                    .extracting(Row::toString)
+                    .containsExactlyInAnyOrder("[1,updated]", "[2,b]");
+        } finally {
+            spark.conf().unset("spark.paimon.source.split.metadata.externalization.path");
+            spark.conf().unset("spark.paimon.source.split.metadata.inline-threshold");
+        }
+    }
+
+    @Test
     public void testFilterPushDown() {
         innerTestSimpleTypeFilterPushDown(spark.table("t1"));
 

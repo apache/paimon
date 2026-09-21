@@ -93,6 +93,18 @@ under the License.
             <td>Whether to verify SparkSession is initialized with required configurations.</td>
         </tr>
         <tr>
+            <td><h5>source.split.metadata.externalization.path</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>A seekable shared file-system directory used to externalize oversized Spark batch input-partition metadata. The feature is disabled when this option is not set. Configure it as a Spark session option with the 'spark.paimon.' prefix.</td>
+        </tr>
+        <tr>
+            <td><h5>source.split.metadata.inline-threshold</h5></td>
+            <td style="word-wrap: break-word;">128 mb</td>
+            <td>MemorySize</td>
+            <td>Maximum serialized size of one Spark batch input partition kept inline. Larger metadata is stored under 'source.split.metadata.externalization.path'.</td>
+        </tr>
+        <tr>
             <td><h5>source.split.target-size-with-column-pruning</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
