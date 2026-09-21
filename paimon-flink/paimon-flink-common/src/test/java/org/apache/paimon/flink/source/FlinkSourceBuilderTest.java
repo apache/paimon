@@ -31,8 +31,10 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.QueryAuthSplit;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.runtime.plugable.SerializationDelegate;
@@ -58,6 +60,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Answers.RETURNS_SELF;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Test for {@link FlinkSourceBuilder}. */
 public class FlinkSourceBuilderTest {
@@ -151,6 +157,26 @@ public class FlinkSourceBuilderTest {
         SourceTransformation<?, ?, ?> transformation =
                 (SourceTransformation<?, ?, ?>) dataStream.getTransformation();
         assertThat(transformation.getSource()).isInstanceOf(PaimonDataStreamSource.class);
+    }
+
+    @Test
+    public void testLongLimitForwardedToReadBuilder() {
+        Table table = mock(Table.class);
+        when(table.name()).thenReturn("table");
+        when(table.options())
+                .thenReturn(Collections.singletonMap("path", tempDir.toUri().toString()));
+        when(table.primaryKeys()).thenReturn(Collections.emptyList());
+        when(table.rowType()).thenReturn(RowType.of(DataTypes.INT()));
+        ReadBuilder readBuilder = mock(ReadBuilder.class, RETURNS_SELF);
+        when(table.newReadBuilder()).thenReturn(readBuilder);
+
+        new FlinkSourceBuilder(table)
+                .env(StreamExecutionEnvironment.getExecutionEnvironment())
+                .sourceBounded(true)
+                .limit(4294967297L)
+                .build();
+
+        verify(readBuilder).withLimit(4294967297L);
     }
 
     @Test

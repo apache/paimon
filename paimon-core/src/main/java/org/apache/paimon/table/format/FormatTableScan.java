@@ -78,12 +78,10 @@ public class FormatTableScan implements InnerTableScan {
     final CoreOptions coreOptions;
     @Nullable private PartitionPredicate partitionFilter;
     private final SplitEnumerator splitEnumerator;
-    @Nullable private final Integer limit;
+    @Nullable private final Long limit;
 
     public FormatTableScan(
-            FormatTable table,
-            @Nullable PartitionPredicate partitionFilter,
-            @Nullable Integer limit) {
+            FormatTable table, @Nullable PartitionPredicate partitionFilter, @Nullable Long limit) {
         this.table = table;
         this.coreOptions = new CoreOptions(table.options());
         this.partitionFilter = partitionFilter;

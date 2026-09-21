@@ -515,7 +515,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public SnapshotReader withLimit(int limit) {
+        public SnapshotReader withLimit(long limit) {
             wrapped.withLimit(limit);
             return this;
         }
@@ -582,7 +582,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public InnerTableScan withLimit(int limit) {
+        public InnerTableScan withLimit(long limit) {
             batchScan.withLimit(limit);
             return this;
         }

@@ -212,7 +212,7 @@ public class FlinkSourceBuilder {
             readBuilder.withPartitionFilter(partitionPredicate);
         }
         if (limit != null) {
-            readBuilder.withLimit(limit.intValue());
+            readBuilder.withLimit(limit);
         }
         return readBuilder.dropStats();
     }

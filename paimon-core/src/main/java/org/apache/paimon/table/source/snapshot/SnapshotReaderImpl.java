@@ -353,7 +353,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
-    public SnapshotReader withLimit(int limit) {
+    public SnapshotReader withLimit(long limit) {
         scan.withLimit(limit);
         return this;
     }
