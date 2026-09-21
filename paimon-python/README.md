@@ -210,6 +210,9 @@ stream-aware splits exposing `Split.is_streaming()`. Python resolves
 deltas into one plan. Continuous streaming uses the same native path for initial
 and delta frames. When `changelog-producer` is enabled, follow-up frames request
 Rust's explicit `changelog` mode and read the physical changelog manifests.
+OVERWRITE changelog frames retain per-snapshot Python planning because Java
+streaming reads them while Java and Rust range-based incremental scans skip
+OVERWRITE; the resulting splits can still use native reads.
 Like Java, readers retain physical change events, including repeated primary
 keys and retracts across commits. They do not merge the window into a final
 table state or apply endpoint deletion vectors or global indexes. Other commit

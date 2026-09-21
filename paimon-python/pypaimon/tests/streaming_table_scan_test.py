@@ -140,6 +140,30 @@ class AsyncStreamingTableScanTest(unittest.TestCase):
     @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
     @patch('pypaimon.read.native_plan.native_plan')
+    def test_overwrite_changelog_keeps_per_snapshot_python_plan(
+            self, native_plan, _manifest_files, manifest_lists):
+        table, _ = _create_mock_table()
+        table.options.native_plan_enabled.return_value = True
+        table.options.changelog_producer.return_value = ChangelogProducer.INPUT
+        snapshot = _create_mock_snapshot(5, 'OVERWRITE')
+        manifests = [Mock()]
+        manifest_lists.return_value.read_changelog.return_value = manifests
+        python_plan = Plan([], snapshot_id=5)
+        scan = AsyncStreamingTableScan(table)
+
+        with patch.object(
+                scan, '_create_plan_from_manifests',
+                return_value=python_plan) as create_plan:
+            plan = scan._create_changelog_plan(snapshot)
+
+        self.assertIs(plan, python_plan)
+        native_plan.assert_not_called()
+        manifest_lists.return_value.read_changelog.assert_called_once_with(snapshot)
+        create_plan.assert_called_once_with(manifests, 5)
+
+    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    @patch('pypaimon.read.native_plan.native_plan')
     def test_bucket_filtered_delta_scan_keeps_python_planner(
             self, native_plan, _manifest_files, manifest_lists):
         table, _ = _create_mock_table()
