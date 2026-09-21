@@ -1693,15 +1693,158 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
 
         val (mergeRowsPlans, _) =
           executeMergeIntoAndCollectPlans("UPDATE t SET b = 22 WHERE id = 2")
-        assert(
-          mergeRowsPlans.exists(_.collectFirst { case _: Join => true }.nonEmpty),
-          s"Expected conditional UPDATE to use the general MERGE plan, but got: " +
-            mergeRowsPlans.mkString("\n")
-        )
+        assertSelfMergeShortcut(mergeRowsPlans)
         checkAnswer(
           sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
           Seq(Row(2, 22, 2, 0, 2), Row(3, 3, 3, 1, 2))
         )
+      }
+    }
+  }
+
+  test("Data Evolution: V1 update with condition prunes files through the self-merge shortcut") {
+    withSparkSQLConf(
+      "spark.paimon.write.use-v2-write" -> "false",
+      "spark.paimon.data-evolution.merge-into.file-pruning" -> "true") {
+      withTable("target") {
+        sql("""
+              |CREATE TABLE target (id INT, b INT) TBLPROPERTIES (
+              |  'row-tracking.enabled' = 'true',
+              |  'data-evolution.enabled' = 'true',
+              |  'compaction.min.file-num' = '100')
+              |""".stripMargin)
+        sql("INSERT INTO target SELECT /*+ REPARTITION(1) */ * FROM VALUES (1, 10), (2, 20)")
+        sql("INSERT INTO target SELECT /*+ REPARTITION(1) */ * FROM VALUES (3, 30), (4, 40)")
+
+        // The condition reads the column being assigned: it must see the pre-update values.
+        val (mergeRowsPlans, resultedTableFiles) =
+          executeMergeIntoAndCollectPlans("UPDATE target SET b = b + 1 WHERE b >= 30")
+        assertSelfMergeShortcut(mergeRowsPlans)
+        assert(
+          resultedTableFiles == Seq(1L),
+          s"Expected the WHERE condition to prune the target scan to one file, but got: " +
+            resultedTableFiles.mkString(", "))
+        checkAnswer(
+          sql("SELECT id, b, _ROW_ID FROM target ORDER BY id"),
+          Seq(Row(1, 10, 0), Row(2, 20, 1), Row(3, 31, 2), Row(4, 41, 3)))
+
+        // A condition that matches nothing in the surviving file copies it through unchanged.
+        sql("UPDATE target SET b = 0 WHERE id = 4 AND b > 100")
+        checkAnswer(
+          sql("SELECT id, b FROM target ORDER BY id"),
+          Seq(Row(1, 10), Row(2, 20), Row(3, 31), Row(4, 41)))
+      }
+    }
+  }
+
+  test("Data Evolution: V1 update with partition condition prunes partitions through the shortcut") {
+    withSparkSQLConf(
+      "spark.paimon.write.use-v2-write" -> "false",
+      "spark.paimon.data-evolution.merge-into.file-pruning" -> "true") {
+      withTable("target") {
+        sql("""
+              |CREATE TABLE target (id INT, b INT, dt STRING) TBLPROPERTIES (
+              |  'row-tracking.enabled' = 'true',
+              |  'data-evolution.enabled' = 'true',
+              |  'compaction.min.file-num' = '100')
+              |PARTITIONED BY (dt)
+              |""".stripMargin)
+        sql("INSERT INTO target VALUES (1, 10, 'p1'), (2, 20, 'p1')")
+        sql("INSERT INTO target VALUES (3, 30, 'p2'), (4, 40, 'p2')")
+
+        val (mergeRowsPlans, resultedTableFiles) =
+          executeMergeIntoAndCollectPlans("UPDATE target SET b = 0 WHERE dt = 'p2' AND id = 4")
+        assertSelfMergeShortcut(mergeRowsPlans)
+        assert(
+          resultedTableFiles == Seq(1L),
+          s"Expected the partition condition to prune the target scan to one file, but got: " +
+            resultedTableFiles.mkString(", "))
+        checkAnswer(
+          sql("SELECT id, b, dt FROM target ORDER BY id"),
+          Seq(Row(1, 10, "p1"), Row(2, 20, "p1"), Row(3, 30, "p2"), Row(4, 0, "p2")))
+      }
+    }
+  }
+
+  test("Data Evolution: V1 update condition on metadata column and NULL values") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ * FROM VALUES (1, 10), (2, NULL), (3, 30)")
+
+        // A NULL condition value means "not matched": the row is copied through unchanged.
+        val (nullPlans, _) = executeMergeIntoAndCollectPlans("UPDATE t SET b = b + 1 WHERE b > 10")
+        assertSelfMergeShortcut(nullPlans)
+        checkAnswer(
+          sql("SELECT id, b FROM t ORDER BY id"),
+          Seq(Row(1, 10), Row(2, null), Row(3, 31)))
+
+        val (rowIdPlans, _) =
+          executeMergeIntoAndCollectPlans("UPDATE t SET b = 22 WHERE _ROW_ID = 1")
+        assertSelfMergeShortcut(rowIdPlans)
+        checkAnswer(
+          sql("SELECT id, b, _ROW_ID FROM t ORDER BY id"),
+          Seq(Row(1, 10, 0), Row(2, 22, 1), Row(3, 31, 2)))
+      }
+    }
+  }
+
+  test("Data Evolution: V1 update with constant false condition changes nothing") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        sql("INSERT INTO t VALUES (1, 10), (2, 20)")
+        val snapshotId = loadTable("t").snapshotManager().latestSnapshotId()
+
+        sql("UPDATE t SET b = 0 WHERE 1 = 0")
+
+        assert(loadTable("t").snapshotManager().latestSnapshotId() == snapshotId)
+        checkAnswer(sql("SELECT id, b FROM t ORDER BY id"), Seq(Row(1, 10), Row(2, 20)))
+      }
+    }
+  }
+
+  test("Data Evolution: V1 conditional update with user-specified snapshot uses the shortcut") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        sql("INSERT INTO t VALUES (1, 10), (2, 20)")
+        val snapshotId = loadTable("t").snapshotManager().latestSnapshotId()
+        sql("INSERT INTO t VALUES (3, 30)")
+
+        var mergeRowsPlans = Seq.empty[LogicalPlan]
+        withSparkSQLConf("spark.paimon.scan.snapshot-id" -> snapshotId.toString) {
+          mergeRowsPlans = executeMergeIntoAndCollectPlans("UPDATE t SET b = 100 WHERE id = 1")._1
+        }
+        assertSelfMergeShortcut(mergeRowsPlans)
+
+        checkAnswer(
+          sql("SELECT id, b FROM t ORDER BY id"),
+          Seq(Row(1, 100), Row(2, 20), Row(3, 30)))
+      }
+    }
+  }
+
+  test("Data Evolution: V1 update with subquery condition keeps the source filter") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t", "s") {
+        sql(
+          "CREATE TABLE t (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        sql("INSERT INTO t VALUES (1, 10), (2, 20), (3, 30)")
+        sql("CREATE TABLE s (id INT)")
+        sql("INSERT INTO s VALUES (2), (3)")
+
+        val (mergeRowsPlans, _) =
+          executeMergeIntoAndCollectPlans("UPDATE t SET b = 0 WHERE id IN (SELECT id FROM s)")
+        assert(
+          mergeRowsPlans.exists(_.collectFirst { case _: Join => true }.nonEmpty),
+          s"Expected an UPDATE with a subquery condition to use the general MERGE plan, but got: " +
+            mergeRowsPlans.mkString("\n")
+        )
+        checkAnswer(sql("SELECT id, b FROM t ORDER BY id"), Seq(Row(1, 10), Row(2, 0), Row(3, 0)))
       }
     }
   }
