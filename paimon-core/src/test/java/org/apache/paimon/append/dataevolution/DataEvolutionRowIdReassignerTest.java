@@ -103,9 +103,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.append.dataevolution.SerializationAssignment.PLAN_FILE_PROPERTY;
+import static org.apache.paimon.append.dataevolution.SerializationAssignment.REASSIGN_SNAPSHOT_ID;
 import static org.apache.paimon.append.dataevolution.SerializationAssignment.planFile;
 import static org.apache.paimon.append.dataevolution.SerializationAssignment.readPlan;
-import static org.apache.paimon.append.dataevolution.SerializationAssignment.withoutPlan;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -656,7 +656,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
     }
 
     @Test
-    public void testReassignPlanIsNotInherited() throws Exception {
+    public void testInheritedPropertiesDoNotMarkReassignment() throws Exception {
         FileStoreTable table = createTableWithInterleavedPartitions();
         new DataEvolutionRowIdReassigner(table).reassign();
         Snapshot reassigned = table.snapshotManager().latestSnapshot();
@@ -665,18 +665,29 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         compactManifests(table);
         Snapshot compacted = table.snapshotManager().latestSnapshot();
         assertThat(compacted.id()).isGreaterThan(reassigned.id());
+        assertThat(compacted.properties()).isEqualTo(reassigned.properties());
         assertThat(planFile(compacted)).isNull();
 
         try (FileStoreCommitImpl commit =
                 (FileStoreCommitImpl) table.store().newCommit("test-rollback-plan", table)) {
             assertThat(commit.rollbackToAsLatest(reassigned)).isTrue();
         }
-        assertThat(planFile(table.snapshotManager().latestSnapshot())).isNull();
+        Snapshot rolledBack = table.snapshotManager().latestSnapshot();
+        assertThat(rolledBack.properties()).isEqualTo(reassigned.properties());
+        assertThat(planFile(rolledBack)).isNull();
         assertThat(planFile(reassigned)).isNotNull();
         assertThat(
                         readPlan(table.fileIO(), table.store().pathFactory(), planFile(reassigned))
                                 .snapshotId())
                 .isEqualTo(reassigned.id());
+
+        Path plan = table.store().pathFactory().toManifestFilePath(planFile(reassigned));
+        table.newExpireSnapshots()
+                .config(ExpireConfig.builder().snapshotRetainMin(1).snapshotRetainMax(1).build())
+                .expire();
+        assertThat(table.snapshotManager().snapshotExists(reassigned.id())).isFalse();
+        assertThat(table.fileIO().exists(plan)).isFalse();
+        assertThat(planFile(table.snapshotManager().latestSnapshot())).isNull();
     }
 
     @Test
@@ -763,18 +774,6 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 .isInstanceOf(IOException.class);
     }
 
-    @Test
-    public void testRemovingReassignMarkerPreservesOtherProperties() {
-        Map<String, String> properties = new HashMap<>();
-        properties.put(PLAN_FILE_PROPERTY, "plan");
-        properties.put("sequence.generation.max-sequence-number", "100");
-        assertThat(withoutPlan(properties))
-                .containsExactlyEntriesOf(
-                        Collections.singletonMap("sequence.generation.max-sequence-number", "100"));
-        assertThat(properties).hasSize(2);
-        assertThat(withoutPlan(Collections.singletonMap(PLAN_FILE_PROPERTY, "plan"))).isNull();
-    }
-
     private void overwritePlan(FileStoreTable table, Path path, byte[] bytes) throws IOException {
         try (OutputStream out = table.fileIO().newOutputStream(path, true)) {
             out.write(bytes);
@@ -783,6 +782,9 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
 
     private void assertPersistedPlan(FileStoreTable table) throws Exception {
         Snapshot snapshot = Snapshot.fromJson(table.snapshotManager().latestSnapshot().toJson());
+        assertThat(snapshot.properties())
+                .containsEntry(REASSIGN_SNAPSHOT_ID, Long.toString(snapshot.id()))
+                .containsKey(PLAN_FILE_PROPERTY);
         SerializationAssignment assignment =
                 readPlan(table.fileIO(), table.store().pathFactory(), planFile(snapshot));
         assertThat(assignment.snapshotId()).isEqualTo(snapshot.id());

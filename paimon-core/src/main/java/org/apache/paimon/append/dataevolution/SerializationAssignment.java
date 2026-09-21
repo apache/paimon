@@ -55,6 +55,8 @@ public final class SerializationAssignment {
     /** A snapshot-local marker and reference to the plan in the manifest directory. */
     public static final String PLAN_FILE_PROPERTY = "row-id-reassign.plan";
 
+    public static final String REASSIGN_SNAPSHOT_ID = "reassign-snapshot-id";
+
     private static final int VERSION = 1;
     private static final String FILE_PREFIX = "row-id-reassign-plan-";
 
@@ -108,20 +110,15 @@ public final class SerializationAssignment {
         return mapping != null && mapping.overlaps(range);
     }
 
+    /** Returns a plan only for the snapshot that committed it, ignoring inherited properties. */
     @Nullable
     public static String planFile(Snapshot snapshot) {
-        return snapshot.properties() == null ? null : snapshot.properties().get(PLAN_FILE_PROPERTY);
-    }
-
-    /** Reassignment describes a transition and must not be inherited by another commit. */
-    @Nullable
-    public static Map<String, String> withoutPlan(@Nullable Map<String, String> properties) {
-        if (properties == null || !properties.containsKey(PLAN_FILE_PROPERTY)) {
-            return properties;
+        Map<String, String> properties = snapshot.properties();
+        if (properties == null
+                || !Long.toString(snapshot.id()).equals(properties.get(REASSIGN_SNAPSHOT_ID))) {
+            return null;
         }
-        Map<String, String> result = new HashMap<>(properties);
-        result.remove(PLAN_FILE_PROPERTY);
-        return result.isEmpty() ? null : result;
+        return properties.get(PLAN_FILE_PROPERTY);
     }
 
     /** Persists the assignment and adds its reference to this commit's snapshot properties. */
@@ -131,11 +128,12 @@ public final class SerializationAssignment {
             Map<BinaryRow, RowRangeMappingIndex> rowIdMappings,
             long firstAssignedRowId,
             long nextRowId) {
+        long snapshotId = snapshot.id() + 1;
         String planFile;
         try {
             planFile =
                     new SerializationAssignment(
-                                    snapshot.id() + 1, rowIdMappings, firstAssignedRowId, nextRowId)
+                                    snapshotId, rowIdMappings, firstAssignedRowId, nextRowId)
                             .write(table.fileIO(), table.store().pathFactory());
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to persist row-id reassignment plan.", e);
@@ -145,6 +143,7 @@ public final class SerializationAssignment {
                         ? new HashMap<>()
                         : new HashMap<>(snapshot.properties());
         properties.put(PLAN_FILE_PROPERTY, planFile);
+        properties.put(REASSIGN_SNAPSHOT_ID, Long.toString(snapshotId));
         return properties;
     }
 

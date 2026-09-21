@@ -105,7 +105,6 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
-import static org.apache.paimon.append.dataevolution.SerializationAssignment.withoutPlan;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestEntry.nullableRecordCount;
@@ -1402,7 +1401,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 deltaManifestList,
                 indexManifest,
                 nextRowId,
-                withoutPlan(latest.properties()));
+                latest.properties());
     }
 
     public boolean replaceManifestList(
@@ -1521,7 +1520,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null,
                         targetSnapshot.watermark(),
                         targetSnapshot.statistics(),
-                        withoutPlan(targetSnapshot.properties()),
+                        targetSnapshot.properties(),
                         nextRowId,
                         null);
 
@@ -1671,7 +1670,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null,
                         latestSnapshot.watermark(),
                         latestSnapshot.statistics(),
-                        withoutPlan(latestSnapshot.properties()),
+                        latestSnapshot.properties(),
                         latestSnapshot.nextRowId(),
                         null);
 
