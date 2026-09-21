@@ -2618,7 +2618,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Long> DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT =
             key("data-evolution.reassign.skip-contiguous-row-count")
                     .longType()
-                    .defaultValue(1_000_000_000L)
+                    .defaultValue(20_000_000_000L)
                     .withDescription(
                             "Strictly contiguous same-partition logical row-id runs containing "
                                     + "more than this number of rows are excluded from row-id "
