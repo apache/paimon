@@ -42,6 +42,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil
 import org.apache.paimon.types.{BlobType, RowType}
 import org.apache.paimon.types.VectorType.isVectorStoreFile
+import org.apache.paimon.utils.BranchManager
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
@@ -195,9 +196,32 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
   }
 
-  private lazy val sameSourceAndTargetTable: Boolean =
-    passthroughSourceRelation(sourceTable)
-      .exists(sourceRelation => originalTargetRelation.name.equals(sourceRelation.name))
+  /**
+   * Identity of the Paimon table behind a relation: its storage location and branch. The relation
+   * name is not enough: two catalogs can expose different tables under the same `database.table`
+   * name, and a self-merge that only compares names would drop the source scan and silently rewrite
+   * the source columns to the target's own.
+   */
+  private def paimonTableIdentity(relation: DataSourceV2Relation): Option[(String, String)] =
+    relation.table match {
+      case sparkTable: SparkTable =>
+        sparkTable.getTable match {
+          case fileStoreTable: FileStoreTable =>
+            Some(
+              (
+                fileStoreTable.location().toString,
+                BranchManager.normalizeBranch(CoreOptions.branch(fileStoreTable.options()))))
+          case _ => None
+        }
+      case _ => None
+    }
+
+  private lazy val sameSourceAndTargetTable: Boolean = {
+    val targetIdentity = paimonTableIdentity(originalTargetRelation)
+    targetIdentity.isDefined && passthroughSourceRelation(sourceTable).exists {
+      sourceRelation => paimonTableIdentity(sourceRelation) == targetIdentity
+    }
+  }
 
   private def isTargetRowId(attr: AttributeReference): Boolean = {
     attr.name == ROW_ID_NAME && (originalTargetRelation.output ++
@@ -592,7 +616,6 @@ case class MergeIntoPaimonDataEvolutionTable(
     val rawBlobFieldNames = rawBlobFields
       .map(_.name())
       .toSet
-
     def isRawBlobUpdateColumn(attr: AttributeReference): Boolean = {
       rawBlobFieldNames.exists(rawBlobFieldName => resolver(rawBlobFieldName, attr.name))
     }
