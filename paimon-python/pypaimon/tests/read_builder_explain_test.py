@@ -21,6 +21,7 @@ split-level execution signals, and pretty-print smoke."""
 import os
 import shutil
 import tempfile
+import json
 import unittest
 from typing import Any, Dict, List
 
@@ -255,7 +256,7 @@ class ReadBuilderExplainTest(unittest.TestCase):
         table, pa_schema = self._append_table('explain_query_auth')
         _write(table, [{'id': i, 'val': i} for i in range(20)], pa_schema)
 
-        auth_result = TableQueryAuthResult(filter=None, column_masking={'val': 'CAST(NULL AS BIGINT)'})
+        auth_result = TableQueryAuthResult(filter=None, column_masking={'val': json.dumps({'name': 'NULL'})})
         table.catalog_environment.table_query_auth = lambda options, identifier: (lambda select: auth_result)
 
         rb = table.new_read_builder()

@@ -184,6 +184,7 @@ class TableRead:
         self._parquet_row_group_cache = None
 
     def to_iterator(self, splits: List[Split]) -> Iterator:
+        self._begin_auth_read(splits)
         limit = self.limit
 
         def _record_generator():
@@ -793,6 +794,7 @@ class TableRead:
 
     def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema,
                                blob_parallelism: int = 1) -> Iterator[pyarrow.RecordBatch]:
+        self._begin_auth_read(splits)
         chunk_size = 65536
         # ``remaining`` tracks how many rows we are still allowed to emit
         # across all splits. ``None`` means unlimited.
@@ -963,6 +965,7 @@ class TableRead:
         by submission index, so the merged table preserves the order of the
         input ``splits`` list.
         """
+        self._begin_auth_read(splits)
         remaining_state = _RemainingRows(self.limit)
         results: List[Optional[List[pyarrow.RecordBatch]]] = [None] * len(splits)
         workers = min(effective, len(splits))
@@ -1634,6 +1637,15 @@ class TableRead:
                 "MAP-key projection with query authorization is not supported")
         table_fields = self.table.fields
         read_fields = self.read_type
+        from pypaimon.read.table_scan import latest_auth_fields, validate_auth_rules
+        # a split can carry rules without having been planned by a validating scan
+        snapshot = getattr(self, "_auth_schema", None)
+        if snapshot is None:
+            snapshot = self._auth_schema = latest_auth_fields(self.table)
+        latest_fields = validate_auth_rules(self.table, auth_result, snapshot)
+        # bind to the latest schema: a generated alias may since have become a real column
+        auth_result.validate_read_type(
+            latest_fields, read_fields, self.nested_name_paths, table_fields)
 
         extra_fields = auth_result.get_extra_fields_for_filter(read_fields, table_fields)
         effective_read_type = read_fields
@@ -1691,6 +1703,21 @@ class TableRead:
             reader = BatchToRecordReaderAdapter(reader)
 
         return reader
+
+    def _begin_auth_read(self, splits):
+        """Refresh the schema the rules are validated against, once for this read.
+
+        Splits are read concurrently and temporal alignment gives each one its own rule object,
+        so a per-split refresh would ask the catalog once per worker; a per-reader one would let
+        a later read reuse a schema fetched for an earlier one.
+        """
+        from pypaimon.read.table_scan import latest_auth_fields
+
+        self._auth_schema = None
+        for split in splits:
+            if isinstance(split, QueryAuthSplit) and split.auth_result is not None:
+                self._auth_schema = latest_auth_fields(self.table)
+                return
 
     @staticmethod
     def _auth_filter_field_names(auth_result, read_fields) -> set:

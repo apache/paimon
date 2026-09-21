@@ -54,8 +54,7 @@ class _BlobCountingFileIO:
         return getattr(self._inner, name)
 
 
-class _RejectScoreOneAuthResult:
-    column_masking = None
+class _RejectScoreOneAuthResult(TableQueryAuthResult):
     filter = [json.dumps({
         "kind": "LEAF",
         "transform": {
@@ -66,6 +65,9 @@ class _RejectScoreOneAuthResult:
         "literals": [1],
     })]
 
+    def __init__(self):
+        super().__init__(filter=_RejectScoreOneAuthResult.filter, column_masking=None)
+
     @staticmethod
     def get_extra_fields_for_filter(read_fields, table_fields):
         return []
@@ -75,12 +77,11 @@ class _RejectScoreOneAuthResult:
         return lambda batch: pc.not_equal(batch.column("score"), 1)
 
 
-class _PayloadAuthResult:
-    column_masking = None
+class _PayloadAuthResult(TableQueryAuthResult):
 
     def __init__(self, expected_payload):
         self._expected_payload = expected_payload
-        self.filter = [json.dumps({
+        super().__init__(filter=[json.dumps({
             "kind": "LEAF",
             "transform": {
                 "name": "FIELD_REF",
@@ -92,7 +93,7 @@ class _PayloadAuthResult:
             },
             "function": "EQUAL",
             "literals": [],
-        })]
+        })], column_masking=None)
 
     @staticmethod
     def get_extra_fields_for_filter(read_fields, table_fields):

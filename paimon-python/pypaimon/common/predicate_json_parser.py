@@ -606,9 +606,8 @@ def _collect_all_field_refs_from_transform(transform: dict, fields: set = None) 
         fields.add(transform["fieldRef"]["name"])
     else:
         for inp in transform.get("inputs", []):
-            if isinstance(inp, dict):
-                if "name" in inp and "index" in inp:
-                    fields.add(inp["name"])
-                elif "name" in inp:
-                    _collect_all_field_refs_from_transform(inp, fields)
+            if isinstance(inp, dict) and "name" in inp:
+                # _resolve_transform_input reads every dict input as a column by name
+                fields.add(inp["name"])
+                _collect_all_field_refs_from_transform(inp, fields)
     return fields

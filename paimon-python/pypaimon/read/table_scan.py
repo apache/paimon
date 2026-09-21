@@ -367,7 +367,7 @@ class TableScan:
             self.file_scanner.skip_level0 = skip_level0
 
     def __auth_query(self):
-        return resolve_auth_result(self._query_auth_fn, self._read_type)
+        return authorize(self.table, self._query_auth_fn, self._read_type)
 
     def scan_with_stats(self) -> Tuple[Plan, Optional[ScanStats]]:
         """Run :meth:`plan` while recording manifest / pruning counters.
@@ -628,6 +628,41 @@ class TableScan:
                 f"Only {sorted(allowed) if allowed else 'no scan keys'} "
                 f"are allowed for this mode."
             )
+
+
+def latest_auth_fields(table):
+    """The table's current columns, re-read so an alter under a long-lived handle fails closed.
+
+    The catalog answers when it produced the table: a REST data token need not reach the schema
+    directory, which the scanners avoid for the same reason.
+    """
+    environment = getattr(table, "catalog_environment", None)
+    loader = getattr(environment, "catalog_loader", None)
+    if loader is not None and environment.identifier is not None:
+        return loader.load().get_table(environment.identifier).fields
+    latest = table.schema_manager.latest()
+    return latest.fields if latest is not None else table.fields
+
+
+def validate_auth_rules(table, auth_result, latest_fields=None):
+    """Refuse the read when the rules cannot be bound to the columns they name.
+
+    The reader calls this too, so a split that never met a validating scan is held to it.
+    """
+    if not auth_result.has_restrictions:
+        return table.fields
+    if latest_fields is None:
+        latest_fields = latest_auth_fields(table)
+    auth_result.validate_against_schema(latest_fields)
+    auth_result.validate_readable_without_rename(latest_fields, table.fields)
+    return latest_fields
+
+
+def authorize(table, query_auth_fn, read_type):
+    auth_result = resolve_auth_result(query_auth_fn, read_type)
+    if auth_result is not None:
+        validate_auth_rules(table, auth_result)
+    return auth_result
 
 
 def prune_scanner_by_auth(table, scanner, auth_result):
