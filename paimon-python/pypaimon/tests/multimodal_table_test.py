@@ -24,6 +24,7 @@ import unittest
 from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 import pypaimon.multimodal as pmm
 from pypaimon.multimodal import source_col
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -609,6 +610,7 @@ class MultimodalTableTest(unittest.TestCase):
         store.delete_object("images/cat.jpg")
         self.assertEqual([], store.list_objects(prefix="images/"))
 
+    @pytest.mark.python_read
     def test_blob_store_list_reads_batches_and_stops_at_limit(self):
         from pypaimon.read.table_read import TableRead
 
@@ -1001,6 +1003,7 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(1, result.num_rows)
         self.assertEqual([1], result["id"].to_pylist())
 
+    @pytest.mark.python_read
     def test_scan_to_arrow_batch_reader(self):
         users = self.conn.create_table(
             "batch_users",

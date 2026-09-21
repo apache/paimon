@@ -431,7 +431,8 @@ class TableRead:
             return None
         try:
             from pypaimon.read.native_plan import (
-                native_read, native_split_from_python)
+                native_deletion_files_signature, native_read,
+                native_split_from_python)
         except Exception as e:
             logger.warning(
                 "Native read failed, falling back to the Python reader: %s", e)
@@ -442,6 +443,12 @@ class TableRead:
             if not self._native_split_files_supported(split):
                 return None
             rust_split = getattr(split, '_native_split', None)
+            cached_dvs = getattr(split, '_native_deletion_files_signature', None)
+            if (rust_split is not None and cached_dvs is not None
+                    and cached_dvs != native_deletion_files_signature(split)):
+                # Callers may attach an endpoint DV to a planned streaming split.
+                # The cached Rust split predates that in-place metadata change.
+                rust_split = None
             if rust_split is None:
                 try:
                     rust_split = native_split_from_python(split)
