@@ -32,7 +32,6 @@ from pypaimon.read.native_plan import (
     native_version_at_least,
     native_runtime_available,
 )
-from pypaimon.read.sliced_split import SlicedSplit
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
