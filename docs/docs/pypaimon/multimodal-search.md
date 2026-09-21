@@ -109,6 +109,57 @@ matches = (
 )
 ```
 
+## Scores and Result Ordering
+
+On data-evolution tables, use `with_score()` to append a `float64` relevance
+column and `order_by_score()` to sort by descending score, with ascending
+`_ROW_ID` for ties. Both methods are optional: `with_score()` alone preserves
+the existing result order, and `order_by_score()` does not require projecting
+scores. Without either method, result behavior is unchanged.
+
+```python
+neighbors = (
+    docs.search([0.1, 0.2, 0.3], column="embedding")
+    .select(["id", "content"])
+    .with_score("relevance")
+    .order_by_score()
+    .limit(10)
+    .to_arrow()
+)
+```
+
+The default score column is `_score`. A custom name must not conflict with a
+table column or a system field. Scores use the search engine's existing
+higher-is-better convention: L2 uses `1 / (1 + squared_distance)`, cosine uses
+cosine similarity, and inner product uses the dot product. Full-text results
+expose BM25 scores; hybrid results expose the selected ranker's fusion scores.
+Scores from different metrics or rankers are not directly comparable.
+
+These methods also work with full-text, hybrid, and batch vector queries, and
+with local or Ray vector execution. Batch output retains input-query order and
+each row receives its score for that query. `where()` still filters selected
+rows during lookup, so it can return fewer than the requested number of hits.
+
+When only row IDs and scores are needed, explicitly project `_ROW_ID`:
+
+```python
+hits = (
+    docs.search([0.1, 0.2, 0.3], column="embedding")
+    .select(["_ROW_ID"])
+    .with_score()
+    .order_by_score()
+    .limit(10)
+    .to_arrow()
+)
+```
+
+Use `select([]).with_score()` for scores alone. When either score method is
+enabled and the explicit projection contains only `_ROW_ID` or is empty, the
+query skips final row lookup if there is no `where()` and query authorization
+is disabled. Raw search, prefiltering, and vector refinement can still read
+data. Historical snapshot and deletion semantics remain the same. Plain
+`select([])` without either method retains its existing behavior.
+
 ## Distributed Vector Search
 
 Use `execution="ray"` to execute vector queries across Ray workers and return
