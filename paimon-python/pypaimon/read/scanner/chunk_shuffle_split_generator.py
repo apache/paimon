@@ -404,12 +404,22 @@ class AppendChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
     def _chunk_to_split(self, chunk: _Chunk) -> Split:
         files: List[DataFileMeta] = []
         row_ranges = []
+        ranges_use_row_ids = self.table.options.row_tracking_enabled()
         split_offset = 0
         for seg in chunk.segments:
             files.append(seg.file)
+            if ranges_use_row_ids:
+                if seg.file.first_row_id is None:
+                    raise ValueError(
+                        "Row-tracked file '%s' is missing first_row_id"
+                        % seg.file.file_name
+                    )
+                range_base = seg.file.first_row_id
+            else:
+                range_base = split_offset
             row_ranges.extend(
-                Range(split_offset + row_range.from_,
-                      split_offset + row_range.to)
+                Range(range_base + row_range.from_,
+                      range_base + row_range.to)
                 for row_range in seg.row_ranges
             )
             split_offset += seg.file.row_count

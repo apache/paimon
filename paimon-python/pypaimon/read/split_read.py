@@ -230,7 +230,8 @@ class SplitRead(ABC):
         """Create a record reader for the given split."""
 
     # row_ranges: stable global row IDs for data-evolution reads.
-    # physical_row_ranges: file-local physical positions for IndexedSplit raw reads.
+    # physical_row_ranges: file-local positions after resolving the table's
+    # IndexedSplit coordinate system.
     # shard_range: from SlicedSplit (parallel shard scan), a contiguous [start, end) row range within the file.
     def file_reader_supplier(self, file: DataFileMeta, for_merge_read: bool,
                              read_fields: List[str], row_tracking_enabled: bool,
@@ -851,8 +852,8 @@ def _split_local_row_ranges_by_file(
         row_ranges: List[Range]) -> Dict[str, List[Range]]:
     """Map split-local physical positions to file-local ranges.
 
-    The split coordinate is the concatenation of ``files`` in list order,
-    matching Java ``IndexedSplit`` raw-read semantics and the native reader.
+    The split coordinate is the concatenation of ``files`` in list order for
+    tables without row tracking, matching the native reader.
     """
     ranges_by_file = {}
     split_offset = 0
@@ -870,6 +871,39 @@ def _split_local_row_ranges_by_file(
     return ranges_by_file
 
 
+def _row_ranges_by_file(
+        files: List[DataFileMeta],
+        row_ranges: List[Range],
+        ranges_use_row_ids: bool) -> Dict[str, List[Range]]:
+    """Map table-path row ranges to file-local physical positions.
+
+    Row-tracked append tables use stable global row IDs. Tables without row
+    tracking use the split-local concatenation handled by
+    :func:`_split_local_row_ranges_by_file`.
+    """
+    if not ranges_use_row_ids:
+        return _split_local_row_ranges_by_file(files, row_ranges)
+
+    ranges_by_file = {}
+    for file in files:
+        if file.first_row_id is None:
+            raise ValueError(
+                "Row-tracked file '%s' is missing first_row_id"
+                % file.file_name
+            )
+        first_row_id = file.first_row_id
+        selected = Range.and_(
+            row_ranges,
+            [Range(first_row_id, first_row_id + file.row_count - 1)],
+        )
+        ranges_by_file[file.file_name] = [
+            Range(row_range.from_ - first_row_id,
+                  row_range.to - first_row_id)
+            for row_range in selected
+        ]
+    return ranges_by_file
+
+
 class RawFileSplitRead(SplitRead):
     def __init__(
             self,
@@ -884,8 +918,11 @@ class RawFileSplitRead(SplitRead):
         self._physical_row_ranges = {}
         actual_split = split
         if isinstance(split, IndexedSplit):
-            self._physical_row_ranges = _split_local_row_ranges_by_file(
-                split.files, split.row_ranges())
+            self._physical_row_ranges = _row_ranges_by_file(
+                split.files,
+                split.row_ranges(),
+                row_tracking_enabled,
+            )
             actual_split = split.data_split()
         # Nested-leaf projection is NOT pushed down by name: a leaf path is
         # only valid against the latest schema, while each data file stores

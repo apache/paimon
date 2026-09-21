@@ -17,8 +17,9 @@
 
 """IndexedSplit wraps a Split with row ranges and optional scores.
 
-Ranges use the coordinate system of the read path: stable row IDs for data
-evolution and physical positions for primary-key/raw append reads.
+Ranges use the coordinate system of the table read path: stable row IDs for
+row-tracked tables and split-local physical positions for tables without row
+tracking.
 """
 
 from typing import List, Optional

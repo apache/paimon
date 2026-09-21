@@ -38,6 +38,7 @@ from pypaimon.read.sliced_split import SlicedSplit
 from pypaimon.read.split import DataSplit
 from pypaimon.read.split_read import (
     RawFileSplitRead,
+    _row_ranges_by_file,
     _split_local_row_ranges_by_file,
 )
 from pypaimon.table.row.blob import Blob, BlobData
@@ -246,6 +247,30 @@ class DataEvolutionDeletionVectorTest(unittest.TestCase):
             row_tracking_enabled=True,
             physical_row_ranges=[Range(0, 2)],
         )
+
+    def test_row_tracked_append_ranges_map_global_row_ids(self):
+        first = _file("first.parquet", 100, 5, 1)
+        second = _file("second.parquet", 200, 4, 1)
+
+        self.assertEqual(
+            _row_ranges_by_file(
+                [first, second],
+                [Range(103, 104), Range(200, 202)],
+                ranges_use_row_ids=True,
+            ),
+            {
+                "first.parquet": [Range(3, 4)],
+                "second.parquet": [Range(0, 2)],
+            },
+        )
+
+        second.first_row_id = None
+        with self.assertRaisesRegex(ValueError, "missing first_row_id"):
+            _row_ranges_by_file(
+                [first, second],
+                [Range(103, 104)],
+                ranges_use_row_ids=True,
+            )
 
     def test_data_evolution_merge_reader_handles_fully_deleted_file(self):
         deletion_vector = BitmapDeletionVector()

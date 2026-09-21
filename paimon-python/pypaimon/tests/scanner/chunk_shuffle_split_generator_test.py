@@ -49,10 +49,13 @@ def _mock_table(table_path='/tmp/_chunk_shuffle_test_path'):
     table = Mock()
     table.table_path = table_path
     table.options = Mock()
+    table.options.row_tracking_enabled.return_value = False
     return table
 
 
-def _mock_entry(partition_values, bucket, file_name, row_count, file_size=1024):
+def _mock_entry(
+        partition_values, bucket, file_name, row_count, file_size=1024,
+        first_row_id=None):
     entry = Mock()
     entry.partition = Mock()
     entry.partition.values = partition_values
@@ -61,6 +64,7 @@ def _mock_entry(partition_values, bucket, file_name, row_count, file_size=1024):
     entry.file.file_name = file_name
     entry.file.file_size = file_size
     entry.file.row_count = row_count
+    entry.file.first_row_id = first_row_id
     # Swallow set_file_path so we don't need to mock partition path encoding.
     entry.file.set_file_path = Mock()
     return entry
@@ -265,6 +269,28 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
         self.assertEqual(len(splits), 2)
         total_rows = sum(_split_rows(s) for s in splits)
         self.assertEqual(total_rows, 90)
+
+    def test_row_tracking_chunks_use_global_row_ids(self):
+        table = _mock_table()
+        table.options.row_tracking_enabled.return_value = True
+        entries = [
+            _mock_entry([], 0, 'f1', 2, first_row_id=100),
+            _mock_entry([], 0, 'f2', 2, first_row_id=200),
+        ]
+        splits = _make_generator(
+            seed=1, chunk_size=3, table=table).create_splits(entries)
+
+        ranges = sorted(
+            (row_range.from_, row_range.to)
+            for split in splits
+            for row_range in split.row_ranges()
+        )
+        self.assertEqual(ranges, [(100, 101), (200, 200), (201, 201)])
+
+        entries[0].file.first_row_id = None
+        with self.assertRaisesRegex(ValueError, 'missing first_row_id'):
+            _make_generator(
+                seed=1, chunk_size=3, table=table).create_splits(entries)
 
     def test_chunk_size_larger_than_total(self):
         entries = [
