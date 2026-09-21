@@ -32,18 +32,26 @@ _BLOB_COPY_MIN_PART_SIZE = 100 * 1024 * 1024
 _MAX_MULTIPART_UPLOAD_PARTS = 10_000
 
 
-def create_presigned_url(bucket, table_root, descriptor, validity) -> str:
+def create_presigned_url(
+        bucket, table_root, descriptor, validity, sse_headers=None) -> str:
     """Create a presigned URL with the same object layout as Java Paimon."""
     validity_seconds = _validity_seconds(validity)
     source = _validate_table_root(table_root, descriptor)
-    source_key = _object_key(source)
+    # Keep the compatibility URI rules in OssFileIO, which also owns bucket
+    # extraction for oss://AK:SK@endpoint/bucket/object-key URIs.
+    from pypaimon.filesystem.oss_file_io import OssFileIO
+    source_key = OssFileIO._extract_oss_object_key(source.geturl())
+    if not source_key:
+        raise ValueError("Blob descriptor URI must contain an OSS object key.")
+    sse_headers = dict(sse_headers or {})
     fingerprint = hashlib.sha256(descriptor.serialize()).hexdigest()
     parent_end = source_key.rfind('/') + 1
     target_key = source_key[:parent_end] + "_bloburl_" + fingerprint
 
     try:
         target = _head_object_if_exists(bucket, target_key)
-        if not _matches(target, descriptor.length, fingerprint):
+        if not _matches(
+                target, descriptor.length, fingerprint, sse_headers):
             source_metadata = bucket.head_object(source_key)
             _validate_range(descriptor, source_metadata.content_length)
             _materialize(
@@ -52,9 +60,11 @@ def create_presigned_url(bucket, table_root, descriptor, validity) -> str:
                 target_key,
                 descriptor,
                 fingerprint,
+                sse_headers,
             )
             target = bucket.head_object(target_key)
-            if not _matches(target, descriptor.length, fingerprint):
+            if not _matches(
+                    target, descriptor.length, fingerprint, sse_headers):
                 raise OSError(
                     "Materialized blob object metadata does not match "
                     "descriptor.")
@@ -103,13 +113,6 @@ def _normalize_path(path):
     return normalized
 
 
-def _object_key(uri) -> str:
-    path = uri.path
-    if not path or not path.startswith('/') or path == '/':
-        raise ValueError("Blob descriptor URI must contain an OSS object key.")
-    return path[1:]
-
-
 def _head_object_if_exists(bucket, key):
     try:
         return bucket.head_object(key)
@@ -119,10 +122,10 @@ def _head_object_if_exists(bucket, key):
         raise
 
 
-def _matches(metadata, length, fingerprint) -> bool:
+def _matches(metadata, length, fingerprint, sse_headers) -> bool:
     if metadata is None:
         return False
-    headers = getattr(metadata, 'headers', {})
+    headers = getattr(metadata, 'headers', {}) or {}
     metadata_fingerprint = next(
         (value for key, value in headers.items()
          if key.lower() == _BLOB_FINGERPRINT_HEADER),
@@ -132,7 +135,32 @@ def _matches(metadata, length, fingerprint) -> bool:
         metadata.content_length == length
         and metadata.content_type == _BLOB_CONTENT_TYPE
         and metadata_fingerprint == fingerprint
+        and _matches_sse_headers(headers, sse_headers)
     )
+
+
+def _matches_sse_headers(actual_headers, expected_headers) -> bool:
+    if not expected_headers:
+        return True
+    actual = {
+        str(key).lower(): value
+        for key, value in actual_headers.items()
+    }
+    case_insensitive_values = {
+        'x-oss-server-side-encryption',
+        'x-oss-server-side-data-encryption',
+    }
+    for key, expected in expected_headers.items():
+        normalized_key = str(key).lower()
+        found = actual.get(normalized_key)
+        if found is None:
+            return False
+        if normalized_key in case_insensitive_values:
+            if str(found).upper() != str(expected).upper():
+                return False
+        elif found != expected:
+            return False
+    return True
 
 
 def _validate_range(descriptor, source_length):
@@ -143,13 +171,20 @@ def _validate_range(descriptor, source_length):
         raise ValueError("Blob descriptor range is outside the source object.")
 
 
-def _materialize(bucket, source_key, target_key, descriptor, fingerprint):
+def _materialize(
+        bucket,
+        source_key,
+        target_key,
+        descriptor,
+        fingerprint,
+        sse_headers):
     import oss2
 
-    headers = {
+    headers = dict(sse_headers)
+    headers.update({
         'Content-Type': _BLOB_CONTENT_TYPE,
         _BLOB_FINGERPRINT_HEADER: fingerprint,
-    }
+    })
     if descriptor.length == 0:
         bucket.put_object(target_key, b'', headers=headers)
         return

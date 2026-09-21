@@ -242,7 +242,9 @@ A managed BLOB descriptor can point to a byte range inside a larger Paimon
 table, copies exactly that range to an OSS object under the table directory,
 and signs a temporary HTTPS GET URL with the current DLF-issued OSS STS
 credential. Repeated calls for the same descriptor reuse the materialized
-object and create a new URL.
+object and create a new URL. If OSS server-side encryption is configured for
+the catalog, PyPaimon applies the same setting to the materialized object and
+does not reuse a cached object whose encryption setting is incompatible.
 
 The URL has no media suffix and the materialized object uses
 `application/octet-stream`. Keep the original file name and media type in table

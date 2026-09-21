@@ -46,11 +46,15 @@ def _descriptor(offset=10, length=20):
         "oss://bucket/table/bucket-0/source.blob", offset, length)
 
 
-def _metadata(length=20, fingerprint=_FINGERPRINT):
+def _metadata(length=20, fingerprint=_FINGERPRINT, sse_headers=None):
+    headers = {
+        "x-oss-meta-paimon-blob-descriptor-sha256": fingerprint,
+    }
+    headers.update(sse_headers or {})
     return SimpleNamespace(
         content_length=length,
         content_type="application/octet-stream",
-        headers={"x-oss-meta-paimon-blob-descriptor-sha256": fingerprint},
+        headers=headers,
     )
 
 
@@ -100,6 +104,9 @@ def test_oss_file_io_uses_descriptor_bucket_and_closes_session():
     session = mock.MagicMock()
     file_io = OssFileIO.__new__(OssFileIO)
     file_io._create_oss_bucket = mock.MagicMock(return_value=bucket)
+    file_io.properties = Options({
+        'fs.oss.server-side-encryption': 'AES256',
+    })
 
     with mock.patch('oss2.Session', return_value=session), mock.patch(
             'pypaimon.filesystem.oss_blob_presigner.create_presigned_url',
@@ -109,7 +116,12 @@ def test_oss_file_io_uses_descriptor_bucket_and_closes_session():
 
     file_io._create_oss_bucket.assert_called_once_with(session, 'bucket')
     create.assert_called_once_with(
-        bucket, 'oss://bucket/table', descriptor, validity)
+        bucket,
+        'oss://bucket/table',
+        descriptor,
+        validity,
+        sse_headers={'x-oss-server-side-encryption': 'AES256'},
+    )
     session.session.close.assert_called_once_with()
 
 
@@ -173,8 +185,97 @@ def test_materializes_descriptor_range_and_reuses_java_object_key():
     assert [(part.part_number, part.etag) for part in parts] == [(1, "etag")]
 
 
-def test_zero_length_descriptor_uses_put_object():
-    descriptor = _descriptor(offset=100, length=0)
+@pytest.mark.parametrize("sse_headers", [
+    {"x-oss-server-side-encryption": "AES256"},
+    {
+        "x-oss-server-side-encryption": "KMS",
+        "x-oss-server-side-encryption-key-id": "cmk-123",
+    },
+])
+def test_materialization_preserves_server_side_encryption(sse_headers):
+    bucket = _bucket()
+    bucket.head_object.side_effect = [
+        _missing(),
+        SimpleNamespace(content_length=100),
+        _metadata(sse_headers=sse_headers),
+    ]
+    bucket.init_multipart_upload.return_value = SimpleNamespace(
+        upload_id="upload-id")
+    bucket.upload_part_copy.return_value = SimpleNamespace(etag="etag")
+
+    create_presigned_url(
+        bucket,
+        "oss://bucket/table",
+        _descriptor(),
+        timedelta(seconds=30),
+        sse_headers=sse_headers,
+    )
+
+    expected_headers = dict(sse_headers)
+    expected_headers.update({
+        "Content-Type": "application/octet-stream",
+        "x-oss-meta-paimon-blob-descriptor-sha256": _FINGERPRINT,
+    })
+    bucket.init_multipart_upload.assert_called_once_with(
+        _TARGET_KEY, headers=expected_headers)
+
+
+@pytest.mark.parametrize("actual_sse", [
+    {},
+    {"x-oss-server-side-encryption": "AES256"},
+], ids=["unencrypted", "different-method"])
+def test_cache_rejects_object_with_incompatible_server_side_encryption(
+        actual_sse):
+    expected_sse = {
+        "x-oss-server-side-encryption": "KMS",
+        "x-oss-server-side-encryption-key-id": "cmk-123",
+    }
+    bucket = _bucket()
+    bucket.head_object.side_effect = [
+        _metadata(sse_headers=actual_sse),
+        SimpleNamespace(content_length=100),
+        _metadata(sse_headers=expected_sse),
+    ]
+    bucket.init_multipart_upload.return_value = SimpleNamespace(
+        upload_id="upload-id")
+    bucket.upload_part_copy.return_value = SimpleNamespace(etag="etag")
+
+    create_presigned_url(
+        bucket,
+        "oss://bucket/table",
+        _descriptor(),
+        timedelta(seconds=30),
+        sse_headers=expected_sse,
+    )
+
+    bucket.init_multipart_upload.assert_called_once()
+
+
+def test_cache_reuses_object_with_matching_server_side_encryption():
+    expected_sse = {
+        "x-oss-server-side-encryption": "kms",
+        "x-oss-server-side-encryption-key-id": "cmk-123",
+    }
+    bucket = _bucket()
+    bucket.head_object.return_value = _metadata(sse_headers={
+        "X-Oss-Server-Side-Encryption": "KMS",
+        "X-Oss-Server-Side-Encryption-Key-Id": "cmk-123",
+    })
+
+    create_presigned_url(
+        bucket,
+        "oss://bucket/table",
+        _descriptor(),
+        timedelta(seconds=30),
+        sse_headers=expected_sse,
+    )
+
+    bucket.init_multipart_upload.assert_not_called()
+
+
+def test_legacy_oss_uri_strips_bucket_from_source_and_target_keys():
+    descriptor = BlobDescriptor(
+        "oss://AK:SK@endpoint/bucket/table/bucket-0/source.blob", 10, 20)
     fingerprint = hashlib.sha256(descriptor.serialize()).hexdigest()
     target_key = "table/bucket-0/_bloburl_" + fingerprint
     bucket = _bucket()
@@ -186,7 +287,53 @@ def test_zero_length_descriptor_uses_put_object():
     bucket.head_object.side_effect = [
         _missing(),
         SimpleNamespace(content_length=100),
-        _metadata(length=0, fingerprint=fingerprint),
+        _metadata(fingerprint=fingerprint),
+    ]
+    bucket.init_multipart_upload.return_value = SimpleNamespace(
+        upload_id="upload-id")
+    bucket.upload_part_copy.return_value = SimpleNamespace(etag="etag")
+
+    create_presigned_url(
+        bucket,
+        "oss://AK:SK@endpoint/bucket/table",
+        descriptor,
+        timedelta(seconds=30),
+    )
+
+    assert bucket.head_object.call_args_list == [
+        mock.call(target_key),
+        mock.call("table/bucket-0/source.blob"),
+        mock.call(target_key),
+    ]
+    bucket.upload_part_copy.assert_called_once_with(
+        "bucket",
+        "table/bucket-0/source.blob",
+        (10, 29),
+        target_key,
+        "upload-id",
+        1,
+    )
+
+
+def test_zero_length_descriptor_uses_put_object():
+    descriptor = _descriptor(offset=100, length=0)
+    fingerprint = hashlib.sha256(descriptor.serialize()).hexdigest()
+    target_key = "table/bucket-0/_bloburl_" + fingerprint
+    bucket = _bucket()
+    bucket.sign_url.return_value = (
+        "https://bucket.oss-cn-hangzhou.aliyuncs.com/"
+        + target_key
+        + "?x-oss-signature=test"
+    )
+    sse_headers = {"x-oss-server-side-encryption": "AES256"}
+    bucket.head_object.side_effect = [
+        _missing(),
+        SimpleNamespace(content_length=100),
+        _metadata(
+            length=0,
+            fingerprint=fingerprint,
+            sse_headers=sse_headers,
+        ),
     ]
 
     create_presigned_url(
@@ -194,15 +341,18 @@ def test_zero_length_descriptor_uses_put_object():
         "oss://bucket/table",
         descriptor,
         timedelta(minutes=5),
+        sse_headers=sse_headers,
     )
 
+    expected_headers = dict(sse_headers)
+    expected_headers.update({
+        "Content-Type": "application/octet-stream",
+        "x-oss-meta-paimon-blob-descriptor-sha256": fingerprint,
+    })
     bucket.put_object.assert_called_once_with(
         target_key,
         b'',
-        headers={
-            "Content-Type": "application/octet-stream",
-            "x-oss-meta-paimon-blob-descriptor-sha256": fingerprint,
-        },
+        headers=expected_headers,
     )
     bucket.init_multipart_upload.assert_not_called()
 

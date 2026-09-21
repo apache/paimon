@@ -38,9 +38,7 @@ class OssFileIO(PyArrowFileIO):
         if uri.scheme:
             if uri.scheme != 'oss' or self._extract_oss_bucket(path) != self._oss_bucket:
                 raise ValueError("Atomic write must target the configured OSS bucket")
-            key = re.sub(r'/+', '/', uri.path).lstrip('/')
-            if '@' in uri.netloc:
-                key = key.partition('/')[2]
+            key = self._extract_oss_object_key(path)
             path = 'oss://{}/{}'.format(self._oss_bucket, key)
         else:
             key = path
@@ -93,7 +91,12 @@ class OssFileIO(PyArrowFileIO):
             bucket = self._create_oss_bucket(
                 session, self._extract_oss_bucket(descriptor.uri))
             return create_presigned_url(
-                bucket, table_root, descriptor, validity)
+                bucket,
+                table_root,
+                descriptor,
+                validity,
+                sse_headers=self._sse_headers(),
+            )
         finally:
             session.session.close()
 
@@ -116,6 +119,21 @@ class OssFileIO(PyArrowFileIO):
                     "(versioning: %s). Concurrent commits are not protected against overwrites.",
                     self._oss_bucket, versioning)
         return self._atomic_write_supported
+
+    @staticmethod
+    def _extract_oss_object_key(location) -> str:
+        """Return an OSS object key for standard and credential URI forms."""
+        uri = urlparse(location)
+        if uri.scheme and uri.scheme.lower() != 'oss':
+            raise ValueError("Not an OSS URI: {}".format(location))
+        key = re.sub(r'/+', '/', uri.path).lstrip('/')
+        netloc = uri.netloc or ''
+        if ((getattr(uri, 'username', None)
+             or getattr(uri, 'password', None))
+                or '@' in netloc):
+            # Legacy URI: oss://AK:SK@endpoint/bucket/object-key
+            key = key.partition('/')[2]
+        return key
 
     def _create_oss_bucket(self, session, bucket_name=None):
         """Build the metadata client with one V4 credential path for both AK and STS."""
