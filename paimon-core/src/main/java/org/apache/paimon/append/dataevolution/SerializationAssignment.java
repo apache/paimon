@@ -171,7 +171,7 @@ public final class SerializationAssignment {
         return fileName;
     }
 
-    public static SerializationAssignment read(
+    public static SerializationAssignment readPlan(
             FileIO fileIO, FileStorePathFactory pathFactory, String fileName) throws IOException {
         try (DataInputViewStreamWrapper in =
                 new DataInputViewStreamWrapper(

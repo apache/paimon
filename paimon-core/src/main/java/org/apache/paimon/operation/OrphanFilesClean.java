@@ -19,7 +19,6 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.append.dataevolution.SerializationAssignment;
 import org.apache.paimon.blob.ManagedBlobReferenceFile;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.FileIO;
@@ -62,6 +61,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
+import static org.apache.paimon.append.dataevolution.SerializationAssignment.planFile;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.ChangelogManager.CHANGELOG_PREFIX;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
@@ -330,7 +330,7 @@ public abstract class OrphanFilesClean implements Serializable {
                     .forEach(name -> usedFileWithFlagConsumer.accept(Pair.of(name, false)));
         }
 
-        String reassignPlan = SerializationAssignment.planFile(snapshot);
+        String reassignPlan = planFile(snapshot);
         if (reassignPlan != null) {
             usedFileWithFlagConsumer.accept(Pair.of(reassignPlan, false));
         }

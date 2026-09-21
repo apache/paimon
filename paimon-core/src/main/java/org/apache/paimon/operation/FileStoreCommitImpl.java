@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.append.dataevolution.SerializationAssignment;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -106,6 +105,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
+import static org.apache.paimon.append.dataevolution.SerializationAssignment.withoutPlan;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestEntry.nullableRecordCount;
@@ -1402,7 +1402,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 deltaManifestList,
                 indexManifest,
                 nextRowId,
-                SerializationAssignment.withoutPlan(latest.properties()));
+                withoutPlan(latest.properties()));
     }
 
     public boolean replaceManifestList(
@@ -1521,7 +1521,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null,
                         targetSnapshot.watermark(),
                         targetSnapshot.statistics(),
-                        SerializationAssignment.withoutPlan(targetSnapshot.properties()),
+                        withoutPlan(targetSnapshot.properties()),
                         nextRowId,
                         null);
 
@@ -1671,7 +1671,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null,
                         latestSnapshot.watermark(),
                         latestSnapshot.statistics(),
-                        SerializationAssignment.withoutPlan(latestSnapshot.properties()),
+                        withoutPlan(latestSnapshot.properties()),
                         latestSnapshot.nextRowId(),
                         null);
 

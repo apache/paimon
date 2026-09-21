@@ -19,7 +19,6 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.append.dataevolution.SerializationAssignment;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -69,6 +68,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+
+import static org.apache.paimon.append.dataevolution.SerializationAssignment.planFile;
 
 /**
  * Base class for file deletion including methods for clean data files, manifest files and empty
@@ -382,7 +383,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         collectUnusedIndexManifests(snapshot, skippingSet, indexFiles, indexManifests);
         collectUnusedStatisticsManifests(snapshot, skippingSet, statistics);
 
-        String reassignPlan = SerializationAssignment.planFile(snapshot);
+        String reassignPlan = planFile(snapshot);
         if (reassignPlan != null && skippingSet.add(reassignPlan)) {
             manifests.add(reassignPlan);
         }
@@ -623,7 +624,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                     .forEach(skippingSet::add);
         }
 
-        String reassignPlan = SerializationAssignment.planFile(skippingSnapshot);
+        String reassignPlan = planFile(skippingSnapshot);
         if (reassignPlan != null) {
             skippingSet.add(reassignPlan);
         }
