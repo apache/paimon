@@ -79,6 +79,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -696,7 +697,8 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         new DataEvolutionRowIdReassigner(table).reassign();
         Snapshot reassigned = table.snapshotManager().latestSnapshot();
         Path plan = table.store().pathFactory().toManifestFilePath(planFile(reassigned));
-        Path orphan = table.store().pathFactory().toManifestFilePath("row-id-reassign-plan-orphan");
+        Path orphan =
+                table.store().pathFactory().toManifestFilePath("row-id-reassign-plan-orphan.plan");
         table.fileIO().newOutputStream(orphan, false).close();
 
         new LocalOrphanFilesClean(table, System.currentTimeMillis() + 2000).clean();
@@ -731,6 +733,27 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 .config(ExpireConfig.builder().snapshotRetainMin(1).snapshotRetainMax(1).build())
                 .expire();
         assertThat(table.fileIO().exists(plan)).isFalse();
+    }
+
+    @Test
+    public void testExistingPlanIsNotOverwrittenOrDeleted() throws Exception {
+        FileStoreTable table = createTableWithInterleavedPartitions();
+        Snapshot before = table.snapshotManager().latestSnapshot();
+        Path plan =
+                table.store()
+                        .pathFactory()
+                        .toManifestFilePath("row-id-reassign-plan-" + (before.id() + 1) + ".plan");
+        byte[] original = {1, 2, 3};
+        try (OutputStream out = table.fileIO().newOutputStream(plan, false)) {
+            out.write(original);
+        }
+
+        assertThatThrownBy(() -> new DataEvolutionRowIdReassigner(table).reassign())
+                .isInstanceOf(UncheckedIOException.class)
+                .hasMessageContaining("Failed to persist row-id reassignment plan");
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(before.id());
+        assertThat(IOUtils.readFully(table.fileIO().newInputStream(plan), true))
+                .containsExactly(original);
     }
 
     @Test
@@ -784,7 +807,8 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         Snapshot snapshot = Snapshot.fromJson(table.snapshotManager().latestSnapshot().toJson());
         assertThat(snapshot.properties())
                 .containsEntry(REASSIGN_SNAPSHOT_ID, Long.toString(snapshot.id()))
-                .containsKey(PLAN_FILE_PROPERTY);
+                .containsEntry(
+                        PLAN_FILE_PROPERTY, "row-id-reassign-plan-" + snapshot.id() + ".plan");
         SerializationAssignment assignment =
                 readPlan(table.fileIO(), table.store().pathFactory(), planFile(snapshot));
         assertThat(assignment.snapshotId()).isEqualTo(snapshot.id());

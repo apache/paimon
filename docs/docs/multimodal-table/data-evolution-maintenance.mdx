@@ -188,8 +188,9 @@ documented in the [Spark](../spark/procedures) and
 [Flink](../flink/procedures) procedure references.
 
 Each reassignment snapshot records a `row-id-reassign.plan` property referencing a
-versioned plan file in the table's `manifest/` directory, together with a
-`reassign-snapshot-id` property identifying the snapshot that committed it. The plan
+versioned `row-id-reassign-plan-<snapshotId>.plan` file in the table's `manifest/`
+directory, together with a `reassign-snapshot-id` property identifying the snapshot
+that committed it. The plan
 is recognized only when that ID matches the current snapshot ID; inherited properties
 on later snapshots are ignored. The file also stores the reassignment snapshot ID
 and the row-ID mappings applied to each affected partition. It is retained while its

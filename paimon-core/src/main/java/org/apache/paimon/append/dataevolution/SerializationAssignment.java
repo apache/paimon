@@ -33,13 +33,13 @@ import javax.annotation.Nullable;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.zip.CRC32;
 import java.util.zip.CheckedInputStream;
 import java.util.zip.CheckedOutputStream;
@@ -158,11 +158,12 @@ public final class SerializationAssignment {
 
     /** Streams the effective mappings without materializing another copy of the plan. */
     private String write(FileIO fileIO, FileStorePathFactory pathFactory) throws IOException {
-        String fileName = FILE_PREFIX + UUID.randomUUID();
+        String fileName = FILE_PREFIX + snapshotId + ".plan";
         Path path = pathFactory.toManifestFilePath(fileName);
+        // A failed create may mean another attempt owns this path. Do not delete its plan.
+        OutputStream fileOut = fileIO.newOutputStream(path, false);
         try (DataOutputViewStreamWrapper out =
-                new DataOutputViewStreamWrapper(
-                        new BufferedOutputStream(fileIO.newOutputStream(path, false)))) {
+                new DataOutputViewStreamWrapper(new BufferedOutputStream(fileOut))) {
             CRC32 checksum = new CRC32();
             DataOutputViewStreamWrapper payload =
                     new DataOutputViewStreamWrapper(new CheckedOutputStream(out, checksum));
