@@ -39,6 +39,8 @@ Prepare the following resources:
 - The DLF Paimon REST endpoint and OSS endpoint for the catalog's region.
 - A local MP4 file.
 - A Model Studio API key if you want to run the final video-understanding call.
+- PyPaimon 2.2 or later. PyPaimon 2.0 does not provide
+  `Blob.to_presigned_url`.
 
 Use the public DLF endpoint when running outside an Alibaba Cloud VPC. Inside
 an authorized VPC, you can use the VPC endpoint instead:
@@ -56,7 +58,7 @@ endpoint, and `dlf.region` to the region that owns your catalog.
 Install PyPaimon with the OSS dependencies:
 
 ```shell
-python -m pip install -U 'pypaimon[oss]'
+python -m pip install -U 'pypaimon[oss]>=2.2'
 ```
 
 ## Configure credentials
