@@ -20,7 +20,7 @@ import os
 import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable, Dict, Iterator, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional
 
 import pandas
 import pyarrow
@@ -44,6 +44,9 @@ from pypaimon.read.split_read import (DataEvolutionSplitRead,
 from pypaimon.schema.data_types import (
     DataField, MapType, PyarrowFieldParser, is_map_blob_type)
 from pypaimon.table.row.offset_row import OffsetRow
+
+if TYPE_CHECKING:
+    from pypaimon.table.file_store_table import FileStoreTable
 
 ROW_KIND_COLUMN = "_row_kind"
 logger = logging.getLogger(__name__)
@@ -142,15 +145,14 @@ class TableRead:
 
     def __init__(
         self,
-        table,
+        table: "FileStoreTable",
         predicate: Optional[Predicate],
         read_type: List[DataField],
         include_row_kind: bool = False,
         nested_name_paths: Optional[List[List[str]]] = None,
         limit: Optional[int] = None,
-    ):
+    ) -> None:
         from pypaimon.read.merge_engine_support import check_supported
-        from pypaimon.table.file_store_table import FileStoreTable
 
         # Validate merge-engine support before any split-level dispatch.
         # Raw-convertible splits skip MergeFileSplitRead, so this guard
@@ -159,7 +161,7 @@ class TableRead:
         # silently ignored on fresh single-snapshot tables.
         check_supported(table)
 
-        self.table: FileStoreTable = table
+        self.table = table
         self.predicate = predicate
         self.read_type = read_type
         # Split readers may need predicate-only columns that are absent from

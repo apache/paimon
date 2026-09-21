@@ -16,9 +16,8 @@
 # under the License.
 
 from abc import ABC, abstractmethod
-from typing import Callable, List, Optional, Dict, Tuple
+from typing import TYPE_CHECKING, Callable, List, Optional, Dict, Tuple
 
-from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.scan_distribution import shard_range, validate_shard, validate_slice
@@ -26,6 +25,9 @@ from pypaimon.read.split import Split
 from pypaimon.read.split import DataSplit
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.source.deletion_file import DeletionFile
+
+if TYPE_CHECKING:
+    from pypaimon.table.file_store_table import FileStoreTable
 
 
 class AbstractSplitGenerator(ABC):
@@ -38,20 +40,19 @@ class AbstractSplitGenerator(ABC):
 
     def __init__(
         self,
-        table,
+        table: "FileStoreTable",
         target_split_size: int,
         open_file_cost: int,
         deletion_files_map: Optional[Dict] = None,
         snapshot_id: Optional[int] = None,
-    ):
+    ) -> None:
         self.table = table
         self.target_split_size = target_split_size
         self.open_file_cost = open_file_cost
         self.deletion_files_map = deletion_files_map or {}
         self.snapshot_id = snapshot_id
-        self.default_part_value = table.options.options.get(
-            CoreOptions.PARTITION_DEFAULT_NAME, "__DEFAULT_PARTITION__")
-        
+        self.path_factory = table.path_factory()
+
         # Shard configuration
         self.idx_of_this_subtask = None
         self.number_of_para_subtasks = None
@@ -103,11 +104,8 @@ class AbstractSplitGenerator(ABC):
                 raw_convertible = True
 
             for data_file in file_group:
-                data_file.set_file_path(
-                    self.table.table_path,
-                    file_entries[0].partition,
-                    file_entries[0].bucket,
-                    self.default_part_value
+                self._set_file_path(
+                    data_file, file_entries[0].partition, file_entries[0].bucket
                 )
 
             if file_group:
@@ -130,6 +128,17 @@ class AbstractSplitGenerator(ABC):
                 )
                 splits.append(split)
         return splits
+
+    def _set_file_path(
+        self, data_file: DataFileMeta, partition: GenericRow, bucket: int
+    ) -> None:
+        if data_file.external_path:
+            data_file.file_path = data_file.external_path
+        elif not data_file.file_path:
+            bucket_path = self.path_factory.data_file_bucket_path(
+                tuple(partition.values), bucket
+            )
+            data_file.file_path = f"{bucket_path}/{data_file.file_name}"
 
     def _get_deletion_files_for_split(
         self,

@@ -28,6 +28,7 @@ from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.table import Table
+from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
                                               FixedBucketRowKeyExtractor,
                                               PostponeBucketRowKeyExtractor,
@@ -369,9 +370,7 @@ class FileStoreTable(Table):
                 raise ValueError(f"Snapshot id '{snapshot_id}' doesn't exist.")
         self.tag_manager().replace_tag(snapshot, tag_name, time_retained)
 
-    def path_factory(self) -> 'FileStorePathFactory':
-        from pypaimon.utils.file_store_path_factory import FileStorePathFactory
-
+    def path_factory(self) -> FileStorePathFactory:
         # Get external paths
         external_paths = self._create_external_paths()
 

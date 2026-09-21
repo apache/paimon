@@ -17,7 +17,7 @@
 
 import json as _json
 import logging
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.common.identifier import UNKNOWN_DATABASE
@@ -29,6 +29,9 @@ from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import resolve_auth_result, wrap_plan_with_auth
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.scanner.file_scanner import FileScanner
+
+if TYPE_CHECKING:
+    from pypaimon.table.file_store_table import FileStoreTable
 
 logger = logging.getLogger(__name__)
 
@@ -76,14 +79,12 @@ class TableScan:
 
     def __init__(
         self,
-        table,
+        table: "FileStoreTable",
         predicate: Optional[Predicate],
         limit: Optional[int],
         partition_predicate: Optional[Predicate] = None,
-    ):
-        from pypaimon.table.file_store_table import FileStoreTable
-
-        self.table: FileStoreTable = table
+    ) -> None:
+        self.table = table
         self.predicate = predicate
         self.limit = limit
         self.partition_predicate = partition_predicate

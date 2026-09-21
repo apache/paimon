@@ -16,7 +16,7 @@
 # under the License.
 
 from collections import defaultdict
-from typing import List
+from typing import TYPE_CHECKING, List
 
 from pypaimon.common.options.core_options import MergeEngine
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -25,6 +25,9 @@ from pypaimon.read.interval_partition import IntervalPartition
 from pypaimon.read.scanner.split_generator import AbstractSplitGenerator
 from pypaimon.read.split import Split
 
+if TYPE_CHECKING:
+    from pypaimon.table.file_store_table import FileStoreTable
+
 
 class PrimaryKeyTableSplitGenerator(AbstractSplitGenerator):
     """
@@ -32,13 +35,13 @@ class PrimaryKeyTableSplitGenerator(AbstractSplitGenerator):
     """
 
     def __init__(
-            self,
-            table,
-            target_split_size: int,
-            open_file_cost: int,
-            deletion_files_map=None,
-            snapshot_id=None,
-    ):
+        self,
+        table: "FileStoreTable",
+        target_split_size: int,
+        open_file_cost: int,
+        deletion_files_map=None,
+        snapshot_id=None,
+    ) -> None:
         super().__init__(
             table, target_split_size, open_file_cost, deletion_files_map,
             snapshot_id)

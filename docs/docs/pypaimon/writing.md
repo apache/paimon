@@ -144,3 +144,23 @@ table_commit.close()
 | `snapshot`       | `Snapshot`          | The committed snapshot (id, commit_kind, time_millis, next_row_id, …) |
 | `commit_entries` | `List[ManifestEntry]` | Delta manifest entries in this commit (each carries `file.first_row_id` when row-tracking is enabled) |
 | `identifier`     | `int`               | Commit identifier                        |
+
+## DATE Partition Naming
+
+For tables with a `DATE` partition key, Python reads and writes follow the
+existing `partition.legacy-name` setting, matching Java. The default `true`
+uses days since `1970-01-01`; `false` uses ISO dates. For example,
+`1970-01-02` maps to `day=1` or `day=1970-01-02`, respectively. Record values
+remain dates. Date-shaped STRING values and separate integer year, month,
+and day columns are outside this DATE fix.
+
+Paths are derived from the table configuration without probing alternative
+partition directories. Explicit external file paths remain authoritative.
+
+Older Python writers used ISO dates even when `partition.legacy-name=true`.
+Such files require a separate migration before using the corrected reader;
+there is no automatic fallback to their historical directories. Upgrading the
+writer does not relocate old files, and older Python readers may not read new
+legacy-named files. Changing the option alone is not a general migration,
+particularly for tables containing both layouts. Plan reader/writer upgrades
+and historical data migration together.

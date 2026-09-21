@@ -18,7 +18,7 @@
 import logging
 import os
 import time
-from typing import Callable, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,9 @@ from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.table.source.deletion_file import DeletionFile
 from pypaimon.utils.range import Range
+
+if TYPE_CHECKING:
+    from pypaimon.table.file_store_table import FileStoreTable
 
 
 class _GlobalIndexPlanningResult(NamedTuple):
@@ -218,17 +221,17 @@ def _filter_manifest_entries_by_row_ranges(
 class FileScanner:
     def __init__(
         self,
-        table,
-        manifest_scanner: Callable[[], Tuple[List[ManifestFileMeta], Optional[Snapshot]]],
+        table: "FileStoreTable",
+        manifest_scanner: Callable[
+            [], Tuple[List[ManifestFileMeta], Optional[Snapshot]]
+        ],
         predicate: Optional[Predicate] = None,
         limit: Optional[int] = None,
         partition_predicate: Optional[Predicate] = None,
         skip_level0: bool = False,
         is_streaming: bool = False,
-    ):
-        from pypaimon.table.file_store_table import FileStoreTable
-
-        self.table: FileStoreTable = table
+    ) -> None:
+        self.table = table
         self.manifest_scanner = manifest_scanner
         self.predicate = predicate
         row_ranges = (
@@ -461,7 +464,9 @@ class FileScanner:
         )
         return list(PrimaryKeySortedIndexResult(evaluated).splits)
 
-    def _create_data_evolution_split_generator(self):
+    def _create_data_evolution_split_generator(
+        self,
+    ) -> Tuple[List[ManifestEntry], DataEvolutionSplitGenerator]:
         row_ranges = getattr(self, '_row_ranges', None)
         score_getter = None
         # Fetch snapshot once and share with global index evaluation to avoid

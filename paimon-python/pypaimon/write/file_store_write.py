@@ -17,7 +17,7 @@
 
 import logging
 import random
-from typing import Dict, List, Tuple
+from typing import TYPE_CHECKING, Dict, List, Tuple
 
 import pyarrow as pa
 
@@ -35,14 +35,15 @@ from pypaimon.write.writer.data_writer import DataWriter
 from pypaimon.write.writer.key_value_data_writer import KeyValueDataWriter
 from pypaimon.table.bucket_mode import BucketMode
 
+if TYPE_CHECKING:
+    from pypaimon.table.file_store_table import FileStoreTable
+
 
 class FileStoreWrite:
     """Base class for file store write operations."""
 
-    def __init__(self, table, commit_user):
-        from pypaimon.table.file_store_table import FileStoreTable
-
-        self.table: FileStoreTable = table
+    def __init__(self, table: "FileStoreTable", commit_user: str) -> None:
+        self.table = table
         self.data_writers: Dict[Tuple, DataWriter] = {}
         self._runtime_total_buckets: Dict[Tuple, int] = {}
         self.max_seq_numbers: dict = {}

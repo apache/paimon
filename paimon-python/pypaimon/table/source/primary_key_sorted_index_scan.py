@@ -26,6 +26,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.index.pk.primary_key_index_source_file import PrimaryKeyIndexSourceFile
 from pypaimon.index.pk.primary_key_index_source_policy import should_read
 from pypaimon.index.pksorted.pk_sorted_bucket_index_state import PkSortedBucketIndexState
+from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 
@@ -154,15 +155,16 @@ def evaluate(index_plan, fields, predicate, definitions, reader_factory):
     return EvaluatedPlan(index_plan.snapshot_id, tuple(evaluated))
 
 
-def reader_factory(table):
+def reader_factory(table: FileStoreTable):
     path_factory = table.path_factory()
 
     def create(file_plan, definition, payloads):
         field = next(field for field in table.fields if field.id == definition.field_id)
         if path_factory.index_file_in_data_file_dir:
-            index_path = path_factory.bucket_path(
+            index_path = path_factory.data_file_bucket_path(
                 tuple(file_plan.source_split.partition.values),
-                file_plan.source_split.bucket)
+                file_plan.source_split.bucket,
+            )
         else:
             index_path = path_factory.global_index_path_factory().index_path()
         io_metas = [

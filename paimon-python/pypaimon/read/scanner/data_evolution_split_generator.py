@@ -16,7 +16,7 @@
 # under the License.
 
 from collections import defaultdict
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from pypaimon.globalindex.indexed_split import IndexedSplit, scores_for_ranges
 from pypaimon.utils.range import Range
@@ -26,6 +26,9 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.scanner.split_generator import AbstractSplitGenerator
 from pypaimon.read.split import DataSplit, Split
 
+if TYPE_CHECKING:
+    from pypaimon.table.file_store_table import FileStoreTable
+
 
 class DataEvolutionSplitGenerator(AbstractSplitGenerator):
     """
@@ -34,7 +37,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
     def __init__(
         self,
-        table,
+        table: "FileStoreTable",
         target_split_size: int,
         open_file_cost: int,
         deletion_files_map=None,
@@ -42,7 +45,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         score_getter=None,
         group_stats_filter=None,
         snapshot_id: Optional[int] = None,
-    ):
+    ) -> None:
         super().__init__(
             table, target_split_size, open_file_cost, deletion_files_map,
             snapshot_id)
@@ -135,11 +138,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             raw_convertible = all(len(sub_pack) == 1 for sub_pack in pack)
 
             for data_file in file_group:
-                data_file.set_file_path(
-                    self.table.table_path,
-                    file_entries[0].partition,
-                    file_entries[0].bucket,
-                    self.default_part_value
+                self._set_file_path(
+                    data_file, file_entries[0].partition, file_entries[0].bucket
                 )
 
             if file_group:

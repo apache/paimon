@@ -124,6 +124,21 @@ class SplitOrderTest(unittest.TestCase):
         table_path = '/table'
         options = None
 
+        def path_factory(self):
+            from pypaimon.utils.file_store_path_factory import FileStorePathFactory
+
+            return FileStorePathFactory(
+                self.table_path,
+                [],
+                "__DEFAULT_PARTITION__",
+                "parquet",
+                "data-",
+                "changelog-",
+                True,
+                False,
+                None,
+            )
+
     _Table.options = _Options()
 
     @staticmethod

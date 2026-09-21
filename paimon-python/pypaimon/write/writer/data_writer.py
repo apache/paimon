@@ -19,7 +19,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import uuid
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.common.external_path_provider import ExternalPathProvider
@@ -34,18 +34,26 @@ from pypaimon.write.writer.mosaic_writer_options import create_mosaic_writer_opt
 from pypaimon.write.writer.parquet_writer_options import create_parquet_writer_options
 from pypaimon.write.writer.write_buffer import WriteBuffer
 
+if TYPE_CHECKING:
+    from pypaimon.table.file_store_table import FileStoreTable
+
 
 class DataWriter(ABC):
     """Base class for data writers that handle PyArrow tables directly."""
 
     ROW_SIDECAR_SUFFIX = ".row"
 
-    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: CoreOptions = None,
-                 write_cols: Optional[List[str]] = None,
-                 changelog_producer: ChangelogProducer = ChangelogProducer.NONE):
-        from pypaimon.table.file_store_table import FileStoreTable
-
-        self.table: FileStoreTable = table
+    def __init__(
+        self,
+        table: "FileStoreTable",
+        partition: Tuple,
+        bucket: int,
+        max_seq_number: int,
+        options: Optional[CoreOptions] = None,
+        write_cols: Optional[List[str]] = None,
+        changelog_producer: ChangelogProducer = ChangelogProducer.NONE,
+    ) -> None:
+        self.table = table
         self.partition = partition
         self.bucket = bucket
 
@@ -494,7 +502,9 @@ class DataWriter(ABC):
         if self.external_path_provider:
             return self.external_path_provider.get_next_external_data_path(file_name)
 
-        bucket_path = self.path_factory.bucket_path(self.partition, self.bucket)
+        bucket_path = self.path_factory.data_file_bucket_path(
+            self.partition, self.bucket
+        )
         return f"{bucket_path.rstrip('/')}/{file_name}"
 
     def _should_write_row_sidecar(self) -> bool:

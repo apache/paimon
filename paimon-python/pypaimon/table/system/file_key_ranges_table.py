@@ -88,8 +88,9 @@ class FileKeyRangesTable(SystemTable):
 
         for entry in entries:
             meta = entry.file
-            bucket_path = path_factory.bucket_path(
-                tuple(entry.partition.values), int(entry.bucket))
+            bucket_path = path_factory.data_file_bucket_path(
+                tuple(entry.partition.values), int(entry.bucket)
+            )
             rows["partition"].append(_render_partition(entry.partition))
             rows["bucket"].append(int(entry.bucket))
             rows["file_path"].append(_stringify_path(

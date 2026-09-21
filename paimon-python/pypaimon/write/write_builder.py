@@ -17,7 +17,7 @@
 
 import uuid
 from abc import ABC
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from pypaimon.write.table_commit import (BatchTableCommit, StreamTableCommit,
                                          TableCommit)
@@ -26,12 +26,13 @@ from pypaimon.write.table_update import (BatchTableUpdate, StreamTableUpdate,
 from pypaimon.write.table_write import (BatchTableWrite, StreamTableWrite,
                                         TableWrite)
 
+if TYPE_CHECKING:
+    from pypaimon.table.file_store_table import FileStoreTable
+
 
 class WriteBuilder(ABC):
-    def __init__(self, table):
-        from pypaimon.table.file_store_table import FileStoreTable
-
-        self.table: FileStoreTable = table
+    def __init__(self, table: "FileStoreTable") -> None:
+        self.table = table
         self.commit_user = self._create_commit_user()
         self.static_partition = None
 
@@ -48,7 +49,7 @@ class WriteBuilder(ABC):
     def new_commit(self) -> TableCommit:
         """Returns a table commit."""
 
-    def _create_commit_user(self):
+    def _create_commit_user(self) -> str:
         commit_user_prefix = self.table.options.commit_user_prefix()
         if commit_user_prefix is not None:
             return f"{commit_user_prefix}_{uuid.uuid4()}"

@@ -221,13 +221,32 @@ class FileStorePathFactory:
         relative_path = self.relative_bucket_path(partition, bucket, canonical_partition)
         return f"{self._root}/{relative_path}"
 
+    def has_date_partition(self) -> bool:
+        for data_type in self.partition_types or []:
+            # Includes both DATE and DATE NOT NULL.
+            if str(data_type).split()[0] == "DATE":
+                return True
+        return False
+
+    def data_file_bucket_path(self, partition: Tuple, bucket: int) -> str:
+        """Use the table's naming rules for DATE data file partitions.
+
+        Keep other partition schemas unchanged; their historical naming
+        differences require separate compatibility handling.
+        """
+        return self.bucket_path(
+            partition, bucket, canonical_partition=self.has_date_partition()
+        )
+
     def create_external_path_provider(
         self, partition: Tuple, bucket: int
     ) -> Optional[ExternalPathProvider]:
         if not self.external_paths:
             return None
 
-        relative_bucket_path = self.relative_bucket_path(partition, bucket)
+        relative_bucket_path = self.relative_bucket_path(
+            partition, bucket, canonical_partition=self.has_date_partition()
+        )
         return ExternalPathProvider.create(
             self.external_path_strategy,
             self.external_paths,
@@ -248,11 +267,12 @@ class FileStorePathFactory:
             external = self.create_external_path_provider(partition, bucket)
             if external is not None:
                 return external.get_next_external_data_path(file_name), True
-            # Python data directories historically use str(value) without
-            # escaping. Record the actual location when Java renders it
-            # differently, so its readers can find the DV beside those files.
-            return (f"{self.bucket_path(partition, bucket)}/{file_name}",
-                    self._partition_path_requires_explicit_location(partition))
+            # Keep bucket indexes beside newly written data. Explicit locations
+            # also preserve compatibility with historical Python naming.
+            return (
+                f"{self.data_file_bucket_path(partition, bucket)}/{file_name}",
+                self._partition_path_requires_explicit_location(partition),
+            )
         factory = self.global_index_path_factory()
         return factory.to_path(file_name), factory.is_external_path()
 

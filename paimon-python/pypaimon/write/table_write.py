@@ -33,19 +33,24 @@ from pypaimon.write.file_store_write import FileStoreWrite
 if TYPE_CHECKING:
     from ray.data import Dataset
 
+    from pypaimon.table.file_store_table import FileStoreTable
+
 
 class TableWrite:
-    def __init__(self, table, commit_user, static_partition: Optional[dict] = None):
-        from pypaimon.table.file_store_table import FileStoreTable
-
-        self.table: FileStoreTable = table
+    def __init__(
+        self,
+        table: "FileStoreTable",
+        commit_user: str,
+        static_partition: Optional[dict] = None,
+    ) -> None:
+        self.table = table
         self.table_pyarrow_schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
         self.commit_user = commit_user
         self.static_partition = static_partition
         self.file_store_write = self._create_file_store_write(commit_user)
         self.row_key_extractor = self._create_row_key_extractor(static_partition)
 
-    def _create_file_store_write(self, commit_user):
+    def _create_file_store_write(self, commit_user: str) -> FileStoreWrite:
         return FileStoreWrite(self.table, commit_user)
 
     def _create_row_key_extractor(self, static_partition):
@@ -380,7 +385,12 @@ class TableWrite:
 
 
 class BatchTableWrite(TableWrite):
-    def __init__(self, table, commit_user, static_partition: Optional[dict] = None):
+    def __init__(
+        self,
+        table: "FileStoreTable",
+        commit_user: str,
+        static_partition: Optional[dict] = None,
+    ) -> None:
         super().__init__(table, commit_user, static_partition)
         self.batch_committed = False
 

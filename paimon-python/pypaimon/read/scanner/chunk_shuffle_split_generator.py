@@ -19,7 +19,7 @@ import random
 from abc import abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Iterator, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Iterator, List, Optional, Tuple
 
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
 from pypaimon.globalindex.indexed_split import IndexedSplit
@@ -32,6 +32,9 @@ from pypaimon.table.source.deletion_file import DeletionFile
 from pypaimon.utils.data_evolution_utils import retrieve_anchor_file
 from pypaimon.utils.range import Range
 from pypaimon.utils.range_helper import RangeHelper
+
+if TYPE_CHECKING:
+    from pypaimon.table.file_store_table import FileStoreTable
 
 
 def _null_safe_partition_key(partition_values) -> tuple:
@@ -204,14 +207,14 @@ class ChunkShuffleSplitGeneratorBase(AbstractSplitGenerator):
 
     def __init__(
         self,
-        table,
+        table: "FileStoreTable",
         target_split_size: int,
         open_file_cost: int,
         deletion_files_map=None,
         seed: int = 0,
         chunk_size: int = 0,
         snapshot_id: Optional[int] = None,
-    ):
+    ) -> None:
         super().__init__(
             table, target_split_size, open_file_cost, deletion_files_map,
             snapshot_id)
@@ -245,13 +248,7 @@ class ChunkShuffleSplitGeneratorBase(AbstractSplitGenerator):
                 if f.file_name in seen_paths:
                     continue
                 seen_paths.add(f.file_name)
-                if not f.file_path:
-                    f.set_file_path(
-                        self.table.table_path,
-                        partition_row,
-                        bucket,
-                        self.default_part_value,
-                    )
+                self._set_file_path(f, partition_row, bucket)
             for segments in self._slice_group_into_chunks(entries_in_group):
                 all_chunks.append(_Chunk(partition_row, bucket, segments))
 

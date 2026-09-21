@@ -16,7 +16,7 @@
 # under the License.
 
 import ast
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -31,6 +31,9 @@ from pypaimon.read.table_scan import TableScan
 from pypaimon.schema.data_types import AtomicType, DataField, MapType
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.projection import MapKey, Projection, is_row_type
+
+if TYPE_CHECKING:
+    from pypaimon.table.file_store_table import FileStoreTable
 
 
 class _ReadPredicateBuilder(PredicateBuilder):
@@ -50,10 +53,8 @@ class _ReadPredicateBuilder(PredicateBuilder):
 class ReadBuilder:
     """Implementation of ReadBuilder for native Python reading."""
 
-    def __init__(self, table):
-        from pypaimon.table.file_store_table import FileStoreTable
-
-        self.table: FileStoreTable = table
+    def __init__(self, table: "FileStoreTable") -> None:
+        self.table = table
         self._predicate: Optional[Predicate] = None
         # ``_projection`` stores the user-facing name list from
         # :meth:`with_projection`. When nested selectors are present,

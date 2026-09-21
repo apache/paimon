@@ -40,7 +40,7 @@ class _PathFactory:
     def create_external_path_provider(self, partition, bucket):
         return None
 
-    def bucket_path(self, partition, bucket):
+    def data_file_bucket_path(self, partition, bucket):
         return self._bucket_path
 
 

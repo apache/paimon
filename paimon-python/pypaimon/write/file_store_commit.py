@@ -19,7 +19,7 @@ import logging
 import random
 import time
 import uuid
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from pypaimon.build_info import full_version as build_full_version
 from pypaimon.common.options.core_options import CoreOptions
@@ -52,10 +52,15 @@ from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
 from pypaimon.write.commit_message import CommitMessage
 
+if TYPE_CHECKING:
+    from pypaimon.table.file_store_table import FileStoreTable
+
 logger = logging.getLogger(__name__)
 
 
-def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
+def _abort_commit_messages(
+    table: "FileStoreTable", commit_messages: List[CommitMessage]
+) -> None:
     """Delete files created by messages known to be uncommitted."""
     for message in commit_messages:
         for file in list(message.new_files) + list(message.changelog_files):
@@ -218,12 +223,15 @@ class FileStoreCommit:
     org.apache.paimon.operation.FileStoreCommitImpl in Java.
     """
 
-    def __init__(self, snapshot_commit: SnapshotCommit, table, commit_user: str,
-                 commit_callbacks: Optional[List[CommitCallback]] = None):
-        from pypaimon.table.file_store_table import FileStoreTable
-
+    def __init__(
+        self,
+        snapshot_commit: SnapshotCommit,
+        table: "FileStoreTable",
+        commit_user: str,
+        commit_callbacks: Optional[List[CommitCallback]] = None,
+    ) -> None:
         self.snapshot_commit = snapshot_commit
-        self.table: FileStoreTable = table
+        self.table = table
         self.commit_user = commit_user
         self.commit_callbacks: List[CommitCallback] = commit_callbacks if commit_callbacks is not None else []
 
@@ -1008,7 +1016,7 @@ class FileStoreCommit:
                         for entry in entries:
                             file = entry.file
                             file.file_path = file.external_path or "%s/%s" % (
-                                path_factory.bucket_path(
+                                path_factory.data_file_bucket_path(
                                     tuple(entry.partition.values),
                                     entry.bucket,
                                 ).rstrip("/"),
