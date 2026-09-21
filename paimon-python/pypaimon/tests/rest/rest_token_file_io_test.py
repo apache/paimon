@@ -58,7 +58,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
         delegate.create_blob_presigned_url.return_value = "https://signed-url"
         with patch.object(
                 file_io, '_file_io_with_token',
-                return_value=(delegate, None)) as resolve:
+                return_value=(delegate, None)):
             self.assertEqual(
                 file_io.create_blob_presigned_url(root, descriptor, validity),
                 "https://signed-url")
