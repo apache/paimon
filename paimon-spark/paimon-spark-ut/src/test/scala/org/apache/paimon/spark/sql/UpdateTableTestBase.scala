@@ -392,18 +392,19 @@ abstract class UpdateTableTestBase extends PaimonSparkTestBase {
             sql("SELECT id, c, b FROM t ORDER BY id"),
             Seq(Row(1, "a  ", 1), Row(2, "b  ", 3)))
 
-          // A correlated subquery reads it through an outer reference. The non-pk UPDATE puts the
-          // condition into a Project, which only accepts EXISTS/IN subqueries since Spark 3.4.
-          if (gteqSpark3_4) {
+          // A correlated subquery reads it through an outer reference. Only on the primary-key
+          // table, whose UPDATE keeps the condition in a Filter: the non-pk UPDATE moves it into a
+          // Project, and correlated subqueries there depend on the Spark version.
+          if (props.contains("primary-key")) {
             sql("CREATE TABLE s (k CHAR(3))")
             sql("INSERT INTO s VALUES ('b')")
             sql("UPDATE t SET b = 7 WHERE EXISTS (SELECT 1 FROM s WHERE s.k = t.c)")
-            checkAnswer(
-              sql("SELECT id, c, b FROM t ORDER BY id"),
-              Seq(Row(1, "a  ", 1), Row(2, "b  ", 7)))
           } else {
             sql("UPDATE t SET b = 7 WHERE id = 2")
           }
+          checkAnswer(
+            sql("SELECT id, c, b FROM t ORDER BY id"),
+            Seq(Row(1, "a  ", 1), Row(2, "b  ", 7)))
 
           // No condition at all.
           sql("UPDATE t SET b = 5")
