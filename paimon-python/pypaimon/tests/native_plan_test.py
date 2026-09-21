@@ -993,6 +993,28 @@ class NativePlanTest(unittest.TestCase):
         self.assertEqual(native.call_args[1]['incremental_range'], (2, 4))
         fs.scan.assert_not_called()
 
+    def test_native_plan_forwards_explicit_incremental_mode(self):
+        table = _scan(True, Mock()).table
+        table.table_schema = Mock(fields=[], partition_keys=[])
+        rust_plan = SimpleNamespace(splits=lambda: [], snapshot_id=lambda: 4)
+        rust_scan = Mock()
+        rust_scan.plan.return_value = rust_plan
+        builder = Mock()
+        builder.new_incremental_scan.return_value = rust_scan
+        with patch('pypaimon.read.native_plan.native_runtime_available',
+                   return_value=True), patch(
+                'pypaimon.read.native_plan._native_read_builder',
+                return_value=builder):
+            plan = native_plan(
+                table, incremental_range=(2, 4),
+                incremental_mode='changelog')
+        self.assertEqual(plan.snapshot_id, 4)
+        builder.new_incremental_scan.assert_called_once_with(
+            2, 4, 'changelog')
+
+        with self.assertRaisesRegex(ValueError, 'incremental_range'):
+            native_plan(table, incremental_mode='changelog')
+
     def test_incremental_window_outside_snapshots_is_terminal_empty(self):
         fs = Mock(partition_key_predicate=None)
         scan = _scan(True, fs)

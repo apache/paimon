@@ -430,6 +430,69 @@ def test_stream_read_builder_combines_native_nested_projection_and_row_kind(
     ]
 
 
+@pytest.mark.native_plan
+def test_streaming_changelog_frames_use_native_plan_and_read(catalog):
+    import asyncio
+
+    table = _table(catalog, 'native_changelog', True, {
+        'bucket': '1',
+        'changelog-producer': 'input',
+        'source.split.target-size': '1 b',
+        'source.split.open-file-cost': '1 b',
+    })
+    _write(table, 100, [{'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}])
+    _write(table, 200, [{'k': 3, 'v': 'c'}])
+
+    native_table = table.copy({
+        'scan.native-plan.enabled': 'true',
+        'read.native.enabled': 'true',
+    })
+    predicate = (native_table.new_read_builder().new_predicate_builder()
+                 .greater_than('k', 1))
+    builder = (native_table.new_stream_read_builder()
+               .with_filter(predicate)
+               .with_projection(['v'])
+               .with_include_row_kind())
+    scan = builder.new_streaming_scan()
+    scan.next_snapshot_id = 1
+
+    async def first_two_frames():
+        plans = []
+        async for plan in scan.stream():
+            plans.append(plan)
+            if len(plans) == 2:
+                return plans
+
+    with patch.object(
+            scan, '_create_plan_from_manifests',
+            side_effect=AssertionError(
+                'streaming changelog native plan fell back to Python')):
+        plans = asyncio.run(first_two_frames())
+
+    assert [plan.snapshot_id for plan in plans] == [1, 2]
+    assert all(
+        getattr(split, '_native_split', None) is not None
+        for plan in plans for split in plan.splits())
+    assert all(
+        file.file_name.startswith('changelog-')
+        for plan in plans for split in plan.splits() for file in split.files)
+
+    with patch(
+            'pypaimon.read.table_read.TableRead._create_split_read',
+            side_effect=AssertionError(
+                'streaming changelog native read fell back to Python')):
+        rows = [
+            row
+            for plan in plans
+            for row in builder.new_read().to_arrow(
+                plan.splits(), parallelism=2).to_pylist()
+        ]
+    assert rows == [
+        {'_row_kind': '+I', 'v': 'b'},
+        {'_row_kind': '+I', 'v': 'c'},
+    ]
+
+
 def test_streaming_reader_honors_explicit_split_deletion_vector(catalog, native, tmp_path):
     from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
     from pypaimon.table.source.deletion_file import DeletionFile

@@ -117,6 +117,29 @@ class AsyncStreamingTableScanTest(unittest.TestCase):
     @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
     @patch('pypaimon.read.native_plan.native_plan')
+    def test_changelog_scan_uses_explicit_native_mode(
+            self, native_plan, _manifest_files, _manifest_lists):
+        table, _ = _create_mock_table()
+        table.options.native_plan_enabled.return_value = True
+        table.options.changelog_producer.return_value = ChangelogProducer.INPUT
+        native_plan.return_value = Plan([], snapshot_id=5)
+        scan = AsyncStreamingTableScan(table, predicate=Mock())
+        scan._read_type = [Mock(name='payload')]
+        scan._read_type[0].name = 'payload'
+
+        plan = scan._create_changelog_plan(_create_mock_snapshot(5))
+
+        self.assertIs(plan, native_plan.return_value)
+        self.assertEqual(
+            native_plan.call_args.kwargs['incremental_range'], (4, 5))
+        self.assertEqual(
+            native_plan.call_args.kwargs['incremental_mode'], 'changelog')
+        self.assertEqual(
+            native_plan.call_args.kwargs['projection'], ['payload'])
+
+    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    @patch('pypaimon.read.native_plan.native_plan')
     def test_bucket_filtered_delta_scan_keeps_python_planner(
             self, native_plan, _manifest_files, manifest_lists):
         table, _ = _create_mock_table()
