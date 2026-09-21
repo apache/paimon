@@ -96,6 +96,8 @@ class OssFileIO(PyArrowFileIO):
                 descriptor,
                 validity,
                 sse_headers=self._sse_headers(),
+                has_security_token=bool(
+                    self.properties.get(OssOptions.OSS_SECURITY_TOKEN)),
             )
         finally:
             session.session.close()

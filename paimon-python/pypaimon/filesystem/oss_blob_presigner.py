@@ -18,11 +18,14 @@
 """Materialize OSS BLOB ranges and create temporary GET URLs."""
 
 import hashlib
+import logging
 import posixpath
 import re
 from datetime import timedelta
 from urllib.parse import unquote, urlparse, urlsplit
 
+
+_LOGGER = logging.getLogger(__name__)
 
 _BLOB_FINGERPRINT_METADATA = "paimon-blob-descriptor-sha256"
 _BLOB_FINGERPRINT_HEADER = "x-oss-meta-" + _BLOB_FINGERPRINT_METADATA
@@ -32,9 +35,13 @@ _MAX_MULTIPART_UPLOAD_PARTS = 10_000
 
 
 def create_presigned_url(
-        bucket, table_root, descriptor, validity, sse_headers=None) -> str:
+        bucket, table_root, descriptor, validity, sse_headers=None,
+        has_security_token=False) -> str:
     """Create a presigned URL with the same object layout as Java Paimon."""
-    validity_seconds = _validity_seconds(validity)
+    endpoint = urlsplit(bucket.endpoint)
+    if endpoint.scheme.lower() != "https" or not endpoint.hostname:
+        raise ValueError("OSS BLOB presigning requires an HTTPS endpoint.")
+    validity_seconds = _validity_seconds(validity, has_security_token)
     source = _validate_table_root(table_root, descriptor)
     # Keep the compatibility URI rules in OssFileIO, which also owns bucket
     # extraction for oss://AK:SK@endpoint/bucket/object-key URIs.
@@ -78,14 +85,20 @@ def create_presigned_url(
         raise OSError("Failed to create blob presigned URL.") from error
 
 
-def _validity_seconds(validity) -> int:
+def _validity_seconds(validity, has_security_token=False) -> int:
     if not isinstance(validity, timedelta):
         raise TypeError(
             "Blob presigned URL validity must be datetime.timedelta.")
     if validity <= timedelta(0) or validity.microseconds != 0:
         raise ValueError(
             "Blob presigned URL validity must be positive whole seconds.")
-    return validity.days * 24 * 60 * 60 + validity.seconds
+    seconds = validity.days * 24 * 60 * 60 + validity.seconds
+    maximum = 43200 if has_security_token else 604800
+    if seconds > maximum:
+        raise ValueError(
+            "OSS V4 presigned URL validity must not exceed {} seconds."
+            .format(maximum))
+    return seconds
 
 
 def _validate_table_root(table_root, descriptor):
@@ -219,7 +232,9 @@ def _materialize(
             try:
                 bucket.abort_multipart_upload(target_key, upload_id)
             except Exception:
-                pass
+                _LOGGER.warning(
+                    "Failed to abort OSS BLOB multipart upload %s for %s",
+                    upload_id, target_key, exc_info=True)
         raise
 
 

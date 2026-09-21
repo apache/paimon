@@ -239,6 +239,11 @@ The signed URL uses the configured OSS endpoint. Use an Internal endpoint only
 when both the application materializing the BLOB and the URL consumer can reach
 that endpoint. PyPaimon does not replace Internal endpoints with public endpoints.
 
+OSS V4 URL validity is limited to 7 days for long-lived AccessKeys and 12 hours
+for STS credentials. An STS URL also expires when its signing token expires,
+even if the requested URL validity is longer. Credential refresh does not extend
+URLs that have already been issued.
+
 ## How the temporary URL works
 
 A managed BLOB descriptor can point to a byte range inside a larger Paimon

@@ -97,7 +97,8 @@ def test_inline_blob_cannot_create_presigned_url():
     file_io.create_blob_presigned_url.assert_not_called()
 
 
-def test_oss_file_io_uses_descriptor_bucket_and_closes_session():
+@pytest.mark.parametrize("token", [None, "sts-token"])
+def test_oss_file_io_uses_descriptor_bucket_and_closes_session(token):
     descriptor = _descriptor()
     validity = timedelta(minutes=5)
     bucket = _bucket()
@@ -106,6 +107,7 @@ def test_oss_file_io_uses_descriptor_bucket_and_closes_session():
     file_io._create_oss_bucket = mock.MagicMock(return_value=bucket)
     file_io.properties = Options({
         'fs.oss.server-side-encryption': 'AES256',
+        'fs.oss.securityToken': token,
     })
 
     with mock.patch('oss2.Session', return_value=session), mock.patch(
@@ -121,6 +123,7 @@ def test_oss_file_io_uses_descriptor_bucket_and_closes_session():
         descriptor,
         validity,
         sse_headers={'x-oss-server-side-encryption': 'AES256'},
+        has_security_token=bool(token),
     )
     session.session.close.assert_called_once_with()
 
@@ -430,16 +433,18 @@ def test_rejects_url_with_different_endpoint(endpoint, generated_endpoint):
             bucket, "oss://bucket/table", _descriptor(), timedelta(minutes=5))
 
 
-def test_rejects_non_https_endpoint_after_cache_hit():
+def test_rejects_non_https_endpoint_before_any_remote_call():
     bucket = _bucket("http://oss-cn-hangzhou.aliyuncs.com")
     bucket.head_object.return_value = _metadata()
-    with pytest.raises(OSError, match="invalid target"):
+    with pytest.raises(ValueError, match="HTTPS endpoint"):
         create_presigned_url(
             bucket,
             "oss://bucket/table",
             _descriptor(),
             timedelta(minutes=5),
         )
+
+    assert bucket.mock_calls == []
 
 
 def test_failed_materialization_aborts_upload_and_wraps_error():
@@ -484,3 +489,40 @@ def test_file_io_wrappers_delegate_presigning():
     with mock.patch.object(rest, 'file_io', return_value=delegate):
         assert rest.create_blob_presigned_url(
             "oss://bucket/table", descriptor, validity) == "https://example"
+
+
+@pytest.mark.parametrize("has_security_token, maximum", [
+    (False, 604800), (True, 43200),
+])
+def test_validity_upper_bound_before_any_remote_call(has_security_token, maximum):
+    bucket = _bucket()
+    with pytest.raises(ValueError, match="must not exceed"):
+        create_presigned_url(
+            bucket, "oss://bucket/table", _descriptor(),
+            timedelta(seconds=maximum + 1),
+            has_security_token=has_security_token)
+    assert bucket.mock_calls == []
+    bucket.head_object.return_value = _metadata()
+    create_presigned_url(
+        bucket, "oss://bucket/table", _descriptor(),
+        timedelta(seconds=maximum), has_security_token=has_security_token)
+    bucket.sign_url.assert_called_once_with(
+        'GET', _TARGET_KEY, maximum, slash_safe=True)
+
+
+def test_abort_failure_is_logged_without_replacing_copy_error(caplog):
+    bucket = _bucket()
+    bucket.head_object.side_effect = [
+        _missing(), SimpleNamespace(content_length=100)]
+    bucket.init_multipart_upload.return_value = SimpleNamespace(upload_id="upload-id")
+    copy_error = RuntimeError("copy failed")
+    abort_error = RuntimeError("abort failed")
+    bucket.upload_part_copy.side_effect = copy_error
+    bucket.abort_multipart_upload.side_effect = abort_error
+    with pytest.raises(OSError) as caught:
+        create_presigned_url(
+            bucket, "oss://bucket/table", _descriptor(), timedelta(minutes=5))
+    assert caught.value.__cause__ is copy_error
+    record = next(r for r in caplog.records if "Failed to abort" in r.message)
+    assert record.exc_info[1] is abort_error
+    assert "upload-id" in record.message
