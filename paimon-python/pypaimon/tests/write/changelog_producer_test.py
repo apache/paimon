@@ -175,6 +175,76 @@ class ChangelogProducerTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
+    def test_input_mode_overwrite_has_no_changelog(self):
+        table_name = 'test_input_overwrite'
+        table = self._create_table(
+            table_name,
+            options={'changelog-producer': 'input', 'bucket': '1'}
+        )
+        append = table.new_batch_write_builder()
+        writer, commit = append.new_write(), append.new_commit()
+        try:
+            writer.write_arrow(self._sample_data())
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+
+        bucket_dir = os.path.join(
+            self.warehouse, 'default.db', table_name, 'dt=p1', 'bucket-0')
+        before_files = set(glob.glob(os.path.join(bucket_dir, 'changelog-*')))
+        self.assertTrue(before_files)
+
+        overwrite = table.new_batch_write_builder().overwrite()
+        writer, commit = overwrite.new_write(), overwrite.new_commit()
+        try:
+            writer.write_arrow(self._sample_data())
+            messages = writer.prepare_commit()
+            self.assertTrue(messages)
+            self.assertTrue(all(not message.changelog_files for message in messages))
+            commit.commit(messages)
+        finally:
+            writer.close()
+            commit.close()
+
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self.assertEqual(snapshot.commit_kind, 'OVERWRITE')
+        self.assertIsNone(snapshot.changelog_manifest_list)
+        self.assertEqual(
+            set(glob.glob(os.path.join(bucket_dir, 'changelog-*'))), before_files)
+
+        append = table.new_batch_write_builder()
+        writer, commit = append.new_write(), append.new_commit()
+        try:
+            writer.write_arrow(self._sample_data())
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+        self.assertIsNotNone(
+            table.snapshot_manager().get_latest_snapshot().changelog_manifest_list)
+
+    def test_overwrite_commit_discards_supplied_changelog(self):
+        table = self._create_table(
+            'test_overwrite_supplied_changelog',
+            options={'changelog-producer': 'input', 'bucket': '1'}
+        )
+        writer_builder = table.new_batch_write_builder()
+        writer = writer_builder.new_write()
+        overwrite_commit = table.new_batch_write_builder().overwrite().new_commit()
+        try:
+            writer.write_arrow(self._sample_data())
+            messages = writer.prepare_commit()
+            self.assertTrue(any(message.changelog_files for message in messages))
+            overwrite_commit.commit(messages)
+        finally:
+            writer.close()
+            overwrite_commit.close()
+
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self.assertEqual(snapshot.commit_kind, 'OVERWRITE')
+        self.assertIsNone(snapshot.changelog_manifest_list)
+
     def test_input_mode_changelog_manifest_readable(self):
         table = self._create_table(
             'test_input_readable',
