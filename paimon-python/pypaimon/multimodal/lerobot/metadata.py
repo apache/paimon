@@ -25,6 +25,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from pypaimon import Schema as PaimonSchema
+from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.catalog.catalog_exception import (
     TableAlreadyExistException,
     TagNotExistException,
@@ -361,7 +362,7 @@ def _append_arrow(table, data):
 
 def _overwrite_arrow(table, data):
     target_schema = _target_schema(table)
-    if not data.schema.equals(target_schema, check_metadata=False):
+    if not arrow_schemas_compatible(data.schema, target_schema):
         raise ValueError(
             "LeRobot component schema %s does not match target %s."
             % (data.schema, target_schema))
@@ -400,7 +401,7 @@ def _append_arrow_tables(table, tables):
         for data in tables:
             if data.num_rows == 0:
                 continue
-            if not data.schema.equals(target_schema, check_metadata=False):
+            if not arrow_schemas_compatible(data.schema, target_schema):
                 raise ValueError(
                     "LeRobot component schema %s does not match target %s."
                     % (data.schema, target_schema))

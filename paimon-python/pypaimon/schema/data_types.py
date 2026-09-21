@@ -783,7 +783,7 @@ class PyarrowFieldParser:
             type_name = 'DOUBLE'
         elif types.is_boolean(pa_type):
             type_name = 'BOOLEAN'
-        elif types.is_string(pa_type):
+        elif types.is_string(pa_type) or types.is_large_string(pa_type):
             type_name = 'STRING'
         elif types.is_fixed_size_binary(pa_type):
             type_name = f'BINARY({pa_type.byte_width})'

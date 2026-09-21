@@ -198,7 +198,7 @@ function pytest_check() {
     # 3.6/3.7 run a curated core subset (their dep ceiling rules out the
     # vector/index/multimodal/blob suites); 3.10+ run the full suite.
     if [ "$PYTHON_VERSION" = "3.6" ] || [ "$PYTHON_VERSION" = "3.7" ]; then
-        TEST_DIR="pypaimon/tests/py36 pypaimon/tests/file_io_test.py"
+        TEST_DIR="pypaimon/tests/py36 pypaimon/tests/file_io_test.py pypaimon/tests/arrow_schema_test.py"
         echo "Running core test subset for Python $PYTHON_VERSION: $TEST_DIR"
     else
         TEST_DIR="pypaimon/tests pypaimon/acceptance --ignore=pypaimon/tests/py36 --ignore=pypaimon/tests/e2e --ignore=pypaimon/tests/torch_read_test.py"

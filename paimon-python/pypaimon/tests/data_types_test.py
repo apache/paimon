@@ -25,6 +25,29 @@ from pypaimon.schema.data_types import (DataField, AtomicType, ArrayType, Multis
 
 
 class DataTypesTest(unittest.TestCase):
+    def test_large_string_schema_preserves_field_contract(self):
+        from pypaimon.schema.schema import Schema
+
+        arrow_schema = pa.schema([
+            pa.field('text', pa.large_string(), nullable=False,
+                     metadata={b'description': b'task label'}),
+            pa.field('nested', pa.struct([
+                pa.field('labels', pa.list_(pa.large_string())),
+                pa.field('mapping', pa.map_(pa.large_string(), pa.large_string())),
+            ])),
+        ])
+        schema = Schema.from_pyarrow_schema(arrow_schema)
+        restored = PyarrowFieldParser.from_paimon_schema(schema.fields)
+        self.assertEqual(restored, pa.schema([
+            pa.field('text', pa.string(), nullable=False,
+                     metadata={b'description': b'task label'}),
+            pa.field('nested', pa.struct([
+                pa.field('labels', pa.list_(pa.string())),
+                pa.field('mapping', pa.map_(pa.string(), pa.string())),
+            ])),
+        ]))
+        self.assertEqual(schema.fields[0].description, 'task label')
+
     def test_atomic_type(self):
         self.assertEqual(str(AtomicType("BLOB")), "BLOB")
         self.assertEqual(str(AtomicType("TINYINT", nullable=False)), "TINYINT NOT NULL")
