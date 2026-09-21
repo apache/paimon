@@ -41,6 +41,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -95,6 +96,64 @@ class RESTTokenFileIOTest {
                                         new Path("oss://bucket/other"), descriptor, validity))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("bound table root");
+    }
+
+    @Test
+    void testPresigningRefreshesForRequestedLifetime() throws IOException {
+        checkPresignedLifetime(Duration.ofHours(3), 4, true, false);
+    }
+
+    @Test
+    void testPresigningReusesSufficientLifetime() throws IOException {
+        checkPresignedLifetime(Duration.ofMinutes(30), 4, false, false);
+    }
+
+    @Test
+    void testPresigningRejectsInsufficientRefreshedLifetime() throws IOException {
+        checkPresignedLifetime(Duration.ofHours(3), 2, true, true);
+    }
+
+    private void checkPresignedLifetime(
+            Duration validity, int refreshedHours, boolean refresh, boolean rejected)
+            throws IOException {
+        Path root = new Path("oss://bucket/table");
+        BlobDescriptor descriptor = new BlobDescriptor("oss://bucket/table/data.blob", 0, 1);
+        FileIO delegate = mock(FileIO.class);
+        when(delegate.exists(any())).thenReturn(true);
+        when(delegate.createBlobPresignedUrl(root, descriptor, validity))
+                .thenReturn("https://signed");
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenReturn(delegate);
+        when(loader.getScheme()).thenReturn("oss");
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        long now = System.currentTimeMillis();
+        when(api.loadTableToken(identifier))
+                .thenReturn(
+                        new GetTableTokenResponse(
+                                Collections.singletonMap(
+                                        "test.token", UUID.randomUUID().toString()),
+                                now + Duration.ofHours(2).toMillis()),
+                        new GetTableTokenResponse(
+                                Collections.singletonMap(
+                                        "test.token", UUID.randomUUID().toString()),
+                                now + Duration.ofHours(refreshedHours).toMillis()));
+        RESTTokenFileIO fileIO =
+                new RESTTokenFileIO(
+                        CatalogContext.create(new Options(), loader, null), api, identifier, root);
+        fileIO.validToken();
+        if (rejected) {
+            assertThatThrownBy(() -> fileIO.createBlobPresignedUrl(root, descriptor, validity))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("credential lifetime after refresh");
+            verify(loader, never()).load(any());
+            verify(delegate, never()).createBlobPresignedUrl(any(), any(), any());
+        } else {
+            assertThat(fileIO.createBlobPresignedUrl(root, descriptor, validity))
+                    .isEqualTo("https://signed");
+            verify(delegate).createBlobPresignedUrl(root, descriptor, validity);
+        }
+        verify(api, times(refresh ? 2 : 1)).loadTableToken(identifier);
     }
 
     @Test

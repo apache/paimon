@@ -191,7 +191,20 @@ public class RESTTokenFileIO implements FileIO {
         if (!path.equals(tableRoot)) {
             throw new IOException("Table root does not match RESTTokenFileIO bound table root.");
         }
-        return fileIO().createBlobPresignedUrl(tableRoot, descriptor, validity);
+        if (validity == null
+                || validity.isZero()
+                || validity.isNegative()
+                || validity.getNano() != 0) {
+            throw new IOException("Blob presigned URL validity must be positive whole seconds.");
+        }
+        final long minimumValidityMillis;
+        try {
+            minimumValidityMillis = Math.addExact(validity.toMillis(), 1000);
+        } catch (ArithmeticException e) {
+            throw new IOException("Blob presigned URL validity is too large.", e);
+        }
+        return fileIO(minimumValidityMillis)
+                .createBlobPresignedUrl(tableRoot, descriptor, validity);
     }
 
     @Override
@@ -204,7 +217,17 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     public FileIO fileIO() throws IOException {
-        tryToRefreshToken();
+        return fileIO(0);
+    }
+
+    private FileIO fileIO(long minimumValidityMillis) throws IOException {
+        tryToRefreshToken(minimumValidityMillis);
+        if (minimumValidityMillis > 0
+                && token.expireAtMillis() - System.currentTimeMillis() < minimumValidityMillis) {
+            throw new IOException(
+                    "Requested presigned URL validity exceeds the remaining "
+                            + "REST credential lifetime after refresh.");
+        }
 
         FileIO fileIO = FILE_IO_CACHE.getIfPresent(token);
         if (fileIO != null) {
@@ -233,19 +256,23 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     private void tryToRefreshToken() {
-        if (shouldRefresh()) {
+        tryToRefreshToken(0);
+    }
+
+    private void tryToRefreshToken(long minimumValidityMillis) {
+        if (shouldRefresh(minimumValidityMillis)) {
             synchronized (this) {
-                if (shouldRefresh()) {
+                if (shouldRefresh(minimumValidityMillis)) {
                     refreshToken();
                 }
             }
         }
     }
 
-    private boolean shouldRefresh() {
+    private boolean shouldRefresh(long minimumValidityMillis) {
         return token == null
                 || token.expireAtMillis() - System.currentTimeMillis()
-                        < TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
+                        < Math.max(TOKEN_EXPIRATION_SAFE_TIME_MILLIS, minimumValidityMillis);
     }
 
     private void refreshToken() {
