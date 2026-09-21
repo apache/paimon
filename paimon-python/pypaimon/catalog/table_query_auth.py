@@ -30,6 +30,17 @@ from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.schema.data_types import DataField
 
 
+def reject_search_under_query_auth(table) -> None:
+    """Refuses a search on a query-auth table. Called from the methods that build a scan or a
+    read rather than from the builder constructors, which a deserialized builder skips."""
+    from pypaimon.table.file_store_table import FileStoreTable
+
+    if isinstance(table, FileStoreTable) and table.options.query_auth_enabled:
+        raise ValueError(
+            "Search is not supported on a query-auth table: the index ranks raw values, "
+            "which a column mask invalidates.")
+
+
 class TableQueryAuthResult:
 
     def __init__(self, filter: Optional[List[str]], column_masking: Optional[Dict[str, str]]):

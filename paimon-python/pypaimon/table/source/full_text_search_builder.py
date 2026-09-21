@@ -20,6 +20,7 @@
 from abc import ABC, abstractmethod
 from typing import Optional
 
+from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.table.source.full_text_read import FullTextRead, DataEvolutionFullTextRead
@@ -118,6 +119,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         return predicate.new_index(name_to_idx[predicate.field])
 
     def new_full_text_scan(self) -> FullTextScan:
+        reject_search_under_query_auth(self._table)
         definition = self._primary_key_full_text_definition()
         if definition is not None:
             from pypaimon.table.source.primary_key_full_text_scan import PrimaryKeyFullTextScan
@@ -130,6 +132,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         )
 
     def new_full_text_read(self) -> FullTextRead:
+        reject_search_under_query_auth(self._table)
         if self._limit <= 0:
             raise ValueError("Limit must be positive, set via with_limit()")
         definition = self._primary_key_full_text_definition()
