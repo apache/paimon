@@ -448,8 +448,6 @@ class TableRead:
                         "Native split conversion failed, falling back to the "
                         "Python reader: %s", e)
                     return None
-                if rust_split is None:
-                    return None
             rust_splits.append(rust_split)
             split_weights.append(self._native_split_weight(split))
         if (parallelism is not None
