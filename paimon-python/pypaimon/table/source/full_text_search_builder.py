@@ -50,6 +50,11 @@ class FullTextSearchBuilder(ABC):
         pass
 
     @abstractmethod
+    def with_filter(self, predicate) -> 'FullTextSearchBuilder':
+        """Filter data-evolution rows before full-text ranking."""
+        pass
+
+    @abstractmethod
     def new_full_text_scan(self) -> FullTextScan:
         """Create full-text scan to scan index files."""
         pass
@@ -73,6 +78,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         self._field_name: Optional[str] = None
         self._query: Optional[str] = None
         self._partition_filter = None
+        self._filter = None
 
     def with_limit(self, limit: int) -> 'FullTextSearchBuilder':
         self._limit = limit
@@ -81,6 +87,20 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
     def with_query(self, field_name: str, query: str) -> 'FullTextSearchBuilder':
         self._field_name = field_name
         self._query = query
+        return self
+
+    def with_filter(self, predicate) -> 'FullTextSearchBuilder':
+        if predicate is None:
+            return self
+        from pypaimon.read.push_down_utils import _split_and, _get_all_fields
+
+        partition_keys = set(self._table.partition_keys or [])
+        for part in _split_and(predicate):
+            if partition_keys and _get_all_fields(part).issubset(partition_keys):
+                self.with_partition_filter(part)
+            else:
+                self._filter = (part if self._filter is None else
+                                PredicateBuilder.and_predicates([self._filter, part]))
         return self
 
     def with_partition_filter(self, partition_filter) -> 'FullTextSearchBuilder':
@@ -135,6 +155,8 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         reject_search_under_query_auth(self._table)
         if self._limit <= 0:
             raise ValueError("Limit must be positive, set via with_limit()")
+        if self._filter is not None and not self._table.options.data_evolution_enabled():
+            raise NotImplementedError("Full-text row filters require a data-evolution table.")
         definition = self._primary_key_full_text_definition()
         if definition is not None:
             from pypaimon.common.options.core_options import GlobalIndexSearchMode
@@ -156,6 +178,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
             self._text_columns(),
             self._query,
             partition_filter=self._partition_filter,
+            filter_=self._filter,
         )
 
     def _text_columns(self):

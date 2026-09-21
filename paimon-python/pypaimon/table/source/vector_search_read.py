@@ -202,23 +202,9 @@ class AbstractVectorSearchReadImpl:
         return self._matching_candidate_rows(candidates, snapshot)
 
     def _matching_candidate_rows(self, candidates, snapshot):
-        from pypaimon.read.table_read import _ClosableArrowBatchReader
+        from pypaimon.table.source.global_index_row_filter import matching_rows
 
-        matched = RoaringBitmap64()
-        if candidates.is_empty():
-            return matched
-        table = global_index_live_row_filter.table_at_snapshot(self._table, snapshot)
-        builder = (table.new_read_builder().with_filter(self._filter)
-                   .with_projection([SpecialFields.ROW_ID.name]))
-        if self._partition_filter is not None:
-            builder = builder.with_partition_filter(self._partition_filter)
-        splits = builder.new_scan().with_row_ranges(candidates.to_range_list()).plan().splits()
-        reader, batches = builder.new_read()._new_arrow_batch_reader(splits)
-        with _ClosableArrowBatchReader(reader, batches) as batch_reader:
-            for batch in batch_reader:
-                for row_id in batch.column(SpecialFields.ROW_ID.name).to_pylist():
-                    matched.add(row_id)
-        return matched
+        return matching_rows(self._table, self._filter, candidates, self._partition_filter, snapshot)
 
     def _pre_filter(self, splits, snapshot=None):
         # Backwards-compatible helper used by older tests/callers.
