@@ -60,8 +60,18 @@ has exactly one text column. To target a specific text column, pass `column`.
 
 Use `pre_filter` to prune search candidates before ranking. Use `where()` to
 filter the rows read from the search result. Both `pre_filter` and `where()`
-accept SQL-like predicate strings. For full-text search, `pre_filter` must only
-reference partition columns.
+accept SQL-like predicate strings. On data-evolution tables, full-text
+`pre_filter` supports ordinary data columns as well as partition columns.
+For primary-key full-text search, only partition predicates are supported.
+
+Full-text data predicates are evaluated before Top-K selection. PyPaimon reads
+the predicate's columns and row IDs at the search snapshot, then passes the
+matching row IDs to the full-text index. Scalar indexes can prune this read,
+but partial scalar-index coverage does not exclude matching rows covered by
+the full-text search plan. This filter read can scan all candidate rows;
+partition-only predicates keep the existing partition-pruning path. For
+unindexed data in `full-text-index.search-mode=full`, filtering preserves the
+unfiltered corpus used to calculate BM25 statistics.
 
 For data-evolution vector search, a scalar index may return candidates rather than exact
 matches, for example for BTree string-prefix or substring predicates, or when
@@ -92,7 +102,7 @@ neighbors = (
 )
 
 matches = (
-    docs.search("paimon vector", column="content")
+    docs.search("paimon vector", column="content", pre_filter="category = 'lake'")
     .limit(10)
     .to_pandas()
 )
@@ -272,8 +282,11 @@ text column when the table has exactly one text column. To target a specific
 text column, pass `column` to `pm.text_route`.
 
 `pre_filter` is applied before ranking. It accepts a SQL-like predicate string.
-When a hybrid query has a full-text route, `pre_filter` must only reference
-partition columns.
+On data-evolution tables, ordinary data predicates are applied to both vector
+and full-text routes before each route selects its candidates. The vector
+route retains the `global-index.filter.refine-from-data` behavior described
+above, while the full-text route verifies data predicates through a filter-column
+read. Partition-only predicates prune both routes without that extra read.
 
 ```python
 # This example assumes the table is partitioned by dt.

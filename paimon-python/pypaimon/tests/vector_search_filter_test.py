@@ -2683,7 +2683,7 @@ class HybridSearchBuilderTest(unittest.TestCase):
         self.assertEqual(("query", "content", match_query("paimon search", "And")),
                          captured_builders[1].calls[0])
 
-    def test_hybrid_search_rejects_data_filter_with_full_text_route(self):
+    def test_hybrid_search_forwards_data_filter_to_full_text_route(self):
         from pypaimon.table.source.hybrid_search_builder import (
             HybridSearchBuilderImpl,
         )
@@ -2701,9 +2701,8 @@ class HybridSearchBuilderTest(unittest.TestCase):
             .with_limit(5)
         )
 
-        with self.assertRaises(ValueError) as ctx:
-            builder.route_builders()
-        self.assertIn("full-text routes", str(ctx.exception))
+        route = builder.route_builders()[0]
+        self.assertEqual(pb.equal("id", 1), route.search_builder._filter)
 
     def test_hybrid_search_rejects_full_text_route_options(self):
         from pypaimon.table.source.hybrid_search_builder import (
