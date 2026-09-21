@@ -169,6 +169,10 @@ def read_by_row_id(
         from pypaimon.common.options.core_options import CoreOptions
         from pypaimon.common.options.options import Options
         base_schema = table.schema_manager.get_schema(base.schema_id)
+        if table.table_schema.id != base_schema.id:
+            raise ValueError(
+                "The time-travel schema changed while resolving the read snapshot; "
+                "retry read_by_row_id.")
         if not CoreOptions(Options(base_schema.options)).row_tracking_enabled():
             raise ValueError(
                 f"the resolved snapshot ({base.id}) predates row-tracking; read_by_row_id needs it.")
@@ -179,20 +183,14 @@ def read_by_row_id(
             raise ValueError(
                 f"target '{target}' has no rows; every _ROW_ID in the source is foreign.")
         return _empty_result(table, read_cols)
-    # base captures the resolved snapshot; reduce any time-travel key to a plain snapshot-id
-    # so the planner's own snapshot-id pin does not read as a second, conflicting one.
-    from pypaimon.common.options.core_options import CoreOptions
-    present = [k for k in SCAN_KEYS if table.options.options.contains_key(k)]
-    if present:
-        overrides = {k: None for k in present}
-        overrides[CoreOptions.SCAN_SNAPSHOT_ID.key()] = str(base.id)
-        table = table.copy(overrides)
+    # Carry the resolved metadata into planning and workers: a tag can retain its
+    # snapshot after the main snapshot file expires, or move before lazy execution.
+    table = table._copy_with_snapshot(base)
     try:
         result = distributed_read_by_row_id(
             rid_ds, table, projection,
             num_partitions=num_partitions,
             ray_remote_args=ray_remote_args,
-            base_snapshot_id=base.id,
             estimated_size_bytes=estimated_size_bytes,
             estimated_num_rows=estimated_num_rows,
             data_context=data_context,
