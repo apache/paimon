@@ -157,19 +157,24 @@ public class LuminaVectorOptionsTest {
         zeroPqM.put("lumina.index.dimension", "128");
         zeroPqM.put("lumina.encoding.type", "pq");
         zeroPqM.put("lumina.encoding.pq.m", "0");
+        LuminaVectorIndexOptions zeroOptions =
+                new LuminaVectorIndexOptions(Options.fromMap(zeroPqM));
 
-        assertThatThrownBy(
-                        () ->
-                                new LuminaVectorIndexOptions(Options.fromMap(zeroPqM))
-                                        .toLuminaOptions())
+        assertThatThrownBy(() -> zeroOptions.toBuildOptions(128))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("lumina.encoding.pq.m");
 
-        // The upper bound keeps clamping to the dimension rather than throwing.
+        // Only a build may reject: a search layers the index metadata over these options, so the
+        // stale table value is overridden there and must not fail the read.
+        assertThatCode(zeroOptions::toLuminaOptions).doesNotThrowAnyException();
+
+        // The upper bound keeps clamping to the dimension rather than throwing, on both paths.
         Map<String, String> oversizedPqM = new HashMap<>(zeroPqM);
         oversizedPqM.put("lumina.encoding.pq.m", "256");
-        assertThat(new LuminaVectorIndexOptions(Options.fromMap(oversizedPqM)).toLuminaOptions())
-                .containsEntry("encoding.pq.m", "128");
+        LuminaVectorIndexOptions oversizedOptions =
+                new LuminaVectorIndexOptions(Options.fromMap(oversizedPqM));
+        assertThat(oversizedOptions.toLuminaOptions()).containsEntry("encoding.pq.m", "128");
+        assertThat(oversizedOptions.toBuildOptions(128)).containsEntry("encoding.pq.m", "128");
     }
 
     /** Builds the native lumina meta map (what gets serialized into the index file) for a field. */
