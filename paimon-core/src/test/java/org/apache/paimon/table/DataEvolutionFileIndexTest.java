@@ -71,6 +71,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.SpecialFields.rowTypeWithRowId;
@@ -588,6 +589,29 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         writeSplitColumns(neighbour, ROW_COUNT, bitmapOptions("f1"), Collections.emptyMap());
         deleteRows(neighbour, 51);
         assertRow(assertSingleRow(query(neighbour, equalF1(f1(50)))), 50);
+    }
+
+    @Test
+    public void testMergedGroupFileIndexSkipsBeforeReadingDeletionVector() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        FileStoreTable table = createTable("merged_bitmap_before_dv", options);
+        writeSplitColumns(table, ROW_COUNT, bitmapOptions("f1"), Collections.emptyMap());
+        deleteRows(table, 50);
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        DataSplit split =
+                (DataSplit) latest.newReadBuilder().newScan().plan().splits().get(0);
+        Path deletionVectorPath =
+                split.deletionFiles().get().stream()
+                        .filter(Objects::nonNull)
+                        .map(file -> new Path(file.path()))
+                        .findFirst()
+                        .orElseThrow(IllegalStateException::new);
+        assertThat(latest.fileIO().delete(deletionVectorPath, false)).isTrue();
+
+        // The bitmap index already rejects this value, so the missing DV file must not be read.
+        assertThat(readWithFilter(table, equalF1(MISSING_F1))).isEmpty();
     }
 
     /** Commits a deletion vector for the anchor file of the only row id group of {@code table}. */

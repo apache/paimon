@@ -250,14 +250,24 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             } else {
                 suppliers.add(
                         () -> {
-                            DeletionVectorWithRange deletionVector =
-                                    readDeletionVector(needMergeFiles, deletionVectorFactory);
                             if (skipByFileIndex(
                                     filters,
                                     needMergeFiles,
                                     dataFilePathFactory,
                                     rowRanges,
-                                    deletionVector)) {
+                                    null)) {
+                                return new EmptyFileRecordReader<>();
+                            }
+                            DeletionVectorWithRange deletionVector =
+                                    readDeletionVector(needMergeFiles, deletionVectorFactory);
+                            if (deletionVector != null
+                                    && !deletionVector.deletionVector.isEmpty()
+                                    && skipByFileIndex(
+                                            filters,
+                                            needMergeFiles,
+                                            dataFilePathFactory,
+                                            rowRanges,
+                                            deletionVector)) {
                                 return new EmptyFileRecordReader<>();
                             }
                             return createUnionReader(
