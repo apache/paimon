@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
@@ -88,7 +89,10 @@ def test_clustered_materialized_dv_files_use_native_raw_splits(tmp_path, engine,
     pb = table.new_read_builder().new_predicate_builder()
     for predicate in (None, pb.equal('id', 3), pb.equal('value', 'v8')):
         for native in (False, True):
-            builder = table.copy({'scan.native-plan.enabled': str(native).lower()}).new_read_builder()
+            builder = table.copy({
+                'scan.native-plan.enabled': str(native).lower(),
+                'read.native.enabled': str(native).lower(),
+            }).new_read_builder()
             if predicate is not None:
                 builder.with_filter(predicate)
             scan = builder.new_scan()
@@ -98,7 +102,17 @@ def test_clustered_materialized_dv_files_use_native_raw_splits(tmp_path, engine,
             else:
                 plan = scan.plan()
             assert all(split.raw_convertible for split in plan.splits())
-            rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+            if native:
+                assert all(getattr(split, '_native_split', None) is not None
+                           for split in plan.splits())
+                read_guard = patch(
+                    'pypaimon.read.table_read.TableRead._create_split_read',
+                    side_effect=AssertionError(
+                        'materialized PK native read fell back'))
+            else:
+                read_guard = ExitStack()
+            with read_guard:
+                rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
             wanted = expected if predicate is None else ([] if predicate.field == 'id' else [expected[1]])
             assert sorted(rows, key=lambda row: row['id']) == wanted
             assert plan.snapshot_id == 3
@@ -172,7 +186,10 @@ def test_first_row_level_zero_merges_before_filtering(tmp_path, target_size, com
     for predicate, expected in [(None, all_ids), (pb.equal('value', 'later'), []),
                                 (pb.equal('value', 'first'), [1]), (pb.equal('id', 2), [])]:
         for native in (False, True):
-            builder = table.copy({'scan.native-plan.enabled': str(native).lower()}).new_read_builder()
+            builder = table.copy({
+                'scan.native-plan.enabled': str(native).lower(),
+                'read.native.enabled': str(native).lower(),
+            }).new_read_builder()
             builder.with_projection(['id'])
             if predicate is not None:
                 builder.with_filter(predicate)
@@ -183,4 +200,16 @@ def test_first_row_level_zero_merges_before_filtering(tmp_path, target_size, com
             else:
                 plan = scan.plan()
             assert plan.snapshot_id == len(batches) + 1
-            assert sorted(builder.new_read().to_arrow(plan.splits()).column('id').to_pylist()) == expected
+            if native:
+                assert all(getattr(split, '_native_split', None) is not None
+                           for split in plan.splits())
+                read_guard = patch(
+                    'pypaimon.read.table_read.TableRead._create_split_read',
+                    side_effect=AssertionError(
+                        'first-row native read fell back'))
+            else:
+                read_guard = ExitStack()
+            with read_guard:
+                actual = builder.new_read().to_arrow(
+                    plan.splits()).column('id').to_pylist()
+            assert sorted(actual) == expected

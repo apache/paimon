@@ -73,7 +73,10 @@ def _write(table, rows):
 
 
 def _read(table, native, predicate=None, projection=None):
-    table = table.copy_without_time_travel({'scan.native-plan.enabled': str(native).lower()})
+    table = table.copy_without_time_travel({
+        'scan.native-plan.enabled': str(native).lower(),
+        'read.native.enabled': str(native).lower(),
+    })
     builder = table.new_read_builder()
     if predicate is not None:
         builder.with_filter(predicate)
@@ -97,7 +100,16 @@ def _read(table, native, predicate=None, projection=None):
             plan = scan.plan()
     else:
         plan = scan.plan()
-    rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+    if native:
+        assert all(getattr(split, '_native_split', None) is not None
+                   for split in plan.splits())
+        read_guard = patch(
+            'pypaimon.read.table_read.TableRead._create_split_read',
+            side_effect=AssertionError('resolved-schema native read fell back'))
+    else:
+        read_guard = ExitStack()
+    with read_guard:
+        rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
     return plan.snapshot_id, sorted(rows, key=lambda row: row['id'])
 
 

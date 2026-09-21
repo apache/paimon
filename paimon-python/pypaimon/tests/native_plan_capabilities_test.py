@@ -20,6 +20,7 @@
 import json
 import tempfile
 import unittest
+from contextlib import ExitStack
 from dataclasses import replace
 from unittest.mock import patch
 
@@ -116,7 +117,9 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
         plans = []
         for native in (False, True):
             read_table = table.copy({
-                'scan.native-plan.enabled': str(native).lower()})
+                'scan.native-plan.enabled': str(native).lower(),
+                'read.native.enabled': str(native).lower(),
+            })
             builder = read_table.new_read_builder()
             if predicate is not None:
                 builder.with_filter(predicate)
@@ -133,7 +136,18 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
                     plan = scan.plan()
             else:
                 plan = scan.plan()
-            rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+            if native:
+                self.assertTrue(all(
+                    getattr(split, '_native_split', None) is not None
+                    for split in plan.splits()))
+                read_guard = patch(
+                    'pypaimon.read.table_read.TableRead._create_split_read',
+                    side_effect=AssertionError(
+                        'native capability read fell back to Python'))
+            else:
+                read_guard = ExitStack()
+            with read_guard:
+                rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
             self.assertEqual(sorted(rows, key=lambda row: row['k']), expected_rows)
             self.assertEqual(plan.snapshot_id, snapshot_id)
             plans.append(plan)

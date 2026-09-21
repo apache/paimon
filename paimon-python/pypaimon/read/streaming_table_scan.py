@@ -366,8 +366,9 @@ class AsyncStreamingTableScan:
         return self._create_plan_from_manifests(manifest_files, snapshot.id)
 
     def _try_native_plan(self, expected_snapshot_id: int,
-                         incremental_range=None) -> Optional[Plan]:
-        """Plan an initial or delta streaming frame with pypaimon-rust.
+                         incremental_range=None,
+                         incremental_mode='delta') -> Optional[Plan]:
+        """Plan an initial, delta or changelog streaming frame with pypaimon-rust.
 
         An arbitrary Python bucket predicate cannot be represented by the Rust
         planner, so sharded stream consumers retain the Python plan. Any native
@@ -394,6 +395,7 @@ class AsyncStreamingTableScan:
                     [field.name for field in self._read_type]
                     if self._read_type is not None else None),
                 incremental_range=incremental_range,
+                incremental_mode=incremental_mode,
             )
             if plan.snapshot_id != expected_snapshot_id:
                 logging.warning(
@@ -410,6 +412,18 @@ class AsyncStreamingTableScan:
 
     def _create_changelog_plan(self, snapshot: Snapshot) -> Plan:
         """Read from changelog_manifest_list (changelog-producer=input/full-compaction/lookup)."""
+        # Java's range-based incremental CHANGELOG scan skips OVERWRITE,
+        # whereas ChangelogFollowUpScanner reads any follow-up snapshot with a
+        # changelog manifest. Rust's incremental API implements the former, so
+        # keep OVERWRITE on the per-snapshot Python planner.
+        if snapshot.commit_kind != 'OVERWRITE':
+            plan = self._try_native_plan(
+                snapshot.id,
+                incremental_range=(snapshot.id - 1, snapshot.id),
+                incremental_mode='changelog',
+            )
+            if plan is not None:
+                return plan
         manifest_files = self._manifest_list_manager.read_changelog(snapshot)
         return self._create_plan_from_manifests(manifest_files, snapshot.id)
 

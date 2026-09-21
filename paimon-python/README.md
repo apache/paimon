@@ -120,8 +120,9 @@ object-store requests.
 
 # Native scan planning
 
-PyPaimon can plan splits with the optional `pypaimon-rust` package while retaining
-the Python reader:
+PyPaimon can plan splits with the optional `pypaimon-rust` package. Planning and
+reading are independently selectable, so native plans can still use the Python
+reader:
 
 ```python
 native_table = table.copy({"scan.native-plan.enabled": "true"})
@@ -147,10 +148,11 @@ plan = builder.new_scan().plan()
 rows = builder.new_read().to_arrow(plan.splits())
 ```
 
-Native reads return PyArrow batches through the Arrow C Data interface. They
-currently require untouched splits produced by the native planner and top-level
-projection. Query authorization, nested projection, and row-kind output retain
-the Python reader. For both materialized
+Native reads return PyArrow batches through the Arrow C Data interface. Native
+planner handles are used directly when available; splits refined by Python
+index or shuffle logic are serialized through the stable split contract and
+reconstructed by Rust. Nested projection and row-kind output are supported.
+Query authorization retains the Python reader. For both materialized
 `to_arrow()` and streaming `to_arrow_batch_reader()` reads, the effective split
 parallelism (the method argument, `read.parallelism`, or the automatic default)
 runs independent Rust readers. Splits stay in input order but contiguous groups
@@ -205,11 +207,17 @@ counts can differ between shards. Limits are applied after shard/slice selection
 Timestamp incremental scans require `ReadBuilder.new_incremental_scan()` and
 stream-aware splits exposing `Split.is_streaming()`. Python resolves
 `(start_timestamp, end_timestamp]` to snapshot IDs; Rust packs the selected APPEND
-deltas into one plan. Like Java, readers retain physical change events, including
-repeated primary keys and retracts across commits. They do not merge the window
-into a final table state or apply endpoint deletion vectors or global indexes.
-Other commit kinds are excluded; the ending snapshot still supplies plan metadata.
-Rebuild development wheels from Rust main to obtain this contract.
+deltas into one plan. Continuous streaming uses the same native path for initial
+and delta frames. When `changelog-producer` is enabled, follow-up frames request
+Rust's explicit `changelog` mode and read the physical changelog manifests.
+OVERWRITE changelog frames retain per-snapshot Python planning because Java
+streaming reads them while Java and Rust range-based incremental scans skip
+OVERWRITE; the resulting splits can still use native reads.
+Like Java, readers retain physical change events, including repeated primary
+keys and retracts across commits. They do not merge the window into a final
+table state or apply endpoint deletion vectors or global indexes. Other commit
+kinds are excluded; the ending snapshot still supplies plan metadata. Rebuild
+development wheels from Rust main to obtain this contract.
 
 `scan.version` supports tags, snapshot IDs and `watermark-<value>`, resolving tags
 first and using the historical schema. Ordinary postpone-bucket batch scans can
@@ -243,7 +251,9 @@ index reader, preserving merge-required splits and the selected snapshot.
 
 Query authorization, first-row plans mixing L0 with merge-required materialized files,
 and precomputed primary-key global-index results still use the Python planner.
-Continuous streaming and write planning also retain their Python entrypoints.
+Continuous streaming retains Python polling and resume handling, while its
+initial, delta and physical-changelog frames can use native planning and reads.
+Write planning retains its Python entrypoint.
 Native planning remains optional and is disabled by default.
 
 # Coalesced BLOB reads
