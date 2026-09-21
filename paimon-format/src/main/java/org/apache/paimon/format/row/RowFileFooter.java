@@ -79,9 +79,10 @@ class RowFileFooter {
      * from the file itself, and they size the buffer the index is read into.
      */
     void validate(long fileSize) throws IOException {
+        // written this way so that a huge indexOffset cannot overflow the comparison
         if (indexOffset < 0
                 || indexLength < 0
-                || indexOffset + indexLength > fileSize - FOOTER_SIZE) {
+                || indexOffset > fileSize - FOOTER_SIZE - indexLength) {
             throw new IOException(
                     String.format(
                             "Invalid row file block index location: offset %d, length %d, in a file of %d bytes.",

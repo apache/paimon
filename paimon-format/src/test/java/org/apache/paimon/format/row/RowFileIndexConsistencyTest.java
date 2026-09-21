@@ -36,6 +36,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -90,12 +91,49 @@ class RowFileIndexConsistencyTest {
     }
 
     @Test
-    void testRowStartsMustNotGoBackwards() {
-        RowBlockIndex index =
-                new RowBlockIndex(new long[] {10, 20}, new long[] {100, 200}, new long[] {5, 0});
-        assertThatThrownBy(() -> index.validate(new RowFileFooter(9, 2, 30, 7)))
+    void testRowStartsMustCoverEveryRowExactlyOnce() {
+        // RowFormatReader turns consecutive starts into a block's row range and skips a block whose
+        // range the selection does not intersect, so each of these drops rows without an error
+        assertThatThrownBy(() -> validateRowStarts(new long[] {10, 20}, 30))
                 .isInstanceOf(IOException.class)
-                .hasMessageContaining("before block 0 at row 5");
+                .hasMessageContaining("block 0 starts at row 10");
+        assertThatThrownBy(() -> validateRowStarts(new long[] {0, 0}, 30))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("not after block 0 at row 0");
+        assertThatThrownBy(() -> validateRowStarts(new long[] {0, 5}, 5))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("the declared row count 5 does not reach");
+        assertThatThrownBy(() -> validateRowStarts(new long[] {0}, 0))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("the declared row count 0 does not reach");
+    }
+
+    @Test
+    void testAnEmptyIndexNeedsAnEmptyFile() {
+        RowBlockIndex empty = new RowBlockIndex(new long[0], new long[0], new long[0]);
+        assertThatCode(() -> empty.validate(new RowFileFooter(0, 0, 0, 7)))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> empty.validate(new RowFileFooter(7, 0, 0, 7)))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("empty, but the footer declares 7 rows");
+    }
+
+    @Test
+    void testNegativeCompressedSizeIsRejected() {
+        // the sizes sum to the declared indexOffset only because the second cancels the first
+        RowBlockIndex index =
+                new RowBlockIndex(new long[] {200, -100}, new long[] {100, 200}, new long[] {0, 5});
+        assertThatThrownBy(() -> index.validate(new RowFileFooter(9, 2, 100, 7)))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("block 1 has a negative compressed size -100");
+    }
+
+    private static void validateRowStarts(long[] rowStarts, long totalRowCount) throws IOException {
+        long[] sizes = new long[rowStarts.length];
+        Arrays.fill(sizes, 10);
+        new RowBlockIndex(sizes, sizes.clone(), rowStarts)
+                .validate(
+                        new RowFileFooter(totalRowCount, rowStarts.length, 10L * sizes.length, 7));
     }
 
     @Test

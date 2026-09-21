@@ -54,8 +54,11 @@ class RowBlockIndex {
     /**
      * Checks the index against the footer, which is the only place both are in hand. Blocks are
      * written contiguously from position 0 and the index follows the last one, so the compressed
-     * sizes must sum to exactly {@code indexOffset} — see the row format spec. Row starts index the
-     * arrays of every later lookup and size the per-block selection array.
+     * sizes must sum to exactly {@code indexOffset} — see the row format spec. Row starts must
+     * cover every row exactly once, because {@code RowFormatReader} turns consecutive starts into
+     * the row range of a block and skips a block whose range a selection does not intersect: a
+     * first start past 0, a repeated start, or a last start at the row count would drop rows
+     * silently.
      */
     void validate(RowFileFooter footer) throws IOException {
         if (blockCount() != footer.blockCount) {
@@ -65,10 +68,16 @@ class RowBlockIndex {
                             blockCount(), footer.blockCount));
         }
 
-        long blocksEnd =
-                blockCount() == 0
-                        ? 0
-                        : blockOffset(blockCount() - 1) + blockCompressedSize(blockCount() - 1);
+        long blocksEnd = 0;
+        for (int i = 0; i < blockCount(); i++) {
+            if (blockCompressedSizes[i] < 0) {
+                throw new IOException(
+                        String.format(
+                                "Row file block %d has a negative compressed size %d.",
+                                i, blockCompressedSizes[i]));
+            }
+            blocksEnd += blockCompressedSizes[i];
+        }
         if (blocksEnd != footer.indexOffset) {
             throw new IOException(
                     String.format(
@@ -76,18 +85,34 @@ class RowBlockIndex {
                             blocksEnd, footer.indexOffset));
         }
 
-        for (int i = 1; i < blockCount(); i++) {
-            if (blockRowStarts[i] < blockRowStarts[i - 1]) {
+        if (blockCount() == 0) {
+            if (footer.totalRowCount != 0) {
                 throw new IOException(
                         String.format(
-                                "Row file block %d starts at row %d, before block %d at row %d.",
+                                "Row file block index is empty, but the footer declares %d rows.",
+                                footer.totalRowCount));
+            }
+            return;
+        }
+
+        if (blockRowStarts[0] != 0) {
+            throw new IOException(
+                    String.format(
+                            "Row file block 0 starts at row %d, so rows before it are unreachable.",
+                            blockRowStarts[0]));
+        }
+        for (int i = 1; i < blockCount(); i++) {
+            if (blockRowStarts[i] <= blockRowStarts[i - 1]) {
+                throw new IOException(
+                        String.format(
+                                "Row file block %d starts at row %d, not after block %d at row %d.",
                                 i, blockRowStarts[i], i - 1, blockRowStarts[i - 1]));
             }
         }
-        if (blockCount() > 0 && blockRowStarts[blockCount() - 1] > footer.totalRowCount) {
+        if (blockRowStarts[blockCount() - 1] >= footer.totalRowCount) {
             throw new IOException(
                     String.format(
-                            "Row file block %d starts at row %d, past the declared row count %d.",
+                            "Row file block %d starts at row %d, which the declared row count %d does not reach.",
                             blockCount() - 1,
                             blockRowStarts[blockCount() - 1],
                             footer.totalRowCount));
