@@ -59,7 +59,9 @@ public class FileIndexPredicate implements Closeable {
     @Nullable private Path path;
 
     public FileIndexPredicate(Path path, FileIO fileIO, RowType fileRowType) throws IOException {
-        this(fileIO.newInputStream(path), fileRowType, fileIO.getFileStatus(path).getLen());
+        long length = fileIO.getFileStatus(path).getLen();
+        this.reader =
+                FileIndexFormat.createReader(fileIO.newInputStream(path), fileRowType, length);
         this.path = path;
     }
 

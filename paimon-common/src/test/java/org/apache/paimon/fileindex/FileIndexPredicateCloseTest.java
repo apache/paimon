@@ -19,6 +19,8 @@
 package org.apache.paimon.fileindex;
 
 import org.apache.paimon.fs.ByteArraySeekableStream;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -30,11 +32,29 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Tests that {@link FileIndexPredicate} always releases the stream it is handed. */
 public class FileIndexPredicateCloseTest {
 
     private static final RowType ROW_TYPE = RowType.of(DataTypes.INT());
+
+    @Test
+    public void testFileStatusFailureDoesNotOpenStream() throws IOException {
+        FileIO fileIO = mock(FileIO.class);
+        Path path = new Path("file:/index");
+        IOException exception = new IOException("Failed to get file status");
+        when(fileIO.getFileStatus(path)).thenThrow(exception);
+
+        assertThatThrownBy(() -> new FileIndexPredicate(path, fileIO, ROW_TYPE))
+                .isSameAs(exception);
+
+        verify(fileIO).getFileStatus(path);
+        verify(fileIO, never()).newInputStream(path);
+    }
 
     /**
      * The reader rejects a file whose magic does not match, and at that point nothing else holds a
