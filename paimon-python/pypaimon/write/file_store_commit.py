@@ -380,7 +380,6 @@ class FileStoreCommit:
         else:
             partition_filter = self._create_static_partition_filter(overwrite_partition, commit_messages)
 
-        changelog_entries = self._collect_changelog_entries(commit_messages)
         index_adds = [
             entry for message in commit_messages for entry in message.index_adds
         ]
@@ -400,7 +399,7 @@ class FileStoreCommit:
                 commit_kind="OVERWRITE",
                 commit_identifier=commit_identifier,
                 commit_entries_plan=provider.provide,
-                changelog_entries=changelog_entries,
+                changelog_entries=[],
                 detect_conflicts=True,
                 allow_rollback=False,
                 index_deletes=index_deletes,

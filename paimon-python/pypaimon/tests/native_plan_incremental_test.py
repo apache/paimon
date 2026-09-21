@@ -493,43 +493,34 @@ def test_streaming_changelog_frames_use_native_plan_and_read(catalog):
     ]
 
 
-@pytest.mark.native_plan
-def test_streaming_overwrite_changelog_uses_java_follow_up_semantics(catalog):
+def test_streaming_overwrite_is_skipped_by_default_like_java(catalog):
+    import asyncio
+
     table = _table(catalog, 'native_overwrite_changelog', True, {
         'bucket': '1',
         'changelog-producer': 'input',
     })
     _write(table, 100, [{'k': 1, 'v': 'before'}])
     _write(table, 200, [{'k': 2, 'v': 'after'}], overwrite=True)
-    snapshot = table.snapshot_manager().get_latest_snapshot()
-    assert snapshot.commit_kind == 'OVERWRITE'
-    assert snapshot.changelog_manifest_list is not None
+    overwrite = table.snapshot_manager().get_latest_snapshot()
+    assert overwrite.commit_kind == 'OVERWRITE'
+    assert overwrite.changelog_manifest_list is None
+    _write(table, 300, [{'k': 3, 'v': 'next'}])
 
-    native_table = table.copy({
-        'scan.native-plan.enabled': 'true',
-        'read.native.enabled': 'true',
-    })
-    builder = (native_table.new_stream_read_builder()
+    builder = (table.new_stream_read_builder()
                .with_projection(['v'])
                .with_include_row_kind())
     scan = builder.new_streaming_scan()
+    scan.next_snapshot_id = overwrite.id
 
-    with patch.object(
-            scan, '_try_native_plan',
-            side_effect=AssertionError(
-                'OVERWRITE must not use range-based native changelog planning')):
-        plan = scan._create_changelog_plan(snapshot)
+    async def next_plan():
+        async for plan in scan.stream():
+            return plan
 
-    assert plan.snapshot_id == snapshot.id
-    assert all(
-        file.file_name.startswith('changelog-')
-        for split in plan.splits() for file in split.files)
-    with patch(
-            'pypaimon.read.table_read.TableRead._create_split_read',
-            side_effect=AssertionError(
-                'OVERWRITE changelog native read fell back to Python')):
-        rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
-    assert rows == [{'_row_kind': '+I', 'v': 'after'}]
+    plan = asyncio.run(next_plan())
+    assert plan.snapshot_id == 3
+    assert builder.new_read().to_arrow(plan.splits()).to_pylist() == [
+        {'_row_kind': '+I', 'v': 'next'}]
 
 
 def test_streaming_reader_honors_explicit_split_deletion_vector(catalog, native, tmp_path):
