@@ -34,6 +34,7 @@ import java.util.List;
         property = Transform.FIELD_NAME)
 @JsonSubTypes({
     @JsonSubTypes.Type(value = FieldTransform.class, name = FieldTransform.NAME),
+    @JsonSubTypes.Type(value = NestedFieldTransform.class, name = NestedFieldTransform.NAME),
     @JsonSubTypes.Type(value = CastTransform.class, name = CastTransform.NAME),
     @JsonSubTypes.Type(value = ConcatTransform.class, name = ConcatTransform.NAME),
     @JsonSubTypes.Type(value = ConcatWsTransform.class, name = ConcatWsTransform.NAME),
