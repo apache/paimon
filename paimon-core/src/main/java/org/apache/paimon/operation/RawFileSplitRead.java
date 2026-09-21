@@ -53,6 +53,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.system.ChangelogEventMetadata;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -458,32 +459,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     private static List<DataField> createChangelogExtraValueFields(
             TableSchema schema, CoreOptions options) {
-        List<String> preserveColumns = options.changelogExposeFieldAsMetadata();
-        if (preserveColumns.isEmpty()) {
-            return java.util.Collections.emptyList();
-        }
-
-        RowType valueType = schema.logicalRowType();
-        List<DataField> fields = new ArrayList<>();
-        int nextId = valueType.getFields().stream().mapToInt(f -> f.id()).max().orElse(0) + 1;
-        for (String preserveColumn : preserveColumns) {
-            if (!valueType.containsField(preserveColumn)) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "Column '%s' specified in '%s' not found in value type. "
-                                        + "Available columns: %s",
-                                preserveColumn,
-                                CoreOptions.CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA.key(),
-                                valueType.getFieldNames()));
-            }
-            DataField physicalField = valueType.getField(preserveColumn);
-            fields.add(
-                    new DataField(
-                            nextId++,
-                            options.changelogMetadataFieldPrefix() + physicalField.name(),
-                            physicalField.type().copy(true)));
-        }
-        return fields;
+        return ChangelogEventMetadata.extraValueFields(schema.logicalRowType(), options);
     }
 
     private FileRecordReader<InternalRow> applyMetadataFallbackAndOuterProjection(
