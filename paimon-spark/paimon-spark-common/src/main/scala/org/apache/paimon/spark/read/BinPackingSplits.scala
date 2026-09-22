@@ -21,7 +21,7 @@ package org.apache.paimon.spark.read
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions._
 import org.apache.paimon.io.DataFileMeta
-import org.apache.paimon.spark.PaimonInputPartition
+import org.apache.paimon.spark.{PaimonBucketedInputPartition, PaimonInputPartition}
 import org.apache.paimon.spark.util.SplitUtils
 import org.apache.paimon.table.FallbackReadFileStoreTable.FallbackSplit
 import org.apache.paimon.table.format.FormatDataSplit
@@ -79,6 +79,24 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
       all
     } else {
       splits.map(PaimonInputPartition.apply)
+    }
+  }
+
+  /**
+   * Preserve bucket keys without collapsing a whole bucket into one input partition. Spark can
+   * group these partitions when a distribution is required, or schedule them separately for a
+   * partially clustered join. Keep each DataSplit intact to preserve merge-on-read and
+   * data-evolution file groups.
+   */
+  def packByBucket(splits: Array[DataSplit]): Seq[PaimonBucketedInputPartition] = {
+    if (splits.isEmpty) {
+      return Seq.empty
+    }
+    val maxSplitBytes = computeMaxSplitBytes(splits)
+    splits.groupBy(_.bucket()).toSeq.sortBy(_._1).flatMap {
+      case (bucket, bucketSplits) =>
+        packWholeDataSplits(bucketSplits, maxSplitBytes)
+          .map(group => PaimonBucketedInputPartition(group, bucket))
     }
   }
 
@@ -142,15 +160,21 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
   }
 
   private def packDataEvolutionSplit(splits: Array[DataSplit]): Array[PaimonInputPartition] = {
-    val maxSplitBytes = computeMaxSplitBytes(splits)
+    packWholeDataSplits(splits, computeMaxSplitBytes(splits))
+      .map(group => PaimonInputPartition(group))
+      .toArray
+  }
 
+  private def packWholeDataSplits(
+      splits: Array[DataSplit],
+      maxSplitBytes: Long): Seq[Seq[DataSplit]] = {
     var currentSize = 0L
     val currentSplits = new ArrayBuffer[DataSplit]
-    val partitions = new ArrayBuffer[PaimonInputPartition]
+    val partitions = new ArrayBuffer[Seq[DataSplit]]
 
     def closeInputPartition(): Unit = {
       if (currentSplits.nonEmpty) {
-        partitions += PaimonInputPartition(currentSplits.toArray)
+        partitions += currentSplits.toVector
         currentSplits.clear()
         currentSize = 0L
       }
@@ -173,7 +197,7 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
     }
 
     closeInputPartition()
-    partitions.toArray
+    partitions.toSeq
   }
 
   private def copyDataSplit(
