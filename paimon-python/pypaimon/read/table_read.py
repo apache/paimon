@@ -445,8 +445,6 @@ class TableRead:
             return None
         if not splits:
             return []
-        if not self._native_avro_schemas_supported(splits):
-            return None
         if not self._native_blob_view_supported():
             return None
         if (self._deferred_blob_limit_may_prune(splits)
@@ -455,6 +453,8 @@ class TableRead:
         # Query authorization has additional filtering, masking and projection
         # semantics which are already implemented by the Python reader.
         if any(isinstance(split, QueryAuthSplit) for split in splits):
+            return None
+        if not self._native_avro_schemas_supported(splits):
             return None
         try:
             from pypaimon.read.native_plan import (
