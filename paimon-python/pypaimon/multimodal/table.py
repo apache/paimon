@@ -30,7 +30,9 @@ from pypaimon.multimodal.query import (
     TextQuery,
     VectorQuery,
 )
-from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_type
+from pypaimon.schema.data_types import (
+    PyarrowFieldParser, is_array_blob_type, is_blob_file_type, is_map_blob_type,
+)
 from pypaimon.table.data_evolution_merge_into import (
     WhenMatched,
     WhenNotMatched,
@@ -355,6 +357,10 @@ class MultimodalTable:
             fn,
             file_io=self.raw_table.file_io,
             all_blob_columns=_blob_columns(self.raw_table),
+            map_blob_columns=[field.name for field in self.raw_table.fields
+                              if is_map_blob_type(field.type)],
+            array_blob_columns=[field.name for field in self.raw_table.fields
+                                if is_array_blob_type(field.type)],
             **kwargs,
         )
 
@@ -569,7 +575,7 @@ class _MergeBuilder:
 def _blob_columns(table):
     return tuple(
         field.name for field in table.fields
-        if is_blob_type(field.type)
+        if is_blob_file_type(field.type)
     )
 
 

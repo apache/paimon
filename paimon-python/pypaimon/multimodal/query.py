@@ -275,7 +275,10 @@ class ScanQuery:
                 fn_kwargs={"columns": visible_columns},
                 batch_format="pyarrow")
         setattr(ds, "_paimon_blob_file_io", file_io)
-        setattr(ds, "_paimon_blob_columns", self._all_blob_columns())
+        setattr(ds, "_paimon_blob_columns", self._readable_blob_columns())
+        map_blob_cols, array_blob_cols = self._nested_blob_columns()
+        setattr(ds, "_paimon_map_blob_columns", map_blob_cols)
+        setattr(ds, "_paimon_array_blob_columns", array_blob_cols)
         return ds
 
     def read_blobs(
@@ -395,12 +398,6 @@ class ScanQuery:
             [field.name for field in self._table.fields if is_map_blob_type(field.type)],
             [field.name for field in self._table.fields if is_array_blob_type(field.type)],
         )
-
-    def _all_blob_columns(self) -> List[str]:
-        return [
-            field.name for field in self._table.fields
-            if is_blob_type(field.type)
-        ]
 
     def _readable_blob_columns(self) -> List[str]:
         return [

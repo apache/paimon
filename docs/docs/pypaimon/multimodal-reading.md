@@ -324,6 +324,14 @@ values. Read those columns with `to_torch()` instead.
 For larger jobs, read descriptors with `to_ray()`, then fetch and process BLOB
 bytes on Ray workers with `map_with_blobs`.
 
+Scalar, ARRAY, and MAP BLOB columns are supported. In the callback's `blobs`
+dictionary, each column contains row-aligned values: bytes for scalar BLOBs,
+lists for ARRAY BLOBs, and lists of key-value pairs for MAP BLOBs. Null cells,
+null elements, empty containers, and element order are preserved. All source
+BLOB columns are excluded from `scalar_batch`, including unrequested ones.
+After Ray transformations, use `table.map_with_blobs(...)` to supply the source
+table's BLOB column information even if a transform changes Arrow nested types.
+
 ```python
 import ray
 import pyarrow as pa
