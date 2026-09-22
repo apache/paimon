@@ -403,6 +403,7 @@ def test_page_index_switch_bypasses_metadata_processing_when_disabled(fixture, v
 
 
 @pytest.mark.parametrize('nested', [False, True])
+@pytest.mark.python_plan
 def test_table_option_and_copy_control_page_index_reads(tmp_path, nested):
     from pypaimon import CatalogFactory, Schema
 

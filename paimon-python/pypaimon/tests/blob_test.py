@@ -31,6 +31,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
@@ -5664,6 +5665,7 @@ class BlobParallelismTest(unittest.TestCase):
         for i in range(20):
             self.assertEqual(got[i], self.payloads[i])
 
+    @pytest.mark.python_read
     def test_blob_fallback_parallelism_end_to_end(self):
         t = self.catalog.get_table('default.bp_test')
 

@@ -415,11 +415,11 @@ def native_plan(
         for split in rust_splits
     ]
     if table.options.native_read_enabled():
-        # Retain the opaque Rust split next to the Python metadata view. The
-        # normal planner/reader contract remains a Python Split list, while
-        # native reads can consume the exact Rust split without a second lossy
-        # conversion. Any Python split transformation creates a fresh object
-        # without this marker and thus safely falls back to the Python reader.
+        # Retain the opaque Rust split next to the Python metadata view so an
+        # unchanged native plan can be read without reserializing each split.
+        # A caller that needs different metadata (such as an endpoint DV)
+        # passes a new Python split, which the native reader converts at read
+        # time from its current fields.
         for split, rust_split in zip(splits, rust_splits):
             split._native_split = rust_split
     _restore_python_partition_paths(table, splits)

@@ -24,6 +24,7 @@ import unittest
 from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 import torch
 
 import pypaimon.multimodal as pmm
@@ -780,6 +781,7 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"masks \['episode'\]"):
             self._dataset(table)
 
+    @pytest.mark.python_read
     def test_reads_only_the_files_and_row_ranges_a_window_touches(self):
         table = self.conn.create_table(
             "many_files", schema=self._schema(), options=_TABLE_OPTIONS)
