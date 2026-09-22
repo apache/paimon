@@ -603,6 +603,18 @@ class TestRowFileIndexConsistency:
         with pytest.raises(IOError, match="row count 5 does not reach"):
             reader._validate_block_index()
 
+        # one block and no declared rows: the block would hold nothing
+        reader = self._reader_with(compressed=[10], row_starts=[0], total_rows=0)
+        with pytest.raises(IOError, match="row count 0 does not reach"):
+            reader._validate_block_index()
+
+    def test_negative_uncompressed_size_is_rejected(self):
+        # the footer bounds the compressed sizes through the sum, but nothing bounds these
+        reader = self._reader_with(compressed=[10, 20], row_starts=[0, 5], total_rows=30)
+        reader._block_uncompressed_sizes = [100, -1]
+        with pytest.raises(IOError, match="block 1 has a negative uncompressed size -1"):
+            reader._validate_block_index()
+
     def test_compressed_sizes_must_sum_to_the_index_offset(self):
         # two blocks of 10 and 20 compressed bytes occupy [0, 30), so the index starts at 30
         reader = self._reader_with(compressed=[10, 20], row_starts=[0, 5], total_rows=30,
