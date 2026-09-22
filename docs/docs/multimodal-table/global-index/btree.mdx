@@ -154,8 +154,10 @@ print(pa_table)
 | `btree-index.block-size` | `64 kb` | Block size used by BTree index files. |
 | `btree-index.bloom-filter.enabled` | `false` | Whether to write a Bloom filter to accelerate BTree equality and `IN` lookups. |
 | `btree-index.cache-size` | `128 mb` | Cache size used by BTree index readers. |
+| `btree-index.high-priority-pool-ratio` | `0.1` | Fraction of `btree-index.cache-size` reserved for high-priority data such as index blocks; the rest caches data blocks. Must be in `[0, 1)`. |
 | `btree-index.fallback-scan-max-size` | `256 mb` | Maximum total size of candidate BTree global index files to allow fallback index scans. Set to `0 b` to disable fallback scans. |
 | `btree-index.compression` | `none` | Compression algorithm used by BTree index blocks. |
+| `btree-index.compression-level` | `1` | Compression level used by codecs that support levels, such as `zstd`. |
 
 The legacy `btree-index.records-per-range` and
 `btree-index.build.max-parallelism` keys are still recognized as fallback keys.

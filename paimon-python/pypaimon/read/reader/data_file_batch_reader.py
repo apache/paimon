@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from decimal import Decimal, localcontext, ROUND_HALF_UP
 from typing import List, Optional, Tuple
 
 import pyarrow as pa
@@ -40,6 +41,32 @@ def _is_character_string_type(data_type) -> bool:
         return False
     t = data_type.type.upper()
     return t == 'STRING' or t.startswith('VARCHAR') or t.startswith('CHAR')
+
+
+def cast_array_for_schema_evolution(array, target_type):
+    """Cast old-file values using Java's DECIMAL rounding and overflow rules.
+
+    PyArrow's unsafe DECIMAL scale reduction truncates and can retain values
+    outside the target precision. Java rounds HALF_UP and returns NULL for
+    values that do not fit after rounding. Other conversions retain the
+    existing unsafe-cast behavior (such as DOUBLE -> INT truncation).
+    """
+    if (pa.types.is_decimal(array.type) and pa.types.is_decimal(target_type)
+            and array.type.scale > target_type.scale):
+        values = []
+        with localcontext() as context:
+            # Rounding a maximal value can carry into one extra digit.
+            context.prec = max(array.type.precision, target_type.precision) + 1
+            quantum = Decimal(1).scaleb(-target_type.scale)
+            for value in array.to_pylist():
+                if value is None:
+                    values.append(None)
+                    continue
+                rounded = value.quantize(quantum, rounding=ROUND_HALF_UP)
+                values.append(rounded if len(rounded.as_tuple().digits)
+                              <= target_type.precision else None)
+        return pa.array(values, type=target_type)
+    return array.cast(target_type, safe=False)
 
 
 def _unslice(array):
@@ -306,7 +333,7 @@ class DataFileBatchReader(RecordBatchReader):
         # Leaf / non-nested: cast to the target type when it differs.
         target_pa_type = PyarrowFieldParser.from_paimon_type(target_type)
         if array.type != target_pa_type:
-            return array.cast(target_pa_type, safe=False)
+            return cast_array_for_schema_evolution(array, target_pa_type)
         return array
 
     def read_arrow_batch(self, start_idx=None, end_idx=None) -> Optional[RecordBatch]:
@@ -392,11 +419,9 @@ class DataFileBatchReader(RecordBatchReader):
         type. Columns whose type already matches are reused as-is, keeping the
         common (non-evolution) path zero-copy.
 
-        Casts use ``safe=False`` to match Java ``CastExecutors`` semantics for
-        the read-time conversions a user-approved schema evolution implies
-        (e.g. DECIMAL scale-down or DOUBLE -> INT truncate rather than raise).
-        Evolution legality is the writer's concern (``DataTypeCasts``); the read
-        path only materializes the result.
+        DECIMAL scale reductions use Java's HALF_UP and overflow-to-NULL
+        semantics; other conversions retain the existing unsafe Arrow cast.
+        Evolution legality is the writer's concern (``DataTypeCasts``).
         """
         out_arrays = []
         out_fields = []
@@ -405,7 +430,7 @@ class DataFileBatchReader(RecordBatchReader):
             if target_field is None:
                 target_field = pa.field(name, array.type)
             elif array.type != target_field.type:
-                array = array.cast(target_field.type, safe=False)
+                array = cast_array_for_schema_evolution(array, target_field.type)
             out_arrays.append(array)
             out_fields.append(target_field)
         return pa.RecordBatch.from_arrays(out_arrays, schema=pa.schema(out_fields))

@@ -30,7 +30,9 @@ from pypaimon.multimodal.query import (
     TextQuery,
     VectorQuery,
 )
-from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_type
+from pypaimon.schema.data_types import (
+    PyarrowFieldParser, is_array_blob_type, is_blob_file_type, is_map_blob_type,
+)
 from pypaimon.table.data_evolution_merge_into import (
     WhenMatched,
     WhenNotMatched,
@@ -355,6 +357,10 @@ class MultimodalTable:
             fn,
             file_io=self.raw_table.file_io,
             all_blob_columns=_blob_columns(self.raw_table),
+            map_blob_columns=[field.name for field in self.raw_table.fields
+                              if is_map_blob_type(field.type)],
+            array_blob_columns=[field.name for field in self.raw_table.fields
+                                if is_array_blob_type(field.type)],
             **kwargs,
         )
 
@@ -569,13 +575,25 @@ class _MergeBuilder:
 def _blob_columns(table):
     return tuple(
         field.name for field in table.fields
-        if is_blob_type(field.type)
+        if is_blob_file_type(field.type)
     )
 
 
 def _to_arrow_table(data, target_schema=None):
     if target_schema is not None:
         data = _serialize_blob_values(data, target_schema)
+        if isinstance(data, list):
+            # Untyped from_pylist only discovers columns present in the first row.
+            data = {
+                field.name: [row.get(field.name) for row in data]
+                for field in target_schema
+            }
+        if isinstance(data, dict):
+            data = dict(data)
+            for field in target_schema:
+                if field.name in data and pa.types.is_map(field.type):
+                    # Inferred STRUCT/LIST arrays cannot be cast back to MAP.
+                    data[field.name] = pa.array(data[field.name], type=field.type)
     if isinstance(data, pa.Table):
         table = data
     elif isinstance(data, pa.RecordBatch):

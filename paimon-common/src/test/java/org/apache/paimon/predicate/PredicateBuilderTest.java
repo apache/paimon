@@ -224,6 +224,37 @@ public class PredicateBuilderTest {
     }
 
     @Test
+    public void testNotIn() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        Predicate predicate = builder.notIn(0, new ArrayList<>());
+        assertThat(predicate.test(GenericRow.of(1))).isEqualTo(true);
+        predicate = builder.notIn(0, Arrays.asList(1, 2));
+        assertThat(predicate.test(GenericRow.of(1))).isEqualTo(false);
+        assertThat(predicate.test(GenericRow.of(10))).isEqualTo(true);
+    }
+
+    /**
+     * {@link #testIn()} shows {@code in(idx, emptyList())} evaluates to always-false rather than
+     * throwing - {@link PredicateBuilder#in(int, List)} special-cases an empty list. The {@link
+     * Transform} overload has no such special case: for an empty list it falls through to {@code
+     * or(equals)} with an empty {@code equals}, which throws. {@code notIn} inherits this from
+     * {@code in} through {@code negate()}, so it throws too, unlike {@link #testNotIn()}'s {@code
+     * idx} counterpart.
+     */
+    @Test
+    public void testInAndNotInTransformWithEmptyLiteralsMatchTheIdxOverloads() {
+        RowType rowType = RowType.of(new IntType());
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        FieldTransform transform = new FieldTransform(new FieldRef(0, "f0", new IntType()));
+
+        Predicate in = builder.in(transform, new ArrayList<>());
+        assertThat(in.test(GenericRow.of(1))).isEqualTo(false);
+
+        Predicate notIn = builder.notIn(transform, new ArrayList<>());
+        assertThat(notIn.test(GenericRow.of(1))).isEqualTo(true);
+    }
+
+    @Test
     public void testArrayContains() {
         PredicateBuilder builder =
                 new PredicateBuilder(RowType.of(DataTypes.ARRAY(DataTypes.INT())));

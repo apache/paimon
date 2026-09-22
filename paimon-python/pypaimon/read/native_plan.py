@@ -69,8 +69,6 @@ def native_split_from_python(split):
     Vector scores intentionally stay on the Python IndexedSplit. Rust needs
     only its row ranges to perform the physical read.
     """
-    if not native_split_bridge_available():
-        return None
     from pypaimon_rust.datafusion import Split as NativeSplit
     return NativeSplit.deserialize(
         serialize_split_v1(split, include_scores=False))
@@ -370,6 +368,7 @@ def native_plan(
         projection: Optional[List[str]] = None,
         row_ranges: Optional[List[Tuple[int, int]]] = None,
         incremental_range: Optional[Tuple[int, int]] = None,
+        incremental_mode: str = 'delta',
         row_position_slice: Optional[Tuple[int, int]] = None,
         row_position_shard: Optional[Tuple[int, int]] = None,
         chunk_shuffle: Optional[Tuple[int, int]] = None,
@@ -379,6 +378,8 @@ def native_plan(
     Native conversion or planning failures are handled by TableScan, which
     falls back to the Python planner.
     """
+    if incremental_range is None and incremental_mode != 'delta':
+        raise ValueError('incremental_mode requires incremental_range')
     if not native_runtime_available():
         raise RuntimeError(
             "scan.native-plan.enabled needs pypaimon-rust>=0.3.0 (split planning API)")
@@ -386,8 +387,15 @@ def native_plan(
         _native_read_builder(table), predicate, limit, projection)
     if row_ranges is not None:
         builder = builder.with_row_ranges(row_ranges)
-    scan = (builder.new_scan() if incremental_range is None
-            else builder.new_incremental_scan(*incremental_range))
+    if incremental_range is None:
+        scan = builder.new_scan()
+    elif incremental_mode == 'delta':
+        # Keep the two-argument call compatible with runtimes predating the
+        # explicit mode API. Non-delta modes require the new binding.
+        scan = builder.new_incremental_scan(*incremental_range)
+    else:
+        scan = builder.new_incremental_scan(
+            *incremental_range, incremental_mode)
     if row_position_slice is not None:
         scan = scan.with_row_position_slice(*row_position_slice)
     if row_position_shard is not None:
@@ -407,11 +415,11 @@ def native_plan(
         for split in rust_splits
     ]
     if table.options.native_read_enabled():
-        # Retain the opaque Rust split next to the Python metadata view. The
-        # normal planner/reader contract remains a Python Split list, while
-        # native reads can consume the exact Rust split without a second lossy
-        # conversion. Any Python split transformation creates a fresh object
-        # without this marker and thus safely falls back to the Python reader.
+        # Retain the opaque Rust split next to the Python metadata view so an
+        # unchanged native plan can be read without reserializing each split.
+        # A caller that needs different metadata (such as an endpoint DV)
+        # passes a new Python split, which the native reader converts at read
+        # time from its current fields.
         for split, rust_split in zip(splits, rust_splits):
             split._native_split = rust_split
     _restore_python_partition_paths(table, splits)

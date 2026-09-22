@@ -271,7 +271,9 @@ public class PredicateBuilder {
     public Predicate in(Transform transform, List<Object> literals) {
         // In the IN predicate, 20 literals are critical for performance.
         // If there are more than 20 literals, the performance will decrease.
-        if (literals.size() > 20) {
+        // An empty list has no equals to OR together, so it must also take this branch - mirroring
+        // in(int, List) - rather than fall into or(emptyList()), which throws.
+        if (literals.size() > 20 || literals.isEmpty()) {
             return LeafPredicate.of(transform, In.INSTANCE, literals);
         }
 
@@ -284,6 +286,10 @@ public class PredicateBuilder {
 
     public Predicate notIn(int idx, List<Object> literals) {
         return in(idx, literals).negate().get();
+    }
+
+    public Predicate notIn(Transform transform, List<Object> literals) {
+        return in(transform, literals).negate().get();
     }
 
     public Predicate between(int idx, Object includedLowerBound, Object includedUpperBound) {

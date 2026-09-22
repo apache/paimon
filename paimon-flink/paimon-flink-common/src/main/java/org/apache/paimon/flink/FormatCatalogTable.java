@@ -29,6 +29,7 @@ import org.apache.flink.table.types.logical.RowType;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -88,7 +89,7 @@ public class FormatCatalogTable implements CatalogTable {
     public Map<String, String> getOptions() {
         if (cachedOptions == null) {
             cachedOptions = new HashMap<>();
-            String format = table.format().name().toLowerCase();
+            String format = table.format().name().toLowerCase(Locale.ROOT);
             Map<String, String> options = table.options();
             options.forEach(
                     (k, v) -> {

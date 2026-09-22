@@ -369,9 +369,9 @@ class NativePlanTest(unittest.TestCase):
                 np.assert_not_called()
                 fs.scan.assert_called_once_with()
 
-    def test_plan_falls_back_when_scan_is_not_plain(self):
-        # Older native bindings cannot carry DE shard/slice or explicit row ranges,
-        # arbitrary global-index results, or incremental scans.
+    def test_plan_falls_back_for_unsupported_scan_context(self):
+        # These cases cannot be reconstructed by native planning even with the
+        # current Rust bindings.
         def check(setup):
             fs = Mock(partition_key_predicate=None)
             sentinel = object()
@@ -383,25 +383,10 @@ class NativePlanTest(unittest.TestCase):
             np.assert_not_called()
             fs.scan.assert_called_once_with()
 
-        check(lambda s, fs: (setattr(fs, 'data_evolution', True),
-                             setattr(fs, 'idx_of_this_subtask', 0)))
-        check(lambda s, fs: (setattr(fs, 'data_evolution', True),
-                             setattr(fs, 'start_pos_of_this_subtask', 0)))
         check(lambda s, fs: setattr(fs, '_global_index_result', object()))
-        check(lambda s, fs: setattr(fs, '_row_ranges', [object()]))
-        check(lambda s, fs: setattr(fs, 'deletion_vectors_enabled', True))
-        check(lambda s, fs: setattr(fs, 'is_streaming', True))
         check(lambda s, fs: (setattr(s.table, 'is_primary_key_table', True),
                              setattr(s.table, 'trimmed_primary_keys', [])))
-        check(lambda s, fs: setattr(
-            s.table, '_applied_dynamic_options', {'scan.snapshot-id': None}))
-        check(lambda s, fs: setattr(s.table.schema_manager.latest.return_value, 'id', 2))
-        check(lambda s, fs: s.table.schema_manager.latest.__setattr__(
-            'side_effect', RuntimeError('metadata read failed')))
         check(lambda s, fs: setattr(s.table.options, 'query_auth_enabled', True))
-        check(lambda s, fs: s.table.current_branch.__setattr__('return_value', 'b1'))
-        check(lambda s, fs: s.table.identifier.get_database_name.__setattr__(
-            'return_value', 'db.name'))
         check(lambda s, fs: s.table.identifier.get_database_name.__setattr__(
             'return_value', 'unknown'))
         check(lambda s, fs: setattr(
@@ -409,8 +394,6 @@ class NativePlanTest(unittest.TestCase):
         for attr in ('hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'):
             check(lambda s, fs, attr=attr: setattr(
                 s.table.catalog_environment.catalog_loader.context(), attr, object()))
-        check(lambda s, fs: s.table.options.options.contains.__setattr__(
-            'return_value', True))          # incremental
 
     def test_plan_native_empty_preserves_snapshot_without_fallback(self):
         for snapshot_id in (None, 7):
@@ -425,8 +408,7 @@ class NativePlanTest(unittest.TestCase):
                 fs.scan.assert_not_called()
 
     def test_plan_falls_back_when_rust_unavailable(self):
-        # scan.native-plan.enabled but pypaimon-rust missing/old -> fall back,
-        # not crash.
+        # scan.native-plan.enabled but pypaimon-rust missing -> fall back.
         fs = Mock(partition_key_predicate=None)
         sentinel = object()
         fs.scan.return_value = sentinel
@@ -438,49 +420,36 @@ class NativePlanTest(unittest.TestCase):
         np.assert_not_called()
         fs.scan.assert_called_once_with()
 
-    def test_family_search_modes_require_rust_0_4(self):
-        for available, expect_native in ((False, False), (True, True)):
-            with self.subTest(available=available):
-                fs = Mock(partition_key_predicate=None)
-                fs.scan.return_value = fallback = object()
-                scan = _scan(native_enabled=True, file_scanner=fs)
-                scan.table.options.options.contains_key.side_effect = (
-                    lambda key: key == 'scalar-index.search-mode')
-                scan.table._applied_dynamic_options = {
-                    'scalar-index.search-mode': 'full',
-                }
-                split = Mock(partition=Mock(values=[]), snapshot_id=1)
-
-                with patch(
-                        'pypaimon.read.native_plan.'
-                        'native_family_search_modes_available',
-                        return_value=available), patch(
-                            'pypaimon.read.native_plan.native_plan',
-                            return_value=Plan([split], 1)) as native:
-                    plan = scan.plan()
-
-                if expect_native:
-                    self.assertEqual(plan.splits(), [split])
-                    native.assert_called_once()
-                    fs.scan.assert_not_called()
-                else:
-                    self.assertIs(plan, fallback)
-                    native.assert_not_called()
-                    fs.scan.assert_called_once_with()
-
-    def test_removing_search_mode_falls_back(self):
+    def test_family_search_modes_use_native_plan(self):
         fs = Mock(partition_key_predicate=None)
-        fs.scan.return_value = fallback = object()
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        scan.table.options.options.contains_key.side_effect = (
+            lambda key: key == 'scalar-index.search-mode')
+        scan.table._applied_dynamic_options = {
+            'scalar-index.search-mode': 'full',
+        }
+        split = Mock(partition=Mock(values=[]), snapshot_id=1)
+
+        with patch('pypaimon.read.native_plan.native_plan',
+                   return_value=Plan([split], 1)) as native:
+            self.assertEqual(scan.plan().splits(), [split])
+
+        native.assert_called_once()
+        fs.scan.assert_not_called()
+
+    def test_removing_search_mode_uses_native_plan(self):
+        fs = Mock(partition_key_predicate=None)
         scan = _scan(native_enabled=True, file_scanner=fs)
         scan.table._applied_dynamic_options = {
             'scalar-index.search-mode': None,
         }
 
-        with patch('pypaimon.read.native_plan.native_plan') as native:
-            self.assertIs(scan.plan(), fallback)
+        with patch('pypaimon.read.native_plan.native_plan',
+                   return_value=Plan([], 1)) as native:
+            self.assertEqual(scan.plan().snapshot_id, 1)
 
-        native.assert_not_called()
-        fs.scan.assert_called_once_with()
+        native.assert_called_once()
+        fs.scan.assert_not_called()
 
     def test_dynamic_read_option_uses_native_plan(self):
         fs = Mock(partition_key_predicate=None)
@@ -500,19 +469,19 @@ class NativePlanTest(unittest.TestCase):
         native.assert_called_once()
         fs.scan.assert_not_called()
 
-    def test_unknown_dynamic_option_falls_back(self):
+    def test_unknown_dynamic_option_uses_native_plan(self):
         fs = Mock(partition_key_predicate=None)
-        fs.scan.return_value = fallback = object()
         scan = _scan(native_enabled=True, file_scanner=fs)
         scan.table._applied_dynamic_options = {
             'future.scan-option': 'value',
         }
 
-        with patch('pypaimon.read.native_plan.native_plan') as native:
-            self.assertIs(scan.plan(), fallback)
+        with patch('pypaimon.read.native_plan.native_plan',
+                   return_value=Plan([], 1)) as native:
+            self.assertEqual(scan.plan().snapshot_id, 1)
 
-        native.assert_not_called()
-        fs.scan.assert_called_once_with()
+        native.assert_called_once()
+        fs.scan.assert_not_called()
 
     def test_plan_falls_back_when_native_plan_raises(self):
         # A native planning failure (e.g. unsupported scheme) must fall back, not crash.
@@ -872,94 +841,62 @@ class NativePlanTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'requested branch'):
                 native_plan(table)
 
-    def test_explicit_row_ranges_require_runtime_api(self):
-        for available in (False, True):
-            for ranges in ([], [Range(1, 2), Range(5, 8)]):
-                with self.subTest(available=available, ranges=ranges):
-                    fs = Mock(partition_key_predicate=None)
-                    scan = _scan(True, fs)
-                    fs._row_ranges = ranges
-                    fs.scan.return_value = fallback = object()
-                    with patch('pypaimon.read.native_plan.native_method_available',
-                               return_value=available), patch(
-                            'pypaimon.read.native_plan.native_plan',
-                            return_value=Plan([], 3)) as native:
-                        result = scan.plan()
-                    if available:
-                        self.assertEqual(result.snapshot_id, 3)
-                        self.assertEqual(native.call_args[1]['row_ranges'],
-                                         [(r.from_, r.to) for r in ranges])
-                        fs.scan.assert_not_called()
-                    else:
-                        self.assertIs(result, fallback)
-                        native.assert_not_called()
-
-    def test_append_distribution_requires_stable_native_order(self):
-        for available in (False, True):
-            for selection in ('idx_of_this_subtask', 'start_pos_of_this_subtask'):
-                with self.subTest(available=available, selection=selection):
-                    fs = Mock(partition_key_predicate=None)
-                    scan = _scan(True, fs)
-                    setattr(fs, selection, 0)
-                    fs.scan.return_value = fallback = object()
-                    with patch('pypaimon.read.native_plan.native_version_at_least',
-                               return_value=available), patch(
-                            'pypaimon.read.native_plan.native_method_available',
-                            return_value=True):
-                        self.assertEqual(scan._native_plan_supported(), available)
-                        if not available:
-                            with patch('pypaimon.read.native_plan.native_plan') as native:
-                                self.assertIs(scan.plan(), fallback)
-                                native.assert_not_called()
-
-    def test_watermark_forwarding_requires_current_runtime(self):
-        for available in (False, True):
-            with self.subTest(available=available):
+    def test_explicit_row_ranges_are_forwarded(self):
+        for ranges in ([], [Range(1, 2), Range(5, 8)]):
+            with self.subTest(ranges=ranges):
                 fs = Mock(partition_key_predicate=None)
                 scan = _scan(True, fs)
-                scan.table.options.options = Options({'scan.watermark': '200'})
-                scan.table._applied_dynamic_options = {'scan.watermark': '200'}
-                scan.table.schema_manager.latest.return_value.id = 2
-                fs.scan.return_value = fallback = object()
-                self.assertEqual(_read_options(scan.table)['scan.watermark'], '200')
-                with patch('pypaimon.read.native_plan.native_version_at_least',
-                           return_value=available), patch(
-                        'pypaimon.read.native_plan.native_plan',
-                        return_value=Plan([], 1)) as native:
+                fs._row_ranges = ranges
+                with patch('pypaimon.read.native_plan.native_plan',
+                           return_value=Plan([], 3)) as native:
                     result = scan.plan()
-                if available:
-                    self.assertEqual(result.snapshot_id, 1)
-                    fs.scan.assert_not_called()
-                else:
-                    self.assertIs(result, fallback)
-                    native.assert_not_called()
+                self.assertEqual(result.snapshot_id, 3)
+                self.assertEqual(native.call_args[1]['row_ranges'],
+                                 [(r.from_, r.to) for r in ranges])
+                fs.scan.assert_not_called()
 
-    @unittest.skipIf(sys.version_info < (3, 8),
-                     "importlib.metadata requires Python 3.8")
-    def test_deletion_vectors_require_fixed_version_and_matching_l0_semantics(self):
-        for version in ('0.3.0', '0.4.0rc1', '0.4.0', '0.4.1'):
-            for bucket_local in (False, True):
-                for merge_on_read in (False, True):
-                    with self.subTest(version=version, bucket_local=bucket_local,
-                                      merge_on_read=merge_on_read):
-                        fs = Mock(partition_key_predicate=None)
-                        scan = _scan(True, fs)
-                        fs.deletion_vectors_enabled = True
-                        scan.table.options.options = Options({
-                            'index-file-in-data-file-dir': str(bucket_local).lower(),
-                            'deletion-vectors.merge-on-read': str(merge_on_read).lower(),
-                        })
-                        fs.scan.return_value = fallback = object()
-                        with patch('importlib.metadata.version', return_value=version), patch(
-                                'pypaimon.read.native_plan.native_plan',
-                                return_value=Plan([], 1)) as native:
-                            result = scan.plan()
-                        if version in ('0.4.0', '0.4.1'):
-                            self.assertEqual(result.snapshot_id, 1)
-                            fs.scan.assert_not_called()
-                        else:
-                            self.assertIs(result, fallback)
-                            native.assert_not_called()
+    def test_append_distribution_uses_native_order(self):
+        for selection in ('idx_of_this_subtask', 'start_pos_of_this_subtask'):
+            with self.subTest(selection=selection):
+                fs = Mock(partition_key_predicate=None)
+                scan = _scan(True, fs)
+                setattr(fs, selection, 0)
+                with patch('pypaimon.read.native_plan.native_plan',
+                           return_value=Plan([], 3)) as native:
+                    self.assertEqual(scan.plan().snapshot_id, 3)
+                native.assert_called_once()
+                fs.scan.assert_not_called()
+
+    def test_watermark_forwarding_uses_native_plan(self):
+        fs = Mock(partition_key_predicate=None)
+        scan = _scan(True, fs)
+        scan.table.options.options = Options({'scan.watermark': '200'})
+        scan.table._applied_dynamic_options = {'scan.watermark': '200'}
+        scan.table.schema_manager.latest.return_value.id = 2
+        self.assertEqual(_read_options(scan.table)['scan.watermark'], '200')
+        with patch('pypaimon.read.native_plan.native_plan',
+                   return_value=Plan([], 1)) as native:
+            self.assertEqual(scan.plan().snapshot_id, 1)
+        native.assert_called_once()
+        fs.scan.assert_not_called()
+
+    def test_deletion_vectors_use_native_plan_for_bucket_layouts(self):
+        for bucket_local in (False, True):
+            for merge_on_read in (False, True):
+                with self.subTest(bucket_local=bucket_local,
+                                  merge_on_read=merge_on_read):
+                    fs = Mock(partition_key_predicate=None)
+                    scan = _scan(True, fs)
+                    fs.deletion_vectors_enabled = True
+                    scan.table.options.options = Options({
+                        'index-file-in-data-file-dir': str(bucket_local).lower(),
+                        'deletion-vectors.merge-on-read': str(merge_on_read).lower(),
+                    })
+                    with patch('pypaimon.read.native_plan.native_plan',
+                               return_value=Plan([], 1)) as native:
+                        self.assertEqual(scan.plan().snapshot_id, 1)
+                    native.assert_called_once()
+                    fs.scan.assert_not_called()
 
     @unittest.skipIf(sys.version_info < (3, 8),
                      "importlib.metadata requires Python 3.8")
@@ -987,19 +924,40 @@ class NativePlanTest(unittest.TestCase):
         scan.table.options.options = Options({'incremental-between-timestamp': '100,200'})
         scan.table._applied_dynamic_options = {'incremental-between-timestamp': '100,200'}
         scan._incremental_snapshot_range = (2, 4)
-        with patch('pypaimon.read.native_plan.native_method_available', return_value=True), patch(
-                'pypaimon.read.native_plan.native_plan', return_value=Plan([], 4)) as native:
+        with patch('pypaimon.read.native_plan.native_plan',
+                   return_value=Plan([], 4)) as native:
             self.assertEqual(scan.plan().snapshot_id, 4)
         self.assertEqual(native.call_args[1]['incremental_range'], (2, 4))
         fs.scan.assert_not_called()
+
+    def test_native_plan_forwards_explicit_incremental_mode(self):
+        table = _scan(True, Mock()).table
+        table.table_schema = Mock(fields=[], partition_keys=[])
+        rust_plan = SimpleNamespace(splits=lambda: [], snapshot_id=lambda: 4)
+        rust_scan = Mock()
+        rust_scan.plan.return_value = rust_plan
+        builder = Mock()
+        builder.new_incremental_scan.return_value = rust_scan
+        with patch('pypaimon.read.native_plan.native_runtime_available',
+                   return_value=True), patch(
+                'pypaimon.read.native_plan._native_read_builder',
+                return_value=builder):
+            plan = native_plan(
+                table, incremental_range=(2, 4),
+                incremental_mode='changelog')
+        self.assertEqual(plan.snapshot_id, 4)
+        builder.new_incremental_scan.assert_called_once_with(
+            2, 4, 'changelog')
+
+        with self.assertRaisesRegex(ValueError, 'incremental_range'):
+            native_plan(table, incremental_mode='changelog')
 
     def test_incremental_window_outside_snapshots_is_terminal_empty(self):
         fs = Mock(partition_key_predicate=None)
         scan = _scan(True, fs)
         scan.table.options.options = Options({'incremental-between-timestamp': '100,200'})
         scan._incremental_snapshot_range = None
-        with patch('pypaimon.read.native_plan.native_method_available', return_value=True), patch(
-                'pypaimon.read.native_plan.native_plan') as native:
+        with patch('pypaimon.read.native_plan.native_plan') as native:
             plan = scan.plan()
         self.assertEqual(plan.splits(), [])
         self.assertIsNone(plan.snapshot_id)

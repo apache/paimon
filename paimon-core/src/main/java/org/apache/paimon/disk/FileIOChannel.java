@@ -24,6 +24,7 @@ import org.apache.paimon.utils.StringUtils;
 import java.io.File;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
+import java.util.Locale;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -163,7 +164,8 @@ public interface FileIOChannel {
 
         public FileIOChannel.ID next() {
             int bucketNum = GLOBAL_NUMBER.getAndIncrement() % paths.length;
-            String filename = String.format("%s.%06d.channel", namePrefix, (localCounter++));
+            String filename =
+                    String.format(Locale.ROOT, "%s.%06d.channel", namePrefix, (localCounter++));
             return new FileIOChannel.ID(new File(paths[bucketNum], filename), bucketNum);
         }
     }

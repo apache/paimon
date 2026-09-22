@@ -18,6 +18,7 @@
 """Native planning coverage for Java time travel, postpone and scored DE reads."""
 
 import json
+from contextlib import ExitStack
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -63,7 +64,10 @@ def write(table, rows, schema):
 
 
 def read(table, native, predicate=None, shard=None, limit=None, result=None, ranges=None):
-    builder = table.copy({'scan.native-plan.enabled': str(native).lower()}).new_read_builder()
+    builder = table.copy({
+        'scan.native-plan.enabled': str(native).lower(),
+        'read.native.enabled': str(native).lower(),
+    }).new_read_builder()
     if predicate is not None:
         builder.with_filter(predicate)
     if limit is not None:
@@ -80,7 +84,15 @@ def read(table, native, predicate=None, shard=None, limit=None, result=None, ran
             plan = scan.plan()
     else:
         plan = scan.plan()
-    return plan, builder.new_read().to_arrow(plan.splits()).to_pylist()
+    if native:
+        read_guard = patch(
+            'pypaimon.read.table_read.TableRead._create_split_read',
+            side_effect=AssertionError('expanded native read fell back'))
+    else:
+        read_guard = ExitStack()
+    with read_guard:
+        rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+    return plan, rows
 
 
 @pytest.mark.parametrize('version,expected', [('1', 1), ('base', 1), ('watermark-150', 2)])

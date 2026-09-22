@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import pyarrow as pa
 
+from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
@@ -43,6 +44,11 @@ class TableWrite:
         self.commit_user = commit_user
         self.static_partition = static_partition
         self.file_store_write = self._create_file_store_write(commit_user)
+        if static_partition is not None:
+            # An overwrite replaces state, not an input changelog. Java's
+            # overwrite commit does not publish changelog manifests; avoid
+            # writing unreferenced changelog files in the first place.
+            self.file_store_write.changelog_producer = ChangelogProducer.NONE
         self.row_key_extractor = self._create_row_key_extractor(static_partition)
 
     def _create_file_store_write(self, commit_user):
@@ -313,9 +319,6 @@ class TableWrite:
             return commit_messages
 
         index_changes = prepare_indexes()
-        base_snapshot_id = getattr(
-            self.row_key_extractor, "base_snapshot_id", None
-        )
         messages_by_bucket = {
             (tuple(message.partition), message.bucket): message
             for message in commit_messages
@@ -332,12 +335,6 @@ class TableWrite:
                 messages_by_bucket[(partition, bucket)] = message
             message.index_adds.extend(changes.additions)
             message.index_deletes.extend(changes.deletions)
-        if base_snapshot_id is not None:
-            # Data-only upserts must participate too. A concurrent overwrite
-            # can rebuild the HASH index and move an existing key, making a
-            # stale data file unsafe even when this writer added no mapping.
-            for message in commit_messages:
-                message.hash_index_base_snapshot = base_snapshot_id
         return commit_messages
 
     def _release_prepared_indexes(self) -> None:

@@ -69,69 +69,78 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
             return null;
         }
         FieldRef fieldRef = fieldRefOpt.get();
-        Expression field = Expression.column(fieldRef.name());
+        // Builders clone their inputs and leave freeing to the caller (see the vortex-jni
+        // expression.rs module doc), so the column and the literal are ours to release once
+        // the call consuming them has returned.
+        try (Expression field = Expression.column(fieldRef.name())) {
+            if (predicate.function() instanceof IsNull) {
+                return Expression.isNull(field);
+            }
+            if (predicate.function() instanceof IsNotNull) {
+                return Expression.isNotNull(field);
+            }
 
-        if (predicate.function() instanceof IsNull) {
-            return Expression.isNull(field);
-        }
-        if (predicate.function() instanceof IsNotNull) {
-            return Expression.isNotNull(field);
-        }
+            List<Object> literals = predicate.literals();
+            if (literals == null || literals.isEmpty()) {
+                return null;
+            }
 
-        List<Object> literals = predicate.literals();
-        if (literals == null || literals.isEmpty()) {
-            return null;
-        }
+            try (Expression vortexLiteral = toLiteral(fieldRef.type(), literals.get(0))) {
+                if (vortexLiteral == null) {
+                    return null;
+                }
 
-        Expression vortexLiteral = toLiteral(fieldRef.type(), literals.get(0));
-        if (vortexLiteral == null) {
-            return null;
-        }
+                if (predicate.function() instanceof Equal) {
+                    return Expression.binary(Expression.BinaryOp.EQ, field, vortexLiteral);
+                } else if (predicate.function() instanceof NotEqual) {
+                    return Expression.binary(Expression.BinaryOp.NOT_EQ, field, vortexLiteral);
+                } else if (predicate.function() instanceof GreaterThan) {
+                    return Expression.binary(Expression.BinaryOp.GT, field, vortexLiteral);
+                } else if (predicate.function() instanceof GreaterOrEqual) {
+                    return Expression.binary(Expression.BinaryOp.GTE, field, vortexLiteral);
+                } else if (predicate.function() instanceof LessThan) {
+                    return Expression.binary(Expression.BinaryOp.LT, field, vortexLiteral);
+                } else if (predicate.function() instanceof LessOrEqual) {
+                    return Expression.binary(Expression.BinaryOp.LTE, field, vortexLiteral);
+                }
 
-        if (predicate.function() instanceof Equal) {
-            return Expression.binary(Expression.BinaryOp.EQ, field, vortexLiteral);
-        } else if (predicate.function() instanceof NotEqual) {
-            return Expression.binary(Expression.BinaryOp.NOT_EQ, field, vortexLiteral);
-        } else if (predicate.function() instanceof GreaterThan) {
-            return Expression.binary(Expression.BinaryOp.GT, field, vortexLiteral);
-        } else if (predicate.function() instanceof GreaterOrEqual) {
-            return Expression.binary(Expression.BinaryOp.GTE, field, vortexLiteral);
-        } else if (predicate.function() instanceof LessThan) {
-            return Expression.binary(Expression.BinaryOp.LT, field, vortexLiteral);
-        } else if (predicate.function() instanceof LessOrEqual) {
-            return Expression.binary(Expression.BinaryOp.LTE, field, vortexLiteral);
+                return null;
+            }
         }
-
-        return null;
     }
 
     @Override
     public Expression visit(CompoundPredicate predicate) {
-        if (predicate.function() instanceof And) {
-            List<Expression> children = new ArrayList<>();
+        boolean isAnd = predicate.function() instanceof And;
+        if (!isAnd && !(predicate.function() instanceof Or)) {
+            return null;
+        }
+
+        List<Expression> children = new ArrayList<>();
+        try {
             for (Predicate child : predicate.children()) {
                 Expression expr = child.visit(this);
-                if (expr != null) {
-                    children.add(expr);
+                if (expr == null) {
+                    // An Or must push all children or none: dropping a disjunct narrows the
+                    // filter and would drop rows the predicate matches. Dropping a conjunct
+                    // from an And only widens it, which the best-effort contract allows.
+                    if (!isAnd) {
+                        return null;
+                    }
+                    continue;
                 }
+                children.add(expr);
             }
             if (children.isEmpty()) {
                 return null;
             }
-            return Expression.and(children.toArray(new Expression[0]));
-        } else if (predicate.function() instanceof Or) {
-            List<Expression> children = new ArrayList<>();
-            for (Predicate child : predicate.children()) {
-                Expression expr = child.visit(this);
-                if (expr == null) {
-                    return null;
-                }
-                children.add(expr);
-            }
-            return Expression.or(children.toArray(new Expression[0]));
+            Expression[] operands = children.toArray(new Expression[0]);
+            return isAnd ? Expression.and(operands) : Expression.or(operands);
+        } finally {
+            // and/or clone their operands, so the children are ours either way -- and on the Or
+            // give-up path above, the ones already collected would otherwise be unreachable.
+            children.forEach(Expression::close);
         }
-
-        return null;
     }
 
     @Nullable

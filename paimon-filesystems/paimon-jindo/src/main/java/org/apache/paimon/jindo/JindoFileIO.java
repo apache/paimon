@@ -46,6 +46,7 @@ import java.io.UncheckedIOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -79,9 +80,9 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {
                 {
-                    put(OSS_ACCESS_KEY_ID.toLowerCase(), OSS_ACCESS_KEY_ID);
-                    put(OSS_ACCESS_KEY_SECRET.toLowerCase(), OSS_ACCESS_KEY_SECRET);
-                    put(OSS_SECURITY_TOKEN.toLowerCase(), OSS_SECURITY_TOKEN);
+                    put(OSS_ACCESS_KEY_ID.toLowerCase(Locale.ROOT), OSS_ACCESS_KEY_ID);
+                    put(OSS_ACCESS_KEY_SECRET.toLowerCase(Locale.ROOT), OSS_ACCESS_KEY_SECRET);
+                    put(OSS_SECURITY_TOKEN.toLowerCase(Locale.ROOT), OSS_SECURITY_TOKEN);
                 }
             };
 
@@ -118,8 +119,8 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
             for (String prefix : CONFIG_PREFIXES) {
                 if (key.startsWith(prefix)) {
                     String value = context.options().get(key);
-                    if (CASE_SENSITIVE_KEYS.containsKey(key.toLowerCase())) {
-                        key = CASE_SENSITIVE_KEYS.get(key.toLowerCase());
+                    if (CASE_SENSITIVE_KEYS.containsKey(key.toLowerCase(Locale.ROOT))) {
+                        key = CASE_SENSITIVE_KEYS.get(key.toLowerCase(Locale.ROOT));
                     }
                     hadoopOptions.set(key, value);
 

@@ -168,6 +168,16 @@ class TableRead:
         self._predicate_extra_fields = self._predicate_fields_outside_read_type()
         self._scan_read_type = self.read_type + self._predicate_extra_fields
         self._output_column_names = [f.name for f in self.read_type]
+        # Output positions in ``read_type``, not ``_scan_read_type``. Predicate
+        # extras are appended for the inner scan and projected away before
+        # ``_serialize_blob_view_row_tuple``; prepending them would make these
+        # indices rewrite the wrong columns.
+        blob_view_fields = self.table.options.blob_view_fields()
+        self._blob_view_output_indices = tuple(
+            i for i, field in enumerate(self.read_type)
+            if field.name in blob_view_fields
+        )
+        self._blob_as_descriptor = bool(self.table.options.blob_as_descriptor())
         self._deferred_blob_fields = (
             deferred_blob_field_names(
                 self.table,
@@ -420,7 +430,10 @@ class TableRead:
             return None
         if not splits:
             return []
-        if self._deferred_blob_limit_may_prune(splits):
+        if not self._native_blob_view_supported():
+            return None
+        if (self._deferred_blob_limit_may_prune(splits)
+                and not self.table.options.data_evolution_enabled()):
             return None
         # Query authorization has additional filtering, masking and projection
         # semantics which are already implemented by the Python reader.
@@ -446,8 +459,6 @@ class TableRead:
                     logger.warning(
                         "Native split conversion failed, falling back to the "
                         "Python reader: %s", e)
-                    return None
-                if rust_split is None:
                     return None
             rust_splits.append(rust_split)
             split_weights.append(self._native_split_weight(split))
@@ -812,6 +823,8 @@ class TableRead:
                             continue
                         if remaining is not None and batch.num_rows > remaining:
                             batch = batch.slice(0, remaining)
+                        batch = self._serialize_blob_views_as_descriptors(
+                            batch, reader)
                         batch = self._project_batch_to_output(batch)
                         if self.include_row_kind:
                             if "_row_kind" not in batch.schema.names:
@@ -832,7 +845,8 @@ class TableRead:
                         for row in iter(row_iterator.next, None):
                             if not isinstance(row, OffsetRow):
                                 raise TypeError(f"Expected OffsetRow, but got {type(row).__name__}")
-                            row_tuple_chunk.append(row.row_tuple[row.offset: row.offset + row.arity])
+                            row_tuple_chunk.append(
+                                self._serialize_blob_view_row_tuple(row, reader))
                             if self.include_row_kind:
                                 row_kind_chunk.append(row.get_row_kind().to_string())
 
@@ -922,6 +936,20 @@ class TableRead:
                 and (self._deferred_blob_fields
                      or self._native_inline_blob_fields())
                 and not self._limit_covers_all_splits(splits))
+
+    def _native_blob_view_supported(self) -> bool:
+        """Use native view resolution only with the REST catalog environment."""
+        read_names = {field.name for field in self._scan_read_type}
+        view_fields = self.table.options.blob_view_fields() & read_names
+        if not view_fields or not self.table.options.blob_view_resolve_enabled():
+            return True
+        loader = getattr(getattr(self.table, 'catalog_environment', None),
+                         'catalog_loader', None)
+        if loader is None:
+            # Python also leaves view structs unresolved without a loader.
+            return True
+        from pypaimon.read.native_plan import _catalog_metastore
+        return _catalog_metastore(loader) == 'rest'
 
     def _native_inline_blob_fields(self) -> set:
         """Return configured BLOB fields that native reads resolve eagerly."""
@@ -1030,6 +1058,8 @@ class TableRead:
                         break
                     if allowed < batch.num_rows:
                         batch = batch.slice(0, allowed)
+                    batch = self._serialize_blob_views_as_descriptors(
+                        batch, reader)
                     batch = self._project_batch_to_output(batch)
                     if self.include_row_kind:
                         if "_row_kind" not in batch.schema.names:
@@ -1053,7 +1083,7 @@ class TableRead:
                             stop = True
                             break
                         row_tuple_chunk.append(
-                            row.row_tuple[row.offset: row.offset + row.arity])
+                            self._serialize_blob_view_row_tuple(row, reader))
                         if self.include_row_kind:
                             row_kind_chunk.append(row.get_row_kind().to_string())
 
@@ -1399,17 +1429,23 @@ class TableRead:
         ) if push_down_limit else None
         effective_read_type = read_type if read_type is not None else self.read_type
         scan_read_type = self._with_predicate_extra_fields(read_type) if read_type is not None else self._scan_read_type
+        # the columns authorization widens the read with are plain top-level ones, so each
+        # gets a one-segment path; without them the outer extraction sees fewer paths than fields
+        nested_name_paths = self.nested_name_paths
+        if nested_name_paths and len(nested_name_paths) < len(effective_read_type):
+            nested_name_paths = list(nested_name_paths) + [
+                [f.name] for f in effective_read_type[len(nested_name_paths):]]
         if self.table.is_primary_key_table and (
                 getattr(split, 'is_streaming', False) or not split.raw_convertible):
             inner_read_type = scan_read_type
             outer_extract_name_paths: Optional[List[List[str]]] = None
-            if self.nested_name_paths and any(
-                    len(p) > 1 for p in self.nested_name_paths):
+            if nested_name_paths and any(
+                    len(p) > 1 for p in nested_name_paths):
                 # Inner: full ROW for the merge function. Outer: extract
                 # the requested sub-paths back to the user's flat schema.
                 inner_read_type = self._with_predicate_extra_fields(
-                    self._widen_to_top_level_for_merge())
-                outer_extract_name_paths = self.nested_name_paths
+                    self._widen_to_top_level_for_merge(nested_name_paths))
+                outer_extract_name_paths = nested_name_paths
 
             # When the user's projection drops a ``sequence.field``, the merge
             # heap can't compare it. Inject the missing sequence field(s) into
@@ -1450,15 +1486,15 @@ class TableRead:
                 limit=effective_limit,
             )
         elif self.table.options.data_evolution_enabled():
-            if self.nested_name_paths and any(
-                    len(p) > 1 for p in self.nested_name_paths):
+            if nested_name_paths and any(
+                    len(p) > 1 for p in nested_name_paths):
                 if not self._only_map_key_nested_paths():
                     raise NotImplementedError(
                         "ROW nested-field projection on data-evolution tables "
                         "is not yet supported")
                 scan_read_type = self._with_predicate_extra_fields(
-                    self._widen_to_top_level_for_merge())
-                outer_extract_name_paths = self.nested_name_paths
+                    self._widen_to_top_level_for_merge(nested_name_paths))
+                outer_extract_name_paths = nested_name_paths
             else:
                 outer_extract_name_paths = None
             if (outer_extract_name_paths is None
@@ -1473,7 +1509,7 @@ class TableRead:
                 row_tracking_enabled=True,
                 nested_name_paths=(
                     None if outer_extract_name_paths
-                    else self.nested_name_paths),
+                    else nested_name_paths),
                 outer_extract_name_paths=outer_extract_name_paths,
                 outer_flat_read_type=(
                     self.read_type if outer_extract_name_paths else None),
@@ -1485,16 +1521,16 @@ class TableRead:
         else:
             inner_read_type = scan_read_type
             outer_extract_name_paths: Optional[List[List[str]]] = None
-            if self.nested_name_paths and any(
-                    len(p) > 1 for p in self.nested_name_paths):
+            if nested_name_paths and any(
+                    len(p) > 1 for p in nested_name_paths):
                 # Mirror the merge path: read the full top-level columns so
                 # the per-file field-id normalization applies (a leaf path is
                 # only valid against the latest schema, not each file's own
                 # names/types), then extract the requested sub-paths back to
                 # the user's flat schema.
                 inner_read_type = self._with_predicate_extra_fields(
-                    self._widen_to_top_level_for_merge())
-                outer_extract_name_paths = self.nested_name_paths
+                    self._widen_to_top_level_for_merge(nested_name_paths))
+                outer_extract_name_paths = nested_name_paths
             if read_type is None and outer_extract_name_paths is None and self._needs_output_projection():
                 outer_extract_name_paths = self._output_extract_name_paths()
             return RawFileSplitRead(
@@ -1508,6 +1544,40 @@ class TableRead:
                     effective_read_type if outer_extract_name_paths else None),
                 limit=effective_limit,
             )
+
+    def _serialize_blob_views_as_descriptors(self, batch: pyarrow.RecordBatch, reader) -> pyarrow.RecordBatch:
+        if not self._blob_as_descriptor or not self._blob_view_output_indices:
+            return batch
+        lookup = getattr(reader, 'blob_view_lookup', None)
+        if lookup is None:
+            return batch
+        for index in self._blob_view_output_indices:
+            field_name = self.read_type[index].name
+            if field_name not in batch.schema.names:
+                continue
+            converted = [
+                lookup.serialize_view_field_value(value)
+                for value in batch.column(field_name).to_pylist()
+            ]
+            column_idx = batch.schema.names.index(field_name)
+            batch = batch.set_column(
+                column_idx,
+                pyarrow.field(field_name, pyarrow.large_binary(), nullable=True),
+                pyarrow.array(converted, type=pyarrow.large_binary()),
+            )
+        return batch
+
+    def _serialize_blob_view_row_tuple(self, row: OffsetRow, reader) -> tuple:
+        values = row.row_tuple[row.offset: row.offset + row.arity]
+        if not self._blob_as_descriptor or not self._blob_view_output_indices:
+            return values
+        lookup = getattr(reader, 'blob_view_lookup', None)
+        if lookup is None:
+            return values
+        converted = list(values)
+        for index in self._blob_view_output_indices:
+            converted[index] = lookup.serialize_view_field_value(converted[index])
+        return tuple(converted)
 
     def _project_batch_to_output(self, batch: pyarrow.RecordBatch) -> pyarrow.RecordBatch:
         if not self._needs_output_projection():
@@ -1551,15 +1621,16 @@ class TableRead:
             fields = SpecialFields.row_type_with_row_tracking(fields)
         return fields
 
-    def _widen_to_top_level_for_merge(self) -> List[DataField]:
-        """Unique top-level fields from ``self.nested_name_paths``, in path order."""
+    def _widen_to_top_level_for_merge(self, name_paths=None) -> List[DataField]:
+        """Unique top-level fields from ``name_paths``, in path order."""
+        paths = self.nested_name_paths if name_paths is None else name_paths
         table_fields_by_name = {f.name: f for f in self._table_read_fields()}
         paths_by_top = {}
-        for path in self.nested_name_paths or []:
+        for path in paths or []:
             paths_by_top.setdefault(path[0], []).append(path)
         seen = set()
         widened: List[DataField] = []
-        for path in self.nested_name_paths or []:
+        for path in paths or []:
             top_name = path[0]
             if top_name in seen:
                 continue
@@ -1650,7 +1721,7 @@ class TableRead:
         auth_result.validate_read_type(
             latest_fields, read_fields, self.nested_name_paths, table_fields)
 
-        extra_fields = auth_result.get_extra_fields_for_filter(read_fields, table_fields)
+        extra_fields = auth_result.get_extra_fields(read_fields, table_fields)
         effective_read_type = read_fields
         if extra_fields:
             effective_read_type = read_fields + extra_fields
@@ -1688,6 +1759,15 @@ class TableRead:
         if not isinstance(reader, RecordBatchReader):
             schema = PyarrowFieldParser.from_paimon_schema(effective_read_type)
             reader = RecordReaderToBatchAdapter(reader, schema, include_row_kind=self.include_row_kind)
+            if getattr(reader, 'blob_field_indices', None) is None:
+                from pypaimon.read.reader.field_indices import (
+                    blob_field_indices, descriptor_field_indices_for_table,
+                    vector_field_indices)
+                reader.file_io = self.table.file_io
+                reader.blob_field_indices = blob_field_indices(effective_read_type)
+                reader.descriptor_field_indices = descriptor_field_indices_for_table(
+                    self.table, effective_read_type)
+                reader.vector_field_indices = vector_field_indices(effective_read_type)
             needs_convert_back = True
 
         if filter_fn and not embed_filter:
