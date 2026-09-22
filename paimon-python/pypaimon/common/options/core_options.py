@@ -677,6 +677,14 @@ class CoreOptions:
                           "routes fall back to pypaimon.")
     )
 
+    COMMIT_NATIVE_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("commit.native.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Commit append messages via pypaimon_rust. Unsupported "
+                          "operations use Python before any native commit is attempted.")
+    )
+
     CHANGELOG_PRODUCER: ConfigOption[ChangelogProducer] = (
         ConfigOptions.key("changelog-producer")
         .enum_type(ChangelogProducer)
@@ -1591,6 +1599,9 @@ class CoreOptions:
 
     def native_read_enabled(self, default=None):
         return self.options.get(CoreOptions.READ_NATIVE_ENABLED, default)
+
+    def native_commit_enabled(self, default=None):
+        return self.options.get(CoreOptions.COMMIT_NATIVE_ENABLED, default)
 
     def changelog_producer(self, default=None):
         return self.options.get(CoreOptions.CHANGELOG_PRODUCER, default)
