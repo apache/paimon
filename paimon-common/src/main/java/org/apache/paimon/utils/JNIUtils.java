@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.util.Locale;
 import java.util.logging.Logger;
 
 /**
@@ -37,7 +38,7 @@ public class JNIUtils {
     private static boolean inited = false;
 
     private static String osName() {
-        String osName = System.getProperty("os.name").toLowerCase().replace(' ', '_');
+        String osName = System.getProperty("os.name").toLowerCase(Locale.ROOT).replace(' ', '_');
         if (osName.startsWith("win")) {
             return "win";
         } else {
