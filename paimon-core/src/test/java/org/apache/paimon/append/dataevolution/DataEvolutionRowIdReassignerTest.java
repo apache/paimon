@@ -1023,6 +1023,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         }
     }
 
+    @SuppressWarnings("unchecked")
     private void assertPersistedPlan(FileStoreTable table) throws Exception {
         Snapshot snapshot = Snapshot.fromJson(table.snapshotManager().latestSnapshot().toJson());
         assertThat(snapshot.properties())
@@ -1039,6 +1040,8 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         assertThat(assignment.firstAssignedRowId())
                 .isEqualTo(table.snapshotManager().snapshot(snapshot.id() - 1).nextRowId());
         assertThat(assignment.nextRowId()).isEqualTo(snapshot.nextRowId());
+        Map<BinaryRow, RowRangeMappingIndex> mappings =
+                (Map<BinaryRow, RowRangeMappingIndex>) fieldValue(assignment, "rowIdMappings");
         Map<String, ManifestEntry> previous = new HashMap<>();
         for (ManifestEntry entry :
                 table.store().newScan().withSnapshot(snapshot.id() - 1).plan().files()) {
@@ -1047,11 +1050,15 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         for (ManifestEntry entry : currentEntries(table)) {
             Range oldRange = previous.get(entry.file().fileName()).file().nonNullRowIdRange();
             Range newRange = entry.file().nonNullRowIdRange();
+            RowRangeMappingIndex mapping = mappings.get(entry.partition());
             if (oldRange.equals(newRange)) {
-                assertThat(assignment.map(entry.partition(), oldRange)).isEmpty();
-                assertThat(assignment.overlaps(entry.partition(), oldRange)).isFalse();
+                if (mapping != null) {
+                    assertThat(mapping.map(oldRange)).isEmpty();
+                    assertThat(mapping.overlaps(oldRange)).isFalse();
+                }
             } else {
-                assertThat(assignment.map(entry.partition(), oldRange)).hasValue(newRange);
+                assertThat(mapping).isNotNull();
+                assertThat(mapping.map(oldRange)).hasValue(newRange);
             }
         }
     }

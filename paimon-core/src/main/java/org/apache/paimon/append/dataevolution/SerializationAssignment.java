@@ -26,7 +26,6 @@ import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -39,7 +38,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.zip.CRC32;
 import java.util.zip.CheckedOutputStream;
@@ -98,17 +96,6 @@ public final class SerializationAssignment {
 
     public long nextRowId() {
         return nextRowId;
-    }
-
-    /** Returns a mapping only when the entire range maps to a contiguous range. */
-    public Optional<Range> map(BinaryRow partition, Range range) {
-        RowRangeMappingIndex mapping = rowIdMappings.get(partition);
-        return mapping == null ? Optional.empty() : mapping.map(range);
-    }
-
-    public boolean overlaps(BinaryRow partition, Range range) {
-        RowRangeMappingIndex mapping = rowIdMappings.get(partition);
-        return mapping != null && mapping.overlaps(range);
     }
 
     /** Returns a plan only for the snapshot that committed it, ignoring inherited properties. */
