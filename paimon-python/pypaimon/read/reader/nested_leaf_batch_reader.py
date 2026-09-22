@@ -30,11 +30,12 @@ from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 
 
 def _struct_field(column, name):
+    # Resolve literal names before Arrow can interpret them as field paths.
+    field_index = [field.name for field in column.type].index(name)
     struct_field = getattr(pc, "struct_field", None)
     if struct_field is not None:
-        return struct_field(column, name)
+        return struct_field(column, field_index)
 
-    field_index = [field.name for field in column.type].index(name)
     return column.flatten()[field_index]
 
 
