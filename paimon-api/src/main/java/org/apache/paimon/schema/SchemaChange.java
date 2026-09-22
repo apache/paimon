@@ -81,6 +81,9 @@ import java.util.Objects;
     @JsonSubTypes.Type(
             value = SchemaChange.DropPrimaryKey.class,
             name = SchemaChange.Actions.DROP_PRIMARY_KEY_ACTION),
+    @JsonSubTypes.Type(
+            value = SchemaChange.EnableDataEvolution.class,
+            name = SchemaChange.Actions.ENABLE_DATA_EVOLUTION_ACTION),
 })
 public interface SchemaChange extends Serializable {
 
@@ -169,6 +172,16 @@ public interface SchemaChange extends Serializable {
 
     static SchemaChange dropPrimaryKey() {
         return new DropPrimaryKey();
+    }
+
+    /**
+     * Enables {@code row-tracking.enabled} and {@code data-evolution.enabled} on a table that
+     * already has snapshots. Both options are immutable for {@code ALTER TABLE}; this change is
+     * issued by the {@code sys.enable_data_evolution} procedure, which first assigns a first row id
+     * to every existing data file.
+     */
+    static SchemaChange enableDataEvolution() {
+        return new EnableDataEvolution();
     }
 
     /** A SchemaChange to set a table option. */
@@ -836,6 +849,25 @@ public interface SchemaChange extends Serializable {
         }
     }
 
+    /** A SchemaChange to enable row tracking and data evolution. */
+    final class EnableDataEvolution implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            return o != null && getClass() == o.getClass();
+        }
+
+        @Override
+        public int hashCode() {
+            return getClass().hashCode();
+        }
+    }
+
     /** Actions for schema changes： identify for schema change. */
     class Actions {
         public static final String FIELD_ACTION = "action";
@@ -851,6 +883,7 @@ public interface SchemaChange extends Serializable {
         public static final String UPDATE_COLUMN_DEFAULT_VALUE_ACTION = "updateColumnDefaultValue";
         public static final String UPDATE_COLUMN_POSITION_ACTION = "updateColumnPosition";
         public static final String DROP_PRIMARY_KEY_ACTION = "dropPrimaryKey";
+        public static final String ENABLE_DATA_EVOLUTION_ACTION = "enableDataEvolution";
 
         private Actions() {}
     }

@@ -199,6 +199,13 @@ public class RESTApiJsonTest {
         assertEquals(
                 Collections.singletonMap("action", "dropPrimaryKey"),
                 RESTApi.fromJson(RESTApi.toJson(SchemaChange.dropPrimaryKey()), Map.class));
+        assertEquals(
+                Collections.singletonMap("action", "enableDataEvolution"),
+                RESTApi.fromJson(RESTApi.toJson(SchemaChange.enableDataEvolution()), Map.class));
+        assertEquals(
+                SchemaChange.enableDataEvolution(),
+                RESTApi.fromJson(
+                        RESTApi.toJson(SchemaChange.enableDataEvolution()), SchemaChange.class));
 
         Map<String, Object> expectedViewComment = new HashMap<>();
         expectedViewComment.put("action", "updateComment");

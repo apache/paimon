@@ -3302,6 +3302,7 @@ components:
         - $ref: '#/components/schemas/UpdateColumnPosition'
         - $ref: '#/components/schemas/UpdateColumnNullability'
         - $ref: '#/components/schemas/DropPrimaryKey'
+        - $ref: '#/components/schemas/EnableDataEvolution'
     BaseSchemaChange:
       discriminator:
         propertyName: action
@@ -3318,6 +3319,7 @@ components:
           updateColumnPosition: '#/components/schemas/UpdateColumnPosition'
           updateColumnNullability: '#/components/schemas/UpdateColumnNullability'
           dropPrimaryKey: '#/components/schemas/DropPrimaryKey'
+          enableDataEvolution: '#/components/schemas/EnableDataEvolution'
       type: object
       required:
         - action
@@ -3464,6 +3466,13 @@ components:
         action:
           type: string
           const: "dropPrimaryKey"
+    EnableDataEvolution:
+      allOf:
+        - $ref: '#/components/schemas/BaseSchemaChange'
+      properties:
+        action:
+          type: string
+          const: "enableDataEvolution"
     Move:
       type: object
       properties:
