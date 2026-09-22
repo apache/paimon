@@ -972,6 +972,63 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(["id", "name"], result.column_names)
         self.assertEqual([1, 2], result["id"].to_pylist())
 
+    def test_add_preserves_fields_missing_from_first_row(self):
+        table = self.conn.create_table(
+            "sparse_rows", schema=_schema({
+                "id": pa.int32(), "caption": pa.string(), "quality": pa.float64(),
+                "image": pa.large_binary(), "missing": pa.string(),
+            }), options=_PARQUET_OPTIONS)
+        table.add([
+            {"id": "1"},
+            {"id": "2", "caption": "keep-me", "quality": 0.9,
+             "image": b"payload", "extra": "ignored"},
+        ])
+        scalar, blobs = table.scan().read_blobs("image")
+        rows = sorted(zip(scalar.to_pylist(), blobs["image"]), key=lambda row: row[0]["id"])
+        self.assertEqual([
+            ({"id": 1, "caption": None, "quality": None, "missing": None}, None),
+            ({"id": 2, "caption": "keep-me", "quality": 0.9, "missing": None}, b"payload"),
+        ], rows)
+
+    def test_add_python_map_values(self):
+        schema = _schema({
+            "id": pa.int32(), "assets": pa.map_(pa.string(), pa.large_binary()),
+            "scores": pa.map_(pa.string(), pa.int64()),
+        })
+        rows = [
+            {"id": 1, "assets": {"image": pmm.Blob.from_data(b"body"), "missing": None},
+             "scores": {"quality": 9}},
+            {"id": 2, "assets": [("empty", b""), ("image", b"second")], "scores": []},
+            {"id": 3, "assets": [], "scores": None},
+            {"id": 4, "assets": None, "scores": None},
+        ]
+        for columnar in (False, True):
+            with self.subTest(columnar=columnar):
+                table = self.conn.create_table(
+                    "map_input_%s" % columnar, schema=schema, options=_PARQUET_OPTIONS)
+                data = {name: [row[name] for row in rows] for name in schema.names} if columnar else rows
+                table.add(data)
+                scalar, blobs = table.scan().read_blobs("assets")
+                self.assertEqual({
+                    1: [("image", b"body"), ("missing", None)],
+                    2: [("empty", b""), ("image", b"second")], 3: [], 4: None,
+                }, dict(zip(scalar["id"].to_pylist(), blobs["assets"])))
+                self.assertEqual({1: [("quality", 9)], 2: [], 3: None, 4: None},
+                                 dict(zip(scalar["id"].to_pylist(), scalar["scores"].to_pylist())))
+
+    def test_python_input_preserves_safe_casts_and_empty_rows(self):
+        from pypaimon.multimodal.table import _to_arrow_table
+
+        schema = _schema({"id": pa.int32(), "caption": pa.string()})
+        for data in ([{"id": 1.5}], {"id": [1.5]}):
+            with self.assertRaises(pa.ArrowInvalid):
+                _to_arrow_table(data, schema)
+        self.assertEqual([], _to_arrow_table([], schema).to_pylist())
+        self.assertEqual([{"id": None, "caption": None}] * 2,
+                         _to_arrow_table([{}, {}], schema).to_pylist())
+        self.assertEqual([{"id": 2, "caption": None}],
+                         _to_arrow_table({"id": ["2"]}, schema).to_pylist())
+
     def test_add_scan_where_select_limit(self):
         users = self.conn.create_table(
             "users",
