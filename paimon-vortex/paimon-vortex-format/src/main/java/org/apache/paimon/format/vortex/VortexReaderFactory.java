@@ -56,16 +56,20 @@ public class VortexReaderFactory implements FormatReaderFactory {
     @Override
     public FileRecordReader<InternalRow> createReader(Context context) {
         long[] rowIndices = toRowIndices(context.selection());
-        Expression predicate = VortexPredicateConverter.toVortexExpression(predicates);
         Pair<Path, Map<String, String>> vortexSpecified =
                 toVortexSpecifiedForReader(context.fileIO(), context.filePath());
-        return new VortexRecordsReader(
-                vortexSpecified.getLeft(),
-                dataSchemaRowType,
-                projectedRowType,
-                rowIndices,
-                predicate,
-                vortexSpecified.getRight());
+        // The scan clones the filter it is given, the same way it clones the projection, so this
+        // tree is ours to release once the reader's constructor has built the scan. One tree is
+        // built per data file, and nothing downstream reaches it again.
+        try (Expression predicate = VortexPredicateConverter.toVortexExpression(predicates)) {
+            return new VortexRecordsReader(
+                    vortexSpecified.getLeft(),
+                    dataSchemaRowType,
+                    projectedRowType,
+                    rowIndices,
+                    predicate,
+                    vortexSpecified.getRight());
+        }
     }
 
     @Nullable
