@@ -642,17 +642,18 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(self.expected, actual)
 
     @parameterized.expand([
-        ('default', None, None, True),
-        ('not_write_only_default', 'false', None, True),
-        ('write_only_default', 'true', None, True),
-        ('skip_enabled', None, 'true', True),
-        ('not_write_only_skip_enabled', 'false', 'true', True),
-        ('write_only_skip_enabled', 'true', 'true', False),
-        ('skip_disabled', None, 'false', True),
-        ('not_write_only_skip_disabled', 'false', 'false', True),
-        ('write_only_skip_disabled', 'true', 'false', True),
+        ('default', None, None),
+        ('not_write_only_default', 'false', None),
+        ('write_only_default', 'true', None),
+        ('skip_enabled', None, 'true'),
+        ('not_write_only_skip_enabled', 'false', 'true'),
+        ('write_only_skip_enabled', 'true', 'true'),
+        ('skip_disabled', None, 'false'),
+        ('not_write_only_skip_disabled', 'false', 'false'),
+        ('write_only_skip_disabled', 'true', 'false'),
     ])
-    def test_commit_manifest_merge(self, name, write_only, skip_on_write_only, merge_enabled):
+    def test_commit_preserves_existing_manifests(self, name, write_only, skip_on_write_only):
+        # Shared tables may still carry Java manifest maintenance options.
         options = {'manifest.merge-min-count': '2'}
         if write_only is not None:
             options['write-only'] = write_only
@@ -700,16 +701,11 @@ class TableWriteTest(unittest.TestCase):
         base_manifests = manifest_list_manager.read(snapshot.base_manifest_list)
         delta_manifests = manifest_list_manager.read(snapshot.delta_manifest_list)
 
-        if merge_enabled:
-            self.assertEqual(len(base_manifests), 1)
-            self.assertEqual(base_manifests[0].num_added_files, 2)
-            self.assertEqual(base_manifests[0].num_deleted_files, 0)
-        else:
-            self.assertEqual(len(base_manifests), 2)
-            self.assertEqual(
-                [manifest.file_name for manifest in previous_manifests],
-                [manifest.file_name for manifest in base_manifests],
-            )
+        self.assertEqual(len(base_manifests), 2)
+        self.assertEqual(
+            [manifest.file_name for manifest in previous_manifests],
+            [manifest.file_name for manifest in base_manifests],
+        )
         self.assertEqual(len(delta_manifests), 1)
 
         expected = pa.Table.from_pydict(expected_data, schema=self.pa_schema)

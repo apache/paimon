@@ -95,16 +95,13 @@ compatibility when upgrading; PyArrow reads do not currently use these indexes.
 
 ### Manifest Merging
 
-`manifest.merge.skip-on-write-only` defaults to `false` in both Python and Java,
-so commits keep their automatic manifest merging behavior. Set both this option
-and `write-only` to `true` to retain existing manifest files during commit and
-avoid the cost of reading and rewriting them. This option has no effect when
-`write-only=false`, which is also the default.
+Python commits retain existing manifest files without merging or rewriting them,
+including during commit retries. Run manifest compaction through a centralized
+maintenance service, for example using the Java engines' `compact_manifest` procedure.
 
-Python supports minor manifest compaction, using `manifest.merge-min-count` and
-`manifest.target-file-size`. Python does not support manifest sort rewrite.
-In Java, skipping automatic manifest merging also skips automatic manifest sort
-rewrite; explicit manifest compaction remains available.
+The table options `manifest.merge-min-count`, `manifest.merge.skip-on-write-only`,
+and `write-only` do not enable manifest merging in Python.
+`manifest.target-file-size` still controls the size of newly written manifest files.
 
 ### Commit Callback
 
