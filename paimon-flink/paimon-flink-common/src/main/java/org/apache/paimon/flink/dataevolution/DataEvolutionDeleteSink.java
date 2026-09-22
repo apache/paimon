@@ -129,8 +129,7 @@ public class DataEvolutionDeleteSink implements Serializable {
                                 new StoreCommitter(
                                         table,
                                         table.newCommit(context.commitUser())
-                                                .withOperation(Snapshot.Operation.DELETE)
-                                                .rowIdCheckConflict(baseSnapshotId),
+                                                .withOperation(Snapshot.Operation.DELETE),
                                         context),
                         new NoopCommittableStateManager());
 

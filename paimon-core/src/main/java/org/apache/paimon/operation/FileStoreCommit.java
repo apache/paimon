@@ -44,8 +44,6 @@ public interface FileStoreCommit extends AutoCloseable {
 
     FileStoreCommit appendCommitCheckConflict(boolean appendCommitCheckConflict);
 
-    FileStoreCommit rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot);
-
     FileStoreCommit rowIdCheckConflictForMaterializeDvCompaction(
             @Nullable Long rowIdCheckFromSnapshot);
 

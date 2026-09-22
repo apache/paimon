@@ -176,12 +176,6 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
-    public TableCommitImpl rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot) {
-        commit.rowIdCheckConflict(rowIdCheckFromSnapshot);
-        return this;
-    }
-
-    @Override
     public TableCommitImpl rowIdCheckConflictForMaterializeDvCompaction(
             @Nullable Long rowIdCheckFromSnapshot) {
         commit.rowIdCheckConflictForMaterializeDvCompaction(rowIdCheckFromSnapshot);

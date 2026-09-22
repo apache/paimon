@@ -44,8 +44,8 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
-import org.apache.paimon.table.sink.BatchWriteBuilderImpl;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
@@ -320,7 +320,7 @@ public class VectorStoreTableTest extends DataEvolutionTestBase {
             throws Exception {
         FileStoreTable table = getTableDefault();
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
-        ((BatchWriteBuilderImpl) builder).rowIdCheckConflict(table.latestSnapshot().get().id());
+        long readSnapshotId = table.latestSnapshot().get().id();
         try (BatchTableWrite writer =
                         builder.newWrite().withWriteType(table.rowType().project(columns));
                 BatchTableCommit commit = builder.newCommit()) {
@@ -329,7 +329,13 @@ public class VectorStoreTableTest extends DataEvolutionTestBase {
             }
             List<CommitMessage> messages = writer.prepareCommit();
             setFirstRowId(messages, firstRowId);
-            commit.commit(messages);
+            commit.commit(
+                    messages.stream()
+                            .map(
+                                    message ->
+                                            ((CommitMessageImpl) message)
+                                                    .withCheckFromSnapshot(readSnapshotId))
+                            .collect(Collectors.toList()));
         }
     }
 
