@@ -18,6 +18,7 @@
 import json
 import sys
 import unittest
+from datetime import datetime
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -33,8 +34,8 @@ from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
 from pypaimon.read.native_plan import (
     _catalog_options,
+    _native_read_builder,
     _predicate_to_native,
-    _read_options,
     _resolved_schema_json,
     _restore_python_partition_paths,
     native_family_search_modes_available,
@@ -160,24 +161,23 @@ class NativePlanTest(unittest.TestCase):
             pass
 
         table = Mock(file_io=LocalFileIO(), catalog_environment=CatalogEnvironment.empty())
-        with patch('pypaimon.read.native_plan.native_method_available', return_value=True):
-            self.assertEqual(_resolved_schema_file_io_options(table), {})
-            table.file_io = CustomIO()
+        self.assertEqual(_resolved_schema_file_io_options(table), {})
+        table.file_io = CustomIO()
+        self.assertIsNone(_resolved_schema_file_io_options(table))
+        table.file_io = LocalFileIO()
+        table.catalog_environment = CustomEnvironment()
+        self.assertIsNone(_resolved_schema_file_io_options(table))
+        table.catalog_environment = CatalogEnvironment.empty()
+        for loader_type in (RESTCatalogLoader, CustomLoader, CustomJdbcLoader):
+            table.catalog_environment.catalog_loader = loader_type(
+                CatalogContext.create_from_options(Options({})))
             self.assertIsNone(_resolved_schema_file_io_options(table))
-            table.file_io = LocalFileIO()
-            table.catalog_environment = CustomEnvironment()
-            self.assertIsNone(_resolved_schema_file_io_options(table))
-            table.catalog_environment = CatalogEnvironment.empty()
-            for loader_type in (RESTCatalogLoader, CustomLoader, CustomJdbcLoader):
-                table.catalog_environment.catalog_loader = loader_type(
-                    CatalogContext.create_from_options(Options({})))
+        for loader_type in (FileSystemCatalogLoader, JdbcCatalogLoader):
+            for attr in ('hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'):
+                context = CatalogContext.create_from_options(Options({}))
+                setattr(context, attr, object())
+                table.catalog_environment.catalog_loader = loader_type(context)
                 self.assertIsNone(_resolved_schema_file_io_options(table))
-            for loader_type in (FileSystemCatalogLoader, JdbcCatalogLoader):
-                for attr in ('hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'):
-                    context = CatalogContext.create_from_options(Options({}))
-                    setattr(context, attr, object())
-                    table.catalog_environment.catalog_loader = loader_type(context)
-                    self.assertIsNone(_resolved_schema_file_io_options(table))
 
     def test_switch_defaults_off(self):
         defaults = CoreOptions(Options({}))
@@ -200,9 +200,8 @@ class NativePlanTest(unittest.TestCase):
         arrow.properties = properties
         for file_io in (arrow, ResolvingFileIO(properties)):
             table = Mock(file_io=file_io, catalog_environment=CatalogEnvironment.empty())
-            with patch('pypaimon.read.native_plan.native_method_available', return_value=True):
-                self.assertEqual(_resolved_schema_file_io_options(table), {
-                    's3.path-style-access': 'true', 's3.endpoint': 'http://localhost:9000'})
+            self.assertEqual(_resolved_schema_file_io_options(table), {
+                's3.path-style-access': 'true', 's3.endpoint': 'http://localhost:9000'})
 
     def test_plan_uses_file_scanner_when_switch_off(self):
         fs = Mock()
@@ -387,8 +386,13 @@ class NativePlanTest(unittest.TestCase):
         check(lambda s, fs: (setattr(s.table, 'is_primary_key_table', True),
                              setattr(s.table, 'trimmed_primary_keys', [])))
         check(lambda s, fs: setattr(s.table.options, 'query_auth_enabled', True))
-        check(lambda s, fs: s.table.identifier.get_database_name.__setattr__(
-            'return_value', 'unknown'))
+
+        def unknown_rest_database(scan, fs):
+            scan.table.catalog_environment.catalog_loader = RESTCatalogLoader(
+                CatalogContext.create_from_options(Options({})))
+            scan.table.identifier.get_database_name.return_value = 'unknown'
+
+        check(unknown_rest_database)
         check(lambda s, fs: setattr(
             s.table.catalog_environment, 'catalog_loader', object()))   # no context()
         for attr in ('hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'):
@@ -494,19 +498,17 @@ class NativePlanTest(unittest.TestCase):
             self.assertIs(scan.plan(), sentinel)
         fs.scan.assert_called_once_with()
 
-    def test_plan_falls_back_for_jdbc_catalog_loader(self):
+    def test_plan_uses_resolved_schema_for_jdbc_catalog_loader(self):
         fs = Mock(partition_key_predicate=None)
-        sentinel = object()
-        fs.scan.return_value = sentinel
         scan = _scan(native_enabled=True, file_scanner=fs)
         scan.table.catalog_environment.catalog_loader = JdbcCatalogLoader(
             CatalogContext.create_from_options(Options({})))
 
-        with patch('pypaimon.read.native_plan.native_plan') as np:
-            self.assertIs(scan.plan(), sentinel)
+        with patch('pypaimon.read.native_plan.native_plan', return_value=Plan([], 1)) as np:
+            self.assertEqual(scan.plan().snapshot_id, 1)
 
-        np.assert_not_called()
-        fs.scan.assert_called_once_with()
+        np.assert_called_once()
+        fs.scan.assert_not_called()
 
     def test_plan_falls_back_for_builtin_catalog_loader_subclasses(self):
         class RoutedFileSystemLoader(FileSystemCatalogLoader):
@@ -627,13 +629,15 @@ class NativePlanTest(unittest.TestCase):
     def test_blob_as_descriptor_is_forwarded_to_rust(self):
         for value in ('true', 'false', True, False):
             with self.subTest(value=value):
-                table = Mock()
-                table.options = CoreOptions(Options({'blob-as-descriptor': value}))
+                options = {'blob-as-descriptor': value}
+                table = SimpleNamespace(
+                    table_schema=TableSchema(0, [], options=options),
+                    options=CoreOptions(Options(options)))
                 self.assertEqual(
-                    _read_options(table)['blob-as-descriptor'],
+                    json.loads(_resolved_schema_json(table))['options']['blob-as-descriptor'],
                     str(value).lower())
 
-    def test_predicate_and_time_travel_are_converted_for_rust(self):
+    def test_predicate_is_converted_for_rust(self):
         predicate = PredicateBuilder.and_predicates([
             Predicate('greaterOrEqual', 0, 'k', [10]),
             Predicate('in', 1, 'v', ['a', 'b']),
@@ -646,26 +650,48 @@ class NativePlanTest(unittest.TestCase):
             ],
         })
 
-        table = Mock()
-        table.options.source_split_target_size.return_value = 1024
-        table.options.source_split_open_file_cost.return_value = 128
-        table.options.options = Options({
+    def test_resolved_schema_preserves_options_and_normalizes_values(self):
+        options = {
+            'source.split.target-size': '1 kb',
+            'source.split.open-file-cost': '128 b',
             'scan.snapshot-id': '9',
+            'scan.watermark': 200,
             'global-index.search-mode': 'detail',
             'scalar-index.search-mode': 'full',
             'vector-index.search-mode': 'fast',
             'full-text-index.search-mode': 'fast',
-        })
-        self.assertEqual(_read_options(table), {
+            'read.batch-size': 32,
+            'custom.read-option': True,
+            'removed.option': None,
+        }
+        table = SimpleNamespace(
+            table_schema=TableSchema(0, [], options=options),
+            options=CoreOptions(Options(options)))
+        self.assertEqual(json.loads(_resolved_schema_json(table))['options'], {
             'source.split.target-size': '1024',
             'source.split.open-file-cost': '128',
             'deletion-vectors.merge-on-read': 'false',
             'scan.snapshot-id': '9',
+            'scan.watermark': '200',
             'global-index.search-mode': 'detail',
             'scalar-index.search-mode': 'full',
             'vector-index.search-mode': 'fast',
             'full-text-index.search-mode': 'fast',
+            'read.batch-size': '32',
+            'custom.read-option': 'true',
         })
+        self.assertEqual(table.table_schema.options, options)
+
+    def test_resolved_schema_converts_timestamp_to_millis(self):
+        options = {'scan.timestamp': '2026-09-22T00:00:00'}
+        table = SimpleNamespace(
+            table_schema=TableSchema(0, [], options=options),
+            options=CoreOptions(Options(options)))
+        resolved = json.loads(_resolved_schema_json(table))['options']
+        self.assertEqual(resolved['scan.timestamp-millis'],
+                         str(int(datetime(2026, 9, 22).timestamp() * 1000)))
+        self.assertNotIn('scan.timestamp', resolved)
+        self.assertEqual(table.table_schema.options, options)
 
     @unittest.skipIf(sys.version_info < (3, 8),
                      "importlib.metadata requires Python 3.8")
@@ -771,29 +797,14 @@ class NativePlanTest(unittest.TestCase):
         table.current_branch.return_value = 'main'
         table.table_schema = Mock(fields=[], partition_keys=[])
         table.partition_keys = []
-        table.options.source_split_target_size.return_value = 1024
-        table.options.source_split_open_file_cost.return_value = 128
-        table.options.options = Options({})
-        table._applied_dynamic_options = {}
         split = Mock()
         split.serialize.return_value = b'bytes'
-        rt = Mock()
-        builder = rt.new_read_builder.return_value
+        builder = Mock()
         builder.with_row_ranges.return_value = builder
         builder.new_scan.return_value.plan.return_value.splits.return_value = [split]
         builder.new_scan.return_value.plan.return_value.snapshot_id.return_value = 3
-        catalog = Mock()
-        catalog.get_table.return_value = rt
 
-        fake_df = ModuleType('pypaimon_rust.datafusion')
-        fake_df.PaimonCatalog = Mock(return_value=catalog)
-        fake_df.Split = type('Split', (), {'serialize': lambda self: b''})
-        fake_mod = ModuleType('pypaimon_rust')
-        fake_mod.datafusion = fake_df
-
-        with patch.dict(sys.modules,
-                        {'pypaimon_rust': fake_mod, 'pypaimon_rust.datafusion': fake_df}), \
-                patch('pypaimon.read.native_plan._catalog_options', return_value={}), \
+        with patch('pypaimon.read.native_plan._native_read_builder', return_value=builder), \
                 patch('pypaimon.read.native_plan.deserialize_split_v1') as des:
             decoded = Mock()
             des.return_value = decoded
@@ -802,11 +813,6 @@ class NativePlanTest(unittest.TestCase):
         self.assertEqual(result.splits(), [decoded])
         self.assertIs(decoded._native_split, split)
         self.assertEqual(result.snapshot_id, 3)
-        rt.new_read_builder.assert_called_once_with({
-            CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(): '1024',
-            CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(): '128',
-            CoreOptions.DELETION_VECTORS_MERGE_ON_READ.key(): 'false',
-        })
         builder.with_row_ranges.assert_called_once_with([(1, 2)])
         des.assert_called_once_with(b'bytes', [], kfields)
 
@@ -819,10 +825,9 @@ class NativePlanTest(unittest.TestCase):
                 if not legacy:
                     rust_plan.snapshot_id = lambda: snapshot_id
                 scan = SimpleNamespace(plan=lambda: rust_plan)
-                rt = Mock()
-                rt.new_read_builder.return_value.new_scan.return_value = scan
-                with patch('pypaimon_rust.datafusion.PaimonCatalog') as catalog:
-                    catalog.return_value.get_table.return_value = rt
+                builder = Mock()
+                builder.new_scan.return_value = scan
+                with patch('pypaimon.read.native_plan._native_read_builder', return_value=builder):
                     if legacy:
                         with self.assertRaisesRegex(RuntimeError, "empty plan's snapshot"):
                             native_plan(table)
@@ -833,7 +838,8 @@ class NativePlanTest(unittest.TestCase):
 
     def test_native_plan_branch_resolution(self):
         table = _scan(True, Mock()).table
-        table.table_schema = Mock(fields=[], partition_keys=[])
+        table.table_schema = TableSchema(0, [])
+        table.options = CoreOptions(Options({}))
         table.current_branch.return_value = 'b1'
         rust_plan = SimpleNamespace(splits=lambda: [], snapshot_id=lambda: 7)
         scan = Mock()
@@ -841,14 +847,31 @@ class NativePlanTest(unittest.TestCase):
         rt = Mock()
         rt.branch.return_value = 'b1'
         rt.new_read_builder.return_value.new_scan.return_value = scan
-        with patch('pypaimon_rust.datafusion.PaimonCatalog') as catalog:
-            catalog.return_value.get_table.return_value = rt
+        with patch('pypaimon_rust.datafusion.Table', create=True) as native_table:
+            native_table.from_resolved_schema.return_value = rt
             plan = native_plan(table)
             self.assertEqual(plan.snapshot_id, 7)
             scan.plan.assert_called_once_with()
             rt.branch.return_value = 'main'
             with self.assertRaisesRegex(RuntimeError, 'requested branch'):
                 native_plan(table)
+
+    def test_native_read_builder_requires_resolved_schema(self):
+        for loader_type in (FileSystemCatalogLoader, RESTCatalogLoader):
+            with self.subTest(loader=loader_type):
+                table = _scan(True, Mock()).table
+                table.table_schema = TableSchema(0, [], options={'read.batch-size': 32})
+                table.options = CoreOptions(Options(table.table_schema.options))
+                table.catalog_environment.catalog_loader = loader_type(
+                    CatalogContext.create_from_options(Options({})))
+                legacy_table = SimpleNamespace(
+                    location=lambda: table.table_path, new_read_builder=Mock())
+                with patch('pypaimon_rust.datafusion.Table', type('Table', (), {}), create=True), \
+                        patch('pypaimon_rust.datafusion.PaimonCatalog') as catalog:
+                    catalog.return_value.get_table.return_value = legacy_table
+                    with self.assertRaises(AttributeError):
+                        _native_read_builder(table)
+                legacy_table.new_read_builder.assert_not_called()
 
     def test_explicit_row_ranges_are_forwarded(self):
         for ranges in ([], [Range(1, 2), Range(5, 8)]):
@@ -882,7 +905,6 @@ class NativePlanTest(unittest.TestCase):
         scan.table.options.options = Options({'scan.watermark': '200'})
         scan.table._applied_dynamic_options = {'scan.watermark': '200'}
         scan.table.schema_manager.latest.return_value.id = 2
-        self.assertEqual(_read_options(scan.table)['scan.watermark'], '200')
         with patch('pypaimon.read.native_plan.native_plan',
                    return_value=Plan([], 1)) as native:
             self.assertEqual(scan.plan().snapshot_id, 1)
