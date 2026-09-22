@@ -112,6 +112,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.zip.CRC32;
 
 import static org.apache.paimon.append.dataevolution.SerializationAssignment.PLAN_FILE_PROPERTY;
 import static org.apache.paimon.append.dataevolution.SerializationAssignment.REASSIGN_SNAPSHOT_ID;
@@ -928,7 +929,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
     }
 
     @Test
-    public void testRejectInvalidPlanLengthsBeforeAllocation() throws Exception {
+    public void testValidatePlanChecksumBeforeDeserialization() throws Exception {
         FileStoreTable table = createTableWithInterleavedPartitions();
         new DataEvolutionRowIdReassigner(table).reassign();
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
@@ -955,7 +956,8 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                                                 table.store().pathFactory(),
                                                 planFile(snapshot)))
                         .as("Invalid length %s at offset %s", length, offset)
-                        .isInstanceOf(IOException.class);
+                        .isInstanceOf(IOException.class)
+                        .hasMessageContaining("checksum");
             }
         }
     }
@@ -981,6 +983,9 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
 
         corrupted = bytes.clone();
         corrupted[3] = 99;
+        CRC32 checksum = new CRC32();
+        checksum.update(corrupted, 0, corrupted.length - Long.BYTES);
+        ByteBuffer.wrap(corrupted).putLong(corrupted.length - Long.BYTES, checksum.getValue());
         overwritePlan(table, path, corrupted);
         assertThatThrownBy(
                         () ->
@@ -991,14 +996,16 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("version: 99");
 
-        overwritePlan(table, path, Arrays.copyOf(bytes, bytes.length - 1));
-        assertThatThrownBy(
-                        () ->
-                                readPlan(
-                                        table.fileIO(),
-                                        table.store().pathFactory(),
-                                        planFile(snapshot)))
-                .isInstanceOf(IOException.class);
+        for (int length : new int[] {0, Long.BYTES - 1, bytes.length - 1}) {
+            overwritePlan(table, path, Arrays.copyOf(bytes, length));
+            assertThatThrownBy(
+                            () ->
+                                    readPlan(
+                                            table.fileIO(),
+                                            table.store().pathFactory(),
+                                            planFile(snapshot)))
+                    .isInstanceOf(IOException.class);
+        }
     }
 
     private long planFileCount(FileStoreTable table) throws IOException {

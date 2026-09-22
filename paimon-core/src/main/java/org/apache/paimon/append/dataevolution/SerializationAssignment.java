@@ -22,17 +22,14 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.io.DataInputViewStreamWrapper;
+import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Range;
 
-import org.apache.paimon.shade.guava30.com.google.common.io.CountingInputStream;
-
 import javax.annotation.Nullable;
 
-import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -45,9 +42,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.zip.CRC32;
-import java.util.zip.CheckedInputStream;
 import java.util.zip.CheckedOutputStream;
 
+import static org.apache.paimon.utils.IOUtils.readFully;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.readCount;
@@ -63,9 +60,6 @@ public final class SerializationAssignment {
 
     private static final int VERSION = 1;
     private static final String FILE_PREFIX = "snapshot-";
-
-    // Partition length, arity, null bits, mapping count, and at least one mapping triple.
-    private static final long MIN_PARTITION_SIZE = 3L * Integer.BYTES + 4L * Long.BYTES;
 
     private final long snapshotId;
     private final Map<BinaryRow, RowRangeMappingIndex> rowIdMappings;
@@ -186,57 +180,34 @@ public final class SerializationAssignment {
     public static SerializationAssignment readPlan(
             FileIO fileIO, FileStorePathFactory pathFactory, String fileName) throws IOException {
         Path path = pathFactory.toManifestFilePath(fileName);
-        long payloadSize = fileIO.getFileSize(path) - Long.BYTES;
-        // Count bytes consumed by the decoder, rather than bytes prefetched by the buffer.
-        try (CountingInputStream input =
-                new CountingInputStream(new BufferedInputStream(fileIO.newInputStream(path)))) {
-            DataInputViewStreamWrapper in = new DataInputViewStreamWrapper(input);
-            CRC32 checksum = new CRC32();
-            DataInputViewStreamWrapper payload =
-                    new DataInputViewStreamWrapper(new CheckedInputStream(in, checksum));
-            int version = payload.readInt();
+        byte[] bytes = readFully(fileIO.newInputStream(path), true);
+        if (bytes.length < Long.BYTES) {
+            throw new IOException("Truncated row-id reassignment plan.");
+        }
+        int payloadSize = bytes.length - Long.BYTES;
+        CRC32 checksum = new CRC32();
+        checksum.update(bytes, 0, payloadSize);
+        if (ByteBuffer.wrap(bytes).getLong(payloadSize) != checksum.getValue()) {
+            throw new IOException("Row-id reassignment plan checksum mismatch.");
+        }
+        try {
+            DataInputDeserializer in = new DataInputDeserializer(bytes, 0, payloadSize);
+            int version = in.readInt();
             if (version != VERSION) {
                 throw new IOException("Unsupported row-id reassignment plan version: " + version);
             }
-            long snapshotId = payload.readLong();
-            long firstAssignedRowId = payload.readLong();
-            long nextRowId = payload.readLong();
-            int partitions = readCount(payload, "reassignment partitions");
-            if (partitions == 0
-                    || partitions > (payloadSize - input.getCount()) / MIN_PARTITION_SIZE) {
-                throw new IOException("Invalid reassignment partition count: " + partitions);
-            }
+            long snapshotId = in.readLong();
+            long firstAssignedRowId = in.readLong();
+            long nextRowId = in.readLong();
+            int partitions = readCount(in, "reassignment partitions");
             Map<BinaryRow, RowRangeMappingIndex> mappings = new LinkedHashMap<>();
             for (int i = 0; i < partitions; i++) {
-                int partitionSize = readCount(payload, "reassignment partition bytes");
-                if (partitionSize < Integer.BYTES + Long.BYTES
-                        || partitionSize > payloadSize - input.getCount()) {
-                    throw new IOException(
-                            "Invalid reassignment partition byte length: " + partitionSize);
-                }
-                byte[] partitionBytes = new byte[partitionSize];
-                payload.readFully(partitionBytes);
-                int arity = ByteBuffer.wrap(partitionBytes).getInt();
-                long fixedSize =
-                        ((arity + 63L + BinaryRow.HEADER_SIZE_IN_BITS) / 64) * Long.BYTES
-                                + (long) arity * Long.BYTES;
-                if (arity < 0 || fixedSize > partitionSize - Integer.BYTES) {
-                    throw new IOException("Invalid reassignment partition arity: " + arity);
-                }
-                BinaryRow partition = deserializeBinaryRow(partitionBytes);
-                if (mappings.put(
-                                partition,
-                                RowRangeMappingIndex.deserialize(
-                                        payload, payloadSize - input.getCount()))
-                        != null) {
+                BinaryRow partition = deserializeBinaryRow(in);
+                if (mappings.put(partition, RowRangeMappingIndex.deserialize(in)) != null) {
                     throw new IOException("Duplicate partition in row-id reassignment plan.");
                 }
             }
-            long actualChecksum = checksum.getValue();
-            if (in.readLong() != actualChecksum) {
-                throw new IOException("Row-id reassignment plan checksum mismatch.");
-            }
-            if (in.read() != -1) {
+            if (in.available() != 0) {
                 throw new IOException("Unexpected trailing bytes in row-id reassignment plan.");
             }
             return new SerializationAssignment(snapshotId, mappings, firstAssignedRowId, nextRowId);
