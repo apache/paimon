@@ -50,6 +50,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -172,10 +173,10 @@ public class HiveSchema {
                     paimonSchema.fields().stream()
                             .collect(
                                     Collectors.toMap(
-                                            dataField -> dataField.name().toLowerCase(),
+                                            dataField -> dataField.name().toLowerCase(Locale.ROOT),
                                             Function.identity()));
             for (int i = 0; i < columnNames.size(); i++) {
-                String columnName = columnNames.get(i).toLowerCase();
+                String columnName = columnNames.get(i).toLowerCase(Locale.ROOT);
                 if (Objects.equals(columnName, tagToPartField)) {
                     // ignore tagToPartField, it should just be a string type
                     continue;

@@ -38,6 +38,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
 import static org.apache.flink.cdc.connectors.mongodb.internal.MongoDBEnvelope.encodeValue;
@@ -153,7 +154,8 @@ public class MongoDBSchemaUtils {
     }
 
     private static SchemaAcquisitionMode getModeFromConfig(Configuration mongodbConfig) {
-        return SchemaAcquisitionMode.valueOf(mongodbConfig.get(START_MODE).toUpperCase());
+        return SchemaAcquisitionMode.valueOf(
+                mongodbConfig.get(START_MODE).toUpperCase(Locale.ROOT));
     }
 
     private static List<String> getColumnNames(Document document) {

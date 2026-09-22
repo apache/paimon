@@ -22,13 +22,15 @@ import org.apache.paimon.factories.Factory;
 import org.apache.paimon.factories.FactoryException;
 import org.apache.paimon.factories.FactoryUtil;
 
+import java.util.Locale;
+
 /** Factory to create {@link DataFormat}. */
 public interface DataFormatFactory extends Factory {
 
     DataFormat create();
 
     static DataFormat createDataFormat(String format) {
-        String identifier = format.toLowerCase();
+        String identifier = format.toLowerCase(Locale.ROOT);
         DataFormatFactory dataFormatFactory;
         try {
             dataFormatFactory =

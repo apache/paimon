@@ -33,6 +33,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
@@ -103,7 +104,7 @@ public class SystemTableLoader {
 
     @Nullable
     public static Table load(String type, FileStoreTable dataTable) {
-        String name = type.toLowerCase();
+        String name = type.toLowerCase(Locale.ROOT);
         if (PHYSICAL_METADATA_TABLES.contains(name) && dataTable.coreOptions().queryAuthEnabled()) {
             throw new UnsupportedOperationException(
                     String.format(

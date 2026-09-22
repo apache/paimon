@@ -35,6 +35,7 @@ import java.io.File;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.function.LongSupplier;
@@ -152,7 +153,7 @@ public class LocalKvStateFactory implements StateFactory {
         checkArgument(!databases.containsKey(name), "State '%s' already exists.", name);
 
         File stateDirectory =
-                new File(rootDirectory, String.format("state-%06d", databases.size()));
+                new File(rootDirectory, String.format(Locale.ROOT, "state-%06d", databases.size()));
         LocalKvDb db =
                 LocalKvDb.builder(stateDirectory)
                         .cacheManager(cacheManager)

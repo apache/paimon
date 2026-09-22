@@ -27,6 +27,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -450,6 +451,21 @@ class StringUtilsTest {
         void testToLowerCaseIfNeed(String input, boolean caseSensitive, String expected) {
             String result = StringUtils.toLowerCaseIfNeed(input, caseSensitive);
             assertThat(result).isEqualTo(expected);
+        }
+
+        @Test
+        void testToLowerCaseIfNeedIndependentOfDefaultLocale() {
+            Locale original = Locale.getDefault();
+            try {
+                // Turkish lowercases 'I' to a dotless glyph under its locale;
+                // identifier matching must stay locale-independent
+                Locale.setDefault(new Locale("tr", "TR"));
+                assertThat(StringUtils.toLowerCaseIfNeed("INDEX", false)).isEqualTo("index");
+                assertThat(StringUtils.toLowerCase("INDEX")).isEqualTo("index");
+                assertThat(StringUtils.toUpperCase("ıindex")).isEqualTo("IINDEX");
+            } finally {
+                Locale.setDefault(original);
+            }
         }
     }
 

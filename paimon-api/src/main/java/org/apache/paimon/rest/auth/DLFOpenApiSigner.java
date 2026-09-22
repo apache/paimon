@@ -184,7 +184,7 @@ public class DLFOpenApiSigner implements DLFRequestSigner {
     private static String buildCanonicalizedHeaders(Map<String, String> headers) {
         TreeMap<String, String> sortedHeaders = new TreeMap<>();
         for (Map.Entry<String, String> entry : headers.entrySet()) {
-            String key = entry.getKey().toLowerCase();
+            String key = entry.getKey().toLowerCase(Locale.ROOT);
             if (key.startsWith("x-acs-")) {
                 sortedHeaders.put(key, StringUtils.trim(entry.getValue()));
             }

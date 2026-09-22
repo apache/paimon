@@ -21,6 +21,8 @@ package org.apache.paimon.flink.clone;
 import org.apache.paimon.flink.action.CloneAction;
 import org.apache.paimon.utils.StringUtils;
 
+import java.util.Locale;
+
 /** Utils for file format in {@link CloneAction}. */
 public class CloneFileFormatUtils {
 
@@ -28,7 +30,7 @@ public class CloneFileFormatUtils {
         if (StringUtils.isNullOrWhitespaceOnly(fileFormat)) {
             return;
         }
-        String fileFormatLower = fileFormat.toLowerCase();
+        String fileFormatLower = fileFormat.toLowerCase(Locale.ROOT);
         String[] supportedFileFormat = new String[] {"parquet", "orc", "avro"};
         for (String supportedFormat : supportedFileFormat) {
             if (fileFormatLower.equals(supportedFormat)) {

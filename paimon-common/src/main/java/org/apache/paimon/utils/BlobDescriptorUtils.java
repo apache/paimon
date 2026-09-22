@@ -28,6 +28,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.net.URI;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -61,7 +62,7 @@ public class BlobDescriptorUtils {
     }
 
     private static String normalizeScheme(@Nullable String scheme) {
-        return scheme == null ? null : scheme.toLowerCase();
+        return scheme == null ? null : scheme.toLowerCase(Locale.ROOT);
     }
 
     /**

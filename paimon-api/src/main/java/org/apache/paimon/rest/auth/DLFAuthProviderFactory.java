@@ -22,6 +22,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalogOptions;
 import org.apache.paimon.utils.StringUtils;
 
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -96,7 +97,7 @@ public class DLFAuthProviderFactory implements AuthProviderFactory {
         }
 
         // Check for aliyun openapi endpoints
-        if (uri.toLowerCase().contains("dlfnext")) {
+        if (uri.toLowerCase(Locale.ROOT).contains("dlfnext")) {
             return DLFOpenApiSigner.IDENTIFIER;
         }
 
