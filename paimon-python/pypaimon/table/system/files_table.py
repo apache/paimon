@@ -125,6 +125,24 @@ def _render_partition(partition_row) -> Optional[str]:
                     for field, value in zip(fields, values))
 
 
+def _row_values(row) -> List[Any]:
+    # ``GenericRow`` exposes ``values`` directly, but a row read back from a
+    # manifest is a ``BinaryRow`` that only offers ``get_field``/``__len__``.
+    # Fall back to those so value stats are not silently rendered as ``{}``.
+    if row is None:
+        return []
+    values = getattr(row, "values", None)
+    if values is not None:
+        return values
+    try:
+        return [row.get_field(i) for i in range(len(row))]
+    except Exception:
+        # A row whose stored arity disagrees with the resolved fields (schema
+        # evolution) or whose bytes are malformed must degrade to {} rather than
+        # abort the whole $files listing, which is what the old code did.
+        return []
+
+
 def _render_stats_map(values: List[Any], columns: List[str]) -> str:
     pairs = {}
     n = min(len(columns), len(values) if values is not None else 0)
@@ -212,10 +230,10 @@ class FilesTable(SystemTable):
             rows["null_value_counts"].append(
                 _render_null_counts(value_stats.null_counts, stats_cols))
             rows["min_value_stats"].append(_render_stats_map(
-                getattr(value_stats.min_values, "values", []) or [],
+                _row_values(value_stats.min_values),
                 stats_cols))
             rows["max_value_stats"].append(_render_stats_map(
-                getattr(value_stats.max_values, "values", []) or [],
+                _row_values(value_stats.max_values),
                 stats_cols))
 
             rows["min_sequence_number"].append(int(meta.min_sequence_number))

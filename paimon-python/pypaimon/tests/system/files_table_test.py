@@ -148,6 +148,47 @@ class FilesTableTest(unittest.TestCase):
         for level in arrow_table.column("level").to_pylist():
             self.assertGreaterEqual(level, 0)
 
+    def test_value_stats_render_actual_values(self):
+        # A partitioned table with full stats: the value-stats maps must carry
+        # the real per-column values (including the partition column), not {}.
+        fields = [
+            DataField.from_dict({"id": 0, "name": "id", "type": "INT"}),
+            DataField.from_dict({"id": 1, "name": "v", "type": "STRING"}),
+            DataField.from_dict({"id": 2, "name": "dt", "type": "STRING"}),
+        ]
+        self.catalog.create_table(
+            "db.stats_t",
+            Schema(fields=fields, partition_keys=["dt"],
+                   options={"metadata.stats-mode": "full"}),
+            False,
+        )
+        table = self.catalog.get_table("db.stats_t")
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        commit = write_builder.new_commit()
+        writer.write_arrow(pa.table({
+            "id": pa.array([1, 2, 3], type=pa.int32()),
+            "v": ["a", "b", "c"],
+            "dt": ["2024-01-01", "2024-01-01", "2024-01-02"],
+        }))
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+        arrow_table = _read(self.catalog.get_table("db.stats_t$files"))
+        self.assertGreater(arrow_table.num_rows, 0)
+        mins = [json.loads(s) for s in
+                arrow_table.column("min_value_stats").to_pylist()]
+        maxs = [json.loads(s) for s in
+                arrow_table.column("max_value_stats").to_pylist()]
+        # Real per-column values, not an empty {} (the BinaryRow-lacks-values bug).
+        self.assertTrue(any(m for m in mins),
+                        "min_value_stats all empty: {}".format(mins))
+        self.assertEqual(1, min(m["id"] for m in mins if "id" in m))
+        self.assertEqual(3, max(m["id"] for m in maxs if "id" in m))
+        # The partition column also lands in the stats map.
+        self.assertTrue(any("dt" in m for m in mins))
+
 
 if __name__ == "__main__":
     unittest.main()
