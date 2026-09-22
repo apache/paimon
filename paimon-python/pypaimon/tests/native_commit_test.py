@@ -195,6 +195,20 @@ def test_native_empty_overwrite_semantics(tmp_path, mode, dynamic, spec, remaini
         commit.close()
 
 
+@requires_native
+@pytest.mark.parametrize('value', ['off', '0', ' false '])
+def test_native_overwrite_normalizes_python_boolean_option(tmp_path, value):
+    table = _table(tmp_path).copy({'dynamic-partition-overwrite': value})
+    _seed(table)
+    commit = table.new_batch_write_builder().overwrite({'pt': 'a'}).new_commit()
+    try:
+        with _must_not_fallback(commit, 'overwrite'):
+            commit.commit([])
+        assert [row['id'] for row in _rows(table)] == [2, 3]
+    finally:
+        commit.close()
+
+
 @pytest.mark.parametrize('native', [False, True])
 @pytest.mark.parametrize('case', ['unpartitioned', 'static-empty', 'static-missing', 'dynamic-empty'])
 def test_empty_overwrite_records_java_snapshot(tmp_path, native, case):

@@ -74,6 +74,9 @@ def create_native_commit(table, commit_user):
     # copy() overrides. Do not inject scan options or reload catalog schemas.
     options = {str(key): _option_value_to_string(value)
                for key, value in table.table_schema.options.items() if value is not None}
+    # Python accepts boolean spellings such as "off"; pass the parsed value.
+    options['dynamic-partition-overwrite'] = _option_value_to_string(
+        table.options.dynamic_partition_overwrite())
     native_table = NativeTable.from_resolved_schema(
         table.table_path, JSON.to_json(table.table_schema.copy(new_options=options)),
         database=table.identifier.get_database_name(),
