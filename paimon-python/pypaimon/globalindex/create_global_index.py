@@ -103,7 +103,7 @@ _SORTED_INDEX_IDENTIFIERS = (BTREE_IDENTIFIER, BITMAP_IDENTIFIER)
 _GENERIC_INDEX_IDENTIFIERS = tuple(VINDEX_IDENTIFIERS) + (
     FULL_TEXT_IDENTIFIER,
 )
-_SORTED_INDEX_RECORDS_PER_RANGE_FLOATING = 1.2
+_SORTED_INDEX_RECORDS_PER_FILE_FLOATING = 1.2
 
 
 class GlobalIndexBuilder:
@@ -218,10 +218,10 @@ class GlobalIndexBuilder:
         configured_records_per_range = (
             self._core_options.sorted_index_records_per_range())
         if configured_records_per_range <= 0:
-            raise ValueError("sorted-index.records-per-range must be positive.")
+            raise ValueError("sorted-index.records-per-file must be positive.")
         records_per_range = int(
             configured_records_per_range
-            * _SORTED_INDEX_RECORDS_PER_RANGE_FLOATING
+            * _SORTED_INDEX_RECORDS_PER_FILE_FLOATING
         )
 
         messages = []

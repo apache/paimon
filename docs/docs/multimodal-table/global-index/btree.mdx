@@ -99,7 +99,7 @@ added_files = table.create_global_index(
     "name",
     index_type="btree",
     partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
-    options={"sorted-index.records-per-range": "10000000"},
+    options={"sorted-index.records-per-file": "25000000"},
 )
 print(added_files)
 ```
@@ -149,7 +149,7 @@ print(pa_table)
 
 | Option | Default | Description |
 |---|---|---|
-| `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree, Bitmap, and Multivalue builds. |
+| `sorted-index.records-per-file` | `25000000` | Expected number of records per sorted global index file for BTree, Bitmap, and Multivalue builds. |
 | `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
 | `btree-index.block-size` | `64 kb` | Block size used by BTree index files. |
 | `btree-index.bloom-filter.enabled` | `false` | Whether to write a Bloom filter to accelerate BTree equality and `IN` lookups. |

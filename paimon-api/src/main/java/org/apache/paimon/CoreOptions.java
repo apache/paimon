@@ -5012,6 +5012,7 @@ public class CoreOptions implements Serializable {
     private Options primaryKeySortedIndexOptions(
             String column, String optionFamily, String algorithmPrefix) {
         Options resolved = new Options(toConfiguration().toMap());
+        resolved.remove("sorted-index.records-per-file");
         resolved.remove("sorted-index.records-per-range");
         String optionKey = "fields." + column + "." + optionFamily + ".index.options";
         String serialized = options.get(optionKey);

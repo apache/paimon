@@ -1057,10 +1057,10 @@ class CoreOptions:
         )
     )
 
-    SORTED_INDEX_RECORDS_PER_RANGE: ConfigOption[int] = (
-        ConfigOptions.key("sorted-index.records-per-range")
+    SORTED_INDEX_RECORDS_PER_FILE: ConfigOption[int] = (
+        ConfigOptions.key("sorted-index.records-per-file")
         .long_type()
-        .default_value(10_000_000)
+        .default_value(25_000_000)
         .with_description("The expected number of records per sorted global index file.")
     )
 
@@ -1822,6 +1822,7 @@ class CoreOptions:
     def _primary_key_sorted_index_options(
             self, column: str, option_family: str, algorithm_prefix: str) -> Options:
         resolved = dict(self.options.to_map())
+        resolved.pop("sorted-index.records-per-file", None)
         resolved.pop("sorted-index.records-per-range", None)
         option_key = "fields.%s.%s.index.options" % (column, option_family)
         serialized = self.options.to_map().get(option_key)
@@ -1879,9 +1880,13 @@ class CoreOptions:
         return self.options.get(CoreOptions.BTREE_INDEX_BLOOM_FILTER_ENABLED)
 
     def sorted_index_records_per_range(self) -> int:
-        if self.options.contains(CoreOptions.SORTED_INDEX_RECORDS_PER_RANGE):
-            return self.options.get(CoreOptions.SORTED_INDEX_RECORDS_PER_RANGE)
-        return self.options.get(CoreOptions.BTREE_INDEX_RECORDS_PER_RANGE)
+        option = CoreOptions.SORTED_INDEX_RECORDS_PER_FILE
+        for key in (option.key(), "sorted-index.records-per-range",
+                    CoreOptions.BTREE_INDEX_RECORDS_PER_RANGE.key()):
+            value = self.options.to_map().get(key)
+            if value is not None:
+                return OptionsUtils.convert_to_long(value)
+        return option.default_value()
 
     def bitmap_index_fallback_scan_max_size(self) -> int:
         return self.options.get(
