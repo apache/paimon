@@ -141,3 +141,23 @@ CALL sys.reassign_row_id(table => 'default.T');
 
 CALL sys.reassign_row_id(table => 'default.T', partitions => 'dt=2026-05-19');
 ```
+
+## enable_data_evolution
+
+Enable data evolution on an existing append table without rewriting its data files: every data
+file is assigned a row ID range by rewriting the manifests of the latest snapshot, then
+`row-tracking.enabled` and `data-evolution.enabled` are switched on in a new schema. The table
+must be an append table without primary key, with `bucket = -1` and without
+`clustering.incremental`. REST catalog tables are not supported yet. See
+[Data Evolution](../../multimodal-table/data-evolution#enable-on-an-existing-append-table).
+
+**Arguments**
+
+- `table` (`STRING`, required): the target table identifier.
+- `dry_run` (`BOOLEAN`, optional): report the files and rows that would receive row IDs without changing the table. Default `false`.
+
+```sql
+CALL sys.enable_data_evolution(table => 'default.T', dry_run => true);
+
+CALL sys.enable_data_evolution(table => 'default.T');
+```

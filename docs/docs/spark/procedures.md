@@ -102,7 +102,8 @@ Choose a group, then use the page contents to jump to a procedure:
 [`rewrite_file_index`](./procedures/indexes#rewrite_file_index),
 [`create_global_index`](./procedures/indexes#create_global_index),
 [`drop_global_index`](./procedures/indexes#drop_global_index),
-[`reassign_row_id`](./procedures/indexes#reassign_row_id)
+[`reassign_row_id`](./procedures/indexes#reassign_row_id),
+[`enable_data_evolution`](./procedures/indexes#enable_data_evolution)
 
 ### Consumers, Views, and Functions
 

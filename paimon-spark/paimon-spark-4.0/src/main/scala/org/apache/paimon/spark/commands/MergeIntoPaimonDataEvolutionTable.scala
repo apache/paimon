@@ -327,6 +327,21 @@ case class MergeIntoPaimonDataEvolutionTable(
       .map(_.asInstanceOf[DataSplit])
       .toSeq
 
+    // A file without a first row id was written before the table enabled row tracking and has
+    // not been converted by sys.enable_data_evolution yet. Its rows cannot be addressed by row id,
+    // so a partial-column write over them would silently skip them: refuse instead.
+    tableSplits
+      .flatMap(_.dataFiles().asScala)
+      .find(file => file.firstRowId() == null)
+      .foreach {
+        file =>
+          throw new UnsupportedOperationException(
+            s"Cannot run MERGE INTO on data-evolution table ${table.name()}: data file " +
+              s"${file.fileName()} has no first row id. Files written before the table enabled " +
+              "row tracking must be assigned row ids by the sys.enable_data_evolution procedure " +
+              "first.")
+      }
+
     val normalDataFiles: Seq[DataFileMeta] = tableSplits
       .flatMap(_.dataFiles().asScala)
       .filter {
@@ -1358,7 +1373,12 @@ object MergeIntoPaimonDataEvolutionTable {
           dynamicOptions.put(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), fullSearchMode)
           dynamicOptions.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), snapshotId)
 
-          val scanTable = SparkTable.of(table.copy(dynamicOptions))
+          // Pin the scan to the snapshot, but keep the current schema: `copy` would take the
+          // schema the snapshot was committed with, and a schema-only change (ALTER TABLE, or
+          // enabling data evolution on an existing table) creates no snapshot. The files this
+          // merge writes must carry the current schema id, and its columns must be the current
+          // ones.
+          val scanTable = SparkTable.of(table.copyWithoutTimeTravel(dynamicOptions))
           val scanRelation =
             SparkShimLoader.shim.copyDataSourceV2Relation(relation, scanTable, relation.output)
           (scanTable, scanRelation)

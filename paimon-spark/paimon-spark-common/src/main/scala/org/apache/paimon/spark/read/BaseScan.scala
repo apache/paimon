@@ -76,7 +76,11 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
       coreOptions
         .rowTrackingEnabled() && !table.rowType().containsField(SpecialFields.ROW_ID.name())
     ) {
-      SpecialFields.rowTypeWithRowTracking(table.rowType())
+      // Read the row-tracking fields as nullable: a file written before the table enabled row
+      // tracking has no first row id, so its rows are read with a NULL _ROW_ID (see
+      // DataEvolutionUtils#splitByRowIdPresence), and a non-nullable read type would turn that
+      // into 0.
+      SpecialFields.rowTypeWithRowTracking(table.rowType(), true, true)
     } else {
       table.rowType()
     }

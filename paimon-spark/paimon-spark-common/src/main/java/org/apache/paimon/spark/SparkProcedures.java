@@ -37,6 +37,7 @@ import org.apache.paimon.spark.procedure.DeleteTagProcedure;
 import org.apache.paimon.spark.procedure.DropFunctionProcedure;
 import org.apache.paimon.spark.procedure.DropGlobalIndexProcedure;
 import org.apache.paimon.spark.procedure.DropPolicyProcedure;
+import org.apache.paimon.spark.procedure.EnableDataEvolutionProcedure;
 import org.apache.paimon.spark.procedure.ExpirePartitionsProcedure;
 import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
 import org.apache.paimon.spark.procedure.ExpireTagsProcedure;
@@ -142,6 +143,7 @@ public class SparkProcedures {
         procedureBuilders.put("rewrite_file_index", RewriteFileIndexProcedure::builder);
         procedureBuilders.put("copy", CopyFilesProcedure::builder);
         procedureBuilders.put("reassign_row_id", ReassignRowIdProcedure::builder);
+        procedureBuilders.put("enable_data_evolution", EnableDataEvolutionProcedure::builder);
         procedureBuilders.put("grant_permission", GrantPermissionProcedure::builder);
         procedureBuilders.put("revoke_permission", RevokePermissionProcedure::builder);
         procedureBuilders.put("list_permissions", ListPermissionsProcedure::builder);

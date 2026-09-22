@@ -43,7 +43,10 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
     val writeOptions = Map(
       CoreOptions.TARGET_FILE_SIZE.key() -> "99999 G",
       CoreOptions.TARGET_FILE_ROW_NUM.key() -> Long.MaxValue.toString)
-    paimonTable.copy(writeOptions.asJava)
+    // The merge pins its scan with `scan.snapshot-id`; a plain `copy` would re-apply that time
+    // travel and stamp the written files with the schema of that snapshot, which is stale after
+    // a schema-only change (ALTER TABLE creates no snapshot). Write with the current schema.
+    paimonTable.copyWithoutTimeTravel(writeOptions.asJava)
   }
 
   private val dataEvolutionNestedFieldEnabled =
