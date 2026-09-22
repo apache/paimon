@@ -250,12 +250,13 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             } else {
                 suppliers.add(
                         () -> {
-                            if (skipByFileIndex(
-                                    filters,
-                                    needMergeFiles,
-                                    dataFilePathFactory,
-                                    rowRanges,
-                                    null)) {
+                            // Reject the group using only file indexes before opening its DV.
+                            // This keeps the common selective path free of a DV sidecar read.
+                            List<FileIndexResultEntry> fileIndexResults =
+                                    evaluateFileIndexes(
+                                            filters, needMergeFiles, dataFilePathFactory);
+                            if (fileIndexResults.stream()
+                                    .anyMatch(entry -> !entry.result.remain())) {
                                 return new EmptyFileRecordReader<>();
                             }
                             DeletionVectorWithRange deletionVector =
@@ -263,11 +264,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                             if (deletionVector != null
                                     && !deletionVector.deletionVector.isEmpty()
                                     && skipByFileIndex(
-                                            filters,
-                                            needMergeFiles,
-                                            dataFilePathFactory,
-                                            rowRanges,
-                                            deletionVector)) {
+                                            fileIndexResults, rowRanges, deletionVector)) {
                                 return new EmptyFileRecordReader<>();
                             }
                             return createUnionReader(
@@ -837,29 +834,24 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     /**
-     * Whether the file index proves that no row of a merged group can match the filters. Only plain
-     * data files are considered: {@link #mergeRangesAndSort} guarantees they all span the row id
-     * range of the whole group, while a blob or vector-store file only covers a sub range and can
-     * not prove anything for the other rows.
+     * Evaluates each applicable file index once for the winning fields of a merged row-id group.
      *
-     * <p>A column can be written by several files of the group; the column merge takes each field
-     * from the newest file that wrote it and older copies are dead. Files arrive newest first
-     * ({@link #mergeRangesAndSort}), so each file's index is evaluated only over the columns it is
-     * the newest writer of. A stale value in an older file must not veto a group whose winning file
-     * matches, mirroring the winner selection in {@link DataEvolutionFileStoreScan#evolutionStats}.
+     * <p>Only normal data files are considered. Blob and vector-store files can cover only a
+     * subset of the group range, so their indexes cannot prove that the whole group has no match.
+     * Files are visited newest first; {@code claimedFieldIds} prevents an older copy of an
+     * overwritten field from vetoing the group. The returned results are retained so a later
+     * deletion-vector pass can intersect them without reopening file-index sidecars.
      */
-    private boolean skipByFileIndex(
+    private List<FileIndexResultEntry> evaluateFileIndexes(
             @Nullable List<Predicate> filters,
             List<DataFileMeta> files,
-            DataFilePathFactory pathFactory,
-            List<Range> rowRanges,
-            @Nullable DeletionVectorWithRange deletionVector)
+            DataFilePathFactory pathFactory)
             throws IOException {
         if (!fileIndexReadEnabled || isNullOrEmpty(filters)) {
-            return false;
+            return Collections.emptyList();
         }
 
-        DeletionVector dv = deletionVector == null ? null : deletionVector.deletionVector;
+        List<FileIndexResultEntry> results = new ArrayList<>();
         Set<Integer> claimedFieldIds = new HashSet<>();
         for (DataFileMeta file : files) {
             if (isBlobFile(file.fileName()) || isVectorStoreFile(file.fileName())) {
@@ -883,11 +875,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 continue;
             }
 
-            long fileOffset =
-                    dv == null || dv.isEmpty()
-                            ? 0L
-                            : deletionVectorOffset(
-                                    file.nonNullRowIdRange(), rowRanges, deletionVector);
             FileIndexResult result =
                     FileIndexEvaluator.evaluate(
                             fileIO,
@@ -897,8 +884,35 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                             null,
                             pathFactory,
                             file,
-                            dv,
-                            fileOffset);
+                            null);
+            results.add(new FileIndexResultEntry(file, result));
+            if (!result.remain()) {
+                return results;
+            }
+        }
+        return results;
+    }
+
+    /**
+     * Applies a group deletion vector to already evaluated file-index results.
+     *
+     * <p>A merged group can only be skipped when one of the files responsible for the final
+     * predicate values has no live candidate rows. This method only intersects the saved results;
+     * it does not reopen or reevaluate any file index. The offset passed to the evaluator maps
+     * positions in the group's DV anchor range to positions local to the current file.
+     */
+    private boolean skipByFileIndex(
+            List<FileIndexResultEntry> fileIndexResults,
+            List<Range> rowRanges,
+            DeletionVectorWithRange deletionVector) {
+        DeletionVector dv = deletionVector.deletionVector;
+        for (FileIndexResultEntry entry : fileIndexResults) {
+            long fileOffset =
+                    deletionVectorOffset(
+                            entry.file.nonNullRowIdRange(), rowRanges, deletionVector);
+            FileIndexResult result =
+                    FileIndexEvaluator.intersectDeletionVector(
+                            entry.result, entry.file, dv, fileOffset);
             if (!result.remain()) {
                 return true;
             }
@@ -1167,6 +1181,17 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         public int hashCode() {
             return Objects.hash(
                     schemaId, formatIdentifier, writeCols, readRowType, nestedFieldEnabled);
+        }
+    }
+
+    private static class FileIndexResultEntry {
+
+        private final DataFileMeta file;
+        private final FileIndexResult result;
+
+        private FileIndexResultEntry(DataFileMeta file, FileIndexResult result) {
+            this.file = file;
+            this.result = result;
         }
     }
 
