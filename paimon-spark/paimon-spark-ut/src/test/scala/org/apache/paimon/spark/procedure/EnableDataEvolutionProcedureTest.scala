@@ -21,6 +21,7 @@ package org.apache.paimon.spark.procedure
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.schema.TableSchema
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.utils.ExceptionUtils
 
 import org.apache.spark.sql.Row
 
@@ -166,6 +167,44 @@ class EnableDataEvolutionProcedureTest extends PaimonSparkTestBase {
       checkAnswer(sql(s"SELECT id, _ROW_ID FROM t VERSION AS OF $before"), Seq(Row(1, null)))
       checkAnswer(sql("SELECT id, _ROW_ID FROM t VERSION AS OF 'before'"), Seq(Row(1, null)))
       checkAnswer(sql(s"SELECT id FROM t VERSION AS OF $before WHERE v = 10"), Seq(Row(1)))
+    }
+  }
+
+  test("Paimon Procedure: a converted table can build and use a global index") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, name STRING)")
+      sql("INSERT INTO t VALUES (1, 'name-1'), (2, 'name-2')")
+      sql("INSERT INTO t VALUES (3, 'name-3')")
+
+      // A plain append table cannot have a global index at all.
+      val refused = intercept[Exception] {
+        sql(
+          "CALL sys.create_global_index(table => 'test.t', index_column => 'name', " +
+            "index_type => 'btree')")
+      }
+      assert(
+        ExceptionUtils.stringifyException(refused).contains("row-tracking.enabled"),
+        ExceptionUtils.stringifyException(refused))
+
+      sql("CALL sys.enable_data_evolution(table => 't')")
+
+      // The historical rows are indexed by the first call.
+      sql(
+        "CALL sys.create_global_index(table => 'test.t', index_column => 'name', " +
+          "index_type => 'btree')")
+      checkAnswer(sql("SELECT id FROM t WHERE name = 'name-2'"), Row(2) :: Nil)
+      checkAnswer(
+        sql("SELECT id FROM t WHERE name IN ('name-1', 'name-3') ORDER BY id"),
+        Row(1) :: Row(3) :: Nil)
+
+      // Rows appended after the conversion are picked up by a later incremental call.
+      sql("INSERT INTO t VALUES (4, 'name-4')")
+      sql(
+        "CALL sys.create_global_index(table => 'test.t', index_column => 'name', " +
+          "index_type => 'btree')")
+      checkAnswer(sql("SELECT id FROM t WHERE name = 'name-4'"), Row(4) :: Nil)
+      checkAnswer(sql("SELECT id FROM t WHERE name = 'name-2'"), Row(2) :: Nil)
+      checkAnswer(sql("SELECT count(*) FROM t"), Row(4) :: Nil)
     }
   }
 

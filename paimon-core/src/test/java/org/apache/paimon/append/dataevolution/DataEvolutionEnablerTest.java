@@ -546,6 +546,40 @@ public class DataEvolutionEnablerTest extends TableTestBase {
     }
 
     @Test
+    public void testResumesAfterAFailureBetweenTheTwoSteps() throws Exception {
+        FileStoreTable table = createTable(Collections.emptyMap());
+        writeRows(table, row(1, "a", "p1"), row(2, "b", "p1"));
+
+        // The row ids are committed, then the schema change fails: the table is left with row ids
+        // but without the options.
+        DataEvolutionEnabler failing =
+                new DataEvolutionEnabler(
+                        catalog,
+                        TABLE,
+                        () -> {},
+                        () -> {
+                            throw new RuntimeException("boom");
+                        });
+        assertThatThrownBy(() -> failing.run(false)).hasMessageContaining("boom");
+        table = loadTable();
+        assertThat(table.coreOptions().dataEvolutionEnabled()).isFalse();
+        assertThat(table.snapshotManager().latestSnapshot().nextRowId()).isEqualTo(2L);
+
+        // Running again finishes the job and reports the row ids the table already has.
+        DataEvolutionEnabler.Result result = enabler().run(false);
+        assertThat(result.skipped).isFalse();
+        assertThat(result.nextRowId).isEqualTo(2L);
+        assertThat(result.describe(TABLE)).doesNotContain("nextRowId=null");
+
+        table = loadTable();
+        assertThat(table.coreOptions().rowTrackingEnabled()).isTrue();
+        assertThat(table.coreOptions().dataEvolutionEnabled()).isTrue();
+        assertNoDuplicateOrMissingRowIds(table, 2);
+        writeRows(table, row(3, "c", "p1"));
+        assertThat(rowIdsById(loadTable())).containsEntry(3, 2L);
+    }
+
+    @Test
     public void testGivesUpWhenSnapshotsKeepMoving() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.COMMIT_MAX_RETRIES.key(), "1");

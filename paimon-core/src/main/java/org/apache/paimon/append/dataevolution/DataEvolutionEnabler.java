@@ -127,7 +127,9 @@ public class DataEvolutionEnabler {
 
         long assignedFiles = 0;
         long assignedRows = 0;
-        Long nextRowId = planned.files.isEmpty() ? null : planned.nextRowId;
+        // Even when this run assigns nothing, report the id the table is at: a previous run may
+        // have committed the ids and failed before the schema change.
+        Long nextRowId = planned.snapshot == null ? null : planned.nextRowId;
         if (!planned.files.isEmpty()) {
             Committed committed = assignRowIdsWithRetry(table, planned);
             assignedFiles += committed.assignment.files.size();
@@ -447,7 +449,7 @@ public class DataEvolutionEnabler {
                     snapshot,
                     planned.files.size(),
                     planned.rowCount,
-                    planned.files.isEmpty() ? null : planned.nextRowId,
+                    planned.snapshot == null ? null : planned.nextRowId,
                     false,
                     true,
                     null);
