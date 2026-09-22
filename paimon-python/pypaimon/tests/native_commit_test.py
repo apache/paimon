@@ -29,11 +29,14 @@ from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.native_commit import (
-    create_native_commit, native_commit_available, native_messages_supported)
+    create_native_commit, native_commit_available, native_messages_supported,
+    native_overwrite_available)
 
 
 requires_native = pytest.mark.skipif(
     not native_commit_available(), reason='pypaimon-rust CommitMessage/commit API required')
+requires_native_overwrite = pytest.mark.skipif(
+    not native_overwrite_available(), reason='pypaimon-rust batch identity bridge required')
 
 
 def _table(tmp_path, mode='append', backend='filesystem'):
@@ -50,7 +53,7 @@ def _table(tmp_path, mode='append', backend='filesystem'):
     catalog.create_table('default.t', Schema.from_pyarrow_schema(
         pa.schema([('id', pa.int64()), ('pt', pa.string())]),
         options=options, primary_keys=['id'] if mode == 'pk' else [],
-        partition_keys=[] if mode == 'pk' else ['pt']), False)
+        partition_keys=[] if mode in ('pk', 'unpartitioned') else ['pt']), False)
     table = catalog.get_table('default.t')
     if backend == 'path':
         table = FileStoreTable.from_path(table.table_path)
@@ -75,8 +78,18 @@ def _rows(table):
         builder.new_scan().plan().splits()).to_pylist(), key=lambda row: row['id'])
 
 
-def _must_not_fallback(commit):
-    return patch.object(commit.file_store_commit, 'commit', side_effect=AssertionError('Python fallback'))
+def _must_not_fallback(commit, method='commit'):
+    return patch.object(commit.file_store_commit, method, side_effect=AssertionError('Python fallback'))
+
+
+def _seed(table):
+    builder = table.copy({'commit.native.enabled': 'false'}).new_batch_write_builder()
+    commit = builder.new_commit()
+    try:
+        commit.commit(_prepare(builder, [
+            {'id': 1, 'pt': 'a'}, {'id': 2, 'pt': 'b'}, {'id': 3, 'pt': None}]))
+    finally:
+        commit.close()
 
 
 def test_native_commit_is_opt_in():
@@ -123,6 +136,101 @@ def test_native_stream_reuses_commit_user_and_identifiers(tmp_path):
         commit.close()
 
 
+@requires_native_overwrite
+@pytest.mark.parametrize('mode,dynamic,spec', [
+    ('append', True, {'pt': 'ignored'}),
+    ('append', False, {'pt': 'a'}),
+    ('de', True, {}),
+    ('pk', True, {}),
+    ('unpartitioned', True, {}),
+])
+def test_native_overwrite_replaces_only_target_rows(tmp_path, mode, dynamic, spec):
+    table = _table(tmp_path, mode).copy({
+        'dynamic-partition-overwrite': str(dynamic).lower(), 'commit.user-prefix': 'python'})
+    _seed(table)
+    builder = table.new_batch_write_builder().overwrite(spec)
+    commit = builder.new_commit()
+    try:
+        messages = _prepare(builder, [{'id': 4, 'pt': 'a'}])
+        with _must_not_fallback(commit, 'overwrite'):
+            commit.commit(messages)
+        expected = [{'id': 4, 'pt': 'a'}]
+        if table.partition_keys:
+            expected = [{'id': 2, 'pt': 'b'}, {'id': 3, 'pt': None}] + expected
+        assert _rows(table) == expected
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        assert snapshot.commit_user == builder.commit_user
+        assert snapshot.commit_identifier == BATCH_COMMIT_IDENTIFIER
+        assert snapshot.commit_kind == 'OVERWRITE'
+        with pytest.raises(RuntimeError, match='one-time'):
+            commit.commit(messages)
+    finally:
+        commit.close()
+
+
+@requires_native_overwrite
+@pytest.mark.parametrize('mode,dynamic,spec,remaining', [
+    ('append', True, {}, [1, 2, 3]),
+    ('append', False, {'pt': 'a'}, [2, 3]),
+    ('append', False, {'pt': None}, [1, 2]),
+    ('append', False, {'pt': '__DEFAULT_PARTITION__'}, [1, 2]),
+    ('append', False, {}, []),
+    ('unpartitioned', True, {}, []),
+    ('pk', True, {}, []),
+])
+def test_native_empty_overwrite_semantics(tmp_path, mode, dynamic, spec, remaining):
+    table = _table(tmp_path, mode).copy({'dynamic-partition-overwrite': str(dynamic).lower()})
+    _seed(table)
+    builder = table.new_batch_write_builder().overwrite(spec)
+    commit = builder.new_commit()
+    try:
+        with _must_not_fallback(commit, 'overwrite'):
+            commit.commit([])
+        assert [row['id'] for row in _rows(table)] == remaining
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        if remaining == [1, 2, 3]:
+            assert snapshot.id == 1
+        else:
+            assert snapshot.id == 2
+            assert snapshot.commit_user == builder.commit_user
+            assert snapshot.commit_kind == 'OVERWRITE'
+    finally:
+        commit.close()
+
+
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('case', ['unpartitioned', 'static-empty', 'static-missing', 'dynamic-empty'])
+def test_empty_overwrite_records_java_snapshot(tmp_path, native, case):
+    if native and not native_overwrite_available():
+        pytest.skip('native overwrite requires the batch identity bridge')
+    table = _table(tmp_path, 'unpartitioned' if case == 'unpartitioned' else 'append').copy({
+        'commit.native.enabled': str(native).lower(),
+        'dynamic-partition-overwrite': str(case == 'dynamic-empty').lower(),
+    })
+    if case == 'static-missing':
+        _seed(table)
+    builder = table.new_batch_write_builder().overwrite(
+        {'pt': 'missing'} if case.startswith('static') else {})
+    commit = builder.new_commit()
+    try:
+        if native:
+            with _must_not_fallback(commit, 'overwrite'):
+                commit.commit([])
+        else:
+            commit.commit([])
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        if case == 'dynamic-empty':
+            assert snapshot is None
+        else:
+            assert snapshot.id == (2 if case == 'static-missing' else 1)
+            assert snapshot.commit_user == builder.commit_user
+            assert snapshot.commit_kind == 'OVERWRITE'
+            assert snapshot.total_record_count == (3 if case == 'static-missing' else 0)
+        assert [row['id'] for row in _rows(table)] == ([1, 2, 3] if case == 'static-missing' else [])
+    finally:
+        commit.close()
+
+
 @requires_native
 @pytest.mark.parametrize('mode', ['batch', 'stream'])
 @pytest.mark.parametrize('ignore', [True, False])
@@ -146,9 +254,14 @@ def test_native_empty_commit_preserves_python_option(tmp_path, mode, ignore):
 
 
 @requires_native
-def test_native_abort_removes_uncommitted_files(tmp_path):
+@pytest.mark.parametrize('overwrite', [False, True])
+def test_native_abort_removes_uncommitted_files(tmp_path, overwrite):
+    if overwrite and not native_overwrite_available():
+        pytest.skip('native overwrite requires the batch identity bridge')
     table = _table(tmp_path)
     builder = table.new_batch_write_builder()
+    if overwrite:
+        builder.overwrite()
     messages = _prepare(builder, [{'id': 1, 'pt': None}])
     files = list(tmp_path.rglob('data-*.parquet'))
     assert files
@@ -183,9 +296,12 @@ def test_preflight_failure_uses_python(tmp_path, failure):
 
 
 @pytest.mark.parametrize('method', ['commit', 'abort'])
-def test_native_mutation_failure_never_falls_back_or_aborts(tmp_path, method):
+@pytest.mark.parametrize('overwrite', [False, True])
+def test_native_mutation_failure_never_falls_back_or_aborts(tmp_path, method, overwrite):
     table = _table(tmp_path)
     builder = table.new_batch_write_builder()
+    if overwrite:
+        builder.overwrite()
     messages = _prepare(builder, [{'id': 1, 'pt': 'a'}])
     commit = builder.new_commit()
     native = Mock()
@@ -193,10 +309,12 @@ def test_native_mutation_failure_never_falls_back_or_aborts(tmp_path, method):
     with patch('pypaimon.write.native_commit.create_native_commit', return_value=native), \
             patch('pypaimon.write.native_commit.to_native_commit_messages', return_value=['wire']), \
             patch.object(commit.file_store_commit, 'commit') as fallback, \
+            patch.object(commit.file_store_commit, 'overwrite') as fallback_overwrite, \
             patch.object(commit.file_store_commit, 'abort') as abort:
         with pytest.raises(OSError, match='outcome unknown'):
             getattr(commit, method)(messages)
         fallback.assert_not_called()
+        fallback_overwrite.assert_not_called()
         abort.assert_not_called()
         if method == 'commit':
             native.abort.assert_not_called()
@@ -207,22 +325,27 @@ def test_native_mutation_failure_never_falls_back_or_aborts(tmp_path, method):
 
 
 @requires_native
-def test_publication_response_loss_does_not_duplicate_or_delete_files(tmp_path):
+@pytest.mark.parametrize('overwrite', [False, True])
+def test_publication_response_loss_does_not_duplicate_or_delete_files(tmp_path, overwrite):
+    if overwrite and not native_overwrite_available():
+        pytest.skip('native overwrite requires the batch identity bridge')
     table = _table(tmp_path)
     builder = table.new_batch_write_builder()
+    if overwrite:
+        builder.overwrite()
     messages = _prepare(builder, [{'id': 1, 'pt': None}])
-    native = create_native_commit(table, builder.commit_user)
+    native = create_native_commit(table, builder.commit_user, builder.static_partition)
     proxy = Mock(wraps=native)
 
-    def publish_then_fail(identifier, messages):
-        native.commit(identifier, messages)
+    def publish_then_fail(*args):
+        native.commit(*args)
         raise OSError('response lost')
 
     proxy.commit.side_effect = publish_then_fail
     commit = builder.new_commit()
     try:
         with patch('pypaimon.write.native_commit.create_native_commit', return_value=proxy), \
-                _must_not_fallback(commit), \
+                _must_not_fallback(commit, 'overwrite' if overwrite else 'commit'), \
                 patch.object(commit.file_store_commit, 'abort', side_effect=AssertionError('abort')):
             with pytest.raises(OSError, match='response lost'):
                 commit.commit(messages)
@@ -234,9 +357,12 @@ def test_publication_response_loss_does_not_duplicate_or_delete_files(tmp_path):
 
 
 @pytest.mark.parametrize('properties', [{}, {'source': 'python'}])
-def test_snapshot_properties_select_python_before_native(tmp_path, properties):
+@pytest.mark.parametrize('overwrite', [False, True])
+def test_snapshot_properties_select_python_before_native(tmp_path, properties, overwrite):
     table = _table(tmp_path)
     builder = table.new_batch_write_builder()
+    if overwrite:
+        builder.overwrite()
     commit = builder.new_commit()
     with patch('pypaimon.write.native_commit.create_native_commit',
                side_effect=AssertionError('must not initialize native')) as create:
@@ -266,17 +392,84 @@ def test_callbacks_added_after_construction_select_python(tmp_path, warmup):
     callback.close.assert_called_once()
 
 
-def test_overwrite_and_truncate_use_python(tmp_path):
+def test_stream_overwrite_preserves_python_identifier(tmp_path):
     table = _table(tmp_path)
-    builder = table.new_batch_write_builder().overwrite({'pt': 'a'})
+    builder = table.new_stream_write_builder().overwrite({'pt': 'a'})
     commit = builder.new_commit()
     with patch('pypaimon.write.native_commit.create_native_commit') as create:
-        commit.commit(_prepare(builder, [{'id': 1, 'pt': 'a'}]))
-        table.new_batch_write_builder().new_commit().truncate_partitions([{'pt': 'a'}])
-        table.new_batch_write_builder().new_commit().truncate_table()
+        commit.commit(_prepare(builder, [{'id': 1, 'pt': 'a'}], 7), 7)
+        create.assert_not_called()
+    snapshot = table.snapshot_manager().get_latest_snapshot()
+    assert snapshot.commit_identifier == 7
+    assert snapshot.commit_user == builder.commit_user
+    assert _rows(table) == [{'id': 1, 'pt': 'a'}]
+    commit.close()
+
+
+def test_truncate_uses_python(tmp_path):
+    table = _table(tmp_path)
+    _seed(table)
+    with patch('pypaimon.write.native_commit.create_native_commit') as create:
+        for method, args in [('truncate_partitions', ([{'pt': 'a'}],)), ('truncate_table', ())]:
+            commit = table.new_batch_write_builder().new_commit()
+            try:
+                getattr(commit, method)(*args)
+            finally:
+                commit.close()
         create.assert_not_called()
     assert _rows(table) == []
+
+
+def test_older_native_runtime_falls_back_for_overwrite(tmp_path):
+    table = _table(tmp_path).copy({'dynamic-partition-overwrite': 'false'})
+    _seed(table)
+    builder = table.new_batch_write_builder().overwrite({'pt': 'a'})
+    commit = builder.new_commit()
+    try:
+        with patch('pypaimon.write.native_commit.native_method_available',
+                   side_effect=lambda cls, method: method != '_with_commit_user'), \
+                patch('pypaimon.write.native_commit._resolved_schema_file_io_options') as resolve:
+            commit.commit([])
+            resolve.assert_not_called()
+        assert [row['id'] for row in _rows(table)] == [2, 3]
+        assert table.snapshot_manager().get_latest_snapshot().commit_user == builder.commit_user
+    finally:
+        commit.close()
+
+
+def test_overwrite_conversion_failure_preserves_partition_scope(tmp_path):
+    table = _table(tmp_path).copy({'dynamic-partition-overwrite': 'false'})
+    _seed(table)
+    builder = table.new_batch_write_builder().overwrite({'pt': 'a'})
+    commit = builder.new_commit()
+    native = Mock()
+    try:
+        messages = _prepare(builder, [{'id': 4, 'pt': 'a'}])
+        with patch('pypaimon.write.native_commit.create_native_commit', return_value=native), \
+                patch('pypaimon.write.native_commit.to_native_commit_messages',
+                      side_effect=ValueError('unsupported payload')):
+            commit.commit(messages)
+        native.commit.assert_not_called()
+        native.abort.assert_not_called()
+        assert _rows(table) == [{'id': 2, 'pt': 'b'}, {'id': 3, 'pt': None}, {'id': 4, 'pt': 'a'}]
+        assert table.snapshot_manager().get_latest_snapshot().commit_user == builder.commit_user
+    finally:
+        commit.close()
+
+
+def test_overwrite_callbacks_select_python(tmp_path):
+    table = _table(tmp_path)
+    builder = table.new_batch_write_builder().overwrite()
+    commit = builder.new_commit()
+    callback = Mock()
+    commit.add_commit_callback(callback)
+    with patch('pypaimon.write.native_commit.create_native_commit') as create:
+        commit.commit(_prepare(builder, [{'id': 1, 'pt': 'a'}]))
+        create.assert_not_called()
+    assert _rows(table) == [{'id': 1, 'pt': 'a'}]
+    callback.call.assert_called_once()
     commit.close()
+    callback.close.assert_called_once()
 
 
 def test_disabled_option_never_initializes_native(tmp_path):

@@ -361,6 +361,8 @@ class FileStoreCommit:
                 index_deletes=index_deletes,
                 index_adds=index_adds,
                 snapshot_properties=snapshot_properties,
+                # Java records static/table overwrite even when no files match.
+                allow_empty_commit=True,
             )
 
     def _overwrite_hash_index_deletes(self, partition_filter, deletes):
@@ -476,8 +478,7 @@ class FileStoreCommit:
                 else commit_entries_plan(latest_snapshot)
             )
 
-            # Append can explicitly publish an empty snapshot for tagging.
-            # No-op overwrite/drop operations retain their existing behavior.
+            # Callers opt in when the operation records an empty snapshot.
             if (not allow_empty_commit and not commit_entries
                     and not index_deletes and not index_adds):
                 break
