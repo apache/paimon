@@ -16,6 +16,7 @@
 # under the License.
 
 import logging
+import platform
 from typing import Callable, Dict, List, Optional, Union
 
 import re
@@ -50,6 +51,7 @@ from pypaimon.api.client import HttpClient
 from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.api.typedef import T
+from pypaimon import build_info
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
@@ -60,6 +62,7 @@ from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 
 class RESTApi:
     HEADER_PREFIX = "header."
+    USER_AGENT_HEADER = "User-Agent"
     READ_VIA_HEADER = "X-Paimon-Read-Via"
     MAX_RESULTS = "maxResults"
     PAGE_TOKEN = "pageToken"
@@ -88,6 +91,11 @@ class RESTApi:
         self.client = HttpClient(uri)
         auth_provider = AuthProviderFactory.create_auth_provider(options)
         base_headers = RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
+        base_headers.setdefault(
+            self.USER_AGENT_HEADER,
+            "PyPaimon/{} Python/{}".format(
+                build_info.sdk_version(), platform.python_version()),
+        )
 
         if config_required:
             warehouse = options.get(CatalogOptions.WAREHOUSE)

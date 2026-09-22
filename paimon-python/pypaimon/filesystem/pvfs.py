@@ -19,6 +19,7 @@ import datetime
 import importlib
 import logging
 import posixpath
+import platform
 import time
 from abc import ABC
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ from fsspec import AbstractFileSystem
 from fsspec.implementations.local import LocalFileSystem
 from readerwriterlock import rwlock
 
+from pypaimon import build_info
 from pypaimon.api.api_response import GetTableResponse, GetTableTokenResponse
 from pypaimon.api.client import AlreadyExistsException, NoSuchResourceException
 from pypaimon.api.rest_api import RESTApi
@@ -149,7 +151,12 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     def __init__(self, options: Union[Options, Dict[str, str]] = None, **kwargs):
         if isinstance(options, dict):
             options = Options(options)
-        options.set(CatalogOptions.HTTP_USER_AGENT_HEADER, 'PythonPVFS')
+        if not options.contains(CatalogOptions.HTTP_USER_AGENT_HEADER):
+            options.set(
+                CatalogOptions.HTTP_USER_AGENT_HEADER,
+                "PythonPVFS PyPaimon/{} Python/{}".format(
+                    build_info.sdk_version(), platform.python_version()),
+            )
         self.options = options
         self.warehouse = options.get(CatalogOptions.WAREHOUSE)
         cache_expired_time = (
