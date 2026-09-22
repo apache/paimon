@@ -78,6 +78,15 @@ def pytest_configure(config):
         TableRead._try_native_batches = tracked_read
 
 
+def pytest_collection_modifyitems(items):
+    if _native_plan_enabled():
+        return
+    skip_native = pytest.mark.skip(reason="native plan tests run in the Rust Plan job")
+    for item in items:
+        if item.get_closest_marker("native_plan") is not None:
+            item.add_marker(skip_native)
+
+
 @pytest.fixture(autouse=True)
 def enable_native_plan_and_read(request, monkeypatch):
     global _force_native_for_test, _force_native_read_for_test

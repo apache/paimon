@@ -1087,6 +1087,31 @@ class TestShreddingWrite(unittest.TestCase):
             overflow_gv = GenericVariant(overflow, result['metadata'])
             self.assertIn('name', overflow_gv.to_python())
 
+    def test_unicode_overflow_and_rebuild_use_utf8_key_order(self):
+        bmp_key = '\uff21'
+        supplementary_key = '\U0001f600'
+        obj_fields = self._obj_fields_for('col', [('keep', 'BIGINT')])
+        original = GenericVariant.from_python({
+            'keep': 0, bmp_key: 1, supplementary_key: 2})
+        key_dict = parse_metadata_dict(original.metadata())
+
+        shredded = decompose_variant(original, obj_fields)
+        self.assertEqual(
+            [key_id for key_id, _ in _extract_overflow_fields(shredded['value'])],
+            [key_dict[bmp_key], key_dict[supplementary_key]],
+        )
+
+        schema = build_variant_schema(shredding_schema_to_arrow_type(obj_fields))
+        rebuilt_value, metadata = rebuild(shredded, schema, key_dict)
+        self.assertEqual(
+            [key_id for key_id, _ in _extract_overflow_fields(rebuilt_value)],
+            [key_dict['keep'], key_dict[bmp_key], key_dict[supplementary_key]],
+        )
+        self.assertEqual(
+            GenericVariant(rebuilt_value, metadata).to_python(),
+            original.to_python(),
+        )
+
     def test_decompose_absent_field_is_null(self):
         """A shredded field absent from the variant yields {value: None, typed_value: None}."""
         obj_fields = self._obj_fields_for('col', [('missing_field', 'BIGINT')])

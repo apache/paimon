@@ -18,7 +18,6 @@
 import logging
 import os
 import queue
-import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, Iterator, List, Optional
@@ -43,8 +42,7 @@ from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       MergeFileSplitRead, RawFileSplitRead,
                                       SplitRead, deferred_blob_field_names)
 from pypaimon.schema.data_types import (
-    ArrayType, DataField, MapType, MultisetType, PyarrowFieldParser,
-    RowType, is_map_blob_type)
+    DataField, MapType, PyarrowFieldParser, is_map_blob_type)
 from pypaimon.table.row.offset_row import OffsetRow
 
 ROW_KIND_COLUMN = "_row_kind"
@@ -61,29 +59,6 @@ _NATIVE_READ_FILE_FORMATS = frozenset({
 _NATIVE_READ_FILE_SUFFIXES = tuple(
     '.%s' % file_format for file_format in _NATIVE_READ_FILE_FORMATS)
 _NATIVE_BLOB_FILE_SUFFIX = '.blob'
-_AVRO_FIELD_NAME_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
-
-
-def _avro_field_names_supported(fields):
-    """The Rust Avro decoder rejects names accepted by Python fastavro."""
-    return all(
-        _AVRO_FIELD_NAME_RE.fullmatch(field.name) is not None
-        and _avro_type_field_names_supported(field.type)
-        for field in fields
-    )
-
-
-def _avro_type_field_names_supported(data_type):
-    if isinstance(data_type, RowType):
-        return _avro_field_names_supported(data_type.fields)
-    if isinstance(data_type, ArrayType):
-        return _avro_type_field_names_supported(data_type.element)
-    if isinstance(data_type, MapType):
-        return (_avro_type_field_names_supported(data_type.key)
-                and _avro_type_field_names_supported(data_type.value))
-    if isinstance(data_type, MultisetType):
-        return _avro_type_field_names_supported(data_type.element)
-    return True
 
 
 class _ClosableArrowBatchReader:
@@ -454,12 +429,9 @@ class TableRead:
         # semantics which are already implemented by the Python reader.
         if any(isinstance(split, QueryAuthSplit) for split in splits):
             return None
-        if not self._native_avro_schemas_supported(splits):
-            return None
         try:
             from pypaimon.read.native_plan import (
-                native_deletion_files_signature, native_read,
-                native_split_from_python)
+                native_read, native_split_from_python)
         except Exception as e:
             logger.warning(
                 "Native read failed, falling back to the Python reader: %s", e)
@@ -470,12 +442,6 @@ class TableRead:
             if not self._native_split_files_supported(split):
                 return None
             rust_split = getattr(split, '_native_split', None)
-            cached_dvs = getattr(split, '_native_deletion_files_signature', None)
-            if (rust_split is not None and cached_dvs is not None
-                    and cached_dvs != native_deletion_files_signature(split)):
-                # Callers may attach an endpoint DV to a planned streaming split.
-                # The cached Rust split predates that in-place metadata change.
-                rust_split = None
             if rust_split is None:
                 try:
                     rust_split = native_split_from_python(split)
@@ -757,30 +723,6 @@ class TableRead:
                     and not file_name.endswith(_NATIVE_READ_FILE_SUFFIXES)
                     and not file_name.endswith(_NATIVE_BLOB_FILE_SUFFIX)):
                 return False
-        return True
-
-    def _native_avro_schemas_supported(self, splits):
-        checked_schema_ids = set()
-        for split in splits:
-            for data_file in split.files:
-                file_paths = (data_file.file_name,
-                              getattr(data_file, 'external_path', None))
-                if not any(isinstance(path, str) and path.lower().endswith('.avro')
-                           for path in file_paths):
-                    continue
-                schema_id = data_file.schema_id
-                if schema_id in checked_schema_ids:
-                    continue
-                if schema_id == self.table.table_schema.id:
-                    fields = self.table.fields
-                else:
-                    file_schema = self.table.schema_manager.get_schema(schema_id)
-                    if file_schema is None:
-                        return False
-                    fields = file_schema.fields
-                if not _avro_field_names_supported(fields):
-                    return False
-                checked_schema_ids.add(schema_id)
         return True
 
     def _convert_native_batches(self, batches, schema):

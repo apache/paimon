@@ -338,7 +338,7 @@ def _build_object_value(
         id_to_name = {key_id: name for name, key_id in key_dict.items()}
         fields = sorted(
             fields,
-            key=lambda f: id_to_name[f[0]].encode('utf-16-be'),
+            key=lambda f: id_to_name[f[0]].encode('utf-8'),
         )
     size = len(fields)
     data = b''.join(vb for _, vb in fields)

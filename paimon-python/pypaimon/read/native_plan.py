@@ -74,22 +74,6 @@ def native_split_from_python(split):
         serialize_split_v1(split, include_scores=False))
 
 
-def native_deletion_files_signature(split):
-    """Capture mutable split DVs without retaining their mutable objects."""
-    deletion_files = split.data_deletion_files
-    if deletion_files is None:
-        return ()
-    if not isinstance(deletion_files, (list, tuple)):
-        # Unit tests can provide a mock split instead of a DataSplit.
-        return None
-    return tuple(
-        None if deletion_file is None else (
-            deletion_file.dv_index_path, deletion_file.offset,
-            deletion_file.length, deletion_file.cardinality)
-        for deletion_file in deletion_files
-    )
-
-
 def native_family_search_modes_available() -> bool:
     """Whether Rust supports family-specific global-index search modes."""
     return native_version_at_least(0, 4)
@@ -431,14 +415,13 @@ def native_plan(
         for split in rust_splits
     ]
     if table.options.native_read_enabled():
-        # Retain the opaque Rust split next to the Python metadata view. The
-        # normal planner/reader contract remains a Python Split list, while
-        # native reads can consume the exact Rust split without a second lossy
-        # conversion. Any Python split transformation creates a fresh object
-        # without this marker and thus safely falls back to the Python reader.
+        # Retain the opaque Rust split next to the Python metadata view so an
+        # unchanged native plan can be read without reserializing each split.
+        # A caller that needs different metadata (such as an endpoint DV)
+        # passes a new Python split, which the native reader converts at read
+        # time from its current fields.
         for split, rust_split in zip(splits, rust_splits):
             split._native_split = rust_split
-            split._native_deletion_files_signature = native_deletion_files_signature(split)
     _restore_python_partition_paths(table, splits)
     snapshot_id = getattr(rust_plan, 'snapshot_id', None)
     if callable(snapshot_id):

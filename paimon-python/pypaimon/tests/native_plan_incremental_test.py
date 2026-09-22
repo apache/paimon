@@ -28,6 +28,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.identifier import Identifier
 from pypaimon.read.native_plan import native_method_available
+from pypaimon.read.split import DataSplit
 from pypaimon.utils.range import Range
 
 
@@ -538,8 +539,24 @@ def test_streaming_reader_honors_explicit_split_deletion_vector(catalog, native,
     assert len(plan.splits()) == 1
     split = plan.splits()[0]
     assert split.is_streaming
-    split.data_deletion_files = [DeletionFile(str(path), 0, len(encoded) - 8, 1)]
-    # Planners do not attach endpoint DVs, but an explicit split DV is part of
-    # the reader contract, including in Java streaming frames.
-    result = table.new_read_builder().new_read().to_arrow(plan.splits()).to_pylist()
+    # The planner cannot attach an endpoint DV. Build the reader input split
+    # with that DV instead of mutating a previously planned (and cached) split.
+    dv_split = DataSplit(
+        files=split.files,
+        partition=split.partition,
+        bucket=split.bucket,
+        raw_convertible=split.raw_convertible,
+        data_deletion_files=[DeletionFile(str(path), 0, len(encoded) - 8, 1)],
+        snapshot_id=split.snapshot_id,
+        is_streaming=split.is_streaming,
+        bucket_path=split.bucket_path,
+        total_buckets=split.total_buckets,
+    )
+    read_table = table.copy({'read.native.enabled': str(native).lower()})
+    with ExitStack() as stack:
+        if native:
+            stack.enter_context(patch(
+                'pypaimon.read.table_read.TableRead._create_split_read',
+                side_effect=AssertionError('explicit DV native read fell back')))
+        result = read_table.new_read_builder().new_read().to_arrow([dv_split]).to_pylist()
     assert result == [{'k': 1, 'v': '1'}, {'k': 3, 'v': '3'}]

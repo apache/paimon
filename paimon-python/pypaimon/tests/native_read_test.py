@@ -23,7 +23,7 @@ import pytest
 
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.table_read import TableRead
-from pypaimon.schema.data_types import AtomicType, DataField, RowType
+from pypaimon.schema.data_types import AtomicType, DataField
 
 
 class _Split:
@@ -700,36 +700,10 @@ def test_native_read_falls_back_for_unsupported_file_format():
     native.assert_not_called()
 
 
-@pytest.mark.parametrize('file_schema_id', [1, 2])
-def test_native_avro_read_falls_back_for_invalid_file_schema_name(file_schema_id):
+def test_native_avro_read_uses_native_path():
     read = _table_read()
     read.table.options.file_format.return_value = 'avro'
-    read.table.table_schema.id = 2
-    valid = DataField(0, 'id', AtomicType('INT'))
-    invalid = DataField(1, 'long-dt', AtomicType('STRING'))
-    read.table.fields = [valid, invalid] if file_schema_id == 2 else [valid]
-    read.table.schema_manager.get_schema.return_value.fields = [valid, invalid]
     split = _Split('data.avro')
-    split.files[0].schema_id = file_schema_id
-    split._native_split = object()
-
-    with patch('pypaimon.read.native_plan.native_read') as native:
-        assert read._try_native_batches([split], pa.schema([('id', pa.int32())])) is None
-
-    native.assert_not_called()
-    if file_schema_id == 1:
-        read.table.schema_manager.get_schema.assert_called_once_with(1)
-    else:
-        read.table.schema_manager.get_schema.assert_not_called()
-
-
-def test_native_avro_read_keeps_valid_file_schema_on_native_path():
-    read = _table_read()
-    read.table.options.file_format.return_value = 'avro'
-    read.table.table_schema.id = 2
-    read.table.fields = [DataField(0, 'id', AtomicType('INT'))]
-    split = _Split('data.avro')
-    split.files[0].schema_id = 2
     split._native_split = object()
 
     with patch('pypaimon.read.native_plan.native_read',
@@ -739,21 +713,6 @@ def test_native_avro_read_keeps_valid_file_schema_on_native_path():
 
     assert batches[0].column('id').to_pylist() == [7]
     native.assert_called_once()
-
-
-def test_native_avro_read_checks_nested_file_field_names():
-    read = _table_read()
-    read.table.options.file_format.return_value = 'avro'
-    read.table.table_schema.id = 2
-    read.table.fields = [DataField(0, 'payload', RowType(True, [
-        DataField(1, 'long-dt', AtomicType('STRING'))]))]
-    split = _Split('data.avro')
-    split.files[0].schema_id = 2
-
-    with patch('pypaimon.read.native_plan.native_read') as native:
-        assert read._try_native_batches([split], pa.schema([('id', pa.int32())])) is None
-
-    native.assert_not_called()
 
 
 def test_native_read_falls_back_for_unsupported_dedicated_file():
