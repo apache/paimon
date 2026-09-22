@@ -234,6 +234,23 @@ public class VideoFileFormatTest {
     }
 
     @Test
+    public void testRejectTooManyMetadataRanges() {
+        byte[] mapping =
+                ByteBuffer.allocate(18)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .put((byte) 1)
+                        .putLong(0x564944454F4B4649L)
+                        .putInt((int) VideoKeyframeIndex.MAX_METADATA_RANGE_COUNT + 1)
+                        .putInt(1)
+                        .put((byte) 0)
+                        .array();
+
+        assertThatThrownBy(() -> VideoKeyframeIndex.validate(mapping, 1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("metadata range count exceeds limit");
+    }
+
+    @Test
     public void testRejectOversizedKeyframeIndexesBeforeFetch() throws IOException {
         String missing = new Path(tempPath.resolve("missing.mp4").toUri()).toString();
         Blob frame =

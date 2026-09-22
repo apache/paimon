@@ -31,6 +31,7 @@ final class VideoKeyframeIndex {
     private static final int HEADER_LENGTH = Byte.BYTES + Long.BYTES + Integer.BYTES * 2;
     private static final int METADATA_RANGE_LENGTH = Long.BYTES * 2;
     private static final int ENTRY_LENGTH = Long.BYTES * 3;
+    static final long MAX_METADATA_RANGE_COUNT = 64 * 1024;
     static final long MAX_KEYFRAME_COUNT = 64 * 1024;
 
     private VideoKeyframeIndex() {}
@@ -53,6 +54,9 @@ final class VideoKeyframeIndex {
         }
         if (keyframeCount == 0) {
             throw invalid("empty");
+        }
+        if (metadataRangeCount > MAX_METADATA_RANGE_COUNT) {
+            throw invalid("metadata range count exceeds limit");
         }
         if (keyframeCount > MAX_KEYFRAME_COUNT) {
             throw invalid("keyframe count exceeds limit");

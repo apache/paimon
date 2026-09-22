@@ -2705,12 +2705,12 @@ class LeRobotValidationTest(unittest.TestCase):
                     "action": {"dtype": "float32", "shape": [1]},
                     "camera": {
                         "dtype": "video",
-                        "shape": [16, 16, 3],
+                        "shape": [128, 128, 3],
                         "video_info": {"video.fps": 10.0},
                     },
                     "camera_b": {
                         "dtype": "video",
-                        "shape": [16, 16, 3],
+                        "shape": [128, 128, 3],
                         "video_info": {"video.fps": 10.0},
                     },
                 },
@@ -2726,12 +2726,12 @@ class LeRobotValidationTest(unittest.TestCase):
                     "tasks": ["pick"],
                     "videos/camera/chunk_index": 0,
                     "videos/camera/file_index": 0,
-                    "videos/camera/from_timestamp": 0.5,
-                    "videos/camera/to_timestamp": 0.7,
+                    "videos/camera/from_timestamp": 5.5,
+                    "videos/camera/to_timestamp": 5.7,
                     "videos/camera_b/chunk_index": 0,
                     "videos/camera_b/file_index": 0,
-                    "videos/camera_b/from_timestamp": 0.5,
-                    "videos/camera_b/to_timestamp": 0.7,
+                    "videos/camera_b/from_timestamp": 5.5,
+                    "videos/camera_b/to_timestamp": 5.7,
                 },
                 {
                     "episode_index": 1,
@@ -2743,18 +2743,17 @@ class LeRobotValidationTest(unittest.TestCase):
                     "tasks": ["pick"],
                     "videos/camera/chunk_index": 0,
                     "videos/camera/file_index": 0,
-                    "videos/camera/from_timestamp": 0.1,
-                    "videos/camera/to_timestamp": 0.4,
+                    "videos/camera/from_timestamp": 6.1,
+                    "videos/camera/to_timestamp": 6.4,
                     "videos/camera_b/chunk_index": 0,
                     "videos/camera_b/file_index": 0,
-                    "videos/camera_b/from_timestamp": 0.1,
-                    "videos/camera_b/to_timestamp": 0.4,
+                    "videos/camera_b/from_timestamp": 6.1,
+                    "videos/camera_b/to_timestamp": 6.4,
                 },
             ]
-            physical_frame_values = [24] * 60
-            for index, value in {
-                    1: 56, 2: 88, 3: 120, 5: 168, 6: 216}.items():
-                physical_frame_values[index] = value
+            target_frame_values = {
+                55: 168, 56: 216, 61: 56, 62: 88, 63: 120,
+            }
             expected_frame_values = [168, 216, 56, 88, 120]
 
             info_dir = temp_dir / "meta"
@@ -2774,14 +2773,21 @@ class LeRobotValidationTest(unittest.TestCase):
             video_path.parent.mkdir(parents=True)
             with av.open(str(video_path), mode="w") as container:
                 stream = container.add_stream("mpeg4", rate=10)
-                stream.width = 16
-                stream.height = 16
+                stream.width = 128
+                stream.height = 128
                 stream.pix_fmt = "yuv420p"
                 stream.time_base = Fraction(1, 10)
-                stream.gop_size = 10
+                stream.gop_size = 12
                 stream.codec_context.max_b_frames = 2
-                for pts, value in enumerate(physical_frame_values):
-                    image = np.full((16, 16, 3), value, dtype=np.uint8)
+                for pts in range(120):
+                    value = target_frame_values.get(pts)
+                    if value is None:
+                        noise = np.random.RandomState(pts).randint(
+                            0, 256, size=(128, 128, 3))
+                        image = noise.astype(np.uint8)
+                    else:
+                        image = np.full(
+                            (128, 128, 3), value, dtype=np.uint8)
                     frame = av.VideoFrame.from_ndarray(image, format="rgb24")
                     frame.pts = pts
                     frame.time_base = Fraction(1, 10)
@@ -2853,7 +2859,7 @@ class LeRobotValidationTest(unittest.TestCase):
                 for descriptor in descriptors + camera_b_descriptors
             ))
             self.assertEqual(
-                [5, 6, 1, 2, 3],
+                [55, 56, 61, 62, 63],
                 [descriptor.frame_index for descriptor in descriptors],
             )
 
@@ -2892,7 +2898,7 @@ class LeRobotValidationTest(unittest.TestCase):
             )
             np.testing.assert_allclose(
                 [row["decoded"][1] for row in decoded_rows],
-                [0.5, 0.6, 0.1, 0.2, 0.3],
+                [5.5, 5.6, 6.1, 6.2, 6.3],
                 atol=1e-6,
             )
             if not training_reads:
@@ -2903,56 +2909,70 @@ class LeRobotValidationTest(unittest.TestCase):
                 delta_timestamps={"camera": [0.0, 0.1]},
             )
             try:
-                video_ranges = []
+                transferred = []
                 file_io = table.raw_table.file_io
                 read_ranges = file_io.read_ranges_coalesced
+                read_file_range = file_io.read_file_range
+                selected = [descriptors[2], camera_b_descriptors[2]]
+                tracked = []
+                for descriptor in selected:
+                    tracked.append((
+                        descriptor.uri,
+                        descriptor.offset,
+                        descriptor.offset + descriptor.length,
+                    ))
+                    index = descriptor.keyframe_index_descriptor
+                    tracked.append((
+                        index.uri, index.offset, index.offset + index.length))
+
+                def track(path, offset, length):
+                    end = offset + length
+                    if any(
+                            path == tracked_path
+                            and offset < tracked_end and end > tracked_begin
+                            for tracked_path, tracked_begin, tracked_end
+                            in tracked):
+                        transferred.append(length)
 
                 def track_ranges(ranges, parallelism):
-                    video_ranges.extend(ranges)
+                    for path, offset, length in ranges:
+                        track(path, offset, length)
                     return read_ranges(ranges, parallelism)
+
+                def track_file_range(path, offset, length):
+                    track(path, offset, length)
+                    return read_file_range(path, offset, length)
 
                 with patch.object(
                         file_io,
                         "read_ranges_coalesced",
-                        side_effect=track_ranges):
-                    last, first = dataset.__getitems__([4, 0])
+                        side_effect=track_ranges), patch.object(
+                            file_io,
+                            "read_file_range",
+                            side_effect=track_file_range):
+                    middle, = dataset.__getitems__([2])
                 self.assertEqual(
-                    [2, 3, 16, 16], list(last["camera"].shape))
+                    [2, 3, 128, 128], list(middle["camera"].shape))
                 self.assertEqual(
-                    [2, 3, 16, 16], list(first["camera"].shape))
-                self.assertEqual(
-                    [3, 16, 16], list(first["camera_b"].shape))
-                self.assertEqual("torch.float32", str(last["camera"].dtype))
+                    [3, 128, 128], list(middle["camera_b"].shape))
+                self.assertEqual("torch.float32", str(middle["camera"].dtype))
                 np.testing.assert_allclose(
                     [
-                        float(last["camera"][0].mean()) * 255,
-                        float(first["camera"][0].mean()) * 255,
-                        float(first["camera"][1].mean()) * 255,
+                        float(middle["camera"][0].mean()) * 255,
+                        float(middle["camera"][1].mean()) * 255,
                     ],
-                    [120, 168, 216],
+                    [56, 88],
                     atol=5,
                 )
                 self.assertEqual(
-                    [False, True], last["camera_is_pad"].tolist())
+                    [False, False], middle["camera_is_pad"].tolist())
                 self.assertEqual(
                     1, len(dataset._video_collators[0]._decoders))
-                for descriptor in descriptors + camera_b_descriptors:
-                    loaded = bytearray(descriptor.length)
-                    for path, offset, length in video_ranges:
-                        if path != descriptor.uri:
-                            continue
-                        begin = max(offset, descriptor.offset)
-                        end = min(
-                            offset + length,
-                            descriptor.offset + descriptor.length,
-                        )
-                        if begin < end:
-                            loaded[
-                                begin - descriptor.offset:
-                                end - descriptor.offset
-                            ] = b"\1" * (end - begin)
-                    self.assertGreater(sum(loaded), 0)
-                    self.assertLess(sum(loaded), descriptor.length)
+                self.assertGreater(sum(transferred), 0)
+                self.assertLess(
+                    sum(transferred),
+                    sum(descriptor.length for descriptor in selected),
+                )
 
                 from torch.utils.data import DataLoader
                 worker_indices = []
@@ -2977,9 +2997,9 @@ class LeRobotValidationTest(unittest.TestCase):
                 np.testing.assert_allclose(
                     [0.0, 1.0], item["action"].tolist())
                 self.assertEqual(
-                    [3, 16, 16], list(item["camera"].shape))
+                    [3, 128, 128], list(item["camera"].shape))
                 self.assertEqual(
-                    [3, 16, 16], list(item["camera_b"].shape))
+                    [3, 128, 128], list(item["camera_b"].shape))
             finally:
                 action_dataset.close()
         finally:

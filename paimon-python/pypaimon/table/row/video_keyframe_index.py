@@ -30,14 +30,30 @@ class VideoKeyframeIndex:
     HEADER = struct.Struct('<BQII')
     METADATA_RANGE = struct.Struct('<qq')
     ENTRY = struct.Struct('<qqq')
+    MAX_METADATA_RANGE_COUNT = 64 * 1024
     MAX_KEYFRAME_COUNT = 64 * 1024
     _CHUNK_SIZE = 64 * 1024
 
     def __init__(self, metadata_ranges, keyframes):
-        self.metadata_ranges = tuple(
-            (operator.index(offset), operator.index(length))
-            for offset, length in metadata_ranges
-        )
+        normalized_metadata_ranges = []
+        metadata_range_count = 0
+        for offset, length in metadata_ranges:
+            if metadata_range_count >= self.MAX_METADATA_RANGE_COUNT:
+                raise ValueError(
+                    "Video keyframe index exceeds the %s-metadata-range "
+                    "limit." % self.MAX_METADATA_RANGE_COUNT
+                )
+            metadata_range_count += 1
+            offset, length = operator.index(offset), operator.index(length)
+            if normalized_metadata_ranges:
+                previous_offset, previous_length = (
+                    normalized_metadata_ranges[-1])
+                if previous_offset + previous_length == offset:
+                    normalized_metadata_ranges[-1] = (
+                        previous_offset, previous_length + length)
+                    continue
+            normalized_metadata_ranges.append((offset, length))
+        self.metadata_ranges = tuple(normalized_metadata_ranges)
         normalized_keyframes = []
         for ordinal, pts, position in keyframes:
             if len(normalized_keyframes) >= self.MAX_KEYFRAME_COUNT:
@@ -164,8 +180,8 @@ class VideoKeyframeIndex:
             )
         return int(value)
 
-    @staticmethod
-    def _iso_bmff_metadata_ranges(source, payload_length):
+    @classmethod
+    def _iso_bmff_metadata_ranges(cls, source, payload_length):
         ranges = []
         has_moov = False
         offset = 0
@@ -186,11 +202,20 @@ class VideoKeyframeIndex:
                 size = payload_length - offset
             if size < header_size or offset + size > payload_length:
                 raise ValueError("Invalid ISO BMFF box size.")
-            ranges.append((
-                offset,
+            length = (
                 header_size if box_type in (b"mdat", b"free", b"skip")
-                else size,
-            ))
+                else size
+            )
+            if ranges and ranges[-1][0] + ranges[-1][1] == offset:
+                ranges[-1] = (ranges[-1][0], ranges[-1][1] + length)
+            else:
+                if len(ranges) >= cls.MAX_METADATA_RANGE_COUNT:
+                    raise ValueError(
+                        "Video keyframe index exceeds the "
+                        "%s-metadata-range limit."
+                        % cls.MAX_METADATA_RANGE_COUNT
+                    )
+                ranges.append((offset, length))
             has_moov |= box_type == b"moov"
             offset += size
         if offset != payload_length or not has_moov:
@@ -228,6 +253,11 @@ class VideoKeyframeIndex:
             raise ValueError("Invalid video keyframe index version or magic.")
         if keyframe_count == 0:
             raise ValueError("Invalid video keyframe index header.")
+        if metadata_count > cls.MAX_METADATA_RANGE_COUNT:
+            raise ValueError(
+                "Video keyframe index exceeds the %s-metadata-range limit."
+                % cls.MAX_METADATA_RANGE_COUNT
+            )
         if keyframe_count > cls.MAX_KEYFRAME_COUNT:
             raise ValueError(
                 "Video keyframe index exceeds the %s-entry limit."

@@ -50,8 +50,7 @@ class VideoKeyframeIndexTest(unittest.TestCase):
 
         self.assertEqual(
             [
-                (offsets[0], len(boxes[0])),
-                (offsets[1], 8),
+                (offsets[0], len(boxes[0]) + 8),
                 (offsets[2], 8),
                 (offsets[3], 8),
                 (offsets[4], len(boxes[4])),
@@ -68,6 +67,11 @@ class VideoKeyframeIndexTest(unittest.TestCase):
         restored = VideoKeyframeIndex.deserialize(index.serialize())
         self.assertEqual(index.metadata_ranges, restored.metadata_ranges)
         self.assertEqual(index.keyframes, restored.keyframes)
+        self.assertEqual(
+            ((0, 2),),
+            VideoKeyframeIndex(
+                [(0, 1), (1, 1)], [(0, 0, 0)]).metadata_ranges,
+        )
         self.assertEqual(17, index.HEADER.size)
         self.assertFalse(hasattr(restored, 'time_base'))
         self.assertFalse(hasattr(restored, 'frame_count'))
@@ -159,6 +163,39 @@ class VideoKeyframeIndexTest(unittest.TestCase):
                 [],
                 ((value, value, value) for value in range(count)),
             )
+
+    def test_rejects_too_many_metadata_ranges_before_materialization(self):
+        count = VideoKeyframeIndex.MAX_METADATA_RANGE_COUNT + 1
+        data = VideoKeyframeIndex.HEADER.pack(
+            VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, count, 1
+        ) + zlib.compress(VideoKeyframeIndex.ENTRY.pack(0, 0, 0))
+
+        with mock.patch.object(
+                VideoKeyframeIndex, '_iter_metadata_ranges') as ranges:
+            with self.assertRaisesRegex(ValueError, "metadata-range limit"):
+                VideoKeyframeIndex.deserialize(data)
+            ranges.assert_not_called()
+
+        with self.assertRaisesRegex(ValueError, "metadata-range limit"):
+            VideoKeyframeIndex(
+                ((value * 2, 1) for value in range(count)),
+                [(0, 0, 0)],
+            )
+
+    def test_iso_bmff_metadata_range_count_is_bounded_after_merging(self):
+        def box(box_type, body):
+            return struct.pack(">I4s", len(body) + 8, box_type) + body
+
+        payload = b''.join([
+            box(b"free", b"x"),
+            box(b"skip", b"y"),
+            box(b"moov", b"metadata"),
+        ])
+        with mock.patch.object(
+                VideoKeyframeIndex, 'MAX_METADATA_RANGE_COUNT', 2):
+            with self.assertRaisesRegex(ValueError, "metadata-range limit"):
+                VideoKeyframeIndex._iso_bmff_metadata_ranges(
+                    io.BytesIO(payload), len(payload))
 
     def test_inspect_bounds_keyframe_packets(self):
         stream = SimpleNamespace(time_base=Fraction(1, 30))

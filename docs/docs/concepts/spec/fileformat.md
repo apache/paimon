@@ -449,7 +449,7 @@ metadata-range count (uint32), and keyframe count (uint32). It then stores metad
 length)` pairs (two int64 values) and zlib-compressed `(frame ordinal, PTS, packet position)`
 keyframe entries (three int64 values). Offsets are relative to the encoded video; writers reject
 out-of-range values. All numeric fields are little endian. One block is limited to 65,536
-keyframes and 16 MiB; all blocks in one file are limited to 64 MiB.
+metadata ranges, 65,536 keyframes, and 16 MiB; all blocks in one file are limited to 64 MiB.
 
 The index covers the first video stream. Its time base remains in the video. A reader fetches the
 metadata and target GOP, seeks by PTS, and decodes forward in presentation order. It may include the
