@@ -304,6 +304,26 @@ public class DataEvolutionUtils {
      * Retrieve the anchor file of a row range group. Always the oldest normal file. Files are
      * compared by (max_seq, fileName) pairs.
      */
+    /**
+     * Splits {@code files} into the ones that carry a first row id and the ones that do not. A file
+     * without one was written before the table enabled row tracking and has not been assigned an id
+     * by {@code sys.enable_data_evolution} yet: it is a plain full-row file that takes no part in
+     * row-id-range grouping.
+     */
+    public static <T> Pair<List<T>, List<T>> splitByRowIdPresence(
+            Collection<T> files, Function<T, DataFileMeta> fileMetaFunc) {
+        List<T> withRowId = new ArrayList<>();
+        List<T> withoutRowId = new ArrayList<>();
+        for (T file : files) {
+            if (fileMetaFunc.apply(file).firstRowId() == null) {
+                withoutRowId.add(file);
+            } else {
+                withRowId.add(file);
+            }
+        }
+        return Pair.of(withRowId, withoutRowId);
+    }
+
     public static <T> T retrieveAnchorFile(
             Collection<T> entries, Function<T, DataFileMeta> fileMetaFunc) {
         T anchor = null;

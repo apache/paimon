@@ -229,7 +229,9 @@ final class DataEvolutionCompactRangePlanner {
                     ProjectedDataFileMeta file = entry.file();
                     checkState(
                             file.hasFirstRowId(),
-                            "File '%s' does not have first row id.",
+                            "Cannot compact data file '%s': it has no first row id. Files written "
+                                    + "before the table enabled row tracking must be assigned row "
+                                    + "ids by the sys.enable_data_evolution procedure first.",
                             file.fileNameBinary());
                     long rowCount = file.rowCount();
                     checkState(

@@ -18,7 +18,9 @@
 
 package org.apache.paimon.table.source.splitread;
 
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.DataEvolutionSplitRead;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.LazyField;
 
@@ -42,6 +44,16 @@ public class DataEvolutionSplitReadProvider implements SplitReadProvider {
 
     @Override
     public boolean match(Split split, Context context) {
+        // A data split whose files predate row tracking (no first row id yet, see
+        // DataEvolutionUtils#splitByRowIdPresence) holds complete rows and is left to the raw
+        // file reader, which yields a NULL _ROW_ID for them.
+        if (split instanceof DataSplit) {
+            for (DataFileMeta file : ((DataSplit) split).dataFiles()) {
+                if (file.firstRowId() == null) {
+                    return false;
+                }
+            }
+        }
         return true;
     }
 

@@ -37,6 +37,7 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.DataEvolutionUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
@@ -162,9 +163,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             List<ManifestFileMeta> groupMetas = queue.poll();
             List<ManifestEntry> entries = new ArrayList<>();
             super.readManifestEntries(groupMetas, useSequential).forEachRemaining(entries::add);
-            RangeHelper<ManifestEntry> rangeHelper2 =
-                    new RangeHelper<>(e -> e.file().nonNullRowIdRange());
-            List<List<ManifestEntry>> splitByRowId = rangeHelper2.mergeOverlappingRanges(entries);
+            List<List<ManifestEntry>> splitByRowId = groupByRowIdRange(entries);
 
             for (List<ManifestEntry> group : splitByRowId) {
                 filtered.addAll(group);
@@ -191,9 +190,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     protected List<ManifestEntry> postFilterManifestEntries(List<ManifestEntry> entries) {
         if (inputFilter != null || readType != null) {
             // group by row id range
-            RangeHelper<ManifestEntry> rangeHelper =
-                    new RangeHelper<>(e -> e.file().nonNullRowIdRange());
-            List<List<ManifestEntry>> splitByRowId = rangeHelper.mergeOverlappingRanges(entries);
+            List<List<ManifestEntry>> splitByRowId = groupByRowIdRange(entries);
 
             return splitByRowId.stream()
                     .filter(group -> inputFilter == null || filterByStats(group))
@@ -207,7 +204,29 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         }
     }
 
+    /**
+     * Groups entries that share a row-id range. An entry whose file has no first row id (written
+     * before the table enabled row tracking, see {@link DataEvolutionUtils#splitByRowIdPresence})
+     * is a complete-row file that forms a group of its own.
+     */
+    private static List<List<ManifestEntry>> groupByRowIdRange(List<ManifestEntry> entries) {
+        Pair<List<ManifestEntry>, List<ManifestEntry>> byRowId =
+                DataEvolutionUtils.splitByRowIdPresence(entries, ManifestEntry::file);
+        RangeHelper<ManifestEntry> rangeHelper =
+                new RangeHelper<>(e -> e.file().nonNullRowIdRange());
+        List<List<ManifestEntry>> groups =
+                new ArrayList<>(rangeHelper.mergeOverlappingRanges(byRowId.getLeft()));
+        for (ManifestEntry entry : byRowId.getRight()) {
+            groups.add(Collections.singletonList(entry));
+        }
+        return groups;
+    }
+
     private boolean filterByStats(List<ManifestEntry> entries) {
+        if (entries.size() == 1 && entries.get(0).file().firstRowId() == null) {
+            // a complete-row file without row id: plain per-file statistics apply
+            return super.filterByStats(entries.get(0));
+        }
         EvolutionStats stats =
                 evolutionStats(schema, this::scanTableSchema, entries, evolutionStatsCache);
         return inputFilter.test(
