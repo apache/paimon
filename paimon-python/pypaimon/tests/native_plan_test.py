@@ -121,13 +121,11 @@ class NativePlanTest(unittest.TestCase):
                     False, AtomicType('STRING', False), AtomicType('INT'))))
             ])))
         ])
-        table = SimpleNamespace(table_schema=schema, options=CoreOptions(Options({})))
+        table = SimpleNamespace(table_schema=schema)
         self.assertEqual(json.loads(_resolved_schema_json(table)), {
             'version': 3, 'id': 7, 'highestFieldId': 3, 'timeMillis': 0,
             'partitionKeys': [], 'primaryKeys': [], 'comment': None,
-            'options': {'source.split.target-size': '134217728',
-                        'source.split.open-file-cost': '4194304',
-                        'deletion-vectors.merge-on-read': 'false'},
+            'options': {},
             'fields': [{'id': 0, 'name': 'attributes', 'type': {
                 'type': 'MAP NOT NULL', 'nullable': False, 'key': 'STRING NOT NULL',
                 'value': {'type': 'ROW', 'nullable': True, 'fields': [
@@ -631,8 +629,7 @@ class NativePlanTest(unittest.TestCase):
             with self.subTest(value=value):
                 options = {'blob-as-descriptor': value}
                 table = SimpleNamespace(
-                    table_schema=TableSchema(0, [], options=options),
-                    options=CoreOptions(Options(options)))
+                    table_schema=TableSchema(0, [], options=options))
                 self.assertEqual(
                     json.loads(_resolved_schema_json(table))['options']['blob-as-descriptor'],
                     str(value).lower())
@@ -650,10 +647,11 @@ class NativePlanTest(unittest.TestCase):
             ],
         })
 
-    def test_resolved_schema_preserves_options_and_normalizes_values(self):
+    def test_resolved_schema_preserves_options_and_stringifies_values(self):
         options = {
             'source.split.target-size': '1 kb',
             'source.split.open-file-cost': '128 b',
+            'deletion-vectors.merge-on-read': 'true',
             'scan.snapshot-id': '9',
             'scan.watermark': 200,
             'global-index.search-mode': 'detail',
@@ -665,12 +663,11 @@ class NativePlanTest(unittest.TestCase):
             'removed.option': None,
         }
         table = SimpleNamespace(
-            table_schema=TableSchema(0, [], options=options),
-            options=CoreOptions(Options(options)))
+            table_schema=TableSchema(0, [], options=options))
         self.assertEqual(json.loads(_resolved_schema_json(table))['options'], {
-            'source.split.target-size': '1024',
-            'source.split.open-file-cost': '128',
-            'deletion-vectors.merge-on-read': 'false',
+            'source.split.target-size': '1 kb',
+            'source.split.open-file-cost': '128 b',
+            'deletion-vectors.merge-on-read': 'true',
             'scan.snapshot-id': '9',
             'scan.watermark': '200',
             'global-index.search-mode': 'detail',
@@ -685,8 +682,7 @@ class NativePlanTest(unittest.TestCase):
     def test_resolved_schema_converts_timestamp_to_millis(self):
         options = {'scan.timestamp': '2026-09-22T00:00:00'}
         table = SimpleNamespace(
-            table_schema=TableSchema(0, [], options=options),
-            options=CoreOptions(Options(options)))
+            table_schema=TableSchema(0, [], options=options))
         resolved = json.loads(_resolved_schema_json(table))['options']
         self.assertEqual(resolved['scan.timestamp-millis'],
                          str(int(datetime(2026, 9, 22).timestamp() * 1000)))

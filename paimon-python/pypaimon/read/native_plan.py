@@ -201,15 +201,6 @@ def _resolved_schema_json(table) -> str:
     from pypaimon.common.json_util import JSON
     options = {str(key): _option_value_to_string(value)
                for key, value in table.table_schema.options.items() if value is not None}
-    # Keep Python's effective defaults and encode split sizes in bytes.
-    options.update({
-        CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(): str(
-            table.options.source_split_target_size()),
-        CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(): str(
-            table.options.source_split_open_file_cost()),
-        CoreOptions.DELETION_VECTORS_MERGE_ON_READ.key(): _option_value_to_string(
-            table.options.options.get(CoreOptions.DELETION_VECTORS_MERGE_ON_READ)),
-    })
     # Rust takes epoch millis but PyPaimon also accepts a timestamp string.
     timestamp = options.pop(CoreOptions.SCAN_TIMESTAMP.key(), None)
     if timestamp is not None:
