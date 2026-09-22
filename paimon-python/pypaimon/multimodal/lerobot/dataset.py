@@ -1514,7 +1514,10 @@ def _open_video_decoder(stream, backend=None):
     if not isinstance(keyframe_index, VideoKeyframeIndex):
         keyframe_index = None
     if backend is None and keyframe_index is not None:
-        return _PyAVVideoDecoder(stream, keyframe_index)
+        try:
+            return _PyAVVideoDecoder(stream, keyframe_index)
+        except (ImportError, OSError, RuntimeError):
+            stream.seek(0)
     if backend in (None, "torchcodec"):
         try:
             return _open_torchcodec_decoder(stream)

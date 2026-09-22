@@ -48,6 +48,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -212,6 +214,23 @@ public class VideoFileFormatTest {
         assertThatThrownBy(() -> write(frame))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Invalid video keyframe index");
+    }
+
+    @Test
+    public void testRejectTooManyKeyframes() {
+        byte[] mapping =
+                ByteBuffer.allocate(18)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .put((byte) 1)
+                        .putLong(0x564944454F4B4649L)
+                        .putInt(0)
+                        .putInt((int) VideoKeyframeIndex.MAX_KEYFRAME_COUNT + 1)
+                        .put((byte) 0)
+                        .array();
+
+        assertThatThrownBy(() -> VideoKeyframeIndex.validate(mapping, 1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("keyframe count exceeds limit");
     }
 
     @Test

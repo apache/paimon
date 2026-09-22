@@ -532,6 +532,32 @@ class LeRobotValidationTest(unittest.TestCase):
             with self.assertRaises(OSError):
                 _open_video_decoder(stream, backend="torchcodec")
 
+    def test_indexed_default_backend_falls_back_to_torchcodec(self):
+        stream = Mock()
+        stream.video_keyframe_index = VideoKeyframeIndex(
+            [], [(0, 0, 0)])
+        decoder = object()
+        module = "pypaimon.multimodal.lerobot.dataset."
+        with patch(
+                module + "_PyAVVideoDecoder",
+                side_effect=ImportError("no av")) as pyav, patch(
+                module + "_open_torchcodec_decoder",
+                return_value=decoder) as torchcodec:
+            self.assertIs(decoder, _open_video_decoder(stream))
+            stream.seek.assert_called_once_with(0)
+            pyav.assert_called_once_with(
+                stream, stream.video_keyframe_index)
+            torchcodec.assert_called_once_with(stream)
+
+        stream.reset_mock()
+        with patch(
+                module + "_PyAVVideoDecoder",
+                side_effect=ImportError("no av")), patch(
+                module + "_open_torchcodec_decoder") as torchcodec:
+            with self.assertRaisesRegex(ImportError, "no av"):
+                _open_video_decoder(stream, backend="pyav")
+            torchcodec.assert_not_called()
+
     def test_video_batches_include_delta_frames_and_preserve_backends(self):
         try:
             import torch

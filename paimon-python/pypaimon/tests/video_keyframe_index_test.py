@@ -16,7 +16,10 @@
 # under the License.
 
 import io
+from fractions import Fraction
 import struct
+import sys
+from types import SimpleNamespace
 import unittest
 import zlib
 from unittest import mock
@@ -104,7 +107,7 @@ class VideoKeyframeIndexTest(unittest.TestCase):
                     VideoKeyframeIndex.deserialize(data, payload_length=10)
 
     def test_valid_large_index_uses_bounded_input_chunks(self):
-        count = 100_000
+        count = 60_000
         entries = b''.join(
             VideoKeyframeIndex.ENTRY.pack(value, value, value)
             for value in range(count)
@@ -137,6 +140,55 @@ class VideoKeyframeIndexTest(unittest.TestCase):
         self.assertLessEqual(
             max(input_sizes), VideoKeyframeIndex._CHUNK_SIZE
         )
+
+    def test_rejects_too_many_keyframes_before_decompression(self):
+        count = VideoKeyframeIndex.MAX_KEYFRAME_COUNT + 1
+        data = VideoKeyframeIndex.HEADER.pack(
+            VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, 0, count
+        ) + zlib.compress(VideoKeyframeIndex.ENTRY.pack(0, 0, 0))
+
+        with mock.patch.object(
+                keyframe_index_module.zlib,
+                'decompressobj') as decompress:
+            with self.assertRaisesRegex(ValueError, "entry limit"):
+                VideoKeyframeIndex.deserialize(data)
+            decompress.assert_not_called()
+
+        with self.assertRaisesRegex(ValueError, "entry limit"):
+            VideoKeyframeIndex(
+                [],
+                ((value, value, value) for value in range(count)),
+            )
+
+    def test_inspect_bounds_keyframe_packets(self):
+        stream = SimpleNamespace(time_base=Fraction(1, 30))
+        packets = [
+            SimpleNamespace(
+                is_keyframe=True,
+                pts=value,
+                pos=value,
+                time_base=stream.time_base,
+                is_discard=False,
+            )
+            for value in range(2)
+        ]
+        container = mock.MagicMock()
+        container.__enter__.return_value = container
+        container.streams.video = [stream]
+        container.demux.return_value = packets
+        av = SimpleNamespace(open=mock.Mock(return_value=container))
+
+        with mock.patch.dict(sys.modules, {'av': av}), mock.patch.object(
+                VideoKeyframeIndex,
+                '_iso_bmff_metadata_ranges',
+                return_value=[]), mock.patch.object(
+                VideoKeyframeIndex,
+                'MAX_KEYFRAME_COUNT',
+                1):
+            with self.assertRaisesRegex(ValueError, "entry limit"):
+                VideoKeyframeIndex.inspect(mock.Mock(), 10)
+        self.assertEqual(1, av.open.call_count)
+
 
 if __name__ == '__main__':
     unittest.main()

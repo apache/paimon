@@ -30,6 +30,7 @@ class VideoKeyframeIndex:
     HEADER = struct.Struct('<BQII')
     METADATA_RANGE = struct.Struct('<qq')
     ENTRY = struct.Struct('<qqq')
+    MAX_KEYFRAME_COUNT = 64 * 1024
     _CHUNK_SIZE = 64 * 1024
 
     def __init__(self, metadata_ranges, keyframes):
@@ -37,11 +38,18 @@ class VideoKeyframeIndex:
             (operator.index(offset), operator.index(length))
             for offset, length in metadata_ranges
         )
-        self.keyframes = tuple(
-            (operator.index(ordinal), operator.index(pts),
-             operator.index(position))
-            for ordinal, pts, position in keyframes
-        )
+        normalized_keyframes = []
+        for ordinal, pts, position in keyframes:
+            if len(normalized_keyframes) >= self.MAX_KEYFRAME_COUNT:
+                raise ValueError(
+                    "Video keyframe index exceeds the %s-entry limit."
+                    % self.MAX_KEYFRAME_COUNT
+                )
+            normalized_keyframes.append((
+                operator.index(ordinal), operator.index(pts),
+                operator.index(position),
+            ))
+        self.keyframes = tuple(normalized_keyframes)
         previous_end = 0
         for offset, length in self.metadata_ranges:
             if offset < previous_end or length <= 0:
@@ -108,6 +116,11 @@ class VideoKeyframeIndex:
                 )
                 if pts in packet_positions:
                     raise ValueError("Video has duplicate keyframe timestamps.")
+                if len(packet_positions) >= cls.MAX_KEYFRAME_COUNT:
+                    raise ValueError(
+                        "Video keyframe index exceeds the %s-entry limit."
+                        % cls.MAX_KEYFRAME_COUNT
+                    )
                 packet_positions[pts] = int(packet.pos)
 
         source.seek(0)
@@ -132,6 +145,11 @@ class VideoKeyframeIndex:
                     if position is None:
                         raise ValueError(
                             "Video keyframe has no packet byte position."
+                        )
+                    if len(keyframes) >= cls.MAX_KEYFRAME_COUNT:
+                        raise ValueError(
+                            "Video keyframe index exceeds the %s-entry limit."
+                            % cls.MAX_KEYFRAME_COUNT
                         )
                     keyframes.append((ordinal, pts, position))
                 previous_pts = pts
@@ -210,6 +228,11 @@ class VideoKeyframeIndex:
             raise ValueError("Invalid video keyframe index version or magic.")
         if keyframe_count == 0:
             raise ValueError("Invalid video keyframe index header.")
+        if keyframe_count > cls.MAX_KEYFRAME_COUNT:
+            raise ValueError(
+                "Video keyframe index exceeds the %s-entry limit."
+                % cls.MAX_KEYFRAME_COUNT
+            )
         entries_offset = (
             cls.HEADER.size + metadata_count * cls.METADATA_RANGE.size)
         if entries_offset >= len(data):

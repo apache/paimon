@@ -433,7 +433,7 @@ class VideoFormatTest(unittest.TestCase):
         try:
             with self.assertRaisesRegex(
                     ValueError,
-                    "Keyframe ordinals must be strictly increasing"):
+                    "entry limit"):
                 writer.add_element(
                     GenericRow([blob], [self.field], RowKind.INSERT)
                 )
