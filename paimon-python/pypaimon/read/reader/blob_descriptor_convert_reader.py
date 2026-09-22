@@ -31,9 +31,12 @@ class BlobInlineConvertReader(RecordBatchReader):
     Processing is split into two clear stages:
       Stage 1 (BlobView resolution): If view fields exist, use a lightweight
                prescan reader (only projecting view columns) to collect
-               BlobViewStructs and bulk-preload their descriptors, then replace
-               view field values with descriptor bytes so Stage 2 can
-               materialize payloads with the originating table FileIO.
+               BlobViewStructs and bulk-preload their descriptors. When
+               blob-as-descriptor=false, replace view field values with
+               descriptor bytes so Stage 2 can materialize payloads with the
+               originating table FileIO. When blob-as-descriptor=true, leave
+               BlobViewStruct bytes in place so get_blob() keeps that
+               association; Arrow output serializes descriptors later.
       Stage 2 (BlobDescriptor resolution): Controlled by blob-as-descriptor option.
                If false, resolve BlobDescriptor bytes from descriptor fields
                into real blob data bytes. BlobView fields are already resolved
@@ -81,9 +84,13 @@ class BlobInlineConvertReader(RecordBatchReader):
         batch = self._inner.read_arrow_batch()
         if batch is None:
             return None
-        # Resolve view fields using the preloaded lookup.
+        # Resolve view fields using the preloaded lookup. When
+        # blob-as-descriptor=true, leave BlobViewStruct bytes in place so
+        # get_blob() keeps the originating table's FileIO. Arrow paths
+        # serialize descriptors later.
         view_blobs = {}
-        if self._view_fields and self._blob_view_lookup is not None:
+        if (self._view_fields and self._blob_view_lookup is not None
+                and not self._blob_as_descriptor):
             batch, view_blobs = self._resolve_view_fields(batch, self._blob_view_lookup)
         # Resolve BlobDescriptor -> real bytes (if blob-as-descriptor=false)
         return self._resolve_descriptor_fields(batch, view_blobs)

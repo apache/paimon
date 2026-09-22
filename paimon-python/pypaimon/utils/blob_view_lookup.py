@@ -132,6 +132,23 @@ class BlobViewLookup:
             )
         return uri_reader
 
+    def serialize_view_field_value(self, value):
+        """Replace BlobViewStruct bytes with descriptor bytes for Arrow output."""
+        if value is None:
+            return None
+        if hasattr(value, 'as_py'):
+            value = value.as_py()
+        if isinstance(value, str):
+            value = value.encode('utf-8')
+        if isinstance(value, bytearray):
+            value = bytes(value)
+        if not (isinstance(value, bytes) and BlobViewStruct.is_blob_view_struct(value)):
+            return value
+        view_struct = BlobViewStruct.deserialize(value)
+        if self.resolve_to_null(view_struct):
+            return None
+        return self.resolve_descriptor(view_struct).serialize()
+
     def _store_chunk_results(self, descriptors, null_values):
         self._descriptor_cache.update(descriptors)
         self._null_value_cache.update(null_values)

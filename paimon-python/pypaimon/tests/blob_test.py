@@ -2867,6 +2867,291 @@ class BlobTest(unittest.TestCase):
 
         return TokenFileIO()
 
+    def test_offset_row_get_blob_view_keeps_per_table_uri_reader(self):
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.common.uri_reader import FileUriReader, UriReaderFactory
+        from pypaimon.table.row.offset_row import OffsetRow
+        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+
+        shared_uri = "s3://shared/blob"
+        data_a = b"AAAA"
+        data_b = b"BBBB"
+        descriptor = BlobDescriptor(shared_uri, 0, len(data_a))
+        view_a = BlobViewStruct(Identifier.from_string("db.src_a"), 1, 0)
+        view_b = BlobViewStruct(Identifier.from_string("db.src_b"), 1, 0)
+
+        class TokenFileIO:
+            def __init__(self, payload):
+                self._payload = payload
+                self.opened = []
+
+            def new_input_stream(self, path):
+                self.opened.append(path)
+                return io.BytesIO(self._payload)
+
+        file_io_a = TokenFileIO(data_a)
+        file_io_b = TokenFileIO(data_b)
+        lookup = BlobViewLookup(object())
+        lookup._uri_reader_cache["db.src_a"] = FileUriReader(file_io_a)
+        lookup._uri_reader_cache["db.src_b"] = FileUriReader(file_io_b)
+        lookup._uri_reader_factory_cache["db.src_a"] = (
+            UriReaderFactory.from_file_io(file_io_a))
+        lookup._uri_reader_factory_cache["db.src_b"] = (
+            UriReaderFactory.from_file_io(file_io_b))
+        lookup._store_chunk_results(
+            {view_a: descriptor, view_b: descriptor}, set())
+
+        target_file_io = TokenFileIO(b"target-must-not-be-used")
+        row_a = OffsetRow(
+            (view_a.serialize(),), 0, 1,
+            file_io=target_file_io,
+            blob_field_indices=[0],
+            descriptor_field_indices=[0],
+            blob_view_lookup=lookup,
+        )
+        row_b = OffsetRow(
+            (view_b.serialize(),), 0, 1,
+            file_io=target_file_io,
+            blob_field_indices=[0],
+            descriptor_field_indices=[0],
+            blob_view_lookup=lookup,
+        )
+        self.assertEqual(row_a.get_blob(0).to_data(), data_a)
+        self.assertEqual(row_b.get_blob(0).to_data(), data_b)
+        self.assertEqual(file_io_a.opened, [shared_uri])
+        self.assertEqual(file_io_b.opened, [shared_uri])
+        self.assertEqual(target_file_io.opened, [])
+
+    def test_table_read_serializes_only_configured_blob_view_fields(self):
+        from types import SimpleNamespace
+
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.table_read import TableRead
+        from pypaimon.schema.data_types import AtomicType, DataField
+        from pypaimon.table.row.offset_row import OffsetRow
+        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+
+        view_struct = BlobViewStruct(Identifier.from_string("db.source"), 1, 0)
+        view_bytes = view_struct.serialize()
+        descriptor = BlobDescriptor("s3://source/blob", 0, 4)
+        lookup = BlobViewLookup(object())
+        lookup._store_chunk_results({view_struct: descriptor}, set())
+
+        table_read = TableRead.__new__(TableRead)
+        table_read.table = SimpleNamespace(options=CoreOptions(Options({
+            "blob-as-descriptor": "true",
+            "blob-view-field": "picture",
+        })))
+        table_read.read_type = [
+            DataField(0, "id", AtomicType("INT")),
+            DataField(1, "picture", AtomicType("BYTES")),
+        ]
+        table_read._blob_as_descriptor = True
+        table_read._blob_view_output_indices = (1,)
+        reader = SimpleNamespace(blob_view_lookup=lookup)
+        row = OffsetRow((view_bytes, view_bytes), 0, 2)
+
+        converted = table_read._serialize_blob_view_row_tuple(row, reader)
+
+        self.assertEqual(converted[0], view_bytes)
+        self.assertEqual(converted[1], descriptor.serialize())
+
+        table_read._blob_view_output_indices = ()
+        skipped = table_read._serialize_blob_view_row_tuple(
+            row, SimpleNamespace())
+        self.assertEqual(skipped, (view_bytes, view_bytes))
+
+        table_read._blob_view_output_indices = (1,)
+        table_read._blob_as_descriptor = False
+        not_descriptor = table_read._serialize_blob_view_row_tuple(row, reader)
+        self.assertEqual(not_descriptor, (view_bytes, view_bytes))
+
+    def test_offset_row_get_blob_v1_resolved_blob_view_field(self):
+        from pypaimon.common.options import Options
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader.field_indices import descriptor_field_indices_for_table
+        from pypaimon.schema.data_types import AtomicType, DataField
+        from pypaimon.table.row.offset_row import OffsetRow
+
+        data = b"resolved blob-view payload"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "blob.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(data)
+            uri = blob_path.encode('utf-8')
+            serialized_v1 = (
+                bytes([1])
+                + struct.pack('<I', len(uri))
+                + uri
+                + struct.pack('<q', 0)
+                + struct.pack('<q', len(data))
+            )
+
+            class _Table:
+                options = CoreOptions(Options({
+                    "blob-as-descriptor": "true",
+                    "blob-view-field": "picture",
+                }))
+
+            fields = [DataField(0, "picture", AtomicType("BYTES"))]
+            descriptor_indices = descriptor_field_indices_for_table(_Table(), fields)
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            row = OffsetRow(
+                (serialized_v1,), 0, 1, file_io=file_io,
+                blob_field_indices=[0],
+                descriptor_field_indices=descriptor_indices)
+            blob = row.get_blob(0)
+            self.assertIsInstance(blob, BlobRef)
+            self.assertEqual(blob.to_data(), data)
+
+    def test_offset_row_get_blob_resolves_null_blob_view(self):
+        from unittest.mock import MagicMock
+
+        from pypaimon.table.row.offset_row import OffsetRow
+        from pypaimon.table.row.blob import BlobViewStruct
+        from pypaimon.common.identifier import Identifier
+
+        view_struct = BlobViewStruct(Identifier.from_string("db.source"), 1, 42)
+        lookup = MagicMock()
+        lookup.resolve_to_null.return_value = True
+        row = OffsetRow(
+            (view_struct.serialize(),), 0, 1,
+            blob_field_indices=[0],
+            blob_view_lookup=lookup,
+        )
+        self.assertIsNone(row.get_blob(0))
+        lookup.resolve_to_null.assert_called_once()
+
+    def test_offset_row_get_blob_view_struct_without_view_field_indices(self):
+        from unittest.mock import MagicMock
+
+        from pypaimon.common.options import Options
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader.field_indices import descriptor_field_indices_for_table
+        from pypaimon.schema.data_types import AtomicType, DataField
+        from pypaimon.common.uri_reader import FileUriReader
+        from pypaimon.table.row.blob import BlobRef, BlobViewStruct
+        from pypaimon.table.row.offset_row import OffsetRow
+        from pypaimon.common.identifier import Identifier
+
+        data = b"resolved via view struct"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "blob.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(data)
+            descriptor = BlobDescriptor(blob_path, 0, len(data))
+
+            class _Table:
+                options = CoreOptions(Options({
+                    "blob-as-descriptor": "true",
+                    "blob-view-field": "picture",
+                }))
+
+            fields = [DataField(0, "picture", AtomicType("BYTES"))]
+            descriptor_indices = descriptor_field_indices_for_table(_Table(), fields)
+            view_struct = BlobViewStruct(Identifier.from_string("db.source"), 1, 42)
+            lookup = MagicMock()
+            lookup.resolve_to_null.return_value = False
+            lookup.resolve_blob.return_value = BlobRef(
+                FileUriReader(FileIO.get(f"file://{tmp_dir}", {})), descriptor)
+
+            row = OffsetRow(
+                (view_struct.serialize(),), 0, 1,
+                blob_field_indices=[0],
+                descriptor_field_indices=descriptor_indices,
+                blob_view_lookup=lookup,
+            )
+            blob = row.get_blob(0)
+            self.assertIsInstance(blob, BlobRef)
+            self.assertEqual(blob.to_data(), data)
+            lookup.resolve_blob.assert_called_once_with(view_struct)
+
+    def test_to_iterator_adapters_refresh_blob_view_lookup_after_first_read(self):
+        """Merge to_iterator rebuilds OffsetRow after wrap; lookup is filled on
+        the first convert read, so adapters must copy it then, not at wrap time.
+        """
+        from unittest.mock import MagicMock
+
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.common.uri_reader import FileUriReader
+        from pypaimon.read.reader.auth_masking_reader import (
+            BatchToRecordReaderAdapter, RecordReaderToBatchAdapter)
+        from pypaimon.read.reader.iface.record_iterator import RecordIterator
+        from pypaimon.read.reader.iface.record_reader import RecordReader
+        from pypaimon.read.reader.limited_record_reader import LimitedRecordReader
+        from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
+        from pypaimon.table.row.offset_row import OffsetRow
+
+        data = b"upstream blob via refreshed lookup"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "upstream.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(data)
+            view_struct = BlobViewStruct(Identifier.from_string("db.src"), 1, 0)
+            source_file_io = FileIO.get(f"file://{tmp_dir}", {})
+            target_file_io = MagicMock()
+            target_file_io.new_input_stream.side_effect = AssertionError(
+                "target FileIO must not read upstream blob")
+            lookup = MagicMock()
+            lookup.resolve_to_null.return_value = False
+            lookup.resolve_blob.return_value = BlobRef(
+                FileUriReader(source_file_io),
+                BlobDescriptor(blob_path, 0, len(data)),
+            )
+
+            class _OnceIterator(RecordIterator):
+                def __init__(self, row):
+                    self._row = row
+                    self._done = False
+
+                def next(self):
+                    if self._done:
+                        return None
+                    self._done = True
+                    return self._row
+
+            class _ConvertLikeReader(RecordReader):
+                def __init__(self, row):
+                    self._row = row
+                    self._done = False
+                    self.blob_view_lookup = None
+                    self.file_io = target_file_io
+                    self.blob_field_indices = {0}
+                    self.descriptor_field_indices = {0}
+
+                def read_batch(self):
+                    if self._done:
+                        return None
+                    self._done = True
+                    self.blob_view_lookup = lookup
+                    return _OnceIterator(self._row)
+
+                def close(self):
+                    pass
+
+            fields = [DataField(0, "picture", AtomicType("BLOB"))]
+            schema = PyarrowFieldParser.from_paimon_schema(fields)
+            inner = _ConvertLikeReader(OffsetRow(
+                (view_struct.serialize(),), 0, 1,
+                file_io=target_file_io,
+                blob_field_indices=[0],
+                descriptor_field_indices=[0],
+            ))
+            limited = LimitedRecordReader(inner, 10)
+            self.assertIsNone(limited.blob_view_lookup)
+            batch_reader = RecordReaderToBatchAdapter(limited, schema)
+            self.assertIsNone(batch_reader.blob_view_lookup)
+            wrapped = BatchToRecordReaderAdapter(batch_reader)
+            self.assertIsNone(wrapped.blob_view_lookup)
+            row = wrapped.read_batch().next()
+            blob = row.get_blob(0)
+            self.assertIsInstance(blob, BlobRef)
+            self.assertEqual(blob.to_data(), data)
+            lookup.resolve_blob.assert_called_once_with(view_struct)
+            target_file_io.new_input_stream.assert_not_called()
+            wrapped.close()
+
 
 class BlobEndToEndTest(unittest.TestCase):
     """End-to-end tests for blob functionality with schema definition, file writing, and reading."""
