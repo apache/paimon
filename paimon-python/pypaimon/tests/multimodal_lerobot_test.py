@@ -559,11 +559,20 @@ class LeRobotValidationTest(unittest.TestCase):
             torchcodec.assert_not_called()
 
     def test_indexed_default_backend_falls_back_after_lazy_failure(self):
+        if av is None:
+            self.skipTest("PyAV is required for its real exception types")
+        try:
+            av.open(io.BytesIO(b"invalid video"))
+        except av.error.InvalidDataError as error:
+            invalid_data_error = error
+        else:
+            self.fail("Invalid video did not raise InvalidDataError")
+
         stream = Mock()
         stream.video_keyframe_index = VideoKeyframeIndex(
             [], [(0, 0, 0)])
         pyav_decoder = Mock()
-        pyav_decoder.get_frames_at.side_effect = OSError("cannot open")
+        pyav_decoder.get_frames_at.side_effect = invalid_data_error
         torchcodec_decoder = Mock()
         expected = object()
         torchcodec_decoder.get_frames_at.return_value = expected
@@ -588,10 +597,33 @@ class LeRobotValidationTest(unittest.TestCase):
                 return_value=pyav_decoder), patch(
                 module + "_open_torchcodec_decoder") as torchcodec:
             decoder = _open_video_decoder(stream, backend="pyav")
-            with self.assertRaisesRegex(OSError, "cannot open"):
+            with self.assertRaises(av.error.InvalidDataError):
                 decoder.get_frames_at(indices=[3])
             stream.seek.assert_not_called()
             torchcodec.assert_not_called()
+
+    def test_indexed_default_backend_falls_back_on_ffmpeg_error(self):
+        if av is None:
+            self.skipTest("PyAV is required for its real exception types")
+        stream = Mock()
+        stream.video_keyframe_index = VideoKeyframeIndex(
+            [], [(0, 0, 0)])
+        pyav_decoder = Mock()
+        pyav_decoder.get_frames_at.side_effect = av.error.FFmpegError(
+            1, "cannot open", "video")
+        torchcodec_decoder = Mock()
+        expected = object()
+        torchcodec_decoder.get_frames_at.return_value = expected
+        module = "pypaimon.multimodal.lerobot.dataset."
+
+        with patch(
+                module + "_PyAVVideoDecoder",
+                return_value=pyav_decoder), patch(
+                module + "_open_torchcodec_decoder",
+                return_value=torchcodec_decoder):
+            decoder = _open_video_decoder(stream)
+            self.assertIs(expected, decoder.get_frames_at(indices=[3]))
+            stream.seek.assert_called_once_with(0)
 
     def test_video_batches_include_delta_frames_and_preserve_backends(self):
         try:

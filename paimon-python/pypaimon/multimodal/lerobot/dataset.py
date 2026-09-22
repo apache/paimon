@@ -1509,6 +1509,13 @@ def _video_tensor(frame, feature, return_uint8=False):
     return frame
 
 
+def _video_decoder_fallback_errors():
+    errors = (ImportError, OSError, RuntimeError, ValueError)
+    av = sys.modules.get("av")
+    ffmpeg_error = getattr(getattr(av, "error", None), "FFmpegError", None)
+    return errors if ffmpeg_error is None else errors + (ffmpeg_error,)
+
+
 def _open_video_decoder(stream, backend=None):
     keyframe_index = getattr(stream, "video_keyframe_index", None)
     if not isinstance(keyframe_index, VideoKeyframeIndex):
@@ -1516,7 +1523,7 @@ def _open_video_decoder(stream, backend=None):
     if backend is None and keyframe_index is not None:
         try:
             decoder = _PyAVVideoDecoder(stream, keyframe_index)
-        except (ImportError, OSError, RuntimeError):
+        except _video_decoder_fallback_errors():
             stream.seek(0)
         else:
             return _FallbackVideoDecoder(stream, decoder)
@@ -1563,7 +1570,7 @@ class _FallbackVideoDecoder:
     def _call(self, method, *args, **kwargs):
         try:
             result = getattr(self._decoder, method)(*args, **kwargs)
-        except (ImportError, OSError, RuntimeError) as error:
+        except _video_decoder_fallback_errors() as error:
             if not self._pending:
                 raise
             self._pending = False
@@ -1573,7 +1580,7 @@ class _FallbackVideoDecoder:
             self._stream.seek(0)
             try:
                 self._decoder = _open_torchcodec_decoder(self._stream)
-            except (ImportError, OSError, RuntimeError):
+            except _video_decoder_fallback_errors():
                 raise error
             return getattr(self._decoder, method)(*args, **kwargs)
         self._pending = False
