@@ -38,10 +38,54 @@ from pypaimon.write.file_store_commit import (
     RollbackRetryResult,
     RewriteResult,
     _abort_commit_messages,
+    _reject_compact_increment,
+    _row_id_check_from_messages,
 )
 
 
+class TestRowIdCheckFromMessages(unittest.TestCase):
+
+    def test_minimum_baseline_and_invalid_messages(self):
+        tagged = CommitMessage((), 0, [], check_from_snapshot=7)
+        self.assertEqual(_row_id_check_from_messages([tagged, tagged]), 7)
+        self.assertIsNone(_row_id_check_from_messages([CommitMessage((), 0, [])]))
+
+        newer = CommitMessage((), 0, [], check_from_snapshot=8)
+        for messages in ([tagged, newer], [newer, tagged]):
+            self.assertEqual(_row_id_check_from_messages(messages), 7)
+        with self.assertRaisesRegex(ValueError, 'Invalid row-id check snapshot'):
+            _row_id_check_from_messages([
+                CommitMessage((), 0, [], check_from_snapshot=-1)])
+        with self.assertRaisesRegex(ValueError, 'missing its check-from snapshot'):
+            _row_id_check_from_messages([
+                tagged, CommitMessage((), 0, [Mock(first_row_id=1)])])
+
+    def test_compaction_lists_are_not_flattened_into_append(self):
+        message = CommitMessage(
+            (), 0, [], compact_before=[Mock(file_name='before')],
+            compact_after=[Mock(file_name='after')],
+            compact_changelog_files=[Mock(file_name='changelog')])
+        with self.assertRaisesRegex(NotImplementedError, 'separate COMPACT snapshot'):
+            _reject_compact_increment([message])
+        _reject_compact_increment([CommitMessage((), 0, [])])
+
+    def test_overwrite_validates_message_baseline(self):
+        commit = FileStoreCommit.__new__(FileStoreCommit)
+        with self.assertRaisesRegex(ValueError, 'Invalid row-id check snapshot'):
+            commit.overwrite(
+                None, [CommitMessage((), 0, [], check_from_snapshot=-1)], 1)
+
+
 class TestAbortCommitMessages(unittest.TestCase):
+
+    def test_reconstructs_local_path_after_wire_decode(self):
+        table = Mock()
+        table.path_factory.return_value.bucket_path.return_value = '/table/p=1/bucket-0'
+        file = Mock(file_name='data.parquet', external_path=None, file_path=None)
+        message = CommitMessage((1,), 0, [file])
+        _abort_commit_messages(table, [message])
+        table.file_io.delete_quietly.assert_called_once_with(
+            '/table/p=1/bucket-0/data.parquet')
 
     def test_index_path_failure_does_not_escape_abort(self):
         table = Mock()
@@ -51,6 +95,9 @@ class TestAbortCommitMessages(unittest.TestCase):
             new_files=[],
             changelog_files=[],
             index_adds=[Mock(index_file=index_file)],
+            compact_after=[],
+            compact_changelog_files=[],
+            compact_index_adds=[],
         )
 
         with self.assertLogs(
