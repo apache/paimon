@@ -441,7 +441,7 @@ class TableRead:
             return None
         try:
             from pypaimon.read.native_plan import (
-                native_read, native_split_from_python)
+                native_read, native_split_from_python, prepare_native_read)
         except Exception as e:
             logger.warning(
                 "Native read failed, falling back to the Python reader: %s", e)
@@ -464,15 +464,20 @@ class TableRead:
             split_weights.append(self._native_split_weight(split))
         if (parallelism is not None
                 and self._should_run_parallel(splits, parallelism)):
+            read_kwargs = self._native_read_kwargs(blob_parallelism)
+            try:
+                read_splits = prepare_native_read(self.table, **read_kwargs)
+            except Exception as e:
+                logger.warning(
+                    "Native read failed, falling back to the Python reader: %s", e)
+                return None
             if streaming:
                 groups = self._native_split_groups(
                     rust_splits, parallelism, split_weights)
-                read_kwargs = self._native_read_kwargs(blob_parallelism)
                 readers = []
                 try:
                     for group in groups:
-                        readers.append(
-                            native_read(self.table, group, **read_kwargs))
+                        readers.append(read_splits(group))
                 except Exception as e:
                     for reader in readers:
                         close = getattr(reader, 'close', None)
@@ -492,8 +497,8 @@ class TableRead:
                 return self._convert_native_batches(batches, schema)
             try:
                 return self._native_batches_parallel(
-                    native_read, rust_splits, schema, parallelism,
-                    blob_parallelism, split_weights)
+                    read_splits, rust_splits, schema, parallelism,
+                    split_weights)
             except _NativeReadSetupError as e:
                 logger.warning(
                     "Native read failed, falling back to the Python reader: %s", e)
@@ -582,9 +587,9 @@ class TableRead:
         return groups
 
     def _native_batches_parallel(
-            self, native_read, rust_splits, schema, effective,
-            blob_parallelism, split_weights=None):
-        """Read contiguous split groups with independent Rust readers."""
+            self, read_splits, rust_splits, schema, effective,
+            split_weights=None):
+        """Read contiguous split groups with independent Rust streams."""
         groups = self._native_split_groups(
             rust_splits, effective, split_weights)
         workers = len(groups)
@@ -597,11 +602,10 @@ class TableRead:
             futures = {
                 executor.submit(
                     self._read_native_split_group,
-                    native_read,
+                    read_splits,
                     group,
                     schema,
                     remaining_state,
-                    blob_parallelism,
                 ): index
                 for index, group in enumerate(groups)
             }
@@ -700,13 +704,11 @@ class TableRead:
             executor.shutdown(wait=True)
 
     def _read_native_split_group(
-            self, native_read, rust_splits, schema, remaining_state,
-            blob_parallelism):
+            self, read_splits, rust_splits, schema, remaining_state):
         if remaining_state.exhausted():
             return []
         try:
-            read_kwargs = self._native_read_kwargs(blob_parallelism)
-            batches = native_read(self.table, rust_splits, **read_kwargs)
+            batches = read_splits(rust_splits)
         except Exception as e:
             raise _NativeReadSetupError(str(e)) from e
         result = []

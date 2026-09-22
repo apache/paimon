@@ -223,7 +223,11 @@ def test_native_read_uses_effective_parallelism_from_table_option():
     worker_names = set()
     worker_names_lock = threading.Lock()
 
-    def read_group(table, rust_splits, **kwargs):
+    groups = []
+
+    def read_group(rust_splits):
+        groups.append(rust_splits)
+
         def batches():
             with worker_names_lock:
                 worker_names.add(threading.current_thread().name)
@@ -231,15 +235,39 @@ def test_native_read_uses_effective_parallelism_from_table_option():
             yield _id_batch(rust_splits)
         return batches()
 
-    with patch('pypaimon.read.native_plan.native_read',
-               side_effect=read_group) as native:
+    with patch('pypaimon.read.native_plan.prepare_native_read',
+               return_value=read_group) as prepare:
         result = read.to_arrow(splits)
 
     assert result.to_pydict() == {'id': [0, 1, 2, 3]}
-    assert native.call_count == 2
-    groups = sorted(call.args[1] for call in native.call_args_list)
-    assert groups == [[0, 1], [2, 3]]
+    prepare.assert_called_once()
+    assert sorted(groups) == [[0, 1], [2, 3]]
     assert len(worker_names) == 2
+
+
+def test_parallel_native_read_prepares_rust_reader_once():
+    read = _table_read()
+    splits = [_Split() for _ in range(4)]
+    for index, split in enumerate(splits):
+        split._native_split = index
+
+    groups = []
+
+    def read_group(rust_splits):
+        groups.append(rust_splits)
+        return [_id_batch(rust_splits)]
+
+    with patch(
+            'pypaimon.read.native_plan.prepare_native_read',
+            create=True,
+            return_value=read_group) as prepare, patch(
+                'pypaimon.read.native_plan.native_read',
+                side_effect=AssertionError('rebuilt native reader')):
+        result = read.to_arrow(splits, parallelism=2)
+
+    assert result.to_pydict() == {'id': [0, 1, 2, 3]}
+    prepare.assert_called_once()
+    assert sorted(groups) == [[0, 1], [2, 3]]
 
 
 def test_native_batch_reader_uses_effective_parallelism():
@@ -253,7 +281,11 @@ def test_native_batch_reader_uses_effective_parallelism():
     worker_names = set()
     worker_names_lock = threading.Lock()
 
-    def read_group(table, rust_splits, **kwargs):
+    groups = []
+
+    def read_group(rust_splits):
+        groups.append(rust_splits)
+
         def batches():
             with worker_names_lock:
                 worker_names.add(threading.current_thread().name)
@@ -261,14 +293,13 @@ def test_native_batch_reader_uses_effective_parallelism():
             yield _id_batch(rust_splits)
         return batches()
 
-    with patch('pypaimon.read.native_plan.native_read',
-               side_effect=read_group) as native:
+    with patch('pypaimon.read.native_plan.prepare_native_read',
+               return_value=read_group) as prepare:
         result = read.to_arrow_batch_reader(splits).read_all()
 
     assert sorted(result.column('id').to_pylist()) == [0, 1, 2, 3]
-    assert native.call_count == 2
-    assert sorted(call.args[1] for call in native.call_args_list) == [
-        [0, 1], [2, 3]]
+    prepare.assert_called_once()
+    assert sorted(groups) == [[0, 1], [2, 3]]
     assert len(worker_names) == 2
 
 
@@ -316,17 +347,22 @@ def test_native_batch_reader_caps_blob_parallelism_across_rust_readers():
     for index, split in enumerate(splits):
         split._native_split = index
 
+    groups = []
+
+    def read_group(group):
+        groups.append(group)
+        return [_id_batch(group)]
+
     with patch(
-            'pypaimon.read.native_plan.native_read',
-            side_effect=lambda table, group, **kwargs: [
-                _id_batch(group)]) as native:
+            'pypaimon.read.native_plan.prepare_native_read',
+            return_value=read_group) as prepare:
         result = read.to_arrow_batch_reader(
             splits, blob_parallelism=16, parallelism=16).read_all()
 
     assert result.num_rows == 16
-    assert native.call_count == 16
-    assert {call.kwargs['blob_parallelism']
-            for call in native.call_args_list} == {4}
+    prepare.assert_called_once()
+    assert prepare.call_args.kwargs['blob_parallelism'] == 4
+    assert len(groups) == 16
 
 
 def test_parallel_native_stream_bounds_prefetch_per_reader():
@@ -541,15 +577,19 @@ def test_native_read_groups_splits_by_file_bytes():
     for index, split in enumerate(splits):
         split._native_split = index
 
+    groups = []
+
+    def read_group(group):
+        groups.append(group)
+        return [_id_batch(group)]
+
     with patch(
-            'pypaimon.read.native_plan.native_read',
-            side_effect=lambda table, group, **kwargs: [
-                _id_batch(group)]) as native:
+            'pypaimon.read.native_plan.prepare_native_read',
+            return_value=read_group):
         result = read.to_arrow(splits, parallelism=2)
 
     assert result.num_rows == 4
-    assert sorted(call.args[1] for call in native.call_args_list) == [
-        [0], [1, 2, 3]]
+    assert sorted(groups) == [[0], [1, 2, 3]]
 
 
 def test_native_read_runtime_parallelism_overrides_table_option():
@@ -559,14 +599,20 @@ def test_native_read_runtime_parallelism_overrides_table_option():
     for index, split in enumerate(splits):
         split._native_split = index
 
+    groups = []
+
+    def read_group(group):
+        groups.append(group)
+        return [_id_batch(group)]
+
     with patch(
-            'pypaimon.read.native_plan.native_read',
-            side_effect=lambda table, group, **kwargs: [
-                _id_batch(group)]) as native:
+            'pypaimon.read.native_plan.prepare_native_read',
+            return_value=read_group) as prepare:
         result = read.to_arrow(splits, parallelism=2)
 
     assert result.num_rows == 4
-    assert native.call_count == 2
+    prepare.assert_called_once()
+    assert len(groups) == 2
 
 
 def test_native_read_caps_blob_parallelism_across_split_readers():
@@ -575,17 +621,22 @@ def test_native_read_caps_blob_parallelism_across_split_readers():
     for index, split in enumerate(splits):
         split._native_split = index
 
+    groups = []
+
+    def read_group(group):
+        groups.append(group)
+        return [_id_batch(group)]
+
     with patch(
-            'pypaimon.read.native_plan.native_read',
-            side_effect=lambda table, group, **kwargs: [
-                _id_batch(group)]) as native:
+            'pypaimon.read.native_plan.prepare_native_read',
+            return_value=read_group) as prepare:
         result = read.to_arrow(
             splits, parallelism=16, blob_parallelism=16)
 
     assert result.num_rows == 16
-    assert native.call_count == 16
-    assert {call.kwargs['blob_parallelism']
-            for call in native.call_args_list} == {4}
+    prepare.assert_called_once()
+    assert prepare.call_args.kwargs['blob_parallelism'] == 4
+    assert len(groups) == 16
 
 
 def test_parallel_native_read_shares_limit_across_readers():
@@ -596,9 +647,8 @@ def test_parallel_native_read_shares_limit_across_readers():
         split._native_split = index
 
     with patch(
-            'pypaimon.read.native_plan.native_read',
-            side_effect=lambda table, group, **kwargs: [
-                _id_batch(group)]):
+            'pypaimon.read.native_plan.prepare_native_read',
+            return_value=lambda group: [_id_batch(group)]):
         result = read.to_arrow(splits)
 
     assert result.num_rows == 3
@@ -612,9 +662,8 @@ def test_parallel_native_batch_reader_shares_limit_across_readers():
         split._native_split = index
 
     with patch(
-            'pypaimon.read.native_plan.native_read',
-            side_effect=lambda table, group, **kwargs: [
-                _id_batch(group)]):
+            'pypaimon.read.native_plan.prepare_native_read',
+            return_value=lambda group: [_id_batch(group)]):
         result = read.to_arrow_batch_reader(splits).read_all()
 
     assert result.num_rows == 3
@@ -627,7 +676,7 @@ def test_parallel_native_reader_setup_failure_falls_back(streaming):
     for split in splits:
         split._native_split = object()
 
-    with patch('pypaimon.read.native_plan.native_read',
+    with patch('pypaimon.read.native_plan.prepare_native_read',
                side_effect=RuntimeError('setup failed')):
         assert read._try_native_batches(
             splits,
@@ -644,9 +693,10 @@ def test_parallel_native_stream_setup_failure_closes_started_readers():
         split._native_split = object()
     started = Mock()
 
+    read_splits = Mock(side_effect=[started, RuntimeError('setup failed')])
     with patch(
-            'pypaimon.read.native_plan.native_read',
-            side_effect=[started, RuntimeError('setup failed')]):
+            'pypaimon.read.native_plan.prepare_native_read',
+            return_value=read_splits):
         assert read._try_native_batches(
             splits,
             pa.schema([('id', pa.int32())]),
@@ -663,14 +713,14 @@ def test_parallel_native_stream_error_propagates():
     for split in splits:
         split._native_split = object()
 
-    def broken_stream(table, group, **kwargs):
+    def broken_stream(group):
         def batches():
             raise RuntimeError('stream failed')
             yield
         return batches()
 
-    with patch('pypaimon.read.native_plan.native_read',
-               side_effect=broken_stream), \
+    with patch('pypaimon.read.native_plan.prepare_native_read',
+               return_value=broken_stream), \
             pytest.raises(RuntimeError, match='stream failed'):
         read._try_native_batches(
             splits, pa.schema([('id', pa.int32())]), parallelism=2)
@@ -777,8 +827,8 @@ def test_native_read_preserves_parallel_large_binary_blob_schema():
         split._native_split = index
 
     with patch(
-            'pypaimon.read.native_plan.native_read',
-            side_effect=lambda table, group, **kwargs: [pa.record_batch(
+            'pypaimon.read.native_plan.prepare_native_read',
+            return_value=lambda group: [pa.record_batch(
                 [pa.array([bytes(group)], type=pa.large_binary())],
                 names=['payload'])]):
         result = read.to_arrow(splits, parallelism=2)

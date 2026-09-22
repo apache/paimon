@@ -34,7 +34,7 @@ from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.read.native_plan import (
     native_family_search_modes_available, native_method_available, native_read,
     native_reader_available, native_split_bridge_available,
-    native_split_from_python,
+    native_split_from_python, prepare_native_read,
 )
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
@@ -373,8 +373,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         plan = builder.new_scan().plan()
         self.assertEqual(len(plan.splits()), 4)
 
-        with patch('pypaimon.read.native_plan.native_read',
-                   wraps=native_read) as rust_reads, \
+        with patch('pypaimon.read.native_plan.prepare_native_read',
+                   wraps=prepare_native_read) as prepare, \
                 patch(
                     'pypaimon.read.table_read.TableRead._create_split_read',
                     side_effect=AssertionError('Python reader was used')):
@@ -386,10 +386,10 @@ class NativePlanIntegrationTest(unittest.TestCase):
             {'k': 3, 'v': 'c', 'dt': 'p3'},
             {'k': 4, 'v': 'd', 'dt': 'p4'},
         ])
-        self.assertEqual(rust_reads.call_count, 2)
+        prepare.assert_called_once()
 
-        with patch('pypaimon.read.native_plan.native_read',
-                   wraps=native_read) as rust_reads, \
+        with patch('pypaimon.read.native_plan.prepare_native_read',
+                   wraps=prepare_native_read) as prepare, \
                 patch(
                     'pypaimon.read.table_read.TableRead._create_split_read',
                     side_effect=AssertionError('Python reader was used')):
@@ -402,7 +402,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
             {'k': 3, 'v': 'c', 'dt': 'p3'},
             {'k': 4, 'v': 'd', 'dt': 'p4'},
         ])
-        self.assertEqual(rust_reads.call_count, 2)
+        prepare.assert_called_once()
 
     @unittest.skipUnless(native_reader_available(),
                          "pypaimon-rust native reader API not installed")
@@ -1465,10 +1465,10 @@ class NativePlanIntegrationTest(unittest.TestCase):
         })
         builder = native_table.new_read_builder()
         plan = builder.new_scan().plan()
-        with patch('pypaimon.read.native_plan.native_read',
-                   wraps=native_read) as read:
+        with patch('pypaimon.read.native_plan.prepare_native_read',
+                   wraps=prepare_native_read) as prepare:
             rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
-        self.assertEqual(read.call_count, len(plan.splits()))
+        prepare.assert_called_once()
         self.assertEqual(sorted(rows, key=lambda row: row['k']), [
             {'k': 1, 'p': 'a/b'},
             {'k': 2, 'p': 'a/b'},
