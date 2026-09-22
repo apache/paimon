@@ -339,12 +339,12 @@ def _configure_native_read_builder(builder, predicate, limit, projection,
     return builder
 
 
-def prepare_native_read(table, predicate: Optional[Predicate] = None,
-                        limit: Optional[int] = None,
-                        projection: Optional[List[str]] = None,
-                        blob_parallelism: Optional[int] = None,
-                        nested_projection: Optional[List[List[str]]] = None,
-                        include_row_kind: bool = False):
+def _prepare_native_read(table, predicate: Optional[Predicate] = None,
+                         limit: Optional[int] = None,
+                         projection: Optional[List[str]] = None,
+                         blob_parallelism: Optional[int] = None,
+                         nested_projection: Optional[List[List[str]]] = None,
+                         include_row_kind: bool = False):
     """Create one Rust reader reusable across split groups."""
     if not native_reader_available():
         raise RuntimeError(
@@ -367,7 +367,7 @@ def native_read(table, splits, predicate: Optional[Predicate] = None,
                 nested_projection: Optional[List[List[str]]] = None,
                 include_row_kind: bool = False):
     """Read Rust ``Split`` objects into PyArrow ``RecordBatch`` objects."""
-    read_splits = prepare_native_read(
+    read_splits = _prepare_native_read(
         table, predicate, limit, projection, blob_parallelism,
         nested_projection, include_row_kind)
     return read_splits(splits)

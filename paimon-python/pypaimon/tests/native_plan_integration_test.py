@@ -32,9 +32,9 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.read.native_plan import (
-    native_family_search_modes_available, native_method_available, native_read,
-    native_reader_available, native_split_bridge_available,
-    native_split_from_python, prepare_native_read,
+    _prepare_native_read, native_family_search_modes_available,
+    native_method_available, native_read, native_reader_available,
+    native_split_bridge_available, native_split_from_python,
 )
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
@@ -373,8 +373,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         plan = builder.new_scan().plan()
         self.assertEqual(len(plan.splits()), 4)
 
-        with patch('pypaimon.read.native_plan.prepare_native_read',
-                   wraps=prepare_native_read) as prepare, \
+        with patch('pypaimon.read.native_plan._prepare_native_read',
+                   wraps=_prepare_native_read) as prepare, \
                 patch(
                     'pypaimon.read.table_read.TableRead._create_split_read',
                     side_effect=AssertionError('Python reader was used')):
@@ -388,8 +388,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         ])
         prepare.assert_called_once()
 
-        with patch('pypaimon.read.native_plan.prepare_native_read',
-                   wraps=prepare_native_read) as prepare, \
+        with patch('pypaimon.read.native_plan._prepare_native_read',
+                   wraps=_prepare_native_read) as prepare, \
                 patch(
                     'pypaimon.read.table_read.TableRead._create_split_read',
                     side_effect=AssertionError('Python reader was used')):
@@ -1465,8 +1465,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         })
         builder = native_table.new_read_builder()
         plan = builder.new_scan().plan()
-        with patch('pypaimon.read.native_plan.prepare_native_read',
-                   wraps=prepare_native_read) as prepare:
+        with patch('pypaimon.read.native_plan._prepare_native_read',
+                   wraps=_prepare_native_read) as prepare:
             rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
         prepare.assert_called_once()
         self.assertEqual(sorted(rows, key=lambda row: row['k']), [

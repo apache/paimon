@@ -235,7 +235,7 @@ def test_native_read_uses_effective_parallelism_from_table_option():
             yield _id_batch(rust_splits)
         return batches()
 
-    with patch('pypaimon.read.native_plan.prepare_native_read',
+    with patch('pypaimon.read.native_plan._prepare_native_read',
                return_value=read_group) as prepare:
         result = read.to_arrow(splits)
 
@@ -258,7 +258,7 @@ def test_parallel_native_read_prepares_rust_reader_once():
         return [_id_batch(rust_splits)]
 
     with patch(
-            'pypaimon.read.native_plan.prepare_native_read',
+            'pypaimon.read.native_plan._prepare_native_read',
             create=True,
             return_value=read_group) as prepare, patch(
                 'pypaimon.read.native_plan.native_read',
@@ -293,7 +293,7 @@ def test_native_batch_reader_uses_effective_parallelism():
             yield _id_batch(rust_splits)
         return batches()
 
-    with patch('pypaimon.read.native_plan.prepare_native_read',
+    with patch('pypaimon.read.native_plan._prepare_native_read',
                return_value=read_group) as prepare:
         result = read.to_arrow_batch_reader(splits).read_all()
 
@@ -354,7 +354,7 @@ def test_native_batch_reader_caps_blob_parallelism_across_rust_readers():
         return [_id_batch(group)]
 
     with patch(
-            'pypaimon.read.native_plan.prepare_native_read',
+            'pypaimon.read.native_plan._prepare_native_read',
             return_value=read_group) as prepare:
         result = read.to_arrow_batch_reader(
             splits, blob_parallelism=16, parallelism=16).read_all()
@@ -584,7 +584,7 @@ def test_native_read_groups_splits_by_file_bytes():
         return [_id_batch(group)]
 
     with patch(
-            'pypaimon.read.native_plan.prepare_native_read',
+            'pypaimon.read.native_plan._prepare_native_read',
             return_value=read_group):
         result = read.to_arrow(splits, parallelism=2)
 
@@ -606,7 +606,7 @@ def test_native_read_runtime_parallelism_overrides_table_option():
         return [_id_batch(group)]
 
     with patch(
-            'pypaimon.read.native_plan.prepare_native_read',
+            'pypaimon.read.native_plan._prepare_native_read',
             return_value=read_group) as prepare:
         result = read.to_arrow(splits, parallelism=2)
 
@@ -628,7 +628,7 @@ def test_native_read_caps_blob_parallelism_across_split_readers():
         return [_id_batch(group)]
 
     with patch(
-            'pypaimon.read.native_plan.prepare_native_read',
+            'pypaimon.read.native_plan._prepare_native_read',
             return_value=read_group) as prepare:
         result = read.to_arrow(
             splits, parallelism=16, blob_parallelism=16)
@@ -647,7 +647,7 @@ def test_parallel_native_read_shares_limit_across_readers():
         split._native_split = index
 
     with patch(
-            'pypaimon.read.native_plan.prepare_native_read',
+            'pypaimon.read.native_plan._prepare_native_read',
             return_value=lambda group: [_id_batch(group)]):
         result = read.to_arrow(splits)
 
@@ -662,7 +662,7 @@ def test_parallel_native_batch_reader_shares_limit_across_readers():
         split._native_split = index
 
     with patch(
-            'pypaimon.read.native_plan.prepare_native_read',
+            'pypaimon.read.native_plan._prepare_native_read',
             return_value=lambda group: [_id_batch(group)]):
         result = read.to_arrow_batch_reader(splits).read_all()
 
@@ -676,7 +676,7 @@ def test_parallel_native_reader_setup_failure_falls_back(streaming):
     for split in splits:
         split._native_split = object()
 
-    with patch('pypaimon.read.native_plan.prepare_native_read',
+    with patch('pypaimon.read.native_plan._prepare_native_read',
                side_effect=RuntimeError('setup failed')):
         assert read._try_native_batches(
             splits,
@@ -695,7 +695,7 @@ def test_parallel_native_stream_setup_failure_closes_started_readers():
 
     read_splits = Mock(side_effect=[started, RuntimeError('setup failed')])
     with patch(
-            'pypaimon.read.native_plan.prepare_native_read',
+            'pypaimon.read.native_plan._prepare_native_read',
             return_value=read_splits):
         assert read._try_native_batches(
             splits,
@@ -719,7 +719,7 @@ def test_parallel_native_stream_error_propagates():
             yield
         return batches()
 
-    with patch('pypaimon.read.native_plan.prepare_native_read',
+    with patch('pypaimon.read.native_plan._prepare_native_read',
                return_value=broken_stream), \
             pytest.raises(RuntimeError, match='stream failed'):
         read._try_native_batches(
@@ -827,7 +827,7 @@ def test_native_read_preserves_parallel_large_binary_blob_schema():
         split._native_split = index
 
     with patch(
-            'pypaimon.read.native_plan.prepare_native_read',
+            'pypaimon.read.native_plan._prepare_native_read',
             return_value=lambda group: [pa.record_batch(
                 [pa.array([bytes(group)], type=pa.large_binary())],
                 names=['payload'])]):

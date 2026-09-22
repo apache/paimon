@@ -441,7 +441,7 @@ class TableRead:
             return None
         try:
             from pypaimon.read.native_plan import (
-                native_read, native_split_from_python, prepare_native_read)
+                _prepare_native_read, native_read, native_split_from_python)
         except Exception as e:
             logger.warning(
                 "Native read failed, falling back to the Python reader: %s", e)
@@ -466,7 +466,7 @@ class TableRead:
                 and self._should_run_parallel(splits, parallelism)):
             read_kwargs = self._native_read_kwargs(blob_parallelism)
             try:
-                read_splits = prepare_native_read(self.table, **read_kwargs)
+                read_splits = _prepare_native_read(self.table, **read_kwargs)
             except Exception as e:
                 logger.warning(
                     "Native read failed, falling back to the Python reader: %s", e)
