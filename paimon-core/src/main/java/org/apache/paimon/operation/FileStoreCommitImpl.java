@@ -66,6 +66,7 @@ import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
@@ -1043,6 +1044,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
+        TableSchema latestSchema =
+                schemaManager.latestOrThrow("Cannot get latest schema for table " + tableName);
+        long latestSchemaId = latestSchema.id();
+        checkRowTrackingNotEnabledAfterLoad(latestSchema);
+
         long newSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
         long firstRowIdStart = 0;
         if (latestSnapshot != null) {
@@ -1232,11 +1238,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             indexManifest =
                     indexManifestFile.writeIndexFiles(oldIndexManifest, indexFiles, bucketMode);
 
-            long latestSchemaId =
-                    schemaManager
-                            .latestOrThrow("Cannot get latest schema for table " + tableName)
-                            .id();
-
             // write new stats or inherit from the previous snapshot
             String statsFileName = null;
             if (newStatsFileName != null) {
@@ -1406,6 +1407,28 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
+    /**
+     * Row tracking derives every row id from the {@code firstRowId} that the commit assigns to a
+     * new file, so a file committed by a writer which does not know that the table enabled row
+     * tracking would never get one and could not be read as a data-evolution file. Such a writer
+     * loaded the table before {@code sys.enable_data_evolution} converted it: refuse its commit so
+     * that it reloads the table.
+     */
+    private void checkRowTrackingNotEnabledAfterLoad(TableSchema latestSchema) {
+        if (options.rowTrackingEnabled()) {
+            return;
+        }
+        if (!CoreOptions.fromMap(latestSchema.options()).rowTrackingEnabled()) {
+            return;
+        }
+        throw new IllegalStateException(
+                String.format(
+                        "Table %s enabled row tracking in schema %d after this writer loaded the "
+                                + "table without it. Restart the writer so that it picks up the "
+                                + "current schema.",
+                        tableName, latestSchema.id()));
+    }
+
     public boolean replaceManifestList(
             Snapshot latest,
             long totalRecordCount,
@@ -1435,6 +1458,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Long nextRowId) {
         return replaceManifestList(
                 latest,
+                latest.schemaId(),
                 totalRecordCount,
                 baseManifestList,
                 deltaManifestList,
@@ -1451,10 +1475,34 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable String indexManifest,
             @Nullable Long nextRowId,
             @Nullable Map<String, String> properties) {
+        return replaceManifestList(
+                latest,
+                latest.schemaId(),
+                totalRecordCount,
+                baseManifestList,
+                deltaManifestList,
+                indexManifest,
+                nextRowId,
+                properties);
+    }
+
+    /**
+     * Same as {@link #replaceManifestList(Snapshot, long, Pair, Pair, String, Long, Map)}, but the
+     * new snapshot references {@code schemaId} instead of the schema of {@code latest}.
+     */
+    public boolean replaceManifestList(
+            Snapshot latest,
+            long schemaId,
+            long totalRecordCount,
+            Pair<String, Long> baseManifestList,
+            Pair<String, Long> deltaManifestList,
+            @Nullable String indexManifest,
+            @Nullable Long nextRowId,
+            @Nullable Map<String, String> properties) {
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,
-                        latest.schemaId(),
+                        schemaId,
                         baseManifestList.getLeft(),
                         baseManifestList.getRight(),
                         deltaManifestList.getKey(),
@@ -1486,6 +1534,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 checkNotNull(
                         snapshotManager.latestSnapshot(),
                         "Latest snapshot is null, can not roll back.");
+        if (options.rowTrackingEnabled()
+                && !CoreOptions.fromMap(schemaManager.schema(targetSnapshot.schemaId()).options())
+                        .rowTrackingEnabled()) {
+            throw new IllegalStateException(
+                    String.format(
+                            "Cannot roll back table %s to snapshot %d: it was committed with schema "
+                                    + "%d, before row tracking was enabled, so its files have no "
+                                    + "row ids.",
+                            tableName, targetSnapshot.id(), targetSnapshot.schemaId()));
+        }
 
         Map<FileEntry.Identifier, ManifestEntry> latestEntries = new HashMap<>();
         FileEntry.mergeEntries(
