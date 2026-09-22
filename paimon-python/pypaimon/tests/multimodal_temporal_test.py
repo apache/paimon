@@ -26,6 +26,7 @@ from unittest import mock
 
 import numpy as np
 import pyarrow as pa
+import pytest
 import pypaimon.multimodal as pmm
 from pypaimon.multimodal import temporal
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
@@ -741,6 +742,7 @@ class MultimodalTemporalTest(unittest.TestCase):
                         )
                         self.assertEqual(expected, row["matches"])
 
+    @pytest.mark.python_read
     def test_window_join_prunes_unaggregated_right_columns(self):
         anchors = self._table("window_projection_anchors", {
             "episode_id": pa.int32(),
@@ -2402,6 +2404,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         self.assertIsNone(aligned.resolved_snapshots["right_1"]["snapshot_id"])
         self.assertIsNone(aligned.to_list()[0]["value"])
 
+    @pytest.mark.python_read
     def test_alignment_reuses_decoded_parquet_row_groups_across_batches(self):
         anchors = self._table("cached_anchors", {
             "episode_id": pa.int32(),

@@ -23,6 +23,7 @@ import unittest
 from types import SimpleNamespace
 
 import pyarrow as pa
+import pytest
 
 from pypaimon.common.options import CoreOptions, Options
 from pypaimon.read.query_auth_split import QueryAuthSplit
@@ -833,6 +834,7 @@ class TestSchemaRefreshAsksTheCatalog(unittest.TestCase):
             read.to_arrow([QueryAuthSplit(object(), auth)], parallelism=1)
         self.assertEqual(table.catalog_environment.get_table_calls, 3)
 
+    @pytest.mark.python_read
     def test_a_read_without_rules_never_asks_the_catalog(self):
         fields = [_string_field(0, "id"), _string_field(1, "email")]
         table = self._table(fields, fields)

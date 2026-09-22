@@ -195,8 +195,11 @@ def test_missing_explicit_dv_is_not_replaced_by_a_local_copy(tmp_path, planner):
         with table.file_io.new_output_stream(directory + '/' + file.file_name) as stream:
             stream.write(data)
     table.file_io.delete_quietly(file.external_path)
-    with pytest.raises(FileNotFoundError):
+    # The Python filesystem raises FileNotFoundError; the native reader wraps
+    # the same missing explicit path in its storage error.
+    with pytest.raises((FileNotFoundError, ValueError)) as error:
         _read(table, planner, 2, [1, 2, 3])
+    assert file.file_name in str(error.value)
 
 
 @pytest.mark.parametrize('planner', _PLANNERS)

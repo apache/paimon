@@ -22,6 +22,7 @@ import unittest
 from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate import Predicate
@@ -77,6 +78,7 @@ class TestManifestReadRowRangePerformance(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
+    @pytest.mark.python_plan
     def test_scan_constructs_all_entries_without_early_row_range_filter(self):
         """With manifest.merge-min-count=1, all entries are in one manifest.
         Querying with _ROW_ID BETWEEN 5 AND 14 should return 2 files, but

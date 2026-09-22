@@ -20,6 +20,7 @@ import threading
 from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.source.vector_search_read import BatchVectorSearchReadImpl
@@ -117,6 +118,7 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
                 results = reader._read_raw_batch_search([Range(0, 99)], None, 'ivf-flat')
                 self.assertEqual([{}, {}], [_scores(r) for r in results])
 
+    @pytest.mark.python_read
     def test_scoring_finishes_each_batch_before_reading_the_next(self):
         table = self._create_table()
         self._write_arrow(table, self._data([[1, 0], [0, 1], [2, 0], [0, 2]]))
@@ -198,6 +200,7 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
         self.assertEqual([1.0], list(_scores(current[0]).values()))
         self.assertNotEqual(list(old[0].results()), list(current[0].results()))
 
+    @pytest.mark.python_read
     def test_public_batch_search_preserves_split_parallelism(self):
         table = self._create_table(partition_keys=['pt'])
         for partition in range(4):
@@ -246,6 +249,7 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
                         self.assertEqual({'active': 0, 'peak': expected_workers,
                                           'closed': expected_workers}, state)
 
+    @pytest.mark.python_read
     def test_parallel_failure_closes_all_started_readers(self):
         table = self._create_table(
             partition_keys=['pt'], options=dict(self.table_options, **{'read.parallelism': '2'}))

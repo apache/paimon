@@ -34,6 +34,12 @@ import ray
 
 class RESTTableReadWriteTest(RESTBaseTest):
 
+    @staticmethod
+    def _avro_field_names(data):
+        return data.rename_columns([
+            'long_dt' if name == 'long-dt' else name for name in data.schema.names
+        ])
+
     def test_overwrite(self):
         simple_pa_schema = pa.schema([
             ('f0', pa.int32()),
@@ -201,14 +207,15 @@ class RESTTableReadWriteTest(RESTBaseTest):
         self.assertEqual(actual, self.expected)
 
     def test_avro_ao_reader(self):
-        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'avro'})
+        expected = self._avro_field_names(self.expected)
+        schema = Schema.from_pyarrow_schema(expected.schema, partition_keys=['dt'], options={'file.format': 'avro'})
         self.rest_catalog.create_table('default.test_append_only_avro', schema, False)
         table = self.rest_catalog.get_table('default.test_append_only_avro')
-        self._write_test_table(table)
+        self._write_test_table(table, expected)
 
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        self.assertEqual(actual, self.expected)
+        self.assertEqual(actual, expected)
 
     def test_lance_ao_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
@@ -286,15 +293,15 @@ class RESTTableReadWriteTest(RESTBaseTest):
         self.assertEqual(actual, expected)
 
     def test_avro_ao_reader_with_projection(self):
-        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'avro'})
+        expected = self._avro_field_names(self.expected)
+        schema = Schema.from_pyarrow_schema(expected.schema, partition_keys=['dt'], options={'file.format': 'avro'})
         self.rest_catalog.create_table('default.test_avro_append_only_projection', schema, False)
         table = self.rest_catalog.get_table('default.test_avro_append_only_projection')
-        self._write_test_table(table)
+        self._write_test_table(table, expected)
 
         read_builder = table.new_read_builder().with_projection(['dt', 'user_id'])
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        expected = self.expected.select(['dt', 'user_id'])
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, expected.select(['dt', 'user_id']))
 
     def test_ao_reader_with_limit(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
@@ -344,7 +351,8 @@ class RESTTableReadWriteTest(RESTBaseTest):
             self.assertEqual(col_a, col_b)
 
     def test_pk_avro_reader(self):
-        schema = Schema.from_pyarrow_schema(self.pa_schema,
+        expected = self._avro_field_names(self.pk_expected)
+        schema = Schema.from_pyarrow_schema(expected.schema,
                                             partition_keys=['dt'],
                                             primary_keys=['user_id', 'dt'],
                                             options={
@@ -353,11 +361,11 @@ class RESTTableReadWriteTest(RESTBaseTest):
                                             })
         self.rest_catalog.create_table('default.test_pk_avro', schema, False)
         table = self.rest_catalog.get_table('default.test_pk_avro')
-        self._write_test_table(table)
+        self._write_test_table(table, expected)
 
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        self.assertEqual(actual, self.pk_expected)
+        self.assertEqual(actual, expected)
 
     def test_pk_lance_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,

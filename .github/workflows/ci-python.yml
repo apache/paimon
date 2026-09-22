@@ -232,10 +232,11 @@ jobs:
           assert hasattr(ReadBuilder, 'with_row_ranges'), 'Missing ReadBuilder.with_row_ranges'
           PY
 
-      - name: Run Python tests with Rust planning
+      - name: Run Python tests with Rust planning and reading
         shell: bash
         env:
           PYPAIMON_TEST_NATIVE_PLAN: '1'
+          PYPAIMON_TEST_NATIVE_READ: '1'
         run: |
           bash paimon-python/dev/lint-python.sh -i pytest
 

@@ -24,6 +24,7 @@ from unittest.mock import patch
 
 import pyarrow as pa
 import pyarrow.compute as pc
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
@@ -104,6 +105,7 @@ class _PayloadAuthResult(TableQueryAuthResult):
             batch.column("payload"), self._expected_payload)
 
 
+@pytest.mark.python_read
 class DeferredBlobResolveTest(unittest.TestCase):
 
     @classmethod

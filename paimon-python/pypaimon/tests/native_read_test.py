@@ -700,6 +700,21 @@ def test_native_read_falls_back_for_unsupported_file_format():
     native.assert_not_called()
 
 
+def test_native_avro_read_uses_native_path():
+    read = _table_read()
+    read.table.options.file_format.return_value = 'avro'
+    split = _Split('data.avro')
+    split._native_split = object()
+
+    with patch('pypaimon.read.native_plan.native_read',
+               return_value=[_id_batch([7])]) as native:
+        batches = list(read._try_native_batches(
+            [split], pa.schema([('id', pa.int32())])))
+
+    assert batches[0].column('id').to_pylist() == [7]
+    native.assert_called_once()
+
+
 def test_native_read_falls_back_for_unsupported_dedicated_file():
     read = _table_read()
     schema = pa.schema([('id', pa.int32())])
