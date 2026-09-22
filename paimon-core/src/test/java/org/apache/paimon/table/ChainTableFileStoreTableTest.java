@@ -44,7 +44,10 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilderImpl;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.source.ChainSplit;
@@ -1084,6 +1087,227 @@ public class ChainTableFileStoreTableTest {
             }
         }
         return result;
+    }
+
+    @Test
+    public void testChainOverwriteClearsSnapshotPartition() throws Exception {
+        createChainTable(options -> {});
+        FileStoreTable chainTable = loadTable();
+        FileStoreTable snapshotTable = chainTable.switchToBranch(SNAPSHOT_BRANCH);
+        FileStoreTable deltaTable = chainTable.switchToBranch(DELTA_BRANCH);
+        Map<String, String> partition = partition("20");
+
+        writeWithCommit(snapshotTable, row(1L, 1L, "value-1", "CN", "20250810", "20"));
+        assertThat(getResult(loadTable(), partition))
+                .containsExactly(row(1L, 1L, "value-1", "CN", "20250810", "20"));
+
+        // An overwrite of the delta branch clears the same partition of the snapshot branch, so
+        // that reads fall through to the delta.
+        commitOverwrite(deltaTable, partition, 0, row(1L, 2L, "value-2", "CN", "20250810", "20"));
+        assertThat(getResult(loadTable(), partition))
+                .containsExactly(row(1L, 2L, "value-2", "CN", "20250810", "20"));
+    }
+
+    @Test
+    public void testChainOverwriteReplayCompletesSnapshotCleanup() throws Exception {
+        createChainTable(options -> {});
+        FileStoreTable chainTable = loadTable();
+        FileStoreTable snapshotTable = chainTable.switchToBranch(SNAPSHOT_BRANCH);
+        FileStoreTable deltaTable = chainTable.switchToBranch(DELTA_BRANCH);
+        Map<String, String> partition = partition("20");
+
+        writeWithCommit(snapshotTable, row(1L, 1L, "value-1", "CN", "20250810", "20"));
+
+        // The overwrite publishes its snapshot, and only then clears the snapshot branch. Make
+        // that cleanup fail, the way a transient failure of the snapshot branch would: the delta
+        // snapshot is published, the commit throws, and the partition is not cleared.
+        assertThatThrownBy(
+                        () ->
+                                commitOverwrite(
+                                        withFailingCleanup(deltaTable),
+                                        partition,
+                                        0,
+                                        row(1L, 2L, "value-2", "CN", "20250810", "20")))
+                .hasMessageContaining("does not exist");
+        assertThat(deltaTable.snapshotManager().snapshotCount())
+                .as("the delta snapshot was published before the cleanup failed")
+                .isEqualTo(1);
+        assertThat(getResult(loadTable(), partition))
+                .as("the snapshot branch still hides the delta until its partition is cleared")
+                .containsExactly(row(1L, 1L, "value-1", "CN", "20250810", "20"));
+
+        // A restarted job replays the batch under the same user and identifier. The commit is
+        // recognised as already published, so the callback is retried rather than called, and
+        // the retry has to complete the cleanup the first attempt did not.
+        commitOverwrite(deltaTable, partition, 0, row(1L, 2L, "value-2", "CN", "20250810", "20"));
+
+        assertThat(deltaTable.snapshotManager().snapshotCount())
+                .as("the replay must not publish a second snapshot")
+                .isEqualTo(1);
+        assertThat(getResult(loadTable(), partition))
+                .as("the replay must complete the cleanup of the snapshot branch")
+                .containsExactly(row(1L, 2L, "value-2", "CN", "20250810", "20"));
+    }
+
+    @Test
+    public void testChainOverwriteReplayClearsPartitionWithOnlyRemovedFiles() throws Exception {
+        createChainTable(options -> {});
+        FileStoreTable chainTable = loadTable();
+        FileStoreTable snapshotTable = chainTable.switchToBranch(SNAPSHOT_BRANCH);
+        FileStoreTable deltaTable = chainTable.switchToBranch(DELTA_BRANCH);
+
+        writeWithCommit(
+                snapshotTable,
+                row(1L, 1L, "value-1", "CN", "20250810", "20"),
+                row(2L, 1L, "value-1", "CN", "20250810", "21"));
+        writeWithCommit(deltaTable, row(1L, 1L, "delta-old", "CN", "20250810", "20"));
+
+        // A static overwrite of the whole delta branch that writes only to hour 21 removes the
+        // file of hour 20 without adding one there. The cleanup has to cover hour 20 as well,
+        // which the commit messages of the batch do not mention; only the manifest changes of the
+        // snapshot do. (A dynamic partition overwrite, the default, would leave hour 20 alone.)
+        Map<String, String> staticOverwrite = new HashMap<>();
+        staticOverwrite.put(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false");
+        FileStoreTable staticDelta = deltaTable.copy(staticOverwrite);
+        assertThatThrownBy(
+                        () ->
+                                commitOverwrite(
+                                        withFailingCleanup(staticDelta),
+                                        Collections.emptyMap(),
+                                        0,
+                                        row(2L, 2L, "value-2", "CN", "20250810", "21")))
+                .hasMessageContaining("does not exist");
+        commitOverwrite(
+                staticDelta,
+                Collections.emptyMap(),
+                0,
+                row(2L, 2L, "value-2", "CN", "20250810", "21"));
+
+        assertThat(deltaTable.snapshotManager().snapshotCount()).isEqualTo(2);
+        assertThat(getResult(loadTable(), partition("20")))
+                .as("a partition the overwrite only removed files from must be cleared too")
+                .isEmpty();
+        assertThat(getResult(loadTable(), partition("21")))
+                .containsExactly(row(2L, 2L, "value-2", "CN", "20250810", "21"));
+    }
+
+    @Test
+    public void testChainOverwriteReplayKeepsSnapshotDataWrittenAfterTheOverwrite()
+            throws Exception {
+        createChainTable(options -> {});
+        FileStoreTable chainTable = loadTable();
+        FileStoreTable snapshotTable = chainTable.switchToBranch(SNAPSHOT_BRANCH);
+        FileStoreTable deltaTable = chainTable.switchToBranch(DELTA_BRANCH);
+        Map<String, String> partition = partition("20");
+
+        writeWithCommit(snapshotTable, row(1L, 1L, "value-1", "CN", "20250810", "20"));
+        // The overwrite and its cleanup both succeed.
+        commitOverwrite(deltaTable, partition, 0, row(1L, 2L, "value-2", "CN", "20250810", "20"));
+        assertThat(getResult(loadTable(), partition))
+                .containsExactly(row(1L, 2L, "value-2", "CN", "20250810", "20"));
+
+        // New data lands in the same partition of the snapshot branch afterwards and, being the
+        // snapshot, takes precedence over the delta.
+        writeWithCommit(snapshotTable, row(2L, 1L, "value-3", "CN", "20250810", "20"));
+        assertThat(getResult(loadTable(), partition))
+                .containsExactly(row(2L, 1L, "value-3", "CN", "20250810", "20"));
+
+        // The batch is replayed although its callback had completed, for example because the
+        // engine failed after the sink returned. The retry must not clear what landed later.
+        commitOverwrite(deltaTable, partition, 0, row(1L, 2L, "value-2", "CN", "20250810", "20"));
+
+        assertThat(getResult(snapshotTable, partition))
+                .as(
+                        "data written to the snapshot branch after the overwrite must survive its replay")
+                .containsExactly(row(2L, 1L, "value-3", "CN", "20250810", "20"));
+        assertThat(getResult(loadTable(), partition))
+                .containsExactly(row(2L, 1L, "value-3", "CN", "20250810", "20"));
+    }
+
+    @Test
+    public void testChainOverwriteReplayClearsOnlyWhatTheOverwriteSuperseded() throws Exception {
+        createChainTable(options -> {});
+        FileStoreTable chainTable = loadTable();
+        FileStoreTable snapshotTable = chainTable.switchToBranch(SNAPSHOT_BRANCH);
+        FileStoreTable deltaTable = chainTable.switchToBranch(DELTA_BRANCH);
+        Map<String, String> partition = partition("20");
+
+        writeWithCommit(snapshotTable, row(1L, 1L, "value-1", "CN", "20250810", "20"));
+        // The overwrite is published, its cleanup fails.
+        assertThatThrownBy(
+                        () ->
+                                commitOverwrite(
+                                        withFailingCleanup(deltaTable),
+                                        partition,
+                                        0,
+                                        row(1L, 2L, "value-2", "CN", "20250810", "20")))
+                .hasMessageContaining("does not exist");
+
+        // New data lands in the same partition of the snapshot branch before the replay.
+        writeWithCommit(snapshotTable, row(2L, 1L, "value-3", "CN", "20250810", "20"));
+
+        // Had the cleanup run when the overwrite was published, it would have cleared value-1
+        // and left value-3, which came later, in place. The retry has to do the same.
+        commitOverwrite(deltaTable, partition, 0, row(1L, 2L, "value-2", "CN", "20250810", "20"));
+
+        assertThat(getResult(snapshotTable, partition))
+                .as(
+                        "the retry must clear what the overwrite superseded and nothing that came later")
+                .containsExactly(row(2L, 1L, "value-3", "CN", "20250810", "20"));
+        assertThat(getResult(loadTable(), partition))
+                .containsExactly(row(2L, 1L, "value-3", "CN", "20250810", "20"));
+    }
+
+    @Test
+    public void testChainOverwriteReplayWithoutSnapshotIsSkipped() throws Exception {
+        createChainTable(options -> {});
+        FileStoreTable deltaTable = loadTable().switchToBranch(DELTA_BRANCH);
+        Map<String, String> partition = partition("20");
+
+        commitOverwrite(deltaTable, partition, 0, row(1L, 1L, "value-1", "CN", "20250810", "20"));
+        commitOverwrite(deltaTable, partition, 2, row(1L, 2L, "value-2", "CN", "20250810", "20"));
+        long snapshots = deltaTable.snapshotManager().snapshotCount();
+
+        // Identifier 1 is below the latest committed one, so it is treated as a replay and
+        // retried, but no snapshot carries it. That is not an error: nothing is left to clean.
+        commitOverwrite(deltaTable, partition, 1, row(1L, 3L, "value-3", "CN", "20250810", "20"));
+
+        assertThat(deltaTable.snapshotManager().snapshotCount()).isEqualTo(snapshots);
+        assertThat(getResult(loadTable(), partition))
+                .containsExactly(row(1L, 2L, "value-2", "CN", "20250810", "20"));
+    }
+
+    private static Map<String, String> partition(String hour) {
+        return ImmutableMap.of("region", "CN", "dt", "20250810", "hour", hour);
+    }
+
+    /**
+     * The delta table with the snapshot branch cleanup of an overwrite failing after the delta
+     * snapshot is published, since the branch it is told to clean does not exist.
+     */
+    private static FileStoreTable withFailingCleanup(FileStoreTable deltaTable) {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCAN_FALLBACK_SNAPSHOT_BRANCH.key(), "unreachable");
+        return deltaTable.copy(options);
+    }
+
+    private void commitOverwrite(
+            FileStoreTable deltaTable,
+            Map<String, String> overwrite,
+            long identifier,
+            GenericRow... rows)
+            throws Exception {
+        BatchWriteBuilderImpl builder =
+                ((BatchWriteBuilderImpl) deltaTable.newBatchWriteBuilder()).withCommitUser("user");
+        builder.withOverwrite(overwrite);
+        try (BatchTableWrite write =
+                        builder.newWrite().withIOManager(new IOManagerImpl(tempDir.toString()));
+                InnerTableCommit commit = builder.newCommit()) {
+            for (GenericRow r : rows) {
+                write.write(r);
+            }
+            commit.filterAndCommit(Collections.singletonMap(identifier, write.prepareCommit()));
+        }
     }
 
     private FileStoreTable loadTable() {

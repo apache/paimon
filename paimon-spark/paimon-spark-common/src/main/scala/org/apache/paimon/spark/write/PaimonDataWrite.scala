@@ -36,7 +36,7 @@ case class PaimonDataWrite(
     rowKindColIdx: Int = -1,
     writeRowTracking: Boolean = false,
     fullCompactionDeltaCommits: Option[Int],
-    batchId: Option[Long],
+    commitIdentifier: Option[Long],
     uriReaderFactory: UriReaderFactory,
     postponePartitionBucketComputer: Option[BinaryRow => Integer])
   extends abstractInnerTableDataWrite[Row]
