@@ -120,7 +120,10 @@ public class ActionJobCoverageTest {
                                 "<init>"),
                         Tuple2.of(
                                 "org/apache/paimon/flink/orphan/FlinkOrphanFilesClean",
-                                "executeDatabaseOrphanFiles"));
+                                "executeDatabaseOrphanFiles"),
+                        Tuple2.of(
+                                "org/apache/paimon/flink/orphan/FlinkManagedBlobOrphanFilesClean",
+                                "executeDatabase"));
 
         private static final List<Tuple2<String, String>> VALID_OWNER_PATTERN_AND_NAMES =
                 Collections.singletonList(

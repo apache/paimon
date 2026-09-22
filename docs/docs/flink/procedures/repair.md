@@ -90,6 +90,73 @@ CALL sys.remove_orphan_files(
 );
 ```
 
+This procedure does not delete primary-key `.managed.blob` packs. Use [`remove_orphan_blobs`](#remove_orphan_blobs).
+
+## remove_orphan_blobs
+
+Remove unreferenced primary-key `.managed.blob` packs.
+
+**Arguments**
+
+- `table`: the target table identifier. Cannot be empty, you can use `database_name.*` to clean the whole database.
+
+- `olderThan`: an absolute timestamp cutoff. Only packs whose modification time is earlier than this timestamp are candidates. The default cutoff is 1 day before the procedure starts.
+
+- `dryRun`: when true, calculate the candidate file count and total bytes without deleting files. The procedure returns aggregate counts, not individual pack paths. Default is false.
+
+- `parallelism`: per-table concurrency. In `distributed` mode this is the Flink task parallelism of each table job. In `local` mode this is the per-table file-operation thread limit (default: the number of processors available to the Java virtual machine). For `database_name.*`, `distributed` mode runs tables one after another, so cluster concurrency stays within this per-table value; `local` mode may run several tables at once, so total threads can exceed this value.
+
+- `mode`: The mode of remove orphan blob procedure (`local` or `distributed`). By default is `distributed`.
+
+**Syntax**
+
+```sql
+-- Use named argument
+CALL [catalog.]sys.remove_orphan_blobs(
+    `table` => 'identifier',
+    older_than => 'olderThan',
+    dry_run => 'dryRun',
+    parallelism => parallelism,
+    mode => 'mode'
+);
+
+-- Use indexed argument
+CALL [catalog.]sys.remove_orphan_blobs('identifier');
+
+CALL [catalog.]sys.remove_orphan_blobs('identifier', 'olderThan');
+
+CALL [catalog.]sys.remove_orphan_blobs('identifier', 'olderThan', 'dryRun');
+
+CALL [catalog.]sys.remove_orphan_blobs('identifier', 'olderThan', 'dryRun','parallelism');
+
+CALL [catalog.]sys.remove_orphan_blobs('identifier', 'olderThan', 'dryRun','parallelism','mode');
+```
+
+**Example**
+
+```sql
+CALL sys.remove_orphan_blobs(`table` => 'default.T', older_than => '2023-10-31 12:00:00');
+
+CALL sys.remove_orphan_blobs(`table` => 'default.*', older_than => '2023-10-31 12:00:00');
+
+CALL sys.remove_orphan_blobs(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true);
+
+CALL sys.remove_orphan_blobs(
+    `table` => 'default.T',
+    older_than => '2023-10-31 12:00:00',
+    dry_run => false,
+    parallelism => 5
+);
+
+CALL sys.remove_orphan_blobs(
+    `table` => 'default.T',
+    older_than => '2023-10-31 12:00:00',
+    dry_run => false,
+    parallelism => 5,
+    mode => 'local'
+);
+```
+
 ## remove_unexisting_files
 
 Procedure to remove unexisting data files from manifest entries. See [Java docs](https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/RemoveUnexistingFilesAction.html) for detailed use cases. Arguments:
