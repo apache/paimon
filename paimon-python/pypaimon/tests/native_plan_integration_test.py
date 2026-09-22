@@ -1130,6 +1130,68 @@ class NativePlanIntegrationTest(unittest.TestCase):
 
     @unittest.skipUnless(native_reader_available(),
                          "pypaimon-rust native reader API not installed")
+    @patch('pypaimon.read.native_plan.native_method_available',
+           side_effect=lambda type_name, method: (
+               False if method in ('from_resolved_schema', 'copy_with_resolved_schema')
+               else native_method_available(type_name, method)))
+    def test_native_read_dynamic_blob_as_descriptor(self, capabilities):
+        # Exercise the catalog path used by Rust versions without resolved schemas.
+        schema = pa.schema([('id', pa.int32()), ('payload', pa.large_binary())])
+        self.cat.create_table(
+            'default.native_dynamic_descriptor',
+            Schema.from_pyarrow_schema(schema, options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-descriptor-field': 'payload',
+            }), False)
+        table = self.cat.get_table('default.native_dynamic_descriptor')
+        with tempfile.TemporaryDirectory() as payload_dir:
+            path = os.path.join(payload_dir, 'payload')
+            payload = b'blob content'
+            with open(path, 'wb') as output:
+                output.write(payload)
+            descriptor = BlobDescriptor('file://' + path, 0, len(payload)).serialize()
+            wb = table.new_batch_write_builder()
+            write, commit = wb.new_write(), wb.new_commit()
+            try:
+                write.write_arrow(pa.Table.from_pydict({
+                    'id': [1], 'payload': [descriptor],
+                }, schema=schema))
+                commit.commit(write.prepare_commit())
+            finally:
+                write.close()
+                commit.close()
+
+            for value in ('true', 'false', True, False):
+                with self.subTest(value=value):
+                    builder = table.copy({
+                        'read.native.enabled': 'true',
+                        'blob-as-descriptor': value,
+                    }).new_read_builder()
+                    splits = builder.new_scan().plan().splits()
+                    with patch('pypaimon.read.native_plan.native_read',
+                               wraps=native_read) as native, patch(
+                            'pypaimon.read.table_read.TableRead._create_split_read',
+                            side_effect=AssertionError('Python reader used')):
+                        result = builder.new_read().to_arrow(splits)
+                    native.assert_called_once()
+                    expected = descriptor if str(value).lower() == 'true' else payload
+                    self.assertEqual(result.to_pydict(), {'id': [1], 'payload': [expected]})
+
+            # Descriptor queries must still work when the payload is unavailable.
+            os.remove(path)
+            builder = table.copy({
+                'read.native.enabled': 'true',
+                'blob-as-descriptor': 'true',
+            }).new_read_builder()
+            splits = builder.new_scan().plan().splits()
+            with patch('pypaimon.read.table_read.TableRead._create_split_read',
+                       side_effect=AssertionError('Python reader used')):
+                self.assertEqual(builder.new_read().to_arrow(splits).to_pydict(),
+                                 {'id': [1], 'payload': [descriptor]})
+
+    @unittest.skipUnless(native_reader_available(),
+                         "pypaimon-rust native reader API not installed")
     def test_native_read_pruning_limit_defers_descriptor_blob_payload_io(self):
         schema = pa.schema([
             ('id', pa.int32()),

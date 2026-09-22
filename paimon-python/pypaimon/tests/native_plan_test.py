@@ -624,6 +624,15 @@ class NativePlanTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'exact built-in catalog loader'):
             _catalog_options(table)
 
+    def test_blob_as_descriptor_is_forwarded_to_rust(self):
+        for value in ('true', 'false', True, False):
+            with self.subTest(value=value):
+                table = Mock()
+                table.options = CoreOptions(Options({'blob-as-descriptor': value}))
+                self.assertEqual(
+                    _read_options(table)['blob-as-descriptor'],
+                    str(value).lower())
+
     def test_predicate_and_time_travel_are_converted_for_rust(self):
         predicate = PredicateBuilder.and_predicates([
             Predicate('greaterOrEqual', 0, 'k', [10]),
