@@ -298,7 +298,8 @@ class MultimodalTable:
         """
         column = self._resolve_video_frame_column(video_column)
         target_schema = _target_schema(self.raw_table)
-        payload, first_frame = _video_payload(video, first_frame)
+        payload, keyframe_index, first_frame = _video_payload(
+            video, first_frame)
 
         row_ids = (
             self.scan()
@@ -313,7 +314,7 @@ class MultimodalTable:
             return self
 
         descriptors = _video_frame_descriptors(
-            payload, len(row_ids), first_frame)
+            payload, keyframe_index, len(row_ids), first_frame)
         update_data = pa.Table.from_arrays(
             [
                 pa.array(row_ids, type=pa.int64()),
@@ -761,35 +762,41 @@ def _video_payload(video, first_frame):
             "video must be a path, Blob, or BlobDescriptor, got %r."
             % type(video)
         )
+    keyframe_index = None
     if isinstance(payload, VideoFrameDescriptor):
+        keyframe_index = payload.keyframe_index_descriptor
         payload = payload.payload_descriptor
 
-    return payload, first_frame
+    return payload, keyframe_index, first_frame
 
 
-def _video_frame_descriptors(payload, count, first_frame):
+def _video_frame_descriptors(payload, keyframe_index, count, first_frame):
     from pypaimon.table.row.blob import VideoFrameDescriptor
 
+    index_offset = -1 if keyframe_index is None else keyframe_index.offset
+    index_length = 0 if keyframe_index is None else keyframe_index.length
     return [
         VideoFrameDescriptor(
             payload.uri,
             payload.offset,
             payload.length,
             first_frame + index,
+            index_offset,
+            index_length,
         ).serialize()
         for index in range(count)
     ]
 
 
 def _video_frame_table(video, frames, video_column, first_frame, target_schema):
-    payload, first_frame = _video_payload(video, first_frame)
+    payload, keyframe_index, first_frame = _video_payload(video, first_frame)
 
     non_video_schema = pa.schema([
         field for field in target_schema if field.name != video_column
     ])
     frame_table = _to_arrow_table(frames, non_video_schema)
     descriptor_values = _video_frame_descriptors(
-        payload, frame_table.num_rows, first_frame)
+        payload, keyframe_index, frame_table.num_rows, first_frame)
     arrays = []
     for field in target_schema:
         if field.name == video_column:

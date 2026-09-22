@@ -200,6 +200,128 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertTrue(descriptors[0].uri.endswith(".video"))
         self.assertEqual(2, len({d.payload_descriptor for d in descriptors}))
 
+    def test_add_video_indexes_path_and_local_blob_with_unknown_length(self):
+        av = pytest.importorskip("av")
+        np = pytest.importorskip("numpy")
+        from fractions import Fraction
+        from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
+        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+
+        table = self.conn.create_table(
+            "local_video_indexes",
+            schema=_schema({
+                "frame_id": pa.int32(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "video",
+                "blob-as-descriptor": "true",
+            }),
+        )
+        video_path = os.path.join(self.temp_dir, "local-indexed.mp4")
+        with av.open(video_path, mode="w", format="mp4") as container:
+            stream = container.add_stream("libx264", rate=10)
+            stream.width = stream.height = 16
+            stream.pix_fmt = "yuv420p"
+            stream.gop_size = 4
+            for index in range(12):
+                frame = av.VideoFrame.from_ndarray(
+                    np.full((16, 16, 3), index * 16, dtype=np.uint8),
+                    format="rgb24",
+                )
+                frame.pts = index
+                frame.time_base = Fraction(1, 10)
+                for packet in stream.encode(frame):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+
+        table.add_video(video_path, [{"frame_id": 0}])
+        table.add_video(
+            Blob.from_local(video_path), [{"frame_id": 1}], first_frame=1)
+
+        descriptors = [
+            VideoFrameDescriptor.deserialize(row["video"])
+            for row in sorted(
+                table.scan().select(["frame_id", "video"]).to_list(),
+                key=lambda row: row["frame_id"],
+            )
+        ]
+        self.assertEqual([0, 1], [value.frame_index for value in descriptors])
+        for descriptor in descriptors:
+            stored_index = descriptor.keyframe_index_descriptor
+            self.assertIsNotNone(stored_index)
+            VideoKeyframeIndex.deserialize(
+                Blob.from_file(
+                    table.raw_table.file_io,
+                    stored_index.uri,
+                    stored_index.offset,
+                    stored_index.length,
+                ).to_data(),
+                descriptor.length,
+            )
+
+    def test_video_write_apis_preserve_existing_keyframe_index(self):
+        from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
+        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+
+        table = self.conn.create_table(
+            "indexed_video_write_apis",
+            schema=_schema({
+                "frame_id": pa.int32(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "video",
+                "blob-as-descriptor": "true",
+            }),
+        )
+        video = b"indexed-video"
+        index = VideoKeyframeIndex(
+            [(0, 1)], [(0, 0, 1)]
+        ).serialize()
+        source_path = os.path.join(self.temp_dir, "indexed-source.mp4")
+        with open(source_path, "wb") as output:
+            output.write(video + index)
+        source = VideoFrameDescriptor(
+            "file://" + source_path,
+            0,
+            len(video),
+            0,
+            len(video),
+            len(index),
+        )
+
+        table.add_video(source, [{"frame_id": 1}], first_frame=1)
+        table.add_videos([(source, [{"frame_id": 2}], 2)])
+        plain_path = os.path.join(self.temp_dir, "plain-source.mp4")
+        with open(plain_path, "wb") as output:
+            output.write(b"plain-video")
+        table.add_video(Blob.from_local(plain_path), [{"frame_id": 3}])
+        table.replace_video("frame_id = 3", source, first_frame=3)
+
+        rows = sorted(
+            table.scan().select(["frame_id", "video"]).to_list(),
+            key=lambda row: row["frame_id"],
+        )
+        descriptors = [
+            VideoFrameDescriptor.deserialize(row["video"])
+            for row in rows
+        ]
+        self.assertEqual([1, 2, 3], [value.frame_index for value in descriptors])
+        for descriptor in descriptors:
+            stored_index = descriptor.keyframe_index_descriptor
+            self.assertIsNotNone(stored_index)
+            self.assertEqual(
+                index,
+                Blob.from_file(
+                    table.raw_table.file_io,
+                    stored_index.uri,
+                    stored_index.offset,
+                    stored_index.length,
+                ).to_data(),
+            )
+
     def test_normal_update_preserves_video_descriptors(self):
         from pypaimon.table.row.blob import Blob
 
@@ -342,7 +464,7 @@ class MultimodalTableTest(unittest.TestCase):
 
         payload = Blob.from_local(video_path).to_descriptor()
         valid = VideoFrameDescriptor(
-            payload.uri, payload.offset, payload.length, 0
+            payload.uri, payload.offset, payload.length, 0, -1, 0
         ).serialize()
         with self.assertRaisesRegex(ValueError, "VideoFrameDescriptor"):
             table.add_batches([

@@ -23,12 +23,14 @@ import math
 import operator
 import pickle
 import sys
+import tempfile
 import zlib
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from types import SimpleNamespace
 
 import pyarrow as pa
 
@@ -48,6 +50,7 @@ from pypaimon.multimodal.lerobot.schema import (
 )
 from pypaimon.multimodal.table import _target_schema, _time_travel_table
 from pypaimon.multimodal.video import VideoFrameCollator
+from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
 _TORCH_DTYPE_NAMES = {
@@ -273,6 +276,7 @@ class PaimonDatasetReader(ABC):
                 decode_batch_fn=_decode_video_frames,
                 output_column=key,
                 collate_fn=_identity,
+                range_parallelism=self.blob_parallelism,
             )
             for key in self._video_keys
         ]
@@ -1368,14 +1372,20 @@ def _decode_video_windows(plans, rows, collators, features, return_uint8):
             # Cross-file windows use the regular frame assembly path.
             if any(d.payload_descriptor != payload for d in window):
                 return key, None
-            requests.setdefault(payload, []).append((
+            keyframe_index = window[0].keyframe_index_descriptor
+            if any(d.keyframe_index_descriptor != keyframe_index
+                   for d in window):
+                raise ValueError(
+                    "One video payload references different keyframe indexes."
+                )
+            requests.setdefault((payload, keyframe_index), []).append((
                 offset, [d.frame_index for d in window]))
 
         output = [None] * len(plans)
         with torch.inference_mode(inference_enabled), \
                 torch.set_grad_enabled(grad_enabled):
-            for payload, windows in requests.items():
-                decoder = collator._decoder(payload)
+            for (payload, keyframe_index), windows in requests.items():
+                decoder = collator._decoder(payload, keyframe_index)
                 get_frames = getattr(decoder, "get_frames_at", None)
                 if not callable(get_frames):
                     return key, None
@@ -1500,6 +1510,11 @@ def _video_tensor(frame, feature, return_uint8=False):
 
 
 def _open_video_decoder(stream, backend=None):
+    keyframe_index = getattr(stream, "video_keyframe_index", None)
+    if not isinstance(keyframe_index, VideoKeyframeIndex):
+        keyframe_index = None
+    if backend is None and keyframe_index is not None:
+        return _PyAVVideoDecoder(stream, keyframe_index)
     if backend in (None, "torchcodec"):
         try:
             return _open_torchcodec_decoder(stream)
@@ -1507,7 +1522,8 @@ def _open_video_decoder(stream, backend=None):
             if backend == "torchcodec":
                 raise
             stream.seek(0)
-    return _PyAVVideoDecoder(stream)
+    return _PyAVVideoDecoder(stream) if keyframe_index is None \
+        else _PyAVVideoDecoder(stream, keyframe_index)
 
 
 def _open_torchcodec_decoder(stream):
@@ -1531,7 +1547,7 @@ class _PyAVVideoDecoder:
     # Reuse common overlapping delta windows without retaining a whole video.
     _FRAME_CACHE_SIZE = 8
 
-    def __init__(self, stream):
+    def __init__(self, stream, keyframe_index=None):
         try:
             import av
         except ImportError as error:
@@ -1539,13 +1555,22 @@ class _PyAVVideoDecoder:
                 "Video-backed PaimonLeRobotDataset requires PyAV from "
                 "'pypaimon[lerobot]'."
             ) from error
-        self._container = av.open(stream)
-        self._stream = self._container.streams.video[0]
+        self._source = stream
+        self._keyframe_index = keyframe_index
+        self._anchor_ordinals = (
+            [entry[0] for entry in keyframe_index.keyframes]
+            if keyframe_index is not None else [])
+        self._container = None
+        self._stream = None
         self._next_index = 0
         self._timestamps = []
         self._keyframes = []
         self._cache = OrderedDict()
-        self._frames = iter(self._container.decode(self._stream))
+        self._frames = None
+        if keyframe_index is None:
+            self._container = av.open(stream)
+            self._stream = self._container.streams.video[0]
+            self._frames = iter(self._container.decode(self._stream))
 
     def __getitem__(self, index):
         index = operator.index(index)
@@ -1554,7 +1579,11 @@ class _PyAVVideoDecoder:
         frame = self._cache.pop(index, None)
         if frame is not None:
             self._cache[index] = frame
-            return self._tensor(frame)
+            return frame if self._keyframe_index is not None \
+                else self._tensor(frame)
+
+        if self._keyframe_index is not None:
+            return self._read_indexed([index])[0]
 
         indexed = (
             index > 0 and not self._timestamps
@@ -1597,6 +1626,150 @@ class _PyAVVideoDecoder:
                 "Video frame index %d is out of range." % index
             ) from error
         raise IndexError("Video frame index %d is out of range." % index)
+
+    def get_frames_at(self, *, indices):
+        import torch
+        frames = (
+            self._read_indexed(indices)
+            if self._keyframe_index is not None
+            else [self[index] for index in indices]
+        )
+        return SimpleNamespace(data=torch.stack(frames))
+
+    def _read_indexed(self, indices):
+        requested = [operator.index(index) for index in indices]
+        if any(index < 0 for index in requested):
+            raise IndexError("Video frame index is out of range.")
+        missing = sorted(set(requested) - set(self._cache))
+        decoded = self._decode_sparse(missing) if missing else {}
+        try:
+            return [
+                self._cache[index] if index in self._cache else decoded[index]
+                for index in requested
+            ]
+        except KeyError as error:
+            raise IndexError(
+                "Video frame index %d is out of range." % error.args[0]
+            ) from error
+
+    def _decode_sparse(self, indices):
+        decoded = {}
+        import av
+        pending = list(indices)
+        last_error = None
+        for retry in range(3):
+            groups, ranges = self._sparse_plan(pending, retry)
+            bodies = self._read_video_ranges(ranges)
+            failed = []
+            with tempfile.TemporaryFile() as sparse:
+                sparse.truncate(self._video_length())
+                for (offset, unused_length), body in zip(ranges, bodies):
+                    sparse.seek(offset)
+                    sparse.write(body)
+                sparse.seek(0)
+                with av.open(sparse) as container:
+                    stream = container.streams.video[0]
+                    for anchor, targets in sorted(groups.items()):
+                        try:
+                            self._decode_sparse_group(
+                                container,
+                                stream,
+                                anchor,
+                                sorted(targets),
+                                decoded,
+                            )
+                        except (av.error.FFmpegError, ValueError) as error:
+                            last_error = error
+                            failed.extend(targets)
+            if not failed:
+                return decoded
+            pending = failed
+        raise ValueError(
+            "Cannot decode video frames from persisted seek index."
+        ) from last_error
+
+    def _sparse_plan(self, indices, retry):
+        mapping = self._keyframe_index
+        groups = {}
+        ranges = list(mapping.metadata_ranges)
+        for index in indices:
+            preceding = bisect.bisect_right(
+                self._anchor_ordinals, index) - 1
+            if preceding < 0:
+                raise IndexError(
+                    "Video frame index %d is out of range." % index)
+            anchor = max(0, preceding - retry)
+            groups.setdefault(anchor, []).append(index)
+            start = mapping.keyframes[max(0, anchor - 1)][2]
+            range_end = preceding + 2
+            end = (
+                mapping.keyframes[range_end][2]
+                if range_end < len(mapping.keyframes)
+                else self._video_length()
+            )
+            ranges.append((start, end - start))
+        return groups, _merge_video_ranges(ranges)
+
+    def _decode_sparse_group(
+            self, container, stream, anchor, targets, decoded):
+        anchor_ordinal, anchor_pts, unused_position = (
+            self._keyframe_index.keyframes[anchor])
+        container.seek(
+            anchor_pts, backward=True, any_frame=False, stream=stream)
+        ordinal = anchor_ordinal
+        found_anchor = False
+        remaining = set(targets)
+        found = {}
+        for frame in container.decode(stream):
+            if not found_anchor:
+                if frame.pts != anchor_pts or not frame.key_frame:
+                    continue
+                found_anchor = True
+            if ordinal in remaining:
+                found[ordinal] = self._tensor(frame)
+                remaining.remove(ordinal)
+                if not remaining:
+                    decoded.update(found)
+                    for index, tensor in found.items():
+                        self._remember(index, tensor)
+                    return
+            ordinal += 1
+            if ordinal > targets[-1]:
+                break
+        missing = min(remaining) if remaining else targets[-1]
+        raise ValueError(
+            "Cannot decode indexed video frame %d from keyframe %d."
+            % (missing, anchor_ordinal)
+        )
+
+    def _video_length(self):
+        length = getattr(self._source, "video_length", None)
+        if length is not None:
+            return length
+        position = self._source.tell()
+        try:
+            return self._source.seek(0, 2)
+        finally:
+            self._source.seek(position)
+
+    def _read_video_ranges(self, ranges):
+        reader = getattr(self._source, "video_read_ranges", None)
+        if callable(reader):
+            bodies = reader(ranges)
+        else:
+            bodies = []
+            for offset, length in ranges:
+                self._source.seek(offset)
+                bodies.append(self._source.read(length))
+        if len(bodies) != len(ranges):
+            raise IOError("Video range reader returned an invalid result count.")
+        for (unused_offset, length), body in zip(ranges, bodies):
+            if len(body) != length:
+                raise IOError(
+                    "Video byte range changed while reading: expected %d, "
+                    "read %d." % (length, len(body))
+                )
+        return bodies
 
     def _index_packets(self):
         entries = []
@@ -1647,7 +1820,23 @@ class _PyAVVideoDecoder:
         return torch.from_numpy(array).permute(2, 0, 1)
 
     def close(self):
-        self._container.close()
+        if self._container is not None:
+            self._container.close()
+
+
+def _merge_video_ranges(ranges):
+    merged = []
+    for offset, length in sorted(ranges):
+        end = offset + length
+        if merged and offset <= merged[-1][0] + merged[-1][1]:
+            previous_offset, previous_length = merged[-1]
+            merged[-1] = (
+                previous_offset,
+                max(previous_offset + previous_length, end) - previous_offset,
+            )
+        else:
+            merged.append((offset, length))
+    return merged
 
 
 def _decode_video_frames(decoder, frame_indices, unused_rows):

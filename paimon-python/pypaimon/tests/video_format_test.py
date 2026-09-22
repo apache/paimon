@@ -15,10 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import bisect
+import io
 import struct
 import tempfile
+import tracemalloc
 import unittest
+import zlib
+from fractions import Fraction
 from pathlib import Path
+from unittest import mock
 
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.options import Options
@@ -34,7 +40,15 @@ from pypaimon.table.row.blob import (
 )
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
+from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 from pypaimon.write.video_format_writer import VideoFormatWriter
+
+try:
+    import av
+    import numpy as np
+except ImportError:
+    av = None
+    np = None
 
 
 class VideoFormatTest(unittest.TestCase):
@@ -61,7 +75,7 @@ class VideoFormatTest(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_descriptor_round_trip_preserves_payload_and_frame(self):
-        descriptor = VideoFrameDescriptor("s3://bucket/a.video", 7, 99, 42)
+        descriptor = VideoFrameDescriptor("s3://bucket/a.video", 7, 99, 42, -1, 0)
         serialized = descriptor.serialize()
 
         self.assertTrue(
@@ -80,12 +94,20 @@ class VideoFormatTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "trailing bytes"):
             VideoFrameDescriptor.deserialize(serialized + b"x")
         with self.assertRaisesRegex(ValueError, "non-negative"):
-            VideoFrameDescriptor("x", 0, 1, -1)
+            VideoFrameDescriptor("x", 0, 1, -1, -1, 0)
+
+        indexed = VideoFrameDescriptor("s3://bucket/a.video", 7, 99, 42, 106, 8)
+        restored = VideoFrameDescriptor.deserialize(indexed.serialize())
+        self.assertEqual(indexed, restored)
+        self.assertEqual(
+            BlobDescriptor("s3://bucket/a.video", 106, 8),
+            restored.keyframe_index_descriptor,
+        )
 
     def test_cross_language_descriptor_fixture(self):
         fixture = self._fixture_bytes(self.DESCRIPTOR_FIXTURE)
-        expected = VideoFrameDescriptor("s3://bucket/视频.mp4", 7, 99, 42)
-
+        expected = VideoFrameDescriptor(
+            "s3://bucket/视频.mp4", 7, 99, 42, 106, 8)
         self.assertEqual(fixture, expected.serialize())
         self.assertEqual(expected, BlobDescriptor.deserialize(fixture))
 
@@ -114,12 +136,12 @@ class VideoFormatTest(unittest.TestCase):
         with self.file_io.new_input_stream(target) as stream:
             meta = VideoFileMeta(stream, len(stored))
         self.assertEqual(6, meta.record_count)
-        self.assertEqual((0, len(first_bytes), 0), meta.frame(0))
-        self.assertEqual((0, len(first_bytes), 1), meta.frame(1))
+        self.assertEqual((0, len(first_bytes), 0, -1, 0), meta.frame(0))
+        self.assertEqual((0, len(first_bytes), 1, -1, 0), meta.frame(1))
         self.assertEqual(
-            (len(first_bytes), len(second_bytes), 7), meta.frame(2)
+            (len(first_bytes), len(second_bytes), 7, -1, 0), meta.frame(2)
         )
-        self.assertEqual((0, len(first_bytes), 4), meta.frame(3))
+        self.assertEqual((0, len(first_bytes), 4, -1, 0), meta.frame(3))
         self.assertIsNone(meta.frame(4))
         self.assertIs(Blob.PLACE_HOLDER, meta.frame(5))
 
@@ -133,39 +155,335 @@ class VideoFormatTest(unittest.TestCase):
 
     def test_cross_language_video_v1_fixture(self):
         fixture = self._fixture_bytes(self.VIDEO_FIXTURE)
-        fixture_path = self.root / "fixture.video"
-        fixture_path.write_bytes(fixture)
-        target = fixture_path.as_uri()
+        encoded = VideoKeyframeIndex(
+            [(0, 1)], [(0, 0, 0), (12, 36000, 2)]
+        ).serialize()
+        video = b"abc"
+        source_path = self.root / "indexed.mp4"
+        source_path.write_bytes(video + encoded)
 
-        with self.file_io.new_input_stream(target) as stream:
-            meta = VideoFileMeta(stream, len(fixture))
-        self.assertEqual(7, meta.record_count)
-        self.assertEqual((0, 3, 2), meta.frame(0))
-        self.assertEqual((0, 3, 3), meta.frame(1))
-        self.assertIsNone(meta.frame(2))
-        self.assertIs(Blob.PLACE_HOLDER, meta.frame(3))
-        self.assertEqual((3, 4, 7), meta.frame(4))
-        self.assertEqual((3, 4, 8), meta.frame(5))
-        self.assertEqual((0, 3, 10), meta.frame(6))
+        def indexed_frame(frame_index):
+            descriptor = VideoFrameDescriptor(
+                source_path.as_uri(), 0, len(video), frame_index,
+                len(video), len(encoded)
+            )
+            return Blob.from_descriptor(
+                self.file_io.uri_reader_factory.create(descriptor.uri),
+                descriptor,
+            )
+        target = (self.root / "indexed.video").as_uri()
 
-        written_target = (self.root / "written.video").as_uri()
-        writer = VideoFormatWriter(
-            self.file_io.new_output_stream(written_target),
-            file_path=written_target,
-        )
+        writer = VideoFormatWriter(self.file_io.new_output_stream(target))
         values = (
-            self._source_frame("a.mp4", b"abc", 2),
-            self._source_frame("a.mp4", b"abc", 3),
+            indexed_frame(2),
+            indexed_frame(3),
             None,
             Blob.PLACE_HOLDER,
             self._source_frame("b.mp4", b"WXYZ", 7),
             self._source_frame("b.mp4", b"WXYZ", 8),
-            self._source_frame("a.mp4", b"abc", 10),
+            indexed_frame(10),
         )
         for value in values:
             writer.add_element(GenericRow([value], [self.field], RowKind.INSERT))
         writer.close()
-        self.assertEqual(fixture, (self.root / "written.video").read_bytes())
+
+        stored = (self.root / "indexed.video").read_bytes()
+        self.assertEqual(fixture, stored)
+        with self.file_io.new_input_stream(target) as stream:
+            meta = VideoFileMeta(stream, len(stored))
+        self.assertEqual(
+            (0, len(video), 2, 7, len(encoded)), meta.frame(0)
+        )
+        self.assertEqual((3, 4, 7, -1, 0), meta.frame(4))
+        serialized = self._read(target, row_indices=[0])[0]
+        value = VideoFrameDescriptor.deserialize(serialized)
+        self.assertEqual(2, value.frame_index)
+        mapping_descriptor = value.keyframe_index_descriptor
+        self.assertEqual(
+            encoded,
+            Blob.from_file(
+                self.file_io,
+                mapping_descriptor.uri,
+                mapping_descriptor.offset,
+                mapping_descriptor.length,
+            ).to_data(),
+        )
+
+        rewritten = (self.root / "rewritten.video").as_uri()
+        writer = VideoFormatWriter(self.file_io.new_output_stream(rewritten))
+        writer.add_element(GenericRow([
+            Blob.from_bytes(serialized, file_io=self.file_io)
+        ], [self.field], RowKind.INSERT))
+        writer.close()
+        rewritten_value = VideoFrameDescriptor.deserialize(
+            self._read(rewritten)[0]
+        )
+        rewritten_index = rewritten_value.keyframe_index_descriptor
+        self.assertEqual(
+            encoded,
+            Blob.from_file(
+                self.file_io,
+                rewritten_index.uri,
+                rewritten_index.offset,
+                rewritten_index.length,
+            ).to_data(),
+        )
+
+    @unittest.skipUnless(
+        av is not None and np is not None,
+        "PyAV and NumPy are required for sparse video seek validation",
+    )
+    def test_real_mp4_index_supports_sparse_random_reads(self):
+        payload = self._real_mp4()
+        metadata_ranges, keyframes, has_b_frames, is_vfr = (
+            self._mp4_seek_index(payload))
+        index = VideoKeyframeIndex(metadata_ranges, keyframes)
+        source = self.root / "real-indexed.mp4"
+        source.write_bytes(payload)
+        target_frames = [44, 1, 30, 14, 59, 15]
+        target = (self.root / "real-indexed.video").as_uri()
+
+        writer = VideoFormatWriter(self.file_io.new_output_stream(target))
+        for frame_index in target_frames:
+            descriptor = VideoFrameDescriptor(
+                source.as_uri(), 0, len(payload), frame_index,
+                -1, 0)
+            value = Blob.from_descriptor(
+                self.file_io.uri_reader_factory.create(descriptor.uri),
+                descriptor,
+            )
+            writer.add_element(
+                GenericRow([value], [self.field], RowKind.INSERT))
+        writer.close()
+
+        descriptors = [
+            VideoFrameDescriptor.deserialize(value)
+            for value in self._read(target)
+        ]
+        payload_descriptor = descriptors[0].payload_descriptor
+        index_descriptor = descriptors[0].keyframe_index_descriptor
+        stored_payload = Blob.from_file(
+            self.file_io,
+            payload_descriptor.uri,
+            payload_descriptor.offset,
+            payload_descriptor.length,
+        ).to_data()
+        stored_index = VideoKeyframeIndex.deserialize(
+            Blob.from_file(
+                self.file_io,
+                index_descriptor.uri,
+                index_descriptor.offset,
+                index_descriptor.length,
+            ).to_data())
+
+        self.assertEqual(target_frames, [value.frame_index for value in descriptors])
+        self.assertEqual(index.metadata_ranges, stored_index.metadata_ranges)
+        self.assertEqual(index.keyframes, stored_index.keyframes)
+        self.assertTrue(has_b_frames)
+        self.assertTrue(is_vfr)
+
+        with av.open(io.BytesIO(stored_payload)) as container:
+            expected = [
+                frame.to_ndarray(format="rgb24")
+                for frame in container.decode(video=0)
+            ]
+        ordinals = [entry[0] for entry in stored_index.keyframes]
+        sparse_read_sizes = []
+        for target_frame in target_frames:
+            keyframe = bisect.bisect_right(ordinals, target_frame) - 1
+            range_end = (
+                stored_index.keyframes[keyframe + 2][2]
+                if keyframe + 2 < len(stored_index.keyframes)
+                else len(stored_payload)
+            )
+            for retry in range(3):
+                anchor = max(0, keyframe - retry)
+                anchor_ordinal, anchor_pts, unused_position = (
+                    stored_index.keyframes[anchor])
+                range_start = stored_index.keyframes[
+                    max(0, anchor - 1)][2]
+                sparse, available_bytes = self._sparse_video(
+                    stored_payload,
+                    list(stored_index.metadata_ranges)
+                    + [(range_start, range_end - range_start)],
+                )
+                try:
+                    actual = self._decode_sparse_frame(
+                        sparse, anchor_ordinal, anchor_pts, target_frame)
+                    break
+                except (av.error.FFmpegError, ValueError):
+                    continue
+            else:
+                self.fail("Sparse video retries did not reach the target frame.")
+            np.testing.assert_array_equal(expected[target_frame], actual)
+            sparse_read_sizes.append(available_bytes)
+        self.assertLess(min(sparse_read_sizes), len(stored_payload))
+
+    def test_target_size_counts_buffered_keyframe_index(self):
+        mapping = VideoKeyframeIndex([], [(0, 0, 0)]).serialize()
+        video = b"video"
+        source = self.root / "target-size.mp4"
+        source.write_bytes(video + mapping)
+        descriptor = VideoFrameDescriptor(
+            source.as_uri(), 0, len(video), 0, len(video), len(mapping)
+        )
+        blob = Blob.from_descriptor(
+            self.file_io.uri_reader_factory.create(descriptor.uri), descriptor
+        )
+        writer = VideoFormatWriter(io.BytesIO())
+
+        writer.add_element(GenericRow([blob], [self.field], RowKind.INSERT))
+
+        self.assertFalse(writer.reach_target_size(len(video) + len(mapping) + 1))
+        self.assertTrue(writer.reach_target_size(len(video) + len(mapping)))
+
+    def test_rejects_invalid_keyframe_index(self):
+        video = b"video"
+        mapping = b"mapping"
+        source = self.root / "invalid-index.mp4"
+        source.write_bytes(video + mapping)
+        descriptor = VideoFrameDescriptor(
+            source.as_uri(), 0, len(video), 0, len(video), len(mapping)
+        )
+        blob = Blob.from_descriptor(
+            self.file_io.uri_reader_factory.create(descriptor.uri), descriptor
+        )
+        writer = VideoFormatWriter(io.BytesIO())
+
+        with self.assertRaisesRegex(ValueError, "Invalid video keyframe index"):
+            writer.add_element(
+                GenericRow([blob], [self.field], RowKind.INSERT)
+            )
+
+    def test_rejects_oversized_keyframe_indexes_before_fetch(self):
+        descriptor = VideoFrameDescriptor(
+            (self.root / "missing.mp4").as_uri(),
+            0,
+            1,
+            0,
+            1,
+            VideoFormatWriter.MAX_KEYFRAME_INDEX_BYTES + 1,
+        )
+        blob = Blob.from_descriptor(
+            self.file_io.uri_reader_factory.create(descriptor.uri), descriptor
+        )
+
+        with self.assertRaisesRegex(ValueError, "keyframe index length.*limit"):
+            VideoFormatWriter(io.BytesIO()).add_element(
+                GenericRow([blob], [self.field], RowKind.INSERT)
+            )
+
+    def test_rejects_cumulative_keyframe_indexes_before_fetch(self):
+        mapping = VideoKeyframeIndex([], [(0, 0, 0)]).serialize()
+        first = self._indexed_frame("first-indexed.mp4", b"a", mapping)
+        second = self._indexed_frame("second-indexed.mp4", b"b", mapping)
+        writer = VideoFormatWriter(io.BytesIO())
+
+        with mock.patch.object(
+                VideoFormatWriter,
+                'MAX_TOTAL_KEYFRAME_INDEX_BYTES',
+                len(mapping)):
+            writer.add_element(
+                GenericRow([first], [self.field], RowKind.INSERT)
+            )
+            with self.assertRaisesRegex(
+                    ValueError, "Buffered video keyframe indexes.*limit"):
+                writer.add_element(
+                    GenericRow([second], [self.field], RowKind.INSERT)
+                )
+
+    def test_rejects_seek_offsets_outside_video_payload(self):
+        video = b"video"
+        mapping = VideoKeyframeIndex(
+            [(0, len(video) + 1)], [(0, 0, 0)]
+        ).serialize()
+        source = self.root / "out-of-range-index.mp4"
+        source.write_bytes(video + mapping)
+        descriptor = VideoFrameDescriptor(
+            source.as_uri(), 0, len(video), 0, len(video), len(mapping)
+        )
+        blob = Blob.from_descriptor(
+            self.file_io.uri_reader_factory.create(descriptor.uri), descriptor
+        )
+
+        with self.assertRaisesRegex(ValueError, "video payload"):
+            VideoFormatWriter(io.BytesIO()).add_element(
+                GenericRow([blob], [self.field], RowKind.INSERT)
+            )
+
+    def test_rejects_compressed_invalid_index_without_expanding_it(self):
+        count = 500_000
+        entry = VideoKeyframeIndex.ENTRY.pack(0, 0, 0)
+        mapping = VideoKeyframeIndex.HEADER.pack(
+            VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, 0, count
+        ) + zlib.compress(entry * count)
+        video = b"video"
+        source = self.root / "compressed-invalid-index.mp4"
+        source.write_bytes(video + mapping)
+        descriptor = VideoFrameDescriptor(
+            source.as_uri(), 0, len(video), 0, len(video), len(mapping)
+        )
+        blob = Blob.from_descriptor(
+            self.file_io.uri_reader_factory.create(descriptor.uri), descriptor
+        )
+        writer = VideoFormatWriter(io.BytesIO())
+
+        self.assertLess(len(mapping), 20_000)
+        tracemalloc.start()
+        try:
+            with self.assertRaisesRegex(
+                    ValueError,
+                    "Keyframe ordinals must be strictly increasing"):
+                writer.add_element(
+                    GenericRow([blob], [self.field], RowKind.INSERT)
+                )
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 1_000_000)
+
+    def test_rejects_inconsistent_keyframe_indexes_for_same_payload(self):
+        video = b"video"
+        first_index = VideoKeyframeIndex(
+            [(0, 1)], [(0, 0, 0), (12, 36000, 4)]
+        ).serialize()
+        second_index = VideoKeyframeIndex(
+            [], [(0, 0, 0), (6, 18000, 3)]
+        ).serialize()
+        source = self.root / "inconsistent-index.mp4"
+        source.write_bytes(video + first_index + second_index)
+
+        def frame(frame_index, index_offset=-1, index_length=0):
+            descriptor = VideoFrameDescriptor(
+                source.as_uri(), 0, len(video), frame_index,
+                index_offset, index_length
+            )
+            return Blob.from_descriptor(
+                self.file_io.uri_reader_factory.create(descriptor.uri),
+                descriptor,
+            )
+
+        unindexed = frame(0)
+        first = frame(1, len(video), len(first_index))
+        second = frame(
+            2, len(video) + len(first_index), len(second_index)
+        )
+        for values in (
+            (unindexed, first),
+            (first, unindexed),
+            (first, second),
+        ):
+            with self.subTest(values=values):
+                writer = VideoFormatWriter(io.BytesIO())
+                writer.add_element(
+                    GenericRow([values[0]], [self.field], RowKind.INSERT)
+                )
+                with self.assertRaisesRegex(ValueError, "same payload"):
+                    writer.add_element(
+                        GenericRow(
+                            [values[1]], [self.field], RowKind.INSERT
+                        )
+                    )
 
     def test_selection_keeps_logical_frame_positions(self):
         target = (self.root / "selection.video").as_uri()
@@ -233,6 +551,7 @@ class VideoFormatTest(unittest.TestCase):
         target_path = self.root / "corrupt.video"
         indexes = [
             DeltaVarintCompressor.compress([]),
+            DeltaVarintCompressor.compress([]),
             DeltaVarintCompressor.compress([1]),
             DeltaVarintCompressor.compress([0]),
             DeltaVarintCompressor.compress([0]),
@@ -240,7 +559,7 @@ class VideoFormatTest(unittest.TestCase):
         target_path.write_bytes(
             b"".join(indexes)
             + struct.pack(
-                '<IIIIIB',
+                '<IIIIIIB',
                 *(len(index) for index in indexes),
                 VideoFormatWriter.FOOTER_MAGIC_NUMBER,
                 VideoFormatWriter.VERSION,
@@ -282,11 +601,133 @@ class VideoFormatTest(unittest.TestCase):
         source = self._source_blob(name, data)
         payload = source.to_descriptor()
         descriptor = VideoFrameDescriptor(
-            payload.uri, payload.offset, payload.length, frame_index
+            payload.uri, payload.offset, payload.length, frame_index, -1, 0
         )
         return Blob.from_descriptor(
             self.file_io.uri_reader_factory.create(descriptor.uri), descriptor
         )
+
+    def _indexed_frame(self, name, video, keyframe_index):
+        source = self.root / name
+        source.write_bytes(video + keyframe_index)
+        descriptor = VideoFrameDescriptor(
+            source.as_uri(),
+            0,
+            len(video),
+            0,
+            len(video),
+            len(keyframe_index),
+        )
+        return Blob.from_descriptor(
+            self.file_io.uri_reader_factory.create(descriptor.uri), descriptor
+        )
+
+    def _real_mp4(self):
+        output = io.BytesIO()
+        with av.open(output, mode="w", format="mp4") as container:
+            streams = [
+                container.add_stream("libx264", rate=30) for _ in range(2)
+            ]
+            for stream in streams:
+                stream.width = stream.height = 32
+                stream.pix_fmt = "yuv420p"
+                stream.time_base = Fraction(1, 90_000)
+                stream.codec_context.time_base = Fraction(1, 90_000)
+                stream.options = {"g": "15", "bf": "3", "sc_threshold": "0"}
+            pts = 450_000
+            for frame_index in range(60):
+                for stream_index, stream in enumerate(streams):
+                    pixels = np.empty((32, 32, 3), dtype=np.uint8)
+                    pixels[:, :, 0] = (frame_index + stream_index * 100) % 256
+                    pixels[:, :, 1] = np.arange(32, dtype=np.uint8)[:, None]
+                    pixels[:, :, 2] = np.arange(32, dtype=np.uint8)
+                    frame = av.VideoFrame.from_ndarray(pixels, format="rgb24")
+                    frame.pts = pts
+                    frame.time_base = Fraction(1, 90_000)
+                    for packet in stream.encode(frame):
+                        container.mux(packet)
+                pts += (3_000, 6_000, 1_500)[frame_index % 3]
+            for stream in streams:
+                for packet in stream.encode():
+                    container.mux(packet)
+        return output.getvalue()
+
+    def _mp4_seek_index(self, payload):
+        metadata_ranges = []
+        box_types = []
+        offset = 0
+        while offset < len(payload):
+            size, box_type = struct.unpack_from(">I4s", payload, offset)
+            header_size = 8
+            if size == 1:
+                size = struct.unpack_from(">Q", payload, offset + 8)[0]
+                header_size = 16
+            elif size == 0:
+                size = len(payload) - offset
+            self.assertGreaterEqual(size, header_size)
+            self.assertLessEqual(offset + size, len(payload))
+            metadata_ranges.append(
+                (offset, header_size if box_type == b"mdat" else size))
+            box_types.append(box_type)
+            offset += size
+        self.assertEqual(b"moov", box_types[-1])
+
+        with av.open(io.BytesIO(payload)) as container:
+            self.assertEqual(2, len(container.streams.video))
+            stream = container.streams.video[0]
+            packet_positions = {}
+            has_b_frames = False
+            for packet in container.demux(stream):
+                if packet.pts is not None and packet.dts is not None:
+                    has_b_frames |= packet.pts != packet.dts
+                if (packet.is_keyframe and packet.pts is not None
+                        and packet.pos is not None and packet.pos >= 0):
+                    packet_positions[int(packet.pts)] = int(packet.pos)
+
+        with av.open(io.BytesIO(payload)) as container:
+            stream = container.streams.video[0]
+            keyframes = []
+            frame_pts = []
+            for ordinal, frame in enumerate(container.decode(stream)):
+                frame_pts.append(int(frame.pts))
+                if frame.key_frame:
+                    keyframes.append((
+                        ordinal,
+                        int(frame.pts),
+                        packet_positions[int(frame.pts)],
+                    ))
+        self.assertEqual(60, len(frame_pts))
+        is_vfr = len({
+            right - left for left, right in zip(frame_pts, frame_pts[1:])
+        }) > 1
+        return metadata_ranges, keyframes, has_b_frames, is_vfr
+
+    def _decode_sparse_frame(
+            self, source, anchor_ordinal, anchor_pts, target_ordinal):
+        with av.open(source) as container:
+            stream = container.streams.video[0]
+            container.seek(
+                anchor_pts, backward=True, any_frame=False, stream=stream)
+            ordinal = anchor_ordinal
+            found_anchor = False
+            for frame in container.decode(stream):
+                if not found_anchor:
+                    if frame.pts != anchor_pts or not frame.key_frame:
+                        continue
+                    found_anchor = True
+                if ordinal == target_ordinal:
+                    return frame.to_ndarray(format="rgb24")
+                ordinal += 1
+        raise ValueError("Sparse video read did not reach the target frame.")
+
+    @staticmethod
+    def _sparse_video(payload, ranges):
+        sparse = bytearray(len(payload))
+        loaded = bytearray(len(payload))
+        for offset, length in ranges:
+            sparse[offset:offset + length] = payload[offset:offset + length]
+            loaded[offset:offset + length] = b'\1' * length
+        return io.BytesIO(sparse), sum(loaded)
 
     @staticmethod
     def _fixture_bytes(path):

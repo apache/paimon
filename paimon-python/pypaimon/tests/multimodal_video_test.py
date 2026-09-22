@@ -244,7 +244,7 @@ class VideoFrameCollatorTest(unittest.TestCase):
 
         def row(request, offset, length, index):
             return {"request": request, "video": VideoFrameDescriptor(
-                path, offset, length, index).serialize()}
+                path, offset, length, index, -1, 0).serialize()}
 
         collator = VideoFrameCollator(
             self.table,
@@ -403,7 +403,7 @@ class VideoFrameCollatorTest(unittest.TestCase):
         file_io = ResolvedFileIO()
         table = SimpleNamespace(raw_table=SimpleNamespace(file_io=file_io))
         descriptor = VideoFrameDescriptor(
-            "oss://bucket/internal.video", 0, 14, 2
+            "oss://bucket/internal.video", 0, 14, 2, -1, 0
         ).serialize()
         collator = VideoFrameCollator(
             table,
@@ -425,7 +425,7 @@ class VideoFrameCollatorTest(unittest.TestCase):
         with open(path, "wb") as output:
             output.write(data)
         return VideoFrameDescriptor(
-            path, 0, len(data), frame_index
+            path, 0, len(data), frame_index, -1, 0
         ).serialize()
 
 

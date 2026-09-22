@@ -107,9 +107,8 @@ together, and keep writers paused until the call returns.
 Scalars map to scalar types, vectors to `VECTOR`, higher-rank tensors to nested
 `ARRAY`, and images to `BLOB`. Images keep their compressed bytes.
 
-Video features map to `BLOB`. Frame rows reference MP4 payloads copied once per
-aligned file group. Video imports use the video grouping policy and check
-rolling before each Episode. They require a bucket-unaware table. Use
+Video features map to `BLOB`. Each MP4 is copied once per aligned file group and indexed for range
+reads. Imports require a bucket-unaware table and check rolling before each Episode. Use
 `VideoFrameCollator` for scans or `PaimonLeRobotDataset` for training.
 
 ## Capture LeRobot frames directly into Paimon
@@ -223,9 +222,8 @@ loader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4)
 ```
 
 Without `tag_name`, the latest snapshots are used. Frame lookups use the BTree
-on `index`; payloads remain lazy. Video decoding prefers TorchCodec, falls back
-to PyAV, and reuses a bounded decoder cache. Set `video_backend` to force
-either decoder.
+on `index`; payloads remain lazy. Indexed videos use PyAV range reads for metadata and target GOPs;
+unindexed videos use the TorchCodec/PyAV scan path. Set `video_backend` to force either decoder.
 
 Subclass `PaimonDatasetReader` for a custom logical frame layout:
 
