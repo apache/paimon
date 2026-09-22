@@ -1252,6 +1252,69 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  test("Data Evolution: merge into with _ROW_ID shortcut ignores source row ids outside the table") {
+    withTable("source", "target") {
+      sql("""
+            |CREATE TABLE target (id INT, b INT, dt STRING) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true')
+            |PARTITIONED BY (dt)
+            |""".stripMargin)
+      sql("INSERT INTO target VALUES (1, 10, 'p1'), (2, 20, 'p1')")
+      sql("INSERT INTO target VALUES (3, 30, 'p2'), (4, 40, 'p2')")
+
+      // The source is built from this snapshot and keeps the row ids 0..3, then partition p1 is
+      // overwritten: its rows get fresh row ids and 0 and 1 no longer exist anywhere. Add a value
+      // below and above every live range as well.
+      sql("CREATE TABLE source (rid BIGINT, b INT)")
+      sql("INSERT INTO source SELECT _ROW_ID, b + 100 FROM target")
+      sql("INSERT INTO source VALUES (-1L, 999), (1000L, 999)")
+      sql("INSERT OVERWRITE target PARTITION (dt = 'p1') VALUES (5, 50), (6, 60)")
+      checkAnswer(
+        sql("SELECT id, _ROW_ID FROM target ORDER BY id"),
+        Seq(Row(3, 2), Row(4, 3), Row(5, 4), Row(6, 5)))
+
+      var findSplitsPlan: LogicalPlan = null
+      val listener = new QueryExecutionListener {
+        override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
+          if (qe.analyzed.collectFirst { case _: Deduplicate => true }.nonEmpty) {
+            findSplitsPlan = qe.analyzed
+          }
+        }
+        override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit =
+          onSuccess(funcName, qe, 0L)
+      }
+      spark.listenerManager.register(listener)
+      try {
+        sql("""
+              |MERGE INTO target
+              |USING source
+              |ON target._ROW_ID = source.rid
+              |WHEN MATCHED THEN UPDATE SET b = source.b
+              |WHEN NOT MATCHED THEN INSERT (id, b, dt) VALUES (CAST(source.rid AS INT), source.b, 'p3')
+              |""".stripMargin)
+        Utils.waitUntilEventEmpty(spark)
+      } finally {
+        spark.listenerManager.unregister(listener)
+      }
+      // The row-id shortcut was taken: touched files were found without a join.
+      assert(findSplitsPlan != null && findSplitsPlan.collect { case plan: Join => plan }.isEmpty)
+
+      checkAnswer(
+        sql("SELECT id, b, dt FROM target ORDER BY dt, id"),
+        Seq(
+          Row(5, 50, "p1"),
+          Row(6, 60, "p1"),
+          Row(3, 130, "p2"),
+          Row(4, 140, "p2"),
+          Row(-1, 999, "p3"),
+          Row(0, 110, "p3"),
+          Row(1, 120, "p3"),
+          Row(1000, 999, "p3"))
+      )
+    }
+  }
+
   test("Data Evolution: merge into table with data-evolution for Self-Merge with _ROW_ID shortcut") {
     withTable("target") {
       sql(
