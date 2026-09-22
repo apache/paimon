@@ -294,10 +294,6 @@ class FileStoreCommit:
         for msg in commit_messages:
             index_deletes.extend(msg.index_deletes)
             index_adds.extend(msg.index_adds)
-        hash_index_base_snapshot = self._hash_index_base_snapshot(
-            commit_messages
-        )
-
         if not index_deletes:
             from pypaimon.write.global_index_update_checker import (
                 apply_global_index_update_action,
@@ -351,7 +347,6 @@ class FileStoreCommit:
                          allow_rollback=allow_rollback,
                          index_deletes=index_deletes,
                          index_adds=index_adds,
-                         hash_index_base_snapshot=hash_index_base_snapshot,
                          snapshot_properties=snapshot_properties,
                          allow_empty_commit=not ignore_empty_commit)
 
@@ -386,10 +381,6 @@ class FileStoreCommit:
         index_deletes = [
             entry for message in commit_messages for entry in message.index_deletes
         ]
-        hash_index_base_snapshot = self._hash_index_base_snapshot(
-            commit_messages
-        )
-
         if not skip_overwrite:
             index_deletes = self._overwrite_hash_index_deletes(
                 partition_filter, index_deletes
@@ -404,23 +395,8 @@ class FileStoreCommit:
                 allow_rollback=False,
                 index_deletes=index_deletes,
                 index_adds=index_adds,
-                hash_index_base_snapshot=hash_index_base_snapshot,
                 snapshot_properties=snapshot_properties,
             )
-
-    @staticmethod
-    def _hash_index_base_snapshot(
-        commit_messages: List[CommitMessage],
-    ) -> Optional[int]:
-        # Include data-only dynamic-bucket upserts. Their existing mappings
-        # are stable across append commits, but a concurrent overwrite may
-        # rebuild the HASH index and move a key to another bucket.
-        base_snapshots = [
-            getattr(message, "hash_index_base_snapshot", None)
-            for message in commit_messages
-            if getattr(message, "hash_index_base_snapshot", None) is not None
-        ]
-        return min(base_snapshots) if base_snapshots else None
 
     def _overwrite_hash_index_deletes(self, partition_filter, deletes):
         """Delete HASH indexes for every partition replaced by overwrite."""
@@ -511,7 +487,6 @@ class FileStoreCommit:
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan,
                     detect_conflicts=False, allow_rollback=False, index_deletes=None,
                     index_adds=None, changelog_entries=None,
-                    hash_index_base_snapshot=None,
                     snapshot_properties: Optional[Dict[str, str]] = None,
                     allow_empty_commit=False):
 
@@ -553,7 +528,6 @@ class FileStoreCommit:
                 allow_rollback=allow_rollback,
                 index_deletes=index_deletes,
                 index_adds=index_adds,
-                hash_index_base_snapshot=hash_index_base_snapshot,
                 commit_result_may_be_uncertain=commit_result_may_be_uncertain,
                 snapshot_properties=snapshot_properties,
             )
@@ -633,7 +607,6 @@ class FileStoreCommit:
                          allow_rollback: bool = False,
                          index_deletes=None,
                          index_adds=None,
-                         hash_index_base_snapshot=None,
                          commit_result_may_be_uncertain: bool = False,
                          snapshot_properties: Optional[Dict[str, str]] = None
                          ) -> CommitResult:
@@ -645,18 +618,6 @@ class FileStoreCommit:
                 commit_kind,
                 notify_callbacks=True):
             return SuccessResult()
-
-        latest_snapshot_id = latest_snapshot.id if latest_snapshot else 0
-        if (
-            hash_index_base_snapshot is not None
-            and latest_snapshot_id != hash_index_base_snapshot
-        ):
-            raise RuntimeError(
-                "HASH index assignment conflict detected: assigned from "
-                "snapshot {}, but the latest snapshot is {}.".format(
-                    hash_index_base_snapshot, latest_snapshot_id
-                )
-            )
 
         unique_id = uuid.uuid4()
         base_manifest_list = f"manifest-list-{unique_id}-0"

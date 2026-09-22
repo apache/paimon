@@ -503,7 +503,7 @@ class DynamicBucketTest(unittest.TestCase):
                 for message in messages2 for entry in message.index_adds
             ]
             with self.assertRaisesRegex(
-                RuntimeError, 'HASH index assignment conflict'
+                RuntimeError, 'HASH index conflict detected'
             ):
                 commit2.commit(messages2)
 
@@ -544,7 +544,7 @@ class DynamicBucketTest(unittest.TestCase):
 
             commit1.commit(messages1)
             with self.assertRaisesRegex(
-                RuntimeError, 'HASH index assignment conflict'
+                RuntimeError, 'HASH index conflict detected'
             ):
                 commit2.commit(messages2)
 
@@ -556,7 +556,7 @@ class DynamicBucketTest(unittest.TestCase):
             commit1.close()
             commit2.close()
 
-    def test_concurrent_disjoint_bucket_replacements_conflict(self):
+    def test_concurrent_disjoint_bucket_replacements_succeed(self):
         with tempfile.TemporaryDirectory() as root:
             table = self._create_table(
                 root,
@@ -583,41 +583,28 @@ class DynamicBucketTest(unittest.TestCase):
                 return_value=1,
             ):
                 writer2, commit2, messages2 = self._prepare_indexed_write(
-                    table, [3]
+                    table, [4]
                 )
 
             self.assertNotEqual(messages1[0].bucket, messages2[0].bucket)
             commit1.commit(messages1)
-            stale_paths = [
-                file.file_path
-                for message in messages2
-                for file in message.new_files
-            ] + [
-                entry.index_file.external_path
-                or table.path_factory().global_index_path_factory().to_path(
-                    entry.index_file.file_name
-                )
-                for message in messages2
-                for entry in message.index_adds
-            ]
+            commit2.commit(messages2)
 
-            with self.assertRaisesRegex(
-                RuntimeError, 'assigned from snapshot.*latest snapshot'
-            ):
-                commit2.commit(messages2)
-
-            self.assertTrue(all(
-                table.file_io.exists(path) for path in stale_paths
-            ))
+            self.assertEqual(2, len(self._hash_indexes(table)))
+            self.assertEqual(
+                {'id': [1, 2, 3, 4],
+                 'value': ['v-1', 'v-2', 'v-3', 'v-4']},
+                self._read_arrow(table).sort_by('id').to_pydict(),
+            )
             writer1.close()
             writer2.close()
             commit1.close()
             commit2.close()
 
-    def test_data_only_upsert_conflicts_after_overwrite_remaps_key(self):
+    def test_data_only_upsert_succeeds_after_concurrent_index_change(self):
         with tempfile.TemporaryDirectory() as root:
             table = self._create_table(
-                root, 'data_only_overwrite_conflict', target_row_num=1
+                root, 'data_only_concurrent_append', target_row_num=1
             )
             self._commit_arrow(table, [1, 2], ['one', 'two'])
 
@@ -633,25 +620,17 @@ class DynamicBucketTest(unittest.TestCase):
                 for message in stale_messages
             ))
 
-            overwrite_builder = table.new_batch_write_builder().overwrite({})
-            overwrite_writer = overwrite_builder.new_write()
-            overwrite_writer.write_arrow(
-                pa.table({'id': [2], 'value': ['overwrite']})
-            )
-            overwrite_messages = overwrite_writer.prepare_commit()
-            overwrite_commit = overwrite_builder.new_commit()
-            overwrite_commit.commit(overwrite_messages)
-            overwrite_writer.close()
-            overwrite_commit.close()
-
-            with self.assertRaisesRegex(
-                RuntimeError, 'HASH index assignment conflict'
-            ):
-                stale_commit.commit(stale_messages)
+            concurrent_messages = self._commit_arrow(table, [3], ['three'])
+            self.assertTrue(any(
+                message.index_adds or message.index_deletes
+                for message in concurrent_messages
+            ))
+            stale_commit.commit(stale_messages)
 
             self.assertEqual(
-                {'id': [2], 'value': ['overwrite']},
-                self._read_arrow(table).to_pydict(),
+                {'id': [1, 2, 3],
+                 'value': ['one', 'stale-upsert', 'three']},
+                self._read_arrow(table).sort_by('id').to_pydict(),
             )
             stale_writer.close()
             stale_commit.close()
@@ -696,7 +675,7 @@ class DynamicBucketTest(unittest.TestCase):
                 '_commit_retry_wait',
             ):
                 with self.assertRaisesRegex(
-                    RuntimeError, 'HASH index assignment conflict'
+                    RuntimeError, 'HASH index conflict detected'
                 ):
                     commit.commit(messages)
 

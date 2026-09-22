@@ -319,9 +319,6 @@ class TableWrite:
             return commit_messages
 
         index_changes = prepare_indexes()
-        base_snapshot_id = getattr(
-            self.row_key_extractor, "base_snapshot_id", None
-        )
         messages_by_bucket = {
             (tuple(message.partition), message.bucket): message
             for message in commit_messages
@@ -338,12 +335,6 @@ class TableWrite:
                 messages_by_bucket[(partition, bucket)] = message
             message.index_adds.extend(changes.additions)
             message.index_deletes.extend(changes.deletions)
-        if base_snapshot_id is not None:
-            # Data-only upserts must participate too. A concurrent overwrite
-            # can rebuild the HASH index and move an existing key, making a
-            # stale data file unsafe even when this writer added no mapping.
-            for message in commit_messages:
-                message.hash_index_base_snapshot = base_snapshot_id
         return commit_messages
 
     def _release_prepared_indexes(self) -> None:
