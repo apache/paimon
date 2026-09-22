@@ -51,7 +51,7 @@ public class Options implements Serializable {
     /** Stores the concrete key/value pairs of this configuration object. */
     private final HashMap<String, String> data;
 
-    /** Options overriding the base map in the two-map constructor. */
+    /** Options overriding the base map through setters or the two-map constructor. */
     private HashMap<String, String> dynamicOptions;
 
     /** Creates a new empty configuration. */
@@ -63,13 +63,13 @@ public class Options implements Serializable {
     /** Creates a new configuration that is initialized with the options of the given map. */
     public Options(Map<String, String> map) {
         this();
-        this.data.putAll(map);
+        map.forEach(this.data::put);
     }
 
     /** Creates a new configuration that is initialized with the options of the given two maps. */
     public Options(Map<String, String> map1, Map<String, String> map2) {
         this(map1);
-        this.data.putAll(map2);
+        map2.forEach(this.data::put);
         this.dynamicOptions.putAll(map2);
     }
 
@@ -97,10 +97,12 @@ public class Options implements Serializable {
      */
     public synchronized void setString(String key, String value) {
         data.put(key, value);
+        setDynamicOption(key, value);
     }
 
     public synchronized void set(String key, String value) {
         data.put(key, value);
+        setDynamicOption(key, value);
     }
 
     public synchronized <T> Options set(ConfigOption<T> option, T value) {
@@ -256,8 +258,17 @@ public class Options implements Serializable {
             if (canBePrefixMap) {
                 removePrefixMap(this.data, key);
             }
-            this.data.put(key, OptionsUtils.convertToString(value));
+            String stringValue = OptionsUtils.convertToString(value);
+            this.data.put(key, stringValue);
+            setDynamicOption(key, stringValue);
         }
+    }
+
+    private void setDynamicOption(String key, String value) {
+        if (dynamicOptions == null) {
+            dynamicOptions = new HashMap<>();
+        }
+        dynamicOptions.put(key, value);
     }
 
     private Optional<Object> getRawValueFromOption(ConfigOption<?> configOption) {

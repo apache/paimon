@@ -202,6 +202,18 @@ public class NativeVectorGlobalIndexerFactoryTest {
 
     @Test
     public void testRejectsInapplicable050BuildOptions() {
+        Options mutableOptions = new Options();
+        mutableOptions.setString("ivf-flat.ivf.pq-encoding", "canonical");
+        assertThatThrownBy(
+                        () ->
+                                NativeVectorGlobalIndexerFactory.nativeOptions(
+                                        new ArrayType(new FloatType()),
+                                        mutableOptions,
+                                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                                        "vec"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ivf-flat.ivf.pq-encoding");
+
         Map<String, String> flatUserOptions = new HashMap<>();
         flatUserOptions.put("ivf-flat.ivf.pq-encoding", "canonical");
         Options flatOptions = new Options(new HashMap<>(), flatUserOptions);
