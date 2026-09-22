@@ -68,6 +68,17 @@ public class SchemaMergingUtils {
             return currentTableSchema;
         }
 
+        // The automatic merge path must not relax the invariants enforced by the explicit schema
+        // change path (see SchemaManagerUtils#assertNotUpdatingPartitionKeys /
+        // #assertNotUpdatingPrimaryKeys). Widening a key column changes its value encoding, which
+        // silently rehashes it into another bucket, so the same logical key would land in two
+        // different buckets and bypass deduplication. Reject such merges instead of committing
+        // them.
+        assertNotUpdatingKeyColumn(
+                currentTableSchema, currentType, newRowType, "update", "partition column");
+        assertNotUpdatingKeyColumn(
+                currentTableSchema, currentType, newRowType, "update", "primary key");
+
         return new TableSchema(
                 currentTableSchema.id() + 1,
                 newRowType.getFields(),
@@ -268,6 +279,45 @@ public class SchemaMergingUtils {
     private static boolean supportsDataTypesCast(
             DataType sourceType, DataType targetType, boolean allowExplicitCast) {
         return DataTypeCasts.supportsCast(sourceType, targetType, allowExplicitCast);
+    }
+
+    /**
+     * Rejects a merge that changes the type of a primary-key or partition column, mirroring the
+     * explicit schema change path's guards. Only top-level columns are considered, as key columns
+     * are required to be non-nested.
+     */
+    private static void assertNotUpdatingKeyColumn(
+            TableSchema currentTableSchema,
+            RowType currentType,
+            RowType mergedType,
+            String operation,
+            String keyDescription) {
+        List<String> keyColumns =
+                "primary key".equals(keyDescription)
+                        ? currentTableSchema.primaryKeys()
+                        : currentTableSchema.partitionKeys();
+        if (keyColumns.isEmpty()) {
+            return;
+        }
+
+        Map<String, DataField> mergedFieldMap =
+                buildFieldMap(mergedType.getFields(), /* caseSensitive */ true);
+        for (DataField currentField : currentType.getFields()) {
+            if (!keyColumns.contains(currentField.name())) {
+                continue;
+            }
+            DataField mergedField = mergedFieldMap.get(currentField.name());
+            if (mergedField != null && !mergedField.type().equals(currentField.type())) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Cannot %s %s type from %s to %s: [%s].",
+                                operation,
+                                keyDescription,
+                                currentField.type(),
+                                mergedField.type(),
+                                currentField.name()));
+            }
+        }
     }
 
     private static DataField assignIdForNewField(DataField field, AtomicInteger highestFieldId) {
