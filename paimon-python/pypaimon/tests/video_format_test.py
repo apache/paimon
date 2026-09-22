@@ -28,6 +28,7 @@ from unittest import mock
 
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.options import Options
+from pypaimon.filesystem.jindo_file_system_handler import JindoInputFile
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.video_format_reader import VideoFileMeta
@@ -318,6 +319,50 @@ class VideoFormatTest(unittest.TestCase):
             np.testing.assert_array_equal(expected[target_frame], actual)
             sparse_read_sizes.append(available_bytes)
         self.assertLess(min(sparse_read_sizes), len(stored_payload))
+
+    @unittest.skipUnless(
+        av is not None and np is not None,
+        "PyAV and NumPy are required for video index generation",
+    )
+    def test_unknown_length_jindo_video_generates_index(self):
+        payload = self._real_mp4()
+
+        class JindoStream:
+
+            def __init__(self):
+                self._stream = io.BytesIO(payload)
+
+            @property
+            def closed(self):
+                return self._stream.closed
+
+            def read(self, size=-1):
+                return self._stream.read(size)
+
+            def seek(self, offset, whence=io.SEEK_SET):
+                self._stream.seek(offset, whence)
+
+            def tell(self):
+                return self._stream.tell()
+
+            def close(self):
+                self._stream.close()
+
+        reader = mock.Mock()
+        reader.new_input_stream.side_effect = lambda unused: JindoInputFile(
+            JindoStream())
+        descriptor = VideoFrameDescriptor(
+            "oss://bucket/video.mp4", 0, -1, 0, -1, 0)
+        value = Blob.from_descriptor(reader, descriptor)
+        target = (self.root / "jindo.video").as_uri()
+
+        writer = VideoFormatWriter(self.file_io.new_output_stream(target))
+        writer.add_element(GenericRow([value], [self.field], RowKind.INSERT))
+        writer.close()
+
+        stored = VideoFrameDescriptor.deserialize(self._read(target)[0])
+        self.assertEqual(len(payload), stored.length)
+        self.assertGreater(stored.keyframe_index_descriptor.length, 0)
 
     def test_target_size_counts_buffered_keyframe_index(self):
         mapping = VideoKeyframeIndex([], [(0, 0, 0)]).serialize()

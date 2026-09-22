@@ -1515,9 +1515,11 @@ def _open_video_decoder(stream, backend=None):
         keyframe_index = None
     if backend is None and keyframe_index is not None:
         try:
-            return _PyAVVideoDecoder(stream, keyframe_index)
+            decoder = _PyAVVideoDecoder(stream, keyframe_index)
         except (ImportError, OSError, RuntimeError):
             stream.seek(0)
+        else:
+            return _FallbackVideoDecoder(stream, decoder)
     if backend in (None, "torchcodec"):
         try:
             return _open_torchcodec_decoder(stream)
@@ -1543,6 +1545,44 @@ def _open_torchcodec_decoder(stream):
         # TorchCodec 0.2 accepts bytes but not seekable file-like objects.
         stream.seek(0)
         return VideoDecoder(stream.read(), seek_mode="exact")
+
+
+class _FallbackVideoDecoder:
+
+    def __init__(self, stream, decoder):
+        self._stream = stream
+        self._decoder = decoder
+        self._pending = True
+
+    def __getitem__(self, index):
+        return self._call("__getitem__", index)
+
+    def get_frames_at(self, *, indices):
+        return self._call("get_frames_at", indices=indices)
+
+    def _call(self, method, *args, **kwargs):
+        try:
+            result = getattr(self._decoder, method)(*args, **kwargs)
+        except (ImportError, OSError, RuntimeError) as error:
+            if not self._pending:
+                raise
+            self._pending = False
+            close = getattr(self._decoder, "close", None)
+            if close is not None:
+                close()
+            self._stream.seek(0)
+            try:
+                self._decoder = _open_torchcodec_decoder(self._stream)
+            except (ImportError, OSError, RuntimeError):
+                raise error
+            return getattr(self._decoder, method)(*args, **kwargs)
+        self._pending = False
+        return result
+
+    def close(self):
+        close = getattr(self._decoder, "close", None)
+        if close is not None:
+            close()
 
 
 class _RangeBackedVideo(io.RawIOBase):

@@ -558,6 +558,41 @@ class LeRobotValidationTest(unittest.TestCase):
                 _open_video_decoder(stream, backend="pyav")
             torchcodec.assert_not_called()
 
+    def test_indexed_default_backend_falls_back_after_lazy_failure(self):
+        stream = Mock()
+        stream.video_keyframe_index = VideoKeyframeIndex(
+            [], [(0, 0, 0)])
+        pyav_decoder = Mock()
+        pyav_decoder.get_frames_at.side_effect = OSError("cannot open")
+        torchcodec_decoder = Mock()
+        expected = object()
+        torchcodec_decoder.get_frames_at.return_value = expected
+        module = "pypaimon.multimodal.lerobot.dataset."
+
+        with patch(
+                module + "_PyAVVideoDecoder",
+                return_value=pyav_decoder), patch(
+                module + "_open_torchcodec_decoder",
+                return_value=torchcodec_decoder) as torchcodec:
+            decoder = _open_video_decoder(stream)
+            self.assertIs(expected, decoder.get_frames_at(indices=[3]))
+            pyav_decoder.close.assert_called_once_with()
+            stream.seek.assert_called_once_with(0)
+            torchcodec.assert_called_once_with(stream)
+            decoder.close()
+            torchcodec_decoder.close.assert_called_once_with()
+
+        stream.reset_mock()
+        with patch(
+                module + "_PyAVVideoDecoder",
+                return_value=pyav_decoder), patch(
+                module + "_open_torchcodec_decoder") as torchcodec:
+            decoder = _open_video_decoder(stream, backend="pyav")
+            with self.assertRaisesRegex(OSError, "cannot open"):
+                decoder.get_frames_at(indices=[3])
+            stream.seek.assert_not_called()
+            torchcodec.assert_not_called()
+
     def test_video_batches_include_delta_frames_and_preserve_backends(self):
         try:
             import torch

@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import io
 import os
 import types
 import unittest
@@ -27,7 +28,11 @@ from pyarrow.fs import PyFileSystem
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem import jindo_file_system_handler as jindo_module
-from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
+from pypaimon.filesystem.jindo_file_system_handler import (
+    JindoFileSystemHandler,
+    JindoInputFile,
+    JINDO_AVAILABLE,
+)
 
 
 class _RecordingConfig:
@@ -39,6 +44,21 @@ class _RecordingConfig:
 
 
 class JindoConfigTest(unittest.TestCase):
+
+    def test_input_file_seek_returns_position(self):
+        class JindoStream:
+
+            def __init__(self):
+                self._stream = io.BytesIO(b"video")
+
+            def seek(self, offset, whence=io.SEEK_SET):
+                self._stream.seek(offset, whence)
+
+            def tell(self):
+                return self._stream.tell()
+
+        stream = JindoInputFile(JindoStream())
+        self.assertEqual(5, stream.seek(0, io.SEEK_END))
 
     def test_forwards_native_options_to_connect(self):
         created_config = _RecordingConfig()
