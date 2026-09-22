@@ -450,10 +450,6 @@ case class PaimonSparkWriter(
       .map(deserializeCommitMessage(serializer, _))
   }
 
-  def rowIdCheckConflict(rowIdCheckFromSnapshot: Long): Unit = {
-    writeBuilder.asInstanceOf[BatchWriteBuilderImpl].rowIdCheckConflict(rowIdCheckFromSnapshot)
-  }
-
   def commit(commitMessages: Seq[CommitMessage]): Unit = {
     commit(commitMessages, null)
   }

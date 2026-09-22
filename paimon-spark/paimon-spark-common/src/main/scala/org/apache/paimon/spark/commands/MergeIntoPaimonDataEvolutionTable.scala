@@ -423,9 +423,6 @@ case class MergeIntoPaimonDataEvolutionTable(
           insertActionInvoke(sparkSession, touchedFileTargetRelation, persistSourceDss)
         else Nil
 
-      if (readSnapshot != null) {
-        writer.rowIdCheckConflict(readSnapshot.id())
-      }
       DataEvolutionRowIdConflictCommitter.commit(
         sparkSession,
         table,
