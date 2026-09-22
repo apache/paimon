@@ -69,7 +69,7 @@ public class BitmapFileIndex implements FileIndexer {
 
     @Override
     public FileIndexReader createReader(
-            SeekableInputStream seekableInputStream, long start, int length) {
+            SeekableInputStream seekableInputStream, long start, long length) {
         try {
             Reader reader = new Reader(seekableInputStream, start, options);
             return valuesAreTruncated(dataType) ? new TruncatedValueReader(reader) : reader;

@@ -21,13 +21,11 @@ package org.apache.paimon.fileindex;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.utils.Pair;
 
-import java.io.Closeable;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Utilities shared by file index container versions. */
@@ -39,17 +37,6 @@ final class FileIndexFormatUtils {
     static final int VERSION_2 = 2;
 
     private FileIndexFormatUtils() {}
-
-    /** Internal contract implemented by each container version. */
-    interface FormatWriter extends Closeable {
-
-        void writeColumnIndexes(Map<String, Map<String, byte[]>> indexes) throws IOException;
-    }
-
-    interface IndexPayloadWriter {
-
-        Pair<Long, Long> write(byte[] bytes) throws IOException;
-    }
 
     static void writeMagicAndVersion(DataOutput output, int version) throws IOException {
         // writeMagic
@@ -104,25 +91,6 @@ final class FileIndexFormatUtils {
                     output.writeLong(start);
                     output.writeLong(index.getValue().getRight());
                 }
-            }
-        }
-    }
-
-    static void writeIndexPayloads(
-            Map<String, Map<String, byte[]>> indexes,
-            Map<String, Map<String, Pair<Long, Long>>> indexEntries,
-            IndexPayloadWriter payloadWriter)
-            throws IOException {
-        for (Map.Entry<String, Map<String, byte[]>> column : indexes.entrySet()) {
-            Map<String, Pair<Long, Long>> entries =
-                    indexEntries.computeIfAbsent(column.getKey(), ignored -> new LinkedHashMap<>());
-            for (Map.Entry<String, byte[]> index : column.getValue().entrySet()) {
-                // Empty indexes have no payload and use EMPTY_INDEX_FLAG as their start position.
-                entries.put(
-                        index.getKey(),
-                        index.getValue() == null
-                                ? Pair.of((long) EMPTY_INDEX_FLAG, 0L)
-                                : payloadWriter.write(index.getValue()));
             }
         }
     }

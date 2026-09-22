@@ -39,7 +39,7 @@ public class FileIndexOptions {
     public static final String COLUMNS = "columns";
 
     // if the filter size greater than fileIndexInManifestThreshold, we put it in file
-    private final long fileIndexInManifestThreshold;
+    private final int fileIndexInManifestThreshold;
     private final int formatVersion;
 
     private final Map<Column, Map<String, Options>> indexTypeOptions;
@@ -192,7 +192,7 @@ public class FileIndexOptions {
         return formatVersion;
     }
 
-    public long fileIndexInManifestThreshold() {
+    public int fileIndexInManifestThreshold() {
         return fileIndexInManifestThreshold;
     }
 

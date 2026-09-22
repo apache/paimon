@@ -41,8 +41,6 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -203,15 +201,10 @@ public class FileIndexEvaluatorTest {
         indexWriter.write(1);
         indexWriter.write(2);
 
-        Map<String, Map<String, byte[]>> indexes = new HashMap<>();
-        indexes.put(
-                "a",
-                Collections.singletonMap(
-                        BitmapFileIndexFactory.BITMAP_INDEX, indexWriter.serializedBytes()));
-
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(output, 1)) {
-            writer.writeColumnIndexes(indexes);
+            writer.writeIndex("a", BitmapFileIndexFactory.BITMAP_INDEX, indexWriter::writeTo);
+            writer.finish();
         }
         return output.toByteArray();
     }

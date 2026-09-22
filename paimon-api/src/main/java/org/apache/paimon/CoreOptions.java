@@ -4539,8 +4539,15 @@ public class CoreOptions implements Serializable {
         return version;
     }
 
-    public long fileIndexInManifestThreshold() {
-        return options.get(FILE_INDEX_IN_MANIFEST_THRESHOLD).getBytes();
+    public int fileIndexInManifestThreshold() {
+        long bytes = options.get(FILE_INDEX_IN_MANIFEST_THRESHOLD).getBytes();
+        checkArgument(
+                bytes >= 0 && bytes <= Integer.MAX_VALUE,
+                "'%s' must be between 0 and %s bytes, but was %s bytes.",
+                FILE_INDEX_IN_MANIFEST_THRESHOLD.key(),
+                Integer.MAX_VALUE,
+                bytes);
+        return (int) bytes;
     }
 
     public boolean fileIndexReadEnabled() {

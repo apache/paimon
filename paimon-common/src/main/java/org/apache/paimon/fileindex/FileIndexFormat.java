@@ -18,7 +18,6 @@
 
 package org.apache.paimon.fileindex;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fileindex.empty.EmptyFileIndexReader;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
@@ -26,6 +25,8 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
+
+import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.DataInputStream;
@@ -49,6 +50,12 @@ import static org.apache.paimon.fileindex.FileIndexFormatUtils.VERSION_2;
 /** Version-dispatching entry point and shared payload access for file index containers. */
 public final class FileIndexFormat {
 
+    /** Writes a single payload to the container output. */
+    @FunctionalInterface
+    public interface Payload {
+        void writeTo(OutputStream output) throws IOException;
+    }
+
     enum Version {
         V_1(VERSION_1),
         V_2(VERSION_2);
@@ -64,8 +71,14 @@ public final class FileIndexFormat {
         }
     }
 
-    public static Writer createWriter(OutputStream outputStream, int version) {
-        return new Writer(outputStream, version);
+    public static Writer createWriter(OutputStream outputStream, int version) throws IOException {
+        if (version == Version.V_1.version()) {
+            return new FileIndexFormatV1.Writer(outputStream);
+        } else if (version == Version.V_2.version()) {
+            return new FileIndexFormatV2.Writer(outputStream);
+        } else {
+            throw new IllegalArgumentException("Unsupported file index version: " + version);
+        }
     }
 
     public static Reader createReader(
@@ -112,29 +125,14 @@ public final class FileIndexFormat {
     }
 
     /** Writer for file index file. */
-    public static class Writer implements Closeable {
+    public abstract static class Writer implements Closeable {
 
-        private final FileIndexFormatUtils.FormatWriter writer;
+        /** Writes one payload to the container. A null payload is empty. */
+        public abstract void writeIndex(
+                String columnName, String indexType, @Nullable Payload payload) throws IOException;
 
-        private Writer(OutputStream outputStream, int version) {
-            if (version == Version.V_1.version()) {
-                this.writer = new FileIndexFormatV1.Writer(outputStream);
-            } else if (version == Version.V_2.version()) {
-                this.writer = new FileIndexFormatV2.Writer(outputStream);
-            } else {
-                throw new IllegalArgumentException("Unsupported file index version: " + version);
-            }
-        }
-
-        public void writeColumnIndexes(Map<String, Map<String, byte[]>> indexes)
-                throws IOException {
-            writer.writeColumnIndexes(indexes);
-        }
-
-        @Override
-        public void close() throws IOException {
-            writer.close();
-        }
+        /** Completes the container after all payloads have been written. */
+        public abstract void finish() throws IOException;
     }
 
     /** Reader for file index file. */
@@ -227,59 +225,29 @@ public final class FileIndexFormat {
                     .createReader(
                             seekableInputStream,
                             startAndLength.getLeft(),
-                            checkedPayloadLength(startAndLength.getRight()));
+                            startAndLength.getRight());
         }
 
-        private byte[] getBytesWithStartAndLength(Pair<Long, Long> startAndLength) {
-            byte[] b = new byte[checkedPayloadLength(startAndLength.getRight())];
-            try {
-                seekableInputStream.seek(startAndLength.getLeft());
-                int n = 0;
-                int len = b.length;
-                // read fully until b is full else throw.
-                while (n < len) {
-                    int count = seekableInputStream.read(b, n, len - n);
-                    if (count < 0) {
-                        throw new EOFException();
-                    }
-                    n += count;
+        /**
+         * Copies a stored payload without loading it into a byte array or decoding its plugin
+         * format.
+         */
+        public void copyPayload(String columnName, String indexType, OutputStream output)
+                throws IOException {
+            Pair<Long, Long> startAndLength = indexEntries.get(columnName).get(indexType);
+            seekableInputStream.seek(startAndLength.getLeft());
+            byte[] buffer = new byte[8192];
+            long remaining = startAndLength.getRight();
+            while (remaining > 0) {
+                int count =
+                        seekableInputStream.read(
+                                buffer, 0, (int) Math.min(remaining, buffer.length));
+                if (count < 0) {
+                    throw new EOFException();
                 }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
+                output.write(buffer, 0, count);
+                remaining -= count;
             }
-            return b;
-        }
-
-        // TODO: support 64-bit payload length in version 2, and remove this method.
-        private static int checkedPayloadLength(long length) {
-            if (length > Integer.MAX_VALUE) {
-                throw new IllegalArgumentException(
-                        "File index payload length exceeds int32: " + length);
-            }
-            return (int) length;
-        }
-
-        public Map<String, Map<String, byte[]>> readAll() {
-            Map<String, Map<String, byte[]>> result = new HashMap<>();
-            for (Map.Entry<String, Map<String, Pair<Long, Long>>> entryOuter :
-                    indexEntries.entrySet()) {
-                for (Map.Entry<String, Pair<Long, Long>> entryInner :
-                        entryOuter.getValue().entrySet()) {
-                    result.computeIfAbsent(entryOuter.getKey(), key -> new HashMap<>())
-                            .put(
-                                    entryInner.getKey(),
-                                    getBytesWithStartAndLength(entryInner.getValue()));
-                }
-            }
-            return result;
-        }
-
-        @VisibleForTesting
-        // only for test yet
-        Optional<byte[]> getBytesWithNameAndType(String columnName, String indexType) {
-            return Optional.ofNullable(indexEntries.getOrDefault(columnName, null))
-                    .map(i -> i.getOrDefault(indexType, null))
-                    .map(this::getBytesWithStartAndLength);
         }
 
         @Override

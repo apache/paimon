@@ -28,6 +28,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileIndexWriter;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.SpillableIndexOutputStream;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
@@ -42,9 +43,7 @@ import org.apache.paimon.utils.FileStorePathFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -67,7 +66,7 @@ public class FileIndexProcessor {
     private final FileStorePathFactory pathFactory;
     private final DataFilePathFactories pathFactories;
     private final SchemaCache schemaInfoCache;
-    private final long sizeInMeta;
+    private final int sizeInMeta;
 
     public FileIndexProcessor(FileStoreTable table) {
         this.table = table;
@@ -90,102 +89,112 @@ public class FileIndexProcessor {
                         .filter(name -> name.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
                         .collect(Collectors.toList());
         extras.removeAll(indexFiles);
-
         Path newIndexPath;
-        Map<String, Map<String, byte[]>> maintainers;
-        // load
+        FileIndexFormat.Reader sourceReader = null;
         if (!indexFiles.isEmpty()) {
             Path sourcePath = dataFilePathFactory.toAlignedPath(indexFiles.get(0), dataFileMeta);
             long sourceLength = fileIO.getFileStatus(sourcePath).getLen();
-            try (FileIndexFormat.Reader indexReader =
+            sourceReader =
                     FileIndexFormat.createReader(
-                            fileIO.newInputStream(sourcePath),
-                            schemaInfo.fileSchema,
-                            sourceLength)) {
-                maintainers = indexReader.readAll();
-            }
+                            fileIO.newInputStream(sourcePath), schemaInfo.fileSchema, sourceLength);
             newIndexPath = createNewFileIndexFilePath(sourcePath);
         } else {
-            maintainers = new HashMap<>();
             newIndexPath = dataFileToFileIndexPath(dataFilePathFactory.toPath(dataFileMeta));
         }
 
-        // remove unnecessary
-        for (Map.Entry<String, Map<String, byte[]>> entry : new HashSet<>(maintainers.entrySet())) {
-            String name = entry.getKey();
-            if (!schemaInfo.projectedColFullNames.contains(name)) {
-                maintainers.remove(name);
-            } else {
-                Map<String, byte[]> indexTypeBytes = maintainers.get(name);
-                Set<String> configuredIndexTypes =
-                        schemaInfo.projectedIndexTypes.getOrDefault(name, Collections.emptySet());
-                indexTypeBytes
-                        .keySet()
-                        .removeIf(indexType -> !configuredIndexTypes.contains(indexType));
-            }
-        }
-
-        // ignore close, do not close to write file, only collect serialized maintainers
-        @SuppressWarnings("resource")
-        DataFileIndexWriter dataFileIndexWriter =
-                DataFileIndexWriter.create(
-                        fileIO,
-                        newIndexPath,
-                        schemaInfo.fileSchema.project(schemaInfo.projectedIndexCols),
-                        fileIndexOptions,
-                        schemaInfo.colNameMapping);
-        if (dataFileIndexWriter != null) {
-            // projectedIndexCols index into the file schema. withProjection would re-interpret
-            // them against the current table schema, so a schema change that shifts columns (drop
-            // a middle column, add another) would read the wrong column and rebuild the index over
-            // it. Read with the same file-schema projection the writer above uses.
-            RowType indexReadType = schemaInfo.fileSchema.project(schemaInfo.projectedIndexCols);
-            try (RecordReader<InternalRow> reader =
-                    table.newReadBuilder()
-                            .withReadType(indexReadType)
-                            .newRead()
-                            .createReader(
-                                    DataSplit.builder()
-                                            .withPartition(partition)
-                                            .withBucket(bucket)
-                                            .withBucketPath(
-                                                    pathFactory
-                                                            .bucketPath(partition, bucket)
-                                                            .toString())
-                                            .withTotalBuckets(manifestEntry.totalBuckets())
-                                            .withDataFiles(Collections.singletonList(dataFileMeta))
-                                            .rawConvertible(true)
-                                            .build())) {
-                reader.forEachRemaining(dataFileIndexWriter::write);
+        try (FileIndexFormat.Reader oldReader = sourceReader) {
+            Map<String, Map<String, FileIndexFormat.Payload>> entries = new HashMap<>();
+            if (oldReader != null) {
+                for (FileIndexFormat.FileIndexMeta meta : oldReader.indexMetas()) {
+                    String column = meta.columnName();
+                    String type = meta.indexType();
+                    if (schemaInfo.projectedColFullNames.contains(column)
+                            && schemaInfo
+                                    .projectedIndexTypes
+                                    .getOrDefault(column, Collections.emptySet())
+                                    .contains(type)) {
+                        entries.computeIfAbsent(column, ignored -> new HashMap<>())
+                                .put(
+                                        type,
+                                        meta.empty()
+                                                ? null
+                                                : output ->
+                                                        oldReader.copyPayload(
+                                                                column, type, output));
+                    }
+                }
             }
 
-            dataFileIndexWriter
-                    .serializeMaintainers()
-                    .forEach(
-                            (key, value) ->
-                                    maintainers
-                                            .computeIfAbsent(key, k -> new HashMap<>())
-                                            .putAll(value));
-        }
-
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (FileIndexFormat.Writer indexWriter =
-                FileIndexFormat.createWriter(baos, fileIndexOptions.formatVersion())) {
-            if (!maintainers.isEmpty()) {
-                indexWriter.writeColumnIndexes(maintainers);
+            // Collect the new writers, not their serialized payloads.
+            @SuppressWarnings("resource")
+            DataFileIndexWriter newIndexes =
+                    DataFileIndexWriter.create(
+                            fileIO,
+                            newIndexPath,
+                            schemaInfo.fileSchema.project(schemaInfo.projectedIndexCols),
+                            fileIndexOptions,
+                            schemaInfo.colNameMapping);
+            if (newIndexes != null) {
+                // projectedIndexCols index into the file schema. withProjection would re-interpret
+                // them against the current table schema, so a schema change that shifts columns
+                // would rebuild the index over the wrong column.
+                RowType indexReadType = schemaInfo.fileSchema.project(schemaInfo.projectedIndexCols);
+                try (RecordReader<InternalRow> reader =
+                        table.newReadBuilder()
+                                .withReadType(indexReadType)
+                                .newRead()
+                                .createReader(
+                                        DataSplit.builder()
+                                                .withPartition(partition)
+                                                .withBucket(bucket)
+                                                .withBucketPath(
+                                                        pathFactory
+                                                                .bucketPath(partition, bucket)
+                                                                .toString())
+                                                .withTotalBuckets(manifestEntry.totalBuckets())
+                                                .withDataFiles(
+                                                        Collections.singletonList(dataFileMeta))
+                                                .rawConvertible(true)
+                                                .build())) {
+                    reader.forEachRemaining(newIndexes::write);
+                }
+                newIndexes.forEachIndex(
+                        (column, type, writer) ->
+                                entries.computeIfAbsent(column, ignored -> new HashMap<>())
+                                        .put(type, writer == null ? null : writer::writeTo));
             }
-        }
 
-        if (baos.size() > sizeInMeta) {
-            try (OutputStream outputStream = fileIO.newOutputStream(newIndexPath, true)) {
-                outputStream.write(baos.toByteArray());
+            if (entries.isEmpty()) {
+                return dataFileMeta.copy(extras).copy((byte[]) null);
             }
-            extras.add(newIndexPath.getName());
-            return dataFileMeta.copy(extras).copy((byte[]) null);
-        } else if (baos.size() == 0) {
-            return dataFileMeta.copy(extras).copy((byte[]) null);
-        } else {
-            return dataFileMeta.copy(extras).copy(baos.toByteArray());
+
+            SpillableIndexOutputStream output =
+                    new SpillableIndexOutputStream(fileIO, newIndexPath, sizeInMeta);
+            try {
+                try (FileIndexFormat.Writer writer =
+                        FileIndexFormat.createWriter(output, fileIndexOptions.formatVersion())) {
+                    for (Map.Entry<String, Map<String, FileIndexFormat.Payload>> column :
+                            entries.entrySet()) {
+                        for (Map.Entry<String, FileIndexFormat.Payload> index :
+                                column.getValue().entrySet()) {
+                            writer.writeIndex(column.getKey(), index.getKey(), index.getValue());
+                        }
+                    }
+                    writer.finish();
+                }
+                if (output.spilled()) {
+                    extras.add(newIndexPath.getName());
+                    return dataFileMeta.copy(extras).copy((byte[]) null);
+                }
+                return dataFileMeta.copy(extras).copy(output.embeddedBytes());
+            } catch (IOException | RuntimeException e) {
+                try {
+                    output.abort();
+                } catch (IOException cleanupFailure) {
+                    e.addSuppressed(cleanupFailure);
+                }
+                throw e;
+            }
         }
     }
 

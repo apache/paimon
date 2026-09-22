@@ -39,7 +39,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -268,9 +267,10 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
                                 table.fileIO().getFileStatus(indexFilePath).getLen());
             }
             try (FileIndexFormat.Reader indexReader = reader) {
-                Map<String, Map<String, byte[]>> indexes = indexReader.readAll();
-                Assertions.assertThat(indexes).containsKey("k");
-                Assertions.assertThat(indexes.get("k").keySet()).containsExactly(expectedIndexType);
+                Assertions.assertThat(indexReader.indexMetas())
+                        .filteredOn(meta -> meta.columnName().equals("k"))
+                        .extracting(FileIndexFormat.FileIndexMeta::indexType)
+                        .containsExactly(expectedIndexType);
             }
         }
     }

@@ -31,6 +31,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.SparseFileIndexIO;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.schema.Schema;
@@ -60,6 +61,66 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class FileIndexProcessorTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    @Test
+    public void testV2RewritesContainerOverTwoGiB() throws Exception {
+        SparseFileIndexIO fileIO = new SparseFileIndexIO();
+        Path warehouse = new Path(tempDir.toUri());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        options.put(CoreOptions.FILE_INDEX_FORMAT_VERSION.key(), "2");
+        options.put("file-index.in-manifest-threshold", "1B");
+        options.put("file-index.stream-test.columns", "large,small");
+        options.put("file-index.stream-test.large.large", "true");
+        RowType rowType =
+                RowType.builder()
+                        .field("large", DataTypes.INT())
+                        .field("small", DataTypes.INT())
+                        .build();
+        Identifier identifier = Identifier.create("mydb", "t");
+        FileStoreTable table;
+        try (FileSystemCatalog catalog = new FileSystemCatalog(fileIO, warehouse)) {
+            catalog.createDatabase("mydb", false);
+            catalog.createTable(
+                    identifier,
+                    new Schema(
+                            rowType.getFields(),
+                            Collections.emptyList(),
+                            Collections.singletonList("large"),
+                            options,
+                            ""),
+                    false);
+            table = (FileStoreTable) catalog.getTable(identifier);
+        }
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, 2));
+            commit.commit(1, write.prepareCommit(false, 1));
+        }
+
+        ManifestEntry entry = table.store().newScan().plan().files().get(0);
+        DataFileMeta rewritten =
+                new FileIndexProcessor(table).process(entry.partition(), entry.bucket(), entry);
+        String indexFile =
+                rewritten.extraFiles().stream()
+                        .filter(name -> name.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
+                        .findFirst()
+                        .orElseThrow(() -> new AssertionError("no rewritten file index"));
+        Path indexPath =
+                new Path(
+                        table.store().pathFactory().bucketPath(entry.partition(), entry.bucket()),
+                        indexFile);
+        long length = fileIO.getFileStatus(indexPath).getLen();
+        assertThat(length).isGreaterThan(Integer.MAX_VALUE);
+        try (FileIndexFormat.Reader reader =
+                FileIndexFormat.createReader(fileIO.newInputStream(indexPath), rowType, length)) {
+            assertThat(reader.readColumnIndex("large")).hasSize(1);
+            assertThat(reader.readColumnIndex("small")).hasSize(1);
+        }
+    }
 
     @ParameterizedTest
     @ValueSource(ints = {1, 2})
@@ -130,7 +191,9 @@ public class FileIndexProcessorTest {
                         fileIO.newInputStream(indexPath),
                         rowType,
                         fileIO.getFileStatus(indexPath).getLen())) {
-            assertThat(reader.readAll().keySet()).containsExactlyInAnyOrder("m[k1]", "m[k2]");
+            assertThat(reader.indexMetas())
+                    .extracting(FileIndexFormat.FileIndexMeta::columnName)
+                    .containsExactlyInAnyOrder("m[k1]", "m[k2]");
         }
     }
 

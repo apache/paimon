@@ -19,8 +19,9 @@
 package org.apache.paimon.fileindex;
 
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
+
+import javax.annotation.Nullable;
 
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
@@ -103,32 +104,39 @@ final class FileIndexFormatV2 {
         }
     }
 
-    /** V2 writer writes byte-array payloads and records their ranges in the footer. */
-    static final class Writer implements FileIndexFormatUtils.FormatWriter {
+    /** V2 writer records streamed payload ranges in the footer. */
+    static final class Writer extends FileIndexFormat.Writer {
 
         private final DataOutputStream dataOutputStream;
         private final FileIndexFormatUtils.CountingPositionOutputStream positionOutputStream;
+        private final Map<String, Map<String, Pair<Long, Long>>> indexEntries =
+                new LinkedHashMap<>();
 
-        Writer(OutputStream outputStream) {
+        Writer(OutputStream outputStream) throws IOException {
             this.positionOutputStream =
                     new FileIndexFormatUtils.CountingPositionOutputStream(outputStream);
             this.dataOutputStream = new DataOutputStream(positionOutputStream);
+            FileIndexFormatUtils.writeMagicAndVersion(dataOutputStream, VERSION_2);
         }
 
         @Override
-        public void writeColumnIndexes(Map<String, Map<String, byte[]>> indexes)
+        public void writeIndex(
+                String columnName, String indexType, @Nullable FileIndexFormat.Payload payload)
                 throws IOException {
-            FileIndexFormatUtils.writeMagicAndVersion(dataOutputStream, VERSION_2);
-            Map<String, Map<String, Pair<Long, Long>>> indexEntries = new LinkedHashMap<>();
-            // writeBody
-            FileIndexFormatUtils.writeIndexPayloads(
-                    indexes,
-                    indexEntries,
-                    bytes -> {
-                        long start = positionOutputStream.getPos();
-                        dataOutputStream.write(bytes);
-                        return Pair.of(start, (long) bytes.length);
-                    });
+            Map<String, Pair<Long, Long>> column =
+                    indexEntries.computeIfAbsent(columnName, ignored -> new LinkedHashMap<>());
+            if (payload == null) {
+                // Empty indexes have no payload and use EMPTY_INDEX_FLAG as their start position.
+                column.put(indexType, Pair.of((long) FileIndexFormatUtils.EMPTY_INDEX_FLAG, 0L));
+            } else {
+                long start = positionOutputStream.getPos();
+                payload.writeTo(dataOutputStream);
+                column.put(indexType, Pair.of(start, positionOutputStream.getPos() - start));
+            }
+        }
+
+        @Override
+        public void finish() throws IOException {
             writeFooter(indexEntries);
         }
 
@@ -144,7 +152,7 @@ final class FileIndexFormatV2 {
 
         @Override
         public void close() throws IOException {
-            IOUtils.closeQuietly(dataOutputStream);
+            dataOutputStream.close();
         }
     }
 }
