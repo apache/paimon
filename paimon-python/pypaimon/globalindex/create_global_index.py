@@ -295,7 +295,7 @@ class GlobalIndexBuilder:
         rows_per_shard = self._core_options.global_index_row_count_per_shard()
         if rows_per_shard <= 0:
             raise ValueError(
-                "Option 'global-index.row-count-per-file' must be greater than 0."
+                "Option 'global-index.row-count-per-shard' must be greater than 0."
             )
 
         parallelism = self._core_options.global_index_build_parallelism()

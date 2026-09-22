@@ -231,10 +231,10 @@ public class GenericIndexTopoBuilder {
         byte[] sourceMeta =
                 new DataEvolutionIndexSourceMeta(scanResult.scanSnapshotId()).serialize();
 
-        long rowsPerShard = mergedOptions.get(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_FILE);
+        long rowsPerShard = mergedOptions.get(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD);
         checkArgument(
                 rowsPerShard > 0,
-                "Option 'global-index.row-count-per-file' must be greater than 0.");
+                "Option 'global-index.row-count-per-shard' must be greater than 0.");
 
         List<IndexManifestEntry> deletedIndexEntries = scanResult.deletedIndexEntries();
         List<Range> rowRangesToBuild = scanResult.rowRangeIndex().ranges();

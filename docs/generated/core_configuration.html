@@ -852,7 +852,7 @@ under the License.
             <td><h5>global-index.build.max-shard</h5></td>
             <td style="word-wrap: break-word;">32</td>
             <td>Integer</td>
-            <td>The preferred max number of shards for building global index. If the number of shards calculated by 'global-index.row-count-per-file' exceeds this value, max-shard will be automatically increased to accommodate the data volume while keeping 'global-index.row-count-per-file' unchanged.</td>
+            <td>The preferred max number of shards for building global index. If the number of shards calculated by 'global-index.row-count-per-shard' exceeds this value, max-shard will be automatically increased to accommodate the data volume while keeping 'global-index.row-count-per-shard' unchanged.</td>
         </tr>
         <tr>
             <td><h5>global-index.column-update-action</h5></td>
@@ -879,10 +879,10 @@ under the License.
             <td>Whether a vector, hybrid or full-text search may read the filter columns of candidate rows to verify a row filter that the scalar global index can only answer with a superset, such as contains, ends-with or like on a BTree index or a conjunction with a member no index can evaluate. When false, such candidates are excluded from the search, which never returns a non-matching row but may return fewer than the requested top-k. When true, the read runs on the caller and may cover every candidate row.</td>
         </tr>
         <tr>
-            <td><h5>global-index.row-count-per-file</h5></td>
-            <td style="word-wrap: break-word;">25000000</td>
+            <td><h5>global-index.row-count-per-shard</h5></td>
+            <td style="word-wrap: break-word;">100000</td>
             <td>Long</td>
-            <td>Row count per file for global index.</td>
+            <td>Row count per shard for global index.</td>
         </tr>
         <tr>
             <td><h5>global-index.search-mode</h5></td>

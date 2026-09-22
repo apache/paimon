@@ -167,7 +167,7 @@ def split_by_global_index_shard(
 ):
     if rows_per_shard <= 0:
         raise ValueError(
-            "Option 'global-index.row-count-per-file' must be greater than 0."
+            "Option 'global-index.row-count-per-shard' must be greater than 0."
         )
     if row_ranges_to_build is not None:
         row_ranges_to_build = Range.sort_and_merge_overlap(

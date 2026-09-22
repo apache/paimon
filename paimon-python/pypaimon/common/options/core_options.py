@@ -975,11 +975,11 @@ class CoreOptions:
         )
     )
 
-    GLOBAL_INDEX_ROW_COUNT_PER_FILE: ConfigOption[int] = (
-        ConfigOptions.key("global-index.row-count-per-file")
+    GLOBAL_INDEX_ROW_COUNT_PER_SHARD: ConfigOption[int] = (
+        ConfigOptions.key("global-index.row-count-per-shard")
         .long_type()
-        .default_value(25_000_000)
-        .with_description("Row count per file for global index.")
+        .default_value(100000)
+        .with_description("Row count per shard for global index.")
     )
 
     GLOBAL_INDEX_BUILD_PARALLELISM: ConfigOption[int] = (
@@ -1755,13 +1755,7 @@ class CoreOptions:
         return self.options.get(CoreOptions.GLOBAL_INDEX_FILTER_REFINE_FROM_DATA)
 
     def global_index_row_count_per_shard(self) -> int:
-        option = CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_FILE
-        if self.options.contains(option):
-            return self.options.get(option)
-        legacy_value = self.options.to_map().get("global-index.row-count-per-shard")
-        if legacy_value is not None:
-            return OptionsUtils.convert_to_long(legacy_value)
-        return option.default_value()
+        return self.options.get(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
 
     def global_index_build_parallelism(self) -> int:
         return self.options.get(CoreOptions.GLOBAL_INDEX_BUILD_PARALLELISM)
