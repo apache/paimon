@@ -48,6 +48,7 @@ from pypaimon.multimodal.lerobot import load_from_lerobot
 from pypaimon.multimodal.lerobot.dataset import (
     _PaimonLeRobotMetadata,
     _PyAVVideoDecoder,
+    _RangeBackedVideo,
     _arrow_rows,
     _decode_video_frames,
     _decode_video_rows,
@@ -387,6 +388,43 @@ class LeRobotValidationTest(unittest.TestCase):
             finally:
                 decoder.close()
 
+    def test_range_backed_video_fetches_only_missing_bytes(self):
+        payload = bytes(range(32))
+        calls = []
+
+        def read_ranges(ranges):
+            calls.append(list(ranges))
+            return [
+                payload[offset:offset + length]
+                for offset, length in ranges
+            ]
+
+        reader = _RangeBackedVideo(len(payload), read_ranges)
+        reader.prefetch([(0, 4), (12, 4)])
+        self.assertEqual([[(0, 4), (12, 4)]], calls)
+
+        calls.clear()
+        reader.seek(2)
+        self.assertEqual(payload[2:4], reader.read(2))
+        self.assertEqual([], calls)
+
+        reader.seek(6)
+        self.assertEqual(payload[6:14], reader.read(8))
+        self.assertEqual([[(6, 6)]], calls)
+
+        calls.clear()
+        reader.seek(18)
+        output = bytearray(4)
+        self.assertEqual(4, reader.readinto(output))
+        self.assertEqual(payload[18:22], bytes(output))
+        self.assertEqual([[(18, 4)]], calls)
+
+        self.assertEqual(len(payload) - 3, reader.seek(-3, io.SEEK_END))
+        self.assertEqual(payload[-3:], reader.read())
+        with self.assertRaisesRegex(ValueError, "Negative seek"):
+            reader.seek(-1)
+        reader.close()
+
     @unittest.skipUnless(
         av is not None and importlib.util.find_spec("torch") is not None,
         "PyAV and Torch are required for video decoding",
@@ -445,11 +483,31 @@ class LeRobotValidationTest(unittest.TestCase):
 
                 source = io.BytesIO(payload)
                 source.video_length = len(payload)
+                range_calls = []
+
+                def read_ranges(ranges):
+                    range_calls.append(list(ranges))
+                    return [
+                        payload[offset:offset + length]
+                        for offset, length in ranges
+                    ]
+
+                source.video_read_ranges = read_ranges
                 decoder = _PyAVVideoDecoder(source, index)
                 try:
-                    actual = decoder.get_frames_at(
-                        indices=list(range(len(expected)))
-                    ).data.permute(0, 2, 3, 1).numpy()
+                    indices = list(range(len(expected)))
+                    if codec == "mpeg4":
+                        plan = ({0: indices}, [])
+                        with patch.object(
+                                decoder, "_indexed_plan", return_value=plan):
+                            actual = decoder.get_frames_at(
+                                indices=indices
+                            ).data.permute(0, 2, 3, 1).numpy()
+                        self.assertGreater(len(range_calls), 1)
+                    else:
+                        actual = decoder.get_frames_at(
+                            indices=indices
+                        ).data.permute(0, 2, 3, 1).numpy()
                     np.testing.assert_array_equal(expected, actual)
                 finally:
                     decoder.close()

@@ -99,9 +99,9 @@ one run; negative references represent NULL or data-evolution placeholders.
 </pre>
 
 Each video index stores initialization ranges such as MP4 `moov` and keyframe positions. A cold
-reader fetches these ranges and a bounded GOP window around the target. Zero length selects the
-scan fallback. PyPaimon generates indexes for supported ISO BMFF videos and preserves them during
-rewrites. See the
+reader prefetches these ranges and a bounded GOP window, then fetches uncached decoder reads on
+demand. Zero length selects the scan fallback. PyPaimon generates indexes for supported ISO BMFF
+videos and preserves them during rewrites. See the
 [file format specification](../concepts/spec/fileformat#video).
 
 ## Reuse, Rolling, and Compaction

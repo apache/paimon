@@ -222,8 +222,9 @@ loader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4)
 ```
 
 Without `tag_name`, the latest snapshots are used. Frame lookups use the BTree
-on `index`; payloads remain lazy. Indexed videos use PyAV range reads for metadata and target GOPs;
-unindexed videos use the TorchCodec/PyAV scan path. Set `video_backend` to force either decoder.
+on `index`; payloads remain lazy. Indexed videos prefetch metadata and target GOPs, then fetch
+uncached PyAV reads on demand. Unindexed videos use the TorchCodec/PyAV scan path. Set
+`video_backend` to force either decoder.
 
 Subclass `PaimonDatasetReader` for a custom logical frame layout:
 

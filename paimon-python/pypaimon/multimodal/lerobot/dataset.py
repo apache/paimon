@@ -18,12 +18,12 @@
 """LeRobot-compatible map-style reads from a multimodal Paimon table."""
 
 import bisect
+import io
 import json
 import math
 import operator
 import pickle
 import sys
-import tempfile
 import zlib
 from abc import ABC, abstractmethod
 from collections import OrderedDict
@@ -1542,6 +1542,118 @@ def _open_torchcodec_decoder(stream):
         return VideoDecoder(stream.read(), seek_mode="exact")
 
 
+class _RangeBackedVideo(io.RawIOBase):
+
+    def __init__(self, length, read_ranges):
+        if length < 0:
+            raise ValueError("Video length must be non-negative.")
+        self._length = length
+        self._read_ranges = read_ranges
+        self._position = 0
+        self._segments = []
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        return self._position
+
+    def seek(self, offset, whence=io.SEEK_SET):
+        offset = operator.index(offset)
+        if whence == io.SEEK_SET:
+            position = offset
+        elif whence == io.SEEK_CUR:
+            position = self._position + offset
+        elif whence == io.SEEK_END:
+            position = self._length + offset
+        else:
+            raise ValueError("Invalid whence: %s" % whence)
+        if position < 0:
+            raise ValueError("Negative seek position: %s" % position)
+        self._position = position
+        return position
+
+    def read(self, size=-1):
+        read_all = size is None or size < 0
+        if read_all:
+            end = self._length
+        else:
+            end = min(self._position + operator.index(size), self._length)
+        if self._position >= end:
+            return b''
+        start = self._position
+        self._ensure([(start, end - start)])
+        self._position = end
+        return self._cached(start, end)
+
+    def readinto(self, value):
+        data = self.read(len(value))
+        value[:len(data)] = data
+        return len(data)
+
+    def prefetch(self, ranges):
+        self._ensure(ranges)
+
+    def _ensure(self, ranges):
+        requested = []
+        for offset, length in _merge_video_ranges(ranges):
+            if offset < 0 or length < 0 or offset + length > self._length:
+                raise ValueError("Video byte range is outside the payload.")
+            requested.extend(self._missing(offset, offset + length))
+        missing = _merge_video_ranges(requested)
+        if not missing:
+            return
+        bodies = self._read_ranges(missing)
+        if len(bodies) != len(missing):
+            raise IOError("Video range reader returned an invalid result count.")
+        for (offset, length), body in zip(missing, bodies):
+            body = bytes(body)
+            if len(body) != length:
+                raise IOError(
+                    "Video byte range changed while reading: expected %d, "
+                    "read %d." % (length, len(body))
+                )
+            self._segments.append((offset, offset + length, body))
+        self._segments.sort(key=lambda value: value[0])
+
+    def _missing(self, start, end):
+        missing = []
+        position = start
+        for segment_start, segment_end, unused_body in self._segments:
+            if segment_end <= position:
+                continue
+            if segment_start >= end:
+                break
+            if segment_start > position:
+                missing.append((
+                    position, min(segment_start, end) - position))
+            position = max(position, segment_end)
+            if position >= end:
+                break
+        if position < end:
+            missing.append((position, end - position))
+        return missing
+
+    def _cached(self, start, end):
+        result = []
+        position = start
+        for segment_start, segment_end, body in self._segments:
+            if segment_end <= position:
+                continue
+            if segment_start > position:
+                break
+            limit = min(segment_end, end)
+            result.append(body[
+                position - segment_start:limit - segment_start])
+            position = limit
+            if position == end:
+                return b''.join(result)
+        raise IOError("Video range cache is incomplete.")
+
+
 class _PyAVVideoDecoder:
 
     # Reuse common overlapping delta windows without retaining a whole video.
@@ -1641,7 +1753,7 @@ class _PyAVVideoDecoder:
         if any(index < 0 for index in requested):
             raise IndexError("Video frame index is out of range.")
         missing = sorted(set(requested) - set(self._cache))
-        decoded = self._decode_sparse(missing) if missing else {}
+        decoded = self._decode_indexed(missing) if missing else {}
         try:
             return [
                 self._cache[index] if index in self._cache else decoded[index]
@@ -1652,55 +1764,41 @@ class _PyAVVideoDecoder:
                 "Video frame index %d is out of range." % error.args[0]
             ) from error
 
-    def _decode_sparse(self, indices):
-        decoded = {}
+    def _decode_indexed(self, indices):
         import av
-        pending = list(indices)
-        last_error = None
-        for retry in range(3):
-            groups, ranges = self._sparse_plan(pending, retry)
-            bodies = self._read_video_ranges(ranges)
-            failed = []
-            with tempfile.TemporaryFile() as sparse:
-                sparse.truncate(self._video_length())
-                for (offset, unused_length), body in zip(ranges, bodies):
-                    sparse.seek(offset)
-                    sparse.write(body)
-                sparse.seek(0)
-                with av.open(sparse) as container:
-                    stream = container.streams.video[0]
-                    for anchor, targets in sorted(groups.items()):
-                        try:
-                            self._decode_sparse_group(
-                                container,
-                                stream,
-                                anchor,
-                                sorted(targets),
-                                decoded,
-                            )
-                        except (av.error.FFmpegError, ValueError) as error:
-                            last_error = error
-                            failed.extend(targets)
-            if not failed:
-                return decoded
-            pending = failed
-        raise ValueError(
-            "Cannot decode video frames from persisted seek index."
-        ) from last_error
+        groups, ranges = self._indexed_plan(indices)
+        decoded = {}
+        source = _RangeBackedVideo(
+            self._video_length(), self._read_video_ranges)
+        try:
+            source.prefetch(_merge_video_ranges(
+                list(self._keyframe_index.metadata_ranges) + ranges))
+            with av.open(source) as container:
+                stream = container.streams.video[0]
+                for anchor, targets in sorted(groups.items()):
+                    self._decode_indexed_group(
+                        container,
+                        stream,
+                        anchor,
+                        sorted(targets),
+                        decoded,
+                    )
+            return decoded
+        finally:
+            source.close()
 
-    def _sparse_plan(self, indices, retry):
+    def _indexed_plan(self, indices):
         mapping = self._keyframe_index
         groups = {}
-        ranges = list(mapping.metadata_ranges)
+        ranges = []
         for index in indices:
             preceding = bisect.bisect_right(
                 self._anchor_ordinals, index) - 1
             if preceding < 0:
                 raise IndexError(
                     "Video frame index %d is out of range." % index)
-            anchor = max(0, preceding - retry)
-            groups.setdefault(anchor, []).append(index)
-            start = mapping.keyframes[max(0, anchor - 1)][2]
+            groups.setdefault(preceding, []).append(index)
+            start = mapping.keyframes[max(0, preceding - 1)][2]
             range_end = preceding + 2
             end = (
                 mapping.keyframes[range_end][2]
@@ -1710,8 +1808,13 @@ class _PyAVVideoDecoder:
             ranges.append((start, end - start))
         return groups, _merge_video_ranges(ranges)
 
-    def _decode_sparse_group(
-            self, container, stream, anchor, targets, decoded):
+    def _decode_indexed_group(
+            self,
+            container,
+            stream,
+            anchor,
+            targets,
+            decoded):
         anchor_ordinal, anchor_pts, unused_position = (
             self._keyframe_index.keyframes[anchor])
         container.seek(
