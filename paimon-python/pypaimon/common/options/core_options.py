@@ -681,7 +681,7 @@ class CoreOptions:
         ConfigOptions.key("commit.native.enabled")
         .boolean_type()
         .default_value(False)
-        .with_description("Commit append and batch overwrite messages via pypaimon_rust. Unsupported "
+        .with_description("Commit append and overwrite messages via pypaimon_rust. Unsupported "
                           "operations use Python before any native commit is attempted.")
     )
 

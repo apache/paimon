@@ -19,37 +19,14 @@
 
 from pypaimon.common.json_util import JSON
 from pypaimon.read.native_plan import (
-    _option_value_to_string, _resolved_schema_file_io_options,
-    native_method_available)
+    _option_value_to_string, _resolved_schema_file_io_options)
 from pypaimon.write.commit_message_serializer import serialize_commit_message
 
 
 def native_commit_available() -> bool:
-    """Probe capabilities instead of assuming every 0.4 development wheel has them."""
-    return all(native_method_available(type_name, method) for type_name, method in (
-        ('Table', 'from_resolved_schema'),
-        ('Table', 'new_stream_write_builder'),
-        ('StreamWriteBuilder', 'with_commit_user'),
-        ('StreamWriteBuilder', 'new_commit'),
-        ('StreamTableCommit', 'commit'),
-        ('StreamTableCommit', 'abort'),
-        ('StreamTableCommit', 'close'),
-        ('CommitMessage', 'deserialize'),
-    ))
-
-
-def native_overwrite_available() -> bool:
-    """Require the batch identity bridge, built on the empty-overwrite fixes."""
-    return native_commit_available() and all(
-        native_method_available(type_name, method) for type_name, method in (
-            ('Table', 'new_batch_write_builder'),
-            ('BatchWriteBuilder', '_with_commit_user'),
-            ('BatchWriteBuilder', 'with_overwrite'),
-            ('BatchWriteBuilder', 'new_commit'),
-            ('BatchTableCommit', 'commit'),
-            ('BatchTableCommit', 'abort'),
-            ('BatchTableCommit', 'close'),
-        ))
+    """Whether the optional Rust runtime is installed."""
+    from importlib.util import find_spec
+    return find_spec('pypaimon_rust') is not None
 
 
 def native_messages_supported(table, messages) -> bool:
@@ -68,7 +45,7 @@ def native_messages_supported(table, messages) -> bool:
     return True
 
 
-def create_native_commit(table, commit_user, overwrite_partition=None):
+def create_native_commit(table, commit_user):
     """Return a native committer only when its publication protocol matches Python."""
     from pypaimon.catalog.catalog_environment import CatalogEnvironment
     from pypaimon.filesystem.local_file_io import LocalFileIO
@@ -77,8 +54,6 @@ def create_native_commit(table, commit_user, overwrite_partition=None):
     from pypaimon.table.file_store_table import FileStoreTable
 
     if not native_commit_available():
-        return None
-    if overwrite_partition is not None and not native_overwrite_available():
         return None
     # Native branch writes are not supported. Catalog-backed publication (REST
     # or custom version management) must continue through Python's environment.
@@ -104,11 +79,7 @@ def create_native_commit(table, commit_user, overwrite_partition=None):
         database=table.identifier.get_database_name(),
         table=table.identifier.get_table_name(),
         options=file_io_options)
-    if overwrite_partition is not None:
-        return (native_table.new_batch_write_builder()
-                ._with_commit_user(commit_user)
-                .with_overwrite(overwrite_partition).new_commit())
-    # Append commits use the stream committer with the Python writer's identity;
+    # All commits use the stream committer with the Python writer's identity;
     # Python enforces each mode's lifecycle and empty-commit rules.
     return native_table.new_stream_write_builder().with_commit_user(commit_user).new_commit()
 

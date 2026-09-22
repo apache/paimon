@@ -121,7 +121,7 @@ object-store requests.
 
 # Native commit
 
-PyPaimon can submit append and batch overwrite commits through the optional
+PyPaimon can submit append and overwrite commits through the optional
 `pypaimon-rust` runtime. Enable it independently of native planning and reading:
 
 ```python
@@ -156,20 +156,20 @@ matches the whole table. Empty overwrite of an unpartitioned table truncates it.
 Static and unpartitioned overwrite record an OVERWRITE snapshot even when no
 files match, following Java; this also applies when the operation uses Python.
 
-This requires a runtime containing the commit bindings merged in
-[paimon-rust #912](https://github.com/apache/paimon-rust/pull/912). Older or missing
-runtimes automatically use Python. Batch overwrite additionally requires the
-external commit identity bridge in
+Stream overwrite uses the same native bridge and retains the Python builder's
+commit user and each checkpoint's identifier.
+
+Native commits require a runtime containing the overwrite bridge in
 [paimon-rust #916](https://github.com/apache/paimon-rust/pull/916), built on
-[#915](https://github.com/apache/paimon-rust/pull/915). Runtimes without that bridge
-continue to use Python for overwrite. The current native route supports main-branch
+[#915](https://github.com/apache/paimon-rust/pull/915). If the optional runtime is
+not installed, commits use Python. The current native route supports main-branch
 tables using filesystem/JDBC catalogs or `FileStoreTable.from_path()` with
-standard FileIO. Stream overwrite, truncate, REST/catalog-managed publication, custom
+standard FileIO. Truncate, REST/catalog-managed publication, custom
 FileIO/environments, commit callbacks, and snapshot properties use Python.
 Data-evolution updates that need Python's row-id conflict rewriting also retain
 the Python path. Compact increments remain unsupported by both committers.
 
-Fallback is limited to capability checks, table construction and message
+Fallback is limited to runtime availability, table construction and message
 conversion before a native mutation starts. A native commit error propagates;
 the adapter neither retries it through Python nor aborts files, since the
 snapshot may already have been published. The option is disabled by default.
