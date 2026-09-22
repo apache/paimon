@@ -179,6 +179,7 @@ def _read_options(table) -> dict:
     }
     table_options = table.options.options
     for option in (
+            CoreOptions.BLOB_AS_DESCRIPTOR,
             CoreOptions.SCAN_VERSION,
             CoreOptions.SCAN_SNAPSHOT_ID,
             CoreOptions.SCAN_TAG_NAME,
