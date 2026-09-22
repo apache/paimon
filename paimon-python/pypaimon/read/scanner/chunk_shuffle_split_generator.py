@@ -26,7 +26,6 @@ from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.scanner.split_generator import AbstractSplitGenerator
-from pypaimon.read.sliced_split import SlicedSplit
 from pypaimon.read.split import DataSplit, Split
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.source.deletion_file import DeletionFile
@@ -47,17 +46,16 @@ def _null_safe_partition_key(partition_values) -> tuple:
 
 @dataclass
 class _PhysicalRowSlice:
-    """A half-open physical row slice containing visible rows."""
+    """File-local inclusive ranges containing only visible rows."""
 
-    start_inclusive: int
-    end_exclusive: int
+    row_ranges: List[Range]
     live_row_count: int
 
-    def to_closed_row_id_range(self, first_row_id: int) -> Range:
-        return Range(
-            first_row_id + self.start_inclusive,
-            first_row_id + self.end_exclusive - 1,
-        )
+    def to_closed_row_id_ranges(self, first_row_id: int) -> List[Range]:
+        return [
+            Range(first_row_id + row_range.from_, first_row_id + row_range.to)
+            for row_range in self.row_ranges
+        ]
 
 
 class _LiveRowRangeSlicer:
@@ -91,8 +89,8 @@ class _LiveRowRangeSlicer:
         if self._physical_position >= self._physical_row_count:
             return None
 
-        start = self._physical_position
         live_rows = 0
+        row_ranges = []
 
         while self._physical_position < self._physical_row_count:
             if self._next_deleted_position is None:
@@ -100,17 +98,32 @@ class _LiveRowRangeSlicer:
                     expected_live_rows - live_rows,
                     self._physical_row_count - self._physical_position,
                 )
-                self._physical_position += take
-                live_rows += take
+                if take > 0:
+                    row_ranges.append(Range(
+                        self._physical_position,
+                        self._physical_position + take - 1,
+                    ))
+                    self._physical_position += take
+                    live_rows += take
             else:
                 live_run = self._next_deleted_position - self._physical_position
                 needed = expected_live_rows - live_rows
                 if needed <= live_run:
-                    self._physical_position += needed
-                    live_rows += needed
+                    if needed > 0:
+                        row_ranges.append(Range(
+                            self._physical_position,
+                            self._physical_position + needed - 1,
+                        ))
+                        self._physical_position += needed
+                        live_rows += needed
                 else:
-                    self._physical_position += live_run
-                    live_rows += live_run
+                    if live_run > 0:
+                        row_ranges.append(Range(
+                            self._physical_position,
+                            self._physical_position + live_run - 1,
+                        ))
+                        self._physical_position += live_run
+                        live_rows += live_run
 
             if live_rows == expected_live_rows:
                 # Deleted rows have zero live-row weight. Attach a deletion run
@@ -118,8 +131,7 @@ class _LiveRowRangeSlicer:
                 # range starts at a live row (or EOF).
                 self._skip_deleted_positions_at_cursor()
                 return _PhysicalRowSlice(
-                    start,
-                    self._physical_position,
+                    row_ranges,
                     live_rows,
                 )
 
@@ -129,7 +141,7 @@ class _LiveRowRangeSlicer:
 
         if live_rows == 0:
             return None
-        return _PhysicalRowSlice(start, self._physical_position, live_rows)
+        return _PhysicalRowSlice(row_ranges, live_rows)
 
     def _skip_deleted_positions_at_cursor(self) -> None:
         while (
@@ -187,7 +199,7 @@ class ChunkShuffleSplitGeneratorBase(AbstractSplitGenerator):
       7. Map each chunk through :meth:`_chunk_to_split`.
 
     Subclasses implement the three abstract hooks. Chunks ride on existing
-    reader wrappers (``SlicedSplit`` / ``IndexedSplit``).
+    reader wrapper (``IndexedSplit``).
     """
 
     def __init__(
@@ -198,8 +210,11 @@ class ChunkShuffleSplitGeneratorBase(AbstractSplitGenerator):
         deletion_files_map=None,
         seed: int = 0,
         chunk_size: int = 0,
+        snapshot_id: Optional[int] = None,
     ):
-        super().__init__(table, target_split_size, open_file_cost, deletion_files_map)
+        super().__init__(
+            table, target_split_size, open_file_cost, deletion_files_map,
+            snapshot_id)
         self.seed = seed
         self.chunk_size = chunk_size
 
@@ -320,16 +335,9 @@ class ChunkShuffleSplitGeneratorBase(AbstractSplitGenerator):
 
 @dataclass
 class _FileSegment:
-    """A contiguous slice of a data file inside one chunk.
-
-    start/end are half-open row offsets within the file when the chunk
-    boundary falls inside the file; both are None when the chunk owns
-    the full file (so SlicedSplit's shard_file_idx_map can skip it and
-    treat the file as full — see sliced_split.py:73-78).
-    """
+    """Visible file-local row ranges from a data file inside one chunk."""
     file: DataFileMeta
-    start: Optional[int]
-    end: Optional[int]
+    row_ranges: List[Range]
     live_row_count: int
 
 
@@ -378,27 +386,13 @@ class AppendChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
                 if physical_slice is None:
                     break
 
-                if (
-                    physical_slice.start_inclusive == 0
-                    and physical_slice.end_exclusive == file.row_count
-                ):
-                    current.append(
-                        _FileSegment(
-                            file,
-                            None,
-                            None,
-                            physical_slice.live_row_count,
-                        )
+                current.append(
+                    _FileSegment(
+                        file,
+                        physical_slice.row_ranges,
+                        physical_slice.live_row_count,
                     )
-                else:
-                    current.append(
-                        _FileSegment(
-                            file,
-                            physical_slice.start_inclusive,
-                            physical_slice.end_exclusive,
-                            physical_slice.live_row_count,
-                        )
-                    )
+                )
 
                 current_rows += physical_slice.live_row_count
 
@@ -409,11 +403,26 @@ class AppendChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
 
     def _chunk_to_split(self, chunk: _Chunk) -> Split:
         files: List[DataFileMeta] = []
-        shard_file_idx_map = {}
+        row_ranges = []
+        ranges_use_row_ids = self.table.options.row_tracking_enabled()
+        split_offset = 0
         for seg in chunk.segments:
             files.append(seg.file)
-            if seg.start is not None and seg.end is not None:
-                shard_file_idx_map[seg.file.file_name] = (seg.start, seg.end)
+            if ranges_use_row_ids:
+                if seg.file.first_row_id is None:
+                    raise ValueError(
+                        "Row-tracked file '%s' is missing first_row_id"
+                        % seg.file.file_name
+                    )
+                range_base = seg.file.first_row_id
+            else:
+                range_base = split_offset
+            row_ranges.extend(
+                Range(range_base + row_range.from_,
+                      range_base + row_range.to)
+                for row_range in seg.row_ranges
+            )
+            split_offset += seg.file.row_count
 
         # set_file_path is already done once per unique file in
         # ChunkShuffleSplitGeneratorBase.create_splits.
@@ -429,21 +438,14 @@ class AppendChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
             bucket=chunk.bucket,
             raw_convertible=True,
             data_deletion_files=data_deletion_files,
+            snapshot_id=self.snapshot_id,
         )
 
-        exact_merged_row_count = sum(
-            seg.live_row_count for seg in chunk.segments
+        return IndexedSplit(
+            data_split,
+            Range.sort_and_merge_overlap(row_ranges, True),
+            scores=None,
         )
-        if (
-            shard_file_idx_map
-            or data_split.merged_row_count() != exact_merged_row_count
-        ):
-            return SlicedSplit(
-                data_split,
-                shard_file_idx_map,
-                exact_merged_row_count=exact_merged_row_count,
-            )
-        return data_split
 
 
 # ---------------------------------------------------------------------------
@@ -457,11 +459,11 @@ class _AlignedGroupSegment:
 
     ``files`` is the entire group (may include blob/vector siblings),
     so the reader sees every column file even when only a slice of the
-    group's row_id range lands in this chunk. ``row_range`` is the
-    inclusive global row_id range this segment owns.
+    group's row_id range lands in this chunk. ``row_ranges`` are the
+    inclusive global row-id ranges of visible rows this segment owns.
     """
     files: List[DataFileMeta]
-    row_range: Range
+    row_ranges: List[Range]
     live_row_count: int
 
 
@@ -550,11 +552,10 @@ class DataEvolutionChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
                 physical_slice = slicer.take(avail)
                 if physical_slice is None:
                     break
-                seg_range = physical_slice.to_closed_row_id_range(first_row_id)
                 current.append(
                     _AlignedGroupSegment(
                         group_files,
-                        seg_range,
+                        physical_slice.to_closed_row_id_ranges(first_row_id),
                         physical_slice.live_row_count,
                     )
                 )
@@ -569,14 +570,14 @@ class DataEvolutionChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
         segments = chunk.segments
         if len(segments) == 1:
             all_files = segments[0].files
-            row_ranges = [segments[0].row_range]
+            row_ranges = list(segments[0].row_ranges)
         else:
             all_files = []
             row_ranges = []
             for seg in segments:
                 all_files.extend(seg.files)
-                row_ranges.append(seg.row_range)
-            row_ranges.sort(key=lambda r: r.from_)
+                row_ranges.extend(seg.row_ranges)
+        row_ranges = Range.sort_and_merge_overlap(row_ranges, True)
 
         data_deletion_files = self._get_deletion_files_for_split(
             all_files,
@@ -589,14 +590,12 @@ class DataEvolutionChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
             bucket=chunk.bucket,
             raw_convertible=False,
             data_deletion_files=data_deletion_files,
+            snapshot_id=self.snapshot_id,
         )
         return IndexedSplit(
             data_split,
             row_ranges,
             scores=None,
-            exact_merged_row_count=sum(
-                seg.live_row_count for seg in segments
-            ),
         )
 
     @staticmethod

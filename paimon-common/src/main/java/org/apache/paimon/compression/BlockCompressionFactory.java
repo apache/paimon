@@ -23,6 +23,8 @@ import io.airlift.compress.lzo.LzoDecompressor;
 
 import javax.annotation.Nullable;
 
+import java.util.Locale;
+
 /**
  * Each compression codec has an implementation of {@link BlockCompressionFactory} to create
  * compressors and decompressors.
@@ -38,7 +40,7 @@ public interface BlockCompressionFactory {
     /** Creates {@link BlockCompressionFactory} according to the configuration. */
     @Nullable
     static BlockCompressionFactory create(CompressOptions compression) {
-        switch (compression.compress().toUpperCase()) {
+        switch (compression.compress().toUpperCase(Locale.ROOT)) {
             case "NONE":
                 return null;
             case "ZSTD":

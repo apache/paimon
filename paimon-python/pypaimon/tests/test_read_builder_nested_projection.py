@@ -141,5 +141,34 @@ class ReadBuilderProjectionFieldIdTest(_ReadBuilderTestBase):
         self.assertEqual(leaf_ids, [sub_v.id, sub_x.id])
 
 
+class StreamReadBuilderNestedProjectionTest(_ReadBuilderTestBase):
+
+    def test_stream_builder_matches_batch_nested_projection(self):
+        projection = [
+            'mv.latest_version',
+            "attrs['key.with.dots']",
+            'pk',
+        ]
+        batch = self.table.new_read_builder().with_projection(projection)
+        stream = self.table.new_stream_read_builder().with_projection(projection)
+
+        self.assertEqual(
+            [field.name for field in batch.read_type()],
+            [field.name for field in stream.read_type()],
+        )
+        self.assertEqual(
+            batch._nested_name_paths(),
+            stream._nested_name_paths(),
+        )
+        self.assertEqual(
+            [field.name for field in batch.new_scan()._read_type],
+            [field.name for field in stream.new_streaming_scan()._read_type],
+        )
+
+        table_read = stream.with_include_row_kind().new_read()
+        self.assertEqual(batch._nested_name_paths(), table_read.nested_name_paths)
+        self.assertTrue(table_read.include_row_kind)
+
+
 if __name__ == '__main__':
     unittest.main()

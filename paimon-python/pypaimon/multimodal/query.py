@@ -22,7 +22,7 @@ import pyarrow as pa
 
 from pypaimon.common.where_parser import parse_where_clause
 from pypaimon.multimodal.blob_read import fetch_blob_bodies
-from pypaimon.schema.data_types import is_blob_type, is_map_blob_type
+from pypaimon.schema.data_types import is_array_blob_type, is_blob_type, is_map_blob_type
 from pypaimon.table.special_fields import SpecialFields
 
 
@@ -275,19 +275,23 @@ class ScanQuery:
                 fn_kwargs={"columns": visible_columns},
                 batch_format="pyarrow")
         setattr(ds, "_paimon_blob_file_io", file_io)
-        setattr(ds, "_paimon_blob_columns", self._all_blob_columns())
+        setattr(ds, "_paimon_blob_columns", self._readable_blob_columns())
+        map_blob_cols, array_blob_cols = self._nested_blob_columns()
+        setattr(ds, "_paimon_map_blob_columns", map_blob_cols)
+        setattr(ds, "_paimon_array_blob_columns", array_blob_cols)
         return ds
 
     def read_blobs(
             self, columns=None, *, parallelism: int = 64
     ) -> Tuple[pa.Table, Dict[str, List[Any]]]:
-        """Materialise BLOB or MAP BLOB column(s) for the filtered rows with concurrent,
+        """Materialise BLOB, MAP BLOB or ARRAY BLOB columns with concurrent,
         coalesced ranged reads. Reads via blob-as-descriptor to skip the slow
         row-by-row blob resolution on multi-group data-evolution splits.
 
         ``columns`` picks the BLOB column(s) (default: all, intersected with
-        ``select(...)``). Scalar BLOB values are ``bytes|None``; MAP BLOB rows
-        are ``None`` or key-value pairs with ``bytes|None`` values. Returns a
+        ``select(...)``). Scalar BLOB values are ``bytes|None``; ARRAY BLOB rows
+        are ``None`` or lists of these values; MAP BLOB rows are ``None`` or
+        key-value pairs with ``bytes|None`` values. Returns a
         row-aligned ``(scalar_arrow_table, blobs_by_column)`` tuple. Use
         :meth:`stream_blobs` for a memory-bounded read.
 
@@ -297,10 +301,10 @@ class ScanQuery:
         read_builder, file_io = self._blob_descriptor_read_builder(blob_cols)
         arrow = read_builder.new_read().to_arrow(
             read_builder.new_scan().plan().splits())
-        map_blob_cols = set(blob_cols) - set(self._all_blob_columns())
+        map_blob_cols, array_blob_cols = self._nested_blob_columns()
         bodies = self._fetch_bodies(
             file_io, arrow.select(blob_cols).to_pydict(), blob_cols,
-            parallelism, map_blob_cols)
+            parallelism, map_blob_cols, array_blob_cols)
         scalar = arrow.select(self._scalar_columns(arrow.column_names))
         return scalar, bodies
 
@@ -314,20 +318,15 @@ class ScanQuery:
         return self._iter_blobs(read_builder, file_io, blob_cols, parallelism)
 
     def _iter_blobs(self, read_builder, file_io, blob_cols, parallelism):
-        reader = read_builder.new_read().to_arrow_batch_reader(
-            read_builder.new_scan().plan().splits())
-        map_blob_cols = set(blob_cols) - set(self._all_blob_columns())
-        try:
+        map_blob_cols, array_blob_cols = self._nested_blob_columns()
+        with read_builder.new_read()._to_managed_arrow_batch_reader(
+                read_builder.new_scan().plan().splits()) as reader:
             for batch in reader:
                 bodies = self._fetch_bodies(
                     file_io, batch.select(blob_cols).to_pydict(), blob_cols,
-                    parallelism, map_blob_cols)
+                    parallelism, map_blob_cols, array_blob_cols)
                 scalar = batch.select(self._scalar_columns(batch.schema.names))
                 yield scalar, bodies
-        finally:
-            # Close the reader even if the caller breaks out early.
-            if hasattr(reader, "close"):
-                reader.close()
 
     def _blob_descriptor_query_read_builder(self):
         from pypaimon.common.options.core_options import CoreOptions
@@ -378,7 +377,7 @@ class ScanQuery:
 
     @staticmethod
     def _fetch_bodies(
-            file_io, data, blob_cols, parallelism, map_blob_cols=()):
+            file_io, data, blob_cols, parallelism, map_blob_cols=(), array_blob_cols=()):
         # Decode each descriptor to a (uri, offset, length) range and read them all in
         # one coalesced pass on ``file_io`` -- the read table's FileIO, which already
         # carries the merged DLF/OSS token. Going through Blob.from_bytes here would
@@ -387,18 +386,19 @@ class ScanQuery:
         # failing with "endpoint should be non-empty" / "Init credential failed" unless
         # the caller also passes fs.oss.* -- which users should not have to.
         return fetch_blob_bodies(
-            file_io, data, blob_cols, parallelism, map_blob_cols)
+            file_io, data, blob_cols, parallelism, map_blob_cols, array_blob_cols)
 
-    def _all_blob_columns(self) -> List[str]:
-        return [
-            field.name for field in self._table.fields
-            if is_blob_type(field.type)
-        ]
+    def _nested_blob_columns(self):
+        return (
+            [field.name for field in self._table.fields if is_map_blob_type(field.type)],
+            [field.name for field in self._table.fields if is_array_blob_type(field.type)],
+        )
 
     def _readable_blob_columns(self) -> List[str]:
         return [
             field.name for field in self._table.fields
-            if is_blob_type(field.type) or is_map_blob_type(field.type)
+            if (is_blob_type(field.type) or is_map_blob_type(field.type)
+                or is_array_blob_type(field.type))
         ]
 
     def _resolve_blob_columns(self, columns) -> List[str]:
@@ -483,9 +483,95 @@ class _PreFilterQuery(ScanQuery):
             result_factory: Optional[Callable] = None,
             pre_filter=None):
         self._pre_filter = None
+        self._score_column = None
+        self._sort_by_score = False
         super().__init__(table, result_factory=result_factory)
         if pre_filter is not None:
             self.pre_filter(pre_filter)
+
+    def with_score(self, column_name="_score"):
+        """Append relevance scores (higher is better) to data-evolution results."""
+        self._require_row_id_scores()
+        if not isinstance(column_name, str) or not column_name:
+            raise ValueError("Score column name must be a nonempty string.")
+        if (column_name in SpecialFields.SYSTEM_FIELD_NAMES
+                or column_name in {field.name for field in self._table.fields}):
+            raise ValueError("Score column name conflicts with a table column: %s" % column_name)
+        self._score_column = column_name
+        return self
+
+    def order_by_score(self):
+        """Return highest scores first, breaking ties by ascending row ID."""
+        self._require_row_id_scores()
+        self._sort_by_score = True
+        return self
+
+    def _require_row_id_scores(self):
+        if not self._table.options.data_evolution_enabled():
+            raise NotImplementedError("Search score output and ordering require a data-evolution table.")
+
+    def _metadata_only_result(self):
+        projection = self._effective_projection()
+        return (bool(self._score_column or self._sort_by_score)
+                and self._table.options.data_evolution_enabled()
+                and not self._table.options.query_auth_enabled
+                and self._predicate is None
+                and projection is not None
+                and all(name == SpecialFields.ROW_ID.name for name in projection))
+
+    def _read_global_index_result(self, result):
+        metadata_only = self._metadata_only_result()
+        if not (metadata_only or self._score_column or self._sort_by_score):
+            return super()._read_global_index_result(result)
+
+        row_id_name = SpecialFields.ROW_ID.name
+        projection = self._effective_projection()
+        added_row_id = projection is None or row_id_name not in projection
+        if metadata_only:
+            row_ids = pa.array(list(result.results()), type=pa.int64())
+            fields = [pa.field(row_id_name, pa.int64(), nullable=False)] * (len(projection) or 1)
+            table = pa.Table.from_arrays(
+                [row_ids] * len(fields), schema=pa.schema(fields))
+        else:
+            lookup = copy(self)
+            lookup._projection = (list(projection) if projection is not None
+                                  else [field.name for field in self._table.fields])
+            if added_row_id:
+                lookup._projection.append(row_id_name)
+            table = lookup._read_search_rows(result)
+        return self._finish_search_result(table, result, added_row_id)
+
+    def _read_search_rows(self, result):
+        projection = self._effective_projection()
+        if len(projection) == len(set(projection)):
+            return ScanQuery._read_global_index_result(self, result)
+        # Row tracking requires unique names while reading. Restore repeated
+        # output columns after reading their values once.
+        fields = self._configured_read_builder().read_type()
+        lookup = copy(self)
+        lookup._projection = list(dict.fromkeys(projection))
+        table = ScanQuery._read_global_index_result(lookup, result)
+        return table.select([table.column_names.index(field.name) for field in fields])
+
+    def _finish_search_result(self, table, result, added_row_id):
+        if self._score_column or self._sort_by_score:
+            row_ids = table.column(table.column_names.index(SpecialFields.ROW_ID.name)).to_pylist()
+            scores = []
+            if row_ids:
+                getter = result.score_getter()
+                scores = [getter(row_id) for row_id in row_ids]
+                if any(score is None for score in scores):
+                    raise ValueError("Missing score for a selected search row.")
+            if self._score_column:
+                if self._score_column in table.column_names:
+                    raise ValueError("Score column name conflicts with a projected column: %s" % self._score_column)
+                table = table.append_column(self._score_column, pa.array(scores, type=pa.float64()))
+            if self._sort_by_score:
+                order = sorted(range(len(row_ids)), key=lambda i: (-scores[i], row_ids[i]))
+                table = table.take(pa.array(order, type=pa.int64()))
+        if added_row_id:
+            table = table.select([i for i, name in enumerate(table.column_names) if name != SpecialFields.ROW_ID.name])
+        return table
 
     def pre_filter(self, predicate):
         predicate = self._coerce_predicate(predicate, "pre_filter()")
@@ -599,7 +685,7 @@ class TextQuery(_PreFilterQuery):
             .with_limit(limit)
         )
         if query._pre_filter is not None:
-            builder = builder.with_partition_filter(query._pre_filter)
+            builder = builder.with_filter(query._pre_filter)
         return builder.execute_local()
 
 
@@ -697,7 +783,8 @@ class BatchVectorQuery(_PreFilterQuery):
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
         from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
-        if len(results) <= 1 or not self._configured_read_builder().read_type():
+        if (len(results) <= 1 or self._metadata_only_result()
+                or not self._configured_read_builder().read_type()):
             return [self._read_global_index_result(result) for result in results]
 
         row_ids = RoaringBitmap64()
@@ -709,23 +796,23 @@ class BatchVectorQuery(_PreFilterQuery):
         # to the union; where() still filters the selected rows during lookup.
         lookup._limit = None
         projection = self._effective_projection()
-        lookup._projection = list(projection) if projection else [f.name for f in self._table.fields]
+        lookup._projection = (list(projection) if projection is not None and (
+            projection or self._score_column or self._sort_by_score) else [f.name for f in self._table.fields])
         added_row_id = SpecialFields.ROW_ID.name not in lookup._projection
         if added_row_id:
             lookup._projection.append(SpecialFields.ROW_ID.name)
         fields = lookup._configured_read_builder().read_type()
         row_id_column = next(i for i, field in enumerate(fields) if field.id == SpecialFields.ROW_ID.id)
-        table = lookup._read_global_index_result(GlobalIndexResult.create(row_ids))
+        table = lookup._read_search_rows(GlobalIndexResult.create(row_ids))
         positions = {row_id: i for i, row_id in enumerate(table.column(row_id_column).to_pylist())}
-        if added_row_id:
-            table = table.select(list(range(table.num_columns - 1)))
         output = []
         for result in results:
             # Keep the physical read order, rather than imposing score or row-id order.
             selected = sorted(positions[row_id] for row_id in result.results() if row_id in positions)
             if self._limit is not None:
                 selected = selected[:self._limit]
-            output.append(table.take(pa.array(selected, type=pa.int64())))
+            selected_table = table.take(pa.array(selected, type=pa.int64()))
+            output.append(self._finish_search_result(selected_table, result, added_row_id))
         return output
 
     def to_pandas(self, *, execution="local", concurrency=None, ray_remote_args=None):

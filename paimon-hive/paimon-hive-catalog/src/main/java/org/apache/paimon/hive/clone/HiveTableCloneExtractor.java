@@ -45,6 +45,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -226,10 +227,13 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
     public static Map<String, String> getIdentifierPrefixOptions(
             String formatIdentifier, Map<String, String> options) {
         Map<String, String> result = new HashMap<>();
-        String prefix = formatIdentifier.toLowerCase() + ".";
+        // match against the identifier as written so the suffix is sliced at an offset the key
+        // actually has: lower-casing can lengthen a string, and U+0130 lower-cases to two chars
+        String prefix = formatIdentifier + ".";
+        String lowerCasePrefix = formatIdentifier.toLowerCase(Locale.ROOT) + ".";
         for (String key : options.keySet()) {
-            if (key.toLowerCase().startsWith(prefix)) {
-                result.put(prefix + key.substring(prefix.length()), options.get(key));
+            if (key.regionMatches(true, 0, prefix, 0, prefix.length())) {
+                result.put(lowerCasePrefix + key.substring(prefix.length()), options.get(key));
             }
         }
         return result;
@@ -238,9 +242,11 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
     public static Map<String, String> getOptionsWhenCloneSplits(Table table, String format) {
         Map<String, String> result = new HashMap<>();
         if (FormatTable.Format.JSON.name().equalsIgnoreCase(format)) {
-            result.put(FILE_FORMAT.key(), FormatTable.Format.PARQUET.name().toLowerCase());
+            result.put(
+                    FILE_FORMAT.key(), FormatTable.Format.PARQUET.name().toLowerCase(Locale.ROOT));
         } else if (FormatTable.Format.CSV.name().equalsIgnoreCase(format)) {
-            result.put(FILE_FORMAT.key(), FormatTable.Format.PARQUET.name().toLowerCase());
+            result.put(
+                    FILE_FORMAT.key(), FormatTable.Format.PARQUET.name().toLowerCase(Locale.ROOT));
         } else {
             result.put(FILE_FORMAT.key(), format);
         }

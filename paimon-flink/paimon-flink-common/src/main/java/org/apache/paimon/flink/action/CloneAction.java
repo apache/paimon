@@ -29,6 +29,7 @@ import org.apache.paimon.utils.StringUtils;
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /** Clone source table to target table. */
@@ -104,7 +105,7 @@ public class CloneAction extends ActionBase {
         this.preferFileFormat =
                 StringUtils.isNullOrWhitespaceOnly(preferFileFormat)
                         ? preferFileFormat
-                        : preferFileFormat.toLowerCase();
+                        : preferFileFormat.toLowerCase(Locale.ROOT);
         this.cloneFrom = cloneFrom;
         this.metaOnly = metaOnly;
         this.cloneIfExists = cloneIfExists;

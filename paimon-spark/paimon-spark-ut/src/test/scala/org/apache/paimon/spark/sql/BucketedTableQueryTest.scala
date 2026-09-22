@@ -39,6 +39,7 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
     }
     withSparkSQLConf(
       "spark.sql.sources.v2.bucketing.enabled" -> "true",
+      "spark.paimon.scan.preserve-data-grouping" -> "true",
       "spark.sql.requireAllClusterKeysForCoPartition" -> "false",
       "spark.sql.autoBroadcastJoinThreshold" -> "-1"
     ) {

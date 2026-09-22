@@ -259,8 +259,9 @@ extra files because more than one retained data file can reference the same pack
 ## Garbage Collection
 
 Unreferenced `.managed.blob` packs are reclaimed by managed blob orphan cleanup.
-Local cleanup is `LocalManagedBlobOrphanFilesClean`; Spark exposes the same cleanup as
-[`remove_orphan_blobs`](../spark/procedures/maintenance#remove_orphan_blobs).
+Local cleanup is `LocalManagedBlobOrphanFilesClean`. Spark exposes the same cleanup as
+[`remove_orphan_blobs`](../spark/procedures/maintenance#remove_orphan_blobs);
+Flink exposes it as [`remove_orphan_blobs`](../flink/procedures/repair#remove_orphan_blobs).
 The cleaner reads every retained data file's `.blobref` sidecar across snapshots, tags, and
 branches, then deletes packs that are not referenced and whose modification time is earlier than the absolute
 `older_than` cutoff (1 day before the run starts by default).

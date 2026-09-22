@@ -74,7 +74,7 @@ final class BlobViewTableReadSupport {
             RowType readType,
             @Nullable Predicate predicate,
             @Nullable TopN topN,
-            @Nullable Integer limit,
+            @Nullable Long limit,
             boolean executeFilter,
             RecordReaderSupplier dataReaderSupplier,
             Supplier<InnerTableRead> prescanReadSupplier)

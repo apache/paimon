@@ -32,35 +32,6 @@ from pypaimon.read.scanner.file_scanner import FileScanner
 
 logger = logging.getLogger(__name__)
 
-_NATIVE_FAMILY_SEARCH_MODE_OPTIONS = frozenset({
-    CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(),
-    CoreOptions.VECTOR_INDEX_SEARCH_MODE.key(),
-    CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE.key(),
-})
-_NATIVE_SEARCH_MODE_OPTIONS = _NATIVE_FAMILY_SEARCH_MODE_OPTIONS | {
-    CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(),
-}
-_NATIVE_FORWARDED_OPTIONS = frozenset({
-    CoreOptions.SCAN_NATIVE_PLAN_ENABLED.key(),
-    CoreOptions.SCAN_MODE.key(),
-    CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(),
-    CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(),
-    CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(),
-    CoreOptions.DELETION_VECTORS_MERGE_ON_READ.key(),
-    CoreOptions.SCAN_VERSION.key(),
-    CoreOptions.SCAN_SNAPSHOT_ID.key(),
-    CoreOptions.SCAN_TAG_NAME.key(),
-    CoreOptions.SCAN_TIMESTAMP.key(),
-    CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
-    CoreOptions.SCAN_WATERMARK.key(),
-    CoreOptions.BRANCH.key(),
-}) | _NATIVE_SEARCH_MODE_OPTIONS
-_NATIVE_PLAN_INDEPENDENT_OPTIONS = frozenset({
-    CoreOptions.BLOB_AS_DESCRIPTOR.key(),
-    CoreOptions.READ_NATIVE_ENABLED.key(),
-    CoreOptions.READ_BATCH_SIZE.key(),
-    CoreOptions.READ_PARALLELISM.key(),
-})
 _NATIVE_TIME_TRAVEL_OPTIONS = frozenset({
     CoreOptions.SCAN_VERSION.key(),
     CoreOptions.SCAN_SNAPSHOT_ID.key(),
@@ -127,48 +98,20 @@ class TableScan:
         primary-key global-index results,
         a primary-key table whose trimmed PK is empty (PK equals the partition
         key; Rust rejects this schema), unsupported time travel selectors,
-        and catalog-loaded tables with schema/option overrides Rust cannot carry,
-        query auth, a missing/old
-        pypaimon-rust, or a catalog / identifier Rust cannot reconstruct. Keep
-        this capability gate in sync when adding scan features."""
+        query auth, a missing pypaimon-rust, or a catalog / identifier Rust
+        cannot reconstruct. Keep this capability gate in sync when adding scan
+        features."""
         from pypaimon.read.native_plan import (
-            _resolved_schema_file_io_options, native_method_available,
-            native_runtime_available, native_version_at_least,
+            _resolved_schema_file_io_options, native_runtime_available,
         )
         if not native_runtime_available():
             return False
         fs = self.file_scanner
-        if fs.is_streaming and not native_method_available('Split', 'is_streaming'):
-            return False
         if not self._native_global_index_result_supported():
             return False
         if getattr(fs, 'chunk_shuffle', None) is not None:
             fs._validate_chunk_shuffle_compat()
-        # Positional append distribution needs the stable partition/file order
-        # introduced in 0.4. Older bindings can assign different rows per call.
-        if (not self.table.is_primary_key_table and not fs.data_evolution
-                and (fs.idx_of_this_subtask is not None or fs.start_pos_of_this_subtask is not None)
-                and not native_version_at_least(0, 4)):
-            return False
-        if getattr(fs, 'deletion_vectors_enabled', False):
-            # 0.4.0 includes Python-written DV decoding and legacy bucket paths.
-            if not native_version_at_least(0, 4, 0):
-                return False
-        if getattr(fs, 'data_evolution', False):
-            if (getattr(fs, 'idx_of_this_subtask', None) is not None
-                    and not native_method_available('TableScan', 'with_row_position_shard')):
-                return False
-            if (getattr(fs, 'start_pos_of_this_subtask', None) is not None
-                    and not native_method_available('TableScan', 'with_row_position_slice')):
-                return False
-        if (getattr(fs, '_row_ranges', None) is not None
-                and not native_method_available('ReadBuilder', 'with_row_ranges')):
-            return False
-        if (self.table.current_branch() != 'main'
-                and not native_method_available('Table', 'branch')):
-            return False
-        resolved_schema = _resolved_schema_file_io_options(self.table) is not None
-        if not resolved_schema:
+        if _resolved_schema_file_io_options(self.table) is None:
             loader = getattr(
                 getattr(self.table, 'catalog_environment', None),
                 'catalog_loader',
@@ -190,9 +133,6 @@ class TableScan:
             database_name = self.table.identifier.get_database_name()
             if not database_name or database_name == UNKNOWN_DATABASE:
                 return False
-            if ('.' in database_name
-                    and not native_method_available('Table', 'copy_with_resolved_schema')):
-                return False
         if self.table.options.query_auth_enabled:
             return False
         # Rust rejects schemas whose primary keys are all partition keys.
@@ -200,38 +140,9 @@ class TableScan:
                 and not self.table.trimmed_primary_keys:
             return False
         options = self.table.options.options
-        if (options.contains_key(CoreOptions.SCAN_WATERMARK.key())
-                and not native_version_at_least(0, 4)):
-            return False
-        if (any(options.contains_key(key)
-                for key in _NATIVE_FAMILY_SEARCH_MODE_OPTIONS)):
-            from pypaimon.read.native_plan import native_family_search_modes_available
-            if not native_family_search_modes_available():
-                return False
-        if not resolved_schema and not native_method_available('Table', 'copy_with_resolved_schema'):
-            supported_time_travel = any(
-                options.contains_key(key) for key in _NATIVE_TIME_TRAVEL_OPTIONS)
-            # Time travel intentionally carries a historical schema; other stale
-            # table objects must still fall back because Rust reloads the latest.
-            latest_schema = self.table.schema_manager.latest()
-            if (not supported_time_travel and latest_schema is not None
-                    and latest_schema.id != self.table.table_schema.id):
-                return False
-            # Rust cannot remove an option persisted in the catalog-loaded schema.
-            applied_options = getattr(self.table, '_applied_dynamic_options', {}) or {}
-            allowed_options = (
-                _NATIVE_FORWARDED_OPTIONS | _NATIVE_PLAN_INDEPENDENT_OPTIONS)
-            if (set(applied_options) - allowed_options
-                    or any(key in (_NATIVE_TIME_TRAVEL_OPTIONS
-                                   | _NATIVE_SEARCH_MODE_OPTIONS) and value is None
-                           for key, value in applied_options.items())):
-                return False
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
         unsupported_scan_keys = set(SCAN_KEYS) - _NATIVE_TIME_TRAVEL_OPTIONS
-        if any(options.contains_key(k) for k in unsupported_scan_keys):
-            return False
-        return (not options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
-                or native_method_available('ReadBuilder', 'new_incremental_scan'))
+        return not any(options.contains_key(k) for k in unsupported_scan_keys)
 
     def _native_global_index_result_supported(self) -> bool:
         result = self.file_scanner._global_index_result
@@ -272,7 +183,13 @@ class TableScan:
                     return Plan([])
                 extra_options['incremental_range'] = self._incremental_snapshot_range
             chunk_shuffle = fs.chunk_shuffle
-            if has_distribution and fs.data_evolution and chunk_shuffle is None:
+            if chunk_shuffle is not None:
+                extra_options['chunk_shuffle'] = chunk_shuffle
+                if fs.idx_of_this_subtask is not None:
+                    extra_options['shard'] = (
+                        fs.idx_of_this_subtask, fs.number_of_para_subtasks)
+            if (has_distribution and not self.table.is_primary_key_table
+                    and chunk_shuffle is None):
                 if fs.idx_of_this_subtask is not None:
                     extra_options['row_position_shard'] = (
                         fs.idx_of_this_subtask, fs.number_of_para_subtasks)
@@ -318,22 +235,16 @@ class TableScan:
                     and plan.snapshot_id is not None):
                 snapshot = self.table.snapshot_manager().get_snapshot_by_id(plan.snapshot_id)
                 splits = fs._apply_primary_key_sorted_indexes(splits, snapshot)
-            if chunk_shuffle is not None:
-                splits = self._chunk_shuffle_splits(splits, plan.snapshot_id)
-            elif has_distribution:
+            if chunk_shuffle is None and has_distribution:
                 if self.table.is_primary_key_table:
                     splits = [s for s in splits
                               if s.bucket % fs.number_of_para_subtasks == fs.idx_of_this_subtask]
-                elif not fs.data_evolution:
-                    from pypaimon.read.scan_distribution import shard_range, slice_append_splits
-                    if fs.idx_of_this_subtask is not None:
-                        start, end = shard_range(
-                            sum(s.row_count for s in splits),
-                            fs.idx_of_this_subtask, fs.number_of_para_subtasks)
-                    else:
-                        start, end = fs.start_pos_of_this_subtask, fs.end_pos_of_this_subtask
-                    splits = slice_append_splits(splits, start, end)
-                splits = fs._apply_push_down_limit(splits)
+                # A partial IndexedSplit plus a file-wide DV cardinality cannot
+                # reveal how many deleted rows lie inside the selected range.
+                # Keep every selected split and let the reader enforce LIMIT.
+                if not (getattr(fs, 'deletion_vectors_enabled', False)
+                        and not self.table.is_primary_key_table):
+                    splits = fs._apply_push_down_limit(splits)
             # Attach scores to the row ranges retained by native planning.
             from pypaimon.globalindex.indexed_split import IndexedSplit, scores_for_ranges
             from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
@@ -350,36 +261,6 @@ class TableScan:
                 "Native plan failed, falling back to the Python scanner: %s", e)
             return None
 
-    def _chunk_shuffle_splits(self, splits, snapshot_id):
-        """Reuse native file/DV planning with Python's stable chunk assignment."""
-        from pypaimon.manifest.schema.manifest_entry import ManifestEntry
-        from pypaimon.read.scanner.chunk_shuffle_split_generator import (
-            AppendChunkShuffleSplitGenerator, DataEvolutionChunkShuffleSplitGenerator,
-        )
-        fs = self.file_scanner
-        entries, deletions = [], {}
-        for split in splits:
-            key = (tuple(split.partition.values), split.bucket)
-            for index, file in enumerate(split.files):
-                entries.append(ManifestEntry(
-                    0, split.partition, split.bucket, self.table.total_buckets, file))
-                if split.data_deletion_files and split.data_deletion_files[index] is not None:
-                    deletions.setdefault(key, {})[file.file_name] = split.data_deletion_files[index]
-        generator_type = (DataEvolutionChunkShuffleSplitGenerator if fs.data_evolution
-                          else AppendChunkShuffleSplitGenerator)
-        seed, chunk_size = fs.chunk_shuffle
-        generator = generator_type(self.table, fs.target_split_size, fs.open_file_cost,
-                                   deletions, seed=seed, chunk_size=chunk_size)
-        if fs.idx_of_this_subtask is not None:
-            generator.with_shard(fs.idx_of_this_subtask, fs.number_of_para_subtasks)
-        chunks = generator.create_splits(entries)
-        for split in chunks:
-            while callable(getattr(split, 'data_split', None)):
-                split = split.data_split()
-            split.snapshot_id = snapshot_id
-            split.is_streaming = fs.is_streaming
-        return chunks
-
     def plan_for_write(self) -> Plan:
         if self.__auth_query() is not None:
             raise TableNoPermissionException(self.table.identifier)
@@ -392,7 +273,7 @@ class TableScan:
             self.file_scanner.skip_level0 = skip_level0
 
     def __auth_query(self):
-        return resolve_auth_result(self._query_auth_fn, self._read_type)
+        return authorize(self.table, self._query_auth_fn, self._read_type)
 
     def scan_with_stats(self) -> Tuple[Plan, Optional[ScanStats]]:
         """Run :meth:`plan` while recording manifest / pruning counters.
@@ -653,6 +534,41 @@ class TableScan:
                 f"Only {sorted(allowed) if allowed else 'no scan keys'} "
                 f"are allowed for this mode."
             )
+
+
+def latest_auth_fields(table):
+    """The table's current columns, re-read so an alter under a long-lived handle fails closed.
+
+    The catalog answers when it produced the table: a REST data token need not reach the schema
+    directory, which the scanners avoid for the same reason.
+    """
+    environment = getattr(table, "catalog_environment", None)
+    loader = getattr(environment, "catalog_loader", None)
+    if loader is not None and environment.identifier is not None:
+        return loader.load().get_table(environment.identifier).fields
+    latest = table.schema_manager.latest()
+    return latest.fields if latest is not None else table.fields
+
+
+def validate_auth_rules(table, auth_result, latest_fields=None):
+    """Refuse the read when the rules cannot be bound to the columns they name.
+
+    The reader calls this too, so a split that never met a validating scan is held to it.
+    """
+    if not auth_result.has_restrictions:
+        return table.fields
+    if latest_fields is None:
+        latest_fields = latest_auth_fields(table)
+    auth_result.validate_against_schema(latest_fields)
+    auth_result.validate_readable_without_rename(latest_fields, table.fields)
+    return latest_fields
+
+
+def authorize(table, query_auth_fn, read_type):
+    auth_result = resolve_auth_result(query_auth_fn, read_type)
+    if auth_result is not None:
+        validate_auth_rules(table, auth_result)
+    return auth_result
 
 
 def prune_scanner_by_auth(table, scanner, auth_result):

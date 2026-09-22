@@ -246,9 +246,12 @@ def _parse_error_response(response_body: Optional[str], status_code: int) -> Err
             resource_type=error.resource_type if error and error.resource_type else "",
             resource_name=error.resource_name if error and error.resource_name else "",
             message=response_body if response_body else "response body is null",
-            code=error.code if error and error.code else status_code
+            code=error.code if error and error.code is not None else status_code
         )
-    
+
+    if error.code is None:
+        error.code = status_code
+
     return error
 
 

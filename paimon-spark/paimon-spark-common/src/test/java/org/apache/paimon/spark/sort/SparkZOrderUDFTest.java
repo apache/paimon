@@ -29,6 +29,8 @@ import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -85,6 +87,65 @@ public class SparkZOrderUDFTest {
             assertThat(mapped.get(null)).isEqualTo("0000000000000000");
             assertThat(mapped.get(Boolean.FALSE)).isEqualTo("0100000000000000");
             assertThat(mapped.get(Boolean.TRUE)).isEqualTo("8100000000000000");
+        } finally {
+            spark.stop();
+            SparkSession.clearActiveSession();
+            SparkSession.clearDefaultSession();
+        }
+    }
+
+    @Test
+    void testTimestampNtzColumnIsSupported() {
+        SparkSession spark =
+                SparkSession.builder()
+                        .master("local[1]")
+                        .appName("spark-zorder-udf-ntz-test")
+                        .config("spark.ui.enabled", "false")
+                        .getOrCreate();
+        try {
+            StructType schema =
+                    new StructType(
+                            new StructField[] {
+                                new StructField(
+                                        "a", DataTypes.TimestampNTZType, true, Metadata.empty())
+                            });
+            Dataset<Row> df =
+                    spark.createDataFrame(
+                            Arrays.asList(
+                                    RowFactory.create(LocalDateTime.of(2024, 1, 1, 0, 0, 0)),
+                                    RowFactory.create(LocalDateTime.of(2024, 6, 1, 12, 0, 0)),
+                                    RowFactory.create(LocalDateTime.of(2025, 1, 1, 0, 0, 0)),
+                                    RowFactory.create((LocalDateTime) null)),
+                            schema);
+
+            SparkZOrderUDF udf = new SparkZOrderUDF(1, 8, Integer.MAX_VALUE);
+            // A paimon TIMESTAMP column reads back as timestamp_ntz unless the legacy mapping is
+            // on, and the dispatch used to reject it, so ordering by it threw "the type is
+            // unsupported" instead of clustering.
+            List<Row> rows =
+                    df.select(
+                                    df.col("a"),
+                                    functions
+                                            .hex(
+                                                    udf.sortedLexicographically(
+                                                            df.col("a"),
+                                                            DataTypes.TimestampNTZType))
+                                            .as("zvalue"))
+                            .orderBy(df.col("a").asc_nulls_first())
+                            .collectAsList();
+
+            assertThat(rows).hasSize(4);
+            assertThat(rows.get(0).isNullAt(0)).isTrue();
+            assertThat(rows.get(0).getString(1)).isEqualTo("0000000000000000");
+
+            // the z-value of a non-null timestamp has to rise with the timestamp itself
+            List<String> nonNull = new ArrayList<>();
+            for (Row row : rows.subList(1, rows.size())) {
+                nonNull.add(row.getString(1));
+            }
+            for (int i = 1; i < nonNull.size(); i++) {
+                assertThat(nonNull.get(i)).isGreaterThan(nonNull.get(i - 1));
+            }
         } finally {
             spark.stop();
             SparkSession.clearActiveSession();

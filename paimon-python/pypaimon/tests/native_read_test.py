@@ -21,6 +21,7 @@ from unittest.mock import Mock, patch
 import pyarrow as pa
 import pytest
 
+from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import AtomicType, DataField
 
@@ -38,6 +39,8 @@ def _table_read(limit=None):
     read.table.options.blob_as_descriptor.return_value = False
     read.table.options.blob_descriptor_fields.return_value = set()
     read.table.options.blob_view_fields.return_value = set()
+    read.table.options.blob_view_resolve_enabled.return_value = True
+    read.table.options.data_evolution_enabled.return_value = False
     read.predicate = None
     read.read_type = [DataField(0, 'id', AtomicType('INT'))]
     read.include_row_kind = False
@@ -46,6 +49,7 @@ def _table_read(limit=None):
     read._read_parallelism = 1
     read._deferred_blob_fields = set()
     read._predicate_extra_fields = []
+    read._scan_read_type = read.read_type
     read._output_column_names = ['id']
     return read
 
@@ -54,6 +58,7 @@ def _blob_table_read(limit=None):
     read = _table_read(limit)
     read.read_type = [DataField(0, 'payload', AtomicType('BLOB'))]
     read._output_column_names = ['payload']
+    read._scan_read_type = read.read_type
     return read
 
 
@@ -85,6 +90,66 @@ def test_native_read_consumes_retained_rust_splits_and_enforces_limit():
     )
 
 
+def test_native_read_flattens_nested_rows_and_map_keys_with_parent_nulls():
+    read = _table_read()
+    read.read_type = [
+        DataField(2, 'payload_score', AtomicType('INT')),
+        DataField(3, 'attrs_selected', AtomicType('INT')),
+    ]
+    read._output_column_names = [field.name for field in read.read_type]
+    read.nested_name_paths = [
+        ['payload', 'details', 'score'],
+        ['attrs', 'selected'],
+    ]
+    split = _Split()
+    split._native_split = object()
+    payload_type = pa.struct([
+        ('details', pa.struct([('score', pa.int32()), ('ignored', pa.string())])),
+        ('ignored', pa.string()),
+    ])
+    batch = pa.record_batch([
+        pa.array([
+            {'details': {'score': 7, 'ignored': 'x'}, 'ignored': 'x'},
+            None,
+            {'details': None, 'ignored': 'z'},
+        ], type=payload_type),
+        pa.array([
+            [('selected', 10), ('other', 11)],
+            None,
+            [],
+        ], type=pa.map_(pa.string(), pa.int32())),
+    ], names=['payload', 'attrs'])
+
+    with patch('pypaimon.read.native_plan.native_read',
+               return_value=[batch]) as native:
+        result = read.to_arrow([split])
+
+    assert result.to_pydict() == {
+        'payload_score': [7, None, None],
+        'attrs_selected': [10, None, None],
+    }
+    assert native.call_args.kwargs['nested_projection'] == read.nested_name_paths
+
+
+def test_native_read_preserves_physical_row_kinds():
+    read = _table_read()
+    read.include_row_kind = True
+    split = _Split()
+    split._native_split = object()
+    batch = pa.record_batch([
+        pa.array(['+I', '-U', '+U', '-D']),
+        pa.array([1, 2, 3, 4], type=pa.int32()),
+    ], names=['rowkind', 'id'])
+
+    with patch('pypaimon.read.native_plan.native_read',
+               return_value=[batch]) as native:
+        result = read.to_arrow([split])
+
+    assert result.schema.names == ['_row_kind', 'id']
+    assert result.column('_row_kind').to_pylist() == ['+I', '-U', '+U', '-D']
+    assert native.call_args.kwargs['include_row_kind'] is True
+
+
 def test_native_read_falls_back_for_transformed_python_split():
     read = _table_read()
     schema = pa.schema([('id', pa.int32())])
@@ -93,6 +158,57 @@ def test_native_read_falls_back_for_transformed_python_split():
     with patch('pypaimon.read.native_plan.native_read') as native:
         assert read._try_native_batches([split], schema) is None
 
+    native.assert_not_called()
+
+
+def test_native_read_bridges_python_planned_split():
+    read = _table_read()
+    schema = pa.schema([('id', pa.int32())])
+    split = _Split()
+    converted = object()
+
+    with patch(
+            'pypaimon.read.native_plan.native_split_from_python',
+            return_value=converted) as bridge, patch(
+                'pypaimon.read.native_plan.native_read',
+                return_value=[_id_batch([1])]) as native:
+        result = list(read._try_native_batches([split], schema))
+
+    assert result[0].column('id').to_pylist() == [1]
+    bridge.assert_called_once_with(split)
+    native.assert_called_once_with(
+        read.table,
+        [converted],
+        predicate=None,
+        limit=None,
+        projection=['id'],
+    )
+
+
+def test_native_split_bridge_failure_falls_back_before_starting_reader():
+    read = _table_read()
+    split = _Split()
+    with patch(
+            'pypaimon.read.native_plan.native_split_from_python',
+            side_effect=ValueError('not serializable')), patch(
+                'pypaimon.read.native_plan.native_read') as native:
+        assert read._try_native_batches(
+            [split], pa.schema([('id', pa.int32())])) is None
+    native.assert_not_called()
+
+
+def test_native_query_auth_falls_back_to_python_reader():
+    read = _table_read()
+    split = _Split()
+    split._native_split = object()
+    wrapped = QueryAuthSplit(split, object())
+
+    with patch(
+            'pypaimon.read.native_plan.native_split_from_python') as convert, patch(
+            'pypaimon.read.native_plan.native_read') as native:
+        assert read._try_native_batches(
+            [wrapped], pa.schema([('id', pa.int32())])) is None
+    convert.assert_not_called()
     native.assert_not_called()
 
 
@@ -584,6 +700,21 @@ def test_native_read_falls_back_for_unsupported_file_format():
     native.assert_not_called()
 
 
+def test_native_avro_read_uses_native_path():
+    read = _table_read()
+    read.table.options.file_format.return_value = 'avro'
+    split = _Split('data.avro')
+    split._native_split = object()
+
+    with patch('pypaimon.read.native_plan.native_read',
+               return_value=[_id_batch([7])]) as native:
+        batches = list(read._try_native_batches(
+            [split], pa.schema([('id', pa.int32())])))
+
+    assert batches[0].column('id').to_pylist() == [7]
+    native.assert_called_once()
+
+
 def test_native_read_falls_back_for_unsupported_dedicated_file():
     read = _table_read()
     schema = pa.schema([('id', pa.int32())])
@@ -684,6 +815,98 @@ def test_native_read_defers_to_python_for_pruning_descriptor_blob_limit():
             blob_parallelism=1) is None
 
     native.assert_not_called()
+
+
+@pytest.mark.parametrize('descriptor', [False, True])
+def test_native_read_pruning_blob_limit_uses_data_evolution_reader(descriptor):
+    read = _blob_table_read(limit=1)
+    read.table.options.data_evolution_enabled.return_value = True
+    if descriptor:
+        read.table.options.blob_descriptor_fields.return_value = {'payload'}
+    else:
+        read._deferred_blob_fields = {'payload'}
+    split = _Split('payload.parquet' if descriptor else 'payload.blob')
+    split._native_split = object()
+    split.merged_row_count = Mock(return_value=2)
+    batch = pa.record_batch(
+        [pa.array([b'first'], type=pa.large_binary())], names=['payload'])
+
+    with patch('pypaimon.read.native_plan.native_read',
+               return_value=[batch]) as native:
+        actual = list(read._try_native_batches(
+            [split], pa.schema([('payload', pa.large_binary())]),
+            blob_parallelism=1))
+
+    assert actual == [batch]
+    native.assert_called_once()
+
+
+@pytest.mark.parametrize('layout', ['managed', 'descriptor', 'rest_view'])
+def test_native_read_pruning_blob_limit_allows_predicate(layout):
+    read = _blob_table_read(limit=1)
+    read.table.options.data_evolution_enabled.return_value = True
+    read.predicate = Mock()
+    if layout == 'managed':
+        read._deferred_blob_fields = {'payload'}
+    elif layout == 'descriptor':
+        read.table.options.blob_descriptor_fields.return_value = {'payload'}
+    else:
+        read.table.options.blob_view_fields.return_value = {'payload'}
+    split = _Split('payload.blob' if layout == 'managed' else 'payload.parquet')
+    split._native_split = object()
+    split.merged_row_count = Mock(return_value=2)
+    batch = pa.record_batch(
+        [pa.array([b'selected'], type=pa.large_binary())], names=['payload'])
+
+    with patch('pypaimon.read.native_plan._catalog_metastore', return_value='rest'), \
+            patch('pypaimon.read.native_plan.native_read', return_value=[batch]) as native:
+        actual = list(read._try_native_batches(
+            [split], pa.schema([('payload', pa.large_binary())])))
+
+    assert actual == [batch]
+    native.assert_called_once()
+    assert native.call_args.kwargs['predicate'] is read.predicate
+    assert native.call_args.kwargs['limit'] == 1
+
+
+@pytest.mark.parametrize('limit', [None, 1])
+def test_native_read_blob_view_keeps_filesystem_fallback(limit):
+    read = _blob_table_read(limit=limit)
+    read.table.options.data_evolution_enabled.return_value = True
+    read.table.options.blob_view_fields.return_value = {'payload'}
+    read.predicate = Mock()
+    split = _Split('payload.parquet')
+    split._native_split = object()
+    split.merged_row_count = Mock(return_value=2)
+
+    with patch('pypaimon.read.native_plan._catalog_metastore', return_value='filesystem'), \
+            patch('pypaimon.read.native_plan.native_read') as native:
+        assert read._try_native_batches(
+            [split], pa.schema([('payload', pa.large_binary())])) is None
+
+    native.assert_not_called()
+
+
+def test_native_read_pruning_descriptor_limit_allows_non_blob_predicate():
+    read = _blob_table_read(limit=1)
+    read.table.options.data_evolution_enabled.return_value = True
+    read.table.options.blob_descriptor_fields.return_value = {'payload'}
+    read.predicate = Mock()
+    split = _Split('payload.parquet')
+    split._native_split = object()
+    split.merged_row_count = Mock(return_value=2)
+    batch = pa.record_batch(
+        [pa.array([b'selected'], type=pa.large_binary())], names=['payload'])
+
+    with patch('pypaimon.read.push_down_utils.predicate_field_names',
+               return_value={'id'}):
+        with patch('pypaimon.read.native_plan.native_read',
+                   return_value=[batch]) as native:
+            actual = list(read._try_native_batches(
+                [split], pa.schema([('payload', pa.large_binary())])))
+
+    assert actual == [batch]
+    native.assert_called_once()
 
 
 @pytest.mark.parametrize('data_type, values', [

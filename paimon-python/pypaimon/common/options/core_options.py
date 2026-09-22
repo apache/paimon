@@ -1158,6 +1158,19 @@ class CoreOptions:
         .with_description("Read batch size for any file format if it supports.")
     )
 
+    PARQUET_COLUMN_INDEX_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("parquet.filter.columnindex.enabled")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "Enable Parquet page-index pruning. PyPaimon currently uses OffsetIndex "
+            "metadata for contiguous row windows. "
+            "Requires existing offset indexes; nested fields use common leaf row boundaries. "
+            "Unsupported or expensive selections use the ordinary reader. "
+            "Does not enable ColumnIndex predicate filtering."
+        )
+    )
+
     READ_PARALLELISM: ConfigOption[int] = (
         ConfigOptions.key("read.parallelism")
         .int_type()
@@ -1916,6 +1929,9 @@ class CoreOptions:
 
     def read_batch_size(self, default=None) -> int:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
+
+    def parquet_column_index_enabled(self) -> bool:
+        return self.options.get(CoreOptions.PARQUET_COLUMN_INDEX_ENABLED)
 
     def read_parallelism(self, default=None) -> Optional[int]:
         return self.options.get(CoreOptions.READ_PARALLELISM, default)
