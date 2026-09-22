@@ -238,7 +238,8 @@ public class RESTTokenFileIO implements FileIO {
     private FileIOWithToken fileIOWithToken(long minimumValidityMillis) throws IOException {
         tryToRefreshToken(minimumValidityMillis);
         RESTToken currentToken = token;
-        if (!hasRemainingLifetime(currentToken, minimumValidityMillis)) {
+        if (minimumValidityMillis > 0
+                && !hasRemainingLifetime(currentToken, minimumValidityMillis)) {
             throw new IOException(
                     "Requested presigned URL validity exceeds the remaining "
                             + "REST credential lifetime after refresh.");
