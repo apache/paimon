@@ -26,6 +26,8 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate import Predicate
+from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 
 
@@ -50,7 +52,6 @@ class TestManifestReadRowRangePerformance(unittest.TestCase):
         schema = Schema.from_pyarrow_schema(pa_schema, options={
             'row-tracking.enabled': 'true',
             'data-evolution.enabled': 'true',
-            'manifest.merge-min-count': '1',
         })
         cls.catalog.create_table('default.test_row_range_perf', schema, False)
         cls.table = cls.catalog.get_table('default.test_row_range_perf')
@@ -74,16 +75,27 @@ class TestManifestReadRowRangePerformance(unittest.TestCase):
             tw.close()
             tc.close()
 
+        # Build an externally compacted base manifest fixture so entry-level
+        # pruning is exercised even though Python commits never merge manifests.
+        snapshot = cls.table.snapshot_manager().get_latest_snapshot()
+        manifest_lists = ManifestListManager(cls.table)
+        manifest_files = ManifestFileManager(cls.table)
+        entries = []
+        for meta in manifest_lists.read_base(snapshot):
+            entries.extend(manifest_files.read(meta.file_name, drop_stats=False))
+        compacted = manifest_files.rolling_write(
+            entries, cls.table.options.manifest_target_size(), 'manifest-compacted-fixture')
+        assert len(compacted) == 1
+        manifest_lists.write(snapshot.base_manifest_list, compacted)
+
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     @pytest.mark.python_plan
-    def test_scan_constructs_all_entries_without_early_row_range_filter(self):
-        """With manifest.merge-min-count=1, all entries are in one manifest.
-        Querying with _ROW_ID BETWEEN 5 AND 14 should return 2 files, but
-        the current code constructs DataFileMeta for ALL 20 entries because
-        the row-range filter runs after full object construction."""
+    def test_scan_constructs_only_matching_entries_in_compacted_manifest(self):
+        """Querying _ROW_ID BETWEEN 5 AND 14 should construct only the two
+        matching files from the externally compacted base manifest."""
         construction_count = [0]
         original_init = DataFileMeta.__init__
 
@@ -106,7 +118,7 @@ class TestManifestReadRowRangePerformance(unittest.TestCase):
         self.assertEqual(sorted(actual.column('id').to_pylist()),
                          list(range(5, 15)))
 
-        # 2 matching files × 2 (ADD + DELETE from manifest merge) = 4
+        # Each matching file is deserialized and then copied without stats.
         self.assertLessEqual(
             construction_count[0], 2 * total_files,
             f"Expected at most {2 * total_files} DataFileMeta constructions, "
@@ -122,7 +134,6 @@ class TestManifestReadRowRangePerformance(unittest.TestCase):
                                   Schema.from_pyarrow_schema(pa_schema, options={
                                       'row-tracking.enabled': 'true',
                                       'data-evolution.enabled': 'true',
-                                      'manifest.merge-min-count': '1',
                                   }), False)
         table = self.catalog.get_table('default.test_add_delete_pair')
         wb = table.new_batch_write_builder()

@@ -285,16 +285,6 @@ class CoreOptions:
         )
     )
 
-    WRITE_ONLY: ConfigOption[bool] = (
-        ConfigOptions.key("write-only")
-        .boolean_type()
-        .default_value(False)
-        .with_description(
-            "Whether to use write-only mode. Automatic manifest merging is skipped "
-            "when both this option and manifest.merge.skip-on-write-only are true."
-        )
-    )
-
     SCAN_MANIFEST_PARALLELISM: ConfigOption[int] = (
         ConfigOptions.key("scan.manifest.parallelism")
         .int_type()
@@ -328,26 +318,6 @@ class CoreOptions:
         .memory_type()
         .default_value(MemorySize.of_mebi_bytes(8))
         .with_description("Suggested file size of a manifest file.")
-    )
-
-    MANIFEST_MERGE_SKIP_ON_WRITE_ONLY: ConfigOption[bool] = (
-        ConfigOptions.key("manifest.merge.skip-on-write-only")
-        .boolean_type()
-        .default_value(False)
-        .with_description(
-            "Whether to skip automatic manifest merging during commit when write-only is true. "
-            "Python only supports minor manifest compaction, without manifest sort rewrite."
-        )
-    )
-
-    MANIFEST_MERGE_MIN_COUNT: ConfigOption[int] = (
-        ConfigOptions.key("manifest.merge-min-count")
-        .int_type()
-        .default_value(30)
-        .with_description(
-            "To avoid frequent manifest merges, this parameter specifies the minimum number "
-            "of ManifestFileMeta to merge."
-        )
     )
 
     # File format options
@@ -1329,9 +1299,6 @@ class CoreOptions:
             CoreOptions.POSTPONE_TARGET_SIZE_PER_BUCKET, default
         ).get_bytes()
 
-    def write_only(self, default=None):
-        return self.options.get(CoreOptions.WRITE_ONLY, default)
-
     def scan_manifest_parallelism(self, default=None):
         return self.options.get(CoreOptions.SCAN_MANIFEST_PARALLELISM, default)
 
@@ -1349,12 +1316,6 @@ class CoreOptions:
 
     def manifest_sort_enabled(self):
         return self.options.get(CoreOptions.MANIFEST_SORT_ENABLED)
-
-    def manifest_merge_skip_on_write_only(self, default=None):
-        return self.options.get(CoreOptions.MANIFEST_MERGE_SKIP_ON_WRITE_ONLY, default)
-
-    def manifest_merge_min_count(self, default=None):
-        return self.options.get(CoreOptions.MANIFEST_MERGE_MIN_COUNT, default)
 
     def file_format(self, default=None):
         return self.options.get(CoreOptions.FILE_FORMAT, default)
