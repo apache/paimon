@@ -454,7 +454,7 @@ class GlobalIndexBuildTest(
                 options={'bitmap-index.compression': 'lz4'},
             )
 
-    def test_sorted_index_records_per_range_matches_java_floating_factor(self):
+    def test_sorted_index_records_per_file_matches_java_floating_factor(self):
         table = self._create_table()
         rows = list(range(12))
         self._write_arrow(table, pa.table(
@@ -469,7 +469,7 @@ class GlobalIndexBuildTest(
 
         added = table.create_global_index(
             'id',
-            options={'sorted-index.records-per-range': '10'},
+            options={'sorted-index.records-per-file': '10'},
         )
 
         self.assertEqual(1, added)

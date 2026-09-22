@@ -28,9 +28,29 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SortedIndexOptionsTest {
 
     @Test
-    void testDefaultRecordsPerRange() {
-        assertThat(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE.defaultValue())
-                .isEqualTo(10_000_000L);
+    void testDefaultRecordsPerFile() {
+        assertThat(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE.defaultValue())
+                .isEqualTo(25_000_000L);
+    }
+
+    @Test
+    void testRecordsPerFileOption() {
+        Options options = new Options();
+        options.setString("sorted-index.records-per-file", "300");
+
+        assertThat(options.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE)).isEqualTo(300L);
+    }
+
+    @Test
+    void testRecordsPerFileFallbackPriority() {
+        Options options = new Options();
+        options.setString("btree-index.records-per-range", "100");
+        options.setString("sorted-index.records-per-range", "200");
+
+        assertThat(options.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE)).isEqualTo(200L);
+
+        options.setString("sorted-index.records-per-file", "300");
+        assertThat(options.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE)).isEqualTo(300L);
     }
 
     @Test
@@ -39,7 +59,7 @@ class SortedIndexOptionsTest {
         options.setString("btree-index.records-per-range", "100");
         options.setString("btree-index.build.max-parallelism", "8");
 
-        assertThat(options.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE)).isEqualTo(100L);
+        assertThat(options.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE)).isEqualTo(100L);
         assertThat(options.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM)).isEqualTo(8);
     }
 }

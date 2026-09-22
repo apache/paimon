@@ -127,7 +127,7 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
         }
 
         // Calculate maximum parallelism bound
-        long recordsPerRange = options.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE);
+        long recordsPerRange = options.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE);
         int maxParallelism = options.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM);
 
         List<CommitMessage> allMessages = new ArrayList<>();

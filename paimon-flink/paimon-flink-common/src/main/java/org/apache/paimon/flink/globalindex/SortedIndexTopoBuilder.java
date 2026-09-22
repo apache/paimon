@@ -200,7 +200,7 @@ public class SortedIndexTopoBuilder {
 
             // 3. Calculate maximum parallelism bound
             long recordsPerRange =
-                    userOptions.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE);
+                    userOptions.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE);
             int maxParallelism =
                     userOptions.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM);
 
