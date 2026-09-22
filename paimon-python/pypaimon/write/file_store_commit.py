@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 
 def _row_id_check_from_messages(messages: List[CommitMessage]) -> Optional[int]:
-    """Validate the message baseline using Java FileStoreCommitImpl's rules."""
+    """Check conflicts from the earliest baseline, matching the native committer."""
     check_from_snapshot = None
     for message in messages:
         snapshot = message.check_from_snapshot
@@ -62,11 +62,8 @@ def _row_id_check_from_messages(messages: List[CommitMessage]) -> Optional[int]:
             continue
         if snapshot < 0:
             raise ValueError('Invalid row-id check snapshot: %s' % snapshot)
-        if check_from_snapshot is not None and check_from_snapshot != snapshot:
-            raise ValueError(
-                'Commit messages have different row-id check snapshots: %s and %s'
-                % (check_from_snapshot, snapshot))
-        check_from_snapshot = snapshot
+        check_from_snapshot = (snapshot if check_from_snapshot is None
+                               else min(check_from_snapshot, snapshot))
     if check_from_snapshot is not None:
         for message in messages:
             if message.check_from_snapshot is not None:

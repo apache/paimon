@@ -119,6 +119,43 @@ table = table.copy({"parquet.filter.columnindex.enabled": "false"})
 Unsupported reads use the normal path. Reading fewer bytes may require more
 object-store requests.
 
+# Native commit
+
+PyPaimon can submit append commits through the optional `pypaimon-rust`
+runtime. Enable it independently of native planning and reading:
+
+```python
+native_table = table.copy({"commit.native.enabled": "true"})
+builder = native_table.new_batch_write_builder()
+writer, commit = builder.new_write(), builder.new_commit()
+try:
+    writer.write_arrow(data)
+    commit.commit(writer.prepare_commit())
+finally:
+    writer.close()
+    commit.close()
+```
+
+The Python writer still produces files. Its commit messages cross the Java v14
+wire format into `CommitMessage.deserialize()` and are committed by Rust. Batch
+and stream append commits retain the Python builder's commit user, identifier,
+empty-commit option, and batch one-shot lifecycle. Explicit abort also supports
+native cleanup of uncommitted files.
+
+This requires a runtime containing the commit bindings merged in
+[paimon-rust #912](https://github.com/apache/paimon-rust/pull/912). Older or missing
+runtimes automatically use Python. The current native route supports main-branch
+tables using filesystem/JDBC catalogs or `FileStoreTable.from_path()` with
+standard FileIO. Overwrite, truncate, REST/catalog-managed publication, custom
+FileIO/environments, commit callbacks, and snapshot properties use Python.
+Data-evolution updates that need Python's row-id conflict rewriting also retain
+the Python path. Compact increments remain unsupported by both committers.
+
+Fallback is limited to capability checks, table construction and message
+conversion before a native mutation starts. A native commit error propagates;
+the adapter neither retries it through Python nor aborts files, since the
+snapshot may already have been published. The option is disabled by default.
+
 # Native scan planning
 
 PyPaimon can plan splits with the optional `pypaimon-rust` package. Planning and

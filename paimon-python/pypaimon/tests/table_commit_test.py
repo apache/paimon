@@ -78,10 +78,13 @@ class TestTableCommit(unittest.TestCase):
         commit = cls.__new__(cls)
         commit.table = Mock()
         commit.table.identifier = 'default.test_table'
+        commit.table.options.native_commit_enabled.return_value = False
         commit.commit_user = 'test_user'
         commit.overwrite_partition = overwrite_partition
         commit.file_store_commit = Mock()
         commit.batch_committed = False
+        commit._commit_callbacks = []
+        commit._native_commit = None
         return commit, commit.file_store_commit
 
     # -- Overwrite mode: should always call overwrite(), even with empty messages --

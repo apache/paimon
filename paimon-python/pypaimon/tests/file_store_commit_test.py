@@ -45,14 +45,14 @@ from pypaimon.write.file_store_commit import (
 
 class TestRowIdCheckFromMessages(unittest.TestCase):
 
-    def test_java_baseline_rules(self):
+    def test_minimum_baseline_and_invalid_messages(self):
         tagged = CommitMessage((), 0, [], check_from_snapshot=7)
         self.assertEqual(_row_id_check_from_messages([tagged, tagged]), 7)
         self.assertIsNone(_row_id_check_from_messages([CommitMessage((), 0, [])]))
 
-        with self.assertRaisesRegex(ValueError, 'different row-id check snapshots'):
-            _row_id_check_from_messages([
-                tagged, CommitMessage((), 0, [], check_from_snapshot=8)])
+        newer = CommitMessage((), 0, [], check_from_snapshot=8)
+        for messages in ([tagged, newer], [newer, tagged]):
+            self.assertEqual(_row_id_check_from_messages(messages), 7)
         with self.assertRaisesRegex(ValueError, 'Invalid row-id check snapshot'):
             _row_id_check_from_messages([
                 CommitMessage((), 0, [], check_from_snapshot=-1)])
