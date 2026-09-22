@@ -1612,11 +1612,21 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         for (IcebergManifestFileMeta meta : manifestList.read(next)) {
             pathsInUse.add(meta.manifestPath());
         }
-        for (IcebergManifestFileMeta meta : manifestList.read(toExpire)) {
-            if (pathsInUse.contains(meta.manifestPath())) {
-                continue;
+        try {
+            for (IcebergManifestFileMeta meta : manifestList.read(toExpire)) {
+                if (pathsInUse.contains(meta.manifestPath())) {
+                    continue;
+                }
+                table.fileIO().deleteQuietly(new Path(meta.manifestPath()));
             }
-            table.fileIO().deleteQuietly(new Path(meta.manifestPath()));
+        } catch (RuntimeException e) {
+            if (!ExceptionUtils.findThrowable(e, FileNotFoundException.class).isPresent()) {
+                throw e;
+            }
+            // A retry of this cleanup pass (e.g. after a crash between the two calls below)
+            // can be asked to expire a list an earlier pass already deleted. The only reason
+            // to read it here is to delete what it references, and that earlier pass already
+            // did so.
         }
         table.fileIO().deleteQuietly(pathFactory.toManifestListPath(toExpire));
     }
