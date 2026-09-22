@@ -340,13 +340,13 @@ def _configure_native_read_builder(builder, predicate, limit, projection,
     return builder
 
 
-def native_read(table, splits, predicate: Optional[Predicate] = None,
-                limit: Optional[int] = None,
-                projection: Optional[List[str]] = None,
-                blob_parallelism: Optional[int] = None,
-                nested_projection: Optional[List[List[str]]] = None,
-                include_row_kind: bool = False):
-    """Read Rust ``Split`` objects into PyArrow ``RecordBatch`` objects."""
+def _prepare_native_read(table, predicate: Optional[Predicate] = None,
+                         limit: Optional[int] = None,
+                         projection: Optional[List[str]] = None,
+                         blob_parallelism: Optional[int] = None,
+                         nested_projection: Optional[List[List[str]]] = None,
+                         include_row_kind: bool = False):
+    """Create one Rust reader reusable across split groups."""
     if not native_reader_available():
         raise RuntimeError(
             "read.native.enabled needs the pypaimon-rust native reader API")
@@ -358,8 +358,20 @@ def native_read(table, splits, predicate: Optional[Predicate] = None,
         builder = builder.with_blob_parallelism(blob_parallelism)
     reader = builder.new_read()
     read_arrow = getattr(reader, 'read_arrow', None)
-    return (read_arrow(splits) if callable(read_arrow)
-            else reader.read(splits))
+    return read_arrow if callable(read_arrow) else reader.read
+
+
+def native_read(table, splits, predicate: Optional[Predicate] = None,
+                limit: Optional[int] = None,
+                projection: Optional[List[str]] = None,
+                blob_parallelism: Optional[int] = None,
+                nested_projection: Optional[List[List[str]]] = None,
+                include_row_kind: bool = False):
+    """Read Rust ``Split`` objects into PyArrow ``RecordBatch`` objects."""
+    read_splits = _prepare_native_read(
+        table, predicate, limit, projection, blob_parallelism,
+        nested_projection, include_row_kind)
+    return read_splits(splits)
 
 
 def native_plan(
