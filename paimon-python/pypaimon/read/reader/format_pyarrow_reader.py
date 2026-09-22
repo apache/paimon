@@ -542,8 +542,7 @@ class FormatPyArrowReader(RecordBatchReader):
                 if (self._selected_parquet_row_groups is not None
                         and options is not None
                         and options.parquet_column_index_enabled()
-                        and self._row_group_cache is None
-                        and not self._bounded_variant_read):
+                        and self._row_group_cache is None):
                     from pypaimon.read.reader.parquet_page_index_reader import (
                         ParquetPageIndexReader,
                     )
