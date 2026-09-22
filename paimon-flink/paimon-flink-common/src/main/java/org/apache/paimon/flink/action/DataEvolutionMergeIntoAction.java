@@ -717,7 +717,8 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                 written.transform(
                                 "Updated Column Check",
                                 new CommittableTypeInfo(),
-                                new MergeIntoUpdateChecker(storeTable, updatedColumns))
+                                new MergeIntoUpdateChecker(
+                                        storeTable, updatedColumns, baseSnapshotId))
                         .setParallelism(1)
                         .setMaxParallelism(1);
 
@@ -729,9 +730,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                         context ->
                                 new StoreCommitter(
                                         storeTable,
-                                        storeTable
-                                                .newCommit(context.commitUser())
-                                                .rowIdCheckConflict(baseSnapshotId),
+                                        storeTable.newCommit(context.commitUser()),
                                         context),
                         new NoopCommittableStateManager());
 

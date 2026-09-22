@@ -176,7 +176,6 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       sql("CALL sys.compact(table => 't')").collect()
 
       val writer = PaimonSparkWriter(table)
-      writer.rowIdCheckConflict(readSnapshot.id())
       val targetRelation =
         PaimonRelation.getPaimonRelation(spark.table("t").queryExecution.analyzed)
       DataEvolutionRowIdConflictCommitter.commit(
@@ -233,7 +232,6 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       sql("CALL sys.compact(table => 't')").collect()
 
       val writer = PaimonSparkWriter(table)
-      writer.rowIdCheckConflict(readSnapshot.id())
       val targetRelation =
         PaimonRelation.getPaimonRelation(spark.table("t").queryExecution.analyzed)
       DataEvolutionRowIdConflictCommitter.commit(
@@ -290,7 +288,6 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       sql("UPDATE t SET b = 99 WHERE id = 1").collect()
 
       val writer = PaimonSparkWriter(table)
-      writer.rowIdCheckConflict(readSnapshot.id())
       val targetRelation =
         PaimonRelation.getPaimonRelation(spark.table("t").queryExecution.analyzed)
       val exception = intercept[RuntimeException] {
@@ -481,7 +478,6 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       sql("CALL sys.compact(table => 't')").collect()
 
       val writer = PaimonSparkWriter(table)
-      writer.rowIdCheckConflict(readSnapshot.id())
       val targetRelation =
         PaimonRelation.getPaimonRelation(spark.table("t").queryExecution.analyzed)
       DataEvolutionRowIdConflictCommitter.commit(

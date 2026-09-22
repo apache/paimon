@@ -42,4 +42,12 @@ public interface CommitMessage extends Serializable {
     /** Total number of buckets in this partition. */
     @Nullable
     Integer totalBuckets();
+
+    /**
+     * Snapshot used to read rows before producing this message, if row-id conflicts need checking.
+     */
+    @Nullable
+    default Long checkFromSnapshot() {
+        return null;
+    }
 }
