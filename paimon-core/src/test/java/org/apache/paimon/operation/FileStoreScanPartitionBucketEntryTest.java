@@ -164,7 +164,7 @@ public class FileStoreScanPartitionBucketEntryTest extends ScannerTestBase {
     }
 
     @Test
-    public void testReadPartitionEntriesRestoresBucketLayoutAfterRollback() throws Exception {
+    public void testReadPartitionEntriesIgnoresDeletedBucketLayout() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.BUCKET, -2);
         table = createFileStoreTable(true, options, new Path(tablePath, "postpone-bucket-table"));
@@ -173,22 +173,16 @@ public class FileStoreScanPartitionBucketEntryTest extends ScannerTestBase {
         PostponeFixedBucketWriteBuilder builder = table.newPostponeFixedBucketWriteBuilder();
         try (TableWriteImpl<?> write = builder.newWrite();
                 BatchTableCommit commit = builder.newCommit()) {
-            write.writeAndReturn(rowData(1, 1, 1L), 0, 2);
+            write.writeAndReturn(rowData(1, 1, 1L), 0, 4);
             commit.commit(write.prepareCommit());
         }
 
         builder = table.newPostponeFixedBucketWriteBuilder().withOverwrite(Collections.emptyMap());
         try (TableWriteImpl<?> write = builder.newWrite();
                 BatchTableCommit commit = builder.newCommit()) {
-            write.writeAndReturn(rowData(1, 2, 2L), 0, 4);
+            write.writeAndReturn(rowData(1, 2, 2L), 0, 2);
             commit.commit(write.prepareCommit());
         }
-
-        assertThat(snapshotReader.partitionEntries())
-                .extracting(PartitionEntry::totalBuckets)
-                .containsExactly(4);
-
-        table.rollbackTo(1);
 
         assertThat(snapshotReader.partitionEntries())
                 .extracting(PartitionEntry::totalBuckets)

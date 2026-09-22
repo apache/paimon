@@ -369,14 +369,40 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public List<PartitionEntry> readPartitionEntries() {
         List<ManifestFileMeta> manifests = readManifests().filteredManifests;
-        Map<BinaryRow, PartitionEntry> partitions = new HashMap<>();
-        Iterator<ManifestEntry> entries =
-                readAndMergeFileEntries(manifests, Function.identity(), false);
-        while (entries.hasNext()) {
-            PartitionEntry entry = PartitionEntry.fromManifestEntry(entries.next());
-            partitions.compute(
-                    entry.partition(), (partition, old) -> old == null ? entry : old.merge(entry));
-        }
+        Set<Identifier> deletedEntries =
+                FileEntry.readDeletedEntries(
+                        manifest ->
+                                readManifest(
+                                        manifest,
+                                        SimpleFileEntry::from,
+                                        FileEntry.deletedFilter(),
+                                        null),
+                        manifests,
+                        parallelism);
+
+        Map<BinaryRow, PartitionEntry> partitions = new ConcurrentHashMap<>();
+        Consumer<ManifestFileMeta> processor =
+                manifest -> {
+                    Map<BinaryRow, PartitionEntry> entries = new HashMap<>();
+                    for (ManifestEntry manifestEntry :
+                            readManifest(
+                                    manifest,
+                                    Function.identity(),
+                                    FileEntry.addFilter(),
+                                    entry -> !deletedEntries.contains(entry.identifier()))) {
+                        PartitionEntry entry = PartitionEntry.fromManifestEntry(manifestEntry);
+                        entries.compute(
+                                entry.partition(),
+                                (partition, old) -> old == null ? entry : old.merge(entry));
+                    }
+                    PartitionEntry.merge(entries.values(), partitions);
+                };
+        randomlyOnlyExecute(
+                getExecutorService(parallelism),
+                processor,
+                manifests.stream()
+                        .filter(manifest -> manifest.numAddedFiles() > 0)
+                        .collect(Collectors.toList()));
         return partitions.values().stream()
                 .filter(p -> p.fileCount() > 0)
                 .collect(Collectors.toList());
