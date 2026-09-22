@@ -128,6 +128,16 @@ class RowFileIndexConsistencyTest {
                 .hasMessageContaining("block 1 has a negative compressed size -100");
     }
 
+    @Test
+    void testNegativeUncompressedSizeIsRejected() {
+        // the footer bounds the compressed sizes through the sum, but nothing bounds these
+        RowBlockIndex index =
+                new RowBlockIndex(new long[] {10, 20}, new long[] {100, -1}, new long[] {0, 5});
+        assertThatThrownBy(() -> index.validate(new RowFileFooter(9, 2, 30, 7)))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("block 1 has a negative uncompressed size -1");
+    }
+
     private static void validateRowStarts(long[] rowStarts, long totalRowCount) throws IOException {
         long[] sizes = new long[rowStarts.length];
         Arrays.fill(sizes, 10);

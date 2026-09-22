@@ -159,6 +159,20 @@ The arrays are:
 - **blockUncompressedSizes**: Uncompressed size of each block (needed to allocate decompression buffer)
 - **blockRowStarts**: Cumulative row count at the start of each block (for binary search)
 
+A well-formed index satisfies all of the following, and a reader rejects a file that does not:
+
+- The three arrays have the same length, and that length equals the footer's `blockCount`.
+- `blockCompressedSizes[]` sums to exactly `indexOffset`. Blocks are written contiguously from
+  position 0 and the index follows the last one, so any other sum means the two disagree about
+  where the blocks end.
+- No size is negative. The sum alone does not imply this: two sizes can cancel.
+- `blockRowStarts[0]` is 0, and each later start is strictly greater than the one before it. A
+  reader turns consecutive starts into a block's row range, so a first start past 0 leaves the rows
+  before it unreachable and a repeated start gives a block an empty range.
+- `blockRowStarts[last]` is less than the footer's `totalRowCount`, so the last block holds at
+  least one row.
+- An empty index has `blockCount` 0 and `totalRowCount` 0.
+
 ## Footer
 
 The footer occupies the last 32 bytes of the file. Offsets below are relative to the start of
@@ -182,7 +196,7 @@ To read a row by its zero-based row number within the file:
 
 1. **Read Footer**: Seek to file end - 32 bytes, read the 32-byte footer. Validate magic number.
 2. **Read Block Index**: Seek to `indexOffset`, read `indexLength` bytes, decode the three arrays. Compute block offsets by prefix sum of `blockCompressedSizes[]`.
-3. **Check Consistency**: The three arrays must have the same length, that length must equal `blockCount`, and `blockCompressedSizes[]` must sum to `indexOffset`, because the blocks are written contiguously from position 0 and the index follows the last one. A reader that bounds its block loop by one of the two — the footer's `blockCount` or the index array length — must reject a file where they disagree rather than silently reading fewer blocks.
+3. **Check Consistency**: Verify the block index against the footer, as described under Block Index. A reader that bounds its block loop by one of the two — the footer's `blockCount` or the index array length — must reject a file where they disagree rather than silently reading fewer blocks.
 4. **Select Block**: Find block `b` where `blockRowStarts[b] <= rowNum < blockEnd`. For the last block, `blockEnd` is `totalRowCount`; otherwise it is `blockRowStarts[b + 1]`.
 5. **Read Block**: Seek to `blockOffset(b)`, read `blockCompressedSizes[b]` bytes.
 6. **Decompress**: ZSTD decompress into a buffer of size `blockUncompressedSizes[b]`.
