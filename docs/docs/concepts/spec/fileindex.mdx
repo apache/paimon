@@ -103,8 +103,8 @@ BODY:                             column index bytes + column index bytes + colu
 
 ### V2
 
-V2 stores the byte-array payloads first, followed by the footer containing the index entries and a
-fixed 12-byte trailer.
+V2 writes the payloads first, followed by the footer containing the index entries and a fixed
+12-byte trailer.
 All integers are signed and big-endian; strings use Java `writeUTF` encoding.
 
 <pre>
@@ -155,9 +155,10 @@ tail magic:                       8 bytes long, value is PAFIDX02
 footer.
 
 V2 supports a container larger than 2 GiB by storing payload positions and lengths as 64-bit
-values. Each index still serializes to a `byte[]`. `FileIndexer.createReader` receives a 64-bit
-start position and an int length. Before reading an index, the reader rejects a payload whose
-length exceeds `Integer.MAX_VALUE`.
+values. Payloads are written through `FileIndexWriter.writeTo(OutputStream)`; existing byte-array
+writers use its default implementation. `FileIndexer.createReader` receives both the start position
+and length as 64-bit values. Index implementations that load a payload into a `byte[]`, such as
+Bloom filter, may reject lengths greater than `Integer.MAX_VALUE`.
 
 ## Index: BloomFilter 
 
