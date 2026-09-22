@@ -33,6 +33,7 @@ import org.apache.paimon.flink.sink.partition.StatisticsOrRecordChannelComputer;
 import org.apache.paimon.flink.sink.partition.StatisticsOrRecordTypeInfo;
 import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
+import org.apache.paimon.flink.utils.OperatorUidAssigner;
 import org.apache.paimon.table.BlobDescriptorReaderFactory;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
@@ -86,6 +87,12 @@ public class FlinkSinkBuilder {
 
     private static final Logger LOG = LoggerFactory.getLogger(FlinkSinkBuilder.class);
 
+    private static final String ROW_CONVERSION_NAME = "Row Conversion";
+    private static final String INTERNAL_ROW_CONVERSION_NAME = "Internal Row Conversion";
+    private static final String LOCAL_MERGE_NAME = "local merge";
+    private static final String COLLECT_STATISTICS_NAME = "Collect Statistics";
+    private static final String STRIP_STATISTICS_NAME = "Strip Statistics";
+
     protected final FileStoreTable table;
 
     private DataStream<RowData> input;
@@ -119,7 +126,7 @@ public class FlinkSinkBuilder {
                 input.map((MapFunction<Row, RowData>) converter::toInternal)
                         .returns(InternalTypeInfo.of(rowType));
         setParallelism(newInput, input.getParallelism(), false);
-        this.input = newInput;
+        this.input = OperatorUidAssigner.forSink(table).assign(newInput, ROW_CONVERSION_NAME);
         return this;
     }
 
@@ -226,23 +233,26 @@ public class FlinkSinkBuilder {
                         ? materializedBlobFieldIndexes(
                                 table.rowType(), table.coreOptions().blobInlineField())
                         : Collections.emptySet();
+        OperatorUidAssigner uids = OperatorUidAssigner.forSink(table);
         DataStream<InternalRow> input =
-                mapToInternalRowWithUriReaderFactory(
-                        this.input,
-                        table.rowType(),
-                        readerFactoryForDescriptor,
-                        table.coreOptions().blobWriteNullOnMissingFile(),
-                        table.coreOptions().blobWriteNullOnFetchFailure(),
-                        materializedBlobFields);
+                uids.assign(
+                        mapToInternalRowWithUriReaderFactory(
+                                this.input,
+                                table.rowType(),
+                                readerFactoryForDescriptor,
+                                table.coreOptions().blobWriteNullOnMissingFile(),
+                                table.coreOptions().blobWriteNullOnFetchFailure(),
+                                materializedBlobFields),
+                        INTERNAL_ROW_CONVERSION_NAME);
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
             SingleOutputStreamOperator<InternalRow> newInput =
                     input.forward()
                             .transform(
-                                    "local merge",
+                                    LOCAL_MERGE_NAME,
                                     input.getType(),
                                     new LocalMergeOperator.Factory(table.schema()));
             forwardParallelism(newInput, input);
-            input = newInput;
+            input = uids.assign(newInput, LOCAL_MERGE_NAME);
         }
 
         BucketMode bucketMode = table.bucketMode();
@@ -292,7 +302,7 @@ public class FlinkSinkBuilder {
                 Collections.emptySet());
     }
 
-    private static DataStream<InternalRow> mapToInternalRowWithUriReaderFactory(
+    private static SingleOutputStreamOperator<InternalRow> mapToInternalRowWithUriReaderFactory(
             DataStream<RowData> input,
             org.apache.paimon.types.RowType rowType,
             UriReaderFactory uriReaderFactory,
@@ -423,14 +433,17 @@ public class FlinkSinkBuilder {
     }
 
     private DataStream<InternalRow> applyDynamicPartitionShuffle(DataStream<InternalRow> input) {
+        OperatorUidAssigner uids = OperatorUidAssigner.forSink(table);
         StatisticsOrRecordTypeInfo typeInfo =
                 new StatisticsOrRecordTypeInfo(table.schema().logicalRowType());
         SingleOutputStreamOperator<StatisticsOrRecord> statsStream =
-                input.transform(
-                                "Collect Statistics: " + table.name(),
-                                typeInfo,
-                                new DataStatisticsOperatorFactory(table.schema()))
-                        .setParallelism(input.getParallelism());
+                uids.assign(
+                        input.transform(
+                                        "Collect Statistics: " + table.name(),
+                                        typeInfo,
+                                        new DataStatisticsOperatorFactory(table.schema()))
+                                .setParallelism(input.getParallelism()),
+                        COLLECT_STATISTICS_NAME);
 
         DataStream<StatisticsOrRecord> partitioned =
                 partition(
@@ -438,18 +451,20 @@ public class FlinkSinkBuilder {
                         new StatisticsOrRecordChannelComputer(table.schema()),
                         parallelism);
 
-        return partitioned
-                .flatMap(
-                        (org.apache.flink.api.common.functions.FlatMapFunction<
-                                        StatisticsOrRecord, InternalRow>)
-                                (statisticsOrRecord, out) -> {
-                                    if (statisticsOrRecord.isRecord()) {
-                                        out.collect(statisticsOrRecord.record());
-                                    }
-                                })
-                .name("Strip Statistics")
-                .setParallelism(parallelism != null ? parallelism : input.getParallelism())
-                .returns(input.getType());
+        return uids.assign(
+                partitioned
+                        .flatMap(
+                                (org.apache.flink.api.common.functions.FlatMapFunction<
+                                                StatisticsOrRecord, InternalRow>)
+                                        (statisticsOrRecord, out) -> {
+                                            if (statisticsOrRecord.isRecord()) {
+                                                out.collect(statisticsOrRecord.record());
+                                            }
+                                        })
+                        .name(STRIP_STATISTICS_NAME)
+                        .setParallelism(parallelism != null ? parallelism : input.getParallelism())
+                        .returns(input.getType()),
+                STRIP_STATISTICS_NAME);
     }
 
     private DataStream<RowData> trySortInput(DataStream<RowData> input) {
