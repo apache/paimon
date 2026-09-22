@@ -1983,6 +1983,34 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  test("Data Evolution: V1 update on a table with a CHAR column") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (id INT, c CHAR(3), b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        sql("INSERT INTO t VALUES (1, 'a', 10), (2, 'b', 20)")
+
+        // The untouched CHAR column must not be treated as an updated column: only `b` is
+        // written to the new column-group file.
+        sql("UPDATE t SET b = 0 WHERE id = 1")
+        checkAnswer(
+          sql("SELECT id, c, b FROM t ORDER BY id"),
+          Seq(Row(1, "a  ", 0), Row(2, "b  ", 20)))
+        checkAnswer(
+          sql("SELECT write_cols FROM `t$files` ORDER BY max_sequence_number DESC LIMIT 1"),
+          Seq(Row(Seq("b"))))
+
+        // The condition and an assignment value read the CHAR column, padded like a SELECT.
+        val (mergeRowsPlans, _) =
+          executeMergeIntoAndCollectPlans("UPDATE t SET b = length(c) WHERE c = 'b'")
+        assertSelfMergeShortcut(mergeRowsPlans)
+        checkAnswer(
+          sql("SELECT id, c, b FROM t ORDER BY id"),
+          Seq(Row(1, "a  ", 0), Row(2, "b  ", 3)))
+      }
+    }
+  }
+
   test("Data Evolution: V1 update with subquery condition keeps the source filter") {
     withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
       withTable("t", "s") {
