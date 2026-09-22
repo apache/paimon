@@ -121,7 +121,7 @@ object-store requests.
 
 # Native commit
 
-PyPaimon can submit append and overwrite commits through the optional
+PyPaimon can submit append and batch overwrite commits through the optional
 `pypaimon-rust` runtime. Enable it independently of native planning and reading:
 
 ```python
@@ -156,10 +156,10 @@ matches the whole table. Empty overwrite of an unpartitioned table truncates it.
 Static and unpartitioned overwrite record an OVERWRITE snapshot even when no
 files match, following Java; this also applies when the operation uses Python.
 
-Stream overwrite uses the same native bridge and retains the Python builder's
-commit user and each checkpoint's identifier.
+Overwrite is configured only through `BatchWriteBuilder`, following Java's
+batch/stream API split. `StreamWriteBuilder` does not expose overwrite.
 
-Native commits require a runtime containing the overwrite bridge in
+Native commits require a runtime containing the batch identity bridge in
 [paimon-rust #916](https://github.com/apache/paimon-rust/pull/916), built on
 [#915](https://github.com/apache/paimon-rust/pull/915). If the optional runtime is
 not installed, commits use Python. The current native route supports main-branch

@@ -90,7 +90,7 @@ class TableCommit:
                 if prepared is not None:
                     native, messages = prepared
                     # Keep publication failures outside the preparation fallback.
-                    native._overwrite(commit_identifier, messages, self.overwrite_partition)
+                    native.commit(messages)
                     return
             self.file_store_commit.overwrite(
                 overwrite_partition=self.overwrite_partition,
@@ -124,7 +124,8 @@ class TableCommit:
             if not native_messages_supported(self.table, messages):
                 return None
             if self._native_commit is None:
-                self._native_commit = create_native_commit(self.table, self.commit_user)
+                self._native_commit = create_native_commit(
+                    self.table, self.commit_user, self.overwrite_partition)
             if self._native_commit is None:
                 return None
             return self._native_commit, to_native_commit_messages(self.table, messages)
@@ -190,6 +191,9 @@ class StreamTableCommit(TableCommit):
     ``commit_identifier`` — analogous to
     :meth:`StreamTableWrite.prepare_commit`.
     """
+
+    def __init__(self, table, commit_user: str):
+        super().__init__(table, commit_user, None)
 
     def commit(
             self,

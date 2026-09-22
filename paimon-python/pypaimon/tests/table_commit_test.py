@@ -166,18 +166,9 @@ class TestTableCommit(unittest.TestCase):
             snapshot_properties={"source": "capture"},
         )
 
-    # -- StreamTableCommit overwrite should also reach overwrite() with empty messages --
-
-    def test_stream_commit_overwrite_empty_messages(self):
-        commit, mock_fsc = self._create_commit(StreamTableCommit, overwrite_partition={'dt': '2024-01-15'})
-
-        commit.commit([], commit_identifier=42)
-
-        mock_fsc.overwrite.assert_called_once_with(
-            overwrite_partition={'dt': '2024-01-15'},
-            commit_messages=[],
-            commit_identifier=42,
-        )
+    def test_stream_commit_does_not_accept_overwrite_configuration(self):
+        with self.assertRaises(TypeError):
+            StreamTableCommit(Mock(), 'job', {'dt': '2024-01-15'})
 
     def test_stream_commit_forwards_snapshot_properties(self):
         commit, mock_fsc = self._create_commit(

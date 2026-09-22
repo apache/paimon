@@ -45,7 +45,7 @@ def native_messages_supported(table, messages) -> bool:
     return True
 
 
-def create_native_commit(table, commit_user):
+def create_native_commit(table, commit_user, overwrite_partition=None):
     """Return a native committer only when its publication protocol matches Python."""
     from pypaimon.catalog.catalog_environment import CatalogEnvironment
     from pypaimon.filesystem.local_file_io import LocalFileIO
@@ -77,12 +77,18 @@ def create_native_commit(table, commit_user):
     # Python accepts boolean spellings such as "off"; pass the parsed value.
     options['dynamic-partition-overwrite'] = _option_value_to_string(
         table.options.dynamic_partition_overwrite())
+    options['snapshot.ignore-empty-commit'] = _option_value_to_string(
+        table.options.snapshot_ignore_empty_commit())
     native_table = NativeTable.from_resolved_schema(
         table.table_path, JSON.to_json(table.table_schema.copy(new_options=options)),
         database=table.identifier.get_database_name(),
         table=table.identifier.get_table_name(),
         options=file_io_options)
-    # All commits use the stream committer with the Python writer's identity;
+    if overwrite_partition is not None:
+        return (native_table.new_batch_write_builder()
+                ._with_commit_user(commit_user)
+                .with_overwrite(overwrite_partition).new_commit())
+    # Append commits use the stream committer with the Python writer's identity;
     # Python enforces each mode's lifecycle and empty-commit rules.
     return native_table.new_stream_write_builder().with_commit_user(commit_user).new_commit()
 
