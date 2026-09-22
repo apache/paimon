@@ -24,8 +24,10 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -37,6 +39,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.MutableObjectIterator;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -60,6 +63,28 @@ public class SorterTest {
     @ValueSource(strings = {"hilbert", "zorder", "order"})
     public void testSorter(String curve) throws Exception {
         innerTest(curve);
+    }
+
+    @Test
+    public void testCloseKeepsCallerOwnedIOManagerOpenAndClosesReader() throws Exception {
+        FileStoreTable table = createTable(new HashMap<>(), "order");
+        TrackingIOManager ioManager = new TrackingIOManager(ioTempDir.toString());
+        TrackingRecordReader reader = new TrackingRecordReader();
+        Sorter sorter =
+                Sorter.getSorter(
+                        new RecordReaderIterator<>(reader),
+                        ioManager,
+                        table.rowType(),
+                        table.coreOptions());
+
+        try {
+            sorter.close();
+
+            assertThat(ioManager.closed).isFalse();
+            assertThat(reader.closed).isTrue();
+        } finally {
+            ioManager.close();
+        }
     }
 
     private void innerTest(String curve) throws Exception {
@@ -137,5 +162,35 @@ public class SorterTest {
                 LocalFileIO.create(),
                 new Path(tableTempDir.toString()),
                 schemaManager.createTable(schema));
+    }
+
+    private static class TrackingIOManager extends IOManagerImpl {
+
+        private boolean closed;
+
+        private TrackingIOManager(String tempDir) {
+            super(tempDir);
+        }
+
+        @Override
+        public void close() throws Exception {
+            closed = true;
+            super.close();
+        }
+    }
+
+    private static class TrackingRecordReader implements RecordReader<InternalRow> {
+
+        private boolean closed;
+
+        @Override
+        public RecordIterator<InternalRow> readBatch() {
+            return null;
+        }
+
+        @Override
+        public void close() {
+            closed = true;
+        }
     }
 }
