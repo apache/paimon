@@ -390,6 +390,9 @@ class BatchTableWrite(TableWrite):
 
 class StreamTableWrite(TableWrite):
 
+    def __init__(self, table, commit_user):
+        super().__init__(table, commit_user, None)
+
     def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
         messages = self._prepare_commit(commit_identifier)
         self._release_prepared_indexes()

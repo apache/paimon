@@ -33,11 +33,6 @@ class WriteBuilder(ABC):
 
         self.table: FileStoreTable = table
         self.commit_user = self._create_commit_user()
-        self.static_partition = None
-
-    def overwrite(self, static_partition: Optional[dict] = None):
-        self.static_partition = static_partition if static_partition is not None else {}
-        return self
 
     def new_write(self) -> TableWrite:
         """Returns a table write."""
@@ -58,6 +53,14 @@ class WriteBuilder(ABC):
 
 class BatchWriteBuilder(WriteBuilder):
 
+    def __init__(self, table):
+        super().__init__(table)
+        self.static_partition = None
+
+    def overwrite(self, static_partition: Optional[dict] = None):
+        self.static_partition = static_partition if static_partition is not None else {}
+        return self
+
     def new_write(self) -> BatchTableWrite:
         return BatchTableWrite(self.table, self.commit_user, self.static_partition)
 
@@ -72,11 +75,11 @@ class BatchWriteBuilder(WriteBuilder):
 class StreamWriteBuilder(WriteBuilder):
 
     def new_write(self) -> StreamTableWrite:
-        return StreamTableWrite(self.table, self.commit_user, self.static_partition)
+        return StreamTableWrite(self.table, self.commit_user)
 
     def new_update(self) -> StreamTableUpdate:
         return StreamTableUpdate(self.table, self.commit_user)
 
     def new_commit(self) -> StreamTableCommit:
-        commit = StreamTableCommit(self.table, self.commit_user, self.static_partition)
+        commit = StreamTableCommit(self.table, self.commit_user)
         return commit

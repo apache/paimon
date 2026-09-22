@@ -172,14 +172,11 @@ class RaySinkTest(unittest.TestCase):
         finally:
             batch_write.close()
 
-        stream_write = (
-            self.table
-            .new_stream_write_builder()
-            .overwrite({'dt': '2024-01-01'})
-            .new_write()
-        )
+        stream_builder = self.table.new_stream_write_builder()
+        self.assertFalse(hasattr(stream_builder, 'overwrite'))
+        stream_write = stream_builder.new_write()
         try:
-            self.assertEqual(stream_write.static_partition, {'dt': '2024-01-01'})
+            self.assertIsNone(stream_write.static_partition)
         finally:
             stream_write.close()
 

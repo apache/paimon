@@ -121,8 +121,8 @@ object-store requests.
 
 # Native commit
 
-PyPaimon can submit append commits through the optional `pypaimon-rust`
-runtime. Enable it independently of native planning and reading:
+PyPaimon can submit append and batch overwrite commits through the optional
+`pypaimon-rust` runtime. Enable it independently of native planning and reading:
 
 ```python
 native_table = table.copy({"commit.native.enabled": "true"})
@@ -142,16 +142,34 @@ and stream append commits retain the Python builder's commit user, identifier,
 empty-commit option, and batch one-shot lifecycle. Explicit abort also supports
 native cleanup of uncommitted files.
 
-This requires a runtime containing the commit bindings merged in
-[paimon-rust #912](https://github.com/apache/paimon-rust/pull/912). Older or missing
-runtimes automatically use Python. The current native route supports main-branch
+For batch overwrite, configure the Python builder as usual:
+
+```python
+builder = native_table.new_batch_write_builder().overwrite({"pt": "2026-09-22"})
+```
+
+Overwrite preserves the Python commit user and follows the table's
+`dynamic-partition-overwrite` option. Dynamic overwrite replaces only partitions
+present in the messages and does nothing for empty input. Static overwrite
+replaces partitions matching the spec, including for empty input; an empty spec
+matches the whole table. Empty overwrite of an unpartitioned table truncates it.
+Static and unpartitioned overwrite record an OVERWRITE snapshot even when no
+files match, following Java; this also applies when the operation uses Python.
+
+Overwrite is configured only through `BatchWriteBuilder`, following Java's
+batch/stream API split. `StreamWriteBuilder` does not expose overwrite.
+
+Native commits require a runtime containing the batch identity bridge in
+[paimon-rust #916](https://github.com/apache/paimon-rust/pull/916), built on
+[#915](https://github.com/apache/paimon-rust/pull/915). If the optional runtime is
+not installed, commits use Python. The current native route supports main-branch
 tables using filesystem/JDBC catalogs or `FileStoreTable.from_path()` with
-standard FileIO. Overwrite, truncate, REST/catalog-managed publication, custom
+standard FileIO. Truncate, REST/catalog-managed publication, custom
 FileIO/environments, commit callbacks, and snapshot properties use Python.
 Data-evolution updates that need Python's row-id conflict rewriting also retain
 the Python path. Compact increments remain unsupported by both committers.
 
-Fallback is limited to capability checks, table construction and message
+Fallback is limited to runtime availability, table construction and message
 conversion before a native mutation starts. A native commit error propagates;
 the adapter neither retries it through Python nor aborts files, since the
 snapshot may already have been published. The option is disabled by default.
