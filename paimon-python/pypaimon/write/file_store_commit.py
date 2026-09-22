@@ -53,13 +53,54 @@ from pypaimon.write.commit_message import CommitMessage
 logger = logging.getLogger(__name__)
 
 
+def _row_id_check_from_messages(messages: List[CommitMessage]) -> Optional[int]:
+    """Validate the message baseline using Java FileStoreCommitImpl's rules."""
+    check_from_snapshot = None
+    for message in messages:
+        snapshot = message.check_from_snapshot
+        if snapshot is None:
+            continue
+        if snapshot < 0:
+            raise ValueError('Invalid row-id check snapshot: %s' % snapshot)
+        if check_from_snapshot is not None and check_from_snapshot != snapshot:
+            raise ValueError(
+                'Commit messages have different row-id check snapshots: %s and %s'
+                % (check_from_snapshot, snapshot))
+        check_from_snapshot = snapshot
+    if check_from_snapshot is not None:
+        for message in messages:
+            if message.check_from_snapshot is not None:
+                continue
+            if any(file.first_row_id is not None
+                   for file in message.new_files + message.deleted_files):
+                raise ValueError(
+                    'A row-id commit message is missing its check-from snapshot.')
+    return check_from_snapshot
+
+
+def _reject_compact_increment(messages: List[CommitMessage]):
+    # Java commits this increment as a separate COMPACT snapshot.
+    for message in messages:
+        if (message.compact_before or message.compact_after or
+                message.compact_changelog_files or
+                message.compact_index_adds or message.compact_index_deletes):
+            raise NotImplementedError(
+                'Committing a compact increment requires a separate COMPACT snapshot.')
+
+
 def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
     """Delete files created by messages known to be uncommitted."""
     for message in commit_messages:
-        for file in list(message.new_files) + list(message.changelog_files):
+        for file in (list(message.new_files) + list(message.changelog_files)
+                     + list(message.compact_after)
+                     + list(message.compact_changelog_files)):
             path = None
             try:
                 path = file.external_path or file.file_path
+                if not path:
+                    bucket_path = table.path_factory().bucket_path(
+                        tuple(message.partition), message.bucket)
+                    path = '%s/%s' % (bucket_path.rstrip('/'), file.file_name)
                 if path:
                     table.file_io.delete_quietly(str(path))
             except Exception as error:
@@ -68,7 +109,7 @@ def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
                     path,
                     error,
                 )
-        for entry in message.index_adds:
+        for entry in message.index_adds + message.compact_index_adds:
             file_name = None
             try:
                 index_file = entry.index_file
@@ -197,11 +238,10 @@ class FileStoreCommit:
         if not commit_messages and ignore_empty_commit:
             return
 
-        # Extract the minimum check_from_snapshot from commit messages
-        valid_snapshots = [msg.check_from_snapshot for msg in commit_messages
-                           if msg.check_from_snapshot != -1]
-        if valid_snapshots:
-            self.conflict_detection._row_id_check_from_snapshot = min(valid_snapshots)
+        _reject_compact_increment(commit_messages)
+        check_from_snapshot = _row_id_check_from_messages(commit_messages)
+        # A committer can be reused; an untagged commit clears the prior baseline.
+        self.conflict_detection._row_id_check_from_snapshot = check_from_snapshot
 
         logger.info(
             "Ready to commit to table %s, number of commit messages: %d",
@@ -226,7 +266,7 @@ class FileStoreCommit:
             updated_cols = set()
             written_partitions = set()
             for msg in commit_messages:
-                if msg.check_from_snapshot == -1:
+                if msg.check_from_snapshot is None:
                     continue
                 for f in msg.new_files:
                     write_cols = self.table.table_schema.partial_file_write_cols(
@@ -282,6 +322,9 @@ class FileStoreCommit:
             commit_identifier: int,
             snapshot_properties: Optional[Dict[str, str]] = None):
         """Commit the given commit messages in overwrite mode."""
+        _reject_compact_increment(commit_messages)
+        self.conflict_detection._row_id_check_from_snapshot = (
+            _row_id_check_from_messages(commit_messages))
         logger.info(
             "Ready to overwrite to table %s, number of commit messages: %d",
             self.table.identifier,
