@@ -21,8 +21,8 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.Snapshot.{CommitKind, Operation}
 import org.apache.paimon.errors.ErrorMessages
 import org.apache.paimon.globalindex.IndexedSplit
+import org.apache.paimon.spark.{PaimonSparkTestBase, SparkCatalog}
 import org.apache.paimon.spark.PaimonMetrics.RESULTED_TABLE_FILES
-import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.commands.{DataEvolutionPaimonWriter, DataEvolutionRowIdConflictCommitter, PaimonSparkWriter}
 import org.apache.paimon.spark.read.PaimonSplitScan
@@ -1558,6 +1558,161 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       checkAnswer(
         sql("SELECT id, b, dt FROM target ORDER BY id"),
         Seq(Row(1, 11, "p1"), Row(2, 20, "p2")))
+    }
+  }
+
+  test("Data Evolution: self-merge falls back for a same-named table in another catalog") {
+    withSecondCatalog("paimon2", Utils.createTempDir.getCanonicalPath) {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE paimon.test.t (id INT, v INT, w INT) TBLPROPERTIES (
+              |  'row-tracking.enabled' = 'true',
+              |  'data-evolution.enabled' = 'true')
+              |""".stripMargin)
+        sql("INSERT INTO paimon.test.t VALUES (1, 10, 1), (2, 20, 2), (3, 30, 3)")
+        sql("""
+              |CREATE TABLE paimon2.test.t (id INT, v INT, w INT) TBLPROPERTIES (
+              |  'row-tracking.enabled' = 'true',
+              |  'data-evolution.enabled' = 'true')
+              |""".stripMargin)
+        sql("INSERT INTO paimon2.test.t VALUES (1, 100, 9), (2, 200, 9), (3, 300, 9)")
+
+        // Same `database.table` name, different table: the source must be scanned and joined,
+        // its columns must not be rewritten to the target's own.
+        val (mergeRowsPlans, _) =
+          executeMergeIntoAndCollectPlans("""
+                                            |MERGE INTO paimon.test.t AS t
+                                            |USING paimon2.test.t AS s
+                                            |ON t._ROW_ID = s._ROW_ID
+                                            |WHEN MATCHED AND s.v > 100 THEN UPDATE SET v = s.v
+                                            |""".stripMargin)
+        assert(
+          mergeRowsPlans.exists(_.collectFirst { case _: Join => true }.nonEmpty),
+          s"Expected general MERGE plan with Join, but got: ${mergeRowsPlans.mkString("\n")}"
+        )
+        checkAnswer(
+          sql("SELECT id, v, w FROM paimon.test.t ORDER BY id"),
+          Seq(Row(1, 10, 1), Row(2, 200, 2), Row(3, 300, 3)))
+        checkAnswer(
+          sql("SELECT id, v, w FROM paimon2.test.t ORDER BY id"),
+          Seq(Row(1, 100, 9), Row(2, 200, 9), Row(3, 300, 9)))
+
+        // NOT MATCHED against the other catalog's table inserts, it does not hit the self-merge
+        // assertion that rejects NOT MATCHED actions.
+        sql("INSERT INTO paimon2.test.t VALUES (4, 400, 9)")
+        sql("""
+              |MERGE INTO paimon.test.t AS t
+              |USING paimon2.test.t AS s
+              |ON t._ROW_ID = s._ROW_ID
+              |WHEN MATCHED THEN UPDATE SET w = s.w
+              |WHEN NOT MATCHED THEN INSERT (id, v, w) VALUES (s.id, s.v, s.w)
+              |""".stripMargin)
+        checkAnswer(
+          sql("SELECT id, v, w FROM paimon.test.t ORDER BY id"),
+          Seq(Row(1, 10, 9), Row(2, 200, 9), Row(3, 300, 9), Row(4, 400, 9)))
+      }
+    }
+  }
+
+  test("Data Evolution: self-merge shortcut applies to the same table through another catalog") {
+    withSecondCatalog("paimon_alias", tempDBDir.getCanonicalPath) {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE paimon.test.t (id INT, v INT) TBLPROPERTIES (
+              |  'row-tracking.enabled' = 'true',
+              |  'data-evolution.enabled' = 'true')
+              |""".stripMargin)
+        sql("INSERT INTO paimon.test.t VALUES (1, 10), (2, 20)")
+
+        // Both names resolve to the same storage location and branch, so this is a self-merge.
+        val (mergeRowsPlans, _) =
+          executeMergeIntoAndCollectPlans("""
+                                            |MERGE INTO paimon.test.t AS t
+                                            |USING paimon_alias.test.t AS s
+                                            |ON t._ROW_ID = s._ROW_ID
+                                            |WHEN MATCHED THEN UPDATE SET v = s.v + 1
+                                            |""".stripMargin)
+        assertSelfMergeShortcut(mergeRowsPlans)
+        checkAnswer(sql("SELECT id, v FROM paimon.test.t ORDER BY id"), Seq(Row(1, 11), Row(2, 21)))
+      }
+    }
+  }
+
+  test("Data Evolution: self-merge falls back for another branch of the same table") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, v INT) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 10), (2, 20)")
+      sql("CALL sys.create_tag(table => 'test.t', tag => 'base')")
+      sql("CALL sys.create_branch(table => 'test.t', branch => 'b1', tag => 'base')")
+      // The branch shares the row ids of the tag but carries its own values.
+      sql("UPDATE `t$branch_b1` SET v = v + 100")
+      checkAnswer(sql("SELECT id, v FROM `t$branch_b1` ORDER BY id"), Seq(Row(1, 110), Row(2, 120)))
+
+      val (mergeRowsPlans, _) =
+        executeMergeIntoAndCollectPlans("""
+                                          |MERGE INTO t
+                                          |USING `t$branch_b1` AS s
+                                          |ON t._ROW_ID = s._ROW_ID
+                                          |WHEN MATCHED THEN UPDATE SET v = s.v
+                                          |""".stripMargin)
+      assert(
+        mergeRowsPlans.exists(_.collectFirst { case _: Join => true }.nonEmpty),
+        s"Expected general MERGE plan with Join, but got: ${mergeRowsPlans.mkString("\n")}"
+      )
+      checkAnswer(sql("SELECT id, v FROM t ORDER BY id"), Seq(Row(1, 110), Row(2, 120)))
+    }
+  }
+
+  test("Data Evolution: self-merge falls back for a same-named table in another database") {
+    withDatabase("test2") {
+      sql("CREATE DATABASE test2")
+      withTable("t", "test2.t") {
+        sql("""
+              |CREATE TABLE t (id INT, v INT) TBLPROPERTIES (
+              |  'row-tracking.enabled' = 'true',
+              |  'data-evolution.enabled' = 'true')
+              |""".stripMargin)
+        sql("INSERT INTO t VALUES (1, 10), (2, 20)")
+        sql("""
+              |CREATE TABLE test2.t (id INT, v INT) TBLPROPERTIES (
+              |  'row-tracking.enabled' = 'true',
+              |  'data-evolution.enabled' = 'true')
+              |""".stripMargin)
+        sql("INSERT INTO test2.t VALUES (1, 100), (2, 200)")
+
+        val (mergeRowsPlans, _) =
+          executeMergeIntoAndCollectPlans("""
+                                            |MERGE INTO t
+                                            |USING test2.t AS s
+                                            |ON t._ROW_ID = s._ROW_ID
+                                            |WHEN MATCHED THEN UPDATE SET v = s.v
+                                            |""".stripMargin)
+        assert(
+          mergeRowsPlans.exists(_.collectFirst { case _: Join => true }.nonEmpty),
+          s"Expected general MERGE plan with Join, but got: ${mergeRowsPlans.mkString("\n")}"
+        )
+        checkAnswer(sql("SELECT id, v FROM t ORDER BY id"), Seq(Row(1, 100), Row(2, 200)))
+      }
+    }
+  }
+
+  private def withSecondCatalog(name: String, warehouse: String)(f: => Unit): Unit = {
+    spark.conf.set(s"spark.sql.catalog.$name", classOf[SparkCatalog].getName)
+    spark.conf.set(s"spark.sql.catalog.$name.warehouse", warehouse)
+    sql(s"CREATE DATABASE IF NOT EXISTS $name.test")
+    try {
+      f
+    } finally {
+      sql(s"DROP TABLE IF EXISTS $name.test.t")
+      if (warehouse != tempDBDir.getCanonicalPath) {
+        sql(s"DROP DATABASE IF EXISTS $name.test CASCADE")
+      }
+      spark.conf.unset(s"spark.sql.catalog.$name.warehouse")
+      spark.conf.unset(s"spark.sql.catalog.$name")
     }
   }
 
