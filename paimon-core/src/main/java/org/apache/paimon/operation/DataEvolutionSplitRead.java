@@ -836,11 +836,11 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     /**
      * Evaluates each applicable file index once for the winning fields of a merged row-id group.
      *
-     * <p>Only normal data files are considered. Blob and vector-store files can cover only a
-     * subset of the group range, so their indexes cannot prove that the whole group has no match.
-     * Files are visited newest first; {@code claimedFieldIds} prevents an older copy of an
-     * overwritten field from vetoing the group. The returned results are retained so a later
-     * deletion-vector pass can intersect them without reopening file-index sidecars.
+     * <p>Only normal data files are considered. Blob and vector-store files can cover only a subset
+     * of the group range, so their indexes cannot prove that the whole group has no match. Files
+     * are visited newest first; {@code claimedFieldIds} prevents an older copy of an overwritten
+     * field from vetoing the group. The returned results are retained so a later deletion-vector
+     * pass can intersect them without reopening file-index sidecars.
      */
     private List<FileIndexResultEntry> evaluateFileIndexes(
             @Nullable List<Predicate> filters,
@@ -877,14 +877,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
             FileIndexResult result =
                     FileIndexEvaluator.evaluate(
-                            fileIO,
-                            dataSchema,
-                            dataFilters,
-                            null,
-                            null,
-                            pathFactory,
-                            file,
-                            null);
+                            fileIO, dataSchema, dataFilters, null, null, pathFactory, file, null);
             results.add(new FileIndexResultEntry(file, result));
             if (!result.remain()) {
                 return results;
@@ -908,8 +901,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         DeletionVector dv = deletionVector.deletionVector;
         for (FileIndexResultEntry entry : fileIndexResults) {
             long fileOffset =
-                    deletionVectorOffset(
-                            entry.file.nonNullRowIdRange(), rowRanges, deletionVector);
+                    deletionVectorOffset(entry.file.nonNullRowIdRange(), rowRanges, deletionVector);
             FileIndexResult result =
                     FileIndexEvaluator.intersectDeletionVector(
                             entry.result, entry.file, dv, fileOffset);

@@ -131,13 +131,13 @@ public class FileIndexEvaluator {
      * vector.
      *
      * <p>The file index uses positions local to {@code file}, while a deletion vector may use
-     * positions relative to the merged group's anchor range. {@code fileOffset} converts the
-     * latter to the former. Keeping this operation separate from {@link #evaluate} allows callers
-     * to reuse an index result instead of reading the file-index sidecar a second time.
+     * positions relative to the merged group's anchor range. {@code fileOffset} converts the latter
+     * to the former. Keeping this operation separate from {@link #evaluate} allows callers to reuse
+     * an index result instead of reading the file-index sidecar a second time.
      *
      * <p>Only bitmap index results can be narrowed to a subset of live rows. A non-bitmap result
-     * remains conservative, except that an empty live-row selection always proves that the file
-     * can be skipped.
+     * remains conservative, except that an empty live-row selection always proves that the file can
+     * be skipped.
      */
     public static FileIndexResult intersectDeletionVector(
             FileIndexResult result,
