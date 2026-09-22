@@ -168,6 +168,16 @@ class TableRead:
         self._predicate_extra_fields = self._predicate_fields_outside_read_type()
         self._scan_read_type = self.read_type + self._predicate_extra_fields
         self._output_column_names = [f.name for f in self.read_type]
+        # Output positions in ``read_type``, not ``_scan_read_type``. Predicate
+        # extras are appended for the inner scan and projected away before
+        # ``_serialize_blob_view_row_tuple``; prepending them would make these
+        # indices rewrite the wrong columns.
+        blob_view_fields = self.table.options.blob_view_fields()
+        self._blob_view_output_indices = tuple(
+            i for i, field in enumerate(self.read_type)
+            if field.name in blob_view_fields
+        )
+        self._blob_as_descriptor = bool(self.table.options.blob_as_descriptor())
         self._deferred_blob_fields = (
             deferred_blob_field_names(
                 self.table,
@@ -813,6 +823,8 @@ class TableRead:
                             continue
                         if remaining is not None and batch.num_rows > remaining:
                             batch = batch.slice(0, remaining)
+                        batch = self._serialize_blob_views_as_descriptors(
+                            batch, reader)
                         batch = self._project_batch_to_output(batch)
                         if self.include_row_kind:
                             if "_row_kind" not in batch.schema.names:
@@ -833,7 +845,8 @@ class TableRead:
                         for row in iter(row_iterator.next, None):
                             if not isinstance(row, OffsetRow):
                                 raise TypeError(f"Expected OffsetRow, but got {type(row).__name__}")
-                            row_tuple_chunk.append(row.row_tuple[row.offset: row.offset + row.arity])
+                            row_tuple_chunk.append(
+                                self._serialize_blob_view_row_tuple(row, reader))
                             if self.include_row_kind:
                                 row_kind_chunk.append(row.get_row_kind().to_string())
 
@@ -1045,6 +1058,8 @@ class TableRead:
                         break
                     if allowed < batch.num_rows:
                         batch = batch.slice(0, allowed)
+                    batch = self._serialize_blob_views_as_descriptors(
+                        batch, reader)
                     batch = self._project_batch_to_output(batch)
                     if self.include_row_kind:
                         if "_row_kind" not in batch.schema.names:
@@ -1068,7 +1083,7 @@ class TableRead:
                             stop = True
                             break
                         row_tuple_chunk.append(
-                            row.row_tuple[row.offset: row.offset + row.arity])
+                            self._serialize_blob_view_row_tuple(row, reader))
                         if self.include_row_kind:
                             row_kind_chunk.append(row.get_row_kind().to_string())
 
@@ -1529,6 +1544,40 @@ class TableRead:
                     effective_read_type if outer_extract_name_paths else None),
                 limit=effective_limit,
             )
+
+    def _serialize_blob_views_as_descriptors(self, batch: pyarrow.RecordBatch, reader) -> pyarrow.RecordBatch:
+        if not self._blob_as_descriptor or not self._blob_view_output_indices:
+            return batch
+        lookup = getattr(reader, 'blob_view_lookup', None)
+        if lookup is None:
+            return batch
+        for index in self._blob_view_output_indices:
+            field_name = self.read_type[index].name
+            if field_name not in batch.schema.names:
+                continue
+            converted = [
+                lookup.serialize_view_field_value(value)
+                for value in batch.column(field_name).to_pylist()
+            ]
+            column_idx = batch.schema.names.index(field_name)
+            batch = batch.set_column(
+                column_idx,
+                pyarrow.field(field_name, pyarrow.large_binary(), nullable=True),
+                pyarrow.array(converted, type=pyarrow.large_binary()),
+            )
+        return batch
+
+    def _serialize_blob_view_row_tuple(self, row: OffsetRow, reader) -> tuple:
+        values = row.row_tuple[row.offset: row.offset + row.arity]
+        if not self._blob_as_descriptor or not self._blob_view_output_indices:
+            return values
+        lookup = getattr(reader, 'blob_view_lookup', None)
+        if lookup is None:
+            return values
+        converted = list(values)
+        for index in self._blob_view_output_indices:
+            converted[index] = lookup.serialize_view_field_value(converted[index])
+        return tuple(converted)
 
     def _project_batch_to_output(self, batch: pyarrow.RecordBatch) -> pyarrow.RecordBatch:
         if not self._needs_output_projection():

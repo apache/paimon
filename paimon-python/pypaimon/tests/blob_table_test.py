@@ -5593,6 +5593,236 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             self.assertEqual(
                 result.column('picture').to_pylist(), [b'raw-payload-9'])
 
+    def test_blob_view_as_descriptor_get_blob_uses_upstream_file_io(self):
+        """blob-as-descriptor=true still must read source .blob with source FileIO.
+
+        Stage 1 retains each BlobViewStruct so get_blob().to_data() can select
+        the source table token instead of falling back to the target table token.
+        """
+        from pypaimon import Schema
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.table.row.blob import BlobViewStruct
+
+        class GuardedFileIO:
+            def __init__(self, wrapped, forbidden_uris):
+                self._wrapped = wrapped
+                self._forbidden_uris = forbidden_uris
+                self.forbidden_reads = []
+
+            def new_input_stream(self, path):
+                path = str(path)
+                if path in self._forbidden_uris:
+                    self.forbidden_reads.append(path)
+                    raise AssertionError(
+                        "Downstream file_io must not read upstream blob {}.".format(path)
+                    )
+                return self._wrapped.new_input_stream(path)
+
+            def __getattr__(self, name):
+                return getattr(self._wrapped, name)
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table(
+            'test_db.blob_view_desc_guard_source', source, False)
+        source_table = self.catalog.get_table(
+            'test_db.blob_view_desc_guard_source')
+        payloads = [b'desc-guard-source-0', b'desc-guard-source-1']
+
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'picture': payloads,
+        }, schema=source_schema))
+        source_commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(source_commit_messages)
+        writer.close()
+
+        source_blob_paths = {
+            str(f.file_path)
+            for msg in source_commit_messages
+            for f in msg.new_files
+            if f.file_name.endswith('.blob')
+        }
+        self.assertGreater(len(source_blob_paths), 0)
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields
+            if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct(
+                'test_db.blob_view_desc_guard_source', picture_field_id, 0
+            ).serialize(),
+            BlobViewStruct(
+                'test_db.blob_view_desc_guard_source', picture_field_id, 1
+            ).serialize(),
+        ]
+
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table(
+            'test_db.blob_view_desc_guard_target', target, False)
+        target_table = self.catalog.get_table(
+            'test_db.blob_view_desc_guard_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': [10, 11],
+            'picture': view_values,
+        }, schema=target_schema))
+        target_write_builder.new_commit().commit(
+            target_writer.prepare_commit())
+        target_writer.close()
+
+        descriptor_table = target_table.copy({
+            CoreOptions.BLOB_AS_DESCRIPTOR.key(): 'true'
+        })
+        original_file_io = descriptor_table.file_io
+        guarded_file_io = GuardedFileIO(original_file_io, source_blob_paths)
+        descriptor_table.file_io = guarded_file_io
+        try:
+            read_builder = descriptor_table.new_read_builder()
+            data = []
+            for row in read_builder.new_read().to_iterator(
+                    read_builder.new_scan().plan().splits()):
+                data.append(row.get_blob(1).to_data())
+        finally:
+            descriptor_table.file_io = original_file_io
+
+        self.assertEqual(sorted(data), sorted(payloads))
+        self.assertEqual(guarded_file_io.forbidden_reads, [])
+
+    def test_blob_view_as_descriptor_projection_with_predicate_extra_field(self):
+        """Arrow serialize uses read_type positions, not the widened scan type.
+
+        Projection puts picture first and drops grp; the filter still needs
+        grp internally. _blob_view_output_indices must be (0,) — picture in
+        the output schema — so a later change that indexes _scan_read_type
+        or the table field order cannot silently rewrite the wrong column.
+        """
+        from pypaimon import Schema
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table(
+            'test_db.blob_view_proj_pred_source', source, False)
+        source_table = self.catalog.get_table(
+            'test_db.blob_view_proj_pred_source')
+        payloads = [b'proj-pred-source-1', b'proj-pred-source-2']
+
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'picture': payloads,
+        }, schema=source_schema))
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields
+            if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct(
+                'test_db.blob_view_proj_pred_source', picture_field_id, 0
+            ).serialize(),
+            BlobViewStruct(
+                'test_db.blob_view_proj_pred_source', picture_field_id, 1
+            ).serialize(),
+        ]
+
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('grp', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table(
+            'test_db.blob_view_proj_pred_target', target, False)
+        target_table = self.catalog.get_table(
+            'test_db.blob_view_proj_pred_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': [10, 11],
+            'grp': [1, 2],
+            'picture': view_values,
+        }, schema=target_schema))
+        target_write_builder.new_commit().commit(
+            target_writer.prepare_commit())
+        target_writer.close()
+
+        descriptor_table = target_table.copy({
+            CoreOptions.BLOB_AS_DESCRIPTOR.key(): 'true'
+        })
+        predicate = descriptor_table.new_read_builder().new_predicate_builder().equal(
+            'grp', 2)
+        read_builder = descriptor_table.new_read_builder().with_projection(
+            ['picture', 'id']).with_filter(predicate)
+        table_read = read_builder.new_read()
+
+        self.assertEqual(
+            [field.name for field in table_read.read_type],
+            ['picture', 'id'])
+        self.assertEqual(
+            [field.name for field in table_read._scan_read_type],
+            ['picture', 'id', 'grp'])
+        self.assertEqual(table_read._blob_view_output_indices, (0,))
+        self.assertTrue(table_read._blob_as_descriptor)
+
+        result = table_read.to_arrow(read_builder.new_scan().plan().splits())
+        self.assertEqual(list(result.column_names), ['picture', 'id'])
+        self.assertEqual(result.num_rows, 1)
+        self.assertEqual(result.column('id').to_pylist(), [11])
+        picture_bytes = result.column('picture').to_pylist()[0]
+        self.assertTrue(
+            BlobDescriptor.is_blob_descriptor(picture_bytes),
+            "Projected view column must be descriptor bytes, not BlobViewStruct",
+        )
+        self.assertFalse(BlobViewStruct.is_blob_view_struct(picture_bytes))
+
 
 class GetBlobTest(unittest.TestCase):
 
