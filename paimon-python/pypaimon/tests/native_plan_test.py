@@ -763,6 +763,80 @@ class NativePlanTest(unittest.TestCase):
         with self.assertRaises(PermissionError):
             _restore_python_partition_paths(table, [split])
 
+    def test_rest_catalog_retains_response_for_native_reads(self):
+        from pypaimon.api.api_response import GetTableResponse
+        from pypaimon.catalog.rest.rest_catalog import RESTCatalog
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.schema.schema import Schema
+
+        catalog = RESTCatalog.__new__(RESTCatalog)
+        catalog.context = CatalogContext.create_from_options(Options({'warehouse': 'test'}))
+        catalog.create = Mock()
+        identifier = Identifier.create('db', 't')
+        response = GetTableResponse(
+            'uuid', 't', '/warehouse/t', True, 3,
+            Schema(fields=[DataField(4, 'id', AtomicType('INT'))]))
+        metadata = catalog.to_table_metadata('db', response)
+        catalog.load_table(identifier, Mock(), Mock(), lambda _: metadata)
+        environment = catalog.create.call_args[0][3]
+        saved = json.loads(environment.rest_table_response)
+        self.assertEqual(saved['id'], 'uuid')
+        self.assertTrue(saved['isExternal'])
+        self.assertEqual(saved['schemaId'], 3)
+        self.assertEqual(saved['schema']['fields'][0]['id'], 4)
+
+    def test_rest_response_requires_native_support_and_matching_path(self):
+        from pypaimon.catalog.catalog_environment import CatalogEnvironment
+        from pypaimon.read.native_plan import _resolved_rest_table_response
+
+        table = Mock(table_path='/warehouse/t')
+        loader = RESTCatalogLoader(CatalogContext.create_from_options(Options({})))
+        table.catalog_environment = CatalogEnvironment(
+            catalog_loader=loader, rest_table_response='{"path": "/warehouse/t"}')
+        with patch('pypaimon.read.native_plan.native_method_available', return_value=False):
+            self.assertIsNone(_resolved_rest_table_response(table))
+        with patch('pypaimon.read.native_plan.native_method_available', return_value=True):
+            table.table_path = '/another/table'
+            self.assertIsNone(_resolved_rest_table_response(table))
+            table.table_path = '/warehouse/t'
+            table.catalog_environment.rest_table_response = None
+            self.assertIsNone(_resolved_rest_table_response(table))
+
+    def test_rest_native_builder_reuses_loaded_metadata(self):
+        from pypaimon.catalog.catalog_environment import CatalogEnvironment
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.read.native_plan import _native_read_builder
+
+        response = json.dumps({'path': '/warehouse/t', 'id': 'uuid', 'isExternal': False})
+        loader = RESTCatalogLoader(CatalogContext.create_from_options(Options({
+            'uri': 'http://localhost:1', 'warehouse': 'test', 'data-token.enabled': 'true'})))
+        table = Mock()
+        table.identifier = Identifier.create('db', 't')
+        table.table_path = '/warehouse/t'
+        table.current_branch.return_value = 'dev'
+        table.catalog_environment = CatalogEnvironment(
+            identifier=table.identifier, uuid='uuid', catalog_loader=loader,
+            supports_version_management=True, rest_table_response=response)
+        self.assertEqual(table.catalog_environment.copy(table.identifier).rest_table_response, response)
+        resolved = '{"id": 2, "options": {"blob-as-descriptor": "true"}}'
+        native_table = Mock()
+        native_table.copy_with_resolved_schema.return_value = native_table
+        native_table.branch.return_value = 'dev'
+        fake_df = ModuleType('pypaimon_rust.datafusion')
+        fake_df.Table = Mock()
+        fake_df.Table.from_rest_response.return_value = native_table
+        fake_df.PaimonCatalog = Mock()
+        fake_module = ModuleType('pypaimon_rust')
+        fake_module.datafusion = fake_df
+        with patch.dict(sys.modules, {'pypaimon_rust': fake_module,
+                                      'pypaimon_rust.datafusion': fake_df}), \
+                patch('pypaimon.read.native_plan._resolved_schema_json', return_value=resolved):
+            self.assertIs(_native_read_builder(table), native_table.new_read_builder.return_value)
+        fake_df.PaimonCatalog.assert_not_called()
+        fake_df.Table.from_rest_response.assert_called_once_with(
+            response, database='db', table='t', options=_catalog_options(table))
+        native_table.copy_with_resolved_schema.assert_called_once_with(resolved, branch='dev')
+
     def test_native_plan_threads_trimmed_keys_to_deserializer(self):
         # PK tables route through: the trimmed primary keys must reach the
         # deserializer so per-file min/max keys are decoded for merge-on-read.

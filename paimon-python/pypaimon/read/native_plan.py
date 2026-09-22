@@ -22,6 +22,7 @@ Predicates and limits are pushed into Rust planning. The normal pypaimon reader
 still applies them while reading, so pushdown remains an optimization.
 """
 
+import json
 from typing import List, Optional, Tuple
 
 from packaging.version import InvalidVersion, Version
@@ -291,10 +292,40 @@ def _restore_python_partition_paths(table, splits: List[Split]) -> None:
                 split._native_split = None
 
 
+def _resolved_rest_table_response(table):
+    """Reuse REST metadata only when the standard loader can be reproduced."""
+    from pypaimon.catalog.catalog_environment import CatalogEnvironment
+    from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
+
+    environment = table.catalog_environment
+    response = getattr(environment, 'rest_table_response', None)
+    if (type(environment) is not CatalogEnvironment
+            or type(environment.catalog_loader) is not RESTCatalogLoader
+            or not isinstance(response, str)
+            or not native_method_available('Table', 'from_rest_response')):
+        return None
+    context = environment.catalog_loader.context()
+    if any(getattr(context, attr, None) is not None for attr in (
+            'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader')):
+        return None
+    if json.loads(response).get('path') != table.table_path:
+        return None
+    return response
+
+
 def _native_read_builder(table):
     """Reconstruct the Rust table and return a builder for the same schema."""
+    rest_response = _resolved_rest_table_response(table)
     file_io_options = _resolved_schema_file_io_options(table)
-    if file_io_options is not None:
+    if rest_response is not None:
+        from pypaimon_rust.datafusion import Table
+        rt = Table.from_rest_response(
+            rest_response,
+            database=table.identifier.get_database_name(),
+            table=table.identifier.get_table_name(), options=_catalog_options(table))
+        rt = rt.copy_with_resolved_schema(_resolved_schema_json(table), branch=table.current_branch())
+        builder = rt.new_read_builder()
+    elif file_io_options is not None:
         from pypaimon_rust.datafusion import Table
         rt = Table.from_resolved_schema(
             table.table_path, _resolved_schema_json(table),
