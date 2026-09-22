@@ -264,11 +264,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public FileStoreCommit rowIdCheckConflictForMaterializeDvCompaction(
-            @Nullable Long rowIdCheckFromSnapshot) {
-        materializeDvRowIdCheck = rowIdCheckFromSnapshot != null;
-        this.conflictDetection.setRowIdCheckFromSnapshotForMaterializeDvCompaction(
-                rowIdCheckFromSnapshot);
+    public FileStoreCommit materializeDvRowIdCheck() {
+        materializeDvRowIdCheck = true;
         return this;
     }
 
@@ -782,6 +779,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 if (message.checkFromSnapshot() != null) {
                     continue;
                 }
+                checkArgument(
+                        !materializeDvRowIdCheck,
+                        "A materialize-DV commit message is missing its check-from snapshot.");
                 CommitMessageImpl commitMessage = (CommitMessageImpl) message;
                 checkArgument(
                         commitMessage.newFilesIncrement().newFiles().stream()
@@ -793,8 +793,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
         if (materializeDvRowIdCheck) {
             checkArgument(
-                    checkFromSnapshot == null,
-                    "Cannot combine DML row-id checks with materialize-DV compaction checks.");
+                    checkFromSnapshot != null || commitMessages.isEmpty(),
+                    "A materialize-DV commit is missing its check-from snapshot.");
+            conflictDetection.setRowIdCheckFromSnapshotForMaterializeDvCompaction(
+                    checkFromSnapshot);
         } else {
             // A committer can be reused; an untagged commit must not inherit a previous baseline.
             conflictDetection.setRowIdCheckFromSnapshot(checkFromSnapshot);

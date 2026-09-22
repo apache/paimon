@@ -942,6 +942,57 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testMaterializeRejectsMissingCheckFromSnapshot() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        commitDeletionVectors(table, DEFAULT_DV_SPECS);
+
+        Snapshot materializeSnapshot = table.latestSnapshot().get();
+        List<CommitMessage> messages =
+                prepareMaterializeDeletionVectors(table, materializeSnapshot, null);
+
+        assertThatThrownBy(
+                        () -> {
+                            try (TableCommitImpl commit =
+                                    table.newCommit("test-missing-snapshot")) {
+                                commit.materializeDvRowIdCheck().commit(messages);
+                            }
+                        })
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("materialize-DV commit is missing its check-from snapshot");
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(materializeSnapshot.id());
+    }
+
+    @Test
+    public void testMaterializeRejectsMixedTaggedAndUntaggedMessages() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        commitDeletionVectors(table, DEFAULT_DV_SPECS);
+
+        Snapshot materializeSnapshot = table.latestSnapshot().get();
+        CommitMessage message =
+                prepareMaterializeDeletionVectors(table, materializeSnapshot, null).get(0);
+        List<CommitMessage> messages =
+                Arrays.asList(
+                        ((CommitMessageImpl) message)
+                                .withCheckFromSnapshot(materializeSnapshot.id()),
+                        message);
+
+        assertThatThrownBy(
+                        () -> {
+                            try (TableCommitImpl commit = table.newCommit("test-mixed-snapshot")) {
+                                commit.materializeDvRowIdCheck().commit(messages);
+                            }
+                        })
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "materialize-DV commit message is missing its check-from snapshot");
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(materializeSnapshot.id());
+    }
+
+    @Test
     public void testStaleMaterializeAllowsNonOverlappingConcurrentUpdate() throws Exception {
         FileStoreTable table =
                 createPartitionedReassignTable("non_overlapping_materialize_update_table", false);
@@ -1434,8 +1485,14 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
             String commitUser)
             throws Exception {
         try (TableCommitImpl commit = table.newCommit(commitUser)) {
-            commit.rowIdCheckConflictForMaterializeDvCompaction(snapshot.id())
-                    .commit(commitMessages);
+            List<CommitMessage> checkedMessages =
+                    commitMessages.stream()
+                            .map(
+                                    message ->
+                                            ((CommitMessageImpl) message)
+                                                    .withCheckFromSnapshot(snapshot.id()))
+                            .collect(Collectors.toList());
+            commit.materializeDvRowIdCheck().commit(checkedMessages);
         }
     }
 
