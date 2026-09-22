@@ -61,9 +61,9 @@ public class PreAssignSplitAssigner implements SplitAssigner {
     private final Map<Integer, LinkedList<FileStoreSourceSplit>> pendingSplitAssignment;
 
     private final AtomicInteger numberOfPendingSplits;
-    private final Collection<FileStoreSourceSplit> splits;
     private final SerializableFunction<FileStoreSourceSplit, Long> weightFunc;
     @Nullable private final SerializableFunction<FileStoreSourceSplit, ?> groupFunc;
+    private boolean hasAssignedSplits;
 
     public PreAssignSplitAssigner(
             int splitBatchSize,
@@ -144,7 +144,6 @@ public class PreAssignSplitAssigner implements SplitAssigner {
             @Nullable SerializableFunction<FileStoreSourceSplit, ?> groupFunc) {
         this.splitBatchSize = splitBatchSize;
         this.parallelism = parallelism;
-        this.splits = splits;
         this.weightFunc = weightFunc == null ? split -> split.split().rowCount() : weightFunc;
         this.groupFunc = groupFunc;
         this.pendingSplitAssignment =
@@ -195,6 +194,7 @@ public class PreAssignSplitAssigner implements SplitAssigner {
         while (taskSplits != null && !taskSplits.isEmpty() && assignment.size() < splitBatchSize) {
             assignment.add(taskSplits.poll());
         }
+        hasAssignedSplits = hasAssignedSplits || !assignment.isEmpty();
         numberOfPendingSplits.getAndAdd(-assignment.size());
         return assignment;
     }
@@ -318,12 +318,30 @@ public class PreAssignSplitAssigner implements SplitAssigner {
     public SplitAssigner ofDynamicPartitionPruning(
             DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo,
             DynamicFilteringData dynamicFilteringData) {
+        if (hasAssignedSplits) {
+            pendingSplitAssignment
+                    .values()
+                    .forEach(
+                            pendingSplits ->
+                                    pendingSplits.removeIf(
+                                            split ->
+                                                    !dynamicPartitionFilteringInfo.mayMatch(
+                                                            dynamicFilteringData, split.split())));
+            numberOfPendingSplits.set(
+                    pendingSplitAssignment.values().stream().mapToInt(Collection::size).sum());
+            return this;
+        }
+
         return new PreAssignSplitAssigner(
                 splitBatchSize,
                 parallelism,
-                splits,
-                dynamicPartitionFilteringInfo,
-                dynamicFilteringData,
-                weightFunc);
+                remainingSplits().stream()
+                        .filter(
+                                split ->
+                                        dynamicPartitionFilteringInfo.mayMatch(
+                                                dynamicFilteringData, split.split()))
+                        .collect(Collectors.toList()),
+                weightFunc,
+                groupFunc);
     }
 }

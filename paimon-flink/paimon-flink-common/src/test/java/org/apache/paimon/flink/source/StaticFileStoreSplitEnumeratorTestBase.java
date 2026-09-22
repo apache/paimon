@@ -93,6 +93,39 @@ public abstract class StaticFileStoreSplitEnumeratorTestBase
     }
 
     @Test
+    public void testDynamicPartitionFilteringDoesNotReplayAssignedSplits() {
+        TestingSplitEnumeratorContext<FileStoreSourceSplit> context = getSplitEnumeratorContext(1);
+        List<FileStoreSourceSplit> splits = new ArrayList<>();
+        splits.add(createSnapshotSplit(1, 0, Collections.emptyList(), 1));
+        splits.add(createSnapshotSplit(2, 0, Collections.emptyList(), 1));
+        StaticFileStoreSplitEnumerator enumerator =
+                getSplitEnumerator(
+                        context,
+                        splits,
+                        RowType.of(DataTypes.INT()),
+                        Collections.singletonList("f0"));
+
+        enumerator.handleSplitRequest(0, "test-host");
+        assertThat(context.getSplitAssignments().get(0).getAssignedSplits())
+                .containsExactly(splits.get(0));
+        context.getSplitAssignments().clear();
+
+        DynamicFilteringData filteringData =
+                new MockDynamicFilteringData(
+                        org.apache.flink.table.types.logical.RowType.of(new IntType()),
+                        new RowData[] {GenericRowData.of(1)});
+        enumerator.handleSourceEvent(0, new DynamicFilteringEvent(filteringData));
+        assertThat(enumerator.getSplitAssigner().remainingSplits()).containsExactly(splits.get(1));
+        enumerator.handleSplitRequest(0, "test-host");
+        assertThat(context.getSplitAssignments().get(0).getAssignedSplits())
+                .containsExactly(splits.get(1));
+
+        enumerator.handleSourceEvent(0, new DynamicFilteringEvent(filteringData));
+        assertThat(enumerator.getSplitAssigner().remainingSplits()).isEmpty();
+        assertThat(enumerator.getSplitAssigner().numberOfRemainingSplits()).isZero();
+    }
+
+    @Test
     public void testDynamicPartitionFilteringWithProjection() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(1);

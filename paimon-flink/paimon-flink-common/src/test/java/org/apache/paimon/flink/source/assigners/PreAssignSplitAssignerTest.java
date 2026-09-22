@@ -124,7 +124,60 @@ public class PreAssignSplitAssignerTest {
         assertThat(assigner.getNext(0, null)).isEmpty();
     }
 
+    @Test
+    public void testPruningPreservesPendingReaderAssignments() {
+        List<FileStoreSourceSplit> splits = Arrays.asList(partitionSplit(1), partitionSplit(3));
+        PreAssignSplitAssigner assigner = new PreAssignSplitAssigner(1, 2, splits);
+        List<FileStoreSourceSplit> assigned = assigner.getNext(0, null);
+        List<FileStoreSourceSplit> remaining = new ArrayList<>(assigner.remainingSplits());
+        assertThat(assigned).hasSize(1);
+        assertThat(remaining).hasSize(1);
+
+        SplitAssigner filtered = applyPruning(assigner);
+
+        assertThat(filtered.remainingSplits()).containsExactlyElementsOf(remaining);
+        assertThat(filtered.numberOfRemainingSplits()).isEqualTo(1);
+        assertThat(filtered.getNext(0, null)).isEmpty();
+        assertThat(filtered.getNext(1, null)).containsExactlyElementsOf(remaining);
+        assertThat(filtered.numberOfRemainingSplits()).isZero();
+    }
+
+    @Test
+    public void testPruningPreservesReturnedProgressAndAddedSplits() {
+        FileStoreSourceSplit wrapped = withQueryAuth(partitionSplit(1));
+        PreAssignSplitAssigner assigner =
+                new PreAssignSplitAssigner(1, 1, Collections.singletonList(wrapped));
+        assertThat(assigner.getNext(0, null)).containsExactly(wrapped);
+        FileStoreSourceSplit resumed = wrapped.updateWithRecordsToSkip(7);
+        FileStoreSourceSplit added = withQueryAuth(partitionSplit(3));
+        assigner.addSplitsBack(0, Collections.singletonList(resumed));
+        assigner.addSplit(0, added);
+
+        SplitAssigner filtered = applyPruning(assigner);
+
+        assertThat(filtered.remainingSplits()).containsExactly(resumed, added);
+        assertThat(filtered.getNext(0, null)).containsExactly(resumed);
+        assertThat(filtered.getNext(0, null)).containsExactly(added);
+        assertThat(filtered.numberOfRemainingSplits()).isZero();
+    }
+
+    @Test
+    public void testPruningIncludesSplitsAddedBeforeAssignment() {
+        PreAssignSplitAssigner assigner = new PreAssignSplitAssigner(1, 1, Collections.emptyList());
+        FileStoreSourceSplit added = withQueryAuth(partitionSplit(1));
+        assigner.addSplit(0, added);
+
+        SplitAssigner filtered = applyPruning(assigner);
+
+        assertThat(filtered.getNext(0, null)).containsExactly(added);
+        assertThat(filtered.numberOfRemainingSplits()).isZero();
+    }
+
     private static SplitAssigner pruningAssigner(Collection<FileStoreSourceSplit> splits) {
+        return applyPruning(new PreAssignSplitAssigner(10, 1, splits));
+    }
+
+    private static SplitAssigner applyPruning(PreAssignSplitAssigner assigner) {
         DynamicPartitionFilteringInfo filteringInfo =
                 new DynamicPartitionFilteringInfo(
                         RowType.of(DataTypes.INT()), Collections.singletonList("f0"));
@@ -132,8 +185,7 @@ public class PreAssignSplitAssignerTest {
                 new MockDynamicFilteringData(
                         org.apache.flink.table.types.logical.RowType.of(new IntType()),
                         new RowData[] {GenericRowData.of(1), GenericRowData.of(3)});
-        return new PreAssignSplitAssigner(10, 1, splits)
-                .ofDynamicPartitionPruning(filteringInfo, filteringData);
+        return assigner.ofDynamicPartitionPruning(filteringInfo, filteringData);
     }
 
     private static FileStoreSourceSplit partitionSplit(int partition) {
