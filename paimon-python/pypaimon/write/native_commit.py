@@ -15,27 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Optional native append commits using the Java CommitMessage v14 bridge."""
+"""Optional native commits using the Java CommitMessage v14 bridge."""
 
 from pypaimon.common.json_util import JSON
 from pypaimon.read.native_plan import (
-    _option_value_to_string, _resolved_schema_file_io_options,
-    native_method_available)
+    _option_value_to_string, _resolved_schema_file_io_options)
 from pypaimon.write.commit_message_serializer import serialize_commit_message
 
 
 def native_commit_available() -> bool:
-    """Probe capabilities instead of assuming every 0.4 development wheel has them."""
-    return all(native_method_available(type_name, method) for type_name, method in (
-        ('Table', 'from_resolved_schema'),
-        ('Table', 'new_stream_write_builder'),
-        ('StreamWriteBuilder', 'with_commit_user'),
-        ('StreamWriteBuilder', 'new_commit'),
-        ('StreamTableCommit', 'commit'),
-        ('StreamTableCommit', 'abort'),
-        ('StreamTableCommit', 'close'),
-        ('CommitMessage', 'deserialize'),
-    ))
+    """Whether the optional Rust runtime is installed."""
+    from importlib.util import find_spec
+    return find_spec('pypaimon_rust') is not None
 
 
 def native_messages_supported(table, messages) -> bool:
@@ -54,7 +45,7 @@ def native_messages_supported(table, messages) -> bool:
     return True
 
 
-def create_native_commit(table, commit_user):
+def create_native_commit(table, commit_user, overwrite_partition=None):
     """Return a native committer only when its publication protocol matches Python."""
     from pypaimon.catalog.catalog_environment import CatalogEnvironment
     from pypaimon.filesystem.local_file_io import LocalFileIO
@@ -83,14 +74,22 @@ def create_native_commit(table, commit_user):
     # copy() overrides. Do not inject scan options or reload catalog schemas.
     options = {str(key): _option_value_to_string(value)
                for key, value in table.table_schema.options.items() if value is not None}
+    # Python accepts boolean spellings such as "off"; pass the parsed value.
+    options['dynamic-partition-overwrite'] = _option_value_to_string(
+        table.options.dynamic_partition_overwrite())
+    options['snapshot.ignore-empty-commit'] = _option_value_to_string(
+        table.options.snapshot_ignore_empty_commit())
     native_table = NativeTable.from_resolved_schema(
         table.table_path, JSON.to_json(table.table_schema.copy(new_options=options)),
         database=table.identifier.get_database_name(),
         table=table.identifier.get_table_name(),
         options=file_io_options)
-    # Both Python modes already enforce their public lifecycle/empty-commit
-    # contract. The stream builder preserves their existing writer identity;
-    # a native batch builder would mint a different commit user.
+    if overwrite_partition is not None:
+        return (native_table.new_batch_write_builder()
+                ._with_commit_user(commit_user)
+                .with_overwrite(overwrite_partition).new_commit())
+    # Append commits use the stream committer with the Python writer's identity;
+    # Python enforces each mode's lifecycle and empty-commit rules.
     return native_table.new_stream_write_builder().with_commit_user(commit_user).new_commit()
 
 
