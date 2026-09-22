@@ -100,6 +100,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -204,6 +205,63 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                 // no exception
                 write.write(rowData(1, 10, 100L));
             }
+        }
+    }
+
+    @Test
+    public void testBucketedAppendOrderedSequenceNumbers() throws Exception {
+        innerTestBucketedAppendSequenceNumbers(true);
+    }
+
+    @Test
+    public void testBucketedAppendUnorderedSequenceNumbers() throws Exception {
+        innerTestBucketedAppendSequenceNumbers(false);
+    }
+
+    private void innerTestBucketedAppendSequenceNumbers(boolean ordered) throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(BUCKET, 2);
+                            options.set(BUCKET_KEY, "a");
+                            options.set(WRITE_ONLY, true);
+                            options.set(BUCKET_APPEND_ORDERED, ordered);
+                        });
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<DataFileMeta> batch1Files =
+                table.newReadBuilder().newScan().plan().splits().stream()
+                        .flatMap(s -> ((DataSplit) s).dataFiles().stream())
+                        .collect(Collectors.toList());
+        long batch1MaxSequenceNumber =
+                batch1Files.stream().mapToLong(DataFileMeta::maxSequenceNumber).max().getAsLong();
+        Set<String> batch1FileNames =
+                batch1Files.stream().map(DataFileMeta::fileName).collect(Collectors.toSet());
+
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(rowData(1, 20, 200L));
+            commit.commit(write.prepareCommit());
+        }
+
+        long batch2MinSequenceNumber =
+                table.newReadBuilder().newScan().plan().splits().stream()
+                        .flatMap(s -> ((DataSplit) s).dataFiles().stream())
+                        .filter(file -> !batch1FileNames.contains(file.fileName()))
+                        .mapToLong(s -> ((DataFileMeta) s).minSequenceNumber())
+                        .min()
+                        .getAsLong();
+
+        if (ordered) {
+            assertThat(batch2MinSequenceNumber).isGreaterThan(batch1MaxSequenceNumber);
+        } else {
+            assertThat(batch2MinSequenceNumber).isEqualTo(0L);
         }
     }
 
