@@ -582,6 +582,18 @@ def _blob_columns(table):
 def _to_arrow_table(data, target_schema=None):
     if target_schema is not None:
         data = _serialize_blob_values(data, target_schema)
+        if isinstance(data, list):
+            # Untyped from_pylist only discovers columns present in the first row.
+            data = {
+                field.name: [row.get(field.name) for row in data]
+                for field in target_schema
+            }
+        if isinstance(data, dict):
+            data = dict(data)
+            for field in target_schema:
+                if field.name in data and pa.types.is_map(field.type):
+                    # Inferred STRUCT/LIST arrays cannot be cast back to MAP.
+                    data[field.name] = pa.array(data[field.name], type=field.type)
     if isinstance(data, pa.Table):
         table = data
     elif isinstance(data, pa.RecordBatch):
