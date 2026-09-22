@@ -101,6 +101,14 @@ public interface DeletionVector extends DeletionVectorJudger {
     static DeletionVector read(DataInputStream dis, @Nullable Long length) throws IOException {
         // read bitmap length
         int bitmapLength = dis.readInt();
+        if (bitmapLength < BitmapDeletionVector.MAGIC_NUMBER_SIZE_BYTES) {
+            throw new IOException(
+                    "Invalid deletion vector bitmap length: "
+                            + bitmapLength
+                            + ", expected at least "
+                            + BitmapDeletionVector.MAGIC_NUMBER_SIZE_BYTES);
+        }
+
         // read magic number
         int magicNumber = dis.readInt();
 
@@ -113,11 +121,9 @@ public interface DeletionVector extends DeletionVectorJudger {
                                 + length);
             }
 
-            // magic number has been read
-            byte[] bytes = new byte[bitmapLength - BitmapDeletionVector.MAGIC_NUMBER_SIZE_BYTES];
-            dis.readFully(bytes);
-            dis.skipBytes(4); // skip crc
-            return BitmapDeletionVector.deserializeFromByteBuffer(ByteBuffer.wrap(bytes));
+            byte[] bitmapData =
+                    DeletionVectorChecksum.readAndValidate(dis, bitmapLength, magicNumber);
+            return BitmapDeletionVector.deserializeFromByteBuffer(ByteBuffer.wrap(bitmapData));
         } else if (toLittleEndianInt(magicNumber) == Bitmap64DeletionVector.MAGIC_NUMBER) {
             if (length != null) {
                 long expectedBitmapLength =
@@ -133,11 +139,9 @@ public interface DeletionVector extends DeletionVectorJudger {
                 }
             }
 
-            // magic number have been read
-            byte[] bytes = new byte[bitmapLength - Bitmap64DeletionVector.MAGIC_NUMBER_SIZE_BYTES];
-            dis.readFully(bytes);
-            dis.skipBytes(4); // skip crc
-            return Bitmap64DeletionVector.deserializeFromBitmapDataBytes(bytes);
+            byte[] bitmapData =
+                    DeletionVectorChecksum.readAndValidate(dis, bitmapLength, magicNumber);
+            return Bitmap64DeletionVector.deserializeFromBitmapDataBytes(bitmapData);
         } else {
             throw new RuntimeException(
                     "Invalid magic number: "
