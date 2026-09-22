@@ -154,6 +154,20 @@ for obj_info in objects:
     print(obj_info.key, obj_info.size, obj_info.columns)
 ```
 
+### Create a Presigned URL
+
+For an OSS-backed object, generate a temporary URL without downloading its bytes:
+
+```python
+from datetime import timedelta
+
+video = table.blobs(column="video", key_column="id").get_object("video-001")
+video_url = video.to_presigned_url(timedelta(minutes=30))
+```
+
+The URL preserves the configured OSS endpoint and any byte range selected by
+`get_object`. The descriptor must belong to the table.
+
 ### Delete Objects
 
 `delete_object` deletes one object key. `delete_objects` deletes a batch of keys

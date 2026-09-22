@@ -525,6 +525,17 @@ class FileIO(ABC):
                 target_file = f"{target_directory.rstrip('/')}/{file_name}" if target_directory else file_name
                 self.copy_file(source_file, target_file, overwrite)
 
+    def create_blob_presigned_url(self, table_root, descriptor, validity) -> str:
+        """Create a temporary URL for a descriptor-backed BLOB.
+
+        File systems which support presigning override this method. ``table_root``
+        identifies the table which owns ``descriptor`` and ``validity`` is a
+        :class:`datetime.timedelta` containing positive whole seconds.
+        """
+        raise NotImplementedError(
+            "{} does not support creating blob presigned URLs.".format(
+                type(self).__name__))
+
     def read_overwritten_file_utf8(self, path: str) -> Optional[str]:
         retry_number = 0
         exception = None

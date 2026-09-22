@@ -18,6 +18,7 @@
 import io
 import re
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import BinaryIO, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from pypaimon.common.options.core_options import CoreOptions
@@ -58,6 +59,7 @@ class BlobObject:
     columns: Dict[str, object]
     file_io: object
     range_header: Optional[str] = None
+    table_root: Optional[str] = None
 
     @property
     def size(self) -> int:
@@ -76,6 +78,17 @@ class BlobObject:
     def read(self) -> bytes:
         with self.open() as stream:
             return stream.read()
+
+    def to_presigned_url(self, validity: timedelta) -> str:
+        """Create a temporary URL for this object, honoring its selected byte range.
+
+        Requires a table-bound object and a FileIO that supports presigning.
+        """
+        if self.table_root is None:
+            raise ValueError("BlobObject must be bound to a table root for presigning.")
+        descriptor = _descriptor_for_range(self.descriptor, self.range_header)
+        return self.file_io.create_blob_presigned_url(
+            self.table_root, descriptor, validity)
 
 
 class BlobStore:
@@ -172,6 +185,7 @@ class BlobStore:
             columns=info.columns,
             file_io=self._raw_table.file_io,
             range_header=range,
+            table_root=self._raw_table.table_path,
         )
 
     def head_object(
