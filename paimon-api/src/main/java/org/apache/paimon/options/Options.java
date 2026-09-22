@@ -51,27 +51,38 @@ public class Options implements Serializable {
     /** Stores the concrete key/value pairs of this configuration object. */
     private final HashMap<String, String> data;
 
+    /** Options overriding the base map in the two-map constructor. */
+    private HashMap<String, String> dynamicOptions;
+
     /** Creates a new empty configuration. */
     public Options() {
         this.data = new HashMap<>();
+        this.dynamicOptions = new HashMap<>();
     }
 
     /** Creates a new configuration that is initialized with the options of the given map. */
     public Options(Map<String, String> map) {
         this();
-        map.forEach(this::setString);
+        this.data.putAll(map);
     }
 
     /** Creates a new configuration that is initialized with the options of the given two maps. */
     public Options(Map<String, String> map1, Map<String, String> map2) {
-        this();
-        map1.forEach(this::setString);
-        map2.forEach(this::setString);
+        this(map1);
+        this.data.putAll(map2);
+        this.dynamicOptions.putAll(map2);
+    }
+
+    /** Merges a base map while preserving which options dynamically override it. */
+    public Options(Map<String, String> map, Options options) {
+        this(map, options.toMap());
+        this.dynamicOptions.clear();
+        this.dynamicOptions.putAll(options.dynamicOptions());
     }
 
     public Options(Iterable<Map.Entry<String, String>> map) {
         this();
-        map.forEach(entry -> setString(entry.getKey(), entry.getValue()));
+        map.forEach(entry -> data.put(entry.getKey(), entry.getValue()));
     }
 
     public static Options fromMap(Map<String, String> map) {
@@ -150,8 +161,21 @@ public class Options implements Serializable {
         return data;
     }
 
+    /** Returns options supplied as dynamic overrides to the base map. */
+    public synchronized Map<String, String> dynamicOptions() {
+        Map<String, String> result = new HashMap<>();
+        if (dynamicOptions != null) {
+            dynamicOptions.keySet().stream()
+                    .filter(data::containsKey)
+                    .forEach(key -> result.put(key, data.get(key)));
+        }
+        return result;
+    }
+
     public synchronized Options removePrefix(String prefix) {
-        return new Options(convertToPropertiesPrefixKey(data, prefix));
+        return new Options(
+                convertToPropertiesPrefixKey(data, prefix),
+                convertToPropertiesPrefixKey(dynamicOptions(), prefix));
     }
 
     public synchronized String remove(String key) {

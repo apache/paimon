@@ -73,7 +73,7 @@ The build and search examples below use its three-dimensional `embedding` column
 For this small dataset, use `ivf-flat` with one cluster; production workloads should
 choose an index type and cluster count for their own data.
 
-For Python, install `pypaimon[vindex]` (or its matching `paimon-vindex==0.4.0`
+For Python, install `pypaimon[vindex]` (or its matching `paimon-vindex==0.5.0`
 dependency) before building or querying native vector indexes.
 
 <Tabs groupId="vector-build">
@@ -335,14 +335,23 @@ Supported paimon-vindex options:
 |---|---|---|
 | `<index-type>.dimension` | `128` | Vector dimension for `ARRAY<FLOAT>` columns. Ignored for `VECTOR<FLOAT, n>` columns. |
 | `<index-type>.distance.metric` | `inner_product` | Distance metric. Supported values: `l2`, `cosine`, `inner_product`. |
+| `<index-type>.ivf.coarse-assignment` | `auto` | Build-time list assignment for all IVF types. `auto` uses Vamana for large centroid matrices; `exact` always uses exact assignment. |
+| `<index-type>.ivf.train.max-points-per-centroid` | `256` | Positive coarse K-means training limit for all IVF types: at most `nlist × value` vectors. |
 | `<index-type>.train.sample-ratio` | `1.0` | Ratio of vectors sampled for native index training. Must be greater than `0` and less than or equal to `1`. Lower values reduce training memory and build cost, but may reduce index quality. |
 | `<index-type>.nlist` | Automatic | Number of clusters for the four IVF types. When omitted, paimon-vindex resolves it from the shard's non-null vector count. |
 | `<index-type>.pq.code-ratio` | `0.0625` | Relative PQ-code budget for `ivf-pq` and `diskann`. |
 | `<index-type>.pq.m` | Automatic | Expert override for the PQ sub-vector count used by `ivf-pq` and `diskann`. |
+| `ivf-pq.ivf.pq-encoding` | `auto` | IVF-PQ build-time encoding. `auto` selects an accelerated backend when supported; `canonical` uses the canonical encoder. |
+| `<index-type>.pq.train.max-points-per-centroid` | `256` | Positive PQ training limit for `ivf-pq` and `diskann`: at most `2^pq.bits × value` vectors per subquantizer. |
 | `ivf-pq.pq.use-opq` | Automatic | Explicitly enables or disables OPQ. Without an explicit value, a `target-recall` of at least `0.9` enables it. |
 | `ivf-rq.rq.bits` | `4` | Persisted IVF-RQ residual width. Supported values are `1` through `8`; changing it requires rebuilding the index. |
 | `<index-type>.target-recall` | Not set | Build-policy hint used by `ivf-pq` and `diskann`. Validate the resulting recall on held-out queries. |
 | `<index-type>.max-bytes-per-vector` | Not set | Storage objective and conservative preflight bound for `ivf-pq`, `ivf-rq`, and `diskann`. |
+
+The native names `ivf.coarse-assignment`, `ivf.pq-encoding`,
+`ivf.train.max-points-per-centroid`, and `pq.train.max-points-per-centroid` are
+also accepted in procedure and Python build options. Index-prefixed and
+`fields.<field-name>.` forms follow the precedence described below.
 
 Additional paimon-vindex DiskANN build options:
 
