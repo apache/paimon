@@ -103,7 +103,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         this.fileWriter = fileWriter;
         this.options = options;
         this.dim = validateAndResolveDimension(fieldType, options);
-        this.luminaOptions = options.toLuminaOptions(dim);
+        this.luminaOptions = options.toBuildOptions(dim);
         this.count = 0;
         this.closed = false;
         this.recordSizeInBytes = checkedRecordSize(dim, IO_BUFFER_SIZE);
