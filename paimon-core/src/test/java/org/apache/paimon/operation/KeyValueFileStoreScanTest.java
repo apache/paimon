@@ -30,6 +30,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -80,7 +81,7 @@ public class KeyValueFileStoreScanTest {
                         .build();
 
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
         schemaManager.createTable(
                 new Schema(
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
@@ -423,7 +424,7 @@ public class KeyValueFileStoreScanTest {
         // Test that limit pushdown is disabled for PARTIAL_UPDATE merge engine
         // Create a store with PARTIAL_UPDATE merge engine by setting it in schema options
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
         Schema schema =
                 new Schema(
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
@@ -471,7 +472,7 @@ public class KeyValueFileStoreScanTest {
     public void testLimitPushdownWithAggregateMergeEngine() throws Exception {
         // Test that limit pushdown is disabled for AGGREGATE merge engine
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
         Schema schema =
                 new Schema(
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
@@ -519,7 +520,7 @@ public class KeyValueFileStoreScanTest {
     public void testLimitPushdownWithDeletionVectors() throws Exception {
         // Test that limit pushdown is disabled when deletion vectors are enabled
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
         Schema schema =
                 new Schema(
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),

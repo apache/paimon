@@ -38,7 +38,8 @@ public class ProcedureTest {
     @Test
     public void testProcedureCoverAllActions() {
         Set<String> expectedExclusions = new HashSet<>();
-        // Can be covered by `DELETE FROM` syntax. No procedure needed.
+        // Delete is exposed through both Flink SQL and the unified delete action. No procedure is
+        // needed.
         expectedExclusions.add("delete");
         List<String> actionIdentifiers =
                 FactoryUtil.discoverIdentifiers(

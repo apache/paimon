@@ -21,8 +21,11 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.Or;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
@@ -40,6 +43,7 @@ import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /** Test for {@link FlinkTableSource}. */
@@ -50,7 +54,8 @@ public class FlinkTableSourceTest extends TableTestBase {
         FileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
         Schema schema = Schema.newBuilder().column("col1", DataTypes.INT()).build();
-        TableSchema tableSchema = new SchemaManager(fileIO, tablePath).createTable(schema);
+        TableSchema tableSchema =
+                new FileSystemSchemaManager(fileIO, tablePath).createTable(schema);
         Table table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
         DataTableSource tableSource =
                 new DataTableSource(
@@ -74,7 +79,8 @@ public class FlinkTableSourceTest extends TableTestBase {
                         .column("p2", DataTypes.STRING())
                         .partitionKeys("p1", "p2")
                         .build();
-        TableSchema tableSchema = new SchemaManager(fileIO, tablePath).createTable(schema);
+        TableSchema tableSchema =
+                new FileSystemSchemaManager(fileIO, tablePath).createTable(schema);
         Table table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
         FlinkTableSource tableSource =
                 new DataTableSource(
@@ -136,6 +142,302 @@ public class FlinkTableSourceTest extends TableTestBase {
                 .isEqualTo(ImmutableList.of(filters.get(1)));
     }
 
+    @Test
+    public void testApplyNotFilters() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
+        Schema schema =
+                Schema.newBuilder()
+                        .column("col1", DataTypes.INT())
+                        .column("col2", DataTypes.INT())
+                        .column("p1", DataTypes.INT())
+                        .column("p2", DataTypes.STRING())
+                        .partitionKeys("p1", "p2")
+                        .build();
+        TableSchema tableSchema =
+                new FileSystemSchemaManager(fileIO, tablePath).createTable(schema);
+        Table table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+
+        ResolvedExpression supportedPartitionFilter = not(p1Equal1());
+        FlinkTableSource tableSource = dataTableSource(table);
+        Assertions.assertThat(
+                        tableSource
+                                .applyFilters(ImmutableList.of(supportedPartitionFilter))
+                                .getRemainingFilters())
+                .isEmpty();
+        Assertions.assertThat(tableSource.predicate).isEqualTo(builder.notEqual(2, 1));
+
+        ResolvedExpression supportedNonPartitionFilter = not(col1Equal1());
+        tableSource = dataTableSource(table);
+        Assertions.assertThat(
+                        tableSource
+                                .applyFilters(ImmutableList.of(supportedNonPartitionFilter))
+                                .getRemainingFilters())
+                .containsExactly(supportedNonPartitionFilter);
+        Assertions.assertThat(tableSource.predicate).isEqualTo(builder.notEqual(0, 1));
+
+        ResolvedExpression unsupportedLike = not(p2Like("%a"));
+        tableSource = dataTableSource(table);
+        Assertions.assertThat(
+                        tableSource
+                                .applyFilters(ImmutableList.of(unsupportedLike))
+                                .getRemainingFilters())
+                .containsExactly(unsupportedLike);
+        Assertions.assertThat(tableSource.predicate).isNull();
+
+        ResolvedExpression unsupportedPrefixLike = not(p2Like("prefix%"));
+        tableSource = dataTableSource(table);
+        Assertions.assertThat(
+                        tableSource
+                                .applyFilters(ImmutableList.of(unsupportedPrefixLike))
+                                .getRemainingFilters())
+                .containsExactly(unsupportedPrefixLike);
+        Assertions.assertThat(tableSource.predicate).isNull();
+
+        ResolvedExpression unsupportedSimilar = not(p2Similar("a.*"));
+        tableSource = dataTableSource(table);
+        Assertions.assertThat(
+                        tableSource
+                                .applyFilters(ImmutableList.of(unsupportedSimilar))
+                                .getRemainingFilters())
+                .containsExactly(unsupportedSimilar);
+        Assertions.assertThat(tableSource.predicate).isNull();
+    }
+
+    @Test
+    public void testApplyNegatedFloatingPointComparison() throws Exception {
+        // Simple SQL such as NOT (d = NaN), d NOT IN (NaN) and NOT (d <> 0.0)
+        // is normalized by Flink to <>(d, NaN) or =(d, 0.0) before applyFilters,
+        // so those queries never hit this residual. CAST(-0.0 AS DOUBLE) is also
+        // +0.0 in Flink. Coverage is the unsimplified AST below.
+        FileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
+        Schema schema = Schema.newBuilder().column("d", DataTypes.DOUBLE()).build();
+        TableSchema tableSchema =
+                new FileSystemSchemaManager(fileIO, tablePath).createTable(schema);
+        Table table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+
+        assertResidual(table, not(doubleGreaterThan1()));
+        assertResidual(table, not(doubleEqual(1.0d)));
+        assertResidual(table, not(doubleNotEqual(0.0d)));
+        assertResidual(table, not(doubleIn(Double.NaN)));
+        assertResidual(table, not(doubleBetween(1.0d, Double.NaN)));
+    }
+
+    @Test
+    public void testApplyNotBetweenWithNullBounds() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
+        Schema schema = Schema.newBuilder().column("col1", DataTypes.INT()).build();
+        TableSchema tableSchema =
+                new FileSystemSchemaManager(fileIO, tablePath).createTable(schema);
+        Table table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+
+        assertResidual(table, not(col1Between(15, null)));
+        assertResidual(table, not(col1Between(null, 10)));
+    }
+
+    @Test
+    public void testApplyNotInWithNull() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
+        Schema schema = Schema.newBuilder().column("col1", DataTypes.INT()).build();
+        TableSchema tableSchema =
+                new FileSystemSchemaManager(fileIO, tablePath).createTable(schema);
+        Table table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+
+        ResolvedExpression notInNull = not(col1InWithNull());
+        FlinkTableSource tableSource = dataTableSource(table);
+        Assertions.assertThat(
+                        tableSource.applyFilters(ImmutableList.of(notInNull)).getRemainingFilters())
+                .containsExactly(notInNull);
+        Assertions.assertThat(tableSource.predicate).isEqualTo(PredicateBuilder.alwaysFalse());
+    }
+
+    // ==================== Nested OR Tree Tests ====================
+    //
+    // These tests construct OR trees in various shapes — mimicking what Flink's
+    // SQL Planner may produce when expanding IN(v1,...,vN) — and pass them directly
+    // to applyFilters, bypassing Flink's ExpressionResolver.
+    //
+    // They verify that PredicateConverter flattens any nesting shape into a flat list
+    // of predicates, which PredicateBuilder.or() combines into a binary tree.
+
+    @Test
+    public void testApplyFiltersLargeNestedOr() throws Exception {
+        Table table = createStringTable();
+
+        // 10000 values: the nested OR tree is flattened and combined into a
+        // binary tree (depth ~14), preventing StackOverflowError.
+        int size = 10000;
+        DataTableSource tableSource =
+                new DataTableSource(
+                        ObjectIdentifier.of("catalog1", "db1", "T"), table, false, null);
+        ResolvedExpression orTree = buildNestedOrTree(size);
+
+        tableSource.applyFilters(ImmutableList.of(orTree));
+
+        Assertions.assertThat(tableSource.predicate).isNotNull();
+        Assertions.assertThat(tableSource.predicate).isInstanceOf(CompoundPredicate.class);
+        CompoundPredicate compound = (CompoundPredicate) tableSource.predicate;
+        Assertions.assertThat(compound.function()).isEqualTo(Or.INSTANCE);
+        Assertions.assertThat(compound.children()).hasSize(2);
+    }
+
+    @Test
+    public void testApplyFiltersRightFoldOrTree() throws Exception {
+        Table table = createStringTable();
+        DataTableSource tableSource =
+                new DataTableSource(
+                        ObjectIdentifier.of("catalog1", "db1", "T"), table, false, null);
+
+        // Right-fold tree: OR(OR(OR(=(f,0), =(f,1)), =(f,2)), ...) with 25 values
+        ResolvedExpression orTree = buildRightFoldOrTree(25);
+
+        tableSource.applyFilters(ImmutableList.of(orTree));
+
+        // Regardless of tree shape → flattened → binary tree
+        Assertions.assertThat(tableSource.predicate).isNotNull();
+        Assertions.assertThat(tableSource.predicate).isInstanceOf(CompoundPredicate.class);
+        CompoundPredicate compound = (CompoundPredicate) tableSource.predicate;
+        Assertions.assertThat(compound.function()).isEqualTo(Or.INSTANCE);
+        Assertions.assertThat(compound.children()).hasSize(2);
+    }
+
+    @Test
+    public void testApplyFiltersBalancedOrTree() throws Exception {
+        Table table = createStringTable();
+        DataTableSource tableSource =
+                new DataTableSource(
+                        ObjectIdentifier.of("catalog1", "db1", "T"), table, false, null);
+
+        // Balanced tree: OR(OR(=(f,0), =(f,1)), OR(=(f,2), =(f,3)), ...) with 25 values
+        ResolvedExpression orTree = buildBalancedOrTree(25);
+
+        tableSource.applyFilters(ImmutableList.of(orTree));
+
+        Assertions.assertThat(tableSource.predicate).isNotNull();
+        Assertions.assertThat(tableSource.predicate).isInstanceOf(CompoundPredicate.class);
+        CompoundPredicate compound = (CompoundPredicate) tableSource.predicate;
+        Assertions.assertThat(compound.function()).isEqualTo(Or.INSTANCE);
+        Assertions.assertThat(compound.children()).hasSize(2);
+    }
+
+    @Test
+    public void testApplyFiltersFlatOrWithMultipleChildren() throws Exception {
+        Table table = createStringTable();
+        DataTableSource tableSource =
+                new DataTableSource(
+                        ObjectIdentifier.of("catalog1", "db1", "T"), table, false, null);
+
+        // Flat OR with >2 children in a single CallExpression
+        ResolvedExpression orExpr = buildFlatOrExpression(25);
+
+        tableSource.applyFilters(ImmutableList.of(orExpr));
+
+        Assertions.assertThat(tableSource.predicate).isNotNull();
+        Assertions.assertThat(tableSource.predicate).isInstanceOf(CompoundPredicate.class);
+        CompoundPredicate compound = (CompoundPredicate) tableSource.predicate;
+        Assertions.assertThat(compound.function()).isEqualTo(Or.INSTANCE);
+        Assertions.assertThat(compound.children()).hasSize(2);
+    }
+
+    private Table createStringTable() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
+        Schema schema = Schema.newBuilder().column("contract_address", DataTypes.STRING()).build();
+        TableSchema tableSchema =
+                new FileSystemSchemaManager(fileIO, tablePath).createTable(schema);
+        return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+    }
+
+    /**
+     * Build a nested binary OR tree mimicking Flink's IN-to-OR expansion: OR(=(f, v1), OR(=(f, v2),
+     * OR(..., OR(=(f, vN-1), =(f, vN)))))
+     *
+     * <p>Built iteratively (inside-out) to avoid StackOverflow during construction.
+     */
+    private ResolvedExpression buildNestedOrTree(int count) {
+        FieldReferenceExpression field =
+                new FieldReferenceExpression(
+                        "contract_address", org.apache.flink.table.api.DataTypes.STRING(), 0, 0);
+
+        // Start with innermost: =(contract_address, addr_{count-1})
+        ResolvedExpression result = equalExpr(field, count - 1);
+
+        // Wrap outward: OR(=(field, addr_i), result) for i = count-2 down to 0
+        for (int i = count - 2; i >= 0; i--) {
+            result = or(equalExpr(field, i), result);
+        }
+        return result;
+    }
+
+    /**
+     * Build a right-fold binary OR tree: OR(OR(OR(=(f, v0), =(f, v1)), =(f, v2)), =(f, v3), ...).
+     */
+    private ResolvedExpression buildRightFoldOrTree(int count) {
+        FieldReferenceExpression field =
+                new FieldReferenceExpression(
+                        "contract_address", org.apache.flink.table.api.DataTypes.STRING(), 0, 0);
+        ResolvedExpression result = equalExpr(field, 0);
+        for (int i = 1; i < count; i++) {
+            result = or(result, equalExpr(field, i));
+        }
+        return result;
+    }
+
+    /** Build a balanced binary OR tree: OR(OR(=(f, v0), =(f, v1)), OR(=(f, v2), =(f, v3)), ...). */
+    private ResolvedExpression buildBalancedOrTree(int count) {
+        FieldReferenceExpression field =
+                new FieldReferenceExpression(
+                        "contract_address", org.apache.flink.table.api.DataTypes.STRING(), 0, 0);
+        List<ResolvedExpression> leaves = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            leaves.add(equalExpr(field, i));
+        }
+        while (leaves.size() > 1) {
+            List<ResolvedExpression> next = new ArrayList<>();
+            for (int i = 0; i < leaves.size(); i += 2) {
+                if (i + 1 < leaves.size()) {
+                    next.add(or(leaves.get(i), leaves.get(i + 1)));
+                } else {
+                    next.add(leaves.get(i));
+                }
+            }
+            leaves = next;
+        }
+        return leaves.get(0);
+    }
+
+    /** Build a flat OR CallExpression with more than 2 children. */
+    private ResolvedExpression buildFlatOrExpression(int count) {
+        FieldReferenceExpression field =
+                new FieldReferenceExpression(
+                        "contract_address", org.apache.flink.table.api.DataTypes.STRING(), 0, 0);
+        List<ResolvedExpression> children = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            children.add(equalExpr(field, i));
+        }
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.OR,
+                children,
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private ResolvedExpression equalExpr(FieldReferenceExpression field, int i) {
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.EQUALS,
+                ImmutableList.of(field, addressLiteral(i)),
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private ValueLiteralExpression addressLiteral(int i) {
+        return new ValueLiteralExpression(
+                String.format("0x%040x", i),
+                org.apache.flink.table.api.DataTypes.STRING().notNull());
+    }
+
     private ResolvedExpression col1Equal1() {
         return CallExpression.anonymous(
                 BuiltInFunctionDefinitions.EQUALS,
@@ -145,6 +447,97 @@ public class FlinkTableSourceTest extends TableTestBase {
                         new ValueLiteralExpression(
                                 1, org.apache.flink.table.api.DataTypes.INT().notNull())),
                 org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private ResolvedExpression col1InWithNull() {
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.IN,
+                ImmutableList.of(
+                        new FieldReferenceExpression(
+                                "col1", org.apache.flink.table.api.DataTypes.INT(), 0, 0),
+                        new ValueLiteralExpression(
+                                1, org.apache.flink.table.api.DataTypes.INT().notNull()),
+                        new ValueLiteralExpression(
+                                null, org.apache.flink.table.api.DataTypes.INT()),
+                        new ValueLiteralExpression(
+                                3, org.apache.flink.table.api.DataTypes.INT().notNull())),
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private ResolvedExpression doubleGreaterThan1() {
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.GREATER_THAN,
+                ImmutableList.of(
+                        new FieldReferenceExpression(
+                                "d", org.apache.flink.table.api.DataTypes.DOUBLE(), 0, 0),
+                        new ValueLiteralExpression(
+                                1.0d, org.apache.flink.table.api.DataTypes.DOUBLE().notNull())),
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private ResolvedExpression doubleEqual(double value) {
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.EQUALS,
+                ImmutableList.of(
+                        new FieldReferenceExpression(
+                                "d", org.apache.flink.table.api.DataTypes.DOUBLE(), 0, 0),
+                        new ValueLiteralExpression(
+                                value, org.apache.flink.table.api.DataTypes.DOUBLE().notNull())),
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private ResolvedExpression doubleNotEqual(double value) {
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.NOT_EQUALS,
+                ImmutableList.of(
+                        new FieldReferenceExpression(
+                                "d", org.apache.flink.table.api.DataTypes.DOUBLE(), 0, 0),
+                        new ValueLiteralExpression(
+                                value, org.apache.flink.table.api.DataTypes.DOUBLE().notNull())),
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private ResolvedExpression doubleIn(double value) {
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.IN,
+                ImmutableList.of(
+                        new FieldReferenceExpression(
+                                "d", org.apache.flink.table.api.DataTypes.DOUBLE(), 0, 0),
+                        new ValueLiteralExpression(
+                                value, org.apache.flink.table.api.DataTypes.DOUBLE().notNull())),
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private ResolvedExpression doubleBetween(double lower, double upper) {
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.BETWEEN,
+                ImmutableList.of(
+                        new FieldReferenceExpression(
+                                "d", org.apache.flink.table.api.DataTypes.DOUBLE(), 0, 0),
+                        new ValueLiteralExpression(
+                                lower, org.apache.flink.table.api.DataTypes.DOUBLE().notNull()),
+                        new ValueLiteralExpression(
+                                upper, org.apache.flink.table.api.DataTypes.DOUBLE().notNull())),
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private ResolvedExpression col1Between(Integer lower, Integer upper) {
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.BETWEEN,
+                ImmutableList.of(
+                        new FieldReferenceExpression(
+                                "col1", org.apache.flink.table.api.DataTypes.INT(), 0, 0),
+                        intLiteral(lower),
+                        intLiteral(upper)),
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private ValueLiteralExpression intLiteral(Integer value) {
+        if (value == null) {
+            return new ValueLiteralExpression(null, org.apache.flink.table.api.DataTypes.INT());
+        }
+        return new ValueLiteralExpression(
+                value, org.apache.flink.table.api.DataTypes.INT().notNull());
     }
 
     private ResolvedExpression p1Equal1() {
@@ -161,6 +554,17 @@ public class FlinkTableSourceTest extends TableTestBase {
     private ResolvedExpression p2Like(String literal) {
         return CallExpression.anonymous(
                 BuiltInFunctionDefinitions.LIKE,
+                ImmutableList.of(
+                        new FieldReferenceExpression(
+                                "p2", org.apache.flink.table.api.DataTypes.STRING(), 0, 3),
+                        new ValueLiteralExpression(
+                                literal, org.apache.flink.table.api.DataTypes.STRING().notNull())),
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private ResolvedExpression p2Similar(String literal) {
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.SIMILAR,
                 ImmutableList.of(
                         new FieldReferenceExpression(
                                 "p2", org.apache.flink.table.api.DataTypes.STRING(), 0, 3),
@@ -217,5 +621,24 @@ public class FlinkTableSourceTest extends TableTestBase {
                 BuiltInFunctionDefinitions.AND,
                 ImmutableList.of(e1, e2),
                 org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private ResolvedExpression not(ResolvedExpression expression) {
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.NOT,
+                ImmutableList.of(expression),
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private void assertResidual(Table table, ResolvedExpression filter) {
+        FlinkTableSource tableSource = dataTableSource(table);
+        Assertions.assertThat(
+                        tableSource.applyFilters(ImmutableList.of(filter)).getRemainingFilters())
+                .containsExactly(filter);
+        Assertions.assertThat(tableSource.predicate).isNull();
+    }
+
+    private DataTableSource dataTableSource(Table table) {
+        return new DataTableSource(ObjectIdentifier.of("catalog1", "db1", "T"), table, false, null);
     }
 }

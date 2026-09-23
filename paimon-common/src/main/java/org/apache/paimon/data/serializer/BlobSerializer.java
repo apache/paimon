@@ -39,12 +39,18 @@ public class BlobSerializer extends SerializerSingleton<Blob> {
 
     @Override
     public void serialize(Blob blob, DataOutputView target) throws IOException {
-        BinarySerializer.INSTANCE.serialize(blob.toData(), target);
+        byte[] bytes;
+        if (blob instanceof BlobData) {
+            bytes = blob.toData();
+        } else {
+            bytes = Blob.serializeBlob(blob);
+        }
+        BinarySerializer.INSTANCE.serialize(bytes, target);
     }
 
     @Override
     public Blob deserialize(DataInputView source) throws IOException {
         byte[] bytes = BinarySerializer.INSTANCE.deserialize(source);
-        return new BlobData(bytes);
+        return Blob.fromBytes(bytes, null, null);
     }
 }

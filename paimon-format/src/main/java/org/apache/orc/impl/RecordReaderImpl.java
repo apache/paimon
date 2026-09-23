@@ -38,6 +38,7 @@ import org.apache.orc.DataReader;
 import org.apache.orc.DateColumnStatistics;
 import org.apache.orc.DecimalColumnStatistics;
 import org.apache.orc.DoubleColumnStatistics;
+import org.apache.orc.FileFormatException;
 import org.apache.orc.IntegerColumnStatistics;
 import org.apache.orc.OrcConf;
 import org.apache.orc.OrcFile;
@@ -96,6 +97,7 @@ public class RecordReaderImpl implements RecordReader {
                     .setBytesOnDisk(0)
                     .build();
     protected final Path path;
+    private final long fileLength;
     private final long firstRow;
     private final List<StripeInformation> stripes = new ArrayList<>();
     private OrcProto.StripeFooter stripeFooter;
@@ -255,6 +257,7 @@ public class RecordReaderImpl implements RecordReader {
         LOG.debug("noSelectedVector={}", this.noSelectedVector);
         this.schema = evolution.getReaderSchema();
         this.path = fileReader.path;
+        this.fileLength = fileReader.getFileTail().getFileLength();
         this.rowIndexStride = fileReader.rowIndexStride;
         boolean ignoreNonUtf8BloomFilter =
                 OrcConf.IGNORE_NON_UTF8_BLOOM_FILTERS.getBoolean(fileReader.conf);
@@ -747,6 +750,12 @@ public class RecordReaderImpl implements RecordReader {
             TypeDescription type,
             boolean writerUsedProlepticGregorian,
             boolean useUTCTimestamp) {
+        // When statsProto is EMPTY_COLUMN_STATISTICS, this column does not actually provide
+        // statistics, so we cannot make any assumptions.
+        if (statsProto == EMPTY_COLUMN_STATISTICS) {
+            return SearchArgument.TruthValue.YES_NO_NULL;
+        }
+
         ColumnStatistics cs =
                 ColumnStatisticsImpl.deserialize(
                         null, statsProto, writerUsedProlepticGregorian, true);
@@ -840,14 +849,22 @@ public class RecordReaderImpl implements RecordReader {
             ValueRange range,
             BloomFilter bloomFilter,
             boolean useUTCTimestamp) {
+        // An invalid range means no value, including null, is written to this column.
         if (!range.isValid()) {
-            return SearchArgument.TruthValue.YES_NO_NULL;
+            return SearchArgument.TruthValue.NO;
         }
 
         // if we didn't have any values, everything must have been null
         if (!range.hasValues()) {
             if (predicate.getOperator() == PredicateLeaf.Operator.IS_NULL) {
                 return SearchArgument.TruthValue.YES;
+            } else if (predicate.getOperator() == PredicateLeaf.Operator.NULL_SAFE_EQUALS) {
+                Object literal = predicate.getLiteral();
+                if (literal == null) {
+                    return SearchArgument.TruthValue.YES;
+                } else {
+                    return SearchArgument.TruthValue.NO;
+                }
             } else {
                 return SearchArgument.TruthValue.NULL;
             }
@@ -1467,8 +1484,49 @@ public class RecordReaderImpl implements RecordReader {
         }
     }
 
+    static void validateStripeInformation(StripeInformation stripe, long fileLength, Path path)
+            throws FileFormatException {
+        long offset = stripe.getOffset();
+        long indexLength = stripe.getIndexLength();
+        long dataLength = stripe.getDataLength();
+        long footerLength = stripe.getFooterLength();
+        boolean malformed =
+                offset < 0
+                        || indexLength < 0
+                        || dataLength < 0
+                        || footerLength < 0
+                        || footerLength > Integer.MAX_VALUE;
+        if (!malformed) {
+            try {
+                long total =
+                        Math.addExact(
+                                Math.addExact(Math.addExact(offset, indexLength), dataLength),
+                                footerLength);
+                malformed = total >= fileLength;
+            } catch (ArithmeticException e) {
+                malformed = true;
+            }
+        }
+        if (malformed) {
+            throw new FileFormatException(
+                    "Malformed ORC file "
+                            + path
+                            + ". Invalid stripe offset/length. fileLength="
+                            + fileLength
+                            + ", offset="
+                            + offset
+                            + ", indexLength="
+                            + indexLength
+                            + ", dataLength="
+                            + dataLength
+                            + ", footerLength="
+                            + footerLength);
+        }
+    }
+
     private StripeInformation beginReadStripe() throws IOException {
         StripeInformation stripe = stripes.get(currentStripe);
+        validateStripeInformation(stripe, fileLength, path);
         stripeFooter = readStripeFooter(stripe);
         clearStreams();
         // setup the position in the stripe

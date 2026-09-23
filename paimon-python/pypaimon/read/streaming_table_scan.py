@@ -36,6 +36,7 @@ from pypaimon.consumer.consumer_manager import ConsumerManager
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.read.plan import Plan
+from pypaimon.read.query_auth_split import wrap_plan_with_auth
 from pypaimon.read.scanner.append_table_split_generator import \
     AppendTableSplitGenerator
 from pypaimon.read.scanner.changelog_follow_up_scanner import \
@@ -108,6 +109,9 @@ class AsyncStreamingTableScan:
 
         # Consumer management for persisting streaming progress
         self._consumer_id = consumer_id
+        self._read_type = None
+        self._query_auth_fn = self.table.catalog_environment.table_query_auth(
+            self.table.options, self.table.identifier)
         self._consumer_manager = (
             ConsumerManager(table.file_io, table.table_path)
             if consumer_id else None
@@ -267,6 +271,13 @@ class AsyncStreamingTableScan:
             )
             self._pending_consumer_snapshot = None
 
+    def __apply_auth(self, plan) -> Plan:
+        return wrap_plan_with_auth(self.__auth_query(), plan)
+
+    def __auth_query(self):
+        from pypaimon.read.table_scan import authorize
+        return authorize(self.table, self._query_auth_fn, self._read_type)
+
     def _start_prefetch(self, snapshot_id: int) -> None:
         """Start prefetching the next scannable snapshot in a background thread."""
         if self._prefetch_future is not None or self._prefetch_executor is None:
@@ -300,9 +311,10 @@ class AsyncStreamingTableScan:
     def _create_follow_up_plan(self, snapshot: Snapshot) -> Plan:
         """Route to changelog or delta plan based on scanner type."""
         if isinstance(self.follow_up_scanner, ChangelogFollowUpScanner):
-            return self._create_changelog_plan(snapshot)
+            plan = self._create_changelog_plan(snapshot)
         else:
-            return self._create_delta_plan(snapshot)
+            plan = self._create_delta_plan(snapshot)
+        return self.__apply_auth(plan)
 
     def _create_follow_up_scanner(self) -> FollowUpScanner:
         """Create the appropriate follow-up scanner based on changelog-producer option."""
@@ -319,8 +331,7 @@ class AsyncStreamingTableScan:
             return [e for e in entries if self._bucket_filter(e.bucket)]
         return entries
 
-    def _create_initial_plan(self, snapshot: Snapshot) -> Plan:
-        """Create a Plan for the initial full scan of the latest snapshot."""
+    def __create_initial_plan_raw(self, snapshot, auth_result=None):
         def all_manifests():
             return self._manifest_list_manager.read_all(snapshot), snapshot
 
@@ -330,37 +341,116 @@ class AsyncStreamingTableScan:
             predicate=self.predicate,
             limit=None
         )
+        if auth_result is not None:
+            from pypaimon.read.table_scan import prune_scanner_by_auth
+            prune_scanner_by_auth(self.table, starting_scanner, auth_result)
         return starting_scanner.scan()
+
+    def _create_initial_plan(self, snapshot: Snapshot) -> Plan:
+        """Create a Plan for the initial full scan of the latest snapshot."""
+        auth_result = self.__auth_query()
+        plan = None
+        if auth_result is None:
+            plan = self._try_native_plan(snapshot.id)
+        if plan is None:
+            plan = self.__create_initial_plan_raw(snapshot, auth_result)
+        return wrap_plan_with_auth(auth_result, plan)
 
     def _create_delta_plan(self, snapshot: Snapshot) -> Plan:
         """Read new files from delta_manifest_list (changelog-producer=none)."""
+        plan = self._try_native_plan(
+            snapshot.id, incremental_range=(snapshot.id - 1, snapshot.id))
+        if plan is not None:
+            return plan
         manifest_files = self._manifest_list_manager.read_delta(snapshot)
-        return self._create_plan_from_manifests(manifest_files)
+        return self._create_plan_from_manifests(manifest_files, snapshot.id)
+
+    def _try_native_plan(self, expected_snapshot_id: int,
+                         incremental_range=None,
+                         incremental_mode='delta') -> Optional[Plan]:
+        """Plan an initial, delta or changelog streaming frame with pypaimon-rust.
+
+        An arbitrary Python bucket predicate cannot be represented by the Rust
+        planner, so sharded stream consumers retain the Python plan. Any native
+        setup or planning error is an optimization miss and falls back before
+        a plan is returned.
+        """
+        if (not self.table.options.native_plan_enabled()
+                or self._bucket_filter is not None):
+            return None
+        # Rust's full-snapshot scan currently has batch visibility semantics.
+        # For first-row and non-MOR deletion-vector tables it hides level-0
+        # files, while an initial streaming scan must include those files.
+        # Incremental scans already use Rust's streaming split mode and do not
+        # need this fallback.
+        if (incremental_range is None
+                and self.table.options.batch_scan_skip_level0()):
+            return None
+        try:
+            from pypaimon.read.native_plan import native_plan
+            plan = native_plan(
+                self.table,
+                predicate=self.predicate,
+                projection=(
+                    [field.name for field in self._read_type]
+                    if self._read_type is not None else None),
+                incremental_range=incremental_range,
+                incremental_mode=incremental_mode,
+            )
+            if plan.snapshot_id != expected_snapshot_id:
+                logging.warning(
+                    "Native streaming plan resolved snapshot %s, expected %s; "
+                    "falling back to Python planning",
+                    plan.snapshot_id, expected_snapshot_id)
+                return None
+            return plan
+        except Exception as error:
+            logging.warning(
+                "Native streaming plan failed, falling back to Python planning: %s",
+                error)
+            return None
 
     def _create_changelog_plan(self, snapshot: Snapshot) -> Plan:
         """Read from changelog_manifest_list (changelog-producer=input/full-compaction/lookup)."""
+        # Java's range-based incremental CHANGELOG scan skips OVERWRITE,
+        # whereas ChangelogFollowUpScanner reads any follow-up snapshot with a
+        # changelog manifest. Rust's incremental API implements the former, so
+        # keep OVERWRITE on the per-snapshot Python planner.
+        if snapshot.commit_kind != 'OVERWRITE':
+            plan = self._try_native_plan(
+                snapshot.id,
+                incremental_range=(snapshot.id - 1, snapshot.id),
+                incremental_mode='changelog',
+            )
+            if plan is not None:
+                return plan
         manifest_files = self._manifest_list_manager.read_changelog(snapshot)
-        return self._create_plan_from_manifests(manifest_files)
+        return self._create_plan_from_manifests(manifest_files, snapshot.id)
 
-    def _create_plan_from_manifests(self, manifest_files: List) -> Plan:
+    def _create_plan_from_manifests(self, manifest_files: List, snapshot_id=None) -> Plan:
         """Create splits from manifest files, applying shard filtering."""
         if not manifest_files:
-            return Plan([])
+            return Plan([], snapshot_id=snapshot_id)
 
         # Use configurable parallelism from table options
         max_workers = max(8, self.table.options.scan_manifest_parallelism(os.cpu_count() or 8))
 
-        # Read manifest entries from manifest files
+        def require_add(entry):
+            if entry.kind != 0:
+                raise ValueError("Incremental manifests must contain only ADD entries")
+            return True
+
+        # Validate before the manifest reader reconciles ADD/DELETE entries.
         entries = self._manifest_file_manager.read_entries_parallel(
             manifest_files,
-            manifest_entry_filter=None,
+            manifest_entry_filter=require_add,
             max_workers=max_workers
         )
 
         # Apply shard/bucket filtering for parallel consumption
         entries = self._filter_entries_for_shard(entries) if entries else []
         if not entries:
-            return Plan([])
+            return Plan([], snapshot_id=snapshot_id)
 
         # Get split options from table
         options = self.table.options
@@ -373,18 +463,22 @@ class AsyncStreamingTableScan:
                 self.table,
                 target_split_size,
                 open_file_cost,
-                deletion_files_map={}
+                deletion_files_map={},
+                snapshot_id=snapshot_id,
             )
         else:
             split_generator = AppendTableSplitGenerator(
                 self.table,
                 target_split_size,
                 open_file_cost,
-                deletion_files_map={}
+                deletion_files_map={},
+                snapshot_id=snapshot_id,
             )
 
         splits = split_generator.create_splits(entries)
-        return Plan(splits)
+        for split in splits:
+            split.is_streaming = True
+        return Plan(splits, snapshot_id=snapshot_id)
 
     def _should_use_diff_catch_up(self) -> bool:
         """Check if diff-based catch-up should be used (large gap to latest)."""
@@ -403,13 +497,13 @@ class AsyncStreamingTableScan:
 
     def _create_catch_up_plan(self, start_id: int, end_snapshot: Snapshot) -> Plan:
         """Create a catch-up plan using diff-based scanning between start and end snapshots."""
-        # Get start snapshot (one before where we want to start reading).
-        # If start_id is 0 or 1, fall back to a full scan of end_snapshot.
         start_snapshot = None
         if start_id > 1:
             start_snapshot = self._snapshot_manager.get_snapshot_by_id(start_id - 1)
 
+        auth_result = self.__auth_query()
         if start_snapshot is None:
-            return self._create_initial_plan(end_snapshot)
-
-        return IncrementalDiffScanner(self.table).scan(start_snapshot, end_snapshot)
+            plan = self.__create_initial_plan_raw(end_snapshot, auth_result)
+        else:
+            plan = IncrementalDiffScanner(self.table).scan(start_snapshot, end_snapshot)
+        return wrap_plan_with_auth(auth_result, plan)

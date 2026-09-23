@@ -2,7 +2,11 @@
 module.exports = [
   {
     "from": "/append-table/blob-storage.html",
-    "to": "/append-table/blob"
+    "to": "/multimodal-table/blob"
+  },
+  {
+    "from": "/append-table/blob",
+    "to": "/multimodal-table/blob"
   },
   {
     "from": "/append-table/bucketed.html",
@@ -10,11 +14,19 @@ module.exports = [
   },
   {
     "from": "/append-table/data-evolution.html",
-    "to": "/append-table/data-evolution"
+    "to": "/multimodal-table/data-evolution"
+  },
+  {
+    "from": "/append-table/data-evolution",
+    "to": "/multimodal-table/data-evolution"
   },
   {
     "from": "/append-table/global-index.html",
-    "to": "/append-table/global-index"
+    "to": "/multimodal-table/global-index"
+  },
+  {
+    "from": "/append-table/global-index",
+    "to": "/multimodal-table/global-index"
   },
   {
     "from": "/append-table/incremental-clustering.html",
@@ -26,7 +38,11 @@ module.exports = [
   },
   {
     "from": "/append-table/vector-storage.html",
-    "to": "/append-table/vector"
+    "to": "/multimodal-table/vector"
+  },
+  {
+    "from": "/append-table/vector",
+    "to": "/multimodal-table/vector"
   },
   {
     "from": "/cdc-ingestion/flink-cdc.html",
@@ -241,10 +257,6 @@ module.exports = [
     "to": "/maintenance/manage-partitions"
   },
   {
-    "from": "/maintenance/manage-privileges.html",
-    "to": "/maintenance/manage-privileges"
-  },
-  {
     "from": "/maintenance/manage-snapshots.html",
     "to": "/maintenance/manage-snapshots"
   },
@@ -311,6 +323,14 @@ module.exports = [
   {
     "from": "/primary-key-table/query-performance.html",
     "to": "/primary-key-table/query-performance"
+  },
+  {
+    "from": "/primary-key-table/vector-index.html",
+    "to": "/primary-key-table/global-index"
+  },
+  {
+    "from": "/primary-key-table/vector-index",
+    "to": "/primary-key-table/global-index"
   },
   {
     "from": "/primary-key-table/sequence-rowkind.html",
@@ -382,7 +402,11 @@ module.exports = [
   },
   {
     "from": "/pypaimon/global-index.html",
-    "to": "/pypaimon/global-index"
+    "to": "/multimodal-table/global-index"
+  },
+  {
+    "from": "/pypaimon/global-index",
+    "to": "/multimodal-table/global-index"
   },
   {
     "from": "/pypaimon/manage-tags.html",
@@ -447,10 +471,6 @@ module.exports = [
   {
     "from": "/spark/sql-query.html",
     "to": "/spark/sql-query"
-  },
-  {
-    "from": "/spark/sql-upsert.html",
-    "to": "/spark/sql-upsert"
   },
   {
     "from": "/spark/sql-write.html",

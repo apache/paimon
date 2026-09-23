@@ -20,9 +20,15 @@
 from abc import ABC, abstractmethod
 from typing import Optional
 
+from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
+from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.table.source.full_text_read import FullTextRead, FullTextReadImpl
-from pypaimon.table.source.full_text_scan import FullTextScan, FullTextScanImpl
+from pypaimon.table.source.full_text_read import FullTextRead, DataEvolutionFullTextRead
+from pypaimon.table.source.full_text_scan import FullTextScan, DataEvolutionFullTextScan
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
+from pypaimon.index.pk.primary_key_index_definition import PrimaryKeyIndexFamily
+from pypaimon.index.pk.primary_key_index_definitions import PrimaryKeyIndexDefinitions
 
 
 class FullTextSearchBuilder(ABC):
@@ -34,13 +40,18 @@ class FullTextSearchBuilder(ABC):
         pass
 
     @abstractmethod
-    def with_text_column(self, name: str) -> 'FullTextSearchBuilder':
-        """The text column to search."""
+    def with_query(self, field_name: str, query: str) -> 'FullTextSearchBuilder':
+        """The full-text query string to search against the given field."""
         pass
 
     @abstractmethod
-    def with_query_text(self, query_text: str) -> 'FullTextSearchBuilder':
-        """The query text to search."""
+    def with_partition_filter(self, partition_filter) -> 'FullTextSearchBuilder':
+        """Partition predicate used to prune index manifest entries."""
+        pass
+
+    @abstractmethod
+    def with_filter(self, predicate) -> 'FullTextSearchBuilder':
+        """Filter data-evolution rows before full-text ranking."""
         pass
 
     @abstractmethod
@@ -64,36 +75,132 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
     def __init__(self, table: 'FileStoreTable'):
         self._table = table
         self._limit: int = 0
-        self._text_column: Optional['DataField'] = None
-        self._query_text: Optional[str] = None
+        self._field_name: Optional[str] = None
+        self._query: Optional[str] = None
+        self._partition_filter = None
+        self._filter = None
 
     def with_limit(self, limit: int) -> 'FullTextSearchBuilder':
         self._limit = limit
         return self
 
-    def with_text_column(self, name: str) -> 'FullTextSearchBuilder':
-        field_dict = {f.name: f for f in self._table.fields}
-        if name not in field_dict:
-            raise ValueError(f"Text column '{name}' not found in table schema")
-        self._text_column = field_dict[name]
+    def with_query(self, field_name: str, query: str) -> 'FullTextSearchBuilder':
+        self._field_name = field_name
+        self._query = query
         return self
 
-    def with_query_text(self, query_text: str) -> 'FullTextSearchBuilder':
-        self._query_text = query_text
+    def with_filter(self, predicate) -> 'FullTextSearchBuilder':
+        if predicate is None:
+            return self
+        from pypaimon.read.push_down_utils import _split_and, _get_all_fields
+
+        partition_keys = set(self._table.partition_keys or [])
+        for part in _split_and(predicate):
+            if partition_keys and _get_all_fields(part).issubset(partition_keys):
+                self.with_partition_filter(part)
+            else:
+                self._filter = (part if self._filter is None else
+                                PredicateBuilder.and_predicates([self._filter, part]))
         return self
+
+    def with_partition_filter(self, partition_filter) -> 'FullTextSearchBuilder':
+        if partition_filter is None:
+            self._partition_filter = None
+            return self
+        partition_keys = list(self._table.partition_keys or [])
+        if not partition_keys:
+            raise ValueError(
+                "with_partition_filter called on a non-partitioned table")
+        from pypaimon.read.push_down_utils import _get_all_fields
+        referenced = _get_all_fields(partition_filter)
+        extras = referenced - set(partition_keys)
+        if extras:
+            raise ValueError(
+                "Partition filter must reference only partition keys "
+                "(%s); got non-partition field(s): %s"
+                % (partition_keys, sorted(extras)))
+        rebuilt = self._rebuild_leaf_indices_by_name(
+            partition_filter,
+            {name: idx for idx, name in enumerate(partition_keys)},
+        )
+        if self._partition_filter is None:
+            self._partition_filter = rebuilt
+        else:
+            self._partition_filter = PredicateBuilder.and_predicates(
+                [self._partition_filter, rebuilt])
+        return self
+
+    @classmethod
+    def _rebuild_leaf_indices_by_name(cls, predicate, name_to_idx):
+        if predicate.method in ('and', 'or'):
+            return predicate.new_literals(
+                [cls._rebuild_leaf_indices_by_name(c, name_to_idx)
+                 for c in (predicate.literals or [])])
+        return predicate.new_index(name_to_idx[predicate.field])
 
     def new_full_text_scan(self) -> FullTextScan:
-        if self._text_column is None:
-            raise ValueError("Text column must be set via with_text_column()")
-        return FullTextScanImpl(self._table, self._text_column)
+        reject_search_under_query_auth(self._table)
+        definition = self._primary_key_full_text_definition()
+        if definition is not None:
+            from pypaimon.table.source.primary_key_full_text_scan import PrimaryKeyFullTextScan
+            return PrimaryKeyFullTextScan(
+                self._table, definition, partition_filter=self._partition_filter)
+        return DataEvolutionFullTextScan(
+            self._table,
+            self._text_columns(),
+            partition_filter=self._partition_filter,
+        )
 
     def new_full_text_read(self) -> FullTextRead:
+        reject_search_under_query_auth(self._table)
         if self._limit <= 0:
             raise ValueError("Limit must be positive, set via with_limit()")
-        if self._text_column is None:
-            raise ValueError("Text column must be set via with_text_column()")
-        if self._query_text is None:
-            raise ValueError("Query text must be set via with_query_text()")
-        return FullTextReadImpl(
-            self._table, self._limit, self._text_column, self._query_text
+        if self._filter is not None and not self._table.options.data_evolution_enabled():
+            raise NotImplementedError("Full-text row filters require a data-evolution table.")
+        definition = self._primary_key_full_text_definition()
+        if definition is not None:
+            from pypaimon.common.options.core_options import GlobalIndexSearchMode
+            mode = CoreOptions(
+                Options(dict(self._table.table_schema.options))
+            ).full_text_index_search_mode()
+            if mode != GlobalIndexSearchMode.FAST:
+                raise NotImplementedError(
+                    "Primary-key full-text search only supports the FAST "
+                    "full-text index search mode; FULL and DETAIL require "
+                    "merge-aware logical-row fallback.")
+            from pypaimon.table.source.primary_key_full_text_read import PrimaryKeyFullTextRead
+            return PrimaryKeyFullTextRead(
+                self._table, self._limit, self._text_columns(), self._query,
+                definition=definition, partition_filter=self._partition_filter)
+        return DataEvolutionFullTextRead(
+            self._table,
+            self._limit,
+            self._text_columns(),
+            self._query,
+            partition_filter=self._partition_filter,
+            filter_=self._filter,
         )
+
+    def _text_columns(self):
+        if self._query is None:
+            raise ValueError("Query must be set via with_query()")
+        if self._field_name is None:
+            raise ValueError("Field name must be set via with_query()")
+        field_dict = {f.name: f for f in self._table.fields}
+        if self._field_name not in field_dict:
+            raise ValueError(
+                f"Text column '{self._field_name}' not found in table schema")
+        return [field_dict[self._field_name]]
+
+    def _primary_key_full_text_definition(self):
+        text_column = self._text_columns()[0]
+        core = CoreOptions(Options(dict(self._table.table_schema.options)))
+        if (core.data_evolution_enabled()
+                or not core.primary_key_full_text_index_columns()):
+            return None
+        for definition in PrimaryKeyIndexDefinitions.create(
+                self._table.table_schema).definitions:
+            if (definition.family == PrimaryKeyIndexFamily.FULL_TEXT
+                    and definition.field_id == text_column.id):
+                return definition
+        return None

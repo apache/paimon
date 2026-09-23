@@ -20,9 +20,10 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.{FullTextSearch, Predicate, TopN, VectorSearch}
+import org.apache.paimon.predicate.{FullTextSearch, HybridSearch, Predicate, TopN, VectorSearch}
+import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.commands.BucketExpression.quote
-import org.apache.paimon.spark.read.VariantExtractionInfo
+import org.apache.paimon.spark.read.{BinPackingSplits, VariantExtractionInfo}
 import org.apache.paimon.table.{BucketMode, FileStoreTable, InnerTable}
 import org.apache.paimon.table.source.{DataSplit, Split}
 
@@ -43,16 +44,14 @@ case class PaimonScan(
     override val pushedLimit: Option[Int],
     override val pushedTopN: Option[TopN],
     override val pushedVectorSearch: Option[VectorSearch],
+    override val pushedHybridSearch: Option[HybridSearch] = None,
     override val pushedFullTextSearch: Option[FullTextSearch] = None,
     override val pushedVariantExtractions: Map[Seq[String], Seq[VariantExtractionInfo]] = Map.empty,
-    bucketedScanDisabled: Boolean = false)
+    override val pushedMapSelectedKeys: Map[String, Seq[String]] = Map.empty,
+    preserveDataGrouping: Boolean = false)
   extends PaimonBaseScan(table)
   with SupportsReportPartitioning
   with SupportsReportOrdering {
-
-  def disableBucketedScan(): PaimonScan = {
-    copy(bucketedScanDisabled = true)
-  }
 
   @transient
   private lazy val extractBucketTransform: Option[Transform] = {
@@ -64,6 +63,15 @@ case class PaimonScan(
           bucketSpec.getBucketMode != BucketMode.HASH_FIXED || coreOptions
             .bucketFunctionType() != BucketFunctionType.DEFAULT
         ) {
+          None
+        } else if (!BucketFunction.supportsTable(fileStoreTable)) {
+          // Spark tells two scans apart by the canonical name of the bound bucket function, which
+          // is derived from Spark types. Spark's timestamp precision is fixed to 6, so bucket keys
+          // carrying any other precision are indistinguishable there, while Paimon lays their
+          // BinaryRow out differently and thus puts the same value into a different bucket.
+          // Reporting a bucket transform would let Spark treat such tables as co-partitioned and
+          // drop a shuffle that is actually required. This mirrors the same check the write side
+          // already does in `PaimonSparkWriter`.
           None
         } else if (bucketSpec.getBucketKeys.size() > 1) {
           None
@@ -106,14 +114,16 @@ case class PaimonScan(
   }
 
   private def shouldDoBucketedScan: Boolean = {
-    !bucketedScanDisabled && conf.v2BucketingEnabled && extractBucketTransform.isDefined
+    preserveDataGrouping && extractBucketTransform.isDefined
   }
 
   // Since Spark 3.3
   override def outputPartitioning: Partitioning = {
-    extractBucketTransform
-      .map(bucket => new KeyGroupedPartitioning(Array(bucket), inputPartitions.size))
-      .getOrElse(new UnknownPartitioning(0))
+    if (shouldDoBucketedScan) {
+      new KeyGroupedPartitioning(Array(extractBucketTransform.get), inputPartitions.size)
+    } else {
+      new UnknownPartitioning(0)
+    }
   }
 
   // Since Spark 3.4
@@ -155,7 +165,7 @@ case class PaimonScan(
       .map(Expressions.identity)
       .map {
         sortExpr =>
-          // Primary key can not be null, the null ordering is no matter.
+          // Paimon MergeTree comparators and Spark ascending expressions both order nulls first.
           Expressions.sort(sortExpr, SortDirection.ASCENDING)
       }
       .toArray
@@ -166,13 +176,7 @@ case class PaimonScan(
       return super.getInputPartitions(splits)
     }
 
-    splits
-      .map(_.asInstanceOf[DataSplit])
-      .groupBy(_.bucket())
-      .map {
-        case (bucket, groupedSplits) =>
-          PaimonBucketedInputPartition(groupedSplits, bucket)
-      }
-      .toSeq
+    BinPackingSplits(coreOptions, readRowSizeRatio)
+      .packByBucket(splits.map(_.asInstanceOf[DataSplit]))
   }
 }

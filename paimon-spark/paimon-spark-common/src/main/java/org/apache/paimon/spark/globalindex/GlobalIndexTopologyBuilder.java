@@ -31,10 +31,8 @@ import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation;
 import java.io.IOException;
 import java.util.List;
 
-/** User defined topology builder. */
+/** Topology builder for Spark global index creation. */
 public interface GlobalIndexTopologyBuilder {
-
-    String identifier();
 
     List<CommitMessage> buildIndex(
             SparkSession spark,
@@ -46,4 +44,32 @@ public interface GlobalIndexTopologyBuilder {
             DataField indexField,
             Options options)
             throws IOException;
+
+    default List<CommitMessage> buildIndex(
+            SparkSession spark,
+            DataSourceV2Relation relation,
+            PartitionPredicate partitionPredicate,
+            FileStoreTable table,
+            String indexType,
+            RowType readType,
+            DataField indexField,
+            List<DataField> extraFields,
+            Options options)
+            throws IOException {
+        if (extraFields != null && !extraFields.isEmpty()) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Topology builder '%s' does not support multi-column index, got extra columns: %s",
+                            getClass().getSimpleName(), extraFields));
+        }
+        return buildIndex(
+                spark,
+                relation,
+                partitionPredicate,
+                table,
+                indexType,
+                readType,
+                indexField,
+                options);
+    }
 }

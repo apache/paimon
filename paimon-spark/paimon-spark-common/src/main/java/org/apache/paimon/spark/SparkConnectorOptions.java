@@ -25,6 +25,19 @@ import static org.apache.paimon.options.ConfigOptions.key;
 /** Options for spark connector. */
 public class SparkConnectorOptions {
 
+    public static final ConfigOption<Boolean> SCAN_PRESERVE_DATA_GROUPING =
+            key("scan.preserve-data-grouping")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether batch scans preserve bucket grouping for Spark to use the table's "
+                                    + "distribution and ordering. Requires Spark V2 bucketing to be enabled. "
+                                    + "If false, scans use regular split packing and report no bucket distribution "
+                                    + "or ordering. If true, Spark may group multiple read units into one task "
+                                    + "per bucket, or use them separately for a partially clustered join. "
+                                    + "Set as a table/read option or with spark.paimon.scan.preserve-data-grouping. "
+                                    + "The choice is fixed when the scan is created.");
+
     public static final ConfigOption<Boolean> REQUIRED_SPARK_CONFS_CHECK_ENABLED =
             key("requiredSparkConfsCheck.enabled")
                     .booleanType()
@@ -32,19 +45,48 @@ public class SparkConnectorOptions {
                     .withDescription(
                             "Whether to verify SparkSession is initialized with required configurations.");
 
+    public static final ConfigOption<Boolean> LEGACY_TIMESTAMP_MAPPING =
+            key("legacy-timestamp-mapping.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, map Paimon TIMESTAMP to Spark TIMESTAMP instead of TIMESTAMP_NTZ.");
+
+    public static final ConfigOption<Integer> VECTOR_SEARCH_LATERAL_JOIN_PARALLELISM =
+            key("vector-search.lateral-join.parallelism")
+                    .intType()
+                    .defaultValue(16)
+                    .withDescription(
+                            "Parallelism used to repartition a single-partition LIMIT input before "
+                                    + "executing a lateral vector search.");
+
     public static final ConfigOption<Boolean> MERGE_SCHEMA =
             key("write.merge-schema")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "If true, merge the data schema and the table schema automatically before write data.");
+                            "If true, evolve the table schema to accept new columns from the incoming data. "
+                                    + "Existing column types are preserved and incoming values are cast to them; "
+                                    + "to also widen existing types, enable 'write.merge-schema.type-widening'.");
+
+    public static final ConfigOption<Boolean> TYPE_WIDENING =
+            key("write.merge-schema.type-widening")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Only effective when 'write.merge-schema' is true. "
+                                    + "If true, widen an existing column type when the incoming data has a wider "
+                                    + "compatible type (e.g. INT -> BIGINT, DECIMAL precision increase). "
+                                    + "Lossy changes are still rejected unless 'write.merge-schema.explicit-cast' is also true.");
 
     public static final ConfigOption<Boolean> EXPLICIT_CAST =
             key("write.merge-schema.explicit-cast")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "If true, allow to merge data types if the two types meet the rules for explicit casting.");
+                            "Only effective when 'write.merge-schema.type-widening' is true. "
+                                    + "If true, also allow lossy type changes between compatible types "
+                                    + "(e.g. BIGINT -> INT, STRING -> DATE).");
 
     public static final ConfigOption<Boolean> USE_V2_WRITE =
             key("write.use-v2-write")
@@ -52,6 +94,33 @@ public class SparkConnectorOptions {
                     .defaultValue(false)
                     .withDescription(
                             "If true, v2 write will be used. Currently, only HASH_FIXED and BUCKET_UNAWARE bucket modes are supported. Will fall back to v1 write for other bucket modes. Currently, Spark V2 write does not support TableCapability.STREAMING_WRITE.");
+
+    public static final ConfigOption<Boolean> HIVE_STYLE_DYNAMIC_PARTITION_ENABLED =
+            key("write.hive-style-dynamic-partition.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, positional SQL inserts with explicit dynamic partitions "
+                                    + "use Hive's column order, with non-dynamic columns followed by "
+                                    + "dynamic partition columns. If false, the query output follows "
+                                    + "the table schema order.");
+
+    public static final ConfigOption<Integer> DATA_EVOLUTION_UPDATE_CONFLICT_RETRY_MAX_ATTEMPTS =
+            key("write.data-evolution.update-conflict-retry.max-attempts")
+                    .intType()
+                    .defaultValue(20)
+                    .withDescription(
+                            "Maximum attempts for Spark V1 UPDATE on data-evolution tables when "
+                                    + "concurrent partial-column updates conflict on the same row-id "
+                                    + "range and update columns. Values less than 2 disable retry.");
+
+    public static final ConfigOption<Long> DATA_EVOLUTION_UPDATE_CONFLICT_RETRY_WAIT_MS =
+            key("write.data-evolution.update-conflict-retry.wait-ms")
+                    .longType()
+                    .defaultValue(10L)
+                    .withDescription(
+                            "Wait time in milliseconds between retry attempts for Spark V1 UPDATE "
+                                    + "on data-evolution tables after row-id range update conflicts.");
 
     public static final ConfigOption<Integer> MAX_FILES_PER_TRIGGER =
             key("read.stream.maxFilesPerTrigger")
@@ -98,6 +167,24 @@ public class SparkConnectorOptions {
                     .defaultValue(true)
                     .withDescription(
                             "Whether to allow full scan when reading a partitioned table.");
+
+    public static final ConfigOption<Boolean> FORMAT_TABLE_REPAIR_COLLECT_STATISTICS =
+            key("format-table.repair.collect-statistics")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether MSCK REPAIR TABLE on a Format Table also measures the partitions it "
+                                    + "finds. Off by default: measuring lists the files inside every partition, "
+                                    + "not only the partition directories.");
+
+    public static final ConfigOption<Integer> FORMAT_TABLE_STATISTICS_PARALLELISM =
+            key("format-table.statistics.parallelism")
+                    .intType()
+                    .defaultValue(8)
+                    .withDescription(
+                            "How many requests MSCK REPAIR TABLE and ANALYZE TABLE use at once to "
+                                    + "measure Format Table partitions, so that a large table does not burst "
+                                    + "them at storage.");
 
     public static final ConfigOption<Boolean> SOURCE_SPLIT_TARGET_SIZE_WITH_COLUMN_PRUNING =
             key("source.split.target-size-with-column-pruning")

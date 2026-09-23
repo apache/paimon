@@ -25,14 +25,12 @@ import org.apache.paimon.rest.responses.ConfigResponse
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap
 
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.Row
-import org.assertj.core.api.Assertions
 
 import java.util.UUID
 
 class PaimonSparkTestWithRestCatalogBase extends PaimonSparkTestBase {
 
-  private var restCatalogServer: RESTCatalogServer = _
+  protected var restCatalogServer: RESTCatalogServer = _
   private var serverUrl: String = _
   protected var warehouse: String = _
   private val initToken = "init_token"
@@ -45,13 +43,25 @@ class PaimonSparkTestWithRestCatalogBase extends PaimonSparkTestBase {
         "paimon",
         CatalogOptions.WAREHOUSE.key,
         warehouse),
-      ImmutableMap.of())
+      ImmutableMap.of()
+    )
     val authProvider = new BearTokenAuthProvider(initToken)
     restCatalogServer =
       new RESTCatalogServer(tempDBDir.getCanonicalPath, authProvider, config, warehouse)
     restCatalogServer.start()
     serverUrl = restCatalogServer.getUrl
     super.beforeAll()
+    Seq("analyst", "first", "second", "reader", "function_reader").foreach(
+      restCatalogServer.registerManagementPrincipal)
+    restCatalogServer.registerManagementPrincipal("analysts")
+    restCatalogServer.registerManagementPrincipal("admin")
+    spark.sql("CREATE DATABASE IF NOT EXISTS paimon.sales")
+    spark.sql("""CREATE TABLE IF NOT EXISTS paimon.sales.orders (
+                |  id INT,
+                |  region STRING,
+                |  email STRING)
+                |TBLPROPERTIES ('query-auth.enabled' = 'true')
+                |""".stripMargin)
   }
 
   override protected def afterAll(): Unit = {
@@ -61,6 +71,12 @@ class PaimonSparkTestWithRestCatalogBase extends PaimonSparkTestBase {
       restCatalogServer.shutdown()
     }
   }
+
+  protected def clearFilteredListingRequests(): Unit =
+    restCatalogServer.clearReceivedListPartitionsByFilterRequests()
+
+  protected def filteredListingWasRequested: Boolean =
+    restCatalogServer.hasReceivedListPartitionsByFilterRequest
 
   override protected def sparkConf: SparkConf = {
     super.sparkConf

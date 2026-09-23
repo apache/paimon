@@ -87,20 +87,21 @@ class ScoredGlobalIndexResult(GlobalIndexResult):
             return self
 
         score_getter_fn = self.score_getter()
-        # Use a min-heap of size k to find top-k scores in O(n log k)
+        # The heap head is the weakest candidate: lowest score, then largest row ID.
         heap = []
         for row_id in row_ids:
             score = score_getter_fn(row_id)
             if score is None:
                 score = 0.0
+            item = (score, -row_id)
             if len(heap) < k:
-                heapq.heappush(heap, (score, row_id))
-            elif score > heap[0][0]:
-                heapq.heapreplace(heap, (score, row_id))
+                heapq.heappush(heap, item)
+            elif item > heap[0]:
+                heapq.heapreplace(heap, item)
 
         top_k_bitmap = RoaringBitmap64()
-        for _, row_id in heap:
-            top_k_bitmap.add(row_id)
+        for _, neg_row_id in heap:
+            top_k_bitmap.add(-neg_row_id)
 
         return SimpleScoredGlobalIndexResult(top_k_bitmap, score_getter_fn)
 
@@ -111,15 +112,15 @@ class ScoredGlobalIndexResult(GlobalIndexResult):
 
     @staticmethod
     def create(
-        supplier: Callable[[], RoaringBitmap64],
+        bitmap: RoaringBitmap64,
         score_getter: ScoreGetter
     ) -> 'ScoredGlobalIndexResult':
-        """Creates a new VectorSearchGlobalIndexResult from supplier."""
-        return LazyScoredGlobalIndexResult(supplier, score_getter)
+        """Creates a new ScoredGlobalIndexResult wrapping the given bitmap."""
+        return SimpleScoredGlobalIndexResult(bitmap, score_getter)
 
 
 class SimpleScoredGlobalIndexResult(ScoredGlobalIndexResult):
-    """Simple implementation of VectorSearchGlobalIndexResult."""
+    """Simple implementation of ScoredGlobalIndexResult."""
 
     def __init__(self, bitmap: RoaringBitmap64, score_getter_fn: ScoreGetter):
         self._bitmap = bitmap
@@ -127,23 +128,6 @@ class SimpleScoredGlobalIndexResult(ScoredGlobalIndexResult):
 
     def results(self) -> RoaringBitmap64:
         return self._bitmap
-
-    def score_getter(self) -> ScoreGetter:
-        return self._score_getter_fn
-
-
-class LazyScoredGlobalIndexResult(ScoredGlobalIndexResult):
-    """Lazy implementation of VectorSearchGlobalIndexResult."""
-
-    def __init__(self, supplier: Callable[[], RoaringBitmap64], score_getter_fn: ScoreGetter):
-        self._supplier = supplier
-        self._score_getter_fn = score_getter_fn
-        self._cached: Optional[RoaringBitmap64] = None
-
-    def results(self) -> RoaringBitmap64:
-        if self._cached is None:
-            self._cached = self._supplier()
-        return self._cached
 
     def score_getter(self) -> ScoreGetter:
         return self._score_getter_fn

@@ -40,6 +40,7 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.FieldsComparator;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RecordWriter;
 
 import javax.annotation.Nullable;
@@ -163,10 +164,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     @Override
     public void write(KeyValue kv) throws Exception {
         long sequenceNumber = newSequenceNumber();
-        boolean success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
+        InternalRow value = writerFactory.externalizeBlob(kv.valueKind(), kv.value());
+        boolean success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), value);
         if (!success) {
             flushWriteBuffer(false, false);
-            success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
+            success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), value);
             if (!success) {
                 throw new RuntimeException("Mem table is too small to hold a single element.");
             }
@@ -208,7 +210,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private void flushWriteBuffer(boolean waitForLatestCompaction, boolean forcedFullCompaction)
             throws Exception {
-        if (writeBuffer.size() > 0) {
+        if (!writeBuffer.isEmpty()) {
             if (compactManager.shouldWaitForLatestCompaction()) {
                 waitForLatestCompaction = true;
             }
@@ -228,10 +230,10 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                         dataWriter::write);
             } finally {
                 writeBuffer.clear();
-                if (changelogWriter != null) {
-                    changelogWriter.close();
-                }
-                dataWriter.close();
+                // dataWriter is a local and is reachable from nowhere else, so a failing
+                // changelogWriter.close() would strand it open with its rolled files unaborted.
+                // closeAll runs both and attaches the second failure to the first.
+                IOUtils.closeAll(changelogWriter, dataWriter);
             }
 
             if (changelogWriter != null) {
@@ -263,6 +265,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             waitCompaction = true;
         }
         trySyncLatestCompaction(waitCompaction);
+        writerFactory.prepareCommit();
         return drainIncrement();
     }
 
@@ -341,6 +344,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public void close() throws Exception {
+        writerFactory.abortManagedBlobWrites();
         // cancel compaction so that it does not block job cancelling
         compactManager.cancelCompaction();
         sync();

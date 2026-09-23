@@ -21,7 +21,7 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Tuple
 
-from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.common.external_path_provider import ExternalPathProvider
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -29,13 +29,20 @@ from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.write.map_shared_shredding_writer import MapSharedShreddingWriter
+from pypaimon.write.writer.mosaic_writer_options import create_mosaic_writer_options
+from pypaimon.write.writer.parquet_writer_options import create_parquet_writer_options
+from pypaimon.write.writer.write_buffer import WriteBuffer
 
 
 class DataWriter(ABC):
     """Base class for data writers that handle PyArrow tables directly."""
 
+    ROW_SIDECAR_SUFFIX = ".row"
+
     def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: CoreOptions = None,
-                 write_cols: Optional[List[str]] = None):
+                 write_cols: Optional[List[str]] = None,
+                 changelog_producer: ChangelogProducer = ChangelogProducer.NONE):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
@@ -48,6 +55,10 @@ class DataWriter(ABC):
 
         self.options = options
         self.target_file_size = self.options.target_file_size(self.table.is_primary_key_table)
+        # Roll a file when it reaches target_file_row_num rows or target_file_size,
+        # whichever comes first. Defaults to the max long (disabled), so plain
+        # size-based rolling is unchanged unless the option is set.
+        self.target_file_row_num = self.options.target_file_row_num()
         # POSTPONE_BUCKET uses AVRO format, otherwise default to PARQUET
         default_format = (
             CoreOptions.FILE_FORMAT_AVRO
@@ -57,10 +68,28 @@ class DataWriter(ABC):
         self.file_format = self.options.file_format(default_format)
         self.compression = self.options.file_compression()
         self.zstd_level = self.options.file_compression_zstd_level()
+        self.mosaic_writer_options = (
+            create_mosaic_writer_options(self.options)
+            if self.file_format == CoreOptions.FILE_FORMAT_MOSAIC
+            else None
+        )
         self.sequence_generator = SequenceGenerator(max_seq_number)
 
-        self.pending_data: Optional[pa.Table] = None
+        self._buffer = WriteBuffer(self._merge_data)
         self.committed_files: List[DataFileMeta] = []
+        self.committed_changelog_files: List[DataFileMeta] = []
+        self.changelog_producer = changelog_producer
+        self.changelog_file_format = (
+            self.options.changelog_file_format()
+            or self.file_format
+        )
+        self.parquet_writer_options = (
+            create_parquet_writer_options(self.options)
+            if self.file_format == CoreOptions.FILE_FORMAT_PARQUET
+            or (changelog_producer == ChangelogProducer.INPUT
+                and self.changelog_file_format == CoreOptions.FILE_FORMAT_PARQUET)
+            else {}
+        )
         self.write_cols = write_cols
         self.blob_as_descriptor = self.options.blob_as_descriptor()
 
@@ -68,8 +97,6 @@ class DataWriter(ABC):
         self.external_path_provider: Optional[ExternalPathProvider] = self.path_factory.create_external_path_provider(
             self.partition, self.bucket
         )
-        # Store the current generated external path to preserve scheme in metadata
-        self._current_external_path: Optional[str] = None
         # Variant shredding (static mode) — col_name → (obj_fields, target_arrow_type)
         self._variant_shredding: Dict[str, Tuple] = {}
         if self.file_format == CoreOptions.FILE_FORMAT_PARQUET \
@@ -86,16 +113,28 @@ class DataWriter(ABC):
         # Paimon field id map, used by _apply_variant_shredding; built once since
         # the table schema is fixed for the lifetime of this writer.
         self._paimon_field_id: Dict[str, int] = {pf.name: pf.id for pf in self.table.fields}
+        self._map_shared_shredding = MapSharedShreddingWriter(
+            self.table.fields,
+            self.options,
+            self.file_format,
+            self.changelog_file_format
+            if self.changelog_producer == ChangelogProducer.INPUT else None,
+        )
+
+    @property
+    def pending_row_count(self) -> int:
+        """Rows held for the file being written, not yet in a finished file.
+
+        The composite writers override this: they keep their normal rows in
+        ``_normal_buffer`` and hand the rest to their sub-writers, so the base
+        ``_buffer`` stays empty for them.
+        """
+        return self._buffer.num_rows
 
     def write(self, data: pa.RecordBatch):
         try:
             processed_data = self._process_data(data)
-
-            if self.pending_data is None:
-                self.pending_data = processed_data
-            else:
-                self.pending_data = self._merge_data(self.pending_data, processed_data)
-
+            self._buffer.append(processed_data)
             self._check_and_roll_if_needed()
         except Exception as e:
             import logging
@@ -105,16 +144,34 @@ class DataWriter(ABC):
             raise e
 
     def prepare_commit(self) -> List[DataFileMeta]:
-        if self.pending_data is not None and self.pending_data.num_rows > 0:
-            self._write_data_to_file(self.pending_data)
-            self.pending_data = None
+        if self._buffer.num_rows > 0:
+            # Clear only once the write lands: a caller that retries
+            # prepare_commit after a failed write has to still find its rows.
+            self._write_data_to_file(self._buffer.materialize())
+            self._buffer.reset()
 
         return self.committed_files.copy()
 
+    def _release_prepared_files(self) -> List[DataFileMeta]:
+        """Clear metadata accepted by the parent and return files it must delete on abort.
+
+        Call only after all sidecars are prepared and validated. Until then, this
+        writer retains its metadata for retry and its responsibility for cleanup.
+        """
+        owned_files = self.committed_files.copy() if self.delete_file_upon_abort() else []
+        self.committed_files.clear()
+        return owned_files
+
+    def delete_file_upon_abort(self) -> bool:
+        return True
+
+    def prepare_changelog_commit(self) -> List[DataFileMeta]:
+        return self.committed_changelog_files.copy()
+
     def close(self):
         try:
-            if self.pending_data is not None and self.pending_data.num_rows > 0:
-                self._write_data_to_file(self.pending_data)
+            if self._buffer.num_rows > 0:
+                self._write_data_to_file(self._buffer.materialize())
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
@@ -122,7 +179,7 @@ class DataWriter(ABC):
             self.abort()
             raise e
         finally:
-            self.pending_data = None
+            self._buffer.reset()
             # Note: Don't clear committed_files in close() - they should be returned by prepare_commit()
 
     def abort(self):
@@ -130,24 +187,28 @@ class DataWriter(ABC):
         Abort all writers and clean up resources. This method should be called when an error occurs
         during writing. It deletes any files that were written and cleans up resources.
         """
-        # Delete any files that were written
-        for file_meta in self.committed_files:
+        to_delete = self.committed_files + self.committed_changelog_files
+        self._delete_committed_files(to_delete)
+
+        # Clean up resources
+        self._buffer.reset()
+        self.committed_files.clear()
+        self.committed_changelog_files.clear()
+
+    def _delete_committed_files(self, file_metas: List[DataFileMeta]):
+        for file_meta in file_metas:
             try:
-                # Use external_path if available (contains full URL scheme), otherwise use file_path
                 path_to_delete = file_meta.external_path if file_meta.external_path else file_meta.file_path
                 if path_to_delete:
                     path_str = str(path_to_delete)
                     self.file_io.delete_quietly(path_str)
+                for extra_file in file_meta.extra_files:
+                    self.file_io.delete_quietly(self._aligned_extra_file_path(file_meta, extra_file))
             except Exception as e:
-                # Log but don't raise - we want to clean up as much as possible
                 import logging
                 logger = logging.getLogger(__name__)
                 path_to_delete = file_meta.external_path if file_meta.external_path else file_meta.file_path
                 logger.warning(f"Failed to delete file {path_to_delete} during abort: {e}")
-
-        # Clean up resources
-        self.pending_data = None
-        self.committed_files.clear()
 
     @abstractmethod
     def _process_data(self, data: pa.RecordBatch) -> pa.RecordBatch:
@@ -157,18 +218,62 @@ class DataWriter(ABC):
     def _merge_data(self, existing_data: pa.RecordBatch, new_data: pa.RecordBatch) -> pa.RecordBatch:
         """Merge existing data with new data. Must be implemented by subclasses."""
 
+    def _append_file_sequence_range(self, row_count: int) -> Tuple[int, int]:
+        if row_count <= 0:
+            raise ValueError("row_count must be positive")
+
+        if self.options.data_evolution_enabled(False):
+            # Row-tracking commit stamps this sentinel range with the snapshot id.
+            return 0, row_count - 1
+
+        return -1, -1
+
     def _check_and_roll_if_needed(self):
-        while self.pending_data is not None:
-            current_size = self.pending_data.nbytes
-            if current_size <= self.target_file_size:
+        # Neither trigger can fire below these thresholds, so the running counts
+        # rule out rolling -- the common case -- without concatenating anything.
+        while (self._buffer.nbytes > self.target_file_size
+                or self._buffer.num_rows > self.target_file_row_num):
+            pending = self._buffer.materialize()
+            num_rows = pending.num_rows
+            # Row-count trigger: keep at most target_file_row_num rows per file.
+            split_row = num_rows
+            if num_rows > self.target_file_row_num:
+                split_row = self.target_file_row_num
+            # Size trigger: roll earlier if the size split point comes first.
+            if pending.nbytes > self.target_file_size:
+                size_split = self._find_optimal_split_point(
+                    pending, self.target_file_size)
+                # First row alone exceeds target_file_size: roll it by itself.
+                if size_split <= 0:
+                    size_split = 1
+                if size_split < split_row:
+                    split_row = size_split
+            if split_row <= 0 or split_row >= num_rows:
                 break
-            split_row = self._find_optimal_split_point(self.pending_data, self.target_file_size)
-            if split_row <= 0:
-                break
-            data_to_write = self.pending_data.slice(0, split_row)
-            remaining_data = self.pending_data.slice(split_row)
-            self._write_data_to_file(data_to_write)
-            self.pending_data = remaining_data
+            self._write_data_to_file(pending.slice(0, split_row))
+            self._buffer.reset(pending.slice(split_row))
+
+    def _write_file(self, file_path: str, data: pa.Table, file_format: str) -> Dict:
+        """Write contents without publishing metadata; return shredding statistics."""
+        if file_format == CoreOptions.FILE_FORMAT_PARQUET:
+            return self._write_parquet_data(file_path, data)
+        elif file_format == CoreOptions.FILE_FORMAT_ORC:
+            self.file_io.write_orc(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
+        elif file_format == CoreOptions.FILE_FORMAT_AVRO:
+            self.file_io.write_avro(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
+        elif file_format == CoreOptions.FILE_FORMAT_BLOB:
+            self.file_io.write_blob(file_path, data)
+        elif file_format == CoreOptions.FILE_FORMAT_LANCE:
+            self.file_io.write_lance(file_path, data)
+        elif file_format == CoreOptions.FILE_FORMAT_VORTEX:
+            self.file_io.write_vortex(file_path, data)
+        elif file_format == CoreOptions.FILE_FORMAT_MOSAIC:
+            self.file_io.write_mosaic(file_path, data, options=self.mosaic_writer_options)
+        elif file_format == CoreOptions.FILE_FORMAT_ROW:
+            self.file_io.write_row(file_path, data, zstd_level=self.zstd_level)
+        else:
+            raise ValueError(f"Unsupported file format: {file_format}")
+        return {}
 
     def _write_data_to_file(self, data: pa.Table):
         if data.num_rows == 0:
@@ -177,84 +282,139 @@ class DataWriter(ABC):
         file_path = self._generate_file_path(file_name)
 
         is_external_path = self.external_path_provider is not None
-        if is_external_path:
-            # Use the stored external path from _generate_file_path to preserve scheme
-            external_path_str = self._current_external_path if self._current_external_path else None
-        else:
-            external_path_str = None
+        external_path_str = file_path if is_external_path else None
 
+        logical_data = data
+        extra_files = []
+        row_sidecar_path = None
+        changelog_meta = None
+        shared_shredding_stats = {}
         if self._variant_shredding:
             data = self._apply_variant_shredding(data)
 
-        if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
-            self.file_io.write_parquet(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
-        elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
-            self.file_io.write_orc(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
-        elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
-            self.file_io.write_avro(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
-        elif self.file_format == CoreOptions.FILE_FORMAT_BLOB:
-            self.file_io.write_blob(file_path, data)
-        elif self.file_format == CoreOptions.FILE_FORMAT_LANCE:
-            self.file_io.write_lance(file_path, data)
-        elif self.file_format == CoreOptions.FILE_FORMAT_VORTEX:
-            self.file_io.write_vortex(file_path, data)
-        else:
-            raise ValueError(f"Unsupported file format: {self.file_format}")
+        # One data file means up to three files on disk -- the data file, its row
+        # sidecar and its changelog -- and none of them is committed until all of
+        # them have landed. A caller that retries the flush still holds these
+        # rows in its buffer, so publishing the data file before the changelog
+        # exists would make the retry write a second copy of rows the first meta
+        # already covers.
+        try:
+            shared_shredding_stats = self._write_file(file_path, data, self.file_format)
 
-        # min key & max key
+            if self._should_write_row_sidecar():
+                row_sidecar_name = f"{file_name}{self.ROW_SIDECAR_SUFFIX}"
+                row_sidecar_path = f"{file_path}{self.ROW_SIDECAR_SUFFIX}"
+                self.file_io.write_row(
+                    row_sidecar_path,
+                    logical_data,
+                    fields=self._row_sidecar_fields(logical_data),
+                    zstd_level=self.zstd_level)
+                extra_files.append(row_sidecar_name)
 
-        selected_table = data.select(self.trimmed_primary_keys)
-        key_columns_batch = selected_table.to_batches()[0]
-        min_key_row_batch = key_columns_batch.slice(0, 1)
-        max_key_row_batch = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1)
-        min_key = [col.to_pylist()[0] for col in min_key_row_batch.columns]
-        max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
+            # min key & max key
 
-        # key stats & value stats
-        value_stats_enabled = self.options.metadata_stats_enabled()
-        if value_stats_enabled:
-            stats_fields = self.table.fields if self.table.is_primary_key_table \
-                else PyarrowFieldParser.to_paimon_schema(data.schema)
-        else:
-            stats_fields = self.table.trimmed_primary_keys_fields
-        column_stats = {
-            field.name: self._get_column_stats(data, field.name)
-            for field in stats_fields
-        }
-        key_fields = self.trimmed_primary_keys_fields
-        key_stats = self._collect_value_stats(data, key_fields, column_stats)
-        if not all(count == 0 for count in key_stats.null_counts):
-            raise RuntimeError("Primary key should not be null")
+            selected_table = logical_data.select(self.trimmed_primary_keys)
+            key_columns_batch = selected_table.to_batches()[0]
+            min_key_row_batch = key_columns_batch.slice(0, 1)
+            max_key_row_batch = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1)
+            min_key = [col.to_pylist()[0] for col in min_key_row_batch.columns]
+            max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
 
-        value_fields = stats_fields if value_stats_enabled else []
-        value_stats = self._collect_value_stats(data, value_fields, column_stats)
+            # key stats & value stats
+            value_stats_enabled = self.options.metadata_stats_enabled()
+            if value_stats_enabled:
+                stats_fields = self.table.fields if self.table.is_primary_key_table \
+                    else PyarrowFieldParser.to_paimon_schema(logical_data.schema)
+            else:
+                stats_fields = self.table.trimmed_primary_keys_fields
+            column_stats = {
+                field.name: self._get_column_stats(logical_data, field.name)
+                for field in stats_fields
+            }
+            key_fields = self.trimmed_primary_keys_fields
+            key_stats = self._collect_value_stats(
+                logical_data, key_fields, column_stats)
+            if not self.options.primary_key_nullable() and not all(
+                    count == 0 for count in key_stats.null_counts):
+                raise RuntimeError("Primary key should not be null")
 
-        min_seq = self.sequence_generator.start
-        max_seq = self.sequence_generator.current
+            value_fields = stats_fields if value_stats_enabled else []
+            value_stats = self._collect_value_stats(
+                logical_data, value_fields, column_stats)
+
+            # Read the range without advancing it: the advance belongs with the
+            # append below, so a retried flush derives the same range.
+            min_seq = self.sequence_generator.start
+            max_seq = self.sequence_generator.current
+            creation_time = Timestamp.now()
+            data_meta = self._create_data_file_meta(
+                file_name=file_name,
+                file_path=file_path,
+                row_count=data.num_rows,
+                min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
+                max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
+                key_stats=key_stats,
+                value_stats=value_stats,
+                min_sequence_number=min_seq,
+                max_sequence_number=max_seq,
+                extra_files=extra_files,
+                creation_time=creation_time,
+            )
+
+            if self.changelog_producer == ChangelogProducer.INPUT:
+                changelog_meta = self._write_changelog_file(
+                    data, min_key, max_key, key_stats, value_stats,
+                    min_seq, max_seq, creation_time,
+                    value_stats_enabled, external_path_str is not None,
+                )
+        except Exception:
+            self.file_io.delete_quietly(file_path)
+            if row_sidecar_path is not None:
+                self.file_io.delete_quietly(row_sidecar_path)
+            raise
+
+        self._finish_data_file(data_meta, changelog_meta, shared_shredding_stats)
+
+    def _finish_data_file(self, data_meta, changelog_meta=None,
+                          shared_shredding_stats=None):
+        """Record a fully written data file and its optional changelog."""
         self.sequence_generator.start = self.sequence_generator.current
-        self.committed_files.append(DataFileMeta.create(
+        if shared_shredding_stats is not None:
+            self._map_shared_shredding.file_completed(shared_shredding_stats)
+        self.committed_files.append(data_meta)
+        if changelog_meta is not None:
+            self.committed_changelog_files.append(changelog_meta)
+
+    def _write_parquet_data(self, path, data):
+        if self._map_shared_shredding.is_active():
+            return self._map_shared_shredding.write_parquet(
+                self.file_io, path, data, self.compression, self.zstd_level)
+        self.file_io.write_parquet(
+            path, data, compression=self.compression, zstd_level=self.zstd_level,
+            **self.parquet_writer_options)
+        return {}
+
+    def _create_data_file_meta(self, file_name, file_path, row_count,
+                               min_key, max_key, key_stats, value_stats,
+                               min_sequence_number, max_sequence_number,
+                               extra_files=None, creation_time=None):
+        """Common metadata finalization for buffered and incremental files."""
+        return DataFileMeta.create(
             file_name=file_name,
             file_size=self.file_io.get_file_size(file_path),
-            row_count=data.num_rows,
-            min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
-            max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
-            key_stats=key_stats,
-            value_stats=value_stats,
-            min_sequence_number=min_seq,
-            max_sequence_number=max_seq,
-            schema_id=self.table.table_schema.id,
-            level=0,
-            extra_files=[],
-            creation_time=Timestamp.now(),
-            delete_row_count=0,
-            file_source=0,
-            value_stats_cols=None if value_stats_enabled else [],
-            external_path=external_path_str,  # Set external path if using external paths
-            first_row_id=None,
-            write_cols=self.write_cols,
-            # None means all columns in the table have been written
-            file_path=file_path,
-        ))
+            row_count=row_count,
+            min_key=min_key, max_key=max_key,
+            key_stats=key_stats, value_stats=value_stats,
+            min_sequence_number=min_sequence_number,
+            max_sequence_number=max_sequence_number,
+            schema_id=self.table.table_schema.id, level=0,
+            extra_files=extra_files if extra_files is not None else [],
+            creation_time=creation_time if creation_time is not None else Timestamp.now(),
+            delete_row_count=0, file_source=0,
+            value_stats_cols=None if self.options.metadata_stats_enabled() else [],
+            external_path=file_path if self.external_path_provider is not None else None,
+            first_row_id=None, write_cols=self.write_cols, file_path=file_path,
+        )
 
     def _apply_variant_shredding(self, data: pa.Table) -> pa.Table:
         """Transform VARIANT columns into shredded Parquet format.
@@ -281,14 +441,82 @@ class DataWriter(ABC):
             return data
         return pa.Table.from_arrays(columns, schema=pa.schema(fields))
 
+    def _write_changelog_file(self, data, min_key, max_key, key_stats, value_stats,
+                              min_seq, max_seq, creation_time,
+                              value_stats_enabled, is_external) -> DataFileMeta:
+        """Write the changelog file for one data file and return its meta.
+
+        The caller appends the returned meta only once the whole data file has
+        landed, so a failure here leaves nothing behind: no meta to commit, and
+        no file on disk either.
+        """
+        cl_fmt = self.changelog_file_format
+        changelog_file_name = f"changelog-{uuid.uuid4()}-0.{cl_fmt}"
+        changelog_file_path = self._generate_file_path(changelog_file_name)
+
+        changelog_external_path = changelog_file_path if is_external else None
+
+        try:
+            if cl_fmt not in (CoreOptions.FILE_FORMAT_PARQUET,
+                              CoreOptions.FILE_FORMAT_ORC,
+                              CoreOptions.FILE_FORMAT_AVRO):
+                raise ValueError(f"Unsupported changelog file format: {cl_fmt}. "
+                                 f"Supported formats: parquet, orc, avro.")
+            self._write_file(changelog_file_path, data, cl_fmt)
+
+            return DataFileMeta.create(
+                file_name=changelog_file_name,
+                file_size=self.file_io.get_file_size(changelog_file_path),
+                row_count=data.num_rows,
+                min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
+                max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
+                key_stats=key_stats,
+                value_stats=value_stats,
+                min_sequence_number=min_seq,
+                max_sequence_number=max_seq,
+                schema_id=self.table.table_schema.id,
+                level=0,
+                extra_files=[],
+                creation_time=creation_time,
+                delete_row_count=0,
+                file_source=0,
+                value_stats_cols=None if value_stats_enabled else [],
+                external_path=changelog_external_path,
+                first_row_id=None,
+                write_cols=self.write_cols,
+                file_path=changelog_file_path,
+            )
+        except Exception:
+            self.file_io.delete_quietly(changelog_file_path)
+            raise
+
     def _generate_file_path(self, file_name: str) -> str:
         if self.external_path_provider:
-            external_path = self.external_path_provider.get_next_external_data_path(file_name)
-            self._current_external_path = external_path
-            return external_path
+            return self.external_path_provider.get_next_external_data_path(file_name)
 
         bucket_path = self.path_factory.bucket_path(self.partition, self.bucket)
         return f"{bucket_path.rstrip('/')}/{file_name}"
+
+    def _should_write_row_sidecar(self) -> bool:
+        return (
+            self.options.data_evolution_enabled(False)
+            and self.options.data_evolution_row_sidecar_enabled(False)
+        )
+
+    def _row_sidecar_fields(self, data: pa.Table) -> List:
+        if self.write_cols:
+            field_map = {field.name: field for field in self.table.table_schema.fields}
+            return [field_map[name] for name in self.write_cols if name in field_map]
+        return PyarrowFieldParser.to_paimon_schema(data.schema)
+
+    @staticmethod
+    def _aligned_extra_file_path(file_meta: DataFileMeta, extra_file: str) -> str:
+        if "://" in extra_file or extra_file.startswith("/"):
+            return extra_file
+        file_path = file_meta.external_path if file_meta.external_path else file_meta.file_path
+        if not file_path or "/" not in file_path:
+            return extra_file
+        return f"{file_path.rsplit('/', 1)[0]}/{extra_file}"
 
     @staticmethod
     def _find_optimal_split_point(data: pa.RecordBatch, target_size: int) -> int:

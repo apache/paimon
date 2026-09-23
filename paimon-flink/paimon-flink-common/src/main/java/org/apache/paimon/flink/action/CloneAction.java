@@ -29,6 +29,7 @@ import org.apache.paimon.utils.StringUtils;
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /** Clone source table to target table. */
@@ -39,6 +40,7 @@ public class CloneAction extends ActionBase {
     private final String sourceTableName;
 
     private final Map<String, String> targetCatalogConfig;
+    private final Map<String, String> targetTableConfig;
     private final String targetDatabase;
     private final String targetTableName;
 
@@ -58,6 +60,7 @@ public class CloneAction extends ActionBase {
             String targetDatabase,
             String targetTableName,
             Map<String, String> targetCatalogConfig,
+            Map<String, String> targetTableConfig,
             @Nullable Integer parallelism,
             @Nullable String whereSql,
             @Nullable List<String> includedTables,
@@ -69,6 +72,11 @@ public class CloneAction extends ActionBase {
         super(sourceCatalogConfig);
 
         if (cloneFrom.equalsIgnoreCase("hive")) {
+            if (!targetTableConfig.isEmpty()) {
+                throw new UnsupportedOperationException(
+                        "Parameter 'target_table_conf' is only supported when clone_from is paimon.");
+            }
+
             Catalog sourceCatalog = catalog;
             if (sourceCatalog instanceof CachingCatalog) {
                 sourceCatalog = ((CachingCatalog) sourceCatalog).wrapped();
@@ -87,6 +95,7 @@ public class CloneAction extends ActionBase {
         this.targetDatabase = targetDatabase;
         this.targetTableName = targetTableName;
         this.targetCatalogConfig = targetCatalogConfig;
+        this.targetTableConfig = targetTableConfig;
 
         this.parallelism = parallelism == null ? env.getParallelism() : parallelism;
         this.whereSql = whereSql;
@@ -96,7 +105,7 @@ public class CloneAction extends ActionBase {
         this.preferFileFormat =
                 StringUtils.isNullOrWhitespaceOnly(preferFileFormat)
                         ? preferFileFormat
-                        : preferFileFormat.toLowerCase();
+                        : preferFileFormat.toLowerCase(Locale.ROOT);
         this.cloneFrom = cloneFrom;
         this.metaOnly = metaOnly;
         this.cloneIfExists = cloneIfExists;
@@ -133,6 +142,7 @@ public class CloneAction extends ActionBase {
                         targetDatabase,
                         targetTableName,
                         targetCatalogConfig,
+                        targetTableConfig,
                         parallelism,
                         whereSql,
                         includedTables,

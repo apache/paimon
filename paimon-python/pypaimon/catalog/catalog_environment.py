@@ -17,8 +17,13 @@
 
 from typing import Optional
 
+from pypaimon.api.rest_api import RESTApi
+from pypaimon.api.rest_util import RESTUtil
+from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_loader import CatalogLoader
 from pypaimon.common.identifier import Identifier
+from pypaimon.common.json_util import JSON
+from pypaimon.common.options.config import CatalogOptions
 from pypaimon.snapshot.catalog_snapshot_commit import CatalogSnapshotCommit
 from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
 from pypaimon.snapshot.snapshot_commit import SnapshotCommit
@@ -26,6 +31,8 @@ from pypaimon.snapshot.snapshot_loader import SnapshotLoader
 
 
 class CatalogEnvironment:
+
+    _READ_VIA_OPTION = RESTApi.HEADER_PREFIX + RESTApi.READ_VIA_HEADER
 
     def __init__(
             self,
@@ -86,6 +93,41 @@ class CatalogEnvironment:
             return SnapshotLoader(self.catalog_loader, self.identifier)
         return None
 
+    def catalog_context(self) -> Optional[CatalogContext]:
+        if self.catalog_loader is None:
+            return None
+        context = getattr(self.catalog_loader, "context", None)
+        return context() if callable(context) else None
+
+    def dependency_read_context(self) -> Optional[CatalogContext]:
+        context = self.catalog_context()
+        if self.identifier is None or context is None:
+            return context
+
+        from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
+
+        rest_catalog = (
+            isinstance(self.catalog_loader, RESTCatalogLoader)
+            or context.options.get(CatalogOptions.METASTORE) == "rest"
+        )
+        if not rest_catalog:
+            return context
+        if context.options.contains_key(self._READ_VIA_OPTION):
+            return context
+
+        dependency_options = context.options.copy()
+        if not dependency_options.contains(CatalogOptions.METASTORE):
+            dependency_options.set(CatalogOptions.METASTORE, "rest")
+        dependency_options.to_map()[self._READ_VIA_OPTION] = RESTUtil.encode_string(
+            JSON.to_json(self.identifier, separators=(",", ":"))
+        )
+        return CatalogContext.create(
+            dependency_options,
+            context.hadoop_conf,
+            context.prefer_io_loader,
+            context.fallback_io_loader,
+        )
+
     def copy(self, identifier: Identifier) -> 'CatalogEnvironment':
         """
         Create a copy of this CatalogEnvironment with a different identifier.
@@ -117,3 +159,19 @@ class CatalogEnvironment:
             catalog_loader=None,
             supports_version_management=False
         )
+
+    def table_query_auth(self, options, identifier):
+        if not options.query_auth_enabled or self.catalog_loader is None:
+            return None
+        return _TableQueryAuthFn(self.catalog_loader, identifier)
+
+
+class _TableQueryAuthFn:
+
+    def __init__(self, catalog_loader, identifier):
+        self._catalog_loader = catalog_loader
+        self._identifier = identifier
+
+    def __call__(self, select):
+        catalog = self._catalog_loader.load()
+        return catalog.auth_table_query(self._identifier, select)

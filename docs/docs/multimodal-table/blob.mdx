@@ -1,0 +1,572 @@
+---
+title: "Blob Storage"
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Blob Storage
+
+## Overview
+
+Use `BLOB` for large binary payloads such as images, audio, video clips, and documents.
+Managed BLOB columns keep payload bytes in dedicated files, so metadata-only queries
+can skip them. Use `ARRAY<BLOB>` for ordered collections or `MAP<K, BLOB>` for keyed objects.
+For numeric embeddings, see [Vector Storage](./vector).
+
+This page covers append tables with [Data Evolution](./data-evolution) enabled.
+For primary-key tables, follow [Primary-Key BLOB Storage](../primary-key-table/blob-storage).
+Start with table creation, writing, and reading below; use
+[BLOB References and Sharing](./blob-references) for reuse across tables and
+[Video Frame Storage](./video) for encoded videos addressed one frame per row.
+
+## Storage Modes
+
+Paimon supports three storage modes for BLOB fields, selected via **comment directives** on the column:
+
+1. **Default blob storage** (`__BLOB_FIELD`)
+   Blob bytes are written to Paimon-managed `.blob` files under the table path.
+   This mode supports `BLOB`, `ARRAY<BLOB>`, and `MAP<K, BLOB>` fields.
+
+2. **Descriptor-only storage** (`__BLOB_DESCRIPTOR_FIELD`)
+   Only serialized `BlobDescriptor` bytes are stored inline in data files. Paimon does not write `.blob` files for these fields, and non-null values must provide descriptor-based input.
+
+3. **Blob view storage** (`__BLOB_VIEW_FIELD`)
+   Serialized `BlobViewStruct` bytes are stored inline. The struct points to a BLOB value in an upstream table by table identifier, BLOB field, and row id. The actual blob bytes are resolved from the upstream table at read time.
+
+This allows one table to mix different storage modes for different BLOB columns.
+`ARRAY<BLOB>` and `MAP<K, BLOB>` are supported only by `__BLOB_FIELD`;
+descriptor-only and blob-view comment directives accept scalar BLOB fields only.
+Map keys support the integer family, `BOOLEAN`, `DECIMAL`, `DATE`, `TIME`, `BINARY`,
+`VARBINARY` (`BYTES`), `CHAR`, and `VARCHAR`. Use non-null keys for compatibility across
+Flink, Spark, and Python.
+
+![Managed BLOB fields write payload files; descriptor fields store a URI range; BLOB views store a table, field, and row-ID reference.](/img/multimodal-blob-modes.svg)
+
+## Creating a Table
+
+Select a configured Paimon catalog before running SQL. Run the Flink examples in
+batch mode and wait for each insert to finish before reading its results. The Java
+snippets assume a configured `catalog` and the imports shown in the
+[Java API guide](../program-api/java-api). Use fresh table names for this walkthrough.
+
+The recommended way to create a blob table in SQL is to use the **comment directive** `__BLOB_FIELD`, `__BLOB_DESCRIPTOR_FIELD`, or `__BLOB_VIEW_FIELD` on the column. Paimon automatically converts the column to the corresponding BLOB type and registers it in the corresponding option.
+
+<Tabs groupId="blob-create-table">
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+```sql
+CREATE TABLE image_table (
+    id INT,
+    name STRING,
+    image BYTES COMMENT '__BLOB_FIELD; product image',
+    gallery ARRAY<BYTES> COMMENT '__BLOB_FIELD; product gallery'
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+
+-- Multiple blob columns with different storage modes
+CREATE TABLE media_table (
+    id INT,
+    photo BYTES COMMENT '__BLOB_FIELD; original photo',
+    thumbnail BYTES COMMENT '__BLOB_DESCRIPTOR_FIELD; thumbnail descriptor',
+    preview BYTES COMMENT '__BLOB_VIEW_FIELD; preview from upstream'
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+```
+
+</TabItem>
+
+<TabItem value="spark-sql" label="Spark SQL">
+
+```sql
+CREATE TABLE image_table (
+    id INT,
+    name STRING,
+    image BINARY COMMENT '__BLOB_FIELD; product image',
+    gallery ARRAY<BINARY> COMMENT '__BLOB_FIELD; product gallery'
+) TBLPROPERTIES (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+```
+
+</TabItem>
+
+<TabItem value="java" label="Java API">
+
+```java
+// Comment directives convert binary source types and register the blob fields.
+Schema schema = Schema.newBuilder()
+        .column("id", DataTypes.INT())
+        .column("name", DataTypes.STRING())
+        .column("image", DataTypes.BYTES(), "__BLOB_FIELD; product image")
+        .column("gallery", DataTypes.ARRAY(DataTypes.BYTES()),
+                "__BLOB_FIELD; product gallery")
+        .option("row-tracking.enabled", "true")
+        .option("data-evolution.enabled", "true")
+        .build();
+
+catalog.createDatabase("my_db", true);
+Identifier identifier = Identifier.create("my_db", "image_table");
+catalog.createTable(identifier, schema, false);
+Table table = catalog.getTable(identifier);
+```
+
+</TabItem>
+
+<TabItem value="python" label="Python API">
+
+```python
+import pyarrow as pa
+from pypaimon import CatalogFactory, Schema
+
+catalog = CatalogFactory.create({'warehouse': '/tmp/paimon-warehouse'})
+catalog.create_database('my_db', True)
+
+# Scalar, list, and map types with large_binary() values are recognized as blob types.
+pa_schema = pa.schema([
+    ('id', pa.int32()),
+    ('name', pa.string()),
+    ('image', pa.large_binary()),
+    ('gallery', pa.list_(pa.large_binary())),
+])
+
+schema = Schema.from_pyarrow_schema(
+    pa_schema,
+    options={
+        'row-tracking.enabled': 'true',
+        'data-evolution.enabled': 'true',
+    }
+)
+catalog.create_table('my_db.image_table', schema, False)
+table = catalog.get_table('my_db.image_table')
+```
+
+</TabItem>
+
+</Tabs>
+
+The comment directive format is `__DIRECTIVE; optional user comment`. Paimon converts `BYTES`/`BINARY` to `BLOB`, `ARRAY<BYTES>`/`ARRAY<BINARY>` to `ARRAY<BLOB>`, and `MAP<K, BYTES>`/`MAP<K, BINARY>` to `MAP<K, BLOB>`. It registers the field in the corresponding option and stores the text after `;` as the column's real comment.
+
+Supported directives:
+
+| Directive | Storage mode | Option |
+|-----------|-------------|--------|
+| `__BLOB_FIELD` | Raw scalar, array elements, or map values in `.blob` files | `blob-field` |
+| `__BLOB_DESCRIPTOR_FIELD` | Descriptor bytes inline | `blob-descriptor-field` |
+| `__BLOB_VIEW_FIELD` | View reference inline | `blob-view-field` |
+
+## Inserting Blob Data
+
+Continue with the table created above. The short binary values are test payloads,
+not complete image files. Each insert appends a new row; `id` is not a primary key.
+
+<Tabs groupId="blob-insert">
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+```sql
+INSERT INTO image_table VALUES (1, 'sample', X'89504E470D0A1A0A', NULL);
+```
+
+</TabItem>
+
+<TabItem value="spark-sql" label="Spark SQL">
+
+```sql
+INSERT INTO image_table VALUES (1, 'sample', X'89504E470D0A1A0A', NULL);
+```
+
+</TabItem>
+
+<TabItem value="java" label="Java API">
+
+```java
+byte[] imageBytes = new byte[] {1, 2, 3};
+BatchWriteBuilder builder = table.newBatchWriteBuilder();
+try (BatchTableWrite write = builder.newWrite();
+        BatchTableCommit commit = builder.newCommit()) {
+    write.write(GenericRow.of(
+            1, BinaryString.fromString("sample"), new BlobData(imageBytes), null));
+    commit.commit(write.prepareCommit());
+}
+```
+
+</TabItem>
+
+<TabItem value="python" label="Python API">
+
+```python
+data = pa.table({
+    'id': pa.array([1], type=pa.int32()),
+    'name': pa.array(['sample']),
+    'image': pa.array([b'\x89PNG\r\n\x1a\n'], type=pa.large_binary()),
+    'gallery': pa.array([None], type=pa.list_(pa.large_binary())),
+})
+write_builder = table.new_batch_write_builder()
+writer = write_builder.new_write()
+commit = write_builder.new_commit()
+try:
+    writer.write_arrow(data)
+    commit.commit(writer.prepare_commit())
+finally:
+    writer.close()
+    commit.close()
+```
+
+</TabItem>
+
+</Tabs>
+
+For an `ARRAY<BLOB>` field, write an array of binary values. The array itself and
+individual elements may be null when the corresponding array and element types are
+nullable:
+
+<Tabs groupId="array-blob-insert">
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+```sql
+INSERT INTO image_table
+VALUES (2, 'gallery sample', X'89504E470D0A1A0A', ARRAY[X'01', NULL, X'02']);
+```
+
+</TabItem>
+
+<TabItem value="spark-sql" label="Spark SQL">
+
+```sql
+INSERT INTO image_table
+VALUES (2, 'gallery sample', X'89504E470D0A1A0A', array(X'01', NULL, X'02'));
+```
+
+</TabItem>
+
+<TabItem value="java" label="Java API">
+
+```java
+GenericArray gallery = new GenericArray(new Object[] {
+        new BlobData(new byte[] {1}), null, new BlobData(new byte[] {2})
+});
+// Pass gallery as the fourth field of GenericRow in a new batch write.
+```
+
+</TabItem>
+
+<TabItem value="python" label="Python API">
+
+```python
+gallery_type = pa.list_(pa.large_binary())
+gallery = pa.array([[b'\x01', None, b'\x02']], type=gallery_type)
+# Use gallery as the gallery column of an Arrow table in a new batch write.
+```
+
+</TabItem>
+
+</Tabs>
+
+## Querying Blob Data
+
+<Tabs groupId="blob-query">
+
+<TabItem value="sql" label="Flink SQL">
+
+```sql
+-- Select all columns including blob
+SELECT * FROM image_table;
+
+-- Select only non-blob columns (efficient - doesn't load blob data)
+SELECT id, name FROM image_table;
+
+-- Return descriptor bytes instead of actual blob bytes
+SELECT image
+FROM image_table /*+ OPTIONS('blob-as-descriptor'='true') */;
+```
+
+</TabItem>
+
+<TabItem value="spark-sql" label="Spark SQL">
+
+```sql
+SELECT id, name FROM image_table;
+SELECT id, image FROM image_table;
+
+ALTER TABLE image_table SET TBLPROPERTIES ('blob-as-descriptor' = 'true');
+SELECT id, image FROM image_table;
+ALTER TABLE image_table SET TBLPROPERTIES ('blob-as-descriptor' = 'false');
+```
+
+The `ALTER TABLE` setting persists for subsequent reads. Restore it after the
+descriptor query if ordinary readers should continue to receive payload bytes.
+
+</TabItem>
+
+<TabItem value="java" label="Java API">
+
+```java
+Table descriptorTable = table.copy(
+        Collections.singletonMap("blob-as-descriptor", "true"));
+ReadBuilder readBuilder = descriptorTable.newReadBuilder();
+TableScan.Plan plan = readBuilder.newScan().plan();
+try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+    reader.forEachRemaining(row -> {
+        Blob blob = row.getBlob(2);
+        if (blob != null) {
+            BlobDescriptor descriptor = blob.toDescriptor();
+            try (SeekableInputStream in = blob.newInputStream()) {
+                byte[] prefix = new byte[1024];
+                int bytesRead = in.read(prefix);
+            }
+        }
+    });
+}
+```
+
+Descriptor reads keep the payload lazy. Call `blob.toData()` instead when you need
+the complete value in memory; use `newInputStream()` for partial or streamed reads.
+
+</TabItem>
+
+<TabItem value="python" label="Python API">
+
+```python
+read_builder = table.new_read_builder()
+splits = read_builder.new_scan().plan().splits()
+read = read_builder.new_read()
+with read.to_arrow_batch_reader(splits, blob_parallelism=4) as batches:
+    for batch in batches:
+        print(batch.column('image').to_pylist())
+```
+
+This reads payload bytes in batches. For lazy descriptor reads and partial streams,
+see [BLOB reading in PyPaimon](../pypaimon/blob#streaming--partial-reads).
+
+</TabItem>
+
+</Tabs>
+
+## Blob Construct Sources (Java API)
+
+Each line below is an alternative way to construct a `Blob`.
+
+```java
+Blob blob = Blob.fromData(imageBytes);                                         // byte array
+Blob blob = Blob.fromLocal("/path/to/image.png");                              // local file
+Blob blob = Blob.fromFile(fileIO, "s3://bucket/path/to/image.png");            // any FileIO
+Blob blob = Blob.fromFile(fileIO, "s3://bucket/large-file.bin", 1024, 2048);   // partial file
+Blob blob = Blob.fromHttp("https://example.com/image.png");                    // HTTP URL
+Blob blob = Blob.fromInputStream(() -> new FileInputStream("..."));            // InputStream
+Blob blob = Blob.fromDescriptor(uriReader, descriptor);                        // BlobDescriptor
+```
+
+## Adding a Blob Column
+
+The examples below are optional schema changes, separate from the create/write examples above. Adding a column does not backfill existing rows.
+The same comment directive works with `ALTER TABLE ADD COLUMN`:
+
+<Tabs groupId="blob-add-column">
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+```sql
+ALTER TABLE image_table ADD picture BYTES COMMENT '__BLOB_FIELD';
+
+ALTER TABLE image_table
+    ADD video BYTES COMMENT '__BLOB_DESCRIPTOR_FIELD; promotional video';
+```
+
+</TabItem>
+
+<TabItem value="spark-sql" label="Spark SQL">
+
+```sql
+ALTER TABLE image_table ADD COLUMN picture BINARY COMMENT '__BLOB_FIELD';
+
+ALTER TABLE image_table
+    ADD COLUMN video BINARY COMMENT '__BLOB_DESCRIPTOR_FIELD; promotional video';
+```
+
+</TabItem>
+
+<TabItem value="java" label="Java API">
+
+```java
+// Java API: add column with BlobType directly
+schemaManager.commitChanges(
+    SchemaChange.addColumn("picture", DataTypes.BLOB()));
+
+// Or use comment directive like SQL
+schemaManager.commitChanges(
+    SchemaChange.addColumn("video", DataTypes.BYTES(),
+        "__BLOB_DESCRIPTOR_FIELD; promotional video", null));
+```
+
+</TabItem>
+
+<TabItem value="python" label="Python API">
+
+```python
+from pypaimon.schema.schema_change import SchemaChange
+from pypaimon.schema.data_types import AtomicType
+
+catalog.alter_table(
+    'my_db.image_table',
+    [SchemaChange.add_column('picture', AtomicType('BLOB'))]
+)
+```
+
+</TabItem>
+
+</Tabs>
+
+## Storage Layout
+
+For managed BLOB columns (`__BLOB_FIELD`), Paimon separates the storage:
+
+1. **Normal Data Files** (e.g., `.parquet`, `.orc`): Store regular columns (INT, STRING, etc.)
+2. **Blob Data Files** (`.blob`): Store the actual blob data
+
+Descriptor-only and view columns stay inline in normal data files. They do not
+create dedicated payload files in the referencing table.
+
+For example, given a table with schema `(id INT, name STRING, picture BLOB)`:
+
+```
+table/
+├── bucket-0/
+│   ├── data-uuid-0.parquet      # Contains id, name columns
+│   ├── data-uuid-1.blob         # Contains picture blob data
+│   ├── data-uuid-2.blob         # Contains more picture blob data
+│   └── ...
+├── manifest/
+├── schema/
+└── snapshot/
+```
+
+This separation provides several benefits:
+- Efficient column projection (reading non-blob columns doesn't load blob data)
+- Optimized file rolling based on blob size
+- Better compression for regular columnar data
+
+For details about the blob file format structure, see [File Format - BLOB](../concepts/spec/fileformat#blob).
+
+## Table Options
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `row-tracking.enabled` | `false` | Set to `true` for Data Evolution append tables. |
+| `data-evolution.enabled` | `false` | Set to `true` for Data Evolution append tables. |
+| `blob-as-descriptor` | `false` | Return descriptors instead of payload bytes. Can be changed with `ALTER TABLE`. See [video reads](./video#read-frames) for engine-specific behavior. |
+| `blob.target-file-size` | `target-file-size` | Target size for managed BLOB files. |
+| `blob-write-null-on-missing-file` | `false` | On Flink writes, write `NULL` and warn if an input descriptor references a missing file. |
+| `blob-view.resolve.enabled` | `true` | Set to `false` when forwarding serialized BLOB view references. |
+| `video-frame-field` | Not set | Comma-separated scalar BLOB fields using the [video pack format](./video). |
+
+Specifically, if the storage system of the input BlobDescriptor differs from that used by Paimon,
+you can specify the storage configuration for the input blob descriptor using the prefix
+`blob-descriptor.`. For example, if the source data is stored in a different OSS endpoint,
+you can configure it as below (using flink sql as an example):
+```sql
+CREATE TABLE image_table (
+    id INT,
+    name STRING,
+    image BYTES COMMENT '__BLOB_FIELD'
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true',
+    'fs.oss.endpoint' = 'aaa',                   -- This is for Paimon's own config
+    'blob-descriptor.fs.oss.endpoint' = 'bbb'    -- This is for input blob descriptors' config
+);
+```
+
+## MERGE INTO Support
+
+Partial-column BLOB updates differ by engine:
+
+| Engine | Managed BLOB fields | Descriptor and view fields |
+| --- | --- | --- |
+| Spark `MERGE INTO` | Supports scalar BLOBs, BLOB arrays, and BLOB maps, including updates to `NULL`. | Supports scalar fields. |
+| Flink `sys.merge_into` | Rejects updates to raw-data BLOB fields, including arrays and maps. Other columns in the same table can still be updated. | Supports scalar fields. |
+
+For example, Spark can replace the payload for an existing row from the earlier
+`image_table` example:
+
+```sql
+CREATE TABLE image_updates (id INT, image BINARY);
+INSERT INTO image_updates VALUES (1, X'040506');
+
+MERGE INTO image_table AS t
+USING image_updates AS s
+ON t.id = s.id
+WHEN MATCHED THEN UPDATE SET t.image = s.image;
+```
+
+Unchanged payloads are preserved. See [Data Evolution](./data-evolution#partial-updates)
+for the engine-specific update APIs and [PyPaimon Data Evolution](../pypaimon/data-evolution)
+for Python partial writes.
+
+## Limitations
+
+1. **Primary Key Tables**: Managed BLOB storage in primary-key tables has additional requirements; see [Primary-Key BLOB Storage](../primary-key-table/blob-storage). Primary-key tables support `merge-engine=partial-update` with scalar `blob-descriptor-field`, managed `blob-field` (`changelog-producer=none`), and scalar `blob-view-field`; `ARRAY` / `MAP` descriptor or view fields are not supported.
+2. **No Payload Predicate Pushdown**: The BLOB file reader does not push filters into payload files. Payload predicates supported by the calling engine require reading the values; filter on ordinary metadata columns first to reduce payload reads.
+3. **No Statistics**: Statistics collection is not supported for blob columns.
+4. **Append Table Options**: For append tables, `row-tracking.enabled` and `data-evolution.enabled` must be set to `true`.
+5. **Blob View Dependency**: Blob view fields depend on the referenced upstream table and row. If the upstream data is removed or no longer readable, the view cannot be resolved.
+6. **Collection Storage Mode**: `ARRAY<BLOB>` and `MAP<K, BLOB>` are supported only for raw managed blob storage (`__BLOB_FIELD`), not for `__BLOB_DESCRIPTOR_FIELD` or `__BLOB_VIEW_FIELD`.
+
+## Best Practices
+
+1. **Use Column Projection**: Always select only the columns you need. Avoid `SELECT *` if you don't need blob data.
+
+2. **Set Appropriate Target File Size**: Configure `blob.target-file-size` based on your blob sizes. Larger values mean fewer files but larger individual files.
+
+3. **Use Descriptor Fields When Reusing External Blob Files**: Use `__BLOB_DESCRIPTOR_FIELD` for fields that should keep descriptor references instead of writing new `.blob` files.
+
+4. **Use Blob View to Avoid Copying BLOB Data**: Use `__BLOB_VIEW_FIELD` when a downstream table only needs to reference BLOB values from an upstream table.
+
+5. **Use Partitioning**: Partition your blob tables by date or other dimensions to improve query performance and data management.
+
+
+## Descriptor-Only Storage
+
+Store a serialized URI range in a normal data file to reuse existing payloads.
+See [descriptor input and table creation](./blob-references#descriptor-only-storage).
+
+## Blob View
+
+Reference an upstream BLOB by table, column, and row ID. See
+[creating and forwarding BLOB views](./blob-references#blob-view), including reference lifetime.
+
+## Video Frame Storage
+
+Store complete encoded videos while addressing individual frames as logical rows.
+See [Video Frame Storage](./video) for the descriptor format, rolling, and read requirements.
+
+## Presigned URLs for OSS Blobs
+
+Export an OSS-backed descriptor as a temporary HTTPS URL. See
+[Presigned URLs for OSS Blobs](./blob-references#presigned-urls-for-oss-blobs) for SQL and Java APIs.

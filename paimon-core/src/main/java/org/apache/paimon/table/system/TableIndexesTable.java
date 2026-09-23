@@ -235,8 +235,16 @@ public class TableIndexesTable implements ReadonlyTable {
             String indexFieldName = null;
             if (globalMeta != null) {
                 try {
-                    indexFieldName = logicalRowType.getField(globalMeta.indexFieldId()).name();
-                } catch (RuntimeException ignored) {
+                    indexFieldName =
+                            String.join(",", globalMeta.getIndexedFieldNames(logicalRowType));
+                } catch (RuntimeException e) {
+                    // Indexed columns may no longer exist in the current schema (e.g. dropped via
+                    // ALTER TABLE); leave the name empty instead of failing the listing.
+                    LOG.debug(
+                            "Failed to resolve indexed field names for index file {} (primary field {}).",
+                            indexManifestEntry.indexFile().fileName(),
+                            globalMeta.indexFieldId(),
+                            e);
                 }
             }
             return GenericRow.of(

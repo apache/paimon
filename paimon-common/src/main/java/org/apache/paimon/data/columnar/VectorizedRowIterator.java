@@ -38,7 +38,7 @@ public class VectorizedRowIterator extends ColumnarRowIterator implements Vector
     }
 
     @Override
-    protected VectorizedRowIterator copy(ColumnVector[] vectors) {
+    public VectorizedRowIterator copy(ColumnVector[] vectors) {
         checkArgument(returnedPositionIndex == 0, "copy() should not be called after next()");
         VectorizedRowIterator newIterator =
                 new VectorizedRowIterator(filePath, row.copy(vectors), recycler);

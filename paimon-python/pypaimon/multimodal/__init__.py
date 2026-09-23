@@ -1,0 +1,93 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+"""High-level APIs for mutable multimodal Paimon tables."""
+
+from pypaimon.multimodal.blob_store import (
+    BlobObject,
+    BlobStore,
+    NoSuchKey,
+    ObjectInfo,
+    PutObjectResult,
+)
+from pypaimon.multimodal.connection import MultimodalConnection, connect
+from pypaimon.multimodal.hdf5 import (
+    Hdf5File,
+    Hdf5LoadResult,
+)
+from pypaimon.multimodal.lerobot.dataset import (
+    PaimonDatasetReader,
+    PaimonLeRobotDataset,
+)
+from pypaimon.multimodal.rosbag import (
+    RosbagLoadResult,
+    RosbagSource,
+    RosbagStagingConfig,
+)
+from pypaimon.multimodal.table import (
+    MultimodalTable,
+    TextRoute,
+    VectorRoute,
+    text_route,
+    vector_route,
+)
+from pypaimon.multimodal.temporal import (
+    TemporalAlignment,
+    interpolate,
+    join_asof,
+    join_window,
+)
+from pypaimon.multimodal.video import VideoFrameCollator
+from pypaimon.table.row.blob import Blob, BlobDescriptor, VideoFrameDescriptor
+from pypaimon.table.data_evolution_merge_into import (
+    lit,
+    source_col,
+    target_col,
+)
+
+__all__ = [
+    "Blob",
+    "BlobDescriptor",
+    "BlobObject",
+    "BlobStore",
+    "Hdf5File",
+    "Hdf5LoadResult",
+    "MultimodalConnection",
+    "MultimodalTable",
+    "NoSuchKey",
+    "ObjectInfo",
+    "PaimonDatasetReader",
+    "PaimonLeRobotDataset",
+    "PutObjectResult",
+    "RosbagLoadResult",
+    "RosbagSource",
+    "RosbagStagingConfig",
+    "TextRoute",
+    "TemporalAlignment",
+    "VectorRoute",
+    "VideoFrameCollator",
+    "VideoFrameDescriptor",
+    "connect",
+    "interpolate",
+    "join_asof",
+    "join_window",
+    "lit",
+    "source_col",
+    "target_col",
+    "text_route",
+    "vector_route",
+]

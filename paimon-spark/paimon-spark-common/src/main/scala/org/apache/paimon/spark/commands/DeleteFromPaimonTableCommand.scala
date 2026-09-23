@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.FileStoreTable
@@ -46,14 +47,15 @@ case class DeleteFromPaimonTableCommand(
     } else {
       performNonPrimaryKeyDelete(sparkSession)
     }
-    writer.commit(commitMessages)
+    writer.commit(commitMessages, Snapshot.Operation.DELETE)
     Seq.empty[Row]
   }
 
   private def usePKUpsertDelete(): Boolean = {
     try {
       validatePKUpsertDeletable(table)
-      true
+      coreOptions.mergeEngine() != CoreOptions.MergeEngine.PARTIAL_UPDATE ||
+      coreOptions.toConfiguration.get(CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE)
     } catch {
       case _: UnsupportedOperationException => false
     }
@@ -78,7 +80,8 @@ case class DeleteFromPaimonTableCommand(
         dataFilePathToMeta,
         condition,
         relation,
-        sparkSession)
+        sparkSession,
+        coreOptions.dataEvolutionEnabled())
 
       // Step3: update the touched deletion vectors and index files
       writer.persistDeletionVectors(deletionVectors, readSnapshot)
@@ -102,7 +105,6 @@ case class DeleteFromPaimonTableCommand(
         data = selectWithRowTracking(data)
       }
 
-      // only write new files, should have no compaction
       val addCommitMessage = writer.writeOnly().withRowTracking().write(data)
 
       // Step5: convert the deleted files that need to be written to commit message.

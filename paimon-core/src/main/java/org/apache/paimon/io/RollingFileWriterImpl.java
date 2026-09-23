@@ -41,17 +41,27 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
 
     private final Supplier<? extends SingleFileWriter<T, R>> writerFactory;
     private final long targetFileSize;
+    private final long targetFileRowNum;
     private final List<FileWriterAbortExecutor> closedWriters;
     protected final List<R> results;
 
     private SingleFileWriter<T, R> currentWriter = null;
     private long recordCount = 0;
+    private long currentFileRecordCount = 0;
     private boolean closed = false;
+    private boolean aborted = false;
 
     public RollingFileWriterImpl(
-            Supplier<? extends SingleFileWriter<T, R>> writerFactory, long targetFileSize) {
+            Supplier<? extends SingleFileWriter<T, R>> writerFactory,
+            long targetFileSize,
+            long targetFileRowNum) {
+        Preconditions.checkArgument(
+                targetFileRowNum > 0,
+                "targetFileRowNum must be positive, but is %s",
+                targetFileRowNum);
         this.writerFactory = writerFactory;
         this.targetFileSize = targetFileSize;
+        this.targetFileRowNum = targetFileRowNum;
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
     }
@@ -62,13 +72,15 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
     }
 
     private boolean rollingFile(boolean forceCheck) throws IOException {
-        return currentWriter.reachTargetSize(
-                forceCheck || recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
+        return currentFileRecordCount >= targetFileRowNum
+                || currentWriter.reachTargetSize(
+                        forceCheck || recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
     }
 
     @Override
     public void write(T row) throws IOException {
         try {
+            beforeWrite(row);
             // Open the current writer if write the first record or roll over happen before.
             if (currentWriter == null) {
                 openCurrentWriter();
@@ -76,9 +88,11 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
 
             currentWriter.write(row);
             recordCount += 1;
+            currentFileRecordCount += 1;
+            afterWrite(row);
 
             if (rollingFile(false)) {
-                closeCurrentWriter();
+                onRollingCondition(row);
             }
         } catch (Throwable e) {
             LOG.warn(
@@ -99,8 +113,10 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
                 openCurrentWriter();
             }
 
+            long rowCount = bundle.rowCount();
             currentWriter.writeBundle(bundle);
-            recordCount += bundle.rowCount();
+            recordCount += rowCount;
+            currentFileRecordCount += rowCount;
 
             if (rollingFile(true)) {
                 closeCurrentWriter();
@@ -120,6 +136,22 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
         currentWriter = writerFactory.get();
     }
 
+    /** Hook for rolling policies which need to close at a record boundary before writing. */
+    protected void beforeWrite(T row) throws IOException {}
+
+    /** Hook for rolling policies which track the record most recently written. */
+    protected void afterWrite(T row) {}
+
+    /** Handles a reached size or row target. The default policy rolls immediately. */
+    protected void onRollingCondition(T row) throws IOException {
+        closeCurrentWriter();
+    }
+
+    /** Returns whether this rolling writer currently owns an open file writer. */
+    protected boolean hasCurrentWriter() {
+        return currentWriter != null;
+    }
+
     protected void closeCurrentWriter() throws IOException {
         if (currentWriter == null) {
             return;
@@ -132,7 +164,12 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
         currentWriter.abortExecutor().ifPresent(closedWriters::add);
         results.add(currentWriter.result());
         currentWriter = null;
+        currentFileRecordCount = 0;
+        onCurrentWriterClosed();
     }
+
+    /** Hook for rolling policies to reset state tied to the file which was just closed. */
+    protected void onCurrentWriterClosed() {}
 
     @Override
     public long recordCount() {
@@ -141,8 +178,12 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
 
     @Override
     public void abort() {
-        if (currentWriter != null) {
-            currentWriter.abort();
+        SingleFileWriter<T, R> writer = currentWriter;
+        currentWriter = null;
+        aborted = true;
+
+        if (writer != null) {
+            writer.abort();
         }
         for (FileWriterAbortExecutor abortExecutor : closedWriters) {
             abortExecutor.abort();
@@ -155,9 +196,17 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
         return results;
     }
 
+    /** Transfers ownership of abort executors for closed files to the caller. */
+    public List<FileWriterAbortExecutor> drainAbortExecutors() {
+        Preconditions.checkState(closed, "Cannot drain abort executors unless close all writers.");
+        List<FileWriterAbortExecutor> abortExecutors = new ArrayList<>(closedWriters);
+        closedWriters.clear();
+        return abortExecutors;
+    }
+
     @Override
     public void close() throws IOException {
-        if (closed) {
+        if (closed || aborted) {
             return;
         }
 

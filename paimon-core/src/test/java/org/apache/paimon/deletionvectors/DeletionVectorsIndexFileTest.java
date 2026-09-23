@@ -34,7 +34,11 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -43,6 +47,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link DeletionVectorsIndexFile}. */
 public class DeletionVectorsIndexFileTest {
@@ -262,6 +267,59 @@ public class DeletionVectorsIndexFileTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
+    public void testReadAllDeletionVectorsWithOutOfOrderDvRanges(boolean bitmap64) {
+        IndexPathFactory pathFactory = getPathFactory();
+        DeletionVectorsIndexFile deletionVectorsIndexFile =
+                deletionVectorsIndexFile(pathFactory, bitmap64);
+
+        // write multiple DVs so they are stored sequentially in the index file
+        HashMap<String, DeletionVector> deleteMap = new HashMap<>();
+        Map<String, Integer> expected = new HashMap<>();
+        for (int i = 0; i < 10; i++) {
+            DeletionVector dv = createEmptyDV(bitmap64);
+            dv.delete(i * 100);
+            dv.delete(i * 100 + 1);
+            deleteMap.put("file" + i + ".parquet", dv);
+            expected.put("file" + i + ".parquet", i * 100);
+        }
+
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.writeWithRolling(deleteMap);
+        assertThat(indexFiles.size()).isEqualTo(1);
+        IndexFileMeta original = indexFiles.get(0);
+
+        // build a new IndexFileMeta with dvRanges in reverse offset order,
+        // simulating compaction merging dvRanges from multiple sources
+        LinkedHashMap<String, DeletionVectorMeta> originalRanges = original.dvRanges();
+        List<Map.Entry<String, DeletionVectorMeta>> entries =
+                new ArrayList<>(originalRanges.entrySet());
+        Collections.reverse(entries);
+        LinkedHashMap<String, DeletionVectorMeta> reversedRanges = new LinkedHashMap<>();
+        for (Map.Entry<String, DeletionVectorMeta> entry : entries) {
+            reversedRanges.put(entry.getKey(), entry.getValue());
+        }
+
+        IndexFileMeta reordered =
+                new IndexFileMeta(
+                        original.indexType(),
+                        original.fileName(),
+                        original.fileSize(),
+                        original.rowCount(),
+                        reversedRanges,
+                        original.externalPath());
+
+        // read with out-of-order dvRanges — this would fail without the seek fix
+        Map<String, DeletionVector> result =
+                deletionVectorsIndexFile.readAllDeletionVectors(reordered);
+        assertThat(result).hasSize(10);
+        for (Map.Entry<String, Integer> e : expected.entrySet()) {
+            assertThat(result.get(e.getKey()).isDeleted(e.getValue())).isTrue();
+            assertThat(result.get(e.getKey()).isDeleted(e.getValue() + 1)).isTrue();
+            assertThat(result.get(e.getKey()).isDeleted(e.getValue() + 2)).isFalse();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     public void testReadDeletionFile(boolean bitmap64) throws IOException {
         IndexPathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
@@ -292,6 +350,42 @@ public class DeletionVectorsIndexFileTest {
         assertThat(dv.isDeleted(1)).isTrue();
         assertThat(dv.isDeleted(10)).isTrue();
         assertThat(dv.isDeleted(100)).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRejectCorruptedDeletionVectorFromIndexFile(boolean bitmap64)
+            throws IOException {
+        IndexPathFactory pathFactory = getPathFactory();
+        DeletionVectorsIndexFile deletionVectorsIndexFile =
+                deletionVectorsIndexFile(pathFactory, bitmap64);
+
+        DeletionVector deletionVector = createEmptyDV(bitmap64);
+        deletionVector.delete(1);
+        IndexFileMeta indexFileMeta =
+                deletionVectorsIndexFile
+                        .writeWithRolling(Collections.singletonMap("file.parquet", deletionVector))
+                        .get(0);
+        DeletionVectorMeta deletionVectorMeta = indexFileMeta.dvRanges().get("file.parquet");
+        Path indexPath = pathFactory.toPath(indexFileMeta);
+        java.nio.file.Path localIndexPath = java.nio.file.Paths.get(indexPath.toUri());
+        byte[] bytes = Files.readAllBytes(localIndexPath);
+        int checksumEnd =
+                deletionVectorMeta.offset()
+                        + deletionVectorMeta.length()
+                        + (bitmap64 ? 0 : Integer.BYTES * 2);
+        bytes[checksumEnd - 1] ^= 1;
+        Files.write(localIndexPath, bytes);
+
+        DeletionFile deletionFile =
+                new DeletionFile(
+                        indexPath.toString(),
+                        deletionVectorMeta.offset(),
+                        deletionVectorMeta.length(),
+                        deletionVectorMeta.cardinality());
+        assertThatThrownBy(() -> DeletionVector.read(LocalFileIO.create(), deletionFile))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Invalid deletion vector checksum");
     }
 
     @Test

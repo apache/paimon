@@ -31,6 +31,7 @@ import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgumentFactory;
+import org.apache.hadoop.hive.ql.io.sarg.SearchArgumentImpl.PredicateLeafImpl;
 import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
 import org.junit.jupiter.api.Test;
 
@@ -256,6 +257,28 @@ public class SearchArgumentToPredicateConverterTest {
                 builder.between("f_bigint", PredicateLeaf.Type.LONG, 100L, 200L).build();
         Predicate expected = BUILDER.between(1, 100L, 200L);
         assertExpected(sarg, expected);
+    }
+
+    @Test
+    public void testUnavailableBetween() {
+        SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
+        SearchArgument sarg =
+                builder.startAnd()
+                        .between("f_bigint", PredicateLeaf.Type.LONG, 100L, 200L)
+                        .lessThanEquals("f_int", PredicateLeaf.Type.LONG, 10L)
+                        .end()
+                        .build();
+        sarg.getLeaves()
+                .set(
+                        0,
+                        new PredicateLeafImpl(
+                                PredicateLeaf.Operator.BETWEEN,
+                                PredicateLeaf.Type.LONG,
+                                "f_bigint",
+                                null,
+                                Collections.emptyList()));
+
+        assertExpected(sarg, BUILDER.lessOrEqual(0, 10));
     }
 
     @Test

@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.options.Options;
 
 import org.apache.flink.api.dag.Transformation;
@@ -34,12 +35,13 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link FlinkCdcMultiTableSink}. */
 public class FlinkCdcMultiTableSinkTest {
 
     @Test
-    public void testTransformationParallelism() {
+    public void testTransformationParallelismAndShuffle() {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(8);
         int inputParallelism = ThreadLocalRandom.current().nextInt(8) + 1;
@@ -50,6 +52,7 @@ public class FlinkCdcMultiTableSinkTest {
         FlinkCdcMultiTableSink sink =
                 new FlinkCdcMultiTableSink(
                         () -> FlinkCatalogFactory.createPaimonCatalog(new Options()),
+                        "test_db",
                         FlinkConnectorOptions.SINK_WRITER_CPU.defaultValue(),
                         null,
                         FlinkConnectorOptions.SINK_COMMITTER_CPU.defaultValue(),
@@ -76,5 +79,66 @@ public class FlinkCdcMultiTableSinkTest {
                 (OneInputTransformation<?, ?>) partitioner.getInputs().get(0);
         assertThat(writer.getName()).isEqualTo("CDC MultiplexWriter");
         assertThat(writer.getParallelism()).isEqualTo(inputParallelism);
+
+        // The sink must shuffle its input by bucket itself, otherwise the writer states restored by
+        // CdcRecordStoreMultiWriteOperator would land in subtasks which never write the
+        // corresponding buckets. Do not drop this shuffle.
+        PartitionTransformation<?> writerInput =
+                (PartitionTransformation<?>) writer.getInputs().get(0);
+        assertThat(writerInput.getPartitioner()).isInstanceOf(FlinkStreamPartitioner.class);
+        assertThat(writerInput.getPartitioner()).hasToString("shuffle by bucket");
+        assertThat(writerInput.getParallelism()).isEqualTo(inputParallelism);
+        assertThat(writerInput.getInputs().get(0)).isSameAs(input.getTransformation());
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    public void testCompatibilityConstructorPreservesInputTopology() {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        DataStreamSource<CdcMultiplexRecord> input =
+                env.fromData(CdcMultiplexRecord.class, new CdcMultiplexRecord("", "", null));
+
+        FlinkCdcMultiTableSink sink =
+                new FlinkCdcMultiTableSink(
+                        () -> FlinkCatalogFactory.createPaimonCatalog(new Options()),
+                        FlinkConnectorOptions.SINK_WRITER_CPU.defaultValue(),
+                        null,
+                        FlinkConnectorOptions.SINK_COMMITTER_CPU.defaultValue(),
+                        null,
+                        UUID.randomUUID().toString(),
+                        false,
+                        null);
+        Transformation<?> end = sink.sinkFrom(input).getTransformation();
+        OneInputTransformation<?, ?> committer =
+                (OneInputTransformation<?, ?>) end.getInputs().get(0);
+        PartitionTransformation<?> committablePartitioner =
+                (PartitionTransformation<?>) committer.getInputs().get(0);
+        OneInputTransformation<?, ?> writer =
+                (OneInputTransformation<?, ?>) committablePartitioner.getInputs().get(0);
+
+        assertThat(writer.getInputs().get(0)).isSameAs(input.getTransformation());
+        assertThatThrownBy(() -> sink.sinkFrom(input, 4))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Explicit parallelism")
+                .hasMessageContaining("database name");
+    }
+
+    @Test
+    public void testDatabaseAwareConstructorRejectsNullDatabase() {
+        assertThatThrownBy(
+                        () ->
+                                new FlinkCdcMultiTableSink(
+                                        () ->
+                                                FlinkCatalogFactory.createPaimonCatalog(
+                                                        new Options()),
+                                        null,
+                                        FlinkConnectorOptions.SINK_WRITER_CPU.defaultValue(),
+                                        null,
+                                        FlinkConnectorOptions.SINK_COMMITTER_CPU.defaultValue(),
+                                        null,
+                                        UUID.randomUUID().toString(),
+                                        false,
+                                        null))
+                .isInstanceOf(NullPointerException.class);
     }
 }

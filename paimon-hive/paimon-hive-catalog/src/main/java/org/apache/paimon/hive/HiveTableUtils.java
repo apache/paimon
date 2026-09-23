@@ -28,8 +28,11 @@ import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import static org.apache.hadoop.hive.serde.serdeConstants.FIELD_DELIM;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
@@ -42,7 +45,41 @@ import static org.apache.paimon.hive.HiveCatalog.HIVE_FIELD_DELIM_DEFAULT;
 import static org.apache.paimon.hive.HiveCatalog.TABLE_TYPE_PROP;
 import static org.apache.paimon.hive.HiveCatalog.isView;
 
-class HiveTableUtils {
+/** Utils for converting between Paimon and Hive tables. */
+public class HiveTableUtils {
+
+    /**
+     * Max length of a Hive column comment. The metastore stores column comments in {@code
+     * COLUMNS_V2.COMMENT}, which is mapped to {@code VARCHAR(256)}, and AWS Glue rejects comments
+     * longer than 255 characters.
+     */
+    private static final int HIVE_COLUMN_COMMENT_MAX_LENGTH = 255;
+
+    private static final String TRUNCATION_MARKER = "...";
+
+    /**
+     * Normalizes a column comment so that it can be stored in {@code COLUMNS_V2.COMMENT}: line
+     * breaks are replaced by spaces and the result is truncated to {@link
+     * #HIVE_COLUMN_COMMENT_MAX_LENGTH} characters.
+     *
+     * <p>Note that this must not be applied to partition key comments, which are stored in {@code
+     * PARTITION_KEYS.PKEY_COMMENT} with a much larger limit.
+     */
+    @Nullable
+    public static String normalizeColumnComment(@Nullable String comment) {
+        if (comment == null) {
+            return null;
+        }
+
+        String normalized = comment.replace('\n', ' ').replace('\r', ' ');
+
+        if (normalized.length() <= HIVE_COLUMN_COMMENT_MAX_LENGTH) {
+            return normalized;
+        }
+
+        return normalized.substring(0, HIVE_COLUMN_COMMENT_MAX_LENGTH - TRUNCATION_MARKER.length())
+                + TRUNCATION_MARKER;
+    }
 
     public static Schema tryToFormatSchema(Table hiveTable) {
         if (isView(hiveTable)) {
@@ -67,7 +104,7 @@ class HiveTableUtils {
         String serLib =
                 serdeInfo.getSerializationLib() == null
                         ? ""
-                        : serdeInfo.getSerializationLib().toLowerCase();
+                        : serdeInfo.getSerializationLib().toLowerCase(Locale.ROOT);
         String inputFormat = sd.getInputFormat() == null ? "" : sd.getInputFormat();
         if (serLib.contains("parquet")) {
             format = Format.PARQUET;
@@ -96,7 +133,7 @@ class HiveTableUtils {
         rowType.getFields().forEach(f -> builder.column(f.name(), f.type(), f.description()));
         options.set(PATH, location);
         options.set(TYPE, FORMAT_TABLE);
-        options.set(FILE_FORMAT, format.name().toLowerCase());
+        options.set(FILE_FORMAT, format.name().toLowerCase(Locale.ROOT));
         return builder.partitionKeys(partitionKeys)
                 .options(options.toMap())
                 .comment(comment)

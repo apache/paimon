@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.sink.state.OperatorBackendStateStore;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -86,7 +87,7 @@ class PartitionMarkDoneTest extends TableTestBase {
                                 getClass().getClassLoader(),
                                 false,
                                 false,
-                                new MockOperatorStateStore(),
+                                new OperatorBackendStateStore(new MockOperatorStateStore()),
                                 table)
                         .get();
 

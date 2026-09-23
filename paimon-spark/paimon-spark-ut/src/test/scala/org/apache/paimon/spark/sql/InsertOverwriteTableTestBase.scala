@@ -706,6 +706,150 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Insert: overwrite format(parquet) table in static mode") {
+    try {
+      sql("USE spark_catalog.default")
+      withTable("t_parquet") {
+        sql("""
+              |CREATE TABLE t_parquet (id INT, dt STRING)
+              |USING parquet PARTITIONED BY (dt)
+              |""".stripMargin)
+
+        sql("""
+              |INSERT OVERWRITE t_parquet PARTITION (dt)
+              |SELECT 1 AS id, '2026-07-01' AS dt
+              |""".stripMargin)
+
+        checkAnswer(sql("SELECT id, dt FROM t_parquet"), Row(1, "2026-07-01"))
+      }
+    } finally {
+      sql(s"USE paimon.$dbName0")
+    }
+  }
+
+  test("Paimon Insert: [table-order-default] dynamic partition follows table order") {
+    for (useV2Write <- Seq("true", "false")) {
+      withSparkSQLConf(
+        "spark.sql.sources.partitionOverwriteMode" -> "dynamic",
+        "spark.paimon.write.use-v2-write" -> useV2Write) {
+        withTable("target_table") {
+          sql("""
+                |CREATE TABLE target_table (
+                |  ds STRING,
+                |  part STRING,
+                |  uid STRING,
+                |  value STRING
+                |) PARTITIONED BY (ds, part)
+                |TBLPROPERTIES (
+                |  'primary-key' = 'ds,part,uid',
+                |  'bucket' = '2',
+                |  'bucket-key' = 'uid'
+                |)
+                |""".stripMargin)
+
+          sql("""
+                |INSERT OVERWRITE target_table PARTITION (ds, part)
+                |SELECT
+                |  '20260808' AS ds,
+                |  'p1' AS part,
+                |  '1001' AS uid,
+                |  '0.8' AS metric
+                |""".stripMargin)
+
+          checkAnswer(
+            sql("SELECT ds, part, uid, value FROM target_table"),
+            Row("20260808", "p1", "1001", "0.8"))
+        }
+      }
+    }
+  }
+
+  test("Paimon Insert: [hive-tail-enabled] dynamic overwrite accepts Hive partition order") {
+    if (gteqSpark3_4) {
+      withSparkSQLConf(
+        "spark.sql.sources.partitionOverwriteMode" -> "dynamic",
+        "spark.paimon.write.use-v2-write" -> "true",
+        "spark.paimon.write.hive-style-dynamic-partition.enabled" -> "true"
+      ) {
+        withTable("my_table") {
+          sql("""
+                |CREATE TABLE my_table (
+                |  id INT,
+                |  dt STRING,
+                |  name STRING,
+                |  hr STRING
+                |) PARTITIONED BY (dt, hr)
+                |TBLPROPERTIES (
+                |  'primary-key' = 'dt,hr,id',
+                |  'bucket' = '2',
+                |  'bucket-key' = 'id'
+                |)
+                |""".stripMargin)
+
+          sql("""
+                |INSERT INTO my_table VALUES
+                |  (1, '2026-06-29', 'old-00', '00'),
+                |  (2, '2026-06-29', 'old-01', '01')
+                |""".stripMargin)
+
+          sql("""
+                |INSERT OVERWRITE my_table PARTITION (dt, hr)
+                |SELECT
+                |  3 AS id,
+                |  'new-10' AS name,
+                |  '2026-06-30' AS dt,
+                |  '10' AS hr
+                |""".stripMargin)
+
+          checkAnswer(
+            sql("SELECT id, dt, name, hr FROM my_table ORDER BY id"),
+            Seq(
+              Row(1, "2026-06-29", "old-00", "00"),
+              Row(2, "2026-06-29", "old-01", "01"),
+              Row(3, "2026-06-30", "new-10", "10"))
+          )
+
+          sql("""
+                |INSERT OVERWRITE my_table PARTITION (dt, hr)
+                |SELECT
+                |  4 AS id,
+                |  '2026-07-01' AS dt,
+                |  'table-order-11' AS name,
+                |  '11' AS hr
+                |""".stripMargin)
+
+          checkAnswer(
+            sql("SELECT id, dt, name, hr FROM my_table ORDER BY id"),
+            Seq(
+              Row(1, "2026-06-29", "old-00", "00"),
+              Row(2, "2026-06-29", "old-01", "01"),
+              Row(3, "2026-06-30", "new-10", "10"),
+              Row(4, "2026-07-01", "table-order-11", "11"))
+          )
+
+          sql("""
+                |INSERT OVERWRITE my_table PARTITION (dt = '2026-07-02', hr)
+                |SELECT
+                |  5 AS id,
+                |  'mixed-12' AS name,
+                |  '12' AS hr
+                |""".stripMargin)
+
+          checkAnswer(
+            sql("SELECT id, dt, name, hr FROM my_table ORDER BY id"),
+            Seq(
+              Row(1, "2026-06-29", "old-00", "00"),
+              Row(2, "2026-06-29", "old-01", "01"),
+              Row(3, "2026-06-30", "new-10", "10"),
+              Row(4, "2026-07-01", "table-order-11", "11"),
+              Row(5, "2026-07-02", "mixed-12", "12")
+            )
+          )
+        }
+      }
+    }
+  }
+
   test("Paimon Insert: dynamic insert into table with partition columns contain primary key") {
     withSparkSQLConf("spark.sql.shuffle.partitions" -> "10") {
       withTable("pk_pt") {

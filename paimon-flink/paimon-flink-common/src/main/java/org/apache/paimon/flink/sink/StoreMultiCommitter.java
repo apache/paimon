@@ -203,6 +203,13 @@ public class StoreMultiCommitter
     }
 
     @Override
+    public void snapshotState() throws Exception {
+        for (StoreCommitter committer : tableCommitters.values()) {
+            committer.snapshotState();
+        }
+    }
+
+    @Override
     public Map<Long, List<MultiTableCommittable>> groupByCheckpoint(
             Collection<MultiTableCommittable> committables) {
         Map<Long, List<MultiTableCommittable>> grouped = new HashMap<>();

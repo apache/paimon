@@ -21,6 +21,7 @@ package org.apache.paimon.format;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
+import org.apache.paimon.statistics.CountsSimpleColStatsCollector;
 import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
@@ -52,6 +53,18 @@ public class SimpleStatsCollector {
                 numFields,
                 collectorFactory.length);
         this.statsCollectors = SimpleColStatsCollector.create(collectorFactory);
+        for (int i = 0; i < numFields; i++) {
+            switch (rowType.getTypeAt(i).getTypeRoot()) {
+                case GEOMETRY:
+                case GEOGRAPHY:
+                    if (!(statsCollectors[i] instanceof NoneSimpleColStatsCollector)) {
+                        statsCollectors[i] = new CountsSimpleColStatsCollector();
+                    }
+                    break;
+                default:
+                    // Keep the configured collector for non-geospatial fields.
+            }
+        }
         this.converter = new RowDataToObjectArrayConverter(rowType);
         this.fieldSerializers = new Serializer[numFields];
         for (int i = 0; i < numFields; i++) {

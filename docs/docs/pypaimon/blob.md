@@ -1,5 +1,5 @@
 ---
-title: "Blob Storage"
+title: "BLOB Storage"
 sidebar_position: 7
 ---
 <!--
@@ -21,12 +21,14 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Blob Storage in pypaimon
+# BLOB Storage
 
 For Paimon's Blob storage concepts (storage modes, table options, SQL usage,
-Java API), see [Blob Storage](../append-table/blob).
+Java API), see [Blob Storage](../multimodal-table/blob).
 
 This page covers the Python API for reading and writing BLOB columns.
+
+![A descriptor keeps a BLOB payload lazy until FileIO reads its byte range.](../../static/img/pypaimon/blob-reads.svg)
 
 ## Creating a Table
 
@@ -64,24 +66,72 @@ to dedicated `.blob` files automatically.
 table = catalog.get_table('my_db.image_table')
 write_builder = table.new_batch_write_builder()
 writer = write_builder.new_write()
-
-with open('cat.jpg', 'rb') as f1, open('dog.jpg', 'rb') as f2:
-    writer.write_arrow(pa.Table.from_pydict({
-        'id': [1, 2],
-        'name': ['cat', 'dog'],
-        'image': [f1.read(), f2.read()],
-    }, schema=pa_schema))
-
-write_builder.new_commit().commit(writer.prepare_commit())
-writer.close()
+commit = write_builder.new_commit()
+try:
+    with open('cat.jpg', 'rb') as f1, open('dog.jpg', 'rb') as f2:
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['cat', 'dog'],
+            'image': [f1.read(), f2.read()],
+        }, schema=pa_schema))
+    commit.commit(writer.prepare_commit())
+finally:
+    writer.close()
+    commit.close()
 ```
+
+For frame tables, configure `video-frame-field`. The high-level multimodal
+API creates `VideoFrameDescriptor` values, packs multiple complete videos in
+`.video` files, keeps frame ordinals out of the normal data file, and provides
+`add_video` / `add_videos` / `replace_video` for physical video writes.
+Ordinary frame-column updates and all reads continue to use the existing table
+and BLOB APIs. See
+[Video Frame Storage](./video#video-frame-storage).
 
 ## Reading Blob Data
 
-Use `row.get_blob(pos)` to access blob columns. It returns a `Blob` object
-regardless of how the blob is stored.
+### Batch reading (recommended)
+
+Use `to_arrow_batch_reader` to read blob data in batches. Set
+`blob_parallelism` to enable concurrent blob reads within each batch:
 
 ```python
+read_builder = table.new_read_builder()
+splits = read_builder.new_scan().plan().splits()
+read = read_builder.new_read()
+
+for batch in read.to_arrow_batch_reader(splits, blob_parallelism=16):
+    for i in range(len(batch)):
+        image_bytes = batch['image'][i].as_py()
+```
+
+Or read all data into a single Arrow Table:
+
+```python
+arrow_table = read.to_arrow(splits, blob_parallelism=16)
+```
+
+### Row-by-row reading
+
+Use `row.get_blob(pos)` to access blob columns one row at a time:
+
+```python
+for row in read.to_iterator(splits):
+    blob = row.get_blob(2)
+    if blob is None:
+        continue
+    data = blob.to_data()
+```
+
+### Streaming / partial reads
+
+For true on-demand streaming (large blobs like videos or model weights),
+set `blob-as-descriptor=true` so blob values are kept as lightweight
+references instead of being materialized into memory:
+
+```python
+table = table.copy({'blob-as-descriptor': 'true'})
+
 read_builder = table.new_read_builder()
 splits = read_builder.new_scan().plan().splits()
 read = read_builder.new_read()
@@ -90,40 +140,19 @@ for row in read.to_iterator(splits):
     blob = row.get_blob(2)
     if blob is None:
         continue
-    data = blob.to_data()
+    with blob.new_input_stream() as stream:
+        chunk = stream.read(4096)
 ```
 
-## Streaming for Large Blobs
+Without `blob-as-descriptor=true`, blob values are materialized before
+`row.get_blob(...)` returns; `new_input_stream()` then reads from
+in-memory bytes, not from storage.
 
-`blob.new_input_stream()` returns a file-like object. Whether it is
-genuinely lazy depends on how the table is configured:
-
-- Default mode (`blob-as-descriptor=false`): the read path materialises
-  the payload before it reaches `row.get_blob(pos)`. `Blob` is a
-  `BlobData` and `new_input_stream()` wraps the in-memory bytes — not
-  true streaming. For large blobs this can still OOM.
-- Descriptor mode (`blob-as-descriptor=true`): the read path preserves
-  the descriptor. `Blob` is a `BlobRef` and `new_input_stream()` opens
-  the underlying file on demand.
-
-This mirrors Java's `BlobFormatReader` semantics.
-
-For genuine on-demand streaming of large blobs (videos, model weights),
-use `table.copy` to set `blob-as-descriptor=true` before reading:
-
-```python
-table = catalog.get_table('my_db.image_table')
-table = table.copy({'blob-as-descriptor': 'true'})
-
-read_builder = table.new_read_builder()
-splits = read_builder.new_scan().plan().splits()
-read = read_builder.new_read()
-
-# Reads now return BlobRef whose new_input_stream() is lazy.
-for row in read.to_iterator(splits):
-    with row.get_blob(2).new_input_stream() as stream:
-        chunk = stream.read(1024)
-```
+For data-evolution reads, PyPaimon applies user filters, row-level authorization
+filters, and limits before materializing projected scalar BLOB payloads. A user
+or authorization filter that references a BLOB value keeps that field eager.
+Column masking is applied after payload materialization. ARRAY and MAP elements
+containing BLOB values are not deferred.
 
 ## Lower-level: `Blob.from_bytes`
 
@@ -143,12 +172,15 @@ blob = Blob.from_bytes(descriptor_bytes, file_io)
 data = blob.to_data()
 ```
 
-The factory auto-dispatches based on the bytes content (BLOBDESC magic
-header). This mirrors Java's `Blob.fromBytes(...)`.
+The factory auto-dispatches based on the bytes content (`BLOBDESC`,
+`VIDEOFRM`, or blob-view magic header). This mirrors Java's
+`Blob.fromBytes(...)`.
 
 ## See Also
 
-- [Blob Storage](../append-table/blob) — concept, storage modes,
+- [Blob Storage](../multimodal-table/blob) — concept, storage modes,
   SQL/Java API
 - [Data Evolution](./data-evolution) — required for
   blob tables
+- [Multimodal video frames](./video#video-frame-storage) —
+  `.video` pack writing and PyTorch DataLoader decoding

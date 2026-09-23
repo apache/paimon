@@ -18,14 +18,66 @@
 
 package org.apache.paimon;
 
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link org.apache.paimon.CoreOptions}. */
 public class CoreOptionsTest {
+
+    @Test
+    void testCommitLastSafeSnapshotAndStrictMode() {
+        Options options = new Options();
+        CoreOptions core = new CoreOptions(options);
+        assertThat(core.commitLastSafeSnapshot()).isEmpty();
+        assertThat(core.commitStrictModeEnabled()).isTrue();
+
+        options.setString("commit.strict-mode.last-safe-snapshot", "7");
+        assertThat(core.commitLastSafeSnapshot()).contains(7L);
+        assertThat(core.commitStrictModeEnabled()).isTrue();
+
+        options.set(CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT, 11L);
+        assertThat(core.commitLastSafeSnapshot()).contains(11L);
+
+        options.set(CoreOptions.COMMIT_STRICT_MODE_ENABLED, false);
+        assertThat(core.commitStrictModeEnabled()).isFalse();
+        assertThat(core.commitLastSafeSnapshot()).contains(11L);
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    void testLegacyCommitLastSafeSnapshotApi() {
+        Options options = new Options();
+        options.set(CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT, 7L);
+        CoreOptions core = new CoreOptions(options);
+        assertThat(core.commitLastSafeSnapshot()).contains(7L);
+        assertThat(core.commitStrictModeLastSafeSnapshot()).contains(7L);
+
+        options.set(CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT, 11L);
+        assertThat(core.commitStrictModeLastSafeSnapshot()).contains(11L);
+    }
+
+    @Test
+    void testManifestSidecarDefaultsToManifestSort() {
+        assertThat(CoreOptions.MANIFEST_SIDECAR_ENABLED.defaultValue()).isNull();
+        for (Boolean sort : new Boolean[] {null, false, true}) {
+            for (Boolean configured : new Boolean[] {null, false, true}) {
+                Options options = new Options();
+                if (sort != null) {
+                    options.set(CoreOptions.MANIFEST_SORT_ENABLED, sort);
+                }
+                if (configured != null) {
+                    options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, configured);
+                }
+                assertThat(new CoreOptions(options).manifestSidecarEnabled())
+                        .isEqualTo(configured == null ? Boolean.TRUE.equals(sort) : configured);
+            }
+        }
+    }
 
     @Test
     public void testDefaultStartupMode() {
@@ -88,12 +140,75 @@ public class CoreOptionsTest {
     }
 
     @Test
+    public void testDeletionVectorsMergeOnRead() {
+        Options conf = new Options();
+        conf.set(CoreOptions.DELETION_VECTORS_MERGE_ON_READ, true);
+        CoreOptions options = new CoreOptions(conf);
+
+        assertThat(options.deletionVectorsMergeOnRead()).isTrue();
+        assertThat(options.batchScanSkipLevel0()).isFalse();
+
+        conf.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        assertThat(options.deletionVectorsMergeOnRead()).isTrue();
+        assertThat(options.batchScanSkipLevel0()).isFalse();
+
+        conf.set(CoreOptions.DELETION_VECTORS_MERGE_ON_READ, false);
+        assertThat(options.deletionVectorsMergeOnRead()).isFalse();
+        assertThat(options.batchScanSkipLevel0()).isTrue();
+    }
+
+    @Test
     public void testSequenceFieldTrim() {
         Options conf = new Options();
         conf.set(CoreOptions.SEQUENCE_FIELD, " f1 ,f2 ,  f3  ");
 
         CoreOptions options = new CoreOptions(conf);
         assertThat(options.sequenceField()).containsExactly("f1", "f2", "f3");
+    }
+
+    @Test
+    public void testIgnoreGlobalIndexColumnUpdateAction() {
+        Options conf = new Options();
+        conf.setString(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(), "IGNORE");
+
+        CoreOptions options = new CoreOptions(conf);
+        assertThat(options.globalIndexColumnUpdateAction())
+                .isEqualTo(CoreOptions.GlobalIndexColumnUpdateAction.IGNORE);
+        assertThat(options.ignoreIndexColumnUpdate()).isTrue();
+        assertThat(new CoreOptions(new Options()).ignoreIndexColumnUpdate()).isFalse();
+    }
+
+    @Test
+    public void testIndexSearchModes() {
+        Options conf = new Options();
+        CoreOptions options = new CoreOptions(conf);
+        assertThat(options.globalIndexSearchMode()).isNull();
+        assertThat(options.scalarIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
+        assertThat(options.vectorIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
+        assertThat(options.fullTextIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
+
+        conf.set(CoreOptions.GLOBAL_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.DETAIL);
+        options = new CoreOptions(conf);
+        assertThat(options.scalarIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.DETAIL);
+        assertThat(options.vectorIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.DETAIL);
+        assertThat(options.fullTextIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.DETAIL);
+
+        conf.set(CoreOptions.SCALAR_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.FAST);
+        conf.set(CoreOptions.VECTOR_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.FULL);
+        conf.set(CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.FULL);
+        options = new CoreOptions(conf);
+        assertThat(options.scalarIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
+        assertThat(options.vectorIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
+        assertThat(options.fullTextIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
     }
 
     @Test
@@ -116,5 +231,175 @@ public class CoreOptionsTest {
         conf.set(CoreOptions.BLOB_AS_DESCRIPTOR, false);
         options = new CoreOptions(conf);
         assertThat(options.blobSplitByFileSize()).isTrue();
+    }
+
+    @Test
+    public void testMapStorageLayout() {
+        Options conf = new Options();
+        CoreOptions options = new CoreOptions(conf);
+        assertThat(options.mapStorageLayout("metrics"))
+                .isEqualTo(CoreOptions.MapStorageLayout.DEFAULT);
+        assertThat(options.mapSharedShreddingMaxColumns("metrics")).isEqualTo(256);
+        assertThat(options.mapSharedShreddingColumnPlacementPolicy("metrics"))
+                .isEqualTo(CoreOptions.MapSharedShreddingColumnPlacementPolicy.LRU);
+
+        conf.setString("fields.metrics.map.storage-layout", "shared-shredding");
+        conf.setString("fields.metrics.map.shared-shredding.max-columns", "32");
+        conf.setString("fields.metrics.map.shared-shredding.column-placement-policy", "sequential");
+        options = new CoreOptions(conf);
+        assertThat(options.mapStorageLayout("metrics"))
+                .isEqualTo(CoreOptions.MapStorageLayout.SHARED_SHREDDING);
+        assertThat(options.mapSharedShreddingMaxColumns("metrics")).isEqualTo(32);
+        assertThat(options.mapSharedShreddingColumnPlacementPolicy("metrics"))
+                .isEqualTo(CoreOptions.MapSharedShreddingColumnPlacementPolicy.SEQUENTIAL);
+
+        conf.setString("fields.metrics.map.shared-shredding.column-placement-policy", "lru");
+        options = new CoreOptions(conf);
+        assertThat(options.mapSharedShreddingColumnPlacementPolicy("metrics"))
+                .isEqualTo(CoreOptions.MapSharedShreddingColumnPlacementPolicy.LRU);
+
+        conf = new Options();
+        conf.setString("fields.metrics.map.storage-layout", "Shared-Shredding");
+        conf.setString("fields.metrics.map.shared-shredding.column-placement-policy", "PLAIN");
+        options = new CoreOptions(conf);
+        assertThat(options.mapStorageLayout("metrics"))
+                .isEqualTo(CoreOptions.MapStorageLayout.SHARED_SHREDDING);
+        assertThat(options.mapSharedShreddingColumnPlacementPolicy("metrics"))
+                .isEqualTo(CoreOptions.MapSharedShreddingColumnPlacementPolicy.PLAIN);
+
+        conf = new Options();
+        conf.setString("fields.metrics.map.storage-layout", "invalid");
+        final CoreOptions invalidLayoutOptions = new CoreOptions(conf);
+        assertThatThrownBy(() -> invalidLayoutOptions.mapStorageLayout("metrics"))
+                .hasMessageContaining("invalid");
+
+        conf = new Options();
+        conf.setString("fields.metrics.map.shared-shredding.column-placement-policy", "invalid");
+        final CoreOptions invalidPlacementPolicyOptions = new CoreOptions(conf);
+        assertThatThrownBy(
+                        () ->
+                                invalidPlacementPolicyOptions
+                                        .mapSharedShreddingColumnPlacementPolicy("metrics"))
+                .hasMessageContaining("invalid");
+
+        conf = new Options();
+        conf.setString("fields.metrics.map.shared-shredding.max-columns", "0");
+        final CoreOptions zeroMaxColumnsOptions = new CoreOptions(conf);
+        assertThatThrownBy(() -> zeroMaxColumnsOptions.mapSharedShreddingMaxColumns("metrics"))
+                .hasMessageContaining("options map.shared-shredding.max-columns must > 0");
+
+        conf.setString("fields.metrics.map.shared-shredding.max-columns", "-1");
+        final CoreOptions negativeMaxColumnsOptions = new CoreOptions(conf);
+        assertThatThrownBy(() -> negativeMaxColumnsOptions.mapSharedShreddingMaxColumns("metrics"))
+                .hasMessageContaining("options map.shared-shredding.max-columns must > 0");
+    }
+
+    @Test
+    public void testBlobCopyBufferSize() {
+        Options conf = new Options();
+        // default preserves the historical 4 KiB buffer.
+        assertThat(new CoreOptions(conf).blobCopyBufferSize()).isEqualTo(4 * 1024);
+
+        conf.set(CoreOptions.BLOB_COPY_BUFFER_SIZE, MemorySize.parse("64 kb"));
+        assertThat(new CoreOptions(conf).blobCopyBufferSize()).isEqualTo(64 * 1024);
+
+        // zero is rejected early with an option-named message.
+        conf.set(CoreOptions.BLOB_COPY_BUFFER_SIZE, MemorySize.parse("0 bytes"));
+        assertThatThrownBy(() -> new CoreOptions(conf).blobCopyBufferSize())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("blob.copy-buffer-size");
+
+        // There is no arbitrary memory ceiling; only the Java int-sized array limit applies.
+        conf.set(CoreOptions.BLOB_COPY_BUFFER_SIZE, MemorySize.parse("512 mb"));
+        assertThat(new CoreOptions(conf).blobCopyBufferSize()).isEqualTo(512 * 1024 * 1024);
+        conf.set(CoreOptions.BLOB_COPY_BUFFER_SIZE, MemorySize.parse(Integer.MAX_VALUE + " bytes"));
+        assertThat(new CoreOptions(conf).blobCopyBufferSize()).isEqualTo(Integer.MAX_VALUE);
+        conf.set(CoreOptions.BLOB_COPY_BUFFER_SIZE, MemorySize.parse("2 gb"));
+        assertThatThrownBy(() -> new CoreOptions(conf).blobCopyBufferSize())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("blob.copy-buffer-size");
+    }
+
+    @Test
+    public void testVideoFrameFieldIsRecognizedAsBlobField() {
+        Options options = new Options();
+        options.set(CoreOptions.BLOB_FIELD, "image");
+        options.set(CoreOptions.VIDEO_FRAME_FIELD, "camera_a, camera_b");
+
+        assertThat(CoreOptions.blobField(options.toMap()))
+                .containsExactly("image", "camera_a", "camera_b");
+        assertThat(new CoreOptions(options).videoFrameFields())
+                .containsExactly("camera_a", "camera_b");
+        assertThatThrownBy(() -> new CoreOptions(options).videoFrameField())
+                .hasMessageContaining("use videoFrameFields()");
+    }
+
+    @Test
+    public void testLocalKvDbBlockSize() {
+        Options conf = new Options();
+        assertThat(new CoreOptions(conf).localKvDbBlockSize()).isEqualTo(4 * 1024);
+
+        conf.set(CoreOptions.LOCAL_KV_DB_BLOCK_SIZE, MemorySize.parse("8 kb"));
+        assertThat(new CoreOptions(conf).localKvDbBlockSize()).isEqualTo(8 * 1024);
+
+        conf.set(CoreOptions.LOCAL_KV_DB_BLOCK_SIZE, MemorySize.parse("0 bytes"));
+        assertThatThrownBy(() -> new CoreOptions(conf).localKvDbBlockSize())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("local-kv-db.block-size");
+
+        conf.set(CoreOptions.LOCAL_KV_DB_BLOCK_SIZE, MemorySize.parse("2 gb"));
+        assertThatThrownBy(() -> new CoreOptions(conf).localKvDbBlockSize())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("local-kv-db.block-size");
+    }
+
+    @Test
+    public void testFormatTableCommitCleanupThreadNumDefaultsTo64AndAcceptsBounds() {
+        Options conf = new Options();
+        assertThat(new CoreOptions(conf).formatTableCommitCleanupThreadNum()).isEqualTo(64);
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, 1);
+        assertThat(new CoreOptions(conf).formatTableCommitCleanupThreadNum()).isEqualTo(1);
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, 64);
+        assertThat(new CoreOptions(conf).formatTableCommitCleanupThreadNum()).isEqualTo(64);
+    }
+
+    @Test
+    public void testFormatTableCommitCleanupThreadNumRejectsValuesOutsideSupportedRange() {
+        for (int invalid : new int[] {0, -1, 65}) {
+            Options conf = new Options();
+            conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, invalid);
+            assertThatThrownBy(() -> new CoreOptions(conf).formatTableCommitCleanupThreadNum())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("format-table.commit.cleanup-thread-num")
+                    .hasMessageContaining("1")
+                    .hasMessageContaining("64");
+        }
+    }
+
+    @Test
+    public void testFormatTableCommitPublishThreadNumDefaultsTo64AndAcceptsBounds() {
+        Options conf = new Options();
+        assertThat(new CoreOptions(conf).formatTableCommitPublishThreadNum()).isEqualTo(64);
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM, 1);
+        assertThat(new CoreOptions(conf).formatTableCommitPublishThreadNum()).isEqualTo(1);
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM, 64);
+        assertThat(new CoreOptions(conf).formatTableCommitPublishThreadNum()).isEqualTo(64);
+    }
+
+    @Test
+    public void testFormatTableCommitPublishThreadNumRejectsValuesOutsideSupportedRange() {
+        for (int invalid : new int[] {0, -1, 65}) {
+            Options conf = new Options();
+            conf.set(CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM, invalid);
+            assertThatThrownBy(() -> new CoreOptions(conf).formatTableCommitPublishThreadNum())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("format-table.commit.publish-thread-num")
+                    .hasMessageContaining("1")
+                    .hasMessageContaining("64");
+        }
     }
 }

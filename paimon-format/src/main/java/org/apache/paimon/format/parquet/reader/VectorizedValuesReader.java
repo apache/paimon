@@ -67,7 +67,38 @@ public interface VectorizedValuesReader {
 
     void readDoubles(int total, WritableDoubleVector c, int rowId);
 
+    default void readIntegersAsLongs(int total, WritableLongVector c, int rowId) {
+        for (int i = 0; i < total; i++) {
+            c.setLong(rowId + i, readInteger());
+        }
+    }
+
+    default void readIntegersAsDoubles(int total, WritableDoubleVector c, int rowId) {
+        for (int i = 0; i < total; i++) {
+            c.setDouble(rowId + i, readInteger());
+        }
+    }
+
+    default void readFloatsAsDoubles(int total, WritableDoubleVector c, int rowId) {
+        for (int i = 0; i < total; i++) {
+            c.setDouble(rowId + i, readFloat());
+        }
+    }
+
+    default void readLongsAsInts(int total, WritableIntVector c, int rowId) {
+        for (int i = 0; i < total; i++) {
+            c.setInt(rowId + i, (int) readLong());
+        }
+    }
+
     void readBinary(int total, WritableBytesVector c, int rowId);
+
+    default void readFixedLenByteArray(int total, int len, WritableBytesVector c, int rowId) {
+        for (int i = 0; i < total; i++) {
+            byte[] bytes = readBinary(len).getBytesUnsafe();
+            c.putByteArray(rowId + i, bytes, 0, bytes.length);
+        }
+    }
 
     /*
      * Skips `total` values

@@ -27,20 +27,14 @@ import java.util.zip.GZIPOutputStream;
 public class CompressUtils {
 
     public static void gzipCompressFile(String src, String dest) throws IOException {
-        FileInputStream fis = new FileInputStream(src);
-        FileOutputStream fos = new FileOutputStream(dest);
-        GZIPOutputStream gzipOs = new GZIPOutputStream(fos);
-        byte[] buffer = new byte[1024];
-        int bytesRead;
-        while (true) {
-            bytesRead = fis.read(buffer);
-            if (bytesRead == -1) {
-                fis.close();
-                gzipOs.close();
-                return;
+        try (FileInputStream fis = new FileInputStream(src);
+                FileOutputStream fos = new FileOutputStream(dest);
+                GZIPOutputStream gzipOs = new GZIPOutputStream(fos)) {
+            byte[] buffer = new byte[1024];
+            int bytesRead;
+            while ((bytesRead = fis.read(buffer)) != -1) {
+                gzipOs.write(buffer, 0, bytesRead);
             }
-
-            gzipOs.write(buffer, 0, bytesRead);
         }
     }
 }

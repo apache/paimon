@@ -16,9 +16,11 @@
 # limitations under the License.
 ################################################################################
 
-from pypaimon.daft.daft_paimon import read_paimon, write_paimon
+from pypaimon.daft.daft_paimon import explain_paimon_scan, read_paimon, write_paimon
+from pypaimon.daft.daft_blob_read import open_blob, read_blob
 
-__all__ = ["read_paimon", "write_paimon", "PaimonCatalog", "PaimonTable"]
+__all__ = ["explain_paimon_scan", "read_paimon", "write_paimon", "read_blob",
+           "open_blob", "PaimonCatalog", "PaimonTable"]
 
 
 def __getattr__(name):

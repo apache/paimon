@@ -65,7 +65,10 @@ public class SnapshotManager implements Serializable {
 
     public static final String SNAPSHOT_PREFIX = "snapshot-";
 
-    public static final int EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM = 3;
+    public static final int EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM = 300;
+
+    private static final int SNAPSHOT_EXISTS_MAX_ATTEMPTS = 3;
+    private static final long SNAPSHOT_EXISTS_RETRY_INTERVAL_MILLIS = 1_000L;
 
     private final FileIO fileIO;
     private final Path tablePath;
@@ -147,13 +150,44 @@ public class SnapshotManager implements Serializable {
 
     public boolean snapshotExists(long snapshotId) {
         Path path = snapshotPath(snapshotId);
-        try {
-            return fileIO.exists(path);
-        } catch (IOException e) {
-            throw new RuntimeException(
-                    "Failed to determine if snapshot #" + snapshotId + " exists in path " + path,
-                    e);
+        IOException failure = null;
+        for (int attempt = 1; attempt <= SNAPSHOT_EXISTS_MAX_ATTEMPTS; attempt++) {
+            try {
+                return fileIO.exists(path);
+            } catch (IOException e) {
+                failure = e;
+                if (attempt == SNAPSHOT_EXISTS_MAX_ATTEMPTS) {
+                    break;
+                }
+                LOG.warn(
+                        "Failed to check whether snapshot #{} exists at {} (attempt {}/{}). Retrying.",
+                        snapshotId,
+                        path,
+                        attempt,
+                        SNAPSHOT_EXISTS_MAX_ATTEMPTS,
+                        e);
+                try {
+                    Thread.sleep(SNAPSHOT_EXISTS_RETRY_INTERVAL_MILLIS);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(
+                            "Interrupted while checking whether snapshot #"
+                                    + snapshotId
+                                    + " exists at "
+                                    + path,
+                            ie);
+                }
+            }
         }
+        throw new RuntimeException(
+                "Failed to check whether snapshot #"
+                        + snapshotId
+                        + " exists at "
+                        + path
+                        + " after "
+                        + SNAPSHOT_EXISTS_MAX_ATTEMPTS
+                        + " attempts.",
+                failure);
     }
 
     public void deleteSnapshot(long snapshotId) {
@@ -185,7 +219,20 @@ public class SnapshotManager implements Serializable {
 
     public @Nullable Snapshot latestSnapshotFromFileSystem() {
         Long snapshotId = latestSnapshotIdFromFileSystem();
-        return snapshotId == null ? null : snapshot(snapshotId);
+        while (snapshotId != null) {
+            try {
+                return tryGetSnapshot(snapshotId);
+            } catch (FileNotFoundException e) {
+                Long newSnapshotId = latestSnapshotIdFromFileSystem();
+                if (snapshotId.equals(newSnapshotId)) {
+                    // Retry once to preserve the existing exception when the latest snapshot is
+                    // genuinely missing instead of being concurrently expired.
+                    return snapshot(snapshotId);
+                }
+                snapshotId = newSnapshotId;
+            }
+        }
+        return null;
     }
 
     public @Nullable Long latestSnapshotId() {
@@ -232,22 +279,30 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
+        return retryEarliestSnapshot(snapshotId, stopSnapshotId, this::tryGetSnapshot);
+    }
+
+    public static Snapshot retryEarliestSnapshot(
+            long earliestSnapshotId,
+            @Nullable Long stopSnapshotId,
+            FunctionWithException<Long, Snapshot, FileNotFoundException> snapshotFunction) {
         if (stopSnapshotId == null) {
-            stopSnapshotId = snapshotId + EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
+            stopSnapshotId = earliestSnapshotId + EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
         }
 
+        long snapshotId = earliestSnapshotId;
         do {
             try {
-                return tryGetSnapshot(snapshotId);
+                return snapshotFunction.apply(snapshotId);
             } catch (FileNotFoundException e) {
                 snapshotId++;
                 if (snapshotId > stopSnapshotId) {
-                    return null;
+                    throw new RuntimeException(
+                            String.format(
+                                    "Cannot find earliest snapshot from #%s to #%s.",
+                                    earliestSnapshotId, stopSnapshotId),
+                            e);
                 }
-                LOG.warn(
-                        "The earliest snapshot or changelog was once identified but disappeared. "
-                                + "It might have been expired by other jobs operating on this table. "
-                                + "Searching for the second earliest snapshot or changelog instead. ");
             }
         } while (true);
     }
@@ -262,6 +317,56 @@ public class SnapshotManager implements Serializable {
         } catch (IOException e) {
             throw new RuntimeException("Failed to find earliest snapshot id", e);
         }
+    }
+
+    /**
+     * Repairs the earliest snapshot hint to the start of a continuous suffix ending at the latest
+     * snapshot and returns the previous earliest snapshot id.
+     */
+    public long repairEarliestSnapshot(long snapshotId) {
+        long previous =
+                Preconditions.checkNotNull(
+                        earliestSnapshotId(),
+                        "Cannot repair earliest snapshot for an empty table.");
+        long latest =
+                Preconditions.checkNotNull(
+                        latestSnapshotId(), "Cannot repair earliest snapshot for an empty table.");
+        Preconditions.checkArgument(
+                snapshotId >= previous,
+                "Snapshot %s must not be earlier than current earliest snapshot %s.",
+                snapshotId,
+                previous);
+        Preconditions.checkArgument(
+                snapshotId <= latest,
+                "Snapshot %s must not be later than latest snapshot %s.",
+                snapshotId,
+                latest);
+        Set<Long> snapshotIds;
+        try {
+            snapshotIds =
+                    snapshotIdStream()
+                            .filter(id -> id >= snapshotId && id <= latest)
+                            .collect(Collectors.toSet());
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        for (long id = snapshotId; ; id++) {
+            Preconditions.checkArgument(
+                    snapshotIds.contains(id), "Snapshot %s does not exist.", id);
+            if (id == latest) {
+                break;
+            }
+        }
+        Preconditions.checkArgument(
+                snapshotId == previous || !snapshotExists(snapshotId - 1),
+                "Snapshot %s does not immediately follow a snapshot gap.",
+                snapshotId);
+        try {
+            commitEarliestHint(snapshotId);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return previous;
     }
 
     public @Nullable Long pickOrLatest(Predicate<Snapshot> predicate) {
@@ -319,7 +424,7 @@ public class SnapshotManager implements Serializable {
     }
 
     /**
-     * Returns a {@link Snapshot} whoes commit time is later than or equal to given timestamp mills.
+     * Returns a {@link Snapshot} whose commit time is later than or equal to given timestamp mills.
      * If there is no such a snapshot, returns null.
      */
     public @Nullable Snapshot laterOrEqualTimeMills(long timestampMills) {
@@ -353,9 +458,7 @@ public class SnapshotManager implements Serializable {
 
     public @Nullable Snapshot earlierOrEqualWatermark(long watermark) {
         Long latest = latestSnapshotId();
-        // If latest == Long.MIN_VALUE don't need next binary search for watermark
-        // which can reduce IO cost with snapshot
-        if (latest == null || snapshot(latest).watermark() == Long.MIN_VALUE) {
+        if (latest == null) {
             return null;
         }
 
@@ -365,45 +468,35 @@ public class SnapshotManager implements Serializable {
         }
         long earliest = earliestSnapShot.id();
 
-        Long earliestWatermark = null;
-        // find the first snapshot with watermark
-        if ((earliestWatermark = earliestSnapShot.watermark()) == null) {
-            while (earliest < latest) {
-                earliest++;
-                earliestWatermark = snapshot(earliest).watermark();
-                if (earliestWatermark != null) {
-                    break;
-                }
-            }
+        // find the first snapshot with a real watermark
+        Long earliestWatermark = earliestSnapShot.watermark();
+        while (isMissingWatermark(earliestWatermark) && earliest < latest) {
+            earliest++;
+            earliestWatermark = snapshot(earliest).watermark();
         }
-        if (earliestWatermark == null) {
+        if (isMissingWatermark(earliestWatermark) || earliestWatermark > watermark) {
             return null;
-        }
-
-        if (earliestWatermark >= watermark) {
-            return snapshot(earliest);
         }
         Snapshot finalSnapshot = null;
 
         while (earliest <= latest) {
             long mid = earliest + (latest - earliest) / 2; // Avoid overflow
-            Snapshot snapshot = snapshot(mid);
+            // A snapshot without a watermark takes the ordering position of the
+            // nearest earlier snapshot (within the search window) that carries one
+            long pos = mid;
+            Snapshot snapshot = snapshot(pos);
             Long commitWatermark = snapshot.watermark();
-            if (commitWatermark == null) {
-                // find the first snapshot with watermark
-                while (mid >= earliest) {
-                    mid--;
-                    commitWatermark = snapshot(mid).watermark();
-                    if (commitWatermark != null) {
-                        break;
-                    }
-                }
+            while (isMissingWatermark(commitWatermark) && pos > earliest) {
+                pos--;
+                snapshot = snapshot(pos);
+                commitWatermark = snapshot.watermark();
             }
-            if (commitWatermark == null) {
+            if (isMissingWatermark(commitWatermark)) {
+                // No snapshot with watermark in [earliest, mid]: skip the range
                 earliest = mid + 1;
             } else {
                 if (commitWatermark > watermark) {
-                    latest = mid - 1; // Search in the left half
+                    latest = pos - 1; // Search in the left half
                 } else if (commitWatermark < watermark) {
                     earliest = mid + 1; // Search in the right half
                     finalSnapshot = snapshot;
@@ -418,9 +511,7 @@ public class SnapshotManager implements Serializable {
 
     public @Nullable Snapshot laterOrEqualWatermark(long watermark) {
         Long latest = latestSnapshotId();
-        // If latest == Long.MIN_VALUE don't need next binary search for watermark
-        // which can reduce IO cost with snapshot
-        if (latest == null || snapshot(latest).watermark() == Long.MIN_VALUE) {
+        if (latest == null) {
             return null;
         }
 
@@ -430,18 +521,13 @@ public class SnapshotManager implements Serializable {
         }
         long earliest = earliestSnapShot.id();
 
-        Long earliestWatermark = null;
-        // find the first snapshot with watermark
-        if ((earliestWatermark = earliestSnapShot.watermark()) == null) {
-            while (earliest < latest) {
-                earliest++;
-                earliestWatermark = snapshot(earliest).watermark();
-                if (earliestWatermark != null) {
-                    break;
-                }
-            }
+        // find the first snapshot with a real watermark
+        Long earliestWatermark = earliestSnapShot.watermark();
+        while (isMissingWatermark(earliestWatermark) && earliest < latest) {
+            earliest++;
+            earliestWatermark = snapshot(earliest).watermark();
         }
-        if (earliestWatermark == null) {
+        if (isMissingWatermark(earliestWatermark)) {
             return null;
         }
 
@@ -452,23 +538,22 @@ public class SnapshotManager implements Serializable {
 
         while (earliest <= latest) {
             long mid = earliest + (latest - earliest) / 2; // Avoid overflow
-            Snapshot snapshot = snapshot(mid);
+            // A snapshot without a watermark takes the ordering position of the
+            // nearest earlier snapshot (within the search window) that carries one
+            long pos = mid;
+            Snapshot snapshot = snapshot(pos);
             Long commitWatermark = snapshot.watermark();
-            if (commitWatermark == null) {
-                // find the first snapshot with watermark
-                while (mid >= earliest) {
-                    mid--;
-                    commitWatermark = snapshot(mid).watermark();
-                    if (commitWatermark != null) {
-                        break;
-                    }
-                }
+            while (isMissingWatermark(commitWatermark) && pos > earliest) {
+                pos--;
+                snapshot = snapshot(pos);
+                commitWatermark = snapshot.watermark();
             }
-            if (commitWatermark == null) {
+            if (isMissingWatermark(commitWatermark)) {
+                // No snapshot with watermark in [earliest, mid]: skip the range
                 earliest = mid + 1;
             } else {
                 if (commitWatermark > watermark) {
-                    latest = mid - 1; // Search in the left half
+                    latest = pos - 1; // Search in the left half
                     finalSnapshot = snapshot;
                 } else if (commitWatermark < watermark) {
                     earliest = mid + 1; // Search in the right half
@@ -479,6 +564,14 @@ public class SnapshotManager implements Serializable {
             }
         }
         return finalSnapshot;
+    }
+
+    /**
+     * Both {@code null} and {@link Long#MIN_VALUE} mean that the snapshot carries no watermark (the
+     * latter is written as a sentinel by engines without watermark semantics).
+     */
+    private static boolean isMissingWatermark(@Nullable Long watermark) {
+        return watermark == null || watermark == Long.MIN_VALUE;
     }
 
     public long snapshotCount() throws IOException {
@@ -504,14 +597,24 @@ public class SnapshotManager implements Serializable {
     }
 
     public Iterator<Snapshot> snapshotsWithId(List<Long> snapshotIds) {
-        return snapshotIds.stream()
-                .map(this::snapshot)
-                .sorted(Comparator.comparingLong(Snapshot::id))
-                .iterator();
+        List<Snapshot> snapshots = new ArrayList<>();
+        for (long snapshotId : snapshotIds) {
+            try {
+                snapshots.add(tryGetSnapshot(snapshotId));
+            } catch (FileNotFoundException ignored) {
+            }
+        }
+        snapshots.sort(Comparator.comparingLong(Snapshot::id));
+        return snapshots.iterator();
     }
 
     public Iterator<Snapshot> snapshotsWithinRange(
             Optional<Long> optionalMaxSnapshotId, Optional<Long> optionalMinSnapshotId) {
+        if (optionalMaxSnapshotId.isPresent()
+                && optionalMaxSnapshotId.equals(optionalMinSnapshotId)) {
+            return snapshotsWithId(Collections.singletonList(optionalMaxSnapshotId.get()));
+        }
+
         Long lowerBoundSnapshotId = earliestSnapshotId();
         Long upperBoundSnapshotId = latestSnapshotId();
         Long lowerId;

@@ -34,6 +34,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.rest.responses.GetTagResponse;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -43,8 +44,11 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotNotExistException;
 
 import org.slf4j.Logger;
@@ -255,7 +259,7 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         if (isSystemDatabase(databaseName)) {
-            return SystemTableLoader.loadGlobalTableNames();
+            return SystemTableLoader.loadGlobalTableNames(context.options());
         }
 
         // check db exists
@@ -289,7 +293,7 @@ public abstract class AbstractCatalog implements Catalog {
         CatalogUtils.validateTableType(this, tableType);
         if (isSystemDatabase(databaseName)) {
             List<Table> systemTables =
-                    SystemTableLoader.loadGlobalTableNames().stream()
+                    SystemTableLoader.loadGlobalTableNames(context.options()).stream()
                             .map(
                                     tableName -> {
                                         try {
@@ -364,15 +368,21 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotBranch(identifier, "dropTable");
         checkNotSystemTable(identifier, "dropTable");
 
+        if (!tableExists(identifier)) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new TableNotExistException(identifier);
+        }
+
         Set<Path> externalPaths = new HashSet<>();
-        try {
+        if (tableExistsInFileSystem(getTableLocation(identifier), DEFAULT_MAIN_BRANCH)) {
             Table table = getTable(identifier);
             if (table instanceof FileStoreTable) {
                 FileStoreTable fileStoreTable = (FileStoreTable) table;
                 List<Path> schemaExternalPaths =
                         getSchemaExternalPaths(fileStoreTable.schemaManager().listAll());
                 externalPaths.addAll(schemaExternalPaths);
-                // get table branch external path
                 List<String> branches = fileStoreTable.branchManager().branches();
                 for (String branch : branches) {
                     SchemaManager schemaManager =
@@ -380,14 +390,13 @@ public abstract class AbstractCatalog implements Catalog {
                     externalPaths.addAll(getSchemaExternalPaths(schemaManager.listAll()));
                 }
             }
-        } catch (TableNotExistException e) {
-            if (ignoreIfNotExists) {
-                return;
-            }
-            throw new TableNotExistException(identifier);
         }
 
         dropTableImpl(identifier, new ArrayList<>(externalPaths));
+    }
+
+    protected boolean tableExists(Identifier identifier) {
+        return tableExistsInFileSystem(getTableLocation(identifier), DEFAULT_MAIN_BRANCH);
     }
 
     private List<Path> getSchemaExternalPaths(List<TableSchema> schemas) {
@@ -434,6 +443,7 @@ public abstract class AbstractCatalog implements Catalog {
         }
 
         copyTableDefaultOptions(schema.options());
+        validateCreateTable(schema, false);
 
         switch (Options.fromMap(schema.options()).get(TYPE)) {
             case TABLE:
@@ -444,10 +454,8 @@ public abstract class AbstractCatalog implements Catalog {
                 createFormatTable(identifier, schema);
                 break;
             case OBJECT_TABLE:
-                throw new UnsupportedOperationException(
-                        String.format(
-                                "Catalog %s cannot support object tables.",
-                                this.getClass().getName()));
+                createObjectTable(identifier, schema);
+                break;
         }
     }
 
@@ -510,6 +518,7 @@ public abstract class AbstractCatalog implements Catalog {
         validateCreateTable(newSchema, false);
         validateCustomTablePath(newSchema.options());
         copyTableDefaultOptions(newSchema.options());
+        validateCreateTable(newSchema, false);
 
         Table existing;
         try {
@@ -673,6 +682,7 @@ public abstract class AbstractCatalog implements Catalog {
     public boolean commitSnapshot(
             Identifier identifier,
             @Nullable String tableUuid,
+            @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
             List<PartitionStatistics> statistics) {
         throw new UnsupportedOperationException();
@@ -762,6 +772,38 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     /**
+     * Create an {@link ObjectTable} identified by the given {@link Identifier}.
+     *
+     * @param identifier Path of the table
+     * @param schema Schema of the table
+     */
+    public void createObjectTable(Identifier identifier, Schema schema) {
+        throw new UnsupportedOperationException(
+                this.getClass().getName() + " currently does not support object table");
+    }
+
+    /**
+     * Build a {@link Schema} with the fixed fields of {@link ObjectTable} and the options from the
+     * given schema. Object Table has a fixed schema and does not support custom fields, so the
+     * user-provided fields are ignored.
+     *
+     * @param schema the user-provided schema containing options (type=object-table, path, etc.)
+     * @return a new schema with ObjectTable's fixed fields and the user-provided options
+     */
+    protected static Schema buildObjectTableSchema(Schema schema) {
+        RowType schemaRowType = ObjectTable.SCHEMA;
+        Schema.Builder builder = Schema.newBuilder();
+        for (DataField field : schemaRowType.getFields()) {
+            builder.column(field.name(), field.type(), field.description());
+        }
+        builder.options(schema.options());
+        if (schema.comment() != null) {
+            builder.comment(schema.comment());
+        }
+        return builder.build();
+    }
+
+    /**
      * Get warehouse path for specified database. If a catalog would like to provide individual path
      * for each database, this method can be `Override` in that catalog.
      *
@@ -808,7 +850,11 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     private void validateCustomTablePath(Map<String, String> options) {
-        if (!allowCustomTablePath() && options.containsKey(CoreOptions.PATH.key())) {
+        TableType tableType = Options.fromMap(options).get(TYPE);
+        boolean isObjectTable = tableType == TableType.OBJECT_TABLE;
+        if (!isObjectTable
+                && !allowCustomTablePath()
+                && options.containsKey(CoreOptions.PATH.key())) {
             throw new UnsupportedOperationException(
                     String.format(
                             "The current catalog %s does not support specifying the table path when creating a table.",
@@ -841,7 +887,8 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected boolean tableExistsInFileSystem(Path tablePath, String branchName) {
-        SchemaManager schemaManager = new SchemaManager(fileIO(tablePath), tablePath, branchName);
+        SchemaManager schemaManager =
+                new FileSystemSchemaManager(fileIO(tablePath), tablePath, branchName);
 
         // in order to improve the performance, check the schema-0 firstly.
         boolean schemaZeroExists = schemaManager.schemaExists(0);
@@ -855,7 +902,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     public Optional<TableSchema> tableSchemaInFileSystem(Path tablePath, String branchName) {
         Optional<TableSchema> schema =
-                new SchemaManager(fileIO(tablePath), tablePath, branchName).latest();
+                new FileSystemSchemaManager(fileIO(tablePath), tablePath, branchName).latest();
         if (!DEFAULT_MAIN_BRANCH.equals(branchName)) {
             schema =
                     schema.map(
@@ -865,7 +912,12 @@ public abstract class AbstractCatalog implements Catalog {
                                 return s.copy(branchOptions.toMap());
                             });
         }
-        schema.ifPresent(s -> s.options().put(PATH.key(), tablePath.toString()));
+        schema.ifPresent(s -> putPathOption(s, tablePath));
         return schema;
+    }
+
+    /** Set the PATH option on the loaded schema. */
+    protected void putPathOption(TableSchema schema, Path tablePath) {
+        schema.options().put(PATH.key(), tablePath.toString());
     }
 }

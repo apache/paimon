@@ -37,6 +37,10 @@ public class CastedMapColumnVector implements MapColumnVector {
         this.children = children;
     }
 
+    public CastedMapColumnVector copy(ColumnVector[] children) {
+        return new CastedMapColumnVector(heapMapVector, children);
+    }
+
     @Override
     public InternalMap getMap(int i) {
         long offset = heapMapVector.offsets[i];

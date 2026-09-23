@@ -19,6 +19,7 @@
 package org.apache.spark.sql.catalyst.parser.extensions
 
 import org.apache.paimon.spark.SparkProcedures
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonHiveDynamicPartitionQuery
 
 import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.atn.PredictionMode
@@ -30,9 +31,10 @@ import org.apache.spark.sql.catalyst.{FunctionIdentifier, TableIdentifier}
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.parser.{ParseException, ParserInterface}
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonSqlExtensionsParser.{NonReservedContext, QuotedIdentifierContext}
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, InsertIntoStatement, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.internal.VariableSubstitution
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.{DataType, StructType}
 
 import java.util.Locale
@@ -43,18 +45,8 @@ import scala.collection.JavaConverters._
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
  * additional information regarding copyright ownership. */
 
-/**
- * The implementation of [[ParserInterface]] that parsers the sql extension.
- *
- * <p>Most of the content of this class is referenced from Iceberg's
- * IcebergSparkSqlExtensionsParser.
- *
- * @param delegate
- *   The extension parser.
- */
 abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterface)
-  extends org.apache.spark.sql.catalyst.parser.ParserInterface
-  with Logging {
+  extends Logging {
 
   private lazy val substitutor = new VariableSubstitution()
   private lazy val astBuilder = new PaimonSqlExtensionsAstBuilder(delegate)
@@ -79,6 +71,7 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
     PaimonSqlExtensionsParser.TAG,
     PaimonSqlExtensionsParser.TRUE,
     PaimonSqlExtensionsParser.FALSE,
+    PaimonSqlExtensionsParser.ARRAY,
     PaimonSqlExtensionsParser.MAP,
     PaimonSqlExtensionsParser.COPY,
     PaimonSqlExtensionsParser.INTO,
@@ -88,12 +81,14 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
     PaimonSqlExtensionsParser.FORCE,
     PaimonSqlExtensionsParser.ON_ERROR,
     PaimonSqlExtensionsParser.ABORT_STATEMENT,
+    PaimonSqlExtensionsParser.CONTINUE,
+    PaimonSqlExtensionsParser.SKIP_FILE,
     PaimonSqlExtensionsParser.OVERWRITE,
     PaimonSqlExtensionsParser.CSV
   )
 
   /** Parses a string to a LogicalPlan. */
-  override def parsePlan(sqlText: String): LogicalPlan = {
+  def parsePlan(sqlText: String): LogicalPlan = {
     val sqlTextAfterSubstitution = substitutor.substitute(sqlText)
     if (isPaimonCommand(sqlTextAfterSubstitution)) {
       parse(sqlTextAfterSubstitution)(parser => astBuilder.visit(parser.singleStatement()))
@@ -118,38 +113,40 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
 
   private def parserRules(sparkSession: SparkSession): Seq[Rule[LogicalPlan]] = {
     Seq(
+      MarkHiveDynamicPartitionWrite,
       RewritePaimonViewCommands(sparkSession),
       RewritePaimonFunctionCommands(sparkSession),
+      SparkShimLoader.shim.rewritePaimonSQLFunctionCommands(sparkSession),
       RewriteCreateTableLikeCommand(sparkSession),
       RewriteSparkDDLCommands(sparkSession)
     )
   }
 
   /** Parses a string to an Expression. */
-  override def parseExpression(sqlText: String): Expression =
+  def parseExpression(sqlText: String): Expression =
     delegate.parseExpression(sqlText)
 
   /** Parses a string to a TableIdentifier. */
-  override def parseTableIdentifier(sqlText: String): TableIdentifier =
+  def parseTableIdentifier(sqlText: String): TableIdentifier =
     delegate.parseTableIdentifier(sqlText)
 
   /** Parses a string to a FunctionIdentifier. */
-  override def parseFunctionIdentifier(sqlText: String): FunctionIdentifier =
+  def parseFunctionIdentifier(sqlText: String): FunctionIdentifier =
     delegate.parseFunctionIdentifier(sqlText)
 
   /**
    * Creates StructType for a given SQL string, which is a comma separated list of field definitions
    * which will preserve the correct Hive metadata.
    */
-  override def parseTableSchema(sqlText: String): StructType =
+  def parseTableSchema(sqlText: String): StructType =
     delegate.parseTableSchema(sqlText)
 
   /** Parses a string to a DataType. */
-  override def parseDataType(sqlText: String): DataType =
+  def parseDataType(sqlText: String): DataType =
     delegate.parseDataType(sqlText)
 
   /** Parses a string to a multi-part identifier. */
-  override def parseMultipartIdentifier(sqlText: String): Seq[String] =
+  def parseMultipartIdentifier(sqlText: String): Seq[String] =
     delegate.parseMultipartIdentifier(sqlText)
 
   /** Returns whether SQL text is command. */
@@ -372,6 +369,36 @@ class UpperCaseCharStream(wrapped: CodePointCharStream) extends CharStream {
     else Character.toUpperCase(la)
   }
   // scalastyle:on
+}
+
+object MarkHiveDynamicPartitionWrite extends Rule[LogicalPlan] {
+
+  override def apply(plan: LogicalPlan): LogicalPlan = {
+    AnalysisHelper.allowInvokingTransformsInAnalyzer {
+      plan.transformDown {
+        case insert: InsertIntoStatement
+            if insert.userSpecifiedCols.isEmpty && !isByName(insert) &&
+              insert.partitionSpec.exists(_._2.isEmpty) =>
+          val dynamicPartitionColumns =
+            insert.partitionSpec.collect { case (name, None) => name }.toSeq
+          withNewQuery(
+            insert,
+            PaimonHiveDynamicPartitionQuery(dynamicPartitionColumns, insert.query))
+      }
+    }
+  }
+
+  private def withNewQuery(insert: InsertIntoStatement, query: LogicalPlan): InsertIntoStatement = {
+    insert.withNewChildren(Seq(query)).asInstanceOf[InsertIntoStatement]
+  }
+
+  private def isByName(insert: InsertIntoStatement): Boolean = {
+    try {
+      insert.getClass.getMethod("byName").invoke(insert).asInstanceOf[Boolean]
+    } catch {
+      case _: NoSuchMethodException => false
+    }
+  }
 }
 
 /** The post-processor validates & cleans-up the parse tree during the parse process. */

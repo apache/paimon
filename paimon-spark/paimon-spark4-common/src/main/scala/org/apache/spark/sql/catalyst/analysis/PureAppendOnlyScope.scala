@@ -18,7 +18,7 @@
 
 package org.apache.spark.sql.catalyst.analysis
 
-import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.{SparkTable, SparkTypeUtils}
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
@@ -26,14 +26,14 @@ import org.apache.spark.sql.execution.datasources.v2.ExtractV2Table
 
 /**
  * Shared scope predicates for the Spark 4.1 Resolution-batch row-level rewrite rules
- * ([[Spark41AppendOnlyRowLevelRewrite]] for UPDATE + metadata-only DELETE reverse-optimization,
+ * ([[Spark41UpdateTableRewrite]] for UPDATE + metadata-only DELETE reverse-optimization,
  * [[Spark41MergeIntoRewrite]] for MERGE).
  *
- * Both rules only intercept operations against **pure append-only** Paimon tables: no primary key,
- * row tracking, data evolution, deletion vectors, or fixed-length `CHAR(n)` columns. Tables that
- * violate any of these constraints either have a working V2 rewrite path on 4.1 (PK / DV / RT / DE
- * go through Paimon's own postHoc V1 commands) or race with Spark's `CharVarcharCodegenUtils`
- * padding Project (CHAR columns — see [[hasCharColumn]]).
+ * These rules intercept operations against Paimon tables that are valid for Spark's V2
+ * copy-on-write rewrite (no primary key, data evolution, deletion vectors, or fixed-length
+ * `CHAR(n)` columns; row-tracking-only tables are included) or for the delta-based rewrite
+ * (unaware-bucket deletion-vector append tables, see [[targetsV2DeltaTable]]). Tables that violate
+ * these constraints go through Paimon's postHoc V1 commands or Spark's built-in analysis path.
  *
  * Kept as a mix-in trait so the two rewrite objects stay single-responsibility (one rule per Spark
  * row-level command, mirroring Spark's own `RewriteUpdateTable` / `RewriteMergeIntoTable` layout)
@@ -41,36 +41,38 @@ import org.apache.spark.sql.execution.datasources.v2.ExtractV2Table
  */
 trait PureAppendOnlyScope {
 
-  /**
-   * Whether the target of a row-level operation is a pure append-only Paimon table that Spark 4.1's
-   * built-in rewrite rules can't handle (see the two rule class docs for why).
-   */
-  protected def targetsPureAppendOnly(aliasedTable: LogicalPlan): Boolean = {
-    EliminateSubqueryAliases(aliasedTable) match {
-      case ExtractV2Table(sparkTable: SparkTable) =>
-        sparkTable.getTable match {
-          case fs: FileStoreTable =>
-            fs.primaryKeys().isEmpty &&
-            !sparkTable.coreOptions.rowTrackingEnabled() &&
-            !sparkTable.coreOptions.dataEvolutionEnabled() &&
-            !sparkTable.coreOptions.deletionVectorsEnabled() &&
-            !hasCharColumn(fs)
-          case _ => false
-        }
-      case _ => false
+  protected def targetsV2CopyOnWriteTable(aliasedTable: LogicalPlan): Boolean = {
+    targetsPaimonFileStoreTable(aliasedTable) {
+      case (sparkTable, fs) =>
+        fs.primaryKeys().isEmpty &&
+        !sparkTable.coreOptions.dataEvolutionEnabled() &&
+        !sparkTable.coreOptions.deletionVectorsEnabled() &&
+        !SparkTypeUtils.containsCharType(fs.rowType())
     }
   }
 
   /**
-   * Tables with fixed-length `CHAR(n)` columns go through Spark's
-   * `CharVarcharCodegenUtils.readSidePadding` Project that gets inserted between the
-   * `DataSourceV2Relation` and its consumers. If we intercept before that padding project settles,
-   * CheckAnalysis trips on mismatched attribute ids (see PR 7648 history). Let those plans fall
-   * through to Paimon's postHoc V1 fallback rules which run after the padding project stabilizes.
+   * Whether the target is a Paimon table on the delta-based row-level path. Delegates to
+   * `SparkTable.supportsV2DeltaOps` so the delta gating conditions have a single source of truth
+   * (unlike the copy-on-write scope above, the full capability predicate is also the correct plan
+   * scope: its extra `useV2Write` / Spark version checks are trivially true once the table has
+   * exposed `SupportsRowLevelOperations` on 4.1).
    */
-  protected def hasCharColumn(fs: FileStoreTable): Boolean = {
-    import org.apache.paimon.types.CharType
-    import scala.collection.JavaConverters._
-    fs.rowType().getFields.asScala.exists(_.`type`().isInstanceOf[CharType])
+  protected def targetsV2DeltaTable(aliasedTable: LogicalPlan): Boolean = {
+    targetsPaimonFileStoreTable(aliasedTable) {
+      case (sparkTable, _) => SparkTable.supportsV2DeltaOps(sparkTable)
+    }
+  }
+
+  private def targetsPaimonFileStoreTable(aliasedTable: LogicalPlan)(
+      predicate: (SparkTable, FileStoreTable) => Boolean): Boolean = {
+    EliminateSubqueryAliases(aliasedTable) match {
+      case ExtractV2Table(sparkTable: SparkTable) =>
+        sparkTable.getTable match {
+          case fs: FileStoreTable => predicate(sparkTable, fs)
+          case _ => false
+        }
+      case _ => false
+    }
   }
 }

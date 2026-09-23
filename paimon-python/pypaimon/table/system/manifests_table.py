@@ -21,6 +21,7 @@ from typing import List, Optional
 
 import pyarrow
 
+from pypaimon.casting.row_to_string import cast_row_to_string
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
 from pypaimon.table.system.system_table import SystemTable
@@ -75,12 +76,10 @@ class ManifestsTable(SystemTable):
             num_added.append(int(meta.num_added_files))
             num_deleted.append(int(meta.num_deleted_files))
             schema_ids.append(int(meta.schema_id))
-            # TODO: render min/max_partition_stats by casting partition
-            # rows to their string form. pypaimon
-            # has SimpleStats but no shared partition-row-to-string
-            # helper yet; emit NULL to preserve the column shape.
-            min_partition_stats.append(None)
-            max_partition_stats.append(None)
+            min_partition_stats.append(
+                cast_row_to_string(meta.partition_stats.min_values))
+            max_partition_stats.append(
+                cast_row_to_string(meta.partition_stats.max_values))
             min_row_ids.append(
                 None if meta.min_row_id is None else int(meta.min_row_id))
             max_row_ids.append(

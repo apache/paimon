@@ -33,7 +33,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
-import org.apache.hadoop.hive.common.StatsSetupConst;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,6 +43,7 @@ import java.util.Collections;
 import java.util.UUID;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLKEY;
+import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_SKIP_UPDATE_STATS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Verify that table stats has been updated. */
@@ -59,7 +59,7 @@ public class HiveTableStatsTest {
         hiveConf.setVar(METASTORECONNECTURLKEY, jdoConnectionURL + ";create=true");
         String metastoreClientClass = "org.apache.hadoop.hive.metastore.HiveMetaStoreClient";
         Options catalogOptions = new Options();
-        catalogOptions.set(StatsSetupConst.DO_NOT_UPDATE_STATS, "true");
+        catalogOptions.set(HIVE_SKIP_UPDATE_STATS, true);
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
         CatalogContext catalogContext = CatalogContext.create(catalogOptions);
         FileIO fileIO = FileIO.get(new Path(warehouse), catalogContext);
@@ -81,14 +81,15 @@ public class HiveTableStatsTest {
                         Maps.newHashMap(),
                         ""),
                 false);
+        HiveCatalog hiveCatalog = (HiveCatalog) catalog;
+        Table table1 = hiveCatalog.getHmsTable(identifier);
         catalog.alterTable(
                 identifier,
                 Lists.newArrayList(
                         SchemaChange.addColumn("col2", DataTypes.DATE()),
                         SchemaChange.addColumn("col3", DataTypes.STRING(), "col3 field")),
                 false);
-        HiveCatalog hiveCatalog = (HiveCatalog) catalog;
-        Table table = hiveCatalog.getHmsTable(identifier);
-        assertThat(table.getParameters().get("COLUMN_STATS_ACCURATE")).isEqualTo(null);
+        Table table2 = hiveCatalog.getHmsTable(identifier);
+        assertThat(table1.getParameters()).isEqualTo(table2.getParameters());
     }
 }

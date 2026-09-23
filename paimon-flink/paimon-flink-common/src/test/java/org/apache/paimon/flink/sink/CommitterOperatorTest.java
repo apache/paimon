@@ -73,7 +73,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.fail;
 
 /** Tests for {@link CommitterOperator}. */
-public class CommitterOperatorTest extends CommitterOperatorTestBase {
+public class CommitterOperatorTest extends CommitterTestBase {
 
     protected String initialCommitUser;
 

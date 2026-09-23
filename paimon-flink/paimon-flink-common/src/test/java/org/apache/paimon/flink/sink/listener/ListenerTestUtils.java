@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.sink.Committer;
+import org.apache.paimon.flink.sink.state.OperatorBackendStateStore;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileTestUtils;
@@ -43,7 +44,7 @@ class ListenerTestUtils {
                 null,
                 streamingCheckpointEnabled,
                 isRestored,
-                new MockOperatorStateStore(),
+                new OperatorBackendStateStore(new MockOperatorStateStore()),
                 1,
                 1);
     }

@@ -20,7 +20,7 @@ package org.apache.paimon.globalindex.testfulltext;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 
@@ -41,16 +41,18 @@ import java.util.List;
  * <pre>
  *   [4 bytes] count (int)
  *   For each document:
+ *     [8 bytes] relative row id (long)
  *     [4 bytes] text length in bytes (int)
  *     [N bytes] UTF-8 text
  * </pre>
  */
-public class TestFullTextGlobalIndexWriter implements GlobalIndexSingletonWriter {
+public class TestFullTextGlobalIndexWriter implements GlobalIndexSingleColumnWriter {
 
     private static final String FILE_NAME_PREFIX = "test-fulltext";
 
     private final GlobalIndexFileWriter fileWriter;
-    private final List<String> documents;
+    private final List<Document> documents;
+    private long rowCount;
 
     public TestFullTextGlobalIndexWriter(GlobalIndexFileWriter fileWriter) {
         this.fileWriter = fileWriter;
@@ -58,7 +60,8 @@ public class TestFullTextGlobalIndexWriter implements GlobalIndexSingletonWriter
     }
 
     @Override
-    public void write(Object fieldData) {
+    public void write(Object fieldData, long relativeRowId) {
+        rowCount++;
         if (fieldData == null) {
             throw new IllegalArgumentException("Text field data must not be null");
         }
@@ -72,7 +75,7 @@ public class TestFullTextGlobalIndexWriter implements GlobalIndexSingletonWriter
             throw new IllegalArgumentException(
                     "Unsupported text type: " + fieldData.getClass().getName());
         }
-        documents.add(text);
+        documents.add(new Document(relativeRowId, text));
     }
 
     @Override
@@ -91,20 +94,31 @@ public class TestFullTextGlobalIndexWriter implements GlobalIndexSingletonWriter
                 out.write(header.array());
 
                 // Documents
-                for (String doc : documents) {
-                    byte[] textBytes = doc.getBytes(StandardCharsets.UTF_8);
-                    ByteBuffer lenBuf = ByteBuffer.allocate(4);
-                    lenBuf.order(ByteOrder.LITTLE_ENDIAN);
-                    lenBuf.putInt(textBytes.length);
-                    out.write(lenBuf.array());
+                for (Document doc : documents) {
+                    byte[] textBytes = doc.text.getBytes(StandardCharsets.UTF_8);
+                    ByteBuffer entryHeader = ByteBuffer.allocate(Long.BYTES + Integer.BYTES);
+                    entryHeader.order(ByteOrder.LITTLE_ENDIAN);
+                    entryHeader.putLong(doc.relativeRowId);
+                    entryHeader.putInt(textBytes.length);
+                    out.write(entryHeader.array());
                     out.write(textBytes);
                 }
                 out.flush();
             }
 
-            return Collections.singletonList(new ResultEntry(fileName, documents.size(), null));
+            return Collections.singletonList(new ResultEntry(fileName, rowCount, null));
         } catch (IOException e) {
             throw new RuntimeException("Failed to write test full-text index", e);
+        }
+    }
+
+    private static class Document {
+        private final long relativeRowId;
+        private final String text;
+
+        private Document(long relativeRowId, String text) {
+            this.relativeRowId = relativeRowId;
+            this.text = text;
         }
     }
 }

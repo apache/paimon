@@ -171,8 +171,7 @@ public class TestCommitThread extends Thread {
                 () ->
                         commit.overwritePartition(
                                 TestKeyValueGenerator.toPartitionMap(partition, MULTI_PARTITIONED),
-                                committable,
-                                Collections.emptyMap()));
+                                committable));
     }
 
     private void doFinalCompact() {

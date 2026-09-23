@@ -86,6 +86,8 @@ public interface InternalArray extends DataGetters {
                 break;
             case BINARY:
             case VARBINARY:
+            case GEOMETRY:
+            case GEOGRAPHY:
                 elementGetter = InternalArray::getBinary;
                 break;
             case DECIMAL:
@@ -121,6 +123,9 @@ public interface InternalArray extends DataGetters {
                 break;
             case ARRAY:
                 elementGetter = InternalArray::getArray;
+                break;
+            case VECTOR:
+                elementGetter = InternalArray::getVector;
                 break;
             case MULTISET:
             case MAP:

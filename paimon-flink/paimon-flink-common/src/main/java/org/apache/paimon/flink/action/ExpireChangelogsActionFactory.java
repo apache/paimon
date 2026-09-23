@@ -75,7 +75,7 @@ public class ExpireChangelogsActionFactory implements ActionFactory {
                         + "--retain_max <max> \\\n"
                         + "--retain_min <min> \\\n"
                         + "--older_than <older_than> \\\n"
-                        + "--max_delete <max_delete> \\\n"
+                        + "--max_deletes <max_deletes> \\\n"
                         + "--delete_all <delete_all>");
     }
 }

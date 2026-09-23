@@ -32,6 +32,8 @@ public interface LocalMerger {
 
     int size();
 
+    boolean isEmpty();
+
     void forEach(Consumer<InternalRow> consumer) throws IOException;
 
     void clear();

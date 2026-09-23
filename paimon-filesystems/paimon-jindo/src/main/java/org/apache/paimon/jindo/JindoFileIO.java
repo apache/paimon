@@ -19,19 +19,23 @@
 package org.apache.paimon.jindo;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.plugin.PluginLoader;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SensitiveConfigUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import com.aliyun.jindodata.common.JindoHadoopSystem;
 import com.aliyun.jindodata.dls.JindoDlsFileSystem;
 import com.aliyun.jindodata.oss.JindoOssFileSystem;
 import com.aliyun.jindodata.oss.auth.SimpleCredentialsProvider;
+import com.aliyun.jindodata.store.JindoMpuStore;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.slf4j.Logger;
@@ -40,7 +44,9 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.time.Duration;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -67,15 +73,16 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
     private static final String OSS_USER_AGENT_EXTENDED = "fs.oss.user.agent.extended";
+    private static final String OSS_SHOW_DIR_TIMESTAMP = "fs.oss.show-dir-timestamp";
     private static final String DLF_ACCESS_TRACKING_EXTENDED_INFO =
             "dlf.access-tracking.extended-info";
 
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {
                 {
-                    put(OSS_ACCESS_KEY_ID.toLowerCase(), OSS_ACCESS_KEY_ID);
-                    put(OSS_ACCESS_KEY_SECRET.toLowerCase(), OSS_ACCESS_KEY_SECRET);
-                    put(OSS_SECURITY_TOKEN.toLowerCase(), OSS_SECURITY_TOKEN);
+                    put(OSS_ACCESS_KEY_ID.toLowerCase(Locale.ROOT), OSS_ACCESS_KEY_ID);
+                    put(OSS_ACCESS_KEY_SECRET.toLowerCase(Locale.ROOT), OSS_ACCESS_KEY_SECRET);
+                    put(OSS_SECURITY_TOKEN.toLowerCase(Locale.ROOT), OSS_SECURITY_TOKEN);
                 }
             };
 
@@ -89,6 +96,13 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     private Options hadoopOptions;
     private Options hadoopOptionsWithCache;
     private boolean allowCache = true;
+    private transient BlobPresigner blobPresigner;
+
+    public JindoFileIO() {}
+
+    JindoFileIO(BlobPresigner blobPresigner) {
+        this.blobPresigner = blobPresigner;
+    }
 
     @Override
     public boolean isObjectStore() {
@@ -105,15 +119,15 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
             for (String prefix : CONFIG_PREFIXES) {
                 if (key.startsWith(prefix)) {
                     String value = context.options().get(key);
-                    if (CASE_SENSITIVE_KEYS.containsKey(key.toLowerCase())) {
-                        key = CASE_SENSITIVE_KEYS.get(key.toLowerCase());
+                    if (CASE_SENSITIVE_KEYS.containsKey(key.toLowerCase(Locale.ROOT))) {
+                        key = CASE_SENSITIVE_KEYS.get(key.toLowerCase(Locale.ROOT));
                     }
                     hadoopOptions.set(key, value);
 
                     LOG.debug(
                             "Adding config entry for {} as {} to Hadoop config",
                             key,
-                            hadoopOptions.get(key));
+                            SensitiveConfigUtils.redactValue(key, hadoopOptions.get(key)));
                 }
             }
         }
@@ -133,6 +147,11 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
             context.hadoopConf()
                     .iterator()
                     .forEachRemaining(entry -> hadoopOptions.set(entry.getKey(), entry.getValue()));
+        }
+
+        // Resolving a timestamp for every listed directory is expensive in Jindo.
+        if (!hadoopOptions.containsKey(OSS_SHOW_DIR_TIMESTAMP)) {
+            hadoopOptions.set(OSS_SHOW_DIR_TIMESTAMP, "false");
         }
 
         String dlfAccessTrackingExtendedInfo =
@@ -193,8 +212,59 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         Pair<JindoHadoopSystem, String> pair = getFileSystemPair(hadoopPath, false);
         JindoHadoopSystem fs = pair.getKey();
+        JindoMpuStore mpuStore = fs.getMpuStore(hadoopPath);
+        if (mpuStore == null) {
+            LOG.debug(
+                    "Jindo multipart upload is unavailable for {}, falling back to rename commit.",
+                    path);
+            return super.newTwoPhaseOutputStream(path, overwrite);
+        }
         return new JindoTwoPhaseOutputStream(
-                new JindoMultiPartUpload(fs, hadoopPath), hadoopPath, path);
+                new JindoMultiPartUpload(mpuStore, fs.getWorkingDirectory()), hadoopPath, path);
+    }
+
+    @Override
+    public String createBlobPresignedUrl(
+            Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
+        BlobPresigner presigner = blobPresigner();
+        Thread thread = Thread.currentThread();
+        ClassLoader previous = thread.getContextClassLoader();
+        try {
+            thread.setContextClassLoader(presigner.getClass().getClassLoader());
+            return presigner.create(tableRoot, descriptor, validity);
+        } finally {
+            thread.setContextClassLoader(previous);
+        }
+    }
+
+    private synchronized BlobPresigner blobPresigner() {
+        if (blobPresigner == null) {
+            PluginLoader loader = BlobPlugin.getLoader();
+            Thread thread = Thread.currentThread();
+            ClassLoader previous = thread.getContextClassLoader();
+            try {
+                thread.setContextClassLoader(loader.submoduleClassLoader());
+                BlobPresigner presigner =
+                        loader.newInstance("org.apache.paimon.jindo.JindoBlobPresigner");
+                presigner.configure(hadoopOptions);
+                blobPresigner = presigner;
+            } finally {
+                thread.setContextClassLoader(previous);
+            }
+        }
+        return blobPresigner;
+    }
+
+    private static class BlobPlugin {
+
+        private static PluginLoader loader;
+
+        private static synchronized PluginLoader getLoader() {
+            if (loader == null) {
+                loader = new PluginLoader("paimon-plugin-jindo-oss");
+            }
+            return loader;
+        }
     }
 
     @Override
@@ -245,11 +315,34 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
+        if (blobPresigner != null) {
+            Thread thread = Thread.currentThread();
+            ClassLoader previous = thread.getContextClassLoader();
+            try {
+                thread.setContextClassLoader(blobPresigner.getClass().getClassLoader());
+                blobPresigner.close();
+                blobPresigner = null;
+            } finally {
+                thread.setContextClassLoader(previous);
+            }
+        }
         if (!allowCache) {
             fsMap.values().stream().map(Pair::getKey).forEach(IOUtils::closeQuietly);
             fsMap.clear();
         }
+    }
+
+    /** Contract shared with the isolated OSS implementation. */
+    public interface BlobPresigner extends AutoCloseable {
+
+        void configure(Options options);
+
+        String create(Path tableRoot, BlobDescriptor descriptor, Duration validity)
+                throws IOException;
+
+        @Override
+        void close();
     }
 
     private static class CacheKey {

@@ -98,12 +98,13 @@ abstract class AbstractLookupBenchmark {
         LookupStoreFactory factory =
                 LookupStoreFactory.create(
                         options,
-                        new CacheManager(MemorySize.ofMebiBytes(10)),
+                        new CacheManager(MemorySize.ofMebiBytes(10), 0),
                         keySerializer.createSliceComparator());
 
         String name = String.format("%s-%s", valueLength, bloomFilterEnabled);
         File file = new File(tempDir.toFile(), UUID.randomUUID() + "-" + name);
-        LookupStoreWriter writer = factory.createWriter(file, createBloomFiler(bloomFilterEnabled));
+        LookupStoreWriter writer =
+                factory.createWriter(file, createBloomFilterBuilder(bloomFilterEnabled));
         int i = 0;
         for (byte[] input : inputs) {
             if (sameValue) {
@@ -121,10 +122,10 @@ abstract class AbstractLookupBenchmark {
         return file.getAbsolutePath();
     }
 
-    private BloomFilter.Builder createBloomFiler(boolean enabled) {
+    private BloomFilter.Builder createBloomFilterBuilder(boolean enabled) {
         if (!enabled) {
             return null;
         }
-        return BloomFilter.builder(5000000, 0.01);
+        return BloomFilter.fixedBuilder(5000000, 0.01);
     }
 }

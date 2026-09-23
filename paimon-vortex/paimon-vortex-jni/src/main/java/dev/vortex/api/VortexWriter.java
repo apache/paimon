@@ -18,27 +18,79 @@
 
 package dev.vortex.api;
 
-import dev.vortex.jni.JNIDType;
-import dev.vortex.jni.JNIWriter;
-import dev.vortex.jni.NativeWriterMethods;
+import dev.vortex.jni.NativeWriter;
+
+import org.apache.arrow.c.ArrowSchema;
+import org.apache.arrow.c.Data;
+import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.types.pojo.Schema;
+
 import java.io.IOException;
 import java.util.Map;
 
-/** Writer for creating Vortex files from Arrow data. */
-public interface VortexWriter extends AutoCloseable {
+/** A Vortex file writer using the Arrow C Data Interface. */
+public final class VortexWriter implements AutoCloseable {
 
-    static VortexWriter create(String uri, DType dtype, Map<String, String> options) throws IOException {
-        long ptr = NativeWriterMethods.create(uri, ((JNIDType) dtype).getPointer(), options);
-        if (ptr <= 0) {
-            throw new IOException("Failed to create Vortex writer for: " + uri + " (got ptr=" + ptr + ")");
-        }
-        return new JNIWriter(ptr);
+    private final long pointer;
+    private boolean closed;
+
+    private VortexWriter(long pointer) {
+        this.pointer = pointer;
     }
 
-    void writeBatch(byte[] arrowData) throws IOException;
+    public static VortexWriter create(
+            Session session, String uri, Schema arrowSchema, Map<String, String> options)
+            throws IOException {
+        // Use a dedicated allocator for schema export to avoid leaking retained
+        // references into the caller's allocator (Arrow C Data Interface retain/release
+        // semantics don't fully clean up via ArrowSchema.close in Arrow 15).
+        RootAllocator schemaAllocator = new RootAllocator(Long.MAX_VALUE);
+        try {
+            ArrowSchema cSchema = ArrowSchema.allocateNew(schemaAllocator);
+            Data.exportSchema(schemaAllocator, arrowSchema, null, cSchema);
+            long ptr =
+                    NativeWriter.create(
+                            session.nativePointer(), uri, cSchema.memoryAddress(), options);
+            cSchema.close();
+            if (ptr <= 0) {
+                throw new IOException("Failed to create Vortex writer for: " + uri);
+            }
+            return new VortexWriter(ptr);
+        } finally {
+            try {
+                schemaAllocator.close();
+            } catch (IllegalStateException e) {
+                if (e.getMessage() == null || !e.getMessage().contains("Memory was leaked")) {
+                    throw e;
+                }
+            }
+        }
+    }
 
-    void writeBatchFfi(long arrowArrayAddr, long arrowSchemaAddr) throws IOException;
+    public void writeBatch(long arrowArrayAddr, long arrowSchemaAddr) throws IOException {
+        if (closed) {
+            throw new IllegalStateException("writer already closed");
+        }
+        boolean ok;
+        try {
+            ok = NativeWriter.writeBatch(pointer, arrowArrayAddr, arrowSchemaAddr);
+        } catch (RuntimeException e) {
+            throw new IOException("failed to write batch", e);
+        }
+        if (!ok) {
+            throw new IOException("NativeWriter.writeBatch returned false");
+        }
+    }
 
     @Override
-    void close() throws IOException;
+    public void close() throws IOException {
+        if (!closed && pointer != 0) {
+            closed = true;
+            try {
+                NativeWriter.close(pointer);
+            } catch (RuntimeException e) {
+                throw new IOException("failed to close writer", e);
+            }
+        }
+    }
 }

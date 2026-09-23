@@ -42,13 +42,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class SparkCatalogWithHiveTest {
 
     private static TestHiveMetastore testHiveMetastore;
-    private static final int PORT = 9087;
+    private static int port;
     @TempDir java.nio.file.Path tempDir;
 
     @BeforeAll
     public static void startMetastore() {
         testHiveMetastore = new TestHiveMetastore();
-        testHiveMetastore.start(PORT);
+        testHiveMetastore.start(0);
+        port = testHiveMetastore.getPort();
     }
 
     @AfterAll
@@ -156,18 +157,42 @@ public class SparkCatalogWithHiveTest {
         }
     }
 
+    @Test
+    public void testDescribeExternalAndManagedTableType() throws IOException {
+        try (SparkSession spark = createSessionBuilder().getOrCreate()) {
+            spark.sql("CREATE DATABASE IF NOT EXISTS type_test_db");
+            spark.sql("USE spark_catalog.type_test_db");
+
+            spark.sql("CREATE EXTERNAL TABLE external_type_table (a INT, bb INT, c STRING)");
+            assertThat(
+                            spark.sql("DESC FORMATTED external_type_table")
+                                    .filter("col_name = 'Type'")
+                                    .head()
+                                    .getString(1))
+                    .isEqualTo("EXTERNAL");
+
+            spark.sql("CREATE TABLE managed_type_table (a INT)");
+            assertThat(
+                            spark.sql("DESC FORMATTED managed_type_table")
+                                    .filter("col_name = 'Type'")
+                                    .head()
+                                    .getString(1))
+                    .isEqualTo("MANAGED");
+        }
+    }
+
     private SparkSession.Builder createSessionBuilder() {
         Path warehousePath = new Path("file:" + tempDir.toString());
         return SparkSession.builder()
                 .config("spark.sql.warehouse.dir", warehousePath.toString())
                 // with hive metastore
                 .config("spark.sql.catalogImplementation", "hive")
-                .config("hive.metastore.uris", "thrift://localhost:" + PORT)
+                .config("hive.metastore.uris", "thrift://localhost:" + port)
                 .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
                 .config("spark.sql.catalog.spark_catalog.metastore", "hive")
                 .config(
                         "spark.sql.catalog.spark_catalog.hive.metastore.uris",
-                        "thrift://localhost:" + PORT)
+                        "thrift://localhost:" + port)
                 .config("spark.sql.catalog.spark_catalog.warehouse", warehousePath.toString())
                 .config(
                         "spark.sql.extensions",

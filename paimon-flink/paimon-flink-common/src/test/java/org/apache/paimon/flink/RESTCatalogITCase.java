@@ -366,6 +366,85 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
     }
 
     @Test
+    public void testColumnMaskingCrossColumnWithProjection() {
+        String maskingTable = "cross_column_masking_table";
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s (first_name STRING, last_name STRING, display STRING, other_col STRING)"
+                                + " WITH ('query-auth.enabled' = 'true', 'source.split.target-size' = '1 b')",
+                        DATABASE_NAME, maskingTable));
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES ('john', 'doe', 'ignored', 'o1')",
+                        DATABASE_NAME, maskingTable));
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES ('jane', 'roe', 'ignored', 'o2')",
+                        DATABASE_NAME, maskingTable));
+
+        Map<String, Transform> columnMasking = new HashMap<>();
+        columnMasking.put(
+                "display",
+                new ConcatWsTransform(
+                        Arrays.asList(
+                                BinaryString.fromString("-"),
+                                new FieldRef(0, "first_name", DataTypes.STRING()),
+                                new FieldRef(1, "last_name", DataTypes.STRING()))));
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create(DATABASE_NAME, maskingTable), columnMasking);
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT display FROM %s.%s", DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of("john-doe"), Row.of("jane-roe"));
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT other_col FROM %s.%s",
+                                        DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of("o1"), Row.of("o2"));
+    }
+
+    @Test
+    public void testFilterOnMaskedPartitionColumn() {
+        String maskingTable = "partition_masking_table";
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s (p STRING, v STRING) PARTITIONED BY (p)"
+                                + " WITH ('query-auth.enabled' = 'true')",
+                        DATABASE_NAME, maskingTable));
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES ('a', 'va'), ('b', 'vb')",
+                        DATABASE_NAME, maskingTable));
+
+        Map<String, Transform> columnMasking = new HashMap<>();
+        columnMasking.put("p", new FieldTransform(new FieldRef(1, "v", DataTypes.STRING())));
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create(DATABASE_NAME, maskingTable), columnMasking);
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT p, v FROM %s.%s WHERE p = 'vb'",
+                                        DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of("vb", "vb"));
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT p, v FROM %s.%s WHERE p = 'a'",
+                                        DATABASE_NAME, maskingTable)))
+                .isEmpty();
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT v FROM %s.%s WHERE p = 'vb'",
+                                        DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of("vb"));
+    }
+
+    @Test
     public void testRowFilter() {
         String filterTable = "row_filter_table";
         batchSql(
@@ -471,6 +550,49 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                                         "SELECT * FROM %s.%s WHERE department = 'IT' ORDER BY id",
                                         DATABASE_NAME, filterTable)))
                 .containsExactlyInAnyOrder(Row.of(3, "Charlie", 35, "IT"));
+
+        String partitionFilterTable = "partition_row_filter_table";
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s (id INT, name STRING, dtpart STRING) PARTITIONED BY (dtpart) WITH ('query-auth.enabled' = 'true')",
+                        DATABASE_NAME, partitionFilterTable));
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES (1, 'blocked', '2026-07-03'), (2, 'allowed', '2026-07-02')",
+                        DATABASE_NAME, partitionFilterTable));
+        Predicate partitionPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "dtpart", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("2026-07-02")));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create(DATABASE_NAME, partitionFilterTable),
+                Collections.singletonList(partitionPredicate));
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM %s.%s WHERE dtpart = '2026-07-02'",
+                                        DATABASE_NAME, partitionFilterTable)))
+                .containsExactly(Row.of(2, "allowed", "2026-07-02"));
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM %s.%s",
+                                        DATABASE_NAME, partitionFilterTable)))
+                .containsExactly(Row.of(2, "allowed", "2026-07-02"));
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT id, dtpart FROM %s.%s LIMIT 1",
+                                        DATABASE_NAME, partitionFilterTable)))
+                .containsExactly(Row.of(2, "2026-07-02"));
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT id FROM %s.%s WHERE dtpart = '2026-07-03'",
+                                        DATABASE_NAME, partitionFilterTable)))
+                .isEmpty();
 
         // Test JOIN with row filter
         String joinTable = "join_table";
@@ -715,7 +837,8 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                                                 "SELECT id, name FROM %s.%s WHERE age > 30 ORDER BY id",
                                                 DATABASE_NAME, combinedTable)))
                 .rootCause()
-                .hasMessageContaining("Unable to read data without column non_existent_column");
+                .hasMessageContaining(
+                        "Row filter references column 'non_existent_column' which does not exist");
 
         // Clear both column masking and row filter
         restCatalogServer.setColumnMaskingAuth(

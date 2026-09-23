@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
@@ -36,6 +37,7 @@ public class PostponeFixedBucketChannelComputer implements ChannelComputer<Inter
 
     private final TableSchema schema;
     private final Map<BinaryRow, Integer> knownNumBuckets;
+    private final int maxNumBuckets;
 
     private transient int numChannels;
     private transient FixedBucketRowKeyExtractor keyExtractor;
@@ -44,6 +46,8 @@ public class PostponeFixedBucketChannelComputer implements ChannelComputer<Inter
             TableSchema schema, Map<BinaryRow, Integer> knownNumBuckets) {
         this.schema = schema;
         this.knownNumBuckets = knownNumBuckets;
+        this.maxNumBuckets =
+                new CoreOptions(schema.options()).postponeBatchWriteFixedBucketMaxParallelism();
     }
 
     @Override
@@ -56,7 +60,9 @@ public class PostponeFixedBucketChannelComputer implements ChannelComputer<Inter
     public int channel(InternalRow record) {
         keyExtractor.setRecord(record);
         BinaryRow partition = keyExtractor.partition();
-        int numBuckets = knownNumBuckets.computeIfAbsent(partition, p -> numChannels);
+        int numBuckets =
+                knownNumBuckets.computeIfAbsent(
+                        partition.copy(), p -> Math.min(numChannels, maxNumBuckets));
         int bucket = keyExtractor.bucket(numBuckets);
         return ChannelComputer.select(partition, bucket, numChannels);
     }

@@ -22,6 +22,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -640,6 +641,32 @@ public class SparkWriteITCase {
 
         // reset config, it will affect other tests
         spark.conf().unset("spark.paimon.changelog-file.prefix");
+    }
+
+    @Test
+    public void testInsertOverwriteDoesNotProduceLookupChangelogFiles() throws Exception {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES ('primary-key'='a', 'bucket' = '1', 'changelog-producer' = 'lookup', 'compaction.force-up-level-0' = 'true', 'file.format' = 'avro', 'file.compression' = 'null', 'manifest.compression' = 'null')");
+
+        FileStoreTable table = getTable("T");
+        Path bucketPath = new Path(table.location(), "bucket-0");
+
+        spark.sql("INSERT INTO T VALUES (1, 1, 'aa')");
+        long changelogFiles = dataFileCount(table.fileIO().listStatus(bucketPath), "changelog-");
+        Assertions.assertEquals(1, changelogFiles);
+
+        spark.sql("INSERT OVERWRITE T VALUES (2, 2, 'bb')");
+
+        Assertions.assertEquals(
+                changelogFiles, dataFileCount(table.fileIO().listStatus(bucketPath), "changelog-"));
+        Assertions.assertNull(table.latestSnapshot().get().changelogManifestList());
+        List<DataFileMeta> dataFiles =
+                table.newSnapshotReader().read().dataSplits().stream()
+                        .flatMap(split -> split.dataFiles().stream())
+                        .collect(Collectors.toList());
+        assertThat(dataFiles).isNotEmpty();
+        assertThat(dataFiles).allMatch(file -> file.level() > 0);
+        assertThat(spark.sql("SELECT * FROM T").collectAsList().toString()).isEqualTo("[[2,2,bb]]");
     }
 
     @Test

@@ -23,10 +23,14 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FormatReaderContext;
+import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
@@ -41,8 +45,16 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link RollingFileWriterImpl}. */
 public class RollingFileWriterTest {
@@ -65,6 +77,14 @@ public class RollingFileWriterTest {
     }
 
     public void initialize(String identifier, boolean statsDenseStore) {
+        initialize(identifier, statsDenseStore, TARGET_FILE_SIZE, Long.MAX_VALUE);
+    }
+
+    public void initialize(
+            String identifier,
+            boolean statsDenseStore,
+            long targetFileSize,
+            long targetFileRowNum) {
         FileFormat fileFormat = FileFormat.fromIdentifier(identifier, new Options());
         rollingFileWriter =
                 new RollingFileWriterImpl<>(
@@ -98,8 +118,11 @@ public class RollingFileWriterTest {
                                         true,
                                         statsDenseStore,
                                         false,
+                                        null,
+                                        null,
                                         null),
-                        TARGET_FILE_SIZE);
+                        targetFileSize,
+                        targetFileRowNum);
     }
 
     @ParameterizedTest
@@ -122,6 +145,199 @@ public class RollingFileWriterTest {
         }
     }
 
+    @Test
+    public void testCloseAfterWriteFailure() throws IOException {
+        Path path = new Path(tempDir.resolve("failed-file").toString());
+        OutOfMemoryError expected = new OutOfMemoryError("expected");
+        RollingFileWriterImpl<InternalRow, Void> writer =
+                new RollingFileWriterImpl<>(
+                        () ->
+                                new TestSingleFileWriter(
+                                        LocalFileIO.create(),
+                                        (out, compression) ->
+                                                new FormatWriter() {
+                                                    @Override
+                                                    public void addElement(InternalRow element) {
+                                                        throw expected;
+                                                    }
+
+                                                    @Override
+                                                    public boolean reachTargetSize(
+                                                            boolean suggestedCheck,
+                                                            long targetSize) {
+                                                        return false;
+                                                    }
+
+                                                    @Override
+                                                    public void close() {}
+                                                },
+                                        path),
+                        Long.MAX_VALUE,
+                        Long.MAX_VALUE);
+
+        assertThatThrownBy(() -> writer.write(GenericRow.of(1))).isSameAs(expected);
+        assertThat(LocalFileIO.create().exists(path)).isFalse();
+        assertThatCode(writer::abort).doesNotThrowAnyException();
+        assertThatCode(writer::close).doesNotThrowAnyException();
+        assertThatThrownBy(writer::result).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(writer::drainAbortExecutors).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    public void testRollingByRows() throws IOException {
+        // Huge byte target so only the row-count limit triggers rolling.
+        initialize("avro", false, 1024L * 1024 * 1024, 100L);
+        for (int i = 0; i < 350; i++) {
+            rollingFileWriter.write(GenericRow.of(i));
+        }
+        rollingFileWriter.close();
+        List<DataFileMeta> files = rollingFileWriter.result();
+        assertThat(files).hasSize(4);
+        assertThat(files.get(0).rowCount()).isEqualTo(100);
+        assertThat(files.get(1).rowCount()).isEqualTo(100);
+        assertThat(files.get(2).rowCount()).isEqualTo(100);
+        assertThat(files.get(3).rowCount()).isEqualTo(50);
+    }
+
+    @Test
+    public void testRollingByRowsWithBundle() throws IOException {
+        // Bundle-granular cap: a file may overshoot by up to one bundle.
+        initialize("avro", false, 1024L * 1024 * 1024, 100L);
+        rollingFileWriter.writeBundle(bundle(150));
+        rollingFileWriter.writeBundle(bundle(120));
+        rollingFileWriter.writeBundle(bundle(30));
+        rollingFileWriter.close();
+        List<DataFileMeta> files = rollingFileWriter.result();
+        assertThat(files).hasSize(3);
+        assertThat(files.get(0).rowCount()).isEqualTo(150);
+        assertThat(files.get(1).rowCount()).isEqualTo(120);
+        assertThat(files.get(2).rowCount()).isEqualTo(30);
+    }
+
+    private static SingleUseBundleRecords bundle(int rowCount) {
+        List<InternalRow> rows = new ArrayList<>();
+        for (int i = 0; i < rowCount; i++) {
+            rows.add(GenericRow.of(i));
+        }
+        return new SingleUseBundleRecords(rows);
+    }
+
+    @Test
+    public void testWriteRowSidecar() throws IOException {
+        FileFormat fileFormat = FileFormat.fromIdentifier("parquet", new Options());
+        FileFormat rowFormat = FileFormat.fromIdentifier("row", new Options());
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        new Path(tempDir + "/bucket-0"),
+                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null);
+        RowDataRollingFileWriter writer =
+                new RowDataRollingFileWriter(
+                        LocalFileIO.create(),
+                        0L,
+                        fileFormat,
+                        TARGET_FILE_SIZE,
+                        SCHEMA,
+                        pathFactory,
+                        () -> new LongCounter(0),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        SimpleColStatsCollector.createFullStatsFactories(SCHEMA.getFieldCount()),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        true,
+                        false,
+                        null,
+                        rowFormat,
+                        Long.MAX_VALUE);
+
+        writer.write(GenericRow.of(1));
+        writer.close();
+
+        List<DataFileMeta> files = writer.result();
+        assertThat(files).hasSize(1);
+        DataFileMeta file = files.get(0);
+        assertThat(file.extraFiles()).hasSize(1);
+        String rowSidecar = file.extraFiles().get(0);
+        assertThat(rowSidecar).endsWith(".row");
+        Path dataPath = pathFactory.toPath(file);
+        Path rowSidecarPath = pathFactory.toAlignedPath(rowSidecar, file);
+        assertThat(LocalFileIO.create().exists(dataPath)).isTrue();
+        assertThat(LocalFileIO.create().exists(rowSidecarPath)).isTrue();
+
+        writer.abort();
+        assertThat(LocalFileIO.create().exists(dataPath)).isFalse();
+        assertThat(LocalFileIO.create().exists(rowSidecarPath)).isFalse();
+    }
+
+    @Test
+    public void testWriteRowSidecarWithBundle() throws IOException {
+        FileFormat fileFormat = FileFormat.fromIdentifier("parquet", new Options());
+        FileFormat rowFormat = FileFormat.fromIdentifier("row", new Options());
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        new Path(tempDir + "/bucket-0"),
+                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null);
+        RowDataRollingFileWriter writer =
+                new RowDataRollingFileWriter(
+                        LocalFileIO.create(),
+                        0L,
+                        fileFormat,
+                        TARGET_FILE_SIZE,
+                        SCHEMA,
+                        pathFactory,
+                        () -> new LongCounter(0),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        SimpleColStatsCollector.createFullStatsFactories(SCHEMA.getFieldCount()),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        true,
+                        false,
+                        null,
+                        rowFormat,
+                        Long.MAX_VALUE);
+
+        writer.writeBundle(
+                new SingleUseBundleRecords(Arrays.asList(GenericRow.of(1), GenericRow.of(2))));
+        writer.close();
+
+        List<DataFileMeta> files = writer.result();
+        assertThat(files).hasSize(1);
+        DataFileMeta file = files.get(0);
+        assertThat(file.rowCount()).isEqualTo(2);
+        assertThat(file.minSequenceNumber()).isEqualTo(0);
+        assertThat(file.maxSequenceNumber()).isEqualTo(1);
+        assertThat(file.extraFiles()).hasSize(1);
+        assertThat(
+                        readIntsFromRowFile(
+                                rowFormat,
+                                pathFactory.toAlignedPath(file.extraFiles().get(0), file)))
+                .containsExactly(1, 2);
+    }
+
+    private static List<Integer> readIntsFromRowFile(FileFormat rowFormat, Path path)
+            throws IOException {
+        LocalFileIO fileIO = LocalFileIO.create();
+        List<Integer> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                rowFormat
+                        .createReaderFactory(SCHEMA, SCHEMA, Collections.emptyList())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, path, fileIO.getFileSize(path), null, null))) {
+            reader.forEachRemaining(row -> result.add(row.getInt(0)));
+        }
+        return result;
+    }
+
     private void assertFileNum(int expected) {
         File dataDir = tempDir.resolve("bucket-0").toFile();
         File[] files = dataDir.listFiles();
@@ -138,5 +354,43 @@ public class RollingFileWriterTest {
         DataFileMeta file = rollingFileWriter.result().get(0);
         assertThat(file.valueStatsCols()).isNull();
         assertThat(file.valueStats().minValues().getFieldCount()).isEqualTo(SCHEMA.getFieldCount());
+    }
+
+    private static class TestSingleFileWriter extends SingleFileWriter<InternalRow, Void> {
+
+        private TestSingleFileWriter(
+                LocalFileIO fileIO, FormatWriterFactory writerFactory, Path path) {
+            super(fileIO, writerFactory, path, Function.identity(), null, false);
+        }
+
+        @Override
+        public Void result() throws IOException {
+            fileIO.getFileSize(path);
+            return null;
+        }
+    }
+
+    private static class SingleUseBundleRecords implements BundleRecords {
+
+        private final List<InternalRow> rows;
+        private boolean iterated;
+
+        private SingleUseBundleRecords(List<InternalRow> rows) {
+            this.rows = rows;
+        }
+
+        @Override
+        public Iterator<InternalRow> iterator() {
+            if (iterated) {
+                throw new IllegalStateException("Bundle should only be consumed once.");
+            }
+            iterated = true;
+            return rows.iterator();
+        }
+
+        @Override
+        public long rowCount() {
+            return rows.size();
+        }
     }
 }

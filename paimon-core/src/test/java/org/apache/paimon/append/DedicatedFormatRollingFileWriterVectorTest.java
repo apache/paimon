@@ -25,18 +25,24 @@ import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.fileindex.FileIndexPredicate;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.blob.BlobFileFormat;
+import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.operation.BlobFileContext;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
+import org.apache.paimon.utils.RoaringBitmap32;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -44,11 +50,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -104,6 +113,7 @@ public class DedicatedFormatRollingFileWriterVectorTest {
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
                         VECTOR_TARGET_FILE_SIZE,
+                        Long.MAX_VALUE,
                         SCHEMA,
                         pathFactory,
                         () -> seqNumCounter,
@@ -112,7 +122,8 @@ public class DedicatedFormatRollingFileWriterVectorTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false,
-                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())),
+                        false);
     }
 
     @Test
@@ -138,6 +149,43 @@ public class DedicatedFormatRollingFileWriterVectorTest {
 
         assertThat(metasResult.get(0).rowCount()).isEqualTo(metasResult.get(1).rowCount());
         assertThat(metasResult.get(0).rowCount()).isEqualTo(metasResult.get(2).rowCount());
+    }
+
+    @Test
+    public void testAbortAfterRollingByRowsDeletesVectorFiles() throws IOException {
+        RowType schema =
+                RowType.builder()
+                        .field("f0", DataTypes.INT())
+                        .field("f1", DataTypes.VECTOR(VECTOR_DIM, DataTypes.FLOAT()))
+                        .build();
+        long hugeSize = 1024L * 1024 * 1024;
+        writer =
+                new DedicatedFormatRollingFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        FileFormat.fromIdentifier("json", new Options()),
+                        hugeSize,
+                        hugeSize,
+                        hugeSize,
+                        1L,
+                        schema,
+                        pathFactory,
+                        LongCounter::new,
+                        COMPRESSION,
+                        new StatsCollectorFactories(new CoreOptions(new Options())),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        false,
+                        null,
+                        false);
+
+        writer.write(GenericRow.of(1, BinaryVector.fromPrimitiveArray(new float[VECTOR_DIM])));
+        writer.abort();
+
+        try (Stream<java.nio.file.Path> files = Files.walk(tempDir)) {
+            assertThat(files.filter(Files::isRegularFile).count()).isZero();
+        }
     }
 
     @Test
@@ -170,6 +218,126 @@ public class DedicatedFormatRollingFileWriterVectorTest {
 
         // Verify total record count
         assertThat(writer.recordCount()).isEqualTo(rowNum);
+    }
+
+    @Test
+    public void testBundleWriting() throws Exception {
+        List<InternalRow> rows = makeRows(8, 10);
+        writer.writeBundle(new SingleUseBundleRecords(rows));
+        writer.close();
+        List<DataFileMeta> metasResult = writer.result();
+
+        assertThat(writer.recordCount()).isEqualTo(rows.size());
+        assertThat(metasResult).hasSize(3);
+        assertThat(metasResult.get(0).rowCount()).isEqualTo(rows.size());
+        assertThat(metasResult.get(1).rowCount()).isEqualTo(rows.size());
+        assertThat(metasResult.get(2).rowCount()).isEqualTo(rows.size());
+        assertBundleSequenceSideEffects(metasResult, rows.size());
+    }
+
+    @Test
+    public void testBundleWritingRespectsVectorTargetFileSize() throws Exception {
+        long vectorTargetFileSize = 16 * 1024L;
+        writer =
+                new DedicatedFormatRollingFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        FileFormat.fromIdentifier("json", new Options()),
+                        128 * 1024 * 1024,
+                        128 * 1024 * 1024,
+                        vectorTargetFileSize,
+                        Long.MAX_VALUE,
+                        SCHEMA,
+                        new DataFilePathFactory(
+                                new Path(tempDir + "/bundle-vector-size-test"),
+                                "parquet",
+                                "data-",
+                                "changelog",
+                                false,
+                                null,
+                                null),
+                        () -> new LongCounter(),
+                        COMPRESSION,
+                        new StatsCollectorFactories(new CoreOptions(new Options())),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        false,
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())),
+                        false);
+
+        List<InternalRow> rows = makeRows(2000, 1);
+        writer.writeBundle(new SingleUseBundleRecords(rows));
+        writer.close();
+
+        List<DataFileMeta> vectorStoreFiles =
+                writer.result().stream()
+                        .filter(file -> isVectorStoreFile(file.fileName()))
+                        .collect(java.util.stream.Collectors.toList());
+        assertThat(vectorStoreFiles)
+                .as("Bundle writes should still roll vector files inside the bundle.")
+                .hasSizeGreaterThan(1);
+        for (DataFileMeta file : vectorStoreFiles.subList(0, vectorStoreFiles.size() - 1)) {
+            assertThat(file.fileSize()).isGreaterThanOrEqualTo(vectorTargetFileSize);
+        }
+        assertThat(writer.recordCount()).isEqualTo(rows.size());
+    }
+
+    @Test
+    public void testBundleWritingPreservesMainFileIndexSideEffects() throws Exception {
+        Options options = new Options();
+        options.set("file-index.bitmap.columns", "f0");
+        options.set("file-index.in-manifest-threshold", "1 MB");
+        CoreOptions coreOptions = new CoreOptions(options);
+        writer =
+                new DedicatedFormatRollingFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        FileFormat.fromIdentifier("json", new Options()),
+                        TARGET_FILE_SIZE,
+                        TARGET_FILE_SIZE,
+                        VECTOR_TARGET_FILE_SIZE,
+                        Long.MAX_VALUE,
+                        SCHEMA,
+                        pathFactory,
+                        () -> seqNumCounter,
+                        COMPRESSION,
+                        new StatsCollectorFactories(coreOptions),
+                        new FileIndexOptions(coreOptions),
+                        FileSource.APPEND,
+                        false,
+                        BlobFileContext.create(SCHEMA, coreOptions),
+                        false);
+
+        List<InternalRow> rows = makeRows(4, 10);
+        writer.writeBundle(new SingleUseBundleRecords(rows));
+        writer.close();
+
+        DataFileMeta mainFile =
+                writer.result().stream()
+                        .filter(file -> "parquet".equals(file.fileFormat()))
+                        .findFirst()
+                        .get();
+
+        assertThat(mainFile.rowCount()).isEqualTo(rows.size());
+        assertThat(mainFile.embeddedIndex()).isNotEmpty();
+        assertThat(mainFile.extraFiles()).isEmpty();
+
+        RowType normalFileSchema =
+                RowType.builder()
+                        .field("f0", DataTypes.INT())
+                        .field("f1", DataTypes.STRING())
+                        .field("f4", DataTypes.INT())
+                        .build();
+        PredicateBuilder predicateBuilder = new PredicateBuilder(normalFileSchema);
+        try (FileIndexPredicate index =
+                new FileIndexPredicate(
+                        new ByteArraySeekableStream(mainFile.embeddedIndex()), normalFileSchema)) {
+            assertThat(((BitmapIndexResult) index.evaluate(predicateBuilder.equal(0, 2))).get())
+                    .isEqualTo(RoaringBitmap32.bitmapOf(2));
+            assertThat(index.evaluate(predicateBuilder.equal(0, 99)).remain()).isFalse();
+        }
     }
 
     @Test
@@ -244,6 +412,7 @@ public class DedicatedFormatRollingFileWriterVectorTest {
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
                         VECTOR_TARGET_FILE_SIZE,
+                        Long.MAX_VALUE,
                         schema,
                         pathFactory,
                         () -> seqNumCounter,
@@ -252,7 +421,8 @@ public class DedicatedFormatRollingFileWriterVectorTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false,
-                        null);
+                        null,
+                        false);
 
         // 100k vector-store data would create 1 normal and 3 vector-store files
         int rowNum = 100 * 1000;
@@ -309,5 +479,38 @@ public class DedicatedFormatRollingFileWriterVectorTest {
                             label));
         }
         return rows;
+    }
+
+    private void assertBundleSequenceSideEffects(List<DataFileMeta> metas, long rowCount) {
+        long expectedCounter = rowCount * metas.size();
+        assertThat(seqNumCounter.getValue()).isEqualTo(expectedCounter);
+        for (DataFileMeta meta : metas) {
+            assertThat(meta.minSequenceNumber()).isEqualTo(expectedCounter - rowCount);
+            assertThat(meta.maxSequenceNumber()).isEqualTo(expectedCounter - 1);
+        }
+    }
+
+    private static class SingleUseBundleRecords implements BundleRecords {
+
+        private final List<InternalRow> rows;
+        private boolean iterated;
+
+        private SingleUseBundleRecords(List<InternalRow> rows) {
+            this.rows = rows;
+        }
+
+        @Override
+        public Iterator<InternalRow> iterator() {
+            if (iterated) {
+                throw new IllegalStateException("Bundle should only be consumed once.");
+            }
+            iterated = true;
+            return rows.iterator();
+        }
+
+        @Override
+        public long rowCount() {
+            return rows.size();
+        }
     }
 }

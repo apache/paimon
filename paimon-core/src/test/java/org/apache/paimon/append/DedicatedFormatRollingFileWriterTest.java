@@ -43,9 +43,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -101,6 +103,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
+                        Long.MAX_VALUE,
                         SCHEMA,
                         pathFactory,
                         () -> seqNumCounter,
@@ -109,7 +112,8 @@ public class DedicatedFormatRollingFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // statsDenseStore
-                        BlobFileContext.create(SCHEMA, options));
+                        BlobFileContext.create(SCHEMA, options),
+                        false);
     }
 
     @Test
@@ -146,8 +150,126 @@ public class DedicatedFormatRollingFileWriterTest {
     }
 
     @Test
-    public void testBundleWriting() throws IOException {
-        // Create a bundle of records
+    public void testRollingByRows() throws IOException {
+        CoreOptions options = new CoreOptions(new Options());
+        long hugeSize = 1024L * 1024 * 1024;
+        DedicatedFormatRollingFileWriter cappedWriter =
+                new DedicatedFormatRollingFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        null,
+                        hugeSize,
+                        hugeSize,
+                        hugeSize,
+                        5L,
+                        SCHEMA,
+                        pathFactory,
+                        LongCounter::new,
+                        COMPRESSION,
+                        new StatsCollectorFactories(options),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        false,
+                        BlobFileContext.create(SCHEMA, options),
+                        false);
+        for (int i = 0; i < 11; i++) {
+            cappedWriter.write(
+                    GenericRow.of(i, BinaryString.fromString("t" + i), new BlobData(testBlobData)));
+        }
+        cappedWriter.close();
+        assertThat(cappedWriter.result())
+                .filteredOn(f -> "parquet".equals(f.fileFormat()))
+                .extracting(DataFileMeta::rowCount)
+                .containsExactly(5L, 5L, 1L);
+    }
+
+    @Test
+    public void testAbortAfterRollingByRowsDeletesBlobFiles() throws IOException {
+        CoreOptions options = new CoreOptions(new Options());
+        long hugeSize = 1024L * 1024 * 1024;
+        DedicatedFormatRollingFileWriter cappedWriter =
+                new DedicatedFormatRollingFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        null,
+                        hugeSize,
+                        hugeSize,
+                        hugeSize,
+                        1L,
+                        SCHEMA,
+                        pathFactory,
+                        LongCounter::new,
+                        COMPRESSION,
+                        new StatsCollectorFactories(options),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        false,
+                        BlobFileContext.create(SCHEMA, options),
+                        false);
+
+        cappedWriter.write(
+                GenericRow.of(1, BinaryString.fromString("test"), new BlobData(testBlobData)));
+        cappedWriter.abort();
+
+        try (Stream<java.nio.file.Path> files = Files.walk(tempDir)) {
+            assertThat(files.filter(Files::isRegularFile).count()).isZero();
+        }
+    }
+
+    @Test
+    public void testDoesNotWriteRowSidecar() throws IOException {
+        // Tests that: dedicated blob files do not create row-store sidecars.
+        // Kills mutation: adding row sidecar writing to DedicatedFormatRollingFileWriter.
+        writer.write(GenericRow.of(1, BinaryString.fromString("test"), new BlobData(testBlobData)));
+        writer.close();
+
+        List<DataFileMeta> metasResult = writer.result();
+        assertThat(metasResult).hasSize(2);
+        assertThat(metasResult).anyMatch(file -> "parquet".equals(file.fileFormat()));
+        assertThat(metasResult).anyMatch(file -> "blob".equals(file.fileFormat()));
+        assertThat(metasResult)
+                .allSatisfy(
+                        file ->
+                                assertThat(file.extraFiles())
+                                        .noneMatch(extraFile -> extraFile.endsWith(".row")));
+        try (Stream<java.nio.file.Path> files = Files.walk(tempDir)) {
+            assertThat(
+                            files.filter(Files::isRegularFile)
+                                    .noneMatch(
+                                            file -> file.getFileName().toString().endsWith(".row")))
+                    .isTrue();
+        }
+    }
+
+    @Test
+    public void testBundleWritingPreservesMainFileIndexSideEffects() throws IOException {
+        Options options = new Options();
+        options.set("file-index.bloom-filter.columns", "f0");
+        options.set("file-index.in-manifest-threshold", "1 MB");
+        CoreOptions coreOptions = new CoreOptions(options);
+        writer =
+                new DedicatedFormatRollingFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        null,
+                        TARGET_FILE_SIZE,
+                        TARGET_FILE_SIZE,
+                        TARGET_FILE_SIZE,
+                        Long.MAX_VALUE,
+                        SCHEMA,
+                        pathFactory,
+                        () -> seqNumCounter,
+                        COMPRESSION,
+                        new StatsCollectorFactories(coreOptions),
+                        new FileIndexOptions(coreOptions),
+                        FileSource.APPEND,
+                        false,
+                        BlobFileContext.create(SCHEMA, coreOptions),
+                        false);
+
         List<InternalRow> rows =
                 Arrays.asList(
                         GenericRow.of(
@@ -157,10 +279,19 @@ public class DedicatedFormatRollingFileWriterTest {
                         GenericRow.of(
                                 3, BinaryString.fromString("test3"), new BlobData(testBlobData)));
 
-        // Write bundle
-        writer.writeBundle(new TestBundleRecords(rows));
+        writer.writeBundle(new SingleUseBundleRecords(rows));
+        writer.close();
 
-        assertThat(writer.recordCount()).isEqualTo(3);
+        DataFileMeta mainFile =
+                writer.result().stream()
+                        .filter(file -> "parquet".equals(file.fileFormat()))
+                        .findFirst()
+                        .get();
+
+        assertThat(mainFile.rowCount()).isEqualTo(rows.size());
+        assertThat(mainFile.embeddedIndex()).isNotNull();
+        assertThat(mainFile.embeddedIndex()).isNotEmpty();
+        assertThat(mainFile.extraFiles()).isEmpty();
     }
 
     @Test
@@ -194,6 +325,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         128 * 1024 * 1024,
                         blobTargetFileSize, // Different blob target size
                         128 * 1024 * 1024,
+                        Long.MAX_VALUE,
                         SCHEMA,
                         new DataFilePathFactory(
                                 new Path(tempDir + "/blob-size-test"),
@@ -210,7 +342,8 @@ public class DedicatedFormatRollingFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // statsDenseStore
-                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())),
+                        false);
 
         // Create large blob data that will exceed the blob target file size
         byte[] largeBlobData = new byte[3 * 1024 * 1024]; // 3 MB blob data
@@ -254,6 +387,66 @@ public class DedicatedFormatRollingFileWriterTest {
     }
 
     @Test
+    public void testBundleWritingRespectsBlobTargetFileSize() throws IOException {
+        long blobTargetFileSize = 2 * 1024 * 1024L;
+        DedicatedFormatRollingFileWriter bundleWriter =
+                new DedicatedFormatRollingFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        null,
+                        128 * 1024 * 1024,
+                        blobTargetFileSize,
+                        128 * 1024 * 1024,
+                        Long.MAX_VALUE,
+                        SCHEMA,
+                        new DataFilePathFactory(
+                                new Path(tempDir + "/bundle-blob-size-test"),
+                                "parquet",
+                                "data-",
+                                "changelog",
+                                false,
+                                null,
+                                null),
+                        () -> new LongCounter(),
+                        COMPRESSION,
+                        new StatsCollectorFactories(new CoreOptions(new Options())),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        false,
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())),
+                        false);
+
+        byte[] blobData = new byte[1024 * 1024];
+        new Random(321).nextBytes(blobData);
+        List<InternalRow> rows = new java.util.ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            rows.add(
+                    GenericRow.of(
+                            i,
+                            BinaryString.fromString("bundle-blob-test-" + i),
+                            new BlobData(blobData)));
+        }
+
+        bundleWriter.writeBundle(new SingleUseBundleRecords(rows));
+        bundleWriter.close();
+
+        List<DataFileMeta> blobFiles =
+                bundleWriter.result().stream()
+                        .filter(file -> "blob".equals(file.fileFormat()))
+                        .collect(java.util.stream.Collectors.toList());
+        assertThat(blobFiles)
+                .as("Bundle writes should still roll blob files inside the bundle.")
+                .hasSizeGreaterThan(1);
+        for (DataFileMeta blobFile : blobFiles.subList(0, blobFiles.size() - 1)) {
+            assertThat(blobFile.fileSize())
+                    .isGreaterThanOrEqualTo(blobTargetFileSize)
+                    .isLessThanOrEqualTo(blobTargetFileSize + blobData.length);
+        }
+        assertThat(bundleWriter.recordCount()).isEqualTo(rows.size());
+    }
+
+    @Test
     public void testSchemaValidation() throws IOException {
         // Test that the writer correctly handles the schema with blob field
         InternalRow row =
@@ -280,6 +473,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         128 * 1024 * 1024,
                         blobTargetFileSize,
                         128 * 1024 * 1024,
+                        Long.MAX_VALUE,
                         SCHEMA,
                         pathFactory, // Use the same pathFactory to ensure shared UUID
                         () -> new LongCounter(),
@@ -288,7 +482,8 @@ public class DedicatedFormatRollingFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // statsDenseStore
-                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())),
+                        false);
 
         // Create blob data that will trigger rolling
         byte[] blobData = new byte[1024 * 1024]; // 1 MB blob data
@@ -360,6 +555,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         128 * 1024 * 1024,
                         blobTargetFileSize,
                         128 * 1024 * 1024,
+                        Long.MAX_VALUE,
                         SCHEMA,
                         pathFactory, // Use the same pathFactory to ensure shared UUID
                         () -> new LongCounter(),
@@ -368,7 +564,8 @@ public class DedicatedFormatRollingFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // statsDenseStore
-                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())),
+                        false);
 
         // Create blob data that will trigger rolling
         byte[] blobData = new byte[1024 * 1024]; // 1 MB blob data
@@ -494,17 +691,20 @@ public class DedicatedFormatRollingFileWriterTest {
 
     @Test
     void testSequenceNumberIncrementInBlobWritePathBatch() throws IOException {
-        // Write multiple rows as a batch and verify sequence-number continuity in blob files
         int numRows = 10;
+        List<InternalRow> rows = new java.util.ArrayList<>();
         for (int i = 0; i < numRows; i++) {
-            InternalRow row =
+            rows.add(
                     GenericRow.of(
-                            i, BinaryString.fromString("test" + i), new BlobData(testBlobData));
-            writer.write(row);
+                            i, BinaryString.fromString("test" + i), new BlobData(testBlobData)));
         }
+        writer.writeBundle(new SingleUseBundleRecords(rows));
 
         writer.close();
         List<DataFileMeta> metasResult = writer.result();
+
+        assertThat(metasResult).hasSize(2);
+        assertThat(metasResult.get(0).rowCount()).isEqualTo(metasResult.get(1).rowCount());
 
         // Extract blob files (skip the first normal file)
         List<DataFileMeta> blobFiles =
@@ -578,6 +778,7 @@ public class DedicatedFormatRollingFileWriterTest {
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
+                        Long.MAX_VALUE,
                         customSchema, // Use custom schema
                         pathFactory,
                         () -> seqNumCounter,
@@ -586,7 +787,8 @@ public class DedicatedFormatRollingFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // statsDenseStore
-                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())),
+                        false);
 
         // Write data
         for (int i = 0; i < 3; i++) {
@@ -616,16 +818,21 @@ public class DedicatedFormatRollingFileWriterTest {
         assertThat(writer.recordCount()).isEqualTo(3);
     }
 
-    /** Simple implementation of BundleRecords for testing. */
-    private static class TestBundleRecords implements BundleRecords {
+    /** Bundle implementation that can only be iterated once. */
+    private static class SingleUseBundleRecords implements BundleRecords {
         private final List<InternalRow> rows;
+        private boolean iterated;
 
-        public TestBundleRecords(List<InternalRow> rows) {
+        private SingleUseBundleRecords(List<InternalRow> rows) {
             this.rows = rows;
         }
 
         @Override
         public java.util.Iterator<InternalRow> iterator() {
+            if (iterated) {
+                throw new IllegalStateException("Bundle should only be consumed once.");
+            }
+            iterated = true;
             return rows.iterator();
         }
 

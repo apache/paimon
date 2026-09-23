@@ -19,11 +19,18 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.append.ForceSingleBatchReader;
+import org.apache.paimon.data.BlobArrayPlaceholder;
+import org.apache.paimon.data.BlobMapPlaceholder;
 import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
@@ -55,27 +62,69 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
 
     private final List<RecordReader<InternalRow>> groupReaders = new ArrayList<>();
-    private final int blobIndex;
+    private final int fieldCount;
+    private final int rowIdIndex;
+    private final int seqNumIndex;
+    private final Object blobPlaceholder;
+    private final InternalRow.FieldGetter blobGetter;
     private boolean returned;
 
     BlobFallbackRecordReader(
             List<DataFileMeta> files,
             BlobFileReaderFactory readerFactory,
+            ReaderWrapper readerWrapper,
             List<Range> rowRanges,
             RowType readRowType,
-            int blobIndex) {
-        this.blobIndex = blobIndex;
+            int blobIndex)
+            throws IOException {
+        this(
+                files,
+                readerFactory,
+                readerWrapper,
+                enclosingRange(files),
+                rowRanges,
+                readRowType,
+                blobIndex);
+    }
+
+    BlobFallbackRecordReader(
+            List<DataFileMeta> files,
+            BlobFileReaderFactory readerFactory,
+            ReaderWrapper readerWrapper,
+            Range logicalRange,
+            List<Range> rowRanges,
+            RowType readRowType,
+            int blobIndex)
+            throws IOException {
+        this.fieldCount = readRowType.getFieldCount();
+        this.rowIdIndex = readRowType.getFieldIndex(SpecialFields.ROW_ID.name());
+        this.seqNumIndex = readRowType.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name());
+        this.blobPlaceholder = blobPlaceholder(readRowType, blobIndex);
+        this.blobGetter =
+                InternalRow.createFieldGetter(readRowType.getTypeAt(blobIndex), blobIndex);
 
         checkArgument(!files.isEmpty(), "Blob bunch should not be empty.");
-        long firstRowId = Long.MAX_VALUE;
-        long lastRowId = Long.MIN_VALUE;
+        long firstRowId = logicalRange.from;
+        long lastRowId = logicalRange.to;
 
         // sort group readers in descending order
         Map<Long, List<DataFileMeta>> sequenceGroups = new TreeMap<>(reverseOrder());
         for (DataFileMeta file : files) {
             Range fileRange = file.nonNullRowIdRange();
-            firstRowId = Math.min(firstRowId, fileRange.from);
-            lastRowId = Math.max(lastRowId, fileRange.to);
+            if (rowRanges == null) {
+                checkArgument(
+                        fileRange.from >= firstRowId && fileRange.to <= lastRowId,
+                        "Blob file range %s should be within logical range %s.",
+                        fileRange,
+                        logicalRange);
+            } else {
+                // A pushed range may select one normal-file range from a spanning Blob file.
+                checkArgument(
+                        fileRange.hasIntersection(logicalRange),
+                        "Blob file range %s should intersect logical range %s.",
+                        fileRange,
+                        logicalRange);
+            }
 
             sequenceGroups
                     .computeIfAbsent(file.maxSequenceNumber(), ignored -> new ArrayList<>())
@@ -102,14 +151,28 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
             groupReaders.add(
                     new ForceSingleBatchReader(
                             new BlobSequenceGroupRecordReader(
+                                    entry.getKey(),
                                     groupFiles,
                                     readerFactory,
+                                    readerWrapper,
                                     rowRanges,
                                     readRowType,
                                     blobIndex,
                                     firstRowId,
                                     lastRowId)));
         }
+    }
+
+    private static Range enclosingRange(List<DataFileMeta> files) {
+        checkArgument(!files.isEmpty(), "Blob bunch should not be empty.");
+        long firstRowId = Long.MAX_VALUE;
+        long lastRowId = Long.MIN_VALUE;
+        for (DataFileMeta file : files) {
+            Range range = file.nonNullRowIdRange();
+            firstRowId = Math.min(firstRowId, range.from);
+            lastRowId = Math.max(lastRowId, range.to);
+        }
+        return new Range(firstRowId, lastRowId);
     }
 
     @Nullable
@@ -144,14 +207,21 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
             @Override
             public InternalRow next() throws IOException {
                 InternalRow result = null;
-                // We should always move each iterator forward
-                // This may significantly increase memory usage and decrease read efficiency
-                // if `blob-as-descriptor` is disabled and many non-null blobs are updated
-                // TODO: Do not read stale records if there's a newer non-placeholder
-                //   record. e.g. introduce a discard method to directly discard the
-                //   next record?
+                long rowId = -1L;
+                // We should always move each iterator forward, but stale blobs do not need to be
+                // materialized after finding a newer non-placeholder record.
                 for (int i = 0; i < iterators.length; i++) {
                     RecordIterator<InternalRow> iterator = iterators[i];
+                    // If result is not null, skip all older blobs.
+                    if (result != null) {
+                        if (!iterator.skip()) {
+                            throw new IllegalStateException(
+                                    "All readers of each max_seq group should have the same number "
+                                            + "of records.");
+                        }
+                        continue;
+                    }
+
                     InternalRow row = iterator.next();
                     if (row == null) {
                         if (i != 0) {
@@ -159,7 +229,7 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
                                     "All readers of each max_seq group should have the same number of records.");
                         }
                         for (int j = i + 1; j < iterators.length; j++) {
-                            if (iterators[j].next() != null) {
+                            if (iterators[j].skip()) {
                                 throw new IllegalStateException(
                                         "All readers of each max_seq group should have the same number of records.");
                             }
@@ -170,10 +240,12 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
                     if (result == null && !isPlaceHolder(row)) {
                         result = row;
                     }
+                    if (rowIdIndex >= 0 && rowId < 0) {
+                        rowId = row.getLong(rowIdIndex);
+                    }
                 }
                 if (result == null) {
-                    throw new IllegalStateException(
-                            "Invalid state: all blob files at the same row id store a placeholder, it's a bug.");
+                    result = nullBlobRow(rowId);
                 }
                 return result;
             }
@@ -187,8 +259,34 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
         };
     }
 
+    private InternalRow nullBlobRow(long rowId) {
+        GenericRow row = new GenericRow(fieldCount);
+        if (rowIdIndex >= 0) {
+            row.setField(rowIdIndex, rowId);
+        }
+        // Set seq num as -1 to mark this row as an all-placeholder null
+        if (seqNumIndex >= 0) {
+            row.setField(seqNumIndex, -1L);
+        }
+        return row;
+    }
+
     private boolean isPlaceHolder(InternalRow row) {
-        return !row.isNullAt(blobIndex) && row.getBlob(blobIndex) == BlobPlaceholder.INSTANCE;
+        return blobGetter.getFieldOrNull(row) == blobPlaceholder;
+    }
+
+    private static Object blobPlaceholder(RowType rowType, int blobIndex) {
+        DataTypeRoot typeRoot = rowType.getTypeAt(blobIndex).getTypeRoot();
+        switch (typeRoot) {
+            case ARRAY:
+                return BlobArrayPlaceholder.INSTANCE;
+            case MAP:
+                return BlobMapPlaceholder.INSTANCE;
+            case BLOB:
+                return BlobPlaceholder.INSTANCE;
+            default:
+                throw new UnsupportedOperationException("Unsupported Blob Type: " + typeRoot);
+        }
     }
 
     @Override
@@ -257,172 +355,105 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
      */
     public static class BlobSequenceGroupRecordReader implements RecordReader<InternalRow> {
 
-        private final List<DataFileMeta> files;
-        private final BlobFileReaderFactory readerFactory;
-        // pushed row ranges
-        private final List<Range> rowRanges;
-        private final RowType readRowType;
-        private final int blobIndex;
-        private final long lastRowId;
-
-        private RecordReader<InternalRow> currentReader;
-        private DataFileMeta currentFile;
-        private int nextFileIndex;
-        private int nextRowRangeIndex;
-        // expected next row id
-        private long nextRowId;
-
-        private InternalRow placeholderRow;
+        private final RecordReader<InternalRow> reader;
 
         BlobSequenceGroupRecordReader(
+                long maxSeq,
                 List<DataFileMeta> files,
                 BlobFileReaderFactory readerFactory,
+                ReaderWrapper readerWrapper,
+                List<Range> rowRanges,
+                RowType readRowType,
+                int blobIndex,
+                long firstRowId,
+                long lastRowId)
+                throws IOException {
+            this.reader =
+                    ConcatRecordReader.create(
+                            createReaders(
+                                    maxSeq,
+                                    files,
+                                    readerFactory,
+                                    readerWrapper,
+                                    rowRanges,
+                                    readRowType,
+                                    blobIndex,
+                                    firstRowId,
+                                    lastRowId));
+        }
+
+        private List<ReaderSupplier<InternalRow>> createReaders(
+                long maxSeq,
+                List<DataFileMeta> files,
+                BlobFileReaderFactory readerFactory,
+                ReaderWrapper readerWrapper,
                 List<Range> rowRanges,
                 RowType readRowType,
                 int blobIndex,
                 long firstRowId,
                 long lastRowId) {
-            this.files = files;
-            this.readerFactory = readerFactory;
-            this.rowRanges = rowRanges == null ? null : Range.sortAndMergeOverlap(rowRanges);
-            this.readRowType = readRowType;
-            this.blobIndex = blobIndex;
-            this.lastRowId = lastRowId;
-
-            this.nextFileIndex = 0;
-            this.nextRowRangeIndex = 0;
-            setNextRowId(firstRowId);
-
-            this.placeholderRow = null;
+            List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
+            long nextRowId = firstRowId;
+            for (DataFileMeta file : files) {
+                Range fileRange = file.nonNullRowIdRange();
+                if (nextRowId < fileRange.from) {
+                    long gapFirstRowId = nextRowId;
+                    long gapRowCount = fileRange.from - gapFirstRowId;
+                    Range gapRange = new Range(gapFirstRowId, fileRange.from - 1);
+                    suppliers.add(
+                            () ->
+                                    readerWrapper.wrap(
+                                            new AllPlaceholdersRecordReader(
+                                                    gapFirstRowId,
+                                                    gapRowCount,
+                                                    rowRanges,
+                                                    readRowType,
+                                                    blobIndex,
+                                                    maxSeq),
+                                            gapRange));
+                }
+                suppliers.add(() -> readerFactory.create(file));
+                nextRowId = fileRange.to + 1;
+            }
+            if (nextRowId <= lastRowId) {
+                long gapFirstRowId = nextRowId;
+                long gapRowCount = lastRowId - gapFirstRowId + 1;
+                Range gapRange = new Range(gapFirstRowId, lastRowId);
+                suppliers.add(
+                        () ->
+                                readerWrapper.wrap(
+                                        new AllPlaceholdersRecordReader(
+                                                gapFirstRowId,
+                                                gapRowCount,
+                                                rowRanges,
+                                                readRowType,
+                                                blobIndex,
+                                                maxSeq),
+                                        gapRange));
+            }
+            return suppliers;
         }
 
         @Nullable
         @Override
         public RecordIterator<InternalRow> readBatch() throws IOException {
-            while (true) {
-                if (currentReader != null) {
-                    RecordIterator<InternalRow> batch = currentReader.readBatch();
-                    if (batch != null) {
-                        return batch;
-                    }
-                    // row ranges have been pushed to readers
-                    // directly set nextRowId as the lastRowId + 1
-                    setNextRowId(lastRowId(currentFile) + 1);
-                    closeCurrentFileReader();
-                    continue;
-                }
-
-                if (nextRowId > lastRowId) {
-                    return null;
-                }
-
-                // skip files whose ranges are before nextRowId
-                while (nextFileIndex < files.size()
-                        && lastRowId(files.get(nextFileIndex)) < nextRowId) {
-                    nextFileIndex++;
-                }
-                if (nextFileIndex >= files.size()) {
-                    return placeHolderBatch(lastRowId);
-                }
-
-                DataFileMeta nextFile = files.get(nextFileIndex);
-                if (nextFile.nonNullFirstRowId() > nextRowId) {
-                    return placeHolderBatch(nextFile.nonNullFirstRowId() - 1);
-                }
-
-                createReader(nextFile);
-            }
-        }
-
-        /**
-         * Set nextRowId and try to move to the next selected row id. So the final nextRowId may be
-         * greater than the input value.
-         */
-        private void setNextRowId(long nextRowId) {
-            this.nextRowId = nextRowId;
-            tryMoveToSelectedRow();
-        }
-
-        private void tryMoveToSelectedRow() {
-            if (nextRowId > lastRowId || rowRanges == null) {
-                return;
-            }
-
-            while (nextRowRangeIndex < rowRanges.size()) {
-                Range range = rowRanges.get(nextRowRangeIndex);
-                if (nextRowId >= range.from && nextRowId <= range.to) {
-                    // if nextRowId is within the range, do not need to move
-                    return;
-                } else if (nextRowId < range.from) {
-                    // else if nextRowId < next range, move to next range's `from`
-                    nextRowId = range.from;
-                    return;
-                }
-                // else nextRowId > range.to, try next range
-                nextRowRangeIndex++;
-            }
-
-            // all ranges consumed, no need to read
-            nextRowId = lastRowId + 1;
-        }
-
-        private RecordIterator<InternalRow> placeHolderBatch(long endRowId) {
-            return new RecordIterator<InternalRow>() {
-                long rowId;
-
-                @Nullable
-                @Override
-                public InternalRow next() {
-                    rowId = nextRowId;
-                    if (rowId > endRowId) {
-                        return null;
-                    }
-                    setNextRowId(rowId + 1);
-                    return placeHolderRow();
-                }
-
-                @Override
-                public void releaseBatch() {
-                    // nothing to release
-                }
-            };
-        }
-
-        private InternalRow placeHolderRow() {
-            if (placeholderRow == null) {
-                GenericRow row = new GenericRow(readRowType.getFieldCount());
-                row.setField(blobIndex, BlobPlaceholder.INSTANCE);
-                placeholderRow = row;
-            }
-            return placeholderRow;
-        }
-
-        private long lastRowId(DataFileMeta file) {
-            return file.nonNullFirstRowId() + file.rowCount() - 1;
-        }
-
-        private void closeCurrentFileReader() throws IOException {
-            if (currentReader != null) {
-                currentReader.close();
-                currentReader = null;
-            }
-            currentFile = null;
-        }
-
-        private void createReader(DataFileMeta nextFile) throws IOException {
-            currentFile = nextFile;
-            currentReader = readerFactory.create(nextFile);
-            nextFileIndex++;
+            return reader.readBatch();
         }
 
         @Override
         public void close() throws IOException {
-            closeCurrentFileReader();
+            reader.close();
         }
     }
 
     /** Factory to create readers. */
     interface BlobFileReaderFactory {
-        RecordReader<InternalRow> create(DataFileMeta file) throws IOException;
+        FileRecordReader<InternalRow> create(DataFileMeta file) throws IOException;
+    }
+
+    /** Wraps placeholder readers with shared post-processing. e.g. Apply Deletion Vectors. */
+    interface ReaderWrapper {
+        FileRecordReader<InternalRow> wrap(FileRecordReader<InternalRow> reader, Range range)
+                throws IOException;
     }
 }

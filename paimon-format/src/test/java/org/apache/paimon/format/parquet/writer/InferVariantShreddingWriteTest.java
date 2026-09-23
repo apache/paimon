@@ -32,8 +32,8 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SupportsDirectWrite;
 import org.apache.paimon.format.parquet.ParquetFileFormat;
 import org.apache.paimon.format.parquet.ParquetUtil;
-import org.apache.paimon.format.parquet.VariantUtils;
-import org.apache.paimon.format.variant.InferVariantShreddingWriter;
+import org.apache.paimon.format.parquet.VariantShreddingReadPlanFactory;
+import org.apache.paimon.format.shredding.InferShreddingWritePlanWriter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -63,7 +63,7 @@ import java.util.UUID;
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.variantShreddingSchema;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link InferVariantShreddingWriter}. */
+/** Test for {@link InferShreddingWritePlanWriter}. */
 public class InferVariantShreddingWriteTest {
 
     @TempDir java.nio.file.Path tempPath;
@@ -119,6 +119,243 @@ public class InferVariantShreddingWriteTest {
         assertThat(result2.get(0)).isEqualTo(GenericRow.of(GenericRow.of(30)));
         assertThat(result2.get(1)).isEqualTo(GenericRow.of(GenericRow.of(25)));
         assertThat(result2.get(2)).isEqualTo(GenericRow.of(GenericRow.of(35)));
+    }
+
+    @Test
+    public void testAdaptiveInferenceAcrossFiles() throws Exception {
+        ParquetFileFormat format = createFormat(adaptiveOptions(10, 10, 0.4, 0.2));
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "payload", DataTypes.VARIANT()));
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+
+        List<InternalRow> firstRows = new ArrayList<>();
+        List<String> firstJson = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            String json =
+                    i < 5
+                            ? "{\"legacy\":\"value\",\"stable\":" + i + "}"
+                            : "{\"stable\":" + i + "}";
+            firstRows.add(GenericRow.of(GenericVariant.fromJson(json)));
+            firstJson.add(json);
+        }
+        Path firstFile = file;
+        writeRows(factory, firstFile, firstRows.toArray(new InternalRow[0]));
+
+        List<InternalRow> secondRows = new ArrayList<>();
+        List<String> secondJson = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            String json =
+                    i < 9 ? "{\"emerging\":true,\"stable\":" + i + "}" : "{\"stable\":" + i + "}";
+            secondRows.add(GenericRow.of(GenericVariant.fromJson(json)));
+            secondJson.add(json);
+        }
+        Path secondFile = newFile();
+        writeRows(factory, secondFile, secondRows.toArray(new InternalRow[0]));
+
+        List<InternalRow> thirdRows = new ArrayList<>();
+        List<String> thirdJson = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            String json = "{\"stable\":" + i + "}";
+            thirdRows.add(GenericRow.of(GenericVariant.fromJson(json)));
+            thirdJson.add(json);
+        }
+        Path thirdFile = newFile();
+        writeRows(factory, thirdFile, thirdRows.toArray(new InternalRow[0]));
+
+        assertThat(readVariantFileType(firstFile, "payload"))
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {DataTypes.STRING(), DataTypes.BIGINT()},
+                                        new String[] {"legacy", "stable"})));
+        assertThat(readVariantFileType(secondFile, "payload"))
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {
+                                            DataTypes.BOOLEAN(),
+                                            DataTypes.STRING(),
+                                            DataTypes.BIGINT()
+                                        },
+                                        new String[] {"emerging", "legacy", "stable"})));
+        assertThat(readVariantFileType(thirdFile, "payload"))
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {DataTypes.BOOLEAN(), DataTypes.BIGINT()},
+                                        new String[] {"emerging", "stable"})));
+
+        assertThat(readVariantJson(format, writeType, firstFile, 0))
+                .containsExactlyElementsOf(firstJson);
+        assertThat(readVariantJson(format, writeType, secondFile, 0))
+                .containsExactlyElementsOf(secondJson);
+        assertThat(readVariantJson(format, writeType, thirdFile, 0))
+                .containsExactlyElementsOf(thirdJson);
+    }
+
+    @Test
+    public void testAdaptiveInferenceOnShortRolledFile() throws Exception {
+        ParquetFileFormat format = createFormat(adaptiveOptions(4, 4, 0.4, 0.2));
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "payload", DataTypes.VARIANT()));
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+
+        Path firstFile = file;
+        writeRows(
+                factory,
+                firstFile,
+                GenericRow.of(GenericVariant.fromJson("{\"legacy\":\"a\",\"stable\":1}")),
+                GenericRow.of(GenericVariant.fromJson("{\"legacy\":\"b\",\"stable\":2}")),
+                GenericRow.of(GenericVariant.fromJson("{\"legacy\":\"c\",\"stable\":3}")),
+                GenericRow.of(GenericVariant.fromJson("{\"legacy\":\"d\",\"stable\":4}")));
+
+        Path secondFile = newFile();
+        writeRows(
+                factory,
+                secondFile,
+                GenericRow.of(GenericVariant.fromJson("{\"emerging\":true,\"stable\":5}")),
+                GenericRow.of(GenericVariant.fromJson("{\"emerging\":false,\"stable\":6}")),
+                GenericRow.of(GenericVariant.fromJson("{\"emerging\":true,\"stable\":7}")));
+
+        assertThat(readVariantFileType(secondFile, "payload"))
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {
+                                            DataTypes.BOOLEAN(),
+                                            DataTypes.STRING(),
+                                            DataTypes.BIGINT()
+                                        },
+                                        new String[] {"emerging", "legacy", "stable"})));
+        assertThat(readVariantJson(format, writeType, secondFile, 0))
+                .containsExactly(
+                        "{\"emerging\":true,\"stable\":5}",
+                        "{\"emerging\":false,\"stable\":6}",
+                        "{\"emerging\":true,\"stable\":7}");
+    }
+
+    @Test
+    public void testAdaptiveInferenceWithMultipleVariantFields() throws Exception {
+        ParquetFileFormat format = createFormat(adaptiveOptions(2, 2, 0.4, 0.2));
+        RowType writeType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "left_payload", DataTypes.VARIANT()),
+                        DataTypes.FIELD(1, "right_payload", DataTypes.VARIANT()));
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+
+        Path firstFile = file;
+        writeRows(
+                factory,
+                firstFile,
+                GenericRow.of(
+                        GenericVariant.fromJson("{\"legacy\":\"a\",\"stable\":1}"),
+                        GenericVariant.fromJson("{\"sparse\":\"x\",\"stable\":\"a\"}")),
+                GenericRow.of(
+                        GenericVariant.fromJson("{\"legacy\":\"b\",\"stable\":2}"),
+                        GenericVariant.fromJson("{\"stable\":\"b\"}")));
+
+        Path secondFile = newFile();
+        writeRows(
+                factory,
+                secondFile,
+                GenericRow.of(
+                        GenericVariant.fromJson("{\"emerging\":true,\"stable\":3}"),
+                        GenericVariant.fromJson("{\"stable\":\"c\"}")),
+                GenericRow.of(
+                        GenericVariant.fromJson("{\"emerging\":false,\"stable\":4}"),
+                        GenericVariant.fromJson("{\"emerging\":true,\"stable\":\"d\"}")));
+
+        assertThat(readVariantFileType(firstFile, "left_payload"))
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {DataTypes.STRING(), DataTypes.BIGINT()},
+                                        new String[] {"legacy", "stable"})));
+        assertThat(readVariantFileType(secondFile, "left_payload"))
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {
+                                            DataTypes.BOOLEAN(),
+                                            DataTypes.STRING(),
+                                            DataTypes.BIGINT()
+                                        },
+                                        new String[] {"emerging", "legacy", "stable"})));
+
+        RowType rightSchema =
+                variantShreddingSchema(
+                        RowType.of(
+                                new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
+                                new String[] {"sparse", "stable"}));
+        assertThat(readVariantFileType(firstFile, "right_payload")).isEqualTo(rightSchema);
+        assertThat(readVariantFileType(secondFile, "right_payload")).isEqualTo(rightSchema);
+
+        List<InternalRow> result = readRows(format, writeType, secondFile);
+        assertThat(result.get(0).getVariant(0).toJson())
+                .isEqualTo("{\"emerging\":true,\"stable\":3}");
+        assertThat(result.get(0).getVariant(1).toJson()).isEqualTo("{\"stable\":\"c\"}");
+        assertThat(result.get(1).getVariant(0).toJson())
+                .isEqualTo("{\"emerging\":false,\"stable\":4}");
+        assertThat(result.get(1).getVariant(1).toJson())
+                .isEqualTo("{\"emerging\":true,\"stable\":\"d\"}");
+    }
+
+    @Test
+    public void testAdaptiveInferenceWithNestedVariant() throws Exception {
+        RowType nestedType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(1, "label", DataTypes.STRING()),
+                        DataTypes.FIELD(2, "payload", DataTypes.VARIANT()));
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "nested", nestedType));
+        ParquetFileFormat format = createFormat(adaptiveOptions(2, 2, 0.4, 0.2));
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+
+        Path firstFile = file;
+        writeRows(
+                factory,
+                firstFile,
+                GenericRow.of(
+                        GenericRow.of(
+                                BinaryString.fromString("first"),
+                                GenericVariant.fromJson("{\"legacy\":\"a\",\"stable\":1}"))),
+                GenericRow.of(
+                        GenericRow.of(
+                                BinaryString.fromString("second"),
+                                GenericVariant.fromJson("{\"legacy\":\"b\",\"stable\":2}"))));
+
+        Path secondFile = newFile();
+        writeRows(
+                factory,
+                secondFile,
+                GenericRow.of(
+                        GenericRow.of(
+                                BinaryString.fromString("third"),
+                                GenericVariant.fromJson("{\"emerging\":true,\"stable\":3}"))),
+                GenericRow.of(
+                        GenericRow.of(
+                                BinaryString.fromString("fourth"),
+                                GenericVariant.fromJson("{\"emerging\":false,\"stable\":4}"))));
+
+        assertThat(readVariantFileType(firstFile, "nested", "payload"))
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {DataTypes.STRING(), DataTypes.BIGINT()},
+                                        new String[] {"legacy", "stable"})));
+        assertThat(readVariantFileType(secondFile, "nested", "payload"))
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {
+                                            DataTypes.BOOLEAN(),
+                                            DataTypes.STRING(),
+                                            DataTypes.BIGINT()
+                                        },
+                                        new String[] {"emerging", "legacy", "stable"})));
+
+        List<InternalRow> result = readRows(format, writeType, secondFile);
+        assertThat(result.get(0).getRow(0, 2).getVariant(1).toJson())
+                .isEqualTo("{\"emerging\":true,\"stable\":3}");
+        assertThat(result.get(1).getRow(0, 2).getVariant(1).toJson())
+                .isEqualTo("{\"emerging\":false,\"stable\":4}");
     }
 
     @Test
@@ -193,6 +430,111 @@ public class InferVariantShreddingWriteTest {
                         },
                         new String[] {"bool", "dec", "num", "str"});
         verifyShreddingSchema(expectShreddedType);
+    }
+
+    @Test
+    public void testInferSchemaWithDecimalTrailingZeros() throws Exception {
+        ParquetFileFormat format = createFormat();
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+
+        // 10.0 and 100.00 strip to a negative scale, which used to fail the whole file write
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+        writeRows(
+                factory,
+                GenericRow.of(GenericVariant.fromJson("{\"price\":10.0,\"whole\":100.00}")),
+                GenericRow.of(GenericVariant.fromJson("{\"price\":20.5,\"whole\":7}")));
+
+        RowType expectShreddedType =
+                RowType.of(
+                        new DataType[] {DataTypes.DECIMAL(18, 1), DataTypes.BIGINT()},
+                        new String[] {"price", "whole"});
+        verifyShreddingSchema(expectShreddedType);
+
+        List<InternalRow> result = readRows(format, writeType);
+        assertThat(result.get(0).getVariant(0).toJson()).isEqualTo("{\"price\":10,\"whole\":100}");
+        assertThat(result.get(1).getVariant(0).toJson()).isEqualTo("{\"price\":20.5,\"whole\":7}");
+
+        RowType variantRowType =
+                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                        .field(DataTypes.DOUBLE(), "$.price")
+                        .field(DataTypes.BIGINT(), "$.whole")
+                        .build();
+        RowType readType = DataTypes.ROW(DataTypes.FIELD(0, "v", variantRowType));
+        List<InternalRow> result2 = readRows(format, readType);
+        assertThat(result2.get(0)).isEqualTo(GenericRow.of(GenericRow.of(10.0, 100L)));
+        assertThat(result2.get(1)).isEqualTo(GenericRow.of(GenericRow.of(20.5, 7L)));
+    }
+
+    @Test
+    public void testInferSchemaSkipsBlankKeys() throws Exception {
+        ParquetFileFormat format = createFormat();
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+
+        // an empty key is a valid variant object key but not a RowType field name; it used
+        // to fail the whole file write and must stay in the unshredded value instead
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+        writeRows(
+                factory,
+                GenericRow.of(GenericVariant.fromJson("{\"\":1,\"a\":2}")),
+                GenericRow.of(GenericVariant.fromJson("{\"\":3,\" \":4,\"a\":5}")));
+
+        RowType expectShreddedType =
+                RowType.of(new DataType[] {DataTypes.BIGINT()}, new String[] {"a"});
+        verifyShreddingSchema(expectShreddedType);
+
+        List<InternalRow> result = readRows(format, writeType);
+        assertThat(result.get(0).getVariant(0).toJson()).isEqualTo("{\"\":1,\"a\":2}");
+        assertThat(result.get(1).getVariant(0).toJson()).isEqualTo("{\"\":3,\" \":4,\"a\":5}");
+
+        RowType variantRowType =
+                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                        .field(DataTypes.BIGINT(), "$.a")
+                        .build();
+        RowType readType = DataTypes.ROW(DataTypes.FIELD(0, "v", variantRowType));
+        List<InternalRow> result2 = readRows(format, readType);
+        assertThat(result2.get(0)).isEqualTo(GenericRow.of(GenericRow.of(2L)));
+        assertThat(result2.get(1)).isEqualTo(GenericRow.of(GenericRow.of(5L)));
+    }
+
+    @Test
+    public void testInferSchemaWithKeysOrderedByUtf8Bytes() throws Exception {
+        ParquetFileFormat format = createFormat();
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+
+        // U+FFE5 sorts before the emoji U+1F600 by UTF-8 bytes but after it by UTF-16 code
+        // units; inference used to reject such an object as unsorted and fail the file write
+        String yen = "\uFFE5";
+        String smile = new String(Character.toChars(0x1F600));
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+        writeRows(
+                factory,
+                GenericRow.of(
+                        GenericVariant.fromJson("{\"" + yen + "\":100,\"" + smile + "\":\"s\"}")),
+                GenericRow.of(GenericVariant.fromJson("{\"" + smile + "\":\"t\",\"a\":2}")));
+
+        RowType expectShreddedType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"a", yen, smile});
+        verifyShreddingSchema(expectShreddedType);
+
+        List<InternalRow> result = readRows(format, writeType);
+        assertThat(result.get(0).getVariant(0).toJson())
+                .isEqualTo("{\"" + yen + "\":100,\"" + smile + "\":\"s\"}");
+        assertThat(result.get(1).getVariant(0).toJson())
+                .isEqualTo("{\"a\":2,\"" + smile + "\":\"t\"}");
+
+        RowType variantRowType =
+                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                        .field(DataTypes.STRING(), "$['" + smile + "']")
+                        .field(DataTypes.BIGINT(), "$['" + yen + "']")
+                        .build();
+        RowType readType = DataTypes.ROW(DataTypes.FIELD(0, "v", variantRowType));
+        List<InternalRow> result2 = readRows(format, readType);
+        assertThat(result2.get(0))
+                .isEqualTo(GenericRow.of(GenericRow.of(BinaryString.fromString("s"), 100L)));
+        assertThat(result2.get(1))
+                .isEqualTo(GenericRow.of(GenericRow.of(BinaryString.fromString("t"), null)));
     }
 
     @Test
@@ -513,26 +855,77 @@ public class InferVariantShreddingWriteTest {
         return new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
     }
 
+    private Options adaptiveOptions(
+            int initialSampleRows,
+            int adaptiveSampleRows,
+            double admissionRatio,
+            double retentionRatio) {
+        Options options = defaultOptions();
+        options.set(CoreOptions.VARIANT_SHREDDING_INFERENCE_MODE.key(), "adaptive");
+        options.set(
+                CoreOptions.VARIANT_SHREDDING_MAX_INFER_BUFFER_ROW.key(),
+                String.valueOf(initialSampleRows));
+        options.set(
+                CoreOptions.VARIANT_SHREDDING_ADAPTIVE_MAX_INFER_BUFFER_ROW.key(),
+                String.valueOf(adaptiveSampleRows));
+        options.set(
+                CoreOptions.VARIANT_SHREDDING_MIN_FIELD_CARDINALITY_RATIO.key(),
+                String.valueOf(admissionRatio));
+        options.set(
+                CoreOptions.VARIANT_SHREDDING_ADAPTIVE_RETENTION_RATIO.key(),
+                String.valueOf(retentionRatio));
+        return options;
+    }
+
+    private Path newFile() {
+        return new Path(parent, UUID.randomUUID() + ".parquet");
+    }
+
     protected List<InternalRow> readRows(ParquetFileFormat format, RowType rowType)
+            throws IOException {
+        return readRows(format, rowType, file);
+    }
+
+    private List<InternalRow> readRows(ParquetFileFormat format, RowType rowType, Path dataFile)
             throws IOException {
         List<InternalRow> result = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+                                new FormatReaderContext(
+                                        fileIO,
+                                        dataFile,
+                                        fileIO.getFileSize(dataFile),
+                                        null,
+                                        null))) {
             InternalRowSerializer serializer = new InternalRowSerializer(rowType);
             reader.forEachRemaining(row -> result.add(serializer.copy(row)));
         }
         return result;
     }
 
+    private List<String> readVariantJson(
+            ParquetFileFormat format, RowType rowType, Path dataFile, int fieldIndex)
+            throws IOException {
+        List<String> result = new ArrayList<>();
+        for (InternalRow row : readRows(format, rowType, dataFile)) {
+            result.add(row.getVariant(fieldIndex).toJson());
+        }
+        return result;
+    }
+
     protected void writeRows(FormatWriterFactory factory, InternalRow... rows) throws IOException {
+        writeRows(factory, file, rows);
+    }
+
+    private void writeRows(FormatWriterFactory factory, Path dataFile, InternalRow... rows)
+            throws IOException {
         FormatWriter writer;
         PositionOutputStream out = null;
         if (factory instanceof SupportsDirectWrite) {
-            writer = ((SupportsDirectWrite) factory).create(fileIO, file, "zstd");
+            writer = ((SupportsDirectWrite) factory).create(fileIO, dataFile, "zstd");
         } else {
-            out = fileIO.newOutputStream(file, false);
+            out = fileIO.newOutputStream(dataFile, false);
             writer = factory.create(out, "zstd");
         }
         for (InternalRow row : rows) {
@@ -544,6 +937,19 @@ public class InferVariantShreddingWriteTest {
         }
     }
 
+    private RowType readVariantFileType(Path dataFile, String... fieldPath) throws IOException {
+        try (ParquetFileReader reader =
+                ParquetUtil.getParquetReader(
+                        fileIO, dataFile, fileIO.getFileSize(dataFile), new Options())) {
+            Type variantType = reader.getFooter().getFileMetaData().getSchema();
+            for (String fieldName : fieldPath) {
+                variantType = variantType.asGroupType().getType(fieldName);
+            }
+            return VariantMetadataUtils.addVariantMetadata(
+                    VariantShreddingReadPlanFactory.variantFileType(variantType));
+        }
+    }
+
     protected void verifyShreddingSchema(RowType... expectShreddedTypes) throws IOException {
         try (ParquetFileReader reader =
                 ParquetUtil.getParquetReader(
@@ -552,7 +958,8 @@ public class InferVariantShreddingWriteTest {
             for (int i = 0; i < expectShreddedTypes.length; i++) {
                 assertThat(
                                 VariantMetadataUtils.addVariantMetadata(
-                                        VariantUtils.variantFileType(schema.getType(i))))
+                                        VariantShreddingReadPlanFactory.variantFileType(
+                                                schema.getType(i))))
                         .isEqualTo(variantShreddingSchema(expectShreddedTypes[i]));
             }
         }

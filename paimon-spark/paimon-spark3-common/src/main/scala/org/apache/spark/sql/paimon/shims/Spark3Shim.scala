@@ -18,13 +18,14 @@
 
 package org.apache.spark.sql.paimon.shims
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.data.variant.Variant
 import org.apache.paimon.spark.catalyst.analysis.Spark3ResolutionRules
 import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark3SqlExtensionsParser
 import org.apache.paimon.spark.data.{Spark3ArrayData, Spark3InternalRow, Spark3InternalRowWithBlob, SparkArrayData, SparkInternalRow}
 import org.apache.paimon.spark.format.FormatTableBatchWrite
 import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
-import org.apache.paimon.spark.write.PaimonBatchWrite
+import org.apache.paimon.spark.write.{PaimonBatchWrite, PaimonDeltaBatchWrite}
 import org.apache.paimon.table.{FileStoreTable, FormatTable}
 import org.apache.paimon.types.{DataType, RowType}
 
@@ -37,6 +38,7 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference,
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
+import org.apache.spark.sql.catalyst.plans.physical.Distribution
 // NOTE: `MergeRows` / `MergeRows.Keep` were introduced in Spark 3.4. We access them only via
 // reflection inside the `mergeRowsKeep*` method bodies so that loading `Spark3Shim` does not fail
 // on Spark 3.2 / 3.3 runtimes that still ship `paimon-spark3-common` (the module targets 3.5.8 at
@@ -46,11 +48,12 @@ import org.apache.spark.sql.catalyst.util.{ArrayData, GeneratedColumn, ResolveDe
 import org.apache.spark.sql.connector.catalog.{Column, Identifier, StagingTableCatalog, Table, TableCatalog}
 import org.apache.spark.sql.connector.catalog.CatalogV2Util.structTypeToV2Columns
 import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.connector.write.BatchWrite
 import org.apache.spark.sql.execution.{SparkFormatTable, SparkPlan}
 import org.apache.spark.sql.execution.datasources.{PartitioningAwareFileIndex, PartitionSpec}
 import org.apache.spark.sql.execution.datasources.v2.{AtomicReplaceTableAsSelectExec, AtomicReplaceTableExec, ReplaceTableAsSelectExec, ReplaceTableExec}
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.StructType
@@ -195,15 +198,29 @@ class Spark3Shim extends SparkShim {
       writeSchema: StructType,
       dataSchema: StructType,
       overwritePartitions: Option[Map[String, String]],
-      copyOnWriteScan: Option[PaimonCopyOnWriteScan]): BatchWrite =
-    new PaimonBatchWrite(table, writeSchema, dataSchema, overwritePartitions, copyOnWriteScan)
+      copyOnWriteScan: Option[PaimonCopyOnWriteScan],
+      operationType: Option[Snapshot.Operation]): BatchWrite =
+    new PaimonBatchWrite(
+      table,
+      writeSchema,
+      dataSchema,
+      overwritePartitions,
+      copyOnWriteScan,
+      operationType)
+
+  override def createPaimonDeltaBatchWrite(
+      table: FileStoreTable,
+      rowSchema: StructType,
+      rowIdSchema: StructType,
+      operationType: Snapshot.Operation,
+      readSnapshotId: Option[Long]): BatchWrite =
+    new PaimonDeltaBatchWrite(table, rowSchema, rowIdSchema, operationType, readSnapshotId)
 
   override def createFormatTableBatchWrite(
       table: FormatTable,
-      overwriteDynamic: Option[Boolean],
       overwritePartitions: Option[Map[String, String]],
       writeSchema: StructType): BatchWrite =
-    new FormatTableBatchWrite(table, overwriteDynamic, overwritePartitions, writeSchema)
+    new FormatTableBatchWrite(table, overwritePartitions, writeSchema)
 
   override def createCTERelationRef(
       cteId: Long,
@@ -211,6 +228,11 @@ class Spark3Shim extends SparkShim {
       output: Seq[Attribute],
       isStreaming: Boolean): CTERelationRef =
     MinorVersionShim.createCTERelationRef(cteId, resolved, output, isStreaming)
+
+  override def createClusteredDistribution(
+      expressions: Seq[Expression],
+      numPartitions: Int): Distribution =
+    MinorVersionShim.createClusteredDistribution(expressions, numPartitions)
 
   override def supportsHashAggregate(
       aggregateBufferAttributes: Seq[Attribute],
@@ -257,6 +279,19 @@ class Spark3Shim extends SparkShim {
       table: Table,
       output: Seq[AttributeReference]): DataSourceV2Relation = {
     relation.copy(table = table, output = output)
+  }
+
+  override def createDataSourceV2ScanRelation(
+      relation: DataSourceV2ScanRelation,
+      scan: Scan,
+      output: Seq[AttributeReference]): DataSourceV2ScanRelation = {
+    MinorVersionShim.createDataSourceV2ScanRelation(relation, scan, output)
+  }
+
+  override def createClusteredDistribution(
+      expressions: Seq[Expression],
+      requiredNumPartitions: Option[Int]): Distribution = {
+    MinorVersionShim.createClusteredDistribution(expressions, requiredNumPartitions)
   }
 
   override def earlyBatchRules(): Seq[Rule[LogicalPlan]] =
@@ -314,16 +349,73 @@ class Spark3Shim extends SparkShim {
 
   override def toPaimonVariant(o: Object): Variant = throw new UnsupportedOperationException()
 
+  override def toSparkVariant(variant: Variant): Object =
+    throw new UnsupportedOperationException("Variant requires Spark 4.0 or later")
+
   override def isSparkVariantType(dataType: org.apache.spark.sql.types.DataType): Boolean = false
 
   override def SparkVariantType(): org.apache.spark.sql.types.DataType =
     throw new UnsupportedOperationException()
+
+  override def toPaimonGeometry(o: Object): Array[Byte] = unsupportedGeospatial()
+
+  override def toPaimonGeometry(row: InternalRow, pos: Int): Array[Byte] = unsupportedGeospatial()
+
+  override def toPaimonGeometry(array: ArrayData, pos: Int): Array[Byte] = unsupportedGeospatial()
+
+  override def toPaimonGeography(o: Object): Array[Byte] = unsupportedGeospatial()
+
+  override def toPaimonGeography(row: InternalRow, pos: Int): Array[Byte] = unsupportedGeospatial()
+
+  override def toPaimonGeography(array: ArrayData, pos: Int): Array[Byte] = unsupportedGeospatial()
+
+  override def toSparkGeometry(wkb: Array[Byte], crs: String): Object = unsupportedGeospatial()
+
+  override def toSparkGeography(wkb: Array[Byte], crs: String, algorithm: String): Object =
+    unsupportedGeospatial()
+
+  override def isSparkGeometryType(dataType: org.apache.spark.sql.types.DataType): Boolean = false
+
+  override def isSparkGeographyType(dataType: org.apache.spark.sql.types.DataType): Boolean = false
+
+  override def SparkGeometryType(crs: String): org.apache.spark.sql.types.DataType =
+    unsupportedGeospatial()
+
+  override def SparkGeographyType(
+      crs: String,
+      algorithm: String): org.apache.spark.sql.types.DataType = unsupportedGeospatial()
+
+  override def sparkGeometryCrs(dataType: org.apache.spark.sql.types.DataType): String =
+    unsupportedGeospatial()
+
+  override def sparkGeographyCrs(dataType: org.apache.spark.sql.types.DataType): String =
+    unsupportedGeospatial()
+
+  override def sparkGeographyAlgorithm(dataType: org.apache.spark.sql.types.DataType): String =
+    unsupportedGeospatial()
+
+  private def unsupportedGeospatial[T](): T =
+    throw new UnsupportedOperationException("Geometry and geography require Spark 4.1 or later")
 
   override def toPaimonVariant(row: InternalRow, pos: Int): Variant =
     throw new UnsupportedOperationException()
 
   override def toPaimonVariant(array: ArrayData, pos: Int): Variant =
     throw new UnsupportedOperationException()
+
+  // SQL UDFs (CREATE FUNCTION ... RETURN ...) are a Spark 4.0+ feature; no-op rule on Spark 3.
+  override def rewritePaimonSQLFunctionCommands(spark: SparkSession): Rule[LogicalPlan] =
+    new Rule[LogicalPlan] {
+      override def apply(plan: LogicalPlan): LogicalPlan = plan
+    }
+
+  override def resolvePaimonSQLFunction(
+      funcIdent: org.apache.spark.sql.catalyst.FunctionIdentifier,
+      function: org.apache.paimon.function.Function,
+      arguments: Seq[Expression],
+      parser: org.apache.spark.sql.catalyst.parser.ParserInterface): Expression =
+    throw new UnsupportedOperationException(
+      "SQL user-defined functions (CREATE FUNCTION ... RETURN) require Spark 4.0 or later.")
 }
 
 object Spark3Shim {

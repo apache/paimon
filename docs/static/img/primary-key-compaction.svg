@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="418" viewBox="0 0 960 418" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Compaction reduces overlapping sorted runs</title>
+<desc id="desc">Three input runs include successive values 4, 5, and 6 for key 7. Compaction with deduplicate merges them into a new run retaining value 6. A committed snapshot references the new files; older files can remain referenced by retained snapshots.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="958" height="416" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">Compaction reduces overlapping sorted runs</text>
+<text x="28" y="76" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Example: deduplicate with input versions ordered from oldest to newest.</text>
+<rect x="28" y="111" width="264" height="66" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="44" y="142" font-size="21" font-weight="700" text-anchor="start" fill="#2463b4">Run A</text>
+<text x="155" y="153" font-size="20" font-weight="400" text-anchor="start" fill="#2463b4">key 7 → 4</text>
+<rect x="28" y="195" width="264" height="66" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="44" y="226" font-size="21" font-weight="700" text-anchor="start" fill="#2463b4">Run B</text>
+<text x="155" y="237" font-size="20" font-weight="400" text-anchor="start" fill="#2463b4">key 7 → 5</text>
+<rect x="28" y="279" width="264" height="66" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="44" y="310" font-size="21" font-weight="700" text-anchor="start" fill="#2463b4">Run C</text>
+<text x="155" y="321" font-size="20" font-weight="400" text-anchor="start" fill="#2463b4">key 7 → 6</text>
+<path d="M 299 144 L 337 144 L 337 312 L 299 312 M 299 228 L 337 228" fill="none" stroke="#526277" stroke-width="2"/>
+<path d="M 337 228 L 377 228" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="385" y="179" width="230" height="99" rx="8" fill="#f1ebfa" stroke="#7051a3" stroke-width="1.5"/>
+<text x="401" y="210" font-size="21" font-weight="700" text-anchor="start" fill="#7051a3">Merge versions</text>
+<text x="401" y="240" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Apply the merge engine</text>
+<text x="401" y="265" font-size="18" font-weight="400" text-anchor="start" fill="#526277">and record ordering</text>
+<path d="M 621 228 L 659 228" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="668" y="164" width="264" height="129" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="684" y="195" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">New sorted run</text>
+<text x="684" y="225" font-size="18" font-weight="400" text-anchor="start" fill="#526277">key 7 → value 6</text>
+<text x="684" y="250" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Files have disjoint</text>
+<text x="684" y="275" font-size="18" font-weight="400" text-anchor="start" fill="#526277">key ranges</text>
+<rect x="28" y="363" width="904" height="33" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="44" y="386" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Commit publishes new files. Retention determines when old files can be removed.</text>
+</g>
+</svg>

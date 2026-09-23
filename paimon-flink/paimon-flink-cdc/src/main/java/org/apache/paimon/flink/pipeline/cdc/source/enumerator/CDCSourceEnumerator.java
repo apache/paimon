@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.pipeline.cdc.source.TableAwareFileStoreSourceSplit;
+import org.apache.paimon.flink.pipeline.cdc.source.enumerator.CDCCheckpoint.TableProgress;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
@@ -57,6 +58,7 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -118,7 +120,9 @@ public class CDCSourceEnumerator
         this.splitIdGenerator = new SplitIdGenerator();
 
         if (checkpoint != null) {
-            for (Identifier identifier : checkpoint.getCurrentSnapshotIdMap().keySet()) {
+            for (Map.Entry<Identifier, TableProgress> entry :
+                    checkpoint.getTableProgressMap().entrySet()) {
+                Identifier identifier = entry.getKey();
                 Table table;
                 try {
                     table = catalog.getTable(identifier);
@@ -139,13 +143,14 @@ public class CDCSourceEnumerator
                 }
 
                 TableStatus tableStatus = new TableStatus(context, (FileStoreTable) table);
-                long currentSnapshotId = checkpoint.getCurrentSnapshotIdMap().get(identifier);
-                tableStatus.restore(currentSnapshotId);
+                TableProgress tableProgress = entry.getValue();
+                tableStatus.restore(tableProgress.nextSnapshotId(), tableProgress.schemaId());
                 tableStatusMap.put(identifier, tableStatus);
                 LOG.info(
-                        "Restoring state for table {}. Next snapshot id: {}",
+                        "Restoring state for table {}. Next snapshot id: {}, schema id: {}",
                         identifier,
-                        currentSnapshotId);
+                        tableProgress.nextSnapshotId(),
+                        tableProgress.schemaId());
             }
 
             addSplits(checkpoint.getSplits());
@@ -205,11 +210,13 @@ public class CDCSourceEnumerator
     public CDCCheckpoint snapshotState(long checkpointId) {
         Collection<TableAwareFileStoreSourceSplit> splits = splitAssigner.remainingSplits();
 
-        Map<Identifier, Long> nextSnapshotIdMap = new HashMap<>();
+        Map<Identifier, TableProgress> tableProgressMap = new HashMap<>();
         for (Map.Entry<Identifier, TableStatus> entry : tableStatusMap.entrySet()) {
-            nextSnapshotIdMap.put(entry.getKey(), entry.getValue().nextSnapshotId);
+            tableProgressMap.put(
+                    entry.getKey(),
+                    new TableProgress(entry.getValue().nextSnapshotId, entry.getValue().schemaId));
         }
-        final CDCCheckpoint checkpoint = new CDCCheckpoint(splits, nextSnapshotIdMap);
+        final CDCCheckpoint checkpoint = new CDCCheckpoint(splits, tableProgressMap);
 
         LOG.debug("Source Checkpoint is {}", checkpoint);
         return checkpoint;
@@ -271,7 +278,8 @@ public class CDCSourceEnumerator
         FileStoreTable table = tableStatusMap.get(tableAwarePlan.identifier).table;
         List<TableAwareFileStoreSourceSplit> splits = new ArrayList<>();
         for (Split split : plan.splits()) {
-            Long lastSchemaId = tableStatusMap.get(tableAwarePlan.identifier).schemaId;
+            TableStatus tableStatus = tableStatusMap.get(tableAwarePlan.identifier);
+            Long lastSchemaId = tableStatus.schemaId;
             TableAwareFileStoreSourceSplit tableAwareFileStoreSourceSplit =
                     toTableAwareSplit(
                             splitIdGenerator.getNextId(),
@@ -279,8 +287,20 @@ public class CDCSourceEnumerator
                             table,
                             tableAwarePlan.identifier,
                             lastSchemaId);
-            tableStatusMap.get(tableAwarePlan.identifier).schemaId =
-                    tableAwareFileStoreSourceSplit.getSchemaId();
+            Long consumedLastSchemaId =
+                    tableStatus.consumeLastSchemaId(
+                            lastSchemaId, tableAwareFileStoreSourceSplit.getSchemaId());
+            if (!Objects.equals(consumedLastSchemaId, lastSchemaId)) {
+                tableAwareFileStoreSourceSplit =
+                        new TableAwareFileStoreSourceSplit(
+                                tableAwareFileStoreSourceSplit.splitId(),
+                                tableAwareFileStoreSourceSplit.split(),
+                                tableAwareFileStoreSourceSplit.recordsToSkip(),
+                                tableAwareFileStoreSourceSplit.getIdentifier(),
+                                consumedLastSchemaId,
+                                tableAwareFileStoreSourceSplit.getSchemaId());
+            }
+            tableStatus.schemaId = tableAwareFileStoreSourceSplit.getSchemaId();
             splits.add(tableAwareFileStoreSourceSplit);
         }
 
@@ -391,7 +411,16 @@ public class CDCSourceEnumerator
 
     @VisibleForTesting
     void setScan(Identifier identifier, FileStoreTable table, StreamDataTableScan scan) {
-        tableStatusMap.put(identifier, new TableStatus(table, scan));
+        TableStatus previous = tableStatusMap.get(identifier);
+        TableStatus current = new TableStatus(table, scan);
+        if (previous != null) {
+            current.schemaId = previous.schemaId;
+            current.subtaskId = previous.subtaskId;
+            current.nextSnapshotId = previous.nextSnapshotId;
+            current.schemaRestored = previous.schemaRestored;
+            current.scan.restore(previous.nextSnapshotId);
+        }
+        tableStatusMap.put(identifier, current);
     }
 
     private static class TableAwarePlan {
@@ -412,6 +441,7 @@ public class CDCSourceEnumerator
         private Long schemaId;
         private Integer subtaskId;
         private Long nextSnapshotId;
+        private boolean schemaRestored;
 
         private TableStatus(SplitEnumeratorContext<?> context, FileStoreTable table) {
             this.table = table;
@@ -427,10 +457,22 @@ public class CDCSourceEnumerator
             this.scan = scan;
         }
 
-        private void restore(Long nextSnapshotId) {
+        private void restore(Long nextSnapshotId, @Nullable Long schemaId) {
             this.subtaskId = null;
             this.nextSnapshotId = nextSnapshotId;
+            this.schemaId = schemaId;
+            this.schemaRestored = schemaId != null;
             this.scan.restore(nextSnapshotId);
+        }
+
+        private @Nullable Long consumeLastSchemaId(
+                @Nullable Long lastSchemaId, long currentSchemaId) {
+            if (schemaRestored && Objects.equals(lastSchemaId, currentSchemaId)) {
+                schemaRestored = false;
+                return null;
+            }
+            schemaRestored = false;
+            return lastSchemaId;
         }
 
         @Nullable

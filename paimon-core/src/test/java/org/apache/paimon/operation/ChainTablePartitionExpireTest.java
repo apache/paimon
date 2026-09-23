@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
@@ -29,6 +30,7 @@ import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.partition.PartitionUpdateTimeExpireStrategy;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -594,13 +596,54 @@ public class ChainTablePartitionExpireTest {
                                         "Partition " + region + "|" + dt + " not found"));
     }
 
+    @Test
+    public void testRollbackToAsLatestRejectedWhenDroppingAnchorSnapshotPartition()
+            throws Exception {
+        Path tablePath = tablePath("rollback_reject_anchor");
+        createChainTable(tablePath, true);
+
+        FileStoreTable snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
+        FileStoreTable deltaTable = loadTable(tablePath).switchToBranch("delta");
+
+        // snapshot branch: an unrelated group (US) first, then the CN anchor.
+        writeGrouped(snapshotTable, "US", "20250101", "v1"); // snapshot branch snapshot #1
+        writeGrouped(snapshotTable, "CN", "20250301", "v2"); // snapshot #2 adds CN/20250301
+
+        // delta branch: a CN delta that uses CN/20250301 as its only anchor.
+        writeGrouped(deltaTable, "CN", "20250315", "v3");
+
+        // Rolling back the snapshot branch to snapshot #1 would drop CN/20250301, the only anchor
+        // of the CN/20250315 delta. The pre-commit callback must reject this rollback (same as a
+        // regular overwrite) instead of silently breaking the chain.
+        FileStoreTable snapshotBranch = loadTable(tablePath).switchToBranch("snapshot");
+        Snapshot target = snapshotBranch.snapshotManager().snapshot(1);
+        String protectionTag = "rollback-to-as-latest-" + target.id() + "-" + UUID.randomUUID();
+        snapshotBranch
+                .tagManager()
+                .createTag(target, protectionTag, null, Collections.emptyList(), false);
+        try (TableCommitImpl commit = snapshotBranch.newCommit(commitUser)) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.rollbackToAsLatest(
+                                            snapshotBranch.tagManager().getOrThrow(protectionTag)))
+                    .hasMessageContaining("Snapshot partition cannot be dropped");
+        }
+        // The dangerous rollback was aborted, so the latest snapshot is unchanged.
+        assertThat(
+                        loadTable(tablePath)
+                                .switchToBranch("snapshot")
+                                .snapshotManager()
+                                .latestSnapshotId())
+                .isEqualTo(2L);
+    }
+
     private Path tablePath(String tableName) {
         return new Path(tempDir.toUri().toString(), tableName);
     }
 
     private void createChainTable(Path tablePath, boolean withGroupPartition) throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
 
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
@@ -658,8 +701,8 @@ public class ChainTablePartitionExpireTest {
             chainTableOptions.add(SchemaChange.setOption("chain-table.chain-partition-keys", "dt"));
         }
         schemaManager.commitChanges(chainTableOptions);
-        new SchemaManager(fileIO, tablePath, "snapshot").commitChanges(chainTableOptions);
-        new SchemaManager(fileIO, tablePath, "delta").commitChanges(chainTableOptions);
+        new FileSystemSchemaManager(fileIO, tablePath, "snapshot").commitChanges(chainTableOptions);
+        new FileSystemSchemaManager(fileIO, tablePath, "delta").commitChanges(chainTableOptions);
     }
 
     private FileStoreTable loadTable(Path tablePath) {
@@ -667,7 +710,8 @@ public class ChainTablePartitionExpireTest {
         Options options = new Options();
         options.set(CoreOptions.PATH, tablePath.toString());
         String branchName = CoreOptions.branch(options.toMap());
-        TableSchema tableSchema = new SchemaManager(fileIO, tablePath, branchName).latest().get();
+        TableSchema tableSchema =
+                new FileSystemSchemaManager(fileIO, tablePath, branchName).latest().get();
         return FileStoreTableFactory.create(
                 fileIO, tablePath, tableSchema, CatalogEnvironment.empty());
     }

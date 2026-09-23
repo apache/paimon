@@ -1,5 +1,5 @@
 ---
-title: "Auxiliary"
+title: "Inspect and Maintain Tables"
 sidebar_position: 7
 ---
 
@@ -22,39 +22,15 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Auxiliary Statements
+# Inspect and Maintain Tables
+
+Inspect schemas, partitions, statistics, and cached metadata with these Spark SQL statements.
+For file maintenance and retention operations, see [Procedures](./procedures).
 
 ## Set / Reset
-The SET command sets a property, returns the value of an existing property or returns all SQLConf properties with value and meaning.
-The RESET command resets runtime configurations specific to the current session which were set via the SET command to their default values.
 
-To set dynamic options globally, you need add the `spark.paimon.` prefix. You can also set dynamic table options at this format: 
-`spark.paimon.${catalogName}.${dbName}.${tableName}.${config_key}`. The catalogName/dbName/tableName can be `*`, which means matching all 
-the specific parts. Dynamic table options will override global options if there are conflicts.
-
-```sql
--- set spark conf
-SET spark.sql.sources.partitionOverwriteMode=dynamic;
-
--- set paimon conf
-SET spark.paimon.file.block-size=512M;
-
--- reset conf
-RESET spark.paimon.file.block-size;
-
--- set scan.snapshot-id=1 for the table default.T in any catalogs
-SET spark.paimon.*.default.T.scan.snapshot-id=1;
-SELECT * FROM default.T;
-
--- set scan.snapshot-id=1 for the table T in any databases and catalogs
-SET spark.paimon.*.*.T.scan.snapshot-id=1;
-SELECT * FROM default.T;
-
--- set scan.snapshot-id=2 for the table default.T1 in any catalogs and scan.snapshot-id=1 on other tables
-SET spark.paimon.scan.snapshot-id=1;
-SET spark.paimon.*.default.T1.scan.snapshot-id=2;
-SELECT * FROM default.T1 JOIN default.T2 ON xxxx;
-```
+See [Configuration](./configuration#set-and-reset-session-options) for `SET` / `RESET`,
+option scopes, table-specific overrides, and connector defaults.
 
 ## Describe table
 DESCRIBE TABLE statement returns the basic metadata information of a table or view. The metadata information includes column name, column type and column comment.
@@ -129,6 +105,11 @@ ANALYZE TABLE my_table COMPUTE STATISTICS FOR COLUMNS col1;
 -- collect table-level statistics and column statistics for all columns
 ANALYZE TABLE my_table COMPUTE STATISTICS FOR ALL COLUMNS;
 ```
+
+On a Format Table with catalog-managed partitions the statement means something narrower: it
+measures the table's partitions and supports `PARTITION (...)` and `NOSCAN`, while the
+`FOR COLUMNS` forms above are not supported, see
+[Manage Format Table Partitions](./sql-ddl#manage-format-table-partitions).
 
 ## Refresh table
 

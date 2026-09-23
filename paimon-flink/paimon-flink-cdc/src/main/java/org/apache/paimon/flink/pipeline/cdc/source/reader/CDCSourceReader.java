@@ -21,7 +21,6 @@ package org.apache.paimon.flink.pipeline.cdc.source.reader;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.pipeline.cdc.source.CDCSource;
 import org.apache.paimon.flink.pipeline.cdc.source.TableAwareFileStoreSourceSplit;
-import org.apache.paimon.flink.source.FileStoreSourceSplitState;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 
 import org.apache.flink.api.connector.source.SourceReader;
@@ -37,10 +36,7 @@ import java.util.Map;
 /** A {@link SourceReader} that read records from {@link TableAwareFileStoreSourceSplit}. */
 public class CDCSourceReader
         extends SingleThreadMultiplexSourceReaderBase<
-                RecordIterator<Event>,
-                Event,
-                TableAwareFileStoreSourceSplit,
-                FileStoreSourceSplitState> {
+                RecordIterator<Event>, Event, TableAwareFileStoreSourceSplit, CDCSourceSplitState> {
     private static final Logger LOG = LoggerFactory.getLogger(CDCSourceReader.class);
 
     private final IOManager ioManager;
@@ -69,7 +65,7 @@ public class CDCSourceReader
     }
 
     @Override
-    protected void onSplitFinished(Map<String, FileStoreSourceSplitState> finishedSplitIds) {
+    protected void onSplitFinished(Map<String, CDCSourceSplitState> finishedSplitIds) {
         // this method is called each time when we consume one split
         // it is possible that one response from the coordinator contains multiple splits
         // we should only require for more splits after we've consumed all given splits
@@ -79,16 +75,16 @@ public class CDCSourceReader
     }
 
     @Override
-    protected FileStoreSourceSplitState initializedState(TableAwareFileStoreSourceSplit split) {
+    protected CDCSourceSplitState initializedState(TableAwareFileStoreSourceSplit split) {
         LOG.info("Initializing split {}", split);
-        return new FileStoreSourceSplitState(split);
+        return new CDCSourceSplitState(split);
     }
 
     @Override
     protected TableAwareFileStoreSourceSplit toSplitType(
-            String splitId, FileStoreSourceSplitState splitState) {
+            String splitId, CDCSourceSplitState splitState) {
         LOG.info("Converting split state {} with id {} to split", splitState, splitId);
-        return (TableAwareFileStoreSourceSplit) splitState.toSourceSplit();
+        return splitState.toSourceSplit();
     }
 
     @Override

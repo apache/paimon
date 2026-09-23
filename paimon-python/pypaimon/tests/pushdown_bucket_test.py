@@ -44,12 +44,18 @@ import random
 import shutil
 import tempfile
 import unittest
+from dataclasses import replace
 from typing import Any, Dict, List
+from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
+from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.read.scanner.bucket_select_converter import (
     MAX_VALUES, create_bucket_selector)
 from pypaimon.schema.data_types import AtomicType, DataField
@@ -231,6 +237,25 @@ class BucketSelectConverterUnitTest(unittest.TestCase):
             create_bucket_selector(self.pb_id_val.equal('id', 1), []))
 
     # -- Selector cache + rescale -------------------------------------
+    def test_manifest_bucket_range_uses_inclusive_bounds_and_historical_bucket_count(self):
+        sel = create_bucket_selector(
+            self.pb_id_val.is_in('id', [1, 7]), [self.id_field])
+        for total in [4, 8, 16, 8]:
+            expected = {_hash_bucket([v], [self.id_field], total) for v in [1, 7]}
+            for lower in range(total):
+                for upper in range(lower, total):
+                    self.assertEqual(sel.may_contain(lower, upper, total),
+                                     any(lower <= bucket <= upper for bucket in expected))
+
+    def test_manifest_bucket_range_fails_open(self):
+        sel = create_bucket_selector(self.pb_id_val.equal('id', 7), [self.id_field])
+        for lower, upper, total in [(-2, -1, 8), (-2, 3, 8), (3, 2, 8),
+                                    (0, 1, 0), (0, 1, -1)]:
+            self.assertTrue(sel.may_contain(lower, upper, total))
+        invalid = create_bucket_selector(
+            self.pb_id_val.equal('id', 'invalid-bigint'), [self.id_field])
+        self.assertTrue(invalid.may_contain(0, 0, 8))
+
     def test_selector_caches_per_total_buckets(self):
         """Selector must answer correctly when the same query applies to
         different ``total_buckets`` values (the rescale scenario)."""
@@ -497,6 +522,7 @@ class PartitionAwareBucketSelectorUnitTest(unittest.TestCase):
         # 3-arg form with partition=None has the same semantics.
         for b in range(8):
             self.assertTrue(sel(None, b, 8))
+            self.assertTrue(sel.may_contain(b, b, 8))
 
     def test_selector_partition_not_matching_returns_empty_bucket_set(self):
         # ``part = 'a' AND id = 1`` on partition {part: 'c'} simplifies to
@@ -733,6 +759,47 @@ class BucketPruningIntegrationTest(unittest.TestCase):
                          "Equal on PK still narrows to the writer's bucket "
                          "even when AND'd with a non-bucket-key predicate")
 
+    @pytest.mark.python_plan
+    def test_manifest_bucket_pruning_skips_file_reads(self):
+        # This test observes Python FileIO calls; Rust uses its own file I/O.
+        table = self._create_pk_table('manifest_bucket_pruning')
+        for i in range(self.NUM_BUCKETS):
+            self._write(table, [{'id': i, 'val': i * 11}])
+        manifests = ManifestListManager(table).read_all(table.snapshot_manager().get_latest_snapshot())
+        expected_buckets = self._expected_buckets(table, [0])
+        expected_files = {m.file_name for m in manifests
+                          if any(m.min_bucket <= b <= m.max_bucket for b in expected_buckets)}
+        self.assertTrue(expected_files)
+        self.assertLess(len(expected_files), len(manifests))
+
+        predicate = table.new_read_builder().new_predicate_builder().equal('id', 0)
+        with patch.object(table.file_io, 'new_input_stream',
+                          wraps=table.file_io.new_input_stream) as read:
+            got, _ = self._read_with(table, predicate)
+        opened_manifests = {os.path.basename(str(call.args[0])) for call in read.call_args_list}
+        opened_manifests &= {m.file_name for m in manifests}
+        self.assertEqual(opened_manifests, expected_files)
+        self.assertEqual(got, [{'id': 0, 'val': 0}])
+
+    def test_manifest_bucket_pruning_keeps_unknown_metadata(self):
+        table = self._create_pk_table('manifest_bucket_fallback')
+        predicate = table.new_read_builder().new_predicate_builder().equal('id', 0)
+        scanner = table.new_read_builder().with_filter(predicate).new_scan().file_scanner
+        selected = next(iter(self._expected_buckets(table, [0])))
+        other = (selected + 1) % self.NUM_BUCKETS
+        meta = ManifestFileMeta('manifest', 1, 1, 0, SimpleStats.empty_stats(), 0,
+                                min_bucket=other, max_bucket=other,
+                                total_buckets=self.NUM_BUCKETS)
+        self.assertFalse(scanner._filter_manifest_file(meta))
+        for changes in [dict(min_bucket=None), dict(max_bucket=None),
+                        dict(total_buckets=None), dict(total_buckets=0), dict(total_buckets=-1),
+                        dict(min_bucket=-2), dict(min_bucket=selected, max_bucket=selected)]:
+            with self.subTest(changes=changes):
+                self.assertTrue(scanner._filter_manifest_file(replace(meta, **changes)))
+        scanner.only_read_real_buckets = True
+        self.assertFalse(scanner._filter_manifest_file(replace(meta, min_bucket=-2, max_bucket=-1)))
+        self.assertTrue(scanner._filter_manifest_file(replace(meta, min_bucket=-2, max_bucket=selected)))
+
     def test_early_filter_skips_full_entry_decode_for_pruned_buckets(self):
         """Entries the bucket selector rejects must never reach
         ``GenericRowDeserializer.from_bytes`` for their partition / key
@@ -816,6 +883,7 @@ class BucketPruningIntegrationTest(unittest.TestCase):
         self.assertEqual(self._split_buckets(splits),
                          self._expected_buckets(table, [17]))
 
+    @pytest.mark.python_plan
     def test_per_partition_pruning_with_mixed_or(self):
         """``(part='a' AND id=1) OR (part='b' AND id=2)``: each partition
         sees only the bucket for its own ``id`` literal. Without

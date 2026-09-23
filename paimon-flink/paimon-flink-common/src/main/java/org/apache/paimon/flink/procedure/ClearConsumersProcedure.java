@@ -71,11 +71,7 @@ public class ClearConsumersProcedure extends ProcedureBase {
             throws Catalog.TableNotExistException {
         FileStoreTable fileStoreTable =
                 (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
-        ConsumerManager consumerManager =
-                new ConsumerManager(
-                        fileStoreTable.fileIO(),
-                        fileStoreTable.location(),
-                        fileStoreTable.snapshotManager().branch());
+        ConsumerManager consumerManager = fileStoreTable.consumerManager();
 
         Pattern includingPattern =
                 StringUtils.isNullOrWhitespaceOnly(includingConsumers)

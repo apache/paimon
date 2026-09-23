@@ -18,27 +18,41 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Pair;
 
-import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicate;
+import javax.annotation.Nullable;
+
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Implementation for {@link VectorSearchBuilder}. */
 public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     private static final long serialVersionUID = 1L;
 
-    private final FileStoreTable table;
+    protected final FileStoreTable table;
 
-    private PartitionPredicate partitionFilter;
-    private Predicate filter;
-    private int limit;
-    private DataField vectorColumn;
-    private float[] vector;
+    protected PartitionPredicate partitionFilter;
+    protected Predicate filter;
+    protected int limit;
+    protected DataField vectorColumn;
+    protected float[] vector;
+    protected Map<String, String> options = new HashMap<>();
+    @Nullable private Snapshot pinnedSnapshot;
 
     public VectorSearchBuilderImpl(InnerTable table) {
         this.table = (FileStoreTable) table;
@@ -46,20 +60,39 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     @Override
     public VectorSearchBuilder withPartitionFilter(PartitionPredicate partitionFilter) {
-        this.partitionFilter = partitionFilter;
+        addPartitionFilter(partitionFilter);
         return this;
     }
 
     @Override
     public VectorSearchBuilder withFilter(Predicate predicate) {
-        if (this.filter == null) {
-            this.filter = predicate;
-        } else {
-            this.filter = PredicateBuilder.and(this.filter, predicate);
+        Pair<Optional<PartitionPredicate>, List<Predicate>> pair =
+                splitPartitionPredicatesAndDataPredicates(
+                        predicate, table.rowType(), table.partitionKeys());
+        if (pair.getLeft().isPresent()) {
+            addPartitionFilter(pair.getLeft().get());
         }
-        splitPartitionPredicate(predicate, table.rowType(), table.partitionKeys())
-                .ifPresent(value -> this.partitionFilter = value);
+        if (!pair.getRight().isEmpty()) {
+            Predicate dataFilter = PredicateBuilder.and(pair.getRight());
+            if (this.filter == null) {
+                this.filter = dataFilter;
+            } else {
+                this.filter = PredicateBuilder.and(this.filter, dataFilter);
+            }
+        }
         return this;
+    }
+
+    private void addPartitionFilter(PartitionPredicate partitionFilter) {
+        if (partitionFilter == null) {
+            return;
+        }
+        if (this.partitionFilter == null) {
+            this.partitionFilter = partitionFilter;
+        } else {
+            this.partitionFilter =
+                    PartitionPredicate.and(Arrays.asList(this.partitionFilter, partitionFilter));
+        }
     }
 
     @Override
@@ -81,12 +114,57 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     }
 
     @Override
+    public VectorSearchBuilder withOptions(Map<String, String> options) {
+        if (options != null) {
+            this.options.putAll(options);
+        }
+        return this;
+    }
+
+    @Override
+    public VectorSearchBuilder withOption(String key, String value) {
+        this.options.put(key, value);
+        return this;
+    }
+
+    @Override
     public VectorScan newVectorScan() {
-        return new VectorScanImpl(table, partitionFilter, filter, vectorColumn);
+        rejectUnderQueryAuth();
+        if (isPrimaryKeyVectorSearch()) {
+            return new PrimaryKeyVectorScan(
+                    table,
+                    vectorColumn.id(),
+                    table.coreOptions().primaryKeyVectorIndexType(vectorColumn.name()),
+                    partitionFilter,
+                    filter,
+                    pinnedSnapshot);
+        }
+        return new DataEvolutionVectorScan(
+                table, partitionFilter, filter, vectorColumn, options, pinnedSnapshot);
     }
 
     @Override
     public VectorRead newVectorRead() {
-        return new VectorReadImpl(table, filter, limit, vectorColumn, vector);
+        rejectUnderQueryAuth();
+        checkNotNull(vector, "vector must be set via withVector()");
+        if (isPrimaryKeyVectorSearch()) {
+            return new PrimaryKeyVectorRead(table, vectorColumn, vector, limit, options, filter);
+        }
+        return new DataEvolutionVectorRead(
+                table, partitionFilter, filter, limit, vectorColumn, vector, options);
+    }
+
+    protected boolean isPrimaryKeyVectorSearch() {
+        return vectorColumn != null
+                && table.coreOptions().primaryKeyVectorIndexColumns().contains(vectorColumn.name());
+    }
+
+    public VectorSearchBuilderImpl withSnapshot(Snapshot snapshot) {
+        this.pinnedSnapshot = snapshot;
+        return this;
+    }
+
+    protected void rejectUnderQueryAuth() {
+        TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
     }
 }

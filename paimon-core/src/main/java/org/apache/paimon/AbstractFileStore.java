@@ -29,6 +29,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergCommitCallback;
 import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.iceberg.IcebergPreCommitValidation;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestFile;
@@ -88,7 +89,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
-import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.partition.PartitionExpireStrategy.createPartitionExpireStrategy;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -108,6 +108,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     protected final CatalogEnvironment catalogEnvironment;
 
     @Nullable private SegmentsCache<Path> readManifestCache;
+    @Nullable private SegmentsCache<Path> manifestSidecarCache;
     @Nullable private Cache<Path, Snapshot> snapshotCache;
 
     protected AbstractFileStore(
@@ -210,7 +211,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestCompression(),
                 pathFactory(),
                 options.manifestTargetSize().getBytes(),
-                readManifestCache);
+                readManifestCache,
+                manifestSidecarCache,
+                options);
     }
 
     @Override
@@ -271,9 +274,17 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public boolean mergeSchema(RowType rowType, boolean allowExplicitCast) {
+    public boolean mergeSchema(
+            RowType rowType,
+            boolean typeWidening,
+            boolean allowExplicitCast,
+            boolean caseSensitive) {
         return schemaManager.mergeSchema(
-                rowType, allowExplicitCast, catalogEnvironment.schemaModification());
+                rowType,
+                typeWidening,
+                allowExplicitCast,
+                caseSensitive,
+                catalogEnvironment.schemaModification());
     }
 
     @Override
@@ -285,7 +296,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         }
         ConflictDetection.Factory conflictDetectFactory =
                 scanner ->
-                        new ConflictDetection(
+                        ConflictDetection.create(
                                 tableName,
                                 commitUser,
                                 partitionType,
@@ -294,6 +305,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                                 bucketMode(),
                                 options.deletionVectorsEnabled(),
                                 options.dataEvolutionEnabled(),
+                                options.dataEvolutionNestedFieldEnabled(),
                                 options.pkClusteringOverride(),
                                 newIndexFileHandler(),
                                 snapshotManager,
@@ -336,7 +348,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newStatsFileHandler(),
                 options.changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                 options.cleanEmptyDirectories(),
-                options.fileOperationThreadNum());
+                options.fileOperationThreadNum(),
+                options.scanManifestParallelism());
     }
 
     @Override
@@ -349,12 +362,13 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newIndexFileHandler(),
                 newStatsFileHandler(),
                 options.cleanEmptyDirectories(),
-                options.fileOperationThreadNum());
+                options.fileOperationThreadNum(),
+                options.scanManifestParallelism());
     }
 
     @Override
     public TagManager newTagManager() {
-        return new TagManager(fileIO, options.path(), DEFAULT_MAIN_BRANCH, options);
+        return new TagManager(fileIO, options.path(), options.branch(), options);
     }
 
     @Override
@@ -367,7 +381,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newIndexFileHandler(),
                 newStatsFileHandler(),
                 options.cleanEmptyDirectories(),
-                options.fileOperationThreadNum());
+                options.fileOperationThreadNum(),
+                options.scanManifestParallelism());
     }
 
     public abstract Comparator<InternalRow> newKeyComparator();
@@ -385,6 +400,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         List<CommitPreCallback> callbacks = new ArrayList<>();
         if (options.isChainTable()) {
             callbacks.add(new ChainTableCommitPreCallback(table));
+        }
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                != IcebergOptions.StorageType.DISABLED) {
+            callbacks.add(new IcebergPreCommitValidation(table));
         }
         return callbacks;
     }
@@ -426,15 +445,24 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             callbacks.add(new ChainTableOverwriteCommitCallback(table));
         }
 
-        if (options.visibilityCallbackEnabled() && !schema.primaryKeys().isEmpty()) {
-            if (table.bucketMode() == BucketMode.POSTPONE_MODE
-                    || options.deletionVectorsEnabled()) {
-                callbacks.add(new VisibilityWaitCallback(table));
-            }
+        if (options.visibilityCallbackEnabled() && shouldWaitForVisibility(table)) {
+            callbacks.add(new VisibilityWaitCallback(table));
         }
 
         callbacks.addAll(CallbackUtils.loadCommitCallbacks(options, table));
         return callbacks;
+    }
+
+    private boolean shouldWaitForVisibility(FileStoreTable table) {
+        if (options.rowTrackingEnabled()) {
+            return true;
+        }
+
+        if (schema.primaryKeys().isEmpty()) {
+            return false;
+        }
+
+        return table.bucketMode() == BucketMode.POSTPONE_MODE || options.deletionVectorsEnabled();
     }
 
     @Override
@@ -558,7 +586,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public List<TagCallback> createTagCallbacks(FileStoreTable table) {
-        List<TagCallback> callbacks = new ArrayList<>(CallbackUtils.loadTagCallbacks(options));
+        List<TagCallback> callbacks =
+                new ArrayList<>(CallbackUtils.loadTagCallbacks(options, table));
         String partitionField = options.tagToPartitionField();
 
         if (partitionField != null) {
@@ -586,6 +615,11 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public void setManifestCache(SegmentsCache<Path> manifestCache) {
         this.readManifestCache = manifestCache;
+    }
+
+    @Override
+    public void setManifestSidecarCache(SegmentsCache<Path> manifestSidecarCache) {
+        this.manifestSidecarCache = manifestSidecarCache;
     }
 
     @Override

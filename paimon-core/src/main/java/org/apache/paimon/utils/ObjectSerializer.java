@@ -35,6 +35,9 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.apache.paimon.utils.SerializationUtils.presizedCapacity;
+import static org.apache.paimon.utils.SerializationUtils.readCount;
+
 /** A serializer to serialize object by {@link InternalRowSerializer}. */
 public abstract class ObjectSerializer<T> implements Serializable {
 
@@ -98,8 +101,8 @@ public abstract class ObjectSerializer<T> implements Serializable {
 
     /** De-serializes a record list from the given source input view. */
     public final List<T> deserializeList(DataInputView source) throws IOException {
-        int size = source.readInt();
-        List<T> records = new ArrayList<>(size);
+        int size = readCount(source, getClass().getSimpleName());
+        List<T> records = new ArrayList<>(presizedCapacity(size));
         for (int i = 0; i < size; i++) {
             records.add(deserialize(source));
         }
@@ -112,6 +115,11 @@ public abstract class ObjectSerializer<T> implements Serializable {
         return deserializeList(view);
     }
 
+    /**
+     * Serializes a record to schema-dependent bytes.
+     *
+     * <p>The bytes must be deserialized with the same row schema.
+     */
     public byte[] serializeToBytes(T record) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
@@ -119,6 +127,7 @@ public abstract class ObjectSerializer<T> implements Serializable {
         return out.toByteArray();
     }
 
+    /** Deserializes bytes produced with this serializer's current row schema. */
     public T deserializeFromBytes(byte[] bytes) throws IOException {
         ByteArrayInputStream in = new ByteArrayInputStream(bytes);
         DataInputViewStreamWrapper view = new DataInputViewStreamWrapper(in);

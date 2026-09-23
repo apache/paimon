@@ -23,6 +23,8 @@ import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 
+import java.util.List;
+
 /**
  * A test-only {@link GlobalIndexerFactory} for vector similarity search. Uses brute-force linear
  * scan, no native dependencies required.
@@ -39,5 +41,14 @@ public class TestVectorGlobalIndexerFactory implements GlobalIndexerFactory {
     @Override
     public GlobalIndexer create(DataField field, Options options) {
         return new TestVectorGlobalIndexer(field.type(), options);
+    }
+
+    @Override
+    public GlobalIndexer create(
+            DataField indexField, List<DataField> extraFields, Options options) {
+        if (extraFields == null || extraFields.isEmpty()) {
+            return create(indexField, options);
+        }
+        return new TestMultiFieldVectorGlobalIndexer(indexField, extraFields, options);
     }
 }

@@ -48,53 +48,30 @@ class Schema:
         self.options = options if options is not None else {}
         self.comment = comment
 
+        primary_key_nullable = CoreOptions.primary_key_nullable_from_dict(self.options)
+        if primary_key_nullable and not self.primary_keys:
+            raise ValueError(
+                "Option 'primary-key.nullable' can only be enabled for a table "
+                "with primary keys."
+            )
+        pk_set = set(self.primary_keys)
+        for field in self.fields:
+            if field.name in pk_set:
+                field.type.nullable = primary_key_nullable
+
+        changelog_producer = self.options.get(CoreOptions.CHANGELOG_PRODUCER.key(), 'none')
+        if changelog_producer != 'none' and not self.primary_keys:
+            raise ValueError(
+                f"Cannot set 'changelog-producer' to '{changelog_producer}' on a table without primary keys. "
+                f"Changelog producer requires primary keys to be defined."
+            )
+
     @staticmethod
     def from_pyarrow_schema(pa_schema: pa.Schema, partition_keys: Optional[List[str]] = None,
                             primary_keys: Optional[List[str]] = None, options: Optional[Dict] = None,
                             comment: Optional[str] = None):
         # Convert PyArrow schema to Paimon fields
         fields = PyarrowFieldParser.to_paimon_schema(pa_schema)
-
-        # Primary key fields must be NOT NULL
-        pk_set = set(primary_keys) if primary_keys else set()
-        if pk_set:
-            for field in fields:
-                if field.name in pk_set:
-                    field.type.nullable = False
-
-        # Check if Blob type exists in the schema
-        blob_names = [
-            field.name for field in fields
-            if 'blob' in str(field.type).lower()
-        ]
-
-        if blob_names:
-            if options is None:
-                options = {}
-
-            if len(fields) <= len(blob_names):
-                raise ValueError(
-                    "Table with BLOB type column must have other normal columns."
-                )
-
-            required_options = {
-                CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
-                CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true'
-            }
-
-            missing_options = []
-            for key, expected_value in required_options.items():
-                if key not in options or options[key] != expected_value:
-                    missing_options.append(f"{key}='{expected_value}'")
-
-            if missing_options:
-                raise ValueError(
-                    f"Schema contains Blob type but is missing required options: {', '.join(missing_options)}. "
-                    f"Please add these options to the schema."
-                )
-
-            if primary_keys is not None:
-                raise ValueError("Blob type is not supported with primary key.")
 
         # Check if Vector type with dedicated file format
         vector_names = [

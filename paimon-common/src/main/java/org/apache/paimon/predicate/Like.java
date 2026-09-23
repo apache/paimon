@@ -116,7 +116,7 @@ public class Like extends LeafBinaryFunction {
                 javaPattern.append(nextChar);
                 ++i;
             } else if (c == '_') {
-                javaPattern.append('.');
+                javaPattern.append("(?s:.)");
             } else if (c == '%') {
                 javaPattern.append("(?s:.*)");
             } else {
@@ -148,7 +148,7 @@ public class Like extends LeafBinaryFunction {
 
     @Override
     public Optional<LeafFunction> negate() {
-        return Optional.empty();
+        return Optional.of(NotLike.INSTANCE);
     }
 
     @Override

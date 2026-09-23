@@ -21,10 +21,42 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectSerializerTestBase;
 
-/** Tests for {@link ManifestEntrySerializerTest}. */
+import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/** Tests for {@link ManifestEntrySerializer}. */
 public class ManifestEntrySerializerTest extends ObjectSerializerTestBase<ManifestEntry> {
 
     private final ManifestTestDataGenerator gen = ManifestTestDataGenerator.builder().build();
+
+    @Test
+    void testFormatIdentifier() {
+        assertThat(new ManifestEntrySerializer().toRow(gen.next()).getInt(0)).isEqualTo(2);
+    }
+
+    @Test
+    void testWriteColsLegacySerializer() throws IOException {
+        ManifestEntry expected = gen.next();
+        ManifestEntry withWriteColsSequences =
+                ManifestEntry.create(
+                        expected.kind(),
+                        expected.partition(),
+                        expected.bucket(),
+                        expected.totalBuckets(),
+                        expected.file().withWriteColsSequences(new long[] {3L, 42L}));
+        ManifestEntryWriteColsLegacySerializer serializer =
+                new ManifestEntryWriteColsLegacySerializer();
+
+        ManifestEntry actual =
+                serializer.deserializeFromBytes(
+                        serializer.serializeToBytes(withWriteColsSequences));
+
+        assertThat(actual).isEqualTo(expected);
+        assertThat(actual.file().writeColsSequences()).isNull();
+    }
 
     @Override
     protected ObjectSerializer<ManifestEntry> serializer() {

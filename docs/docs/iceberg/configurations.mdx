@@ -1,6 +1,6 @@
 ---
-title: "Configurations"
-sidebar_position: 7
+title: "Configuration Reference"
+sidebar_position: 10
 ---
 
 import ConfigTable from '@site/src/components/ConfigTable';
@@ -25,8 +25,35 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Configurations
+# Configuration Reference
 
-Options for Iceberg Compatibility.
+Set these options on the **Paimon table** to control Iceberg metadata publication. Reader-side
+Iceberg catalog properties are configured separately.
+
+## Find the Right Options
+
+| Task | Options and guide |
+| --- | --- |
+| Enable publication and choose its location | `metadata.iceberg.storage`, `metadata.iceberg.storage-location`; [catalogs and metadata layout](./catalogs.md) |
+| Register in Hive | `metadata.iceberg.uri`, `metadata.iceberg.hive-*`, `metadata.iceberg.database`, `metadata.iceberg.table`; [Hive Catalog](./hive-catalog.md) |
+| Register in REST | `metadata.iceberg.rest.*`; [REST Catalog](./rest-catalog.mdx) |
+| Publish deletion vectors | `metadata.iceberg.format-version` plus `deletion-vectors.*`; [primary key tables](./primary-key-table.mdx#deletion-vector-support) |
+| Adjust manifest compatibility | `metadata.iceberg.manifest-compression`, `metadata.iceberg.manifest-legacy-version`; [query engines](./ecosystem.mdx) |
+| Control metadata cleanup | `metadata.iceberg.delete-after-commit.enabled`, `metadata.iceberg.previous-versions-max` |
+
+Metadata retention options control generated metadata files, not Paimon data-file retention.
+Use Paimon's [snapshot management](../maintenance/manage-snapshots.mdx) and
+[tag management](../maintenance/manage-tags.mdx) for table history.
+
+## Iceberg Table Options
 
 <ConfigTable html={icebergConfigurationHtml} />
+
+## Prefixed Properties
+
+`metadata.iceberg.rest.<key>` passes `<key>` to the REST catalog client. It is a property prefix,
+so the individual service-specific keys are not listed in the generated table above.
+
+`metadata.iceberg.table-properties.<key>` supplies custom table properties during REST publication.
+Iceberg-reserved properties are ignored. Use the dedicated Paimon options for format version
+and publication behavior.

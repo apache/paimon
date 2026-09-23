@@ -97,11 +97,7 @@ public class ClearConsumersProcedure extends BaseProcedure {
                 tableIdent,
                 table -> {
                     FileStoreTable fileStoreTable = (FileStoreTable) table;
-                    ConsumerManager consumerManager =
-                            new ConsumerManager(
-                                    fileStoreTable.fileIO(),
-                                    fileStoreTable.location(),
-                                    fileStoreTable.snapshotManager().branch());
+                    ConsumerManager consumerManager = fileStoreTable.consumerManager();
                     consumerManager.clearConsumers(includingPattern, excludingPattern);
 
                     InternalRow outputRow = newInternalRow(true);

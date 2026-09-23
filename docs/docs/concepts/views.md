@@ -24,80 +24,139 @@ under the License.
 
 # Views
 
-A view is a logical table that encapsulates business logic and domain-specific semantics.
-While most compute engines support views natively, each engine stores view metadata in proprietary formats, creating interoperability challenges across different platforms.
-Paimon views abstracting engine-specific query dialects and establishing unified metadata standards.
-View metadata could enable centralized view management that facilitates cross-engine sharing and reduces maintenance complexity in heterogeneous computing environments.
+A view is a named SQL query stored in the catalog. It lets users reuse query logic without
+materializing another copy of the data. Paimon view metadata can hold multiple SQL dialect
+representations so that engines can use a definition written for their dialect.
+
+Start by checking catalog support, then use the operations below to create a view or manage its
+SQL representations. Storing multiple dialects does not translate SQL automatically.
 
 ## Catalog support
 
-View metadata is persisted only when the catalog implementation supports it:
+| Catalog | View storage | Dialect changes |
+| --- | --- | --- |
+| REST | Managed by the REST service. | Supported through the view API, subject to server support. |
+| JDBC | Stored in the `paimon_views` metadata table. | Supported. |
+| Hive | Stored as a Hive metastore `VIRTUAL_VIEW`. | Only the default query is persisted; altering dialects is not supported. |
+| Filesystem | View operations are not implemented. | Not supported. |
 
-- **Hive metastore catalog** – view metadata is stored together with table metadata inside the
-  metastore warehouse.
-- **REST catalog** – view metadata is kept in the REST backend and exposed through the catalog API.
-
-File-system catalogs do not currently support views because they lack persistent metadata storage.
-
+See [JDBC catalog notes](#jdbc-catalog-notes) for initialization and concurrency behavior.
 
 ### Representation structure
 
-| Field     | Type | Description |
-|-----------|------|-------------|
-| `query`   | `string` | Canonical SQL `SELECT` statement that defines the view. |
-| `dialect` | `string` | SQL dialect identifier (for example, `spark` or `flink`). |
+The Paimon view schema contains the following fields. How this metadata is persisted depends on
+the catalog implementation.
 
-Multiple representations can be stored for the same version so that different engines can access the
-view using their native dialect.
+| Field | Type | Description |
+| --- | --- | --- |
+| `fields` | List of data fields | The output columns of the view. |
+| `query` | String | The default SQL query. |
+| `dialects` | Map of strings to strings | Queries keyed by dialect identifier, such as `spark` or `flink`. |
+| `comment` | Optional string | A description of the view. |
+| `options` | Map of strings to strings | View properties. |
+
+When an engine requests a dialect that is absent from `dialects`, Paimon returns the default
+`query`. It does not translate that query into another SQL dialect. Dropping a dialect entry
+therefore restores the default query for that dialect; it does not remove the view.
 
 ## Operations
 
 ### Create or replace view
 
-Use `CREATE VIEW` or `CREATE OR REPLACE VIEW` to register a view. Paimon assigns a UUID, writes the
-first metadata file, and records version `1`.
+Use `CREATE VIEW` in a catalog that supports views. The compute engine parses the SQL and resolves
+the view's output schema; the catalog persists the resulting definition.
+
+For an existing `my_db.sales` table with `region` and `amount` columns:
 
 ```sql
-CREATE VIEW sales_view AS
+CREATE VIEW my_db.sales_view AS
 SELECT region, SUM(amount) AS total_amount
-FROM sales
+FROM my_db.sales
 GROUP BY region;
 ```
 
+Replacement behavior depends on the engine. Paimon's Spark integration implements
+`CREATE OR REPLACE VIEW` by dropping the existing view and creating a new one. This is not an
+atomic replacement, and previously added dialect entries are not retained. To change one stored
+dialect, use the procedure below.
+
 ### Alter view dialect via procedure
 
-Paimon provides the `sys.alter_view_dialect` procedure so that engines can manage multiple SQL
-representations for the same view version.
+Use `sys.alter_view_dialect` with a REST or JDBC catalog to add, update, or drop a dialect query.
+Use `add` when the dialect is absent and `update` when it already exists. SQL created in Flink or
+Spark includes that engine's dialect, so the examples update it first.
 
 #### Flink example
 
+Run these statements in the Paimon catalog containing the view:
+
 ```sql
--- Add a Flink dialect
-CALL [catalog.]sys.alter_view_dialect('view_identifier', 'add', 'flink', 'SELECT ...');
+-- Update the Flink query while keeping the output columns unchanged.
+CALL sys.alter_view_dialect(
+    'my_db.sales_view', 'update', 'flink',
+    'SELECT region, SUM(amount) AS total_amount FROM my_db.sales WHERE amount > 0 GROUP BY region'
+);
 
--- Update the stored Flink dialect
-CALL [catalog.]sys.alter_view_dialect('view_identifier', 'update', 'flink', 'SELECT ...');
+-- Fall back to the default query.
+CALL sys.alter_view_dialect('my_db.sales_view', 'drop', 'flink');
 
--- Drop the Flink dialect representation
-CALL [catalog.]sys.alter_view_dialect('view_identifier', 'drop', 'flink');
+-- Add a Flink query again.
+CALL sys.alter_view_dialect(
+    'my_db.sales_view', 'add', 'flink',
+    'SELECT region, SUM(amount) AS total_amount FROM my_db.sales GROUP BY region'
+);
 ```
 
 #### Spark example
 
+For a view created in Spark, use the `spark` dialect:
+
 ```sql
--- Add a Spark dialect
-CALL sys.alter_view_dialect('view_identifier', 'add', 'spark', 'SELECT ...');
+CALL sys.alter_view_dialect(
+    'my_db.sales_view', 'update', 'spark',
+    'SELECT region, SUM(amount) AS total_amount FROM my_db.sales WHERE amount > 0 GROUP BY region'
+);
 
--- Update the Spark dialect
-CALL sys.alter_view_dialect('view_identifier', 'update', 'spark', 'SELECT ...');
+CALL sys.alter_view_dialect('my_db.sales_view', 'drop', 'spark');
 
--- Drop the Spark dialect
-CALL sys.alter_view_dialect('view_identifier', 'drop', 'spark');
+CALL sys.alter_view_dialect(
+    'my_db.sales_view', 'add', 'spark',
+    'SELECT region, SUM(amount) AS total_amount FROM my_db.sales GROUP BY region'
+);
 ```
 
 ### Drop view
 
-`DROP VIEW view_name;`
+```sql
+DROP VIEW my_db.sales_view;
+```
+
+### JDBC catalog notes
+
+The JDBC catalog stores views in a dedicated `paimon_views` table that is created on first
+initialization. A few things are worth knowing when running on top of an existing JDBC catalog:
+
+- **Required permissions on upgrade.** Upgrading to a Paimon release with view support requires
+  `CREATE TABLE` permission on the catalog database the first time the catalog is opened, so that
+  the `paimon_views` table can be created. Operators who tightened privileges to CRUD-only after
+  the initial deployment should either restore `CREATE TABLE` permission temporarily or create the
+  `paimon_views` table manually beforehand.
+- **Table and view share the same identifier namespace.** A name cannot be used by both a table
+  and a view in the same database. `createTable`, `renameTable`, `createView` and `renameView` all
+  validate this invariant under the catalog lock; concurrent operations targeting the same
+  identifier will see exactly one winner.
+- **Single-process atomicity does not depend on `lock.enabled`.** The JDBC catalog also keeps a
+  per-JVM stripe lock keyed by `(catalog key, database, object name)`, so the table-vs-view name
+  uniqueness invariant holds within one JVM even when `lock.enabled = false`. Setting
+  `lock.enabled = true` (with `lock.type = jdbc`) is still recommended for multi-process
+  deployments because the stripe lock only serializes operations within the same JVM.
+- **Database visibility.** A database that contains only views (and no tables or properties) is
+  reported by `listDatabases` and `SHOW DATABASES`. `DROP DATABASE ... CASCADE` removes both the
+  tables and the views in that database; `DROP DATABASE` without `CASCADE` will reject databases
+  that still hold any view.
+- **Cross-database rename.** `renameView(from, to)` and `renameTable(from, to)` raise an
+  `IllegalArgumentException` (`Database X does not exist.`) when the target database is missing,
+  matching the BadRequest semantics of the REST catalog.
 
 ## See also
 

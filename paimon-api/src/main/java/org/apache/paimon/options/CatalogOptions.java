@@ -130,6 +130,30 @@ public class CatalogOptions {
                     .noDefaultValue()
                     .withDescription("Controls the maximum memory to cache manifest content.");
 
+    public static final ConfigOption<MemorySize> CACHE_MANIFEST_SIDECAR_MAX_MEMORY =
+            key("cache.manifest-sidecar.max-memory")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(64))
+                    .withDescription(
+                            "Controls the maximum memory for the separate manifest sidecar cache. "
+                                    + "This budget is additional to the manifest content cache. "
+                                    + "Set to 0 to reuse the manifest content cache. It uses "
+                                    + "'cache.expire-after-access' and 'cache.manifest.soft-values'.");
+
+    public static final ConfigOption<Boolean> CACHE_MANIFEST_SOFT_VALUES =
+            key("cache.manifest.soft-values")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "If true (default), manifest cache entries are held with soft references "
+                                    + "and may be reclaimed by the GC under memory pressure. This can "
+                                    + "trigger a cache-thrash spiral where reclaimed entries are "
+                                    + "refetched, spiking heap and forcing further reclamation. Set to "
+                                    + "false to hold entries with strong references, breaking the spiral; "
+                                    + "the cache then stays bounded by weight up to "
+                                    + "'cache.manifest.max-memory' (size the total heap memory to at "
+                                    + "least roughly twice that value).");
+
     public static final ConfigOption<Integer> CACHE_SNAPSHOT_MAX_NUM_PER_TABLE =
             key("cache.snapshot.max-num-per-table")
                     .intType()
@@ -168,6 +192,12 @@ public class CatalogOptions {
                             "Whether to support format tables, format table corresponds to a regular csv, parquet or orc table, allowing read and write operations. "
                                     + "However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in"
                                     + " the metastore and need to be manually added as separate partition operations.");
+
+    public static final ConfigOption<Boolean> CATALOG_OPTIONS_TABLE_ENABLED =
+            ConfigOptions.key("catalog-options-table.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to support the sys.catalog_options table.");
 
     public static final ConfigOption<Boolean> RESOLVING_FILE_IO_ENABLED =
             ConfigOptions.key("resolving-file-io.enabled")

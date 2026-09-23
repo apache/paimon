@@ -44,6 +44,7 @@ import io.debezium.data.Bits;
 import io.debezium.time.Date;
 import io.debezium.time.MicroTime;
 import io.debezium.time.MicroTimestamp;
+import io.debezium.time.Time;
 import io.debezium.time.Timestamp;
 import io.debezium.time.ZonedTimestamp;
 import org.apache.flink.api.common.functions.FlatMapFunction;
@@ -159,6 +160,8 @@ public class PostgresRecordParser
             case "int32":
                 if (Date.SCHEMA_NAME.equals(field.name())) {
                     return DataTypes.DATE();
+                } else if (Time.SCHEMA_NAME.equals(field.name())) {
+                    return DataTypes.TIME(3);
                 }
                 return DataTypes.INT();
             case "int64":
@@ -166,6 +169,8 @@ public class PostgresRecordParser
                     return DataTypes.TIMESTAMP(6);
                 } else if (MicroTime.SCHEMA_NAME.equals(field.name())) {
                     return DataTypes.TIME(6);
+                } else if (Timestamp.SCHEMA_NAME.equals(field.name())) {
+                    return DataTypes.TIMESTAMP(3);
                 }
                 return DataTypes.BIGINT();
             case "float":
@@ -347,8 +352,7 @@ public class PostgresRecordParser
 
         // generate values of computed columns
         for (ComputedColumn computedColumn : computedColumns) {
-            String refName = computedColumn.fieldReference();
-            resultMap.put(computedColumn.columnName(), computedColumn.eval(resultMap.get(refName)));
+            resultMap.put(computedColumn.columnName(), computedColumn.evalFromRecord(resultMap));
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {

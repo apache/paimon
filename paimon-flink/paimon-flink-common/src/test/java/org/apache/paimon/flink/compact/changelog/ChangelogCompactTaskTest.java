@@ -27,6 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.Schema;
@@ -163,6 +164,20 @@ public class ChangelogCompactTaskTest {
         }
         write.close();
 
+        List<Path> inputFiles = new ArrayList<>();
+        for (Map.Entry<Integer, List<DataFileMeta>> entry : files.entrySet()) {
+            DataFilePathFactory pathFactory =
+                    table.store()
+                            .pathFactory()
+                            .createDataFilePathFactory(BinaryRow.EMPTY_ROW, entry.getKey());
+            for (DataFileMeta file : entry.getValue()) {
+                inputFiles.add(pathFactory.toPath(file));
+            }
+        }
+        for (Path file : inputFiles) {
+            assertThat(table.fileIO().exists(file)).isTrue();
+        }
+
         ChangelogCompactTask task =
                 new ChangelogCompactTask(1, BinaryRow.EMPTY_ROW, 2, files, new HashMap<>());
 
@@ -171,6 +186,10 @@ public class ChangelogCompactTaskTest {
                         .stream()
                         .map(c -> (CommitMessageImpl) c.commitMessage())
                         .collect(Collectors.toList());
+        for (Path file : inputFiles) {
+            assertThat(table.fileIO().exists(file)).isFalse();
+        }
+
         TableCommitImpl commit = table.newCommit("test");
         commit.commit(messages);
         commit.close();

@@ -55,6 +55,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -74,7 +75,6 @@ public class ConfigOptionsDocGenerator {
             new OptionsClassLocation[] {
                 new OptionsClassLocation("paimon-api", "org.apache.paimon.options"),
                 new OptionsClassLocation("paimon-api", "org.apache.paimon"),
-                new OptionsClassLocation("paimon-core", "org.apache.paimon.lookup.rocksdb"),
                 new OptionsClassLocation("paimon-core", "org.apache.paimon.jdbc"),
                 new OptionsClassLocation("paimon-core", "org.apache.paimon.table"),
                 new OptionsClassLocation("paimon-core", "org.apache.paimon.iceberg"),
@@ -264,7 +264,7 @@ public class ConfigOptionsDocGenerator {
 
     @VisibleForTesting
     static String toSnakeCase(String name) {
-        return name.replaceAll("(.)([A-Z][a-z])", "$1_$2").toLowerCase();
+        return name.replaceAll("(.)([A-Z][a-z])", "$1_$2").toLowerCase(Locale.ROOT);
     }
 
     @VisibleForTesting

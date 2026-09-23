@@ -18,6 +18,8 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.types.RowType;
+
 import javax.annotation.Nullable;
 
 import java.util.Collections;
@@ -38,18 +40,35 @@ public interface PredicateVisitor<T> {
         return predicate.visit(new FieldNameCollector());
     }
 
+    static Set<String> collectTransformFieldNames(Transform transform) {
+        Set<String> fieldNames = new HashSet<>();
+        for (Object input : transform.inputs()) {
+            if (input instanceof FieldRef) {
+                fieldNames.add(((FieldRef) input).name());
+            }
+        }
+        return fieldNames;
+    }
+
+    static Set<Integer> collectFieldIds(RowType rowType, @Nullable Predicate predicate) {
+        if (predicate == null) {
+            return Collections.emptySet();
+        }
+        Set<Integer> fieldIds = new HashSet<>();
+        for (String name : collectFieldNames(predicate)) {
+            if (rowType.containsField(name)) {
+                fieldIds.add(rowType.getField(name).id());
+            }
+        }
+        return fieldIds;
+    }
+
     /** A visitor that collects all field names referenced by a predicate. */
     class FieldNameCollector implements PredicateVisitor<Set<String>> {
 
         @Override
         public Set<String> visit(LeafPredicate predicate) {
-            Set<String> fieldNames = new HashSet<>();
-            for (Object input : predicate.transform().inputs()) {
-                if (input instanceof FieldRef) {
-                    fieldNames.add(((FieldRef) input).name());
-                }
-            }
-            return fieldNames;
+            return collectTransformFieldNames(predicate.transform());
         }
 
         @Override

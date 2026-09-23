@@ -45,7 +45,7 @@ public class LikeOptimization {
         }
 
         String pattern = patternLiteral.toString();
-        if (pattern.contains("_")) {
+        if (pattern.indexOf('_') >= 0 || pattern.indexOf('\\') >= 0) {
             return Optional.empty();
         }
 

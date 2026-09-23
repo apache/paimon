@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.fs.FileIO;
 
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
@@ -32,9 +33,12 @@ public class FileOperationThreadPool {
     private static ThreadPoolExecutor executorService =
             createCachedThreadPool(Runtime.getRuntime().availableProcessors(), THREAD_NAME);
 
-    public static synchronized ThreadPoolExecutor getExecutorService(int threadNum) {
-        if (threadNum <= executorService.getMaximumPoolSize()) {
+    public static synchronized ExecutorService getExecutorService(int threadNum) {
+        if (threadNum <= 0 || threadNum == executorService.getMaximumPoolSize()) {
             return executorService;
+        }
+        if (threadNum < executorService.getMaximumPoolSize()) {
+            return new SemaphoredDelegatingExecutor(executorService, threadNum, false);
         }
         // we don't need to close previous pool
         // it is just cached pool

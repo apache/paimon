@@ -28,7 +28,7 @@ import org.apache.paimon.plugin.PluginLoader;
 import java.util.ArrayList;
 import java.util.List;
 
-/** obs Blob Storage {@link FileIOLoader}. */
+/** Huawei OBS Storage {@link FileIOLoader}. */
 public class OBSLoader implements FileIOLoader {
 
     private static final long serialVersionUID = 1L;
@@ -57,8 +57,6 @@ public class OBSLoader implements FileIOLoader {
     public List<String[]> requiredOptions() {
         List<String[]> options = new ArrayList<>();
         options.add(new String[] {"fs.obs.endpoint"});
-        options.add(new String[] {"fs.obs.access.key", "fs.obs.access-key"});
-        options.add(new String[] {"fs.obs.secret.key", "fs.obs.secret-key"});
         return options;
     }
 

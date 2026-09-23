@@ -53,7 +53,9 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
             @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
             MergeSorter mergeSorter,
-            @Nullable RecordEqualiser valueEqualiser) {
+            @Nullable RecordEqualiser valueEqualiser,
+            boolean changelogIgnoreUpdateBefore,
+            boolean changelogIgnoreDelete) {
         super(
                 maxLevel,
                 mergeEngine,
@@ -64,6 +66,8 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
                 mfFactory,
                 mergeSorter,
                 true,
+                changelogIgnoreUpdateBefore,
+                changelogIgnoreDelete,
                 false);
         this.valueEqualiser = valueEqualiser;
     }

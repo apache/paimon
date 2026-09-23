@@ -97,11 +97,16 @@ public interface KvCompactionManagerFactory extends Closeable {
 
     void withCompactionMetrics(@Nullable CompactionMetrics compactionMetrics);
 
+    default void withCompactRewriterFactory(CompactRewriterFactory factory) {
+        throw new UnsupportedOperationException("Custom compaction rewriters are not supported.");
+    }
+
     /** Create a {@link CompactManager} for the given partition and bucket. */
     CompactManager create(
             BinaryRow partition,
             int bucket,
             ExecutorService compactExecutor,
             List<DataFileMeta> restoreFiles,
-            @Nullable BucketedDvMaintainer dvMaintainer);
+            @Nullable BucketedDvMaintainer dvMaintainer,
+            boolean ignorePreviousFiles);
 }

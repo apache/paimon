@@ -19,20 +19,27 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.format.parquet.ParquetListLayoutResolver.LayoutContext;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.EdgeAlgorithm;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Pair;
 
+import org.apache.parquet.column.schema.EdgeInterpolationAlgorithm;
+import org.apache.parquet.schema.ColumnOrder;
 import org.apache.parquet.schema.ConversionPatterns;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
@@ -41,6 +48,7 @@ import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.Type;
 import org.apache.parquet.schema.Types;
 
+import java.util.LinkedList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -57,6 +65,39 @@ public class ParquetSchemaConverter {
     public static final String MAP_KEY_NAME = "key";
     public static final String MAP_VALUE_NAME = "value";
     public static final String LIST_ELEMENT_NAME = "element";
+
+    /**
+     * Whether {@code type} is an unsigned integer. Such a column stores a signed value whose bits
+     * have to be reinterpreted on read, and its statistics are ordered unsigned, so both the reader
+     * and the predicate pushdown have to treat it apart from an ordinary int.
+     */
+    public static boolean isUnsignedInt(PrimitiveType type) {
+        LogicalTypeAnnotation logicalType = type.getLogicalTypeAnnotation();
+        return logicalType instanceof LogicalTypeAnnotation.IntLogicalTypeAnnotation
+                && !((LogicalTypeAnnotation.IntLogicalTypeAnnotation) logicalType).isSigned();
+    }
+
+    /**
+     * Whether an INT32 or INT64 column's logical annotation can be represented as BIGINT. Unsigned
+     * INT32 fits in BIGINT, but unsigned INT64 and non-integer annotations do not. Other physical
+     * types are outside this annotation check.
+     */
+    public static boolean isBigIntLogicalTypeCompatible(PrimitiveType type) {
+        PrimitiveType.PrimitiveTypeName physicalType = type.getPrimitiveTypeName();
+        if (physicalType != INT32 && physicalType != INT64) {
+            return true;
+        }
+
+        LogicalTypeAnnotation logicalType = type.getLogicalTypeAnnotation();
+        if (logicalType == null) {
+            return true;
+        }
+        if (!(logicalType instanceof LogicalTypeAnnotation.IntLogicalTypeAnnotation)) {
+            return false;
+        }
+        return physicalType == INT32
+                || ((LogicalTypeAnnotation.IntLogicalTypeAnnotation) logicalType).isSigned();
+    }
 
     /** Convert paimon {@link RowType} to parquet {@link MessageType}. */
     public static MessageType convertToParquetMessageType(RowType rowType) {
@@ -92,6 +133,23 @@ public class ParquetSchemaConverter {
             case VARBINARY:
             case BLOB:
                 return Types.primitive(PrimitiveType.PrimitiveTypeName.BINARY, repetition)
+                        .named(name)
+                        .withId(fieldId);
+            case GEOMETRY:
+                return Types.primitive(PrimitiveType.PrimitiveTypeName.BINARY, repetition)
+                        .as(LogicalTypeAnnotation.geometryType(((GeometryType) type).getCrs()))
+                        .columnOrder(ColumnOrder.undefined())
+                        .named(name)
+                        .withId(fieldId);
+            case GEOGRAPHY:
+                GeographyType geographyType = (GeographyType) type;
+                return Types.primitive(PrimitiveType.PrimitiveTypeName.BINARY, repetition)
+                        .as(
+                                LogicalTypeAnnotation.geographyType(
+                                        geographyType.getCrs(),
+                                        EdgeInterpolationAlgorithm.valueOf(
+                                                geographyType.getAlgorithm().name())))
+                        .columnOrder(ColumnOrder.undefined())
                         .named(name)
                         .withId(fieldId);
             case DECIMAL:
@@ -159,13 +217,13 @@ public class ParquetSchemaConverter {
                                 name, localZonedTimestampType.getPrecision(), repetition, true)
                         .withId(fieldId);
             case ARRAY:
-                ArrayType arrayType = (ArrayType) type;
+            case VECTOR:
+                DataType listElementType =
+                        type instanceof ArrayType
+                                ? ((ArrayType) type).getElementType()
+                                : ((VectorType) type).getElementType();
                 Type elementParquetType =
-                        convertToParquetType(
-                                        LIST_ELEMENT_NAME,
-                                        arrayType.getElementType(),
-                                        fieldId,
-                                        depth + 1)
+                        convertToParquetType(LIST_ELEMENT_NAME, listElementType, fieldId, depth + 1)
                                 .withId(SpecialFields.getArrayElementFieldId(fieldId, depth + 1));
                 return ConversionPatterns.listOfElements(repetition, name, elementParquetType)
                         .withId(fieldId);
@@ -294,143 +352,233 @@ public class ParquetSchemaConverter {
 
     /** Convert parquet {@link Type} to paimon {@link DataField} to. */
     public static DataField convertToPaimonField(Type parquetType) {
-        LogicalTypeAnnotation logicalType = parquetType.getLogicalTypeAnnotation();
-        DataType paimonDataType;
+        return new FieldConverter(LayoutContext.empty()).convert(parquetType);
+    }
 
-        if (parquetType.isPrimitive()) {
-            switch (parquetType.asPrimitiveType().getPrimitiveTypeName()) {
-                case BINARY:
-                    if (logicalType instanceof LogicalTypeAnnotation.StringLogicalTypeAnnotation) {
-                        paimonDataType = DataTypes.STRING();
-                    } else {
-                        paimonDataType = DataTypes.BYTES();
-                    }
-                    break;
-                case BOOLEAN:
-                    paimonDataType = DataTypes.BOOLEAN();
-                    break;
-                case FLOAT:
-                    paimonDataType = DataTypes.FLOAT();
-                    break;
-                case DOUBLE:
-                    paimonDataType = DataTypes.DOUBLE();
-                    break;
-                case INT32:
-                    if (logicalType instanceof LogicalTypeAnnotation.DecimalLogicalTypeAnnotation) {
-                        LogicalTypeAnnotation.DecimalLogicalTypeAnnotation decimalType =
-                                (LogicalTypeAnnotation.DecimalLogicalTypeAnnotation) logicalType;
-                        paimonDataType =
-                                new DecimalType(decimalType.getPrecision(), decimalType.getScale());
-                    } else if (logicalType
-                            instanceof LogicalTypeAnnotation.IntLogicalTypeAnnotation) {
-                        LogicalTypeAnnotation.IntLogicalTypeAnnotation intType =
-                                (LogicalTypeAnnotation.IntLogicalTypeAnnotation) logicalType;
-                        int bitWidth = intType.getBitWidth();
-                        if (bitWidth == 8) {
-                            paimonDataType = DataTypes.TINYINT();
-                        } else if (bitWidth == 16) {
-                            paimonDataType = DataTypes.SMALLINT();
+    public static DataField convertToPaimonField(
+            Type parquetType, LayoutContext listLayout, String[] parentPath) {
+        return new FieldConverter(listLayout).convertAt(parquetType, parentPath);
+    }
+
+    private static final class FieldConverter {
+
+        private final LayoutContext listLayout;
+        private final LinkedList<String> path = new LinkedList<>();
+
+        FieldConverter(LayoutContext listLayout) {
+            this.listLayout = listLayout == null ? LayoutContext.empty() : listLayout;
+        }
+
+        /**
+         * Converts {@code parquetType} whose parent in the file schema sits at {@code parentPath}.
+         * The converter instance is discarded after this call, so the seeded path stack does not
+         * need to be unwound.
+         */
+        DataField convertAt(Type parquetType, String[] parentPath) {
+            for (String segment : parentPath) {
+                path.addLast(segment);
+            }
+            path.addLast(parquetType.getName());
+            return convert(parquetType);
+        }
+
+        DataField convert(Type parquetType) {
+            LogicalTypeAnnotation logicalType = parquetType.getLogicalTypeAnnotation();
+            DataType paimonDataType;
+
+            if (parquetType.isPrimitive()) {
+                switch (parquetType.asPrimitiveType().getPrimitiveTypeName()) {
+                    case BINARY:
+                        if (logicalType
+                                instanceof LogicalTypeAnnotation.StringLogicalTypeAnnotation) {
+                            paimonDataType = DataTypes.STRING();
+                        } else if (logicalType
+                                instanceof LogicalTypeAnnotation.GeometryLogicalTypeAnnotation) {
+                            paimonDataType =
+                                    DataTypes.GEOMETRY(
+                                            ((LogicalTypeAnnotation.GeometryLogicalTypeAnnotation)
+                                                            logicalType)
+                                                    .getCrs());
+                        } else if (logicalType
+                                instanceof LogicalTypeAnnotation.GeographyLogicalTypeAnnotation) {
+                            LogicalTypeAnnotation.GeographyLogicalTypeAnnotation geography =
+                                    (LogicalTypeAnnotation.GeographyLogicalTypeAnnotation)
+                                            logicalType;
+                            EdgeAlgorithm algorithm =
+                                    geography.getAlgorithm() == null
+                                            ? null
+                                            : EdgeAlgorithm.valueOf(
+                                                    geography.getAlgorithm().name());
+                            paimonDataType = DataTypes.GEOGRAPHY(geography.getCrs(), algorithm);
+                        } else {
+                            paimonDataType = DataTypes.BYTES();
+                        }
+                        break;
+                    case BOOLEAN:
+                        paimonDataType = DataTypes.BOOLEAN();
+                        break;
+                    case FLOAT:
+                        paimonDataType = DataTypes.FLOAT();
+                        break;
+                    case DOUBLE:
+                        paimonDataType = DataTypes.DOUBLE();
+                        break;
+                    case INT32:
+                        if (logicalType
+                                instanceof LogicalTypeAnnotation.DecimalLogicalTypeAnnotation) {
+                            LogicalTypeAnnotation.DecimalLogicalTypeAnnotation decimalType =
+                                    (LogicalTypeAnnotation.DecimalLogicalTypeAnnotation)
+                                            logicalType;
+                            paimonDataType =
+                                    new DecimalType(
+                                            decimalType.getPrecision(), decimalType.getScale());
+                        } else if (logicalType
+                                instanceof LogicalTypeAnnotation.IntLogicalTypeAnnotation) {
+                            LogicalTypeAnnotation.IntLogicalTypeAnnotation intType =
+                                    (LogicalTypeAnnotation.IntLogicalTypeAnnotation) logicalType;
+                            int bitWidth = intType.getBitWidth();
+                            if (bitWidth == 8) {
+                                paimonDataType = DataTypes.TINYINT();
+                            } else if (bitWidth == 16) {
+                                paimonDataType = DataTypes.SMALLINT();
+                            } else {
+                                paimonDataType = DataTypes.INT();
+                            }
+                        } else if (logicalType
+                                instanceof LogicalTypeAnnotation.DateLogicalTypeAnnotation) {
+                            paimonDataType = DataTypes.DATE();
+                        } else if (logicalType
+                                instanceof LogicalTypeAnnotation.TimeLogicalTypeAnnotation) {
+                            paimonDataType = DataTypes.TIME();
                         } else {
                             paimonDataType = DataTypes.INT();
                         }
-                    } else if (logicalType
-                            instanceof LogicalTypeAnnotation.DateLogicalTypeAnnotation) {
-                        paimonDataType = DataTypes.DATE();
-                    } else if (logicalType
-                            instanceof LogicalTypeAnnotation.TimeLogicalTypeAnnotation) {
-                        paimonDataType = DataTypes.TIME();
-                    } else {
-                        paimonDataType = DataTypes.INT();
-                    }
-                    break;
-                case INT64:
-                    if (logicalType instanceof LogicalTypeAnnotation.DecimalLogicalTypeAnnotation) {
+                        break;
+                    case INT64:
+                        if (logicalType
+                                instanceof LogicalTypeAnnotation.DecimalLogicalTypeAnnotation) {
+                            LogicalTypeAnnotation.DecimalLogicalTypeAnnotation decimalType =
+                                    (LogicalTypeAnnotation.DecimalLogicalTypeAnnotation)
+                                            logicalType;
+                            paimonDataType =
+                                    new DecimalType(
+                                            decimalType.getPrecision(), decimalType.getScale());
+                        } else if (logicalType
+                                instanceof LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) {
+                            LogicalTypeAnnotation.TimestampLogicalTypeAnnotation timestampType =
+                                    (LogicalTypeAnnotation.TimestampLogicalTypeAnnotation)
+                                            logicalType;
+                            int precision;
+                            if (timestampType
+                                    .getUnit()
+                                    .equals(LogicalTypeAnnotation.TimeUnit.MILLIS)) {
+                                precision = 3;
+                            } else if (timestampType
+                                    .getUnit()
+                                    .equals(LogicalTypeAnnotation.TimeUnit.MICROS)) {
+                                precision = 6;
+                            } else {
+                                precision = 9;
+                            }
+                            paimonDataType =
+                                    timestampType.isAdjustedToUTC()
+                                            ? new LocalZonedTimestampType(precision)
+                                            : new TimestampType(precision);
+                        } else {
+                            paimonDataType = DataTypes.BIGINT();
+                        }
+                        break;
+                    case INT96:
+                        paimonDataType = new TimestampType(9);
+                        break;
+                    case FIXED_LEN_BYTE_ARRAY:
                         LogicalTypeAnnotation.DecimalLogicalTypeAnnotation decimalType =
                                 (LogicalTypeAnnotation.DecimalLogicalTypeAnnotation) logicalType;
                         paimonDataType =
                                 new DecimalType(decimalType.getPrecision(), decimalType.getScale());
-                    } else if (logicalType
-                            instanceof LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) {
-                        LogicalTypeAnnotation.TimestampLogicalTypeAnnotation timestampType =
-                                (LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) logicalType;
-                        int precision;
-                        if (timestampType.getUnit().equals(LogicalTypeAnnotation.TimeUnit.MILLIS)) {
-                            precision = 3;
-                        } else if (timestampType
-                                .getUnit()
-                                .equals(LogicalTypeAnnotation.TimeUnit.MICROS)) {
-                            precision = 6;
-                        } else {
-                            precision = 9;
-                        }
-                        paimonDataType =
-                                timestampType.isAdjustedToUTC()
-                                        ? new LocalZonedTimestampType(precision)
-                                        : new TimestampType(precision);
-                    } else {
-                        paimonDataType = DataTypes.BIGINT();
-                    }
-                    break;
-                case INT96:
-                    paimonDataType = new TimestampType(9);
-                    break;
-                case FIXED_LEN_BYTE_ARRAY:
-                    LogicalTypeAnnotation.DecimalLogicalTypeAnnotation decimalType =
-                            (LogicalTypeAnnotation.DecimalLogicalTypeAnnotation) logicalType;
-                    paimonDataType =
-                            new DecimalType(decimalType.getPrecision(), decimalType.getScale());
-                    break;
-                default:
-                    throw new UnsupportedOperationException("Unsupported type: " + parquetType);
+                        break;
+                    default:
+                        throw new UnsupportedOperationException("Unsupported type: " + parquetType);
+                }
+                if (parquetType.getRepetition().equals(Type.Repetition.REQUIRED)) {
+                    paimonDataType = paimonDataType.notNull();
+                }
+                return new DataField(
+                        parquetType.getId().intValue(), parquetType.getName(), paimonDataType);
+            } else {
+                GroupType groupType = parquetType.asGroupType();
+                if (ParquetListLayoutResolver.isList(groupType)) {
+                    paimonDataType = convertList(groupType);
+                } else if (logicalType instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
+                    paimonDataType = convertMap(groupType);
+                } else if (ParquetListLayoutResolver.isLegacyNestedList(groupType)) {
+                    paimonDataType = convertTwoLevelList(groupType);
+                } else {
+                    paimonDataType = convertRow(groupType);
+                }
             }
+
             if (parquetType.getRepetition().equals(Type.Repetition.REQUIRED)) {
                 paimonDataType = paimonDataType.notNull();
             }
+
             return new DataField(
                     parquetType.getId().intValue(), parquetType.getName(), paimonDataType);
-        } else {
-            GroupType groupType = parquetType.asGroupType();
-            if (logicalType instanceof LogicalTypeAnnotation.ListLogicalTypeAnnotation) {
-                paimonDataType =
-                        new ArrayType(
-                                convertToPaimonField(parquetListElementType(groupType)).type());
-            } else if (logicalType instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
-                Pair<Type, Type> keyValueType = parquetMapKeyValueType(groupType);
-                paimonDataType =
-                        new MapType(
-                                // Since parquet does not support nullable key, when converting
-                                // back to Paimon, set as nullable by default.
-                                convertToPaimonField(keyValueType.getLeft()).type().nullable(),
-                                convertToPaimonField(keyValueType.getRight()).type());
-            } else {
-                paimonDataType =
-                        new RowType(
-                                groupType.getFields().stream()
-                                        .map(ParquetSchemaConverter::convertToPaimonField)
-                                        .collect(Collectors.toList()));
+        }
+
+        private DataType convertList(GroupType groupType) {
+            return listLayout.isThreeLevelList(groupType, path)
+                    ? convertThreeLevelList(groupType)
+                    : convertTwoLevelList(groupType);
+        }
+
+        private DataType convertThreeLevelList(GroupType groupType) {
+            GroupType repeated = groupType.getType(0).asGroupType();
+            DataType elementType = convertChild(repeated.getType(0), repeated.getName()).type();
+            return new ArrayType(elementType);
+        }
+
+        /**
+         * Rules 1-4: the repeated node itself is the element. A REPEATED node is never null, so the
+         * element type is not nullable.
+         */
+        private DataType convertTwoLevelList(GroupType groupType) {
+            return new ArrayType(convertChild(groupType.getType(0)).type().notNull());
+        }
+
+        private DataType convertRow(GroupType groupType) {
+            return new RowType(
+                    groupType.getFields().stream()
+                            .map(this::convertChild)
+                            .collect(Collectors.toList()));
+        }
+
+        private DataType convertMap(GroupType groupType) {
+            Pair<Type, Type> keyValueType = parquetMapKeyValueType(groupType);
+            String keyValueName = groupType.getType(0).getName();
+            // Since parquet does not support nullable key, when converting back to Paimon, set as
+            // nullable by default.
+            return new MapType(
+                    convertChild(keyValueType.getLeft(), keyValueName).type().nullable(),
+                    convertChild(keyValueType.getRight(), keyValueName).type());
+        }
+
+        private DataField convertChild(Type child) {
+            path.addLast(child.getName());
+            try {
+                return convert(child);
+            } finally {
+                path.removeLast();
             }
         }
 
-        if (parquetType.getRepetition().equals(Type.Repetition.REQUIRED)) {
-            paimonDataType = paimonDataType.notNull();
-        }
-
-        return new DataField(parquetType.getId().intValue(), parquetType.getName(), paimonDataType);
-    }
-
-    public static Type parquetListElementType(GroupType listType) {
-        int level = listType.getType(0) instanceof GroupType ? 3 : 2;
-        if (level == 3) {
-            // Level 3 representation of list type.
-            // List type should only have one middle group type, which is repeated, and one element
-            // type, which is optional.
-            return listType.getType(0).asGroupType().getType(0);
-        } else if (level == 2) {
-            // Level 2 representation of list type
-            return listType.getType(0);
-        } else {
-            throw new UnsupportedOperationException(
-                    "Parquet list type only have two level representation and three level representation.");
+        private DataField convertChild(Type child, String parentName) {
+            path.addLast(parentName);
+            try {
+                return convertChild(child);
+            } finally {
+                path.removeLast();
+            }
         }
     }
 

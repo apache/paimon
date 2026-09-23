@@ -24,7 +24,6 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -179,6 +178,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public IndexFileHandler indexFileHandler() {
+        return indexFileHandler;
+    }
+
+    @Override
     public SnapshotReader withSnapshot(long snapshotId) {
         scan.withSnapshot(snapshotId);
         return this;
@@ -233,17 +237,31 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public SnapshotReader withFilter(Predicate predicate) {
+        return withFilter(predicate, predicate);
+    }
+
+    @Override
+    public SnapshotReader withFilter(Predicate predicate, @Nullable Predicate pushdownPredicate) {
         Pair<Optional<PartitionPredicate>, List<Predicate>> pair =
                 splitPartitionPredicatesAndDataPredicates(
                         predicate, tableSchema.logicalRowType(), tableSchema.partitionKeys());
-        if (pair.getLeft().isPresent()) {
-            scan.withPartitionFilter(pair.getLeft().get());
-        }
         if (!pair.getRight().isEmpty()) {
             this.hasNonPartitionFilter = true;
-            nonPartitionFilterConsumer.accept(scan, PredicateBuilder.and(pair.getRight()));
         }
-        scan.withCompleteFilter(predicate);
+
+        Pair<Optional<PartitionPredicate>, List<Predicate>> pushdownPair =
+                splitPartitionPredicatesAndDataPredicates(
+                        pushdownPredicate,
+                        tableSchema.logicalRowType(),
+                        tableSchema.partitionKeys());
+        if (pushdownPair.getLeft().isPresent()) {
+            scan.withPartitionFilter(pushdownPair.getLeft().get());
+        }
+        if (!pushdownPair.getRight().isEmpty()) {
+            this.hasNonPartitionFilter = true;
+            nonPartitionFilterConsumer.accept(scan, PredicateBuilder.and(pushdownPair.getRight()));
+        }
+        scan.withCompleteFilter(pushdownPredicate);
         return this;
     }
 
@@ -335,7 +353,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
-    public SnapshotReader withLimit(int limit) {
+    public SnapshotReader withLimit(long limit) {
         scan.withLimit(limit);
         return this;
     }
@@ -590,6 +608,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 groupByPartFiles(plan.files(FileKind.ADD));
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles =
                 groupByPartFiles(scan.withSnapshot(before).plan().files(FileKind.ADD));
+        TimeTravelUtil.checkRescaleBucketForIncrementalDiffQuery(
+                tableSchema, before, beforeFiles, plan.snapshot(), afterFiles);
         return toIncrementalPlan(
                 false,
                 new LazyField<>(() -> before),
@@ -630,15 +650,16 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     private Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> scanDvIndex(
             @Nullable Snapshot snapshot, Set<Pair<BinaryRow, Integer>> buckets) {
-        if (snapshot == null || snapshot.indexManifest() == null) {
+        if (snapshot == null || snapshot.indexManifest() == null || buckets.isEmpty()) {
             return Collections.emptyMap();
         }
         Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> result = new HashMap<>();
         Path indexManifestPath = indexFileHandler.indexManifestFilePath(snapshot.indexManifest());
+        Set<Pair<BinaryRow, Integer>> remainingBuckets = new HashSet<>(buckets);
 
         // 1. read from cache
         if (dvMetaCache != null) {
-            Iterator<Pair<BinaryRow, Integer>> iterator = buckets.iterator();
+            Iterator<Pair<BinaryRow, Integer>> iterator = remainingBuckets.iterator();
             while (iterator.hasNext()) {
                 Pair<BinaryRow, Integer> next = iterator.next();
                 BinaryRow partition = next.getLeft();
@@ -658,52 +679,65 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 }
             }
         }
+        if (remainingBuckets.isEmpty()) {
+            return result;
+        }
 
         // 2. read from file system
         Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> partitionFileMetas =
-                indexFileHandler.scan(
-                        snapshot,
-                        DELETION_VECTORS_INDEX,
-                        buckets.stream().map(Pair::getLeft).collect(Collectors.toSet()));
+                dvMetaCache == null
+                        ? indexFileHandler.scanBuckets(
+                                snapshot, DELETION_VECTORS_INDEX, remainingBuckets)
+                        : indexFileHandler.scan(
+                                snapshot,
+                                DELETION_VECTORS_INDEX,
+                                remainingBuckets.stream()
+                                        .map(Pair::getLeft)
+                                        .collect(Collectors.toSet()));
         partitionFileMetas.forEach(
                 (entry, indexFileMetas) -> {
-                    Map<String, DeletionFile> deletionFiles =
-                            toDeletionFiles(entry, indexFileMetas);
-                    if (dvMetaCache != null) {
-                        dvMetaCache.put(
+                    Pair<BinaryRow, Integer> partitionBucket = entry;
+                    if (remainingBuckets.contains(entry)) {
+                        Map<String, DeletionFile> deletionFiles =
+                                indexFileHandler
+                                        .dvIndex(
+                                                partitionBucket.getLeft(),
+                                                partitionBucket.getRight())
+                                        .toDeletionFiles(indexFileMetas);
+                        result.put(partitionBucket, deletionFiles);
+                        if (dvMetaCache != null) {
+                            dvMetaCache.put(
+                                    indexManifestPath,
+                                    partitionBucket.getLeft(),
+                                    partitionBucket.getRight(),
+                                    deletionFiles);
+                        }
+                    } else if (dvMetaCache != null) {
+                        dvMetaCache.putLazy(
                                 indexManifestPath,
-                                entry.getLeft(),
-                                entry.getRight(),
-                                deletionFiles);
-                    }
-                    if (buckets.contains(entry)) {
-                        result.put(entry, deletionFiles);
+                                partitionBucket.getLeft(),
+                                partitionBucket.getRight(),
+                                deletionFileNumber(indexFileMetas),
+                                () ->
+                                        indexFileHandler
+                                                .dvIndex(
+                                                        partitionBucket.getLeft(),
+                                                        partitionBucket.getRight())
+                                                .toDeletionFiles(indexFileMetas));
                     }
                 });
         return result;
     }
 
-    private Map<String, DeletionFile> toDeletionFiles(
-            Pair<BinaryRow, Integer> partitionBucket, List<IndexFileMeta> fileMetas) {
-        Map<String, DeletionFile> deletionFiles = new HashMap<>();
-        DeletionVectorsIndexFile dvIndex =
-                indexFileHandler.dvIndex(partitionBucket.getLeft(), partitionBucket.getRight());
+    private int deletionFileNumber(List<IndexFileMeta> fileMetas) {
+        int count = 0;
         for (IndexFileMeta indexFile : fileMetas) {
             LinkedHashMap<String, DeletionVectorMeta> dvRanges = indexFile.dvRanges();
-            String dvFilePath = dvIndex.path(indexFile).toString();
-            if (dvRanges != null && !dvRanges.isEmpty()) {
-                for (DeletionVectorMeta dvMeta : dvRanges.values()) {
-                    deletionFiles.put(
-                            dvMeta.dataFileName(),
-                            new DeletionFile(
-                                    dvFilePath,
-                                    dvMeta.offset(),
-                                    dvMeta.length(),
-                                    dvMeta.cardinality()));
-                }
+            if (dvRanges != null) {
+                count += dvRanges.size();
             }
         }
-        return deletionFiles;
+        return count;
     }
 
     /**

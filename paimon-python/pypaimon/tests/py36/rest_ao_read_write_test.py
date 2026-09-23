@@ -16,8 +16,10 @@
 # under the License.
 
 import logging
-import time
 import random
+import sys
+import time
+import unittest
 from datetime import date
 from decimal import Decimal
 from unittest.mock import Mock
@@ -241,7 +243,12 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
         actual_data = table_read.to_arrow(table_scan.plan().splits())
-        self.assertEqual(actual_data, expect_data)
+        # BINARY(N) maps to variable-length binary on read (see #7518), so the
+        # fixed-size f9 column normalizes to binary; reflect that in the expected.
+        f9_index = expect_data.schema.get_field_index('f9')
+        expected_data = expect_data.set_column(
+            f9_index, 'f9', expect_data.column('f9').cast(pa.binary()))
+        self.assertEqual(actual_data, expected_data)
 
         # to test GenericRow ability
         latest_snapshot = table.snapshot_manager().get_latest_snapshot()
@@ -644,6 +651,10 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
             table_write.write_arrow_batch(record_batch)
         self.assertTrue(str(e.exception).startswith("Input schema isn't consistent with table schema and write cols."))
 
+    @unittest.skipIf(
+        sys.version_info[:2] == (3, 6),
+        "Large wide-table test is prohibitively slow on Python 3.6."
+    )
     def test_write_wide_table_large_data(self):
         logging.basicConfig(level=logging.INFO)
         catalog = CatalogFactory.create(self.options)

@@ -20,14 +20,13 @@ package org.apache.paimon.benchmark;
 
 import org.apache.paimon.utils.StringUtils;
 
-import org.apache.paimon.shade.org.apache.commons.lang3.SystemUtils;
-
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /** Utility class to benchmark. */
 public class Benchmark {
@@ -160,7 +159,8 @@ public class Benchmark {
     }
 
     private String getProcessorName() {
-        if (SystemUtils.IS_OS_MAC_OSX) {
+        String osName = System.getProperties().getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        if (osName.contains("mac")) {
             try {
                 return StringUtils.stripEnd(
                         executeAndGetOutput(
@@ -171,7 +171,7 @@ public class Benchmark {
             } catch (Throwable e) {
                 return "Unknown processor";
             }
-        } else if (SystemUtils.IS_OS_LINUX) {
+        } else if (osName.contains("linux")) {
             try {
                 String grepPath =
                         StringUtils.stripEnd(

@@ -46,7 +46,6 @@ public abstract class Sorter {
     protected final int[] valueProjectionMap;
     private final int arity;
 
-    private final transient IOManager ioManager;
     private final transient BinaryExternalSortBuffer buffer;
 
     public Sorter(
@@ -77,7 +76,6 @@ public abstract class Sorter {
         CompressOptions spillCompression = options.spillCompressOptions();
         MemorySize maxDiskSize = options.writeBufferSpillDiskSize();
 
-        this.ioManager = ioManager;
         this.buffer =
                 BinaryExternalSortBuffer.create(
                         ioManager,
@@ -104,7 +102,7 @@ public abstract class Sorter {
             buffer.write(rowWithKey);
         }
 
-        if (buffer.size() > 0) {
+        if (!buffer.isEmpty()) {
             return buffer.sortedIterator();
         } else {
             throw new IllegalStateException("numRecords after sorting is 0.");
@@ -116,11 +114,10 @@ public abstract class Sorter {
     }
 
     public void close() throws Exception {
-        if (buffer != null) {
+        try {
             buffer.clear();
-        }
-        if (ioManager != null) {
-            ioManager.close();
+        } finally {
+            reader.close();
         }
     }
 

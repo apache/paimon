@@ -90,9 +90,7 @@ public class ManifestsTableTest extends TableTestBase {
         ManifestList.Factory factory =
                 new ManifestList.Factory(
                         fileIO,
-                        FileFormat.fromIdentifier(
-                                CoreOptions.MANIFEST_FORMAT.defaultValue().toString(),
-                                new Options()),
+                        FileFormat.fromIdentifier(CoreOptions.FILE_FORMAT_AVRO, new Options()),
                         "zstd",
                         createNonPartFactory(tablePath),
                         null);

@@ -39,8 +39,8 @@ public class CreateTagFromWatermarkActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        String tag = params.get(TAG);
-        Long watermark = Long.parseLong(params.get(WATERMARK));
+        String tag = params.getRequired(TAG);
+        Long watermark = Long.parseLong(params.getRequired(WATERMARK));
         String timeRetained = params.get(TIME_RETAINED);
         Map<String, String> catalogConfig = catalogConfigMap(params);
 
@@ -68,7 +68,7 @@ public class CreateTagFromWatermarkActionFactory implements ActionFactory {
                         + "--table <table_name> \\\n"
                         + "--tag <tag> \\\n"
                         + "--watermark <watermark> \\\n"
-                        + "[--timeRetained <duration>] \\\n"
+                        + "[--time_retained <duration>] \\\n"
                         + "[--options <key>=<value>,<key>=<value>,...]");
     }
 }

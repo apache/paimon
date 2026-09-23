@@ -54,6 +54,8 @@ public class RenameTagActionFactory implements ActionFactory {
         System.out.println(
                 "  rename_tag \\\n"
                         + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
                         + "--tag_name <tag_name> \\\n"
                         + "--target_tag_name <target_tag_name>");
         System.out.println();

@@ -32,10 +32,12 @@ public class CustomLineReader implements TextLineReader {
 
     private final InputStream inputStream;
     private final byte[] delimiter;
+    private final int[] prefixTable;
 
     public CustomLineReader(InputStream inputStream, byte[] delimiter) {
         this.inputStream = inputStream;
         this.delimiter = delimiter;
+        this.prefixTable = buildPrefixTable(delimiter);
     }
 
     @Nullable
@@ -61,6 +63,12 @@ public class CustomLineReader implements TextLineReader {
             }
 
             byte current = (byte) b;
+            while (matchIndex > 0 && current != delimiter[matchIndex]) {
+                int fallback = prefixTable[matchIndex - 1];
+                out.write(delimiter, 0, matchIndex - fallback);
+                matchIndex = fallback;
+            }
+
             if (current == delimiter[matchIndex]) {
                 // Current byte matches the next expected delimiter byte
                 matchIndex++;
@@ -68,20 +76,26 @@ public class CustomLineReader implements TextLineReader {
                     // Complete delimiter found, return the line without the delimiter
                     return out.toString(StandardCharsets.UTF_8.name());
                 }
-            } else if (matchIndex > 0) {
-                // Mismatch: handle partial matches
-                out.write(delimiter, 0, matchIndex);
-                if (current == delimiter[0]) {
-                    matchIndex = 1;
-                } else {
-                    out.write(current);
-                    matchIndex = 0;
-                }
             } else {
                 // just add the current byte to output
                 out.write(current);
             }
         }
+    }
+
+    private static int[] buildPrefixTable(byte[] delimiter) {
+        int[] table = new int[delimiter.length];
+        int matched = 0;
+        for (int i = 1; i < delimiter.length; i++) {
+            while (matched > 0 && delimiter[i] != delimiter[matched]) {
+                matched = table[matched - 1];
+            }
+            if (delimiter[i] == delimiter[matched]) {
+                matched++;
+            }
+            table[i] = matched;
+        }
+        return table;
     }
 
     @Override

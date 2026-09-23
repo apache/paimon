@@ -23,7 +23,9 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.MeterView;
 import org.apache.flink.metrics.MetricGroup;
+import org.apache.flink.metrics.SimpleCounter;
 import org.apache.flink.metrics.groups.OperatorIOMetricGroup;
+import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.runtime.metrics.MetricNames;
 
 /** Flink metrics for {@link Committer}. */
@@ -34,14 +36,27 @@ public class CommitterMetrics {
     private final Counter numBytesOutCounter;
     private final Counter numRecordsOutCounter;
 
-    public CommitterMetrics(OperatorIOMetricGroup metricGroup) {
-        MetricGroup sinkMetricGroup = metricGroup.addGroup(SINK_METRIC_GROUP);
+    public CommitterMetrics(MetricGroup metricGroup) {
+        MetricGroup sinkMetricGroup;
 
-        numBytesOutCounter = metricGroup.getNumBytesOutCounter();
+        // When the committer runs as a regular operator we can wire its counters into the
+        // operator's IO metric group; when it runs inside an OperatorCoordinator the coordinator
+        // exposes a plain MetricGroup, so we fall back to local SimpleCounters.
+        if (metricGroup instanceof OperatorMetricGroup) {
+            OperatorIOMetricGroup operatorIOMetricGroup =
+                    ((OperatorMetricGroup) metricGroup).getIOMetricGroup();
+            sinkMetricGroup = operatorIOMetricGroup.addGroup(SINK_METRIC_GROUP);
+            numBytesOutCounter = operatorIOMetricGroup.getNumBytesOutCounter();
+            numRecordsOutCounter = operatorIOMetricGroup.getNumRecordsOutCounter();
+        } else {
+            sinkMetricGroup = metricGroup.addGroup(SINK_METRIC_GROUP);
+            numBytesOutCounter = new SimpleCounter();
+            numRecordsOutCounter = new SimpleCounter();
+        }
+
         sinkMetricGroup.counter(MetricNames.IO_NUM_BYTES_OUT, numBytesOutCounter);
         sinkMetricGroup.meter(MetricNames.IO_NUM_BYTES_OUT_RATE, new MeterView(numBytesOutCounter));
 
-        numRecordsOutCounter = metricGroup.getNumRecordsOutCounter();
         sinkMetricGroup.counter(MetricNames.IO_NUM_RECORDS_OUT, numRecordsOutCounter);
         sinkMetricGroup.meter(
                 MetricNames.IO_NUM_RECORDS_OUT_RATE, new MeterView(numRecordsOutCounter));

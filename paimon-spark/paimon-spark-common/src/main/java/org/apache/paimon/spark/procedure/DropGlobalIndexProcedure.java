@@ -46,6 +46,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -66,12 +67,15 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                 ProcedureParameter.required("index_column", DataTypes.StringType),
                 ProcedureParameter.required("index_type", DataTypes.StringType),
                 ProcedureParameter.optional("partitions", StringType),
+                ProcedureParameter.optional("dry_run", DataTypes.BooleanType),
             };
 
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
+                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty()),
+                        new StructField(
+                                "dropped_file_count", DataTypes.LongType, true, Metadata.empty())
                     });
 
     protected DropGlobalIndexProcedure(TableCatalog tableCatalog) {
@@ -102,10 +106,16 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                 (args.isNullAt(3) || StringUtils.isNullOrWhitespaceOnly(args.getString(3)))
                         ? null
                         : args.getString(3);
+        boolean dryRun = !args.isNullAt(4) && args.getBoolean(4);
 
-        String finalWhere = partitions != null ? SparkProcedureUtils.toWhere(partitions) : null;
+        LOG.info("Starting to drop index for table {} with partitions: {}", tableIdent, partitions);
 
-        LOG.info("Starting to drop index for table " + tableIdent + " WHERE: " + finalWhere);
+        List<String> indexColumns =
+                Arrays.stream(column.split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .collect(Collectors.toList());
+        checkArgument(!indexColumns.isEmpty(), "At least one column required.");
 
         return modifyPaimonTable(
                 tableIdent,
@@ -117,18 +127,21 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                         FileStoreTable table = (FileStoreTable) t;
 
                         RowType rowType = table.rowType();
-                        checkArgument(
-                                rowType.containsField(column),
-                                "Column '%s' does not exist in table '%s'.",
-                                column,
-                                tableIdent);
+                        for (String col : indexColumns) {
+                            checkArgument(
+                                    rowType.containsField(col),
+                                    "Column '%s' does not exist in table '%s'.",
+                                    col,
+                                    tableIdent);
+                        }
+                        List<Integer> indexFieldIds =
+                                indexColumns.stream()
+                                        .map(col -> rowType.getField(col).id())
+                                        .collect(Collectors.toList());
                         DataSourceV2Relation relation = createRelation(tableIdent);
                         PartitionPredicate partitionPredicate =
-                                SparkProcedureUtils.convertToPartitionPredicate(
-                                        finalWhere,
-                                        table.schema().logicalPartitionType(),
-                                        spark(),
-                                        relation);
+                                SparkProcedureUtils.convertPartitionsToPartitionPredicate(
+                                        partitions, table, spark());
 
                         Snapshot snapshot =
                                 t.latestSnapshot()
@@ -144,9 +157,9 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                                         entry.indexFile().indexType().equals(indexType)
                                                 && entry.indexFile().globalIndexMeta() != null
                                                 && entry.indexFile()
-                                                                .globalIndexMeta()
-                                                                .indexFieldId()
-                                                        == rowType.getField(column).id()
+                                                        .globalIndexMeta()
+                                                        .getIndexedFieldIds()
+                                                        .equals(indexFieldIds)
                                                 && (partitionPredicate == null
                                                         || partitionPredicate.test(
                                                                 entry.partition()));
@@ -157,6 +170,18 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                         LOG.info(
                                 "Waiting for global index to be deleted size: "
                                         + waitDelete.size());
+
+                        // Dry run: report how many would be dropped, commit nothing.
+                        if (dryRun) {
+                            return new InternalRow[] {
+                                newInternalRow(true, (long) waitDelete.size())
+                            };
+                        }
+
+                        // Nothing matched: avoid committing an empty change.
+                        if (waitDelete.isEmpty()) {
+                            return new InternalRow[] {newInternalRow(true, 0L)};
+                        }
 
                         Map<BinaryRow, List<IndexFileMeta>> deleteEntries =
                                 waitDelete.stream()
@@ -188,12 +213,12 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                             commit.commit(commitMessages);
                         }
 
-                        return new InternalRow[] {newInternalRow(true)};
+                        return new InternalRow[] {newInternalRow(true, (long) waitDelete.size())};
                     } catch (Exception e) {
                         throw new RuntimeException(
                                 String.format(
-                                        "Failed to drop %s index for column '%s' on table '%s'.",
-                                        indexType, column, tableIdent),
+                                        "Failed to drop %s index for columns '%s' on table '%s'.",
+                                        indexType, String.join(",", indexColumns), tableIdent),
                                 e);
                     }
                 });

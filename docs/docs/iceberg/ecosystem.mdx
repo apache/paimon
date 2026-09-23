@@ -1,10 +1,7 @@
 ---
-title: "Ecosystem"
-sidebar_position: 6
+title: "Query Engines"
+sidebar_position: 8
 ---
-
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
 
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -25,92 +22,98 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Iceberg Ecosystems
+# Query Engines
 
-## AWS Athena
+An engine's Iceberg connector can read Paimon's published Iceberg representation if it supports
+the catalog, data file format, column types, and Iceberg features used by the table. Configure the
+reader's access to both metadata and the original Paimon data files.
 
-AWS Athena may use old manifest reader to read Iceberg manifest by names, we should let Paimon producing legacy Iceberg
-manifest list file, you can enable: `'metadata.iceberg.manifest-legacy-version'`.
-
-## DuckDB
-
-Duckdb may rely on files placed in the `root/data` directory, while Paimon is usually placed directly in the `root`
-directory, so you can configure this parameter for the table to achieve compatibility:
-`'data-file.path-directory' = 'data'`.
+For Flink and Spark, start with the [append-table walkthrough](./append-table.mdx). The examples
+below use Iceberg connectors; all writes and maintenance remain in Paimon.
 
 ## Trino Iceberg
 
-In this example, we use Trino Iceberg connector to access Paimon table through Iceberg Hive catalog.
-Before trying out this example, make sure that you have configured Trino Iceberg connector.
-See [Trino's document](https://trino.io/docs/current/connector/iceberg.html#general-configuration) for more information.
+First publish the `animals` table using the [Hive catalog example](./hive-catalog.md#publish-a-table).
+Configure Trino to connect to the same Hive metastore.
 
-Let's first create a Paimon table with Iceberg compatibility enabled.
+Create `etc/catalog/iceberg.properties` on the Trino server:
 
-<Tabs groupId="paimon-append-only-table-trino-1">
+```properties
+connector.name=iceberg
+iceberg.catalog.type=hive_metastore
+hive.metastore.uri=thrift://<metastore-host>:9083
+```
 
-<TabItem value="flink-sql" label="Flink SQL">
+Add the filesystem configuration and credentials required by your storage. Trino requires a
+configured filesystem in addition to the metastore connection; see the
+[Iceberg connector configuration](https://trino.io/docs/current/connector/iceberg.html#general-configuration).
+
+Query the registered table with the fully qualified catalog, schema, and table name:
 
 ```sql
-CREATE CATALOG paimon_catalog WITH (
-    'type' = 'paimon',
-    'warehouse' = '<path-to-warehouse>'
-);
-
-CREATE TABLE paimon_catalog.`default`.animals (
-    kind STRING,
-    name STRING
-) WITH (
-    'metadata.iceberg.storage' = 'hive-catalog',
-    'metadata.iceberg.uri' = 'thrift://<host>:<port>'
-);
-
-INSERT INTO paimon_catalog.`default`.animals VALUES ('mammal', 'cat'), ('mammal', 'dog'), ('reptile', 'snake'), ('reptile', 'lizard');
+SELECT kind, name
+FROM iceberg.default.animals
+WHERE kind = 'mammal'
+ORDER BY name;
 ```
 
-</TabItem>
-
-<TabItem value="spark-sql" label="Spark SQL">
-
-Start `spark-sql` with the following command line.
-
-```bash
-spark-sql --jars <path-to-paimon-jar> \
-    --conf spark.sql.catalog.paimon_catalog=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.paimon_catalog.warehouse=<path-to-warehouse> \
-    --packages org.apache.iceberg:iceberg-spark-runtime-<iceberg-version> \
-    --conf spark.sql.catalog.iceberg_catalog=org.apache.iceberg.spark.SparkCatalog \
-    --conf spark.sql.catalog.iceberg_catalog.type=hadoop \
-    --conf spark.sql.catalog.iceberg_catalog.warehouse=<path-to-warehouse>/iceberg \
-    --conf spark.sql.catalog.iceberg_catalog.cache-enabled=false \ # disable iceberg catalog caching to quickly see the result
-    --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions,org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+```text
+kind    name
+mammal  cat
+mammal  dog
 ```
 
-Run the following Spark SQL to create Paimon table, insert/update data, and query with Iceberg catalog.
+If you configured `metadata.iceberg.database` or `metadata.iceberg.table`, use those registration
+names in the Trino query.
+
+## AWS Athena
+
+Athena discovers Iceberg tables through AWS Glue. Publish the table using a properly configured
+[Glue Hive client](./hive-catalog.md#aws-glue-catalog), and check Athena's
+[Iceberg limitations](https://docs.aws.amazon.com/athena/latest/ug/querying-iceberg.html).
+Athena documents support for Iceberg v2 tables. Use the full-compaction mode for primary key tables
+when querying with a reader that cannot consume v3 deletion vectors.
+
+For readers that require the legacy manifest field naming, enable this Paimon table option:
 
 ```sql
-CREATE TABLE paimon_catalog.`default`.animals (
-    kind STRING,
-    name STRING
-) TBLPROPERTIES (
-    'metadata.iceberg.storage' = 'hive-catalog',
-    'metadata.iceberg.uri' = 'thrift://<host>:<port>'
-);
-
-INSERT INTO paimon_catalog.`default`.animals VALUES ('mammal', 'cat'), ('mammal', 'dog'), ('reptile', 'snake'), ('reptile', 'lizard');
+'metadata.iceberg.manifest-legacy-version' = 'true'
 ```
 
-</TabItem>
+This controls the manifest representation; it does not add support for otherwise unsupported
+Iceberg versions or column types.
 
-</Tabs>
+## DuckDB
 
-Start Trino using Iceberg catalog and query from Paimon table.
+Install and load DuckDB's [Iceberg extension](https://duckdb.org/docs/current/core_extensions/iceberg/overview)
+and choose the catalog or metadata-file access method supported by your extension version.
+Check its support for the format version and deletion information used by the table.
+
+When troubleshooting a read, verify that the data paths referenced by the manifests are reachable.
+Paimon's data files remain in the Paimon table directory even when the Iceberg metadata is in a
+separate warehouse. Do not treat `<warehouse>/iceberg` as a copy of the data.
+
+For integrations that require data files under a `data` subdirectory, Paimon supports the following
+option for new writes:
 
 ```sql
-SELECT * FROM animals WHERE class = 'mammal';
-/*
-   kind | name 
---------+------
- mammal | cat  
- mammal | dog  
-*/
+'data-file.path-directory' = 'data'
 ```
+
+Changing this setting does not relocate existing data files. Use it only when required by the
+reader or integration you deploy. Keep `metadata.iceberg.manifest-compression` at its default
+`snappy` unless the reader supports the alternative codec.
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| Table not found | Publication mode, Hadoop warehouse path, Hive/REST registration name, and writer-side catalog dependencies |
+| New rows are missing | Completed Paimon commit, primary key compaction mode, metadata publication, and reader cache |
+| Data files cannot be opened | Reader filesystem support, credentials, and access to the original Paimon data paths |
+| Schema or manifest parsing fails | [Type restrictions](./data-types.md), format version, manifest codec, and connector version |
+| Tag not found | Whether its snapshot exists in Iceberg metadata, reader refresh, and [REST tag limitations](./iceberg-tags.md) |
+
+For Hive or REST tables missing from the service, inspect the writer logs as well as the local
+metadata directory. A missing metadata committer dependency can leave local Iceberg metadata files
+present without registering the table in the external catalog.

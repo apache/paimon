@@ -18,6 +18,7 @@
 
 package org.apache.paimon.schema;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
@@ -63,6 +64,21 @@ public class SchemaBuilderTest {
                         anyCauseMatches(
                                 IllegalStateException.class,
                                 "Partition key constraint [id, id] must not contain duplicate columns. Found: [id]"));
+    }
+
+    @Test
+    public void testPrimaryKeyNullability() {
+        Schema defaultSchema =
+                Schema.newBuilder().column("id", DataTypes.INT()).primaryKey("id").build();
+        assertThat(defaultSchema.fields().get(0).type().isNullable()).isFalse();
+
+        Schema nullableSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT().notNull())
+                        .primaryKey("id")
+                        .option(CoreOptions.PRIMARY_KEY_NULLABLE.key(), "true")
+                        .build();
+        assertThat(nullableSchema.fields().get(0).type().isNullable()).isTrue();
     }
 
     @Test

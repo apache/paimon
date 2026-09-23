@@ -19,7 +19,6 @@
 package org.apache.paimon.utils;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 
 /**
  * Combining Delta Encoding and Varints Encoding, suitable for integer sequences that are increasing
@@ -33,21 +32,57 @@ public class DeltaVarintCompressor {
             return new byte[0];
         }
 
-        LongArrayList deltas = new LongArrayList(data.length);
-        // Store the first element
-        deltas.add(data[0]);
+        // First pass: compute the exact encoded size without allocating.
+        long size = varintSize(data[0]);
+        long previous = data[0];
         for (int i = 1; i < data.length; i++) {
-            // Compute delta
-            deltas.add(data[i] - data[i - 1]);
+            long current = data[i];
+            size += varintSize(current - previous);
+            previous = current;
+        }
+        checkIndexSize(size);
+
+        // Second pass: encode into a precisely sized buffer.
+        byte[] out = new byte[(int) size];
+        int pos = 0;
+        previous = data[0];
+        pos = encodeVarint(previous, out, pos);
+        for (int i = 1; i < data.length; i++) {
+            long current = data[i];
+            pos = encodeVarint(current - previous, out, pos);
+            previous = current;
+        }
+        return out;
+    }
+
+    // Compresses a LongArrayList directly, avoiding a copy into a temporary long[].
+    public static byte[] compressLongArrayList(LongArrayList data) {
+        if (data == null || data.size() == 0) {
+            return new byte[0];
         }
 
-        // Pre-allocate space
-        ByteArrayOutputStream out = new ByteArrayOutputStream(data.length * 10);
-        for (int i = 0; i < deltas.size(); i++) {
-            // Apply ZigZag and Varints
-            encodeVarint(deltas.get(i), out);
+        int count = data.size();
+        // First pass: compute the exact encoded size without allocating.
+        long size = varintSize(data.get(0));
+        long previous = data.get(0);
+        for (int i = 1; i < count; i++) {
+            long current = data.get(i);
+            size += varintSize(current - previous);
+            previous = current;
         }
-        return out.toByteArray();
+        checkIndexSize(size);
+
+        // Second pass: encode into a precisely sized buffer.
+        byte[] out = new byte[(int) size];
+        int pos = 0;
+        previous = data.get(0);
+        pos = encodeVarint(previous, out, pos);
+        for (int i = 1; i < count; i++) {
+            long current = data.get(i);
+            pos = encodeVarint(current - previous, out, pos);
+            previous = current;
+        }
+        return out;
     }
 
     // Decompresses a byte array back to the original long array
@@ -74,19 +109,33 @@ public class DeltaVarintCompressor {
         return result;
     }
 
-    // Encodes a long value using ZigZag and Varints
-    private static void encodeVarint(long value, ByteArrayOutputStream out) {
-        // ZigZag transformation for long
+    // Number of bytes a value occupies after ZigZag and Varints encoding.
+    private static int varintSize(long value) {
         long tmp = (value << 1) ^ (value >> 63);
-        // Check if multiple bytes are needed
+        int size = 1;
         while ((tmp & ~0x7FL) != 0) {
-            // Set MSB to 1 (continuation)
-            out.write(((int) tmp & 0x7F) | 0x80);
-            // Unsigned right shift
+            size++;
             tmp >>>= 7;
         }
-        // Final byte with MSB set to 0
-        out.write((byte) tmp);
+        return size;
+    }
+
+    // Encodes a value using ZigZag and Varints into out starting at pos, returning the new pos.
+    private static int encodeVarint(long value, byte[] out, int pos) {
+        long tmp = (value << 1) ^ (value >> 63);
+        while ((tmp & ~0x7FL) != 0) {
+            out[pos++] = (byte) (((int) tmp & 0x7F) | 0x80);
+            tmp >>>= 7;
+        }
+        out[pos++] = (byte) tmp;
+        return pos;
+    }
+
+    // The BLOB footer stores the index length as a signed 32-bit little-endian int.
+    private static void checkIndexSize(long size) {
+        if (size > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("Compressed index too large: " + size + " bytes");
+        }
     }
 
     // Decodes a Varints-encoded value and reverses ZigZag transformation

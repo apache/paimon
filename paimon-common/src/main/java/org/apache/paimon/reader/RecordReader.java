@@ -71,6 +71,19 @@ public interface RecordReader<T> extends Closeable {
          */
         void releaseBatch();
 
+        /**
+         * Consumes the next logical record without materializing it.
+         *
+         * @return true if a record was skipped, false if the iterator is exhausted
+         * @throws UnsupportedOperationException if this iterator does not support skipping
+         */
+        default boolean skip() throws IOException {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Iterator %s does not support skipping records.",
+                            getClass().getCanonicalName()));
+        }
+
         /** Returns an iterator that applies {@code function} to each element. */
         default <R> RecordReader.RecordIterator<R> transform(Function<T, R> function) {
             RecordReader.RecordIterator<T> thisIterator = this;
@@ -83,6 +96,11 @@ public interface RecordReader<T> extends Closeable {
                         return null;
                     }
                     return function.apply(next);
+                }
+
+                @Override
+                public boolean skip() throws IOException {
+                    return thisIterator.skip();
                 }
 
                 @Override

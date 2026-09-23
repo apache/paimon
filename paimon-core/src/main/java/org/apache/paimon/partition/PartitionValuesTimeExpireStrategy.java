@@ -45,6 +45,8 @@ import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_STRATEGY;
  */
 public class PartitionValuesTimeExpireStrategy extends PartitionExpireStrategy {
 
+    private static final long serialVersionUID = 1L;
+
     private static final Logger LOG =
             LoggerFactory.getLogger(PartitionValuesTimeExpireStrategy.class);
 

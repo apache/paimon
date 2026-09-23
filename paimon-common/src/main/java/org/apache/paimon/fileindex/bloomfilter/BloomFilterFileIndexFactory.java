@@ -37,4 +37,9 @@ public class BloomFilterFileIndexFactory implements FileIndexerFactory {
     public FileIndexer create(DataType type, Options options) {
         return new BloomFilterFileIndex(type, options);
     }
+
+    @Override
+    public void validate(DataType dataType) {
+        FastHash.getHashFunction(dataType);
+    }
 }

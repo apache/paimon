@@ -23,6 +23,7 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.SensitiveConfigUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -101,8 +102,8 @@ public class ConfigRefresher {
                     refresher.refresh(table);
                     LOG.info(
                             "write has been refreshed due to configs changed. old options:{}, new options:{}.",
-                            currentOptions,
-                            newOptions);
+                            SensitiveConfigUtils.redactMap(currentOptions),
+                            SensitiveConfigUtils.redactMap(newOptions));
                 }
             } catch (Exception e) {
                 throw new RuntimeException("update write failed.", e);

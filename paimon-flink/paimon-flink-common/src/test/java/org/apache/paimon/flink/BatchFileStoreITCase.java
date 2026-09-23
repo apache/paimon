@@ -1102,6 +1102,16 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testScanWithPartialSpecifiedPartition() {
+        sql("CREATE TABLE P (dt STRING, hh INT, v INT) PARTITIONED BY (dt, hh)");
+        sql(
+                "INSERT INTO P VALUES ('20260814', CAST(NULL AS INT), 1), ('20260814', 10, 2), ('20260815', CAST(NULL AS INT), 3)");
+
+        assertThat(sql("SELECT COUNT(*) FROM P /*+ OPTIONS('scan.partitions' = 'dt=20260814') */"))
+                .containsExactly(Row.of(1L));
+    }
+
+    @Test
     public void testScanWithSpecifiedPartitionsWithFieldMapping() {
         sql("CREATE TABLE P (id INT, v INT, pt STRING) PARTITIONED BY (pt)");
         sql("CREATE TABLE Q (id INT)");
@@ -1163,6 +1173,19 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     public void testEmptyTableIncrementalBetweenTimestamp() {
         assertThat(sql("SELECT * FROM T /*+ OPTIONS('incremental-between-timestamp'='0,1') */"))
                 .isEmpty();
+    }
+
+    @Test
+    public void testLatestDeltaScanMode() {
+        sql("CREATE TABLE latest_delta (id INT, v STRING)");
+        sql("INSERT INTO latest_delta VALUES (1, 'A'), (2, 'B')");
+        sql("INSERT INTO latest_delta VALUES (3, 'C'), (4, 'D')");
+
+        assertThat(
+                        sql(
+                                "SELECT * FROM latest_delta "
+                                        + "/*+ OPTIONS('scan.mode'='latest-delta') */"))
+                .containsExactlyInAnyOrder(Row.of(3, "C"), Row.of(4, "D"));
     }
 
     @Test
@@ -1310,6 +1333,25 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testReadBaseTableAfterAuditLogWithSequenceNumberEnabled() {
+        // Regression test: reading `t$audit_log` must not leak the internal
+        // KEY_VALUE_SEQUENCE_NUMBER_ENABLED option into subsequent reads of the base table.
+        sql(
+                "CREATE TABLE test_table_reuse (a int PRIMARY KEY NOT ENFORCED, b int, c AS a + b) "
+                        + "WITH ('table-read.sequence-number.enabled'='true');");
+        sql("INSERT INTO test_table_reuse VALUES (1, 2)");
+        sql("INSERT INTO test_table_reuse VALUES (3, 4)");
+
+        // First read the audit log
+        assertThat(sql("SELECT * FROM `test_table_reuse$audit_log`"))
+                .containsExactlyInAnyOrder(Row.of("+I", 0L, 1, 2, 3), Row.of("+I", 1L, 3, 4, 7));
+
+        // Then read the base table - must not include _SEQUENCE_NUMBER column.
+        assertThat(sql("SELECT * FROM `test_table_reuse`"))
+                .containsExactlyInAnyOrder(Row.of(1, 2, 3), Row.of(3, 4, 7));
+    }
+
+    @Test
     public void testAuditLogTableWithSequenceNumberAlterTable() {
         // Create primary key table without sequence-number option
         sql("CREATE TABLE test_table_dyn (a int PRIMARY KEY NOT ENFORCED, b int, c AS a + b);");
@@ -1413,6 +1455,38 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                         batchSql(
                                 "SELECT * FROM T /*+ OPTIONS('scan.dedicated-split-generation'='true') */ limit 2"))
                 .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
+    }
+
+    @Test
+    public void testDedicatedPathLimitTenOnManyRows() {
+        sql("CREATE TABLE limit_many_rows (a INT, b INT, c INT)");
+        StringBuilder insertValues = new StringBuilder();
+        for (int i = 1; i <= 100; i++) {
+            if (i > 1) {
+                insertValues.append(", ");
+            }
+            insertValues.append(String.format("(%d, %d, %d)", i, i * 10, i * 100));
+        }
+        batchSql("INSERT INTO limit_many_rows VALUES " + insertValues);
+
+        List<Row> result =
+                batchSql(
+                        "SELECT * FROM limit_many_rows "
+                                + "/*+ OPTIONS('scan.dedicated-split-generation'='true') */ "
+                                + "LIMIT 10");
+        assertThat(result).hasSize(10);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 10, 100),
+                        Row.of(2, 20, 200),
+                        Row.of(3, 30, 300),
+                        Row.of(4, 40, 400),
+                        Row.of(5, 50, 500),
+                        Row.of(6, 60, 600),
+                        Row.of(7, 70, 700),
+                        Row.of(8, 80, 800),
+                        Row.of(9, 90, 900),
+                        Row.of(10, 100, 1000));
     }
 
     @Test

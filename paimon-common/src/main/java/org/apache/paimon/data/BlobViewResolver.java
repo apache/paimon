@@ -24,4 +24,8 @@ import java.io.Serializable;
 public interface BlobViewResolver extends Serializable {
 
     void resolve(BlobView blobView);
+
+    default boolean resolvesToNull(BlobView blobView) {
+        return false;
+    }
 }

@@ -182,7 +182,7 @@ def _parse_typed_value_field(schema: VariantSchema, tv_type: pa.DataType) -> Var
     if pa.types.is_struct(tv_type):
         object_fields: List[ObjectField] = []
         for j in range(tv_type.num_fields):
-            sub_f = tv_type.field(j)
+            sub_f = tv_type[j]
             if pa.types.is_struct(sub_f.type):
                 sub_schema = build_variant_schema(sub_f.type)
             else:
@@ -224,6 +224,8 @@ def _encode_scalar_to_value_bytes(typed_value, arrow_type: pa.DataType) -> bytes
 
 def _append_scalar(builder, value, arrow_type: pa.DataType) -> None:
     """Dispatch a typed Python scalar into the appropriate builder method."""
+    if pa.types.is_decimal(arrow_type) and arrow_type.scale < 0:
+        raise ValueError('VARIANT decimal scale must be non-negative')
     if value is None:
         builder.append_null()
         return
@@ -250,21 +252,60 @@ def _append_scalar(builder, value, arrow_type: pa.DataType) -> None:
     elif pa.types.is_timestamp(arrow_type):
         # PyArrow converts timestamp to datetime.datetime
         if isinstance(value, datetime.datetime):
+            if (arrow_type.unit == 'ns'
+                    and getattr(value, 'nanosecond', 0) != 0):
+                raise ValueError(
+                    "VARIANT timestamps require microsecond-aligned values")
             if value.tzinfo is not None:
                 epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
-                micros = int((value - epoch).total_seconds() * 1_000_000)
+                delta = value - epoch
+                micros = (
+                    (delta.days * 86400 + delta.seconds) * 1_000_000
+                    + delta.microseconds
+                )
                 builder.append_timestamp(micros)
             else:
                 epoch = datetime.datetime(1970, 1, 1)
-                micros = int((value - epoch).total_seconds() * 1_000_000)
+                delta = value - epoch
+                micros = (
+                    (delta.days * 86400 + delta.seconds) * 1_000_000
+                    + delta.microseconds
+                )
                 builder.append_timestamp_ntz(micros)
         else:
-            builder.append_timestamp_ntz(int(value))
+            raw_value = int(value)
+            if arrow_type.unit == 'ns':
+                if raw_value % 1000:
+                    raise ValueError(
+                        "VARIANT timestamps require microsecond-aligned values")
+                micros = raw_value // 1000
+            else:
+                micros = raw_value * {'s': 1_000_000, 'ms': 1000, 'us': 1}[
+                    arrow_type.unit]
+            builder.append_timestamp_ntz(micros)
     elif pa.types.is_decimal(arrow_type):
-        if isinstance(value, _decimal.Decimal):
-            builder.append_decimal(value)
-        else:
-            builder.append_decimal(_decimal.Decimal(str(value)))
+        decimal = (
+            value if isinstance(value, _decimal.Decimal)
+            else _decimal.Decimal(str(value))
+        )
+        sign, digits, exponent = decimal.as_tuple()
+        unscaled = int(''.join(str(digit) for digit in digits))
+        if sign:
+            unscaled = -unscaled
+        shift = exponent + arrow_type.scale
+        if shift < 0 and unscaled % (10 ** -shift):
+            raise ValueError(
+                f'{decimal} does not have Arrow scale {arrow_type.scale}')
+        unscaled = (
+            unscaled * (10 ** shift) if shift >= 0
+            else unscaled // (10 ** -shift)
+        )
+        scale = arrow_type.scale
+        precision = max(1, len(str(abs(unscaled))))
+        if precision > arrow_type.precision:
+            raise ValueError(
+                f'{decimal} exceeds Arrow precision {arrow_type.precision}')
+        builder.append_decimal_unscaled(unscaled, precision, scale)
     else:
         # Fallback: encode as string
         builder.append_string(str(value))
@@ -274,10 +315,14 @@ def _append_scalar(builder, value, arrow_type: pa.DataType) -> None:
 # Object / array binary construction
 # ---------------------------------------------------------------------------
 
-def _build_object_value(fields: List[Tuple[int, bytes]]) -> bytes:
+def _build_object_value(
+    fields: List[Tuple[int, bytes]],
+    key_dict: Optional[Dict[str, int]] = None,
+) -> bytes:
     """Build object variant value bytes from ``(key_id, value_bytes)`` pairs.
 
-    The variant spec requires fields sorted by key_id.
+    Variant object fields are ordered by key name, not metadata key ID. The
+    metadata dictionary may assign IDs in a different order.
     """
     if not fields:
         # Empty object: header + size=0 + one zero-offset sentinel
@@ -287,7 +332,14 @@ def _build_object_value(fields: List[Tuple[int, bytes]]) -> bytes:
         buf.append(0)       # offset[0] = 0 (sentinel)
         return bytes(buf)
 
-    fields = sorted(fields, key=lambda f: f[0])
+    if key_dict is None:
+        fields = sorted(fields, key=lambda f: f[0])
+    else:
+        id_to_name = {key_id: name for name, key_id in key_dict.items()}
+        fields = sorted(
+            fields,
+            key=lambda f: id_to_name[f[0]].encode('utf-8'),
+        )
     size = len(fields)
     data = b''.join(vb for _, vb in fields)
     data_size = len(data)
@@ -479,7 +531,7 @@ def _rebuild_object(
     if overflow_bytes:
         fields.extend(_extract_overflow_fields(bytes(overflow_bytes)))
 
-    return _build_object_value(fields)
+    return _build_object_value(fields, key_dict)
 
 
 def _rebuild_array(
@@ -860,7 +912,8 @@ def _decompose_field_bytes(
             else:
                 typed_value[fname] = {'value': None, 'typed_value': None}
 
-        overflow_bytes = _build_object_value(overflow_pairs) if overflow_pairs else None
+        overflow_bytes = (_build_object_value(overflow_pairs, key_dict)
+                          if overflow_pairs else None)
         return {'value': overflow_bytes, 'typed_value': typed_value}
 
     # No shredding sub-schema: treat field bytes as overflow
@@ -918,7 +971,8 @@ def decompose_variant(
         else:
             typed_value[fname] = {'value': None, 'typed_value': None}
 
-    overflow_bytes = _build_object_value(overflow_pairs) if overflow_pairs else None
+    overflow_bytes = (_build_object_value(overflow_pairs, key_dict)
+                      if overflow_pairs else None)
     return {'metadata': metadata, 'value': overflow_bytes, 'typed_value': typed_value}
 
 

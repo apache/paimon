@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import copy
 import os
 import shutil
 import subprocess
@@ -22,7 +23,11 @@ import sys
 import tempfile
 import threading
 import unittest
+from dataclasses import replace
+from io import BytesIO
+from unittest import mock
 
+import fastavro
 import pyarrow as pa
 
 from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
@@ -33,9 +38,11 @@ from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
+                                                     ManifestEntry)
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.schema import Schema
 from pypaimon.table.row.generic_row import GenericRow
 
@@ -48,7 +55,7 @@ def _paimon_python_root():
 
 
 def _runner_can_write_zstandard_avro():
-    """fastavro uses ``backports.zstd`` (Py < 3.14) to *write* zstandard Avro blocks."""
+    """Whether fastavro can write zstandard Avro blocks with the installed backends."""
     try:
         from io import BytesIO
         import fastavro
@@ -85,8 +92,8 @@ _MANIFEST_ZSTD_READ_SUBPROC_VENV_PYTHON = None
 def _manifest_zstd_read_subprocess_venv_python():
     """Disposable venv with editable pypaimon for ``manifest_list_zstd_read_subprocess.py``.
 
-    Does not install ``backports.zstd`` so the first worker run can hit fastavro's missing zstd
-    codec path when reading zstandard-compressed manifest lists.
+    The test removes the zstd backends before the first worker run, then installs them
+    again to verify reading zstandard-compressed manifest lists in a fresh process.
     """
     global _MANIFEST_ZSTD_READ_SUBPROC_VENV_DIR, _MANIFEST_ZSTD_READ_SUBPROC_VENV_PYTHON
     with _MANIFEST_ZSTD_READ_SUBPROC_VENV_LOCK:
@@ -95,18 +102,21 @@ def _manifest_zstd_read_subprocess_venv_python():
         repo = _paimon_python_root()
         venv_dir = tempfile.mkdtemp(prefix='paimon-zstd-read-subprocess-')
         pip_install_env = _subprocess_env_for_pip()
+        # Keep the codec behavior identical to the parent test environment.
+        fastavro_requirement = 'fastavro=={}'.format(fastavro.__version__)
         uv_bin = shutil.which('uv')
         try:
             if uv_bin:
                 subprocess.check_call(
-                    [uv_bin, 'venv', venv_dir],
+                    [uv_bin, 'venv', '--python', sys.executable, '--seed', venv_dir],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     env=pip_install_env,
                 )
                 isolated_venv_python = _venv_python_executable(venv_dir)
                 subprocess.check_call(
-                    [uv_bin, 'pip', 'install', '-q', '--python', isolated_venv_python, '-e', repo, 'requests'],
+                    [uv_bin, 'pip', 'install', '-q', '--python', isolated_venv_python,
+                     '-e', repo, 'requests', fastavro_requirement],
                     env=pip_install_env,
                 )
             else:
@@ -117,7 +127,8 @@ def _manifest_zstd_read_subprocess_venv_python():
                 )
                 isolated_venv_python = _venv_python_executable(venv_dir)
                 subprocess.check_call(
-                    [isolated_venv_python, '-m', 'pip', 'install', '-q', '-e', repo, 'requests'],
+                    [isolated_venv_python, '-m', 'pip', 'install', '-q', '-e', repo,
+                     'requests', fastavro_requirement],
                     env=pip_install_env,
                 )
         except Exception:
@@ -265,6 +276,166 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
         )
         return entry
 
+    def _partitioned_manifest(self):
+        table_id = 'default.selective_manifest'
+        identifier = Identifier.from_string(table_id)
+        path = self.catalog.get_table_path(identifier)
+        if self.catalog.file_io.exists(path):
+            self.catalog.file_io.delete(path, recursive=True)
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([('pt', pa.string()), ('id', pa.int32())]),
+            partition_keys=['pt'])
+        self.catalog.create_table(table_id, schema, False)
+        table = self.catalog.get_table(table_id)
+        manager = ManifestFileManager(table)
+        entries = []
+        for name, partition, bucket in [
+                ('selected.parquet', 'keep', 1),
+                ('partition-pruned.parquet', 'drop', 1),
+                ('bucket-pruned.parquet', 'keep', 2)]:
+            entry = self._create_manifest_entry(name, bucket)
+            entry.total_buckets = 4
+            entry.partition = GenericRow(
+                [partition], table.partition_keys_fields)
+            entries.append(entry)
+        return table, manager, entries
+
+    def test_partition_and_bucket_filters_skip_file_decoding(self):
+        import pypaimon.manifest.manifest_file_manager as manager_module
+
+        _, manager, entries = self._partitioned_manifest()
+        name = 'selective-manifest.avro'
+        manager.write(name, entries)
+
+        class KeepPartition:
+            @staticmethod
+            def test(row):
+                return row.get_field(0) == 'keep'
+
+        with mock.patch.object(
+                manager_module, '_read_record',
+                wraps=manager_module._read_record) as read_record, \
+                mock.patch.object(
+                    manager_module, '_skip_record',
+                    wraps=manager_module._skip_record) as skip_record:
+            actual = manager.read(
+                name,
+                early_entry_filter=lambda bucket, _: bucket == 1,
+                partition_filter=KeepPartition())
+
+        self.assertEqual([entry.file.file_name for entry in actual],
+                         ['selected.parquet'])
+        self.assertEqual(read_record.call_count, 1)
+        self.assertEqual(skip_record.call_count, 2)
+
+    def test_single_manifest_read_does_not_create_executor(self):
+        import pypaimon.manifest.manifest_file_manager as manager_module
+
+        _, manager, entries = self._partitioned_manifest()
+        manifests = manager.rolling_write(
+            entries, 1024 * 1024, 'single-manifest')
+
+        with mock.patch.object(
+                manager_module, 'ThreadPoolExecutor') as executor:
+            actual = manager.read_entries_parallel(
+                manifests,
+                early_entry_filter=lambda bucket, _: bucket == 1)
+
+        executor.assert_not_called()
+        self.assertEqual(
+            [entry.file.file_name for entry in actual],
+            ['selected.parquet', 'partition-pruned.parquet'])
+
+    def test_reordered_manifest_fields_use_compatible_reader(self):
+        import pypaimon.manifest.manifest_file_manager as manager_module
+
+        table, manager, entries = self._partitioned_manifest()
+        schema = copy.deepcopy(MANIFEST_ENTRY_SCHEMA)
+        fields = schema['fields']
+        schema['fields'] = [fields[1], fields[0]] + fields[2:]
+        buffer = BytesIO()
+        fastavro.writer(buffer, schema, manager._to_avro_records(entries))
+        name = 'reordered-manifest.avro'
+        path = '{}/{}'.format(manager.manifest_path, name)
+        with table.file_io.new_output_stream(path) as output:
+            output.write(buffer.getvalue())
+
+        with mock.patch.object(
+                manager_module, '_read_record',
+                wraps=manager_module._read_record) as read_record:
+            actual = manager.read(
+                name, early_entry_filter=lambda bucket, _: bucket == 1)
+
+        self.assertEqual([entry.file.file_name for entry in actual],
+                         ['selected.parquet', 'partition-pruned.parquet'])
+        self.assertEqual(read_record.call_count, 0)
+
+    def test_file_schema_named_type_reference(self):
+        table, manager, entries = self._partitioned_manifest()
+        schema = copy.deepcopy(MANIFEST_ENTRY_SCHEMA)
+        file_fields = schema['fields'][5]['type']['fields']
+        file_fields[6]['type'] = 'record_KEY_STATS'
+        buffer = BytesIO()
+        fastavro.writer(buffer, schema, manager._to_avro_records(entries))
+        name = 'named-type-manifest.avro'
+        path = '{}/{}'.format(manager.manifest_path, name)
+        with table.file_io.new_output_stream(path) as output:
+            output.write(buffer.getvalue())
+
+        actual = manager.read(
+            name, early_entry_filter=lambda bucket, _: bucket == 1)
+
+        self.assertEqual([entry.file.file_name for entry in actual],
+                         ['selected.parquet', 'partition-pruned.parquet'])
+
+    def test_union_manifest_schema_uses_compatible_reader(self):
+        table, manager, entries = self._partitioned_manifest()
+        buffer = BytesIO()
+        # Rust Avro manifests wrap the record schema in a top-level union.
+        fastavro.writer(buffer, [MANIFEST_ENTRY_SCHEMA], manager._to_avro_records(entries))
+        name = 'union-manifest.avro'
+        with table.file_io.new_output_stream('{}/{}'.format(manager.manifest_path, name)) as output:
+            output.write(buffer.getvalue())
+
+        class KeepPartition:
+            @staticmethod
+            def test(row):
+                return row.get_field(0) == 'keep'
+
+        actual = manager.read(name, early_entry_filter=lambda bucket, _: bucket == 1,
+                              partition_filter=KeepPartition())
+        self.assertEqual([entry.file.file_name for entry in actual], ['selected.parquet'])
+
+    def test_manifest_bucket_and_level_stats(self):
+        manager = self._make_manager()
+        entries = [self._create_manifest_entry('a', bucket=2),
+                   self._create_manifest_entry('b', bucket=6)]
+        entries[0].file.level = 3
+        entries[1].file.level = 1
+        entries[1].kind = 1
+        for totals, expected in [([8, 8], 8), ([8, 16], None),
+                                 ([0, 8], None), ([8, -1], None)]:
+            with self.subTest(totals=totals):
+                for entry, total in zip(entries, totals):
+                    entry.total_buckets = total
+                metas = manager.rolling_write(entries, 1024 * 1024, 'bucket-stats')
+                self.assertEqual(len(metas), 1)
+                meta = metas[0]
+                self.assertEqual((meta.min_bucket, meta.max_bucket), (2, 6))
+                self.assertEqual((meta.min_level, meta.max_level), (1, 3))
+                self.assertEqual((meta.num_added_files, meta.num_deleted_files), (1, 1))
+                self.assertEqual(meta.total_buckets, expected)
+
+    def test_rolling_manifest_bucket_stats_are_per_file(self):
+        manager = self._make_manager()
+        entries = [self._create_manifest_entry(str(i), bucket=i) for i in range(4)]
+        for entry in entries:
+            entry.total_buckets = 8
+        metas = manager.rolling_write(entries, 1, 'rolling-bucket-stats')
+        self.assertEqual(len(metas), len(entries))
+        self.assertEqual([(m.min_bucket, m.max_bucket, m.total_buckets) for m in metas],
+                         [(i, i, 8) for i in range(4)])
+
     def test_filter_applied_after_read(self):
         manager = self._make_manager()
 
@@ -282,6 +453,174 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
             "test-manifest.avro", manifest_entry_filter=lambda e: e.bucket == 0)
         self.assertEqual(len(result_filtered), 2)
 
+    def test_read_write_cols_with_system_field(self):
+        manager = self._make_manager()
+
+        id_field = DataField(0, 'id', AtomicType('INT', nullable=True))
+        min_row = GenericRow([1], [id_field])
+        max_row = GenericRow([10], [id_field])
+        value_stats = SimpleStats(
+            min_values=min_row, max_values=max_row, null_counts=[2])
+
+        entry = ManifestEntry(
+            kind=0,
+            partition=_EMPTY_ROW,
+            bucket=0,
+            total_buckets=1,
+            file=DataFileMeta(
+                file_name="data-dirty.parquet", file_size=1024, row_count=50,
+                min_key=_EMPTY_ROW, max_key=_EMPTY_ROW,
+                key_stats=_EMPTY_STATS, value_stats=value_stats,
+                min_sequence_number=1, max_sequence_number=50,
+                schema_id=0, level=0, extra_files=[],
+                creation_time=Timestamp.from_epoch_millis(0),
+                delete_row_count=0, embedded_index=None, file_source=None,
+                value_stats_cols=None, external_path=None,
+                first_row_id=0,
+                write_cols=["id", "_ROW_ID", "_SEQUENCE_NUMBER"],
+                write_cols_sequences=[12, 50, 50],
+            ),
+        )
+        manager.write("dirty-manifest.avro", [entry])
+
+        entries = manager.read("dirty-manifest.avro", drop_stats=False)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(
+            entries[0].file.write_cols, ["id", "_ROW_ID", "_SEQUENCE_NUMBER"])
+        self.assertEqual(
+            entries[0].file.write_cols_sequences, [12, 50, 50])
+
+        read_stats = entries[0].file.value_stats
+        stats_field_names = [f.name for f in read_stats.min_values.fields]
+        self.assertEqual(stats_field_names, ["id"])
+
+        self.assertEqual(read_stats.min_values.get_field(0), 1)
+        self.assertEqual(read_stats.max_values.get_field(0), 10)
+        self.assertEqual(read_stats.null_counts, [2])
+
+    def test_commit_manifest_exceeds_target_size(self):
+        target_size = 16 * 1024
+        pa_schema = pa.schema([
+            ('pt', pa.string()),
+            ('pk', pa.int32()),
+            ('val', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['pk'],
+            partition_keys=['pt'],
+            options={
+                'bucket': '1',
+                'manifest.target-file-size': '16 kb',
+            },
+        )
+        self.catalog.create_table('default.rolling_bug', schema, False)
+        table = self.catalog.get_table('default.rolling_bug')
+
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        for pt in range(800):
+            rows = [{'pt': f'p{pt}', 'pk': i, 'val': f'v{i}'} for i in range(5)]
+            w.write_arrow(pa.Table.from_pylist(rows, schema=pa_schema))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        snap = table.snapshot_manager().get_latest_snapshot()
+        metas = ManifestListManager(table).read_all(snap)
+        max_allowed = target_size * 2
+        oversized = [m for m in metas if m.file_size > max_allowed]
+        self.assertEqual(
+            len(oversized), 0,
+            f"{len(oversized)} manifest file(s) exceed 2x target ({max_allowed} bytes): "
+            f"{[(m.file_name, m.file_size) for m in oversized]}. "
+            f"Java uses RollingFileWriter to split; Python writes one file.")
+        self.assertGreater(
+            len(metas), 1,
+            f"Expected multiple manifest files but got {len(metas)} "
+            f"with total {sum(m.file_size for m in metas)} bytes")
+
+        mfm = ManifestFileManager(table)
+        all_entries = []
+        for meta in metas:
+            entries = mfm.read(meta.file_name)
+            self.assertEqual(len(entries), meta.num_added_files + meta.num_deleted_files)
+            all_entries.extend(entries)
+        self.assertEqual(len(all_entries), 800)
+
+    def test_rolling_write_with_skewed_entries(self):
+        target_size = 16 * 1024
+        manager = ManifestFileManager(self.table)
+        small = self._create_manifest_entry("small.parquet")
+        big = ManifestEntry(
+            kind=0, partition=_EMPTY_ROW, bucket=0, total_buckets=1,
+            file=DataFileMeta(
+                file_name="big.parquet", file_size=1024, row_count=100,
+                min_key=_EMPTY_ROW, max_key=_EMPTY_ROW,
+                key_stats=_EMPTY_STATS, value_stats=_EMPTY_STATS,
+                min_sequence_number=1, max_sequence_number=100,
+                schema_id=0, level=0,
+                extra_files=[f"extra-{i}.idx" for i in range(50)],
+                creation_time=Timestamp.from_epoch_millis(0),
+                delete_row_count=0, embedded_index=b'\x00' * 2000,
+                file_source=None, value_stats_cols=None,
+                external_path=None, first_row_id=None, write_cols=None,
+            ),
+        )
+        entries = [big if i % 5 == 0 else small for i in range(300)]
+        metas = manager.rolling_write(entries, target_size, "manifest-skew")
+
+        max_allowed = target_size * 2
+        oversized = [m for m in metas if m.file_size > max_allowed]
+        self.assertEqual(
+            len(oversized), 0,
+            f"Skewed entries: {len(oversized)} file(s) exceed 2x target: "
+            f"{[(m.file_name, m.file_size) for m in oversized]}")
+        total_entries = sum(m.num_added_files + m.num_deleted_files for m in metas)
+        self.assertEqual(total_entries, 300)
+
+    def test_manifest_compression(self):
+        pa_schema = pa.schema([('pk', pa.int32()), ('val', pa.string())])
+        schema_compressed = Schema.from_pyarrow_schema(
+            pa_schema, primary_keys=['pk'], options={'bucket': '1'})
+        schema_uncompressed = Schema.from_pyarrow_schema(
+            pa_schema, primary_keys=['pk'],
+            options={'bucket': '1', 'manifest.compression': 'null'})
+
+        self.catalog.create_table('default.compressed', schema_compressed, False)
+        self.catalog.create_table('default.uncompressed', schema_uncompressed, False)
+
+        rows = [{'pk': i, 'val': f'value-{i}' * 20} for i in range(100)]
+        arrow_data = pa.Table.from_pylist(rows, schema=pa_schema)
+
+        for name in ('default.compressed', 'default.uncompressed'):
+            table = self.catalog.get_table(name)
+            wb = table.new_batch_write_builder()
+            w = wb.new_write()
+            w.write_arrow(arrow_data)
+            wb.new_commit().commit(w.prepare_commit())
+            w.close()
+
+        t_comp = self.catalog.get_table('default.compressed')
+        t_uncomp = self.catalog.get_table('default.uncompressed')
+
+        metas_comp = ManifestListManager(t_comp).read_all(
+            t_comp.snapshot_manager().get_latest_snapshot())
+        metas_uncomp = ManifestListManager(t_uncomp).read_all(
+            t_uncomp.snapshot_manager().get_latest_snapshot())
+
+        size_comp = sum(m.file_size for m in metas_comp)
+        size_uncomp = sum(m.file_size for m in metas_uncomp)
+        self.assertLess(
+            size_comp, size_uncomp,
+            f"Compressed manifest ({size_comp}B) should be smaller "
+            f"than uncompressed ({size_uncomp}B)")
+
+        mfm = ManifestFileManager(t_comp)
+        entries = []
+        for m in metas_comp:
+            entries.extend(mfm.read(m.file_name))
+        self.assertGreater(len(entries), 0)
+
 
 class ManifestListManagerTest(_ManifestManagerSetup):
     """Tests for ManifestListManager."""
@@ -298,6 +637,74 @@ class ManifestListManagerTest(_ManifestManagerSetup):
             partition_stats=SimpleStats.empty_stats(), schema_id=0,
         )
         manager.write(name, [meta])
+
+    def test_bucket_and_level_stats_round_trip(self):
+        manager = self._make_manager()
+        legacy_meta = ManifestFileMeta(
+            'legacy', 1024, 1, 0, SimpleStats.empty_stats(), 0,
+            10, 109, ['extra'])
+        meta = replace(legacy_meta, file_name='new', min_bucket=0, max_bucket=7,
+                       min_level=0, max_level=3, total_buckets=8)
+        manager.write('stats-list', [legacy_meta, meta])
+        actual = manager.read('stats-list')
+        fields = ['min_bucket', 'max_bucket', 'min_level', 'max_level',
+                  'min_row_id', 'max_row_id', 'total_buckets', 'extra_files']
+        for expected, restored in zip([legacy_meta, meta], actual):
+            self.assertEqual([getattr(restored, f) for f in fields],
+                             [getattr(expected, f) for f in fields])
+
+        with manager.file_io.new_input_stream(f'{manager.manifest_path}/stats-list') as stream:
+            data = stream.read()
+        reader = fastavro.reader(BytesIO(data))
+        self.assertEqual([f['name'] for f in reader.writer_schema['fields']][7:],
+                         ['_MIN_BUCKET', '_MAX_BUCKET', '_MIN_LEVEL', '_MAX_LEVEL',
+                          '_MIN_ROW_ID', '_MAX_ROW_ID', '_TOTAL_BUCKETS', '_EXTRA_FILES'])
+        self.assertEqual([r['_VERSION'] for r in reader], [2, 2])
+        legacy_schema = reader.writer_schema
+        legacy_schema['fields'] = [f for f in legacy_schema['fields']
+                                   if f['name'] not in {'_MIN_BUCKET', '_MAX_BUCKET',
+                                                        '_MIN_LEVEL', '_MAX_LEVEL', '_TOTAL_BUCKETS'}]
+        records = list(fastavro.reader(BytesIO(data), reader_schema=legacy_schema))
+        self.assertEqual([r['_MIN_ROW_ID'] for r in records], [10, 10])
+        self.assertEqual([r['_EXTRA_FILES'] for r in records], [['extra'], ['extra']])
+
+    def test_extra_files_round_trip(self):
+        manager = self._make_manager()
+        expected_extra_files = [None, [], ["extra-1", "extra-2"]]
+        metas = []
+        for i, extra_files in enumerate(expected_extra_files):
+            meta = ManifestFileMeta(
+                file_name=f"manifest-{i}.avro", file_size=1024,
+                num_added_files=1, num_deleted_files=0,
+                partition_stats=SimpleStats.empty_stats(), schema_id=0,
+            )
+            self.assertIsNone(meta.extra_files)
+            meta.extra_files = extra_files
+            metas.append(meta)
+
+        name = "manifest-list-extra-files"
+        manager.write(name, metas)
+        actual = manager.read(name)
+        self.assertEqual([meta.file_name for meta in actual],
+                         [meta.file_name for meta in metas])
+        self.assertEqual([meta.extra_files for meta in actual], expected_extra_files)
+
+        with manager.file_io.new_input_stream(f"{manager.manifest_path}/{name}") as stream:
+            avro_bytes = stream.read()
+        reader = fastavro.reader(BytesIO(avro_bytes))
+        records = list(reader)
+        self.assertEqual([record["_VERSION"] for record in records], [2, 2, 2])
+        self.assertEqual([record["_EXTRA_FILES"] for record in records], expected_extra_files)
+
+        legacy_schema = reader.writer_schema
+        legacy_schema["fields"] = [
+            field for field in legacy_schema["fields"] if field["name"] != "_EXTRA_FILES"
+        ]
+        legacy_records = list(fastavro.reader(BytesIO(avro_bytes), reader_schema=legacy_schema))
+        self.assertEqual([record["_FILE_NAME"] for record in legacy_records],
+                         [meta.file_name for meta in metas])
+        for record in legacy_records:
+            self.assertNotIn("_EXTRA_FILES", record)
 
     def _make_snapshot(self, base_manifest_list, delta_manifest_list="delta-manifest-list"):
         from pypaimon.snapshot.snapshot import Snapshot
@@ -339,10 +746,10 @@ class ManifestListManagerTest(_ManifestManagerSetup):
         sys.version_info >= (3, 13),
         'fastavro >= 1.12 bundles zstd in compiled extension on Python 3.13+',
     )
-    def test_zstd_manifest_list_fastavro_requires_backports_zstd(self):
+    def test_zstd_manifest_list_requires_codec_backend(self):
         """Child venv runs ``manifest_list_zstd_read_subprocess`` (argv: warehouse, table id, list file name).
 
-        No ``backports.zstd`` in the venv → read fails; after ``pip install`` → read succeeds.
+        No zstd backend in the venv → read fails; after ``pip install`` → read succeeds.
         """
         if not _runner_can_write_zstandard_avro():
             self.skipTest('runner cannot write zstandard Avro')
@@ -362,7 +769,7 @@ class ManifestListManagerTest(_ManifestManagerSetup):
         catalog_table_id = 'default.{}'.format(self._table_name)
         isolated_venv_python = _manifest_zstd_read_subprocess_venv_python()
         pip_install_env = _subprocess_env_for_pip()
-        subprocess.run(
+        subprocess.check_call(
             [isolated_venv_python, '-m', 'pip', 'uninstall', '-y',
              'backports.zstd', 'zstandard'],
             stdout=subprocess.DEVNULL,
@@ -387,7 +794,8 @@ class ManifestListManagerTest(_ManifestManagerSetup):
         stderr_and_stdout = (
             read_without_zstd_backend.stdout + read_without_zstd_backend.stderr)
         self.assertIn('zstandard codec is supported but you need to install', stderr_and_stdout)
-        self.assertIn('backports.zstd', stderr_and_stdout)
+        # fastavro 1.11 uses zstandard; newer versions use backports.zstd.
+        self.assertRegex(stderr_and_stdout, r"'(?:backports\.zstd|zstandard)'")
 
         subprocess.check_call(
             [isolated_venv_python, '-m', 'pip', 'install', '-q',

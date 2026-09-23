@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="562" viewBox="0 0 960 562" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Carry new columns into Paimon</title>
+<desc id="desc">After a source adds field_4, a running Flink SQL job keeps its declared three-column schema. A Paimon CDC action can evolve the target and write the new fourth field.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="958" height="560" rx="12" fill="#fff" stroke="#d7dfeb"/>
+<text x="28" y="44" font-size="27" fill="#172b4d" font-weight="700">Carry new columns into Paimon</text>
+<text x="28" y="76" font-size="18" fill="#526277" font-weight="400">Example: add field_4 to a source table that originally had three fields.</text>
+<text x="28" y="123" font-size="17" fill="#95600c" font-weight="700">DECLARED FLINK SQL SCHEMA</text>
+<rect x="28" y="145" width="250" height="140" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="44" y="176" font-size="21" fill="#2463b4" font-weight="700">Source table</text>
+<text x="44" y="205" font-size="18" fill="#526277" font-weight="400">field_1, field_2, field_3</text>
+<rect x="44" y="224" width="218" height="38" rx="8" fill="#fff4df" stroke="#95600c" stroke-width="1.5"/>
+<text x="57" y="250" font-size="18" fill="#95600c" font-weight="700">+ field_4</text>
+<path d="M 281 209 H 330" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="333" y="145" width="270" height="140" rx="8" fill="#fff4df" stroke="#95600c" stroke-width="1.5"/>
+<text x="349" y="176" font-size="21" fill="#95600c" font-weight="700">SQL INSERT job</text>
+<text x="349" y="205" font-size="18" fill="#526277" font-weight="400">Uses the declared schema</text>
+<text x="349" y="230" font-size="18" fill="#526277" font-weight="400">No automatic addition</text>
+<text x="349" y="255" font-size="18" fill="#526277" font-weight="400">of the source column</text>
+<path d="M 606 209 H 664" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="667" y="145" width="265" height="140" rx="8" fill="#f8fafc" stroke="#526277" stroke-width="1.5"/>
+<text x="683" y="176" font-size="21" fill="#526277" font-weight="700">Paimon table</text>
+<text x="683" y="205" font-size="18" fill="#526277" font-weight="400">field_1, field_2, field_3</text>
+<text x="683" y="230" font-size="18" fill="#526277" font-weight="400">Target schema unchanged</text>
+<path d="M 28 311 H 932" stroke="#d7dfeb"/>
+<text x="28" y="349" font-size="17" fill="#10705d" font-weight="700">PAIMON CDC ACTION</text>
+<rect x="28" y="371" width="250" height="140" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="44" y="402" font-size="21" fill="#2463b4" font-weight="700">Source table</text>
+<text x="44" y="431" font-size="18" fill="#526277" font-weight="400">field_1, field_2, field_3</text>
+<rect x="44" y="450" width="218" height="38" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="57" y="476" font-size="18" fill="#10705d" font-weight="700">+ field_4</text>
+<path d="M 281 435 H 330" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="333" y="371" width="270" height="140" rx="8" fill="#f1ebfa" stroke="#7051a3" stroke-width="1.5"/>
+<text x="349" y="402" font-size="21" fill="#7051a3" font-weight="700">CDC action</text>
+<text x="349" y="431" font-size="18" fill="#526277" font-weight="400">Receives the new field</text>
+<text x="349" y="456" font-size="18" fill="#526277" font-weight="400">Applies supported changes</text>
+<text x="349" y="481" font-size="18" fill="#526277" font-weight="400">Writes new field values</text>
+<path d="M 606 435 H 664" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="667" y="371" width="265" height="140" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="683" y="402" font-size="21" fill="#10705d" font-weight="700">Paimon table</text>
+<text x="683" y="431" font-size="18" fill="#526277" font-weight="400">field_1, field_2, field_3</text>
+<rect x="683" y="450" width="233" height="38" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="697" y="476" font-size="18" fill="#10705d" font-weight="700">+ field_4</text>
+<text x="28" y="540" font-size="17" fill="#526277" font-weight="400">Column additions can flow through without restarting the action job.</text>
+</g>
+</svg>

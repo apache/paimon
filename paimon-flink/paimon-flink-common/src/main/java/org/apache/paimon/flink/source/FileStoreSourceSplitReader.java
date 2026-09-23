@@ -26,8 +26,9 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.Splits;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pool;
 
@@ -191,9 +192,19 @@ public class FileStoreSourceSplitReader
 
     @Override
     public void close() throws Exception {
-        if (currentReader != null) {
-            if (currentReader.lazyRecordReader != null) {
-                currentReader.lazyRecordReader.close();
+        try {
+            if (currentFirstBatch != null) {
+                try {
+                    currentFirstBatch.releaseBatch();
+                } finally {
+                    currentFirstBatch = null;
+                }
+            }
+        } finally {
+            if (currentReader != null) {
+                if (currentReader.lazyRecordReader != null) {
+                    currentReader.lazyRecordReader.close();
+                }
             }
         }
     }
@@ -209,9 +220,10 @@ public class FileStoreSourceSplitReader
         }
 
         // update metric when split changes
-        if (nextSplit.split() instanceof DataSplit) {
+        Split inner = Splits.underlying(nextSplit.split());
+        if (inner instanceof DataSplit) {
             long eventTime =
-                    ((DataSplit) nextSplit.split())
+                    ((DataSplit) inner)
                             .earliestFileCreationEpochMillis()
                             .orElse(FileStoreSourceReaderMetrics.UNDEFINED);
             metrics.recordSnapshotUpdate(eventTime);
@@ -271,13 +283,13 @@ public class FileStoreSourceSplitReader
         private final Set<Integer> blobFields;
 
         private FileStoreRecordIterator(@Nullable RowType rowType) {
-            this.blobFields = rowType == null ? Collections.emptySet() : blobFieldIndex(rowType);
+            this.blobFields = rowType == null ? Collections.emptySet() : blobFieldIndexes(rowType);
         }
 
-        private Set<Integer> blobFieldIndex(RowType rowType) {
+        private Set<Integer> blobFieldIndexes(RowType rowType) {
             Set<Integer> result = new HashSet<>();
             for (int i = 0; i < rowType.getFieldCount(); i++) {
-                if (rowType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BLOB) {
+                if (BlobType.isBlobFileField(rowType.getTypeAt(i))) {
                     result.add(i);
                 }
             }
@@ -319,8 +331,11 @@ public class FileStoreSourceSplitReader
 
         @Override
         public void releaseBatch() {
-            this.iterator.releaseBatch();
-            pool.recycler().recycle(this);
+            try {
+                this.iterator.releaseBatch();
+            } finally {
+                pool.recycler().recycle(this);
+            }
         }
     }
 

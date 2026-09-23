@@ -18,13 +18,13 @@
 
 package org.apache.paimon.spark.write
 
-import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.spark.SparkUtils
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.sink._
 import org.apache.paimon.types.RowType
+import org.apache.paimon.utils.UriReaderFactory
 
 import org.apache.spark.sql.Row
 
@@ -37,7 +37,7 @@ case class PaimonDataWrite(
     writeRowTracking: Boolean = false,
     fullCompactionDeltaCommits: Option[Int],
     batchId: Option[Long],
-    catalogContext: CatalogContext,
+    uriReaderFactory: UriReaderFactory,
     postponePartitionBucketComputer: Option[BinaryRow => Integer])
   extends abstractInnerTableDataWrite[Row]
   with InnerTableV1DataWrite {
@@ -50,14 +50,11 @@ case class PaimonDataWrite(
     if (writeRowTracking) {
       _write.withWriteType(writeType)
     }
-    if (postponePartitionBucketComputer.isDefined) {
-      _write.getWrite.withIgnoreNumBucketCheck(true)
-    }
     _write
   }
 
   private val toPaimonRow = {
-    SparkRowUtils.toPaimonRow(writeType, rowKindColIdx, catalogContext)
+    SparkRowUtils.toPaimonRow(writeType, rowKindColIdx, uriReaderFactory)
   }
 
   def write(row: Row): Unit = {
@@ -65,27 +62,17 @@ case class PaimonDataWrite(
   }
 
   def write(row: Row, bucket: Int): Unit = {
-    postWrite(write.writeAndReturn(toPaimonRow(row), bucket))
+    val paimonRow = toPaimonRow(row)
+    val sinkRecord = postponePartitionBucketComputer match {
+      case Some(numBuckets) =>
+        write.writeAndReturn(paimonRow, bucket, numBuckets(write.getPartition(paimonRow)))
+      case None => write.writeAndReturn(paimonRow, bucket)
+    }
+    postWrite(sinkRecord)
   }
 
   override def commitImpl(): Seq[CommitMessage] = {
-    val commitMessages = write.prepareCommit().asScala.toSeq
-
-    if (postponePartitionBucketComputer.isDefined) {
-      commitMessages.map {
-        case message: CommitMessageImpl =>
-          new CommitMessageImpl(
-            message.partition(),
-            message.bucket(),
-            postponePartitionBucketComputer.get.apply(message.partition()),
-            message.newFilesIncrement(),
-            message.compactIncrement()
-          )
-        case _ => throw new RuntimeException()
-      }
-    } else {
-      commitMessages
-    }
+    write.prepareCommit().asScala.toSeq
   }
 
   override def close(): Unit = {

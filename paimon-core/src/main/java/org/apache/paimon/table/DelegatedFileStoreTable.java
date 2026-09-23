@@ -146,6 +146,17 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void setManifestSidecarCache(SegmentsCache<Path> manifestSidecarCache) {
+        wrapped.setManifestSidecarCache(manifestSidecarCache);
+    }
+
+    @Nullable
+    @Override
+    public SegmentsCache<Path> getManifestSidecarCache() {
+        return wrapped.getManifestSidecarCache();
+    }
+
+    @Override
     public void setSnapshotCache(Cache<Path, Snapshot> cache) {
         wrapped.setSnapshotCache(cache);
     }
@@ -316,6 +327,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory) {
+        return wrapped.newScan(snapshotReaderFactory);
+    }
+
+    @Override
     public StreamDataTableScan newStreamScan() {
         return wrapped.newStreamScan();
     }
@@ -338,6 +354,12 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public TableWriteImpl<?> newWrite(String commitUser, @Nullable Integer writeId) {
         return wrapped.newWrite(commitUser, writeId);
+    }
+
+    @Override
+    public TableWriteImpl<?> newPostponeFixedBucketWrite(
+            String commitUser, @Nullable Integer writeId) {
+        return wrapped.newPostponeFixedBucketWrite(commitUser, writeId);
     }
 
     @Override

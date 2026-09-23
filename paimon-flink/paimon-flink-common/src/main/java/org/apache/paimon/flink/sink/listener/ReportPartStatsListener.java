@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.sink.state.StateStore;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -31,7 +32,6 @@ import org.apache.paimon.utils.PartitionStatisticsReporter;
 
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.api.common.state.OperatorStateStore;
 import org.apache.flink.api.common.typeutils.base.LongSerializer;
 import org.apache.flink.api.common.typeutils.base.MapSerializer;
 import org.apache.flink.api.common.typeutils.base.StringSerializer;
@@ -66,7 +66,7 @@ public class ReportPartStatsListener implements CommitListener {
     private ReportPartStatsListener(
             InternalRowPartitionComputer partitionComputer,
             PartitionStatisticsReporter partitionStatisticsReporter,
-            OperatorStateStore store,
+            StateStore store,
             boolean isRestored,
             long idleTime)
             throws Exception {
@@ -141,8 +141,7 @@ public class ReportPartStatsListener implements CommitListener {
     }
 
     public static Optional<ReportPartStatsListener> create(
-            boolean isRestored, OperatorStateStore stateStore, FileStoreTable table)
-            throws Exception {
+            boolean isRestored, StateStore stateStore, FileStoreTable table) throws Exception {
 
         CoreOptions coreOptions = table.coreOptions();
         Options options = coreOptions.toConfiguration();

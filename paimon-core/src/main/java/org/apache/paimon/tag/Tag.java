@@ -59,6 +59,7 @@ public class Tag extends Snapshot {
     @JsonCreator
     public Tag(
             @JsonProperty(FIELD_VERSION) int version,
+            @JsonProperty(FIELD_UUID) @Nullable String uuid,
             @JsonProperty(FIELD_ID) long id,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_BASE_MANIFEST_LIST) String baseManifestList,
@@ -70,6 +71,7 @@ public class Tag extends Snapshot {
                     Long changelogManifestListSize,
             @JsonProperty(FIELD_INDEX_MANIFEST) @Nullable String indexManifest,
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
+            @JsonProperty(FIELD_WRITER_VERSION) @Nullable String writerVersion,
             @JsonProperty(FIELD_COMMIT_IDENTIFIER) long commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
             @JsonProperty(FIELD_TIME_MILLIS) long timeMillis,
@@ -80,10 +82,12 @@ public class Tag extends Snapshot {
             @JsonProperty(FIELD_STATISTICS) @Nullable String statistics,
             @JsonProperty(FIELD_PROPERTIES) Map<String, String> properties,
             @JsonProperty(FIELD_NEXT_ROW_ID) @Nullable Long nextRowId,
+            @JsonProperty(FIELD_OPERATION) @Nullable Operation operation,
             @JsonProperty(FIELD_TAG_CREATE_TIME) @Nullable LocalDateTime tagCreateTime,
             @JsonProperty(FIELD_TAG_TIME_RETAINED) @Nullable Duration tagTimeRetained) {
         super(
                 version,
+                uuid,
                 id,
                 schemaId,
                 baseManifestList,
@@ -94,6 +98,7 @@ public class Tag extends Snapshot {
                 changelogManifestListSize,
                 indexManifest,
                 commitUser,
+                writerVersion,
                 commitIdentifier,
                 commitKind,
                 timeMillis,
@@ -103,7 +108,8 @@ public class Tag extends Snapshot {
                 watermark,
                 statistics,
                 properties,
-                nextRowId);
+                nextRowId,
+                operation);
         this.tagCreateTime = tagCreateTime;
         this.tagTimeRetained = tagTimeRetained;
     }
@@ -122,6 +128,7 @@ public class Tag extends Snapshot {
             Snapshot snapshot, Duration tagTimeRetained, LocalDateTime tagCreateTime) {
         return new Tag(
                 snapshot.version(),
+                snapshot.uuid(),
                 snapshot.id(),
                 snapshot.schemaId(),
                 snapshot.baseManifestList(),
@@ -132,6 +139,7 @@ public class Tag extends Snapshot {
                 snapshot.changelogManifestListSize(),
                 snapshot.indexManifest(),
                 snapshot.commitUser(),
+                snapshot.writerVersion(),
                 snapshot.commitIdentifier(),
                 snapshot.commitKind(),
                 snapshot.timeMillis(),
@@ -142,6 +150,7 @@ public class Tag extends Snapshot {
                 snapshot.statistics(),
                 snapshot.properties(),
                 snapshot.nextRowId(),
+                snapshot.operation(),
                 tagCreateTime,
                 tagTimeRetained);
     }
@@ -149,6 +158,7 @@ public class Tag extends Snapshot {
     public Snapshot trimToSnapshot() {
         return new Snapshot(
                 version,
+                uuid,
                 id,
                 schemaId,
                 baseManifestList,
@@ -159,6 +169,7 @@ public class Tag extends Snapshot {
                 changelogManifestListSize,
                 indexManifest,
                 commitUser,
+                writerVersion,
                 commitIdentifier,
                 commitKind,
                 timeMillis,
@@ -168,7 +179,8 @@ public class Tag extends Snapshot {
                 watermark,
                 statistics,
                 properties,
-                nextRowId);
+                nextRowId,
+                operation);
     }
 
     @Override

@@ -16,6 +16,7 @@
 # under the License.
 
 import unittest
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock
 
 from parameterized import parameterized
@@ -25,17 +26,65 @@ from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_commit import BatchTableCommit, StreamTableCommit
 
 
-class TestTableCommitEmptyOverwrite(unittest.TestCase):
-    """Tests for TableCommit._commit handling of empty commit messages in overwrite mode."""
+class TestTableCommit(unittest.TestCase):
+
+    def test_empty_append_snapshot_is_opt_in_and_can_be_tagged(self):
+        import pyarrow as pa
+        import pypaimon.multimodal as pmm
+
+        with TemporaryDirectory(prefix="paimon-empty-commit-") as warehouse:
+            connection = pmm.connect(options={"warehouse": warehouse})
+            schema = pa.schema([pa.field("feature", pa.string(), False)])
+            table = connection.create_table("stat", schema=schema)
+            empty = pa.Table.from_pylist([], schema=schema)
+            table.add(empty)
+            snapshots = table.raw_table.snapshot_manager()
+            self.assertIsNone(snapshots.get_latest_snapshot())
+
+            def commit_empty():
+                writable = table.raw_table.copy({
+                    "snapshot.ignore-empty-commit": "false",
+                })
+                commit = writable.new_batch_write_builder().new_commit()
+                try:
+                    commit.commit([], snapshot_properties={"source": "empty-stat"})
+                finally:
+                    commit.close()
+
+            commit_empty()
+            snapshot = snapshots.get_latest_snapshot()
+            self.assertIsNotNone(snapshot)
+            self.assertEqual((1, 0, 0), (
+                snapshot.id, snapshot.total_record_count,
+                snapshot.delta_record_count))
+            self.assertEqual({"source": "empty-stat"}, snapshot.properties)
+            table.raw_table.create_tag("empty")
+            tagged = table.scan(tag_name="empty").to_arrow()
+            self.assertEqual(0, tagged.num_rows)
+            self.assertEqual(schema, tagged.schema)
+
+            table.add([{"feature": "state_imu_body"}])
+            table.add(empty)
+            self.assertEqual(2, snapshots.get_latest_snapshot().id)
+            commit_empty()
+            snapshot = snapshots.get_latest_snapshot()
+            self.assertEqual((3, 1, 0), (
+                snapshot.id, snapshot.total_record_count,
+                snapshot.delta_record_count))
+            self.assertEqual([{"feature": "state_imu_body"}], table.scan().to_list())
+            self.assertEqual([], table.scan(tag_name="empty").to_list())
 
     def _create_commit(self, cls, overwrite_partition=None):
         commit = cls.__new__(cls)
         commit.table = Mock()
         commit.table.identifier = 'default.test_table'
+        commit.table.options.native_commit_enabled.return_value = False
         commit.commit_user = 'test_user'
         commit.overwrite_partition = overwrite_partition
         commit.file_store_commit = Mock()
         commit.batch_committed = False
+        commit._commit_callbacks = []
+        commit._native_commit = None
         return commit, commit.file_store_commit
 
     # -- Overwrite mode: should always call overwrite(), even with empty messages --
@@ -88,15 +137,53 @@ class TestTableCommitEmptyOverwrite(unittest.TestCase):
             mock_fsc.commit.assert_not_called()
             mock_fsc.overwrite.assert_not_called()
 
-    # -- StreamTableCommit overwrite should also reach overwrite() with empty messages --
+    def test_batch_commit_forwards_snapshot_properties(self):
+        commit, mock_fsc = self._create_commit(
+            BatchTableCommit, overwrite_partition=None)
+        message = CommitMessage(
+            partition=(), bucket=0, new_files=[Mock()])
 
-    def test_stream_commit_overwrite_empty_messages(self):
-        commit, mock_fsc = self._create_commit(StreamTableCommit, overwrite_partition={'dt': '2024-01-15'})
+        commit.commit([message], snapshot_properties={"source": "capture"})
 
-        commit.commit([], commit_identifier=42)
+        mock_fsc.commit.assert_called_once_with(
+            commit_messages=[message],
+            commit_identifier=BATCH_COMMIT_IDENTIFIER,
+            snapshot_properties={"source": "capture"},
+        )
+
+    def test_overwrite_forwards_snapshot_properties(self):
+        commit, mock_fsc = self._create_commit(
+            BatchTableCommit, overwrite_partition={"dt": "2024-01-15"})
+        message = CommitMessage(
+            partition=("2024-01-15",), bucket=0, new_files=[Mock()])
+
+        commit.commit([message], snapshot_properties={"source": "capture"})
 
         mock_fsc.overwrite.assert_called_once_with(
-            overwrite_partition={'dt': '2024-01-15'},
-            commit_messages=[],
+            overwrite_partition={"dt": "2024-01-15"},
+            commit_messages=[message],
+            commit_identifier=BATCH_COMMIT_IDENTIFIER,
+            snapshot_properties={"source": "capture"},
+        )
+
+    def test_stream_commit_does_not_accept_overwrite_configuration(self):
+        with self.assertRaises(TypeError):
+            StreamTableCommit(Mock(), 'job', {'dt': '2024-01-15'})
+
+    def test_stream_commit_forwards_snapshot_properties(self):
+        commit, mock_fsc = self._create_commit(
+            StreamTableCommit, overwrite_partition=None)
+        message = CommitMessage(
+            partition=(), bucket=0, new_files=[Mock()])
+
+        commit.commit(
+            [message],
             commit_identifier=42,
+            snapshot_properties={"checkpoint": "42"},
+        )
+
+        mock_fsc.commit.assert_called_once_with(
+            commit_messages=[message],
+            commit_identifier=42,
+            snapshot_properties={"checkpoint": "42"},
         )

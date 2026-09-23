@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
@@ -72,8 +73,10 @@ import java.util.function.Supplier;
 
 import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
-import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
+import static org.apache.paimon.lookup.LookupStoreFactory.bloomFilterBuilderFactory;
 import static org.apache.paimon.mergetree.LookupFile.localFilePrefix;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Factory to create {@link MergeTreeCompactManager}. */
 public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactory {
@@ -97,6 +100,8 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
     @Nullable private IOManager ioManager;
     @Nullable private CompactionMetrics compactionMetrics;
     @Nullable private Cache<String, LookupFile> lookupFileCache;
+    @Nullable private CompactRewriterFactory compactRewriterFactory;
+    private boolean initialized;
 
     public MergeTreeCompactManagerFactory(
             KeyValueFileReaderFactory.Builder readerFactoryBuilder,
@@ -142,12 +147,22 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
     }
 
     @Override
+    public void withCompactRewriterFactory(CompactRewriterFactory factory) {
+        checkState(
+                !initialized,
+                "Configure the compaction rewriter factory before creating bucket writers.");
+        this.compactRewriterFactory = checkNotNull(factory);
+    }
+
+    @Override
     public CompactManager create(
             BinaryRow partition,
             int bucket,
             ExecutorService compactExecutor,
             List<DataFileMeta> restoreFiles,
-            @Nullable BucketedDvMaintainer dvMaintainer) {
+            @Nullable BucketedDvMaintainer dvMaintainer,
+            boolean ignorePreviousFiles) {
+        initialized = true;
         if (options.writeOnly()) {
             return new NoopCompactManager();
         }
@@ -156,20 +171,29 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
         Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
         @Nullable FieldsComparator userDefinedSeqComparator = udsComparatorSupplier.get();
-        MergeTreeCompactRewriter rewriter =
+        MergeTreeCompactRewriter defaultRewriter =
                 createRewriter(
                         partition,
                         bucket,
                         keyComparator,
                         userDefinedSeqComparator,
                         levels,
-                        dvMaintainer);
+                        dvMaintainer,
+                        ignorePreviousFiles);
+        CompactRewriter rewriter =
+                wrapRewriter(compactRewriterFactory, partition, bucket, defaultRewriter);
         CompactionMetrics.Reporter metricsReporter =
                 compactionMetrics == null
                         ? null
                         : compactionMetrics.createReporter(partition, bucket);
         if (metricsReporter != null) {
-            rewriter.setMetricsReporter(metricsReporter);
+            defaultRewriter.setMetricsReporter(metricsReporter);
+        }
+        String bucketInfo = "bucket=" + bucket;
+        if (partition.getFieldCount() > 0) {
+            String partitionString =
+                    readerFactoryBuilder.pathFactory().getPartitionString(partition);
+            bucketInfo = String.format("partition=%s, ", partitionString) + bucketInfo;
         }
         return new MergeTreeCompactManager(
                 compactExecutor,
@@ -185,7 +209,8 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                 options.needLookup(),
                 recordLevelExpire,
                 options.forceRewriteAllFiles(),
-                options.isChainTable());
+                options.isChainTable(),
+                bucketInfo);
     }
 
     private CompactStrategy createCompactStrategy(
@@ -241,13 +266,39 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
         return max < 0 ? null : max;
     }
 
+    @VisibleForTesting
+    static CompactRewriter wrapRewriter(
+            @Nullable CompactRewriterFactory compactRewriterFactory,
+            BinaryRow partition,
+            int bucket,
+            CompactRewriter defaultRewriter) {
+        if (compactRewriterFactory == null) {
+            return defaultRewriter;
+        }
+        try {
+            return checkNotNull(
+                    compactRewriterFactory.create(partition.copy(), bucket, defaultRewriter),
+                    "The compaction rewriter factory must return a rewriter.");
+        } catch (RuntimeException | Error failure) {
+            try {
+                defaultRewriter.close();
+            } catch (Exception closeFailure) {
+                if (closeFailure != failure) {
+                    failure.addSuppressed(closeFailure);
+                }
+            }
+            throw failure;
+        }
+    }
+
     private MergeTreeCompactRewriter createRewriter(
             BinaryRow partition,
             int bucket,
             Comparator<InternalRow> keyComparator,
             @Nullable FieldsComparator userDefinedSeqComparator,
             Levels levels,
-            @Nullable BucketedDvMaintainer dvMaintainer) {
+            @Nullable BucketedDvMaintainer dvMaintainer,
+            boolean ignorePreviousFiles) {
         DeletionVector.Factory dvFactory = DeletionVector.factory(dvMaintainer);
         KeyValueFileReaderFactory keyReaderFactory =
                 readerFactoryBuilder.build(partition, bucket, dvFactory);
@@ -262,6 +313,8 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
         MergeEngine mergeEngine = options.mergeEngine();
         ChangelogProducer changelogProducer = options.changelogProducer();
         LookupStrategy lookupStrategy = options.lookupStrategy();
+        boolean changelogIgnoreUpdateBefore = options.changelogProducerIgnoreUpdateBefore();
+        boolean changelogIgnoreDelete = options.changelogProducerIgnoreDelete();
         if (changelogProducer.equals(FULL_COMPACTION)) {
             return new FullChangelogMergeTreeCompactRewriter(
                     maxLevel,
@@ -272,7 +325,9 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                     userDefinedSeqComparator,
                     mfFactory,
                     mergeSorter,
-                    logDedupEqualSupplier.get());
+                    logDedupEqualSupplier.get(),
+                    changelogIgnoreUpdateBefore,
+                    changelogIgnoreDelete);
         } else if (lookupStrategy.needLookup) {
             PersistProcessor.Factory<?> processorFactory;
             LookupMergeTreeCompactRewriter.MergeFunctionWrapperFactory<?> wrapperFactory;
@@ -297,6 +352,14 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                         processorFactory = PersistValueAndPosProcessor.factory(valueType);
                     } else {
                         processorFactory = PersistPositionProcessor.factory();
+                        // Record-level expiration still inspects value fields.
+                        if (recordLevelExpire == null) {
+                            lookupReaderFactory =
+                                    readerFactoryBuilder
+                                            .copyWithoutProjection()
+                                            .withReadValueType(RowType.of())
+                                            .build(partition, bucket, dvFactory);
+                        }
                     }
                 } else {
                     processorFactory = PersistValueProcessor.factory(valueType);
@@ -331,7 +394,9 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                     mfFactory,
                     mergeSorter,
                     wrapperFactory,
-                    lookupStrategy.produceChangelog,
+                    lookupStrategy.produceChangelog && !ignorePreviousFiles,
+                    changelogIgnoreUpdateBefore,
+                    changelogIgnoreDelete,
                     dvMaintainer,
                     options,
                     remoteLookupFileManager);
@@ -383,7 +448,7 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                                         localFilePrefix(partitionType, partition, bucket, file))
                                 .getPathFile(),
                 lookupStoreFactory,
-                bfGenerator(options),
+                bloomFilterBuilderFactory(options),
                 lookupFileCache);
     }
 

@@ -21,6 +21,7 @@ from pypaimon.common.options import Options
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
+from pypaimon.catalog.jdbc_catalog import JdbcCatalog
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.common.options.config import CatalogOptions
 
@@ -29,6 +30,7 @@ class CatalogFactory:
 
     CATALOG_REGISTRY = {
         "filesystem": FileSystemCatalog,
+        "jdbc": JdbcCatalog,
         "rest": RESTCatalog,
     }
 
@@ -39,6 +41,23 @@ class CatalogFactory:
         if catalog_class is None:
             raise ValueError("Unknown catalog identifier: {}. "
                              "Available types: {}".format(identifier, list(CatalogFactory.CATALOG_REGISTRY.keys())))
-        return catalog_class(
-            CatalogContext.create_from_options(Options(catalog_options))) if identifier == "rest" else catalog_class(
-                Options(catalog_options))
+        if identifier in ("jdbc", "rest"):
+            return catalog_class(CatalogContext.create_from_options(Options(catalog_options)))
+        return catalog_class(Options(catalog_options))
+
+    @staticmethod
+    def create_from_context(
+            context: CatalogContext,
+            config_required: bool = True
+    ) -> Catalog:
+        identifier = context.options.get(CatalogOptions.METASTORE)
+        catalog_class = CatalogFactory.CATALOG_REGISTRY.get(identifier)
+        if catalog_class is None:
+            raise ValueError(
+                "Unknown catalog identifier: {}. Available types: {}".format(
+                    identifier, list(CatalogFactory.CATALOG_REGISTRY.keys())))
+        if identifier == "filesystem":
+            return catalog_class(context.options)
+        if identifier == "rest":
+            return catalog_class(context, config_required=config_required)
+        return catalog_class(context)

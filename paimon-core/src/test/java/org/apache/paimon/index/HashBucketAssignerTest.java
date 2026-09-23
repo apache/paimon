@@ -35,10 +35,13 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
 
 /** Test for {@link HashBucketAssigner}. */
 public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
@@ -148,6 +151,24 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
             int bucket = assigner.assign(row(2), hash += 2);
             assertThat(bucket).isIn(0, 2);
         }
+    }
+
+    @Test
+    public void testEachPartitionUsesAllBucketsWithUpperBound() {
+        HashBucketAssigner assigner = createAssigner(1, 1, 0, 4);
+
+        Map<Integer, Integer> firstPartition = new HashMap<>();
+        for (int hash = 0; hash < 20; hash++) {
+            firstPartition.merge(assigner.assign(row(1), hash), 1, Integer::sum);
+        }
+        assertThat(firstPartition).containsOnly(entry(0, 5), entry(1, 5), entry(2, 5), entry(3, 5));
+
+        Map<Integer, Integer> secondPartition = new HashMap<>();
+        for (int hash = 0; hash < 20; hash++) {
+            secondPartition.merge(assigner.assign(row(2), hash), 1, Integer::sum);
+        }
+        assertThat(secondPartition)
+                .containsOnly(entry(0, 5), entry(1, 5), entry(2, 5), entry(3, 5));
     }
 
     @Test

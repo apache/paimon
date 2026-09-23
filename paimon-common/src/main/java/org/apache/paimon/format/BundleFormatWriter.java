@@ -22,11 +22,18 @@ import org.apache.paimon.io.BundleRecords;
 
 import java.io.IOException;
 
-/** Format write with bundle interface. */
+/**
+ * Format writer with a row-equivalent bundle interface.
+ *
+ * <p>Implementations may consume a compatible bundle natively, convert or copy it, or fall back to
+ * row-by-row writes. {@link #writeBundle} must preserve the same record values and order as
+ * invoking {@link #addElement} for every record. It must not retain borrowed buffers after the
+ * method returns unless it has copied them or acquired independent ownership.
+ */
 public interface BundleFormatWriter extends FormatWriter {
 
     /**
-     * Write a bundle of records directly.
+     * Writes a bundle with semantics equivalent to invoking {@link #addElement} for every record.
      *
      * @param bundle the records to be written
      * @throws IOException if exception happens

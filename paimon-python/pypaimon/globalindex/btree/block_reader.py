@@ -22,7 +22,7 @@ from typing import Callable, Optional
 
 from pypaimon.globalindex.btree.block_aligned_type import BlockAlignedType
 from pypaimon.globalindex.btree.block_entry import BlockEntry
-from pypaimon.globalindex.btree.memory_slice_input import MemorySliceInput
+from pypaimon.globalindex.memory_slice_input import MemorySliceInput
 
 
 class BlockReader:

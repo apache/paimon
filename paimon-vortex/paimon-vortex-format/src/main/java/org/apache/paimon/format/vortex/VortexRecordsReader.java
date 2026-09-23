@@ -30,15 +30,17 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongIterator;
 import org.apache.paimon.utils.ProjectedRow;
 
-import dev.vortex.api.Array;
-import dev.vortex.api.ArrayIterator;
+import dev.vortex.api.DataSource;
 import dev.vortex.api.Expression;
-import dev.vortex.api.File;
-import dev.vortex.api.Files;
 import dev.vortex.api.ImmutableScanOptions;
+import dev.vortex.api.Partition;
+import dev.vortex.api.Scan;
+import dev.vortex.api.ScanOptions;
+import dev.vortex.api.Session;
 import dev.vortex.arrow.ArrowAllocation;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.ipc.ArrowReader;
 
 import javax.annotation.Nullable;
 
@@ -56,12 +58,13 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
     private final ArrowBatchReader arrowBatchReader;
     private final Path filePath;
     private final BufferAllocator allocator;
-    private final ArrayIterator arrayIterator;
-    private final File vortexFile;
+    private final Session session;
+    private final DataSource dataSource;
+    private final Scan scan;
     private final LongIterator positionIterator;
     @Nullable private final int[] physicalFieldMapping;
-    private VectorSchemaRoot reuse;
-    private Array currentArray;
+    private ArrowReader currentArrowReader;
+    private Partition currentPartition;
     private long returnedPosition = -1;
 
     public VortexRecordsReader(
@@ -73,49 +76,83 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
             Map<String, String> storageOptions) {
         this.filePath = path;
         RowType physicalReadRowType = physicalReadRowType(dataSchemaRowType, projectedRowType);
-        this.physicalFieldMapping = physicalFieldMapping(physicalReadRowType, projectedRowType);
+        this.physicalFieldMapping =
+                physicalFieldMapping(dataSchemaRowType, physicalReadRowType, projectedRowType);
         this.allocator =
                 ArrowAllocation.rootAllocator()
                         .newChildAllocator("vortex-reader", 0, Long.MAX_VALUE);
+
         try {
-            this.vortexFile = Files.open(path.toUri().toString(), storageOptions);
+            this.session = Session.create();
             try {
-                ImmutableScanOptions.Builder scanBuilder = ImmutableScanOptions.builder();
-                scanBuilder.addAllColumns(physicalReadRowType.getFieldNames());
-                if (rowIndices != null) {
-                    scanBuilder.rowIndices(rowIndices);
+                this.dataSource = DataSource.open(session, path.toUri().toString(), storageOptions);
+                try {
+                    ImmutableScanOptions.Builder scanBuilder =
+                            ImmutableScanOptions.builder().ordered(true);
+
+                    java.util.List<String> columns = physicalReadRowType.getFieldNames();
+                    // The scan clones the projection it is given, so both the root and the select
+                    // built here are ours to release once dataSource.scan has returned.
+                    try (Expression root = Expression.root();
+                            Expression projection =
+                                    Expression.select(columns.toArray(new String[0]), root)) {
+                        scanBuilder.projection(projection);
+
+                        if (rowIndices != null) {
+                            scanBuilder.selectionIndices(rowIndices);
+                            scanBuilder.selectionMode(ScanOptions.SelectionMode.INCLUDE);
+                        }
+                        if (predicate != null) {
+                            scanBuilder.filter(predicate);
+                        }
+                        this.scan = dataSource.scan(scanBuilder.build());
+                    }
+                } catch (Exception e) {
+                    dataSource.close();
+                    throw e;
                 }
-                if (predicate != null) {
-                    scanBuilder.predicate(predicate);
-                }
-                this.arrayIterator = vortexFile.newScan(scanBuilder.build());
             } catch (Exception e) {
-                vortexFile.close();
+                session.close();
                 throw e;
             }
         } catch (Exception e) {
             allocator.close();
-            throw e;
+            throw new RuntimeException(e);
         }
+
         this.arrowBatchReader = new ArrowBatchReader(physicalReadRowType, true);
+        long totalRowCount = dataSource.rowCount();
         this.positionIterator =
                 rowIndices != null
                         ? LongIterator.fromArray(rowIndices)
-                        : LongIterator.fromRange(0, vortexFile.rowCount());
+                        : LongIterator.fromRange(0, totalRowCount > 0 ? totalRowCount : 0);
     }
 
     @Nullable
     @Override
     public FileRecordIterator<InternalRow> readBatch() throws IOException {
-        if (!arrayIterator.hasNext()) {
-            return null;
+        // Try to load the next batch from the current ArrowReader
+        if (currentArrowReader != null && currentArrowReader.loadNextBatch()) {
+            return toBatchIterator(currentArrowReader.getVectorSchemaRoot());
         }
 
-        releaseCurrentArray();
-        Array array = arrayIterator.next();
-        this.currentArray = array;
-        VectorSchemaRoot vsr = array.exportToArrow(allocator, reuse);
-        this.reuse = vsr;
+        // Close current reader and move to the next partition
+        closeCurrentArrowReader();
+
+        while (scan.hasNext()) {
+            closeCurrentPartition();
+            currentPartition = scan.next();
+            currentArrowReader = currentPartition.scanArrow(allocator);
+            if (currentArrowReader.loadNextBatch()) {
+                return toBatchIterator(currentArrowReader.getVectorSchemaRoot());
+            }
+            closeCurrentArrowReader();
+        }
+
+        return null;
+    }
+
+    private FileRecordIterator<InternalRow> toBatchIterator(VectorSchemaRoot vsr) {
         Iterator<InternalRow> rows = arrowBatchReader.readBatch(vsr).iterator();
         ProjectedRow projectedRow =
                 physicalFieldMapping == null ? null : ProjectedRow.from(physicalFieldMapping);
@@ -143,33 +180,41 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
             }
 
             @Override
-            public void releaseBatch() {
-                releaseCurrentArray();
-            }
+            public void releaseBatch() {}
         };
     }
 
-    private void releaseCurrentArray() {
-        if (currentArray != null) {
-            currentArray.close();
-            currentArray = null;
+    private void closeCurrentArrowReader() {
+        if (currentArrowReader != null) {
+            try {
+                currentArrowReader.close();
+            } catch (IOException e) {
+                // ignore
+            }
+            currentArrowReader = null;
+        }
+    }
+
+    private void closeCurrentPartition() {
+        if (currentPartition != null) {
+            currentPartition.close();
+            currentPartition = null;
         }
     }
 
     @Override
     public void close() {
-        releaseCurrentArray();
-        if (reuse != null) {
-            reuse.close();
-        }
-        arrayIterator.close();
-        vortexFile.close();
+        closeCurrentArrowReader();
+        closeCurrentPartition();
+        scan.close();
+        dataSource.close();
+        session.close();
         allocator.close();
     }
 
     @VisibleForTesting
     static RowType physicalReadRowType(RowType dataSchemaRowType, RowType projectedRowType) {
-        if (!hasRowTrackingField(projectedRowType)) {
+        if (!hasSynthesizedRowTrackingField(dataSchemaRowType, projectedRowType)) {
             return projectedRowType;
         }
 
@@ -177,7 +222,7 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
         Set<Integer> selectedFieldIds = new HashSet<>();
         Set<String> selectedFieldNames = new HashSet<>();
         for (DataField projectedField : projectedRowType.getFields()) {
-            if (isRowTrackingField(projectedField)) {
+            if (isSynthesizedRowTrackingField(dataSchemaRowType, projectedField)) {
                 continue;
             }
 
@@ -196,15 +241,16 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
 
     @Nullable
     @VisibleForTesting
-    static int[] physicalFieldMapping(RowType physicalReadRowType, RowType projectedRowType) {
-        if (!hasRowTrackingField(projectedRowType)) {
+    static int[] physicalFieldMapping(
+            RowType dataSchemaRowType, RowType physicalReadRowType, RowType projectedRowType) {
+        if (!hasSynthesizedRowTrackingField(dataSchemaRowType, projectedRowType)) {
             return null;
         }
 
         int[] mapping = new int[projectedRowType.getFieldCount()];
         for (int i = 0; i < projectedRowType.getFieldCount(); i++) {
             DataField field = projectedRowType.getFields().get(i);
-            if (isRowTrackingField(field)) {
+            if (isSynthesizedRowTrackingField(dataSchemaRowType, field)) {
                 mapping[i] = -1;
             } else {
                 if (physicalReadRowType.containsField(field.id())) {
@@ -235,17 +281,30 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
         return null;
     }
 
-    private static boolean hasRowTrackingField(RowType rowType) {
+    private static boolean hasSynthesizedRowTrackingField(
+            RowType dataSchemaRowType, RowType rowType) {
         for (DataField field : rowType.getFields()) {
-            if (isRowTrackingField(field)) {
+            if (isSynthesizedRowTrackingField(dataSchemaRowType, field)) {
                 return true;
             }
         }
         return false;
     }
 
-    private static boolean isRowTrackingField(DataField field) {
-        return SpecialFields.ROW_ID.name().equals(field.name())
-                || SpecialFields.SEQUENCE_NUMBER.name().equals(field.name());
+    /**
+     * A row-tracking field is synthesized only when the file does not store it physically. {@code
+     * _SEQUENCE_NUMBER} doubles as the primary-key file format's physical sequence column: for
+     * key-value reads it must be read like any other data column, not mapped away for synthesis —
+     * doing so left its projection index at -1 and crashed every vortex read of a primary-key
+     * table.
+     */
+    private static boolean isSynthesizedRowTrackingField(
+            RowType dataSchemaRowType, DataField field) {
+        if (!SpecialFields.ROW_ID.name().equals(field.name())
+                && !SpecialFields.SEQUENCE_NUMBER.name().equals(field.name())) {
+            return false;
+        }
+        return !dataSchemaRowType.containsField(field.id())
+                && dataSchemaRowType.getFieldIndex(field.name()) < 0;
     }
 }

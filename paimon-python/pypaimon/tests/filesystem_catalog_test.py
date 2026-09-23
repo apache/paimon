@@ -219,6 +219,247 @@ class FileSystemCatalogTest(unittest.TestCase):
         table = catalog.get_table(identifier)
         self.assertEqual(len(table.fields), 2)
 
+    def test_alter_immutable_options(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        # while a table has no snapshots, structural options may still be changed
+        empty_identifier = "test_db.immutable_options_empty"
+        pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        catalog.create_table(empty_identifier, Schema.from_pyarrow_schema(pa_schema), False)
+        catalog.alter_table(
+            empty_identifier,
+            [SchemaChange.set_option("merge-engine", "first-row")],
+            False
+        )
+        # the type is rejected even without snapshots: table kinds like format
+        # tables never create Paimon snapshots but can still hold data
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                empty_identifier,
+                [SchemaChange.set_option("type", "format-table")], False)
+        self.assertIn("Change 'type' is not supported yet.", str(ctx.exception))
+        with self.assertRaises(RuntimeError):
+            catalog.alter_table(
+                empty_identifier, [SchemaChange.remove_option("type")], False)
+
+        # once the table has a snapshot, immutable options are rejected
+        identifier = "test_db.immutable_options_table"
+        catalog.create_table(identifier, Schema.from_pyarrow_schema(pa_schema), False)
+        table = catalog.get_table(identifier)
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(
+            pa.Table.from_pydict({'id': [1, 2], 'name': ['a', 'b']}, schema=pa_schema))
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # the catalog wraps alter failures in RuntimeError
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                identifier, [SchemaChange.set_option("type", "format-table")], False)
+        self.assertIn("Change 'type' is not supported yet.", str(ctx.exception))
+
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                identifier, [SchemaChange.set_option("merge-engine", "deduplicate")], False)
+        self.assertIn("Change 'merge-engine' is not supported yet.", str(ctx.exception))
+
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                identifier, [SchemaChange.remove_option("merge-engine")], False)
+        self.assertIn("Change 'merge-engine' is not supported yet.", str(ctx.exception))
+
+        # canonical hyphenated keys are guarded too
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                identifier,
+                [SchemaChange.set_option("index-file-in-data-file-dir", "true")], False)
+        self.assertIn(
+            "Change 'index-file-in-data-file-dir' is not supported yet.", str(ctx.exception))
+
+        # setting the default type explicitly is not a change
+        catalog.alter_table(
+            identifier, [SchemaChange.set_option("type", "table")], False)
+        table = catalog.get_table(identifier)
+        self.assertNotIn("type", table.table_schema.options)
+        # ...and the reloaded effective type resolves to the requested "table"
+        # (the default), not some other configured default
+        from pypaimon.common.options import CoreOptions, Options
+        self.assertEqual(
+            CoreOptions(Options(table.table_schema.options)).type(), "table")
+
+        # mutable options can still be changed
+        catalog.alter_table(
+            identifier, [SchemaChange.set_option("target-file-size", "10mb")], False)
+
+        # repeated changes to the same option in one batch apply in order
+        catalog.alter_table(identifier, [
+            SchemaChange.set_option("target-file-size", "20mb"),
+            SchemaChange.set_option("target-file-size", "10mb")], False)
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.table_schema.options.get("target-file-size"), "10mb")
+        catalog.alter_table(identifier, [
+            SchemaChange.remove_option("target-file-size"),
+            SchemaChange.set_option("target-file-size", "10mb")], False)
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.table_schema.options.get("target-file-size"), "10mb")
+
+        # replaying the actual primary/partition keys is not a change: they are
+        # stored in the schema fields, not the options map
+        pk_identifier = "test_db.immutable_options_pk"
+        catalog.create_table(
+            pk_identifier,
+            Schema.from_pyarrow_schema(
+                pa_schema, primary_keys=['id'], options={'bucket': '1'}),
+            False)
+        pk_table = catalog.get_table(pk_identifier)
+        write_builder = pk_table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(
+            pa.Table.from_pydict({'id': [1], 'name': ['a']}, schema=pa_schema))
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+        catalog.alter_table(
+            pk_identifier, [SchemaChange.set_option("primary-key", "id")], False)
+        pk_table = catalog.get_table(pk_identifier)
+        self.assertNotIn("primary-key", pk_table.table_schema.options)
+        with self.assertRaises(RuntimeError):
+            catalog.alter_table(
+                pk_identifier, [SchemaChange.set_option("primary-key", "name")], False)
+
+        part_identifier = "test_db.immutable_options_part"
+        self._create_partitioned_table_with_data(
+            catalog, part_identifier, [{'dt': '2026-01-01', 'rows': 1}])
+        catalog.alter_table(
+            part_identifier, [SchemaChange.set_option("partition", "dt")], False)
+        with self.assertRaises(RuntimeError):
+            catalog.alter_table(
+                part_identifier, [SchemaChange.set_option("partition", "col1")], False)
+
+        # the LATEST file is only a hint: the guard must still see the
+        # snapshots when it is missing
+        os.remove(os.path.join(
+            self.warehouse, "test_db.db", "immutable_options_table",
+            "snapshot", "LATEST"))
+        with self.assertRaises(RuntimeError):
+            catalog.alter_table(
+                identifier,
+                [SchemaChange.set_option("merge-engine", "deduplicate")], False)
+
+    def test_update_column_type_guards_null_to_not_null(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_guard", False)
+
+        def _make_table(name, options):
+            identifier = "test_db_guard.{}".format(name)
+            schema = Schema(
+                fields=[
+                    DataField.from_dict({"id": 0, "name": "k", "type": "INT"}),
+                    DataField.from_dict({"id": 1, "name": "v", "type": "BIGINT"}),
+                ],
+                partition_keys=[], primary_keys=[], options=options, comment="",
+            )
+            catalog.create_table(identifier, schema, False)
+            return identifier
+
+        # Default option (disabled=true) rejects nullable -> not null, mirroring
+        # Java SchemaManager#updateColumnType.
+        default_id = _make_table("default_opt", {})
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                default_id,
+                [SchemaChange.update_column_type(
+                    "v", AtomicType("BIGINT", nullable=False))],
+                False)
+        self.assertIn("nullable to non nullable", str(ctx.exception))
+
+        # Opting out via the table option allows the transition.
+        allowed_id = _make_table(
+            "allow_opt", {"alter-column-null-to-not-null.disabled": "false"})
+        catalog.alter_table(
+            allowed_id,
+            [SchemaChange.update_column_type(
+                "v", AtomicType("BIGINT", nullable=False))],
+            False)
+        table = catalog.get_table(allowed_id)
+        self.assertFalse(table.fields[1].type.nullable)
+
+    def test_update_column_type_rejects_non_executable_cast(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_cast", False)
+
+        identifier = "test_db_cast.ts_table"
+        schema = Schema(
+            fields=[
+                DataField.from_dict({"id": 0, "name": "k", "type": "INT"}),
+                DataField.from_dict({"id": 1, "name": "ts", "type": "TIMESTAMP(3)"}),
+            ],
+            partition_keys=[], primary_keys=[], options={}, comment="",
+        )
+        catalog.create_table(identifier, schema, False)
+
+        # TIMESTAMP -> DECIMAL is logically allowed but has no PyArrow cast
+        # kernel, so the read path could not materialize it. Reject at alter
+        # time (mirrors Java's CastExecutors.resolve(...) != null check) instead
+        # of failing later at read with ArrowNotImplementedError.
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                identifier,
+                [SchemaChange.update_column_type(
+                    "ts", AtomicType("DECIMAL(10, 0)"))],
+                False)
+        self.assertIn("no executable cast", str(ctx.exception))
+
+        # INT -> DECIMAL(10, 2) has a PyArrow kernel but the target precision is
+        # too small to hold an int's range at scale 2 (needs >= 12); the read
+        # path would fail with ArrowInvalid, so reject it at alter time too.
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                identifier,
+                [SchemaChange.update_column_type(
+                    "k", AtomicType("DECIMAL(10, 2)"))],
+                False)
+        self.assertIn("no executable cast", str(ctx.exception))
+
+        # A wide-enough DECIMAL is executable and succeeds.
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.update_column_type("k", AtomicType("DECIMAL(12, 2)"))],
+            False)
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.fields[0].type.type, "DECIMAL(12, 2)")
+
+    def test_update_column_type_parameterized_not_null_target(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_nn_param", False)
+        identifier = "test_db_nn_param.t"
+        schema = Schema(
+            fields=[
+                DataField.from_dict({"id": 0, "name": "v", "type": "INT NOT NULL"}),
+                DataField.from_dict({"id": 1, "name": "s", "type": "STRING"}),
+            ],
+            partition_keys=[], primary_keys=[], options={}, comment="",
+        )
+        catalog.create_table(identifier, schema, False)
+
+        # Widening a non-null INT to a non-null DECIMAL(12, 2) is valid. The
+        # target's to_dict() is "DECIMAL(12, 2) NOT NULL"; the atomic parser must
+        # keep the nullability in `nullable` so the executable-cast check does
+        # not choke on a doubled "NOT NULL NOT NULL" type string.
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.update_column_type(
+                "v", AtomicType("DECIMAL(12, 2)", nullable=False))],
+            False)
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.fields[0].type.type, "DECIMAL(12, 2)")
+        self.assertFalse(table.fields[0].type.nullable)
+
     def test_add_column_before_partition(self):
         catalog = CatalogFactory.create({
             "warehouse": self.warehouse

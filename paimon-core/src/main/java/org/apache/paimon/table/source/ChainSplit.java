@@ -21,11 +21,15 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.io.DataFileMetaWriteColsLegacySerializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.SerializationUtils;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -35,6 +39,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalLong;
 
 /**
@@ -45,22 +50,28 @@ public class ChainSplit implements Split {
 
     private static final long serialVersionUID = 1L;
 
-    private static final int VERSION = 1;
+    private static final int VERSION_1 = 1;
+    private static final int VERSION = 3;
 
     private BinaryRow logicalPartition;
     private List<DataFileMeta> dataFiles;
     private Map<String, String> fileBranchMapping;
     private Map<String, String> fileBucketPathMapping;
 
+    /** Deletion files corresponding to {@link #dataFiles}, in the same order. */
+    @Nullable private List<DeletionFile> dataDeletionFiles;
+
     public ChainSplit(
             BinaryRow logicalPartition,
             List<DataFileMeta> dataFiles,
             Map<String, String> fileBranchMapping,
-            Map<String, String> fileBucketPathMapping) {
+            Map<String, String> fileBucketPathMapping,
+            @Nullable List<DeletionFile> dataDeletionFiles) {
         this.logicalPartition = logicalPartition;
         this.dataFiles = dataFiles;
         this.fileBranchMapping = fileBranchMapping;
         this.fileBucketPathMapping = fileBucketPathMapping;
+        this.dataDeletionFiles = dataDeletionFiles;
     }
 
     public BinaryRow logicalPartition() {
@@ -79,6 +90,30 @@ public class ChainSplit implements Split {
         return fileBucketPathMapping;
     }
 
+    /**
+     * Creates a {@link ChainSplit} from a {@link DataSplit} where all data files belong to the same
+     * branch.
+     */
+    public static ChainSplit from(DataSplit dataSplit, String branch) {
+        HashMap<String, String> fileBranchMapping = new HashMap<>();
+        HashMap<String, String> fileBucketPathMapping = new HashMap<>();
+        for (DataFileMeta file : dataSplit.dataFiles()) {
+            fileBranchMapping.put(file.fileName(), branch);
+            fileBucketPathMapping.put(file.fileName(), dataSplit.bucketPath());
+        }
+        return new ChainSplit(
+                dataSplit.partition(),
+                dataSplit.dataFiles(),
+                fileBranchMapping,
+                fileBucketPathMapping,
+                dataSplit.deletionFiles().orElse(null));
+    }
+
+    @Override
+    public Optional<List<DeletionFile>> deletionFiles() {
+        return Optional.ofNullable(dataDeletionFiles);
+    }
+
     @Override
     public long rowCount() {
         long sum = 0;
@@ -90,6 +125,10 @@ public class ChainSplit implements Split {
 
     @Override
     public OptionalLong mergedRowCount() {
+        // Chain tables merge and deduplicate rows across snapshot and delta files by primary key,
+        // so the post-merge row count cannot be determined from per-file metadata alone.
+        // Returning empty prevents LIMIT pushdown from discarding splits based on an inaccurate
+        // estimate.
         return OptionalLong.empty();
     }
 
@@ -111,6 +150,22 @@ public class ChainSplit implements Split {
         return Objects.hash(logicalPartition, dataFiles);
     }
 
+    @Override
+    public String toString() {
+        return "{"
+                + "partition=hash-"
+                + logicalPartition.hashCode()
+                + ", files="
+                + (dataFiles == null ? 0 : dataFiles.size())
+                + ", branches="
+                + fileBranchMapping.size()
+                + ", bucketPaths="
+                + fileBucketPathMapping.size()
+                + '}'
+                + "@"
+                + Integer.toHexString(hashCode());
+    }
+
     private void writeObject(ObjectOutputStream out) throws IOException {
         serialize(new DataOutputViewStreamWrapper(out));
     }
@@ -124,6 +179,7 @@ public class ChainSplit implements Split {
         this.dataFiles = other.dataFiles;
         this.fileBranchMapping = other.fileBranchMapping;
         this.fileBucketPathMapping = other.fileBucketPathMapping;
+        this.dataDeletionFiles = other.dataDeletionFiles;
     }
 
     public void serialize(DataOutputView out) throws IOException {
@@ -150,19 +206,23 @@ public class ChainSplit implements Split {
             out.writeUTF(entry.getKey());
             out.writeUTF(entry.getValue());
         }
+
+        // Serialize deletionFiles
+        DeletionFile.serializeList(out, dataDeletionFiles);
     }
 
     public static ChainSplit deserialize(DataInputView in) throws IOException {
         int version = in.readInt();
-        if (version != VERSION) {
-            throw new UnsupportedOperationException("Unsupported version: " + version);
-        }
+        SerializationUtils.checkVersion(version, VERSION_1, VERSION, "ChainSplit");
 
         BinaryRow logicalPartition = SerializationUtils.deserializeBinaryRow(in);
 
-        int n = in.readInt();
-        List<DataFileMeta> dataFiles = new ArrayList<>(n);
-        DataFileMetaSerializer dataFileSer = new DataFileMetaSerializer();
+        int n = SerializationUtils.readCount(in, "ChainSplit");
+        List<DataFileMeta> dataFiles = new ArrayList<>(SerializationUtils.presizedCapacity(n));
+        ObjectSerializer<DataFileMeta> dataFileSer =
+                version <= 2
+                        ? new DataFileMetaWriteColsLegacySerializer()
+                        : new DataFileMetaSerializer();
         for (int i = 0; i < n; i++) {
             dataFiles.add(dataFileSer.deserialize(in));
         }
@@ -182,7 +242,17 @@ public class ChainSplit implements Split {
             fileBranchMapping.put(key, value);
         }
 
+        // Deserialize deletionFiles (only for version > 1)
+        List<DeletionFile> deletionFiles = null;
+        if (version > VERSION_1) {
+            deletionFiles = DeletionFile.deserializeList(in, DeletionFile::deserialize);
+        }
+
         return new ChainSplit(
-                logicalPartition, dataFiles, fileBranchMapping, fileBucketPathMapping);
+                logicalPartition,
+                dataFiles,
+                fileBranchMapping,
+                fileBucketPathMapping,
+                deletionFiles);
     }
 }

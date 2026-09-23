@@ -42,44 +42,55 @@ public class StrictModeChecker {
     private final String commitUser;
     private final Supplier<FileStoreScan> scanSupplier;
     private final IndexManifestFile indexManifestFile;
+    private final boolean dataEvolutionEnabled;
 
-    private long strictModeLastSafeSnapshot;
+    private long lastSafeSnapshot;
 
     public StrictModeChecker(
             SnapshotManager snapshotManager,
             String commitUser,
             Supplier<FileStoreScan> scanSupplier,
             IndexManifestFile indexManifestFile,
-            long strictModeLastSafeSnapshot) {
+            boolean dataEvolutionEnabled,
+            long lastSafeSnapshot) {
         this.snapshotManager = snapshotManager;
         this.commitUser = commitUser;
         this.scanSupplier = scanSupplier;
         this.indexManifestFile = indexManifestFile;
-        this.strictModeLastSafeSnapshot = strictModeLastSafeSnapshot;
+        this.dataEvolutionEnabled = dataEvolutionEnabled;
+        this.lastSafeSnapshot = lastSafeSnapshot;
     }
 
     public void check(
             long newSnapshotId, CommitKind newCommitKind, List<BinaryRow> newChangedPartitions) {
         Set<BinaryRow> newPartitions = new HashSet<>(newChangedPartitions);
-        for (long id = strictModeLastSafeSnapshot + 1; id < newSnapshotId; id++) {
+        for (long id = lastSafeSnapshot + 1; id < newSnapshotId; id++) {
             Snapshot snapshot = snapshotManager.snapshot(id);
             if (snapshot.commitUser().equals(commitUser)) {
                 continue;
             }
             if (snapshot.commitKind() == CommitKind.COMPACT
                     || snapshot.commitKind() == CommitKind.OVERWRITE) {
-                if (hasOverlappedPartition(snapshot, newPartitions)) {
+                boolean hasOverlap = hasOverlappedDataPartition(snapshot, newPartitions);
+                // OVERWRITE may contain logical changes represented only by deletion vectors,
+                // while an index-only COMPACT on a data evolution table does not change data.
+                if (!hasOverlap
+                        && (snapshot.commitKind() == CommitKind.OVERWRITE
+                                || !dataEvolutionEnabled)) {
+                    hasOverlap = hasOverlappedIndexPartition(snapshot, newPartitions);
+                }
+                if (hasOverlap) {
                     throw new RuntimeException(
                             String.format(
                                     "When trying to commit snapshot %d, "
                                             + "commit user %s has found a %s snapshot (id: %d) by another user %s "
-                                            + "which modified the same partition. Giving up committing as %s is set.",
+                                            + "which modified the same partition. Giving up committing as %s is true.",
                                     newSnapshotId,
                                     commitUser,
                                     snapshot.commitKind().name(),
                                     id,
                                     snapshot.commitUser(),
-                                    CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key()));
+                                    CoreOptions.COMMIT_STRICT_MODE_ENABLED.key()));
                 }
             }
             if (snapshot.commitKind() == CommitKind.APPEND
@@ -98,18 +109,18 @@ public class StrictModeChecker {
                                     "When trying to commit snapshot %d, "
                                             + "commit user %s has found a APPEND snapshot (id: %d) by another user %s "
                                             + "which committed files to fixed bucket on the same partition. "
-                                            + "Giving up committing as %s is set.",
+                                            + "Giving up committing as %s is true.",
                                     newSnapshotId,
                                     commitUser,
                                     id,
                                     snapshot.commitUser(),
-                                    CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key()));
+                                    CoreOptions.COMMIT_STRICT_MODE_ENABLED.key()));
                 }
             }
         }
     }
 
-    private boolean hasOverlappedPartition(Snapshot snapshot, Set<BinaryRow> newPartitions) {
+    private boolean hasOverlappedDataPartition(Snapshot snapshot, Set<BinaryRow> newPartitions) {
         if (newPartitions.isEmpty()) {
             return false;
         }
@@ -120,10 +131,13 @@ public class StrictModeChecker {
                         .withKind(ScanMode.DELTA)
                         .dropStats()
                         .readFileIterator();
-        if (hasOverlappedPartition(entries, newPartitions)) {
-            return true;
-        }
+        return hasOverlappedPartition(entries, newPartitions);
+    }
 
+    private boolean hasOverlappedIndexPartition(Snapshot snapshot, Set<BinaryRow> newPartitions) {
+        if (newPartitions.isEmpty()) {
+            return false;
+        }
         String indexManifest = snapshot.indexManifest();
         if (indexManifest == null) {
             return false;
@@ -159,6 +173,6 @@ public class StrictModeChecker {
     }
 
     public void update(long newSafeSnapshot) {
-        strictModeLastSafeSnapshot = newSafeSnapshot;
+        lastSafeSnapshot = newSafeSnapshot;
     }
 }

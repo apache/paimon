@@ -18,14 +18,27 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -34,10 +47,74 @@ import java.util.List;
 import java.util.Random;
 
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
+import static org.apache.paimon.table.SpecialFields.ROW_ID;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.same;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Tests for {@link DataEvolutionBatchScan}. */
 public class DataEvolutionBatchScanTest {
+
+    @Test
+    public void testWithFilterKeepsMixedOrWhenRowRangeExtractionFails() {
+        PredicateBuilder builder = new PredicateBuilder(rowTypeWithRowId());
+        Predicate predicate = PredicateBuilder.or(builder.equal(2, 1L), builder.greaterThan(0, 5));
+
+        AppendBatchTableScan batchScan = mock(AppendBatchTableScan.class);
+        SnapshotReader snapshotReader = mockSnapshotReader(batchScan);
+        new DataEvolutionBatchScan(null, batchScan).withFilter(predicate);
+
+        verify(snapshotReader).withFilter(predicate, null);
+        verify(batchScan, never()).withFilter(any(Predicate.class));
+    }
+
+    @Test
+    public void testWithFilterRemovesRowIdAfterRowRangeExtractionSucceeds() {
+        PredicateBuilder builder = new PredicateBuilder(rowTypeWithRowId());
+        Predicate nonRowIdPredicate = builder.greaterThan(0, 5);
+        Predicate predicate = PredicateBuilder.and(builder.equal(2, 1L), nonRowIdPredicate);
+
+        AppendBatchTableScan batchScan = mock(AppendBatchTableScan.class);
+        SnapshotReader snapshotReader = mockSnapshotReader(batchScan);
+        new DataEvolutionBatchScan(null, batchScan).withFilter(predicate);
+
+        ArgumentCaptor<Predicate> captor = ArgumentCaptor.forClass(Predicate.class);
+        verify(snapshotReader).withFilter(same(predicate), captor.capture());
+        assertThat(captor.getValue()).isSameAs(nonRowIdPredicate);
+    }
+
+    @Test
+    public void testWithFilterDropsNestedMixedOrFromStatsResidual() {
+        PredicateBuilder builder = new PredicateBuilder(rowTypeWithRowId());
+        Predicate nonRowIdPredicate = builder.lessThan(0, 100);
+        Predicate mixedOr = PredicateBuilder.or(builder.equal(2, 1L), builder.greaterThan(1, 5));
+        Predicate predicate =
+                PredicateBuilder.and(builder.between(2, 0L, 10L), nonRowIdPredicate, mixedOr);
+
+        AppendBatchTableScan batchScan = mock(AppendBatchTableScan.class);
+        SnapshotReader snapshotReader = mockSnapshotReader(batchScan);
+        new DataEvolutionBatchScan(null, batchScan).withFilter(predicate);
+
+        ArgumentCaptor<Predicate> captor = ArgumentCaptor.forClass(Predicate.class);
+        verify(snapshotReader).withFilter(same(predicate), captor.capture());
+        assertThat(captor.getValue()).isSameAs(nonRowIdPredicate);
+    }
+
+    @Test
+    public void testWithShardKeepsDataEvolutionWrapper() {
+        AppendBatchTableScan batchScan = mock(AppendBatchTableScan.class);
+        when(batchScan.withShard(0, 2)).thenReturn(batchScan);
+
+        DataEvolutionBatchScan scan = new DataEvolutionBatchScan(null, batchScan);
+        DataTableScan returned = scan.withShard(0, 2);
+
+        assertThat(returned).isSameAs(scan);
+        verify(batchScan).withShard(0, 2);
+    }
 
     @Test
     public void testWrapToIndexSplitsRandomly() {
@@ -135,6 +212,83 @@ public class DataEvolutionBatchScanTest {
         assertThat(indexedSplit.dataSplit()).isEqualTo(split);
         assertThat(indexedSplit.rowRanges())
                 .containsExactly(new Range(4200, 4450), new Range(4650, 4700));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testWrapToIndexSplitsWithQueryAuth(boolean hasAuthResult) {
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(1L)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(Collections.singletonList(newAppendFile(0L, 10L, "file-0")))
+                        .build();
+        TableQueryAuthResult authResult =
+                hasAuthResult
+                        ? new TableQueryAuthResult(
+                                Collections.singletonList("filter-json"),
+                                Collections.singletonMap("f0", "mask-json"))
+                        : null;
+        QueryAuthSplit authSplit = new QueryAuthSplit(split, authResult);
+
+        List<Split> indexedSplits =
+                DataEvolutionBatchScan.wrapToIndexSplits(
+                                Collections.singletonList(authSplit),
+                                RowRangeIndex.create(
+                                        Arrays.asList(new Range(1, 2), new Range(7, 12))),
+                                rowId -> rowId + 0.5f)
+                        .splits();
+
+        assertThat(indexedSplits).hasSize(1);
+        assertThat(indexedSplits.get(0)).isInstanceOf(QueryAuthSplit.class);
+        QueryAuthSplit indexedAuthSplit = (QueryAuthSplit) indexedSplits.get(0);
+        assertThat(indexedAuthSplit.authResult()).isSameAs(authResult);
+        assertThat(indexedAuthSplit.split()).isInstanceOf(IndexedSplit.class);
+        IndexedSplit indexedSplit = (IndexedSplit) indexedAuthSplit.split();
+        assertThat(indexedSplit.dataSplit()).isSameAs(split);
+        assertThat(indexedSplit.rowRanges()).containsExactly(new Range(1, 2), new Range(7, 9));
+        assertThat(indexedSplit.scores()).containsExactly(1.5f, 2.5f, 7.5f, 8.5f, 9.5f);
+        assertThat(authSplit.split()).isSameAs(split);
+    }
+
+    @Test
+    public void testWrapToIndexSplitsKeepsExistingIndexedSplits() {
+        IndexedSplit indexedSplit =
+                new IndexedSplit(
+                        mock(DataSplit.class),
+                        Collections.singletonList(new Range(1, 2)),
+                        new float[] {1.5f, 2.5f});
+        TableQueryAuthResult authResult = mock(TableQueryAuthResult.class);
+
+        List<Split> indexedSplits =
+                DataEvolutionBatchScan.wrapToIndexSplits(
+                                Arrays.asList(
+                                        indexedSplit, new QueryAuthSplit(indexedSplit, authResult)),
+                                null,
+                                null)
+                        .splits();
+
+        assertThat(indexedSplits).hasSize(2);
+        assertThat(indexedSplits.get(0)).isSameAs(indexedSplit);
+        assertThat(indexedSplits.get(1)).isInstanceOf(QueryAuthSplit.class);
+        QueryAuthSplit indexedAuthSplit = (QueryAuthSplit) indexedSplits.get(1);
+        assertThat(indexedAuthSplit.authResult()).isSameAs(authResult);
+        assertThat(indexedAuthSplit.split()).isSameAs(indexedSplit);
+    }
+
+    private static RowType rowTypeWithRowId() {
+        return RowType.of(
+                new DataField(0, "f0", DataTypes.INT()),
+                new DataField(1, "f1", DataTypes.INT()),
+                new DataField(2, ROW_ID.name(), DataTypes.BIGINT()));
+    }
+
+    private static SnapshotReader mockSnapshotReader(AppendBatchTableScan batchScan) {
+        SnapshotReader snapshotReader = mock(SnapshotReader.class);
+        when(batchScan.snapshotReader()).thenReturn(snapshotReader);
+        return snapshotReader;
     }
 
     private static List<Range> expectedRanges(long min, long max, List<Range> rowRanges) {

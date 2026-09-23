@@ -36,7 +36,10 @@ public class StaticFromTagStartingScanner extends ReadPlanStartingScanner {
 
     public Snapshot getSnapshot() {
         TagManager tagManager =
-                new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
+                new TagManager(
+                        snapshotManager.fileIO(),
+                        snapshotManager.tablePath(),
+                        snapshotManager.branch());
         return tagManager.getOrThrow(tagName).trimToSnapshot();
     }
 

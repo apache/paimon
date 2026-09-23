@@ -27,6 +27,7 @@ from unittest.mock import Mock
 
 import pandas as pd
 import pyarrow as pa
+import pytest
 from parameterized import parameterized
 
 from pypaimon import CatalogFactory, Schema
@@ -36,6 +37,7 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         MapType, PyarrowFieldParser)
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer
 from pypaimon.write.file_store_commit import FileStoreCommit
@@ -226,6 +228,7 @@ class ReaderBasicTest(unittest.TestCase):
         pd.testing.assert_frame_equal(
             actual_df.reset_index(drop=True), expected_df.reset_index(drop=True))
 
+    @pytest.mark.python_plan
     def test_full_data_types(self):
         simple_pa_schema = pa.schema([
             ('f0', pa.int8()),
@@ -286,7 +289,12 @@ class ReaderBasicTest(unittest.TestCase):
 
         # assert equal
         actual_data = table_read.to_arrow(splits)
-        self.assertEqual(actual_data, expect_data)
+        # BINARY(N) maps to variable-length binary on read (see #7518), so the
+        # fixed-size f9 column normalizes to binary; reflect that in the expected.
+        f9_index = expect_data.schema.get_field_index('f9')
+        expected_data = expect_data.set_column(
+            f9_index, 'f9', expect_data.column('f9').cast(pa.binary()))
+        self.assertEqual(actual_data, expected_data)
 
         # to test GenericRow ability
         latest_snapshot = table.snapshot_manager().get_latest_snapshot()
@@ -358,6 +366,44 @@ class ReaderBasicTest(unittest.TestCase):
         actual = duckdb_con.query("SELECT * FROM duckdb_table").fetchdf()
         expect = pd.DataFrame(self.raw_data)
         pd.testing.assert_frame_equal(actual.reset_index(drop=True), expect.reset_index(drop=True))
+
+    def test_reader_duckDB_parallelism(self):
+        # A dedicated partitioned table with rows across multiple partitions so
+        # scan planning yields >= 2 splits, exercising the real parallel fan-out
+        # path (``_should_run_parallel`` requires parallelism >= 2 AND
+        # splits >= 2).
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.catalog.create_table('default.test_duckdb_parallel', schema, False)
+        table = self.catalog.get_table('default.test_duckdb_parallel')
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(pa.Table.from_pydict({
+            'user_id': [1, 2, 3, 4, 5, 6],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1006],
+            'behavior': ['a', 'b', 'c', 'd', 'e', 'f'],
+            'dt': ['p1', 'p1', 'p2', 'p2', 'p3', 'p3'],
+        }, schema=self.pa_schema))
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        self.assertGreaterEqual(len(splits), 2)
+
+        serial = read_builder.new_read().to_duckdb(
+            splits, 'duckdb_serial', parallelism=1)
+        parallel = read_builder.new_read().to_duckdb(
+            splits, 'duckdb_parallel', parallelism=4)
+
+        serial_df = serial.query(
+            "SELECT * FROM duckdb_serial ORDER BY item_id").fetchdf()
+        parallel_df = parallel.query(
+            "SELECT * FROM duckdb_parallel ORDER BY item_id").fetchdf()
+        pd.testing.assert_frame_equal(
+            serial_df.reset_index(drop=True),
+            parallel_df.reset_index(drop=True))
 
     def test_mixed_add_and_delete_entries_compute_stats(self):
         """Test record_count calculation with mixed ADD/DELETE entries in same partition."""
@@ -539,6 +585,28 @@ class ReaderBasicTest(unittest.TestCase):
         catalog.create_table("test_db.test_value_stats_cols_schema_match", schema_with_stats, False)
         table_with_stats = catalog.get_table("test_db.test_value_stats_cols_schema_match")
         self._test_append_only_schema_match_case(table_with_stats, pa_schema)
+
+    def test_value_stats_cols_use_file_schema_after_schema_evolution(self):
+        table_name = 'default.test_value_stats_schema_evolution'
+        schema = Schema.from_pyarrow_schema(pa.schema([
+            ('id', pa.int64()), ('name', pa.string())]))
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+        self._test_value_stats_cols_case(
+            ManifestFileManager(table), table, ['id', 'name'], 2, 'schema_evolution')
+
+        for change in (SchemaChange.rename_column('name', 'renamed'),
+                       SchemaChange.drop_column('renamed'),
+                       SchemaChange.add_column('name', AtomicType('INT'))):
+            self.catalog.alter_table(table_name, [change], False)
+            table = self.catalog.get_table(table_name)
+            entries = ManifestFileManager(table).read(
+                'manifest-test-schema_evolution', drop_stats=False)
+            stats = entries[0].file.value_stats
+            self.assertEqual([field.name for field in stats.min_values.fields],
+                             ['id', 'name'])
+            self.assertEqual(stats.min_values.get_field(1), 'apple')
+            self.assertEqual(stats.max_values.get_field(1), 'zebra')
 
     def test_primary_key_value_stats_excludes_system_fields(self):
         catalog = CatalogFactory.create({

@@ -18,12 +18,13 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.PriorityQueue;
-import java.util.function.Supplier;
 
 /** Vector search global index result for scored index. */
 public interface ScoredGlobalIndexResult extends GlobalIndexResult {
@@ -46,8 +47,7 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
             roaringNavigableMap64Offset.add(rowId + offset);
         }
 
-        return create(
-                () -> roaringNavigableMap64Offset, rowId -> thisScoreGetter.score(rowId - offset));
+        return create(roaringNavigableMap64Offset, rowId -> thisScoreGetter.score(rowId - offset));
     }
 
     @Override
@@ -88,17 +88,22 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
         }
 
         ScoreGetter scoreGetter = scoreGetter();
-        // Min-heap by score: the head is the smallest score so we can evict it when a
-        // higher-scored row arrives. This gives O(n log k) instead of O(n log n).
-        PriorityQueue<long[]> minHeap =
-                new PriorityQueue<>(
-                        k + 1, Comparator.comparingDouble(a -> Float.intBitsToFloat((int) a[1])));
+        // Min-heap whose ordering matches the global index ranking semantics (score desc,
+        // rowId asc): the head is the weakest candidate currently kept, i.e. the lowest
+        // score and, among ties, the largest rowId. A new row replaces the head only when
+        // it is strictly stronger, so the retained set equals a full "score desc, rowId asc"
+        // sort truncated to k, while keeping O(n log k) instead of O(n log n).
+        // entry: [rowId, rawScoreBits]
+        Comparator<long[]> weakestFirst =
+                Comparator.<long[]>comparingDouble(a -> Float.intBitsToFloat((int) a[1]))
+                        .thenComparing(Comparator.comparingLong((long[] a) -> a[0]).reversed());
+        PriorityQueue<long[]> minHeap = new PriorityQueue<>(k + 1, weakestFirst);
         for (long rowId : rowIds) {
             float score = scoreGetter.score(rowId);
             long[] entry = new long[] {rowId, Float.floatToRawIntBits(score)};
             if (minHeap.size() < k) {
                 minHeap.offer(entry);
-            } else if (score > Float.intBitsToFloat((int) minHeap.peek()[1])) {
+            } else if (weakestFirst.compare(entry, minHeap.peek()) > 0) {
                 minHeap.poll();
                 minHeap.offer(entry);
             }
@@ -109,18 +114,40 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
             topKRowIds.add(entry[0]);
         }
 
-        return ScoredGlobalIndexResult.create(() -> topKRowIds, scoreGetter);
+        return ScoredGlobalIndexResult.create(topKRowIds, scoreGetter);
     }
 
     /** Returns an empty {@link ScoredGlobalIndexResult}. */
     static ScoredGlobalIndexResult createEmpty() {
-        return create(RoaringNavigableMap64::new, rowId -> 0);
+        return create(new RoaringNavigableMap64(), rowId -> 0);
     }
 
-    /** Returns a new {@link ScoredGlobalIndexResult} from supplier. */
-    static ScoredGlobalIndexResult create(
-            Supplier<RoaringNavigableMap64> supplier, ScoreGetter scoreGetter) {
-        LazyField<RoaringNavigableMap64> lazyField = new LazyField<>(supplier);
+    /** Merges scored results, keeping the score from the first result containing each row ID. */
+    static ScoredGlobalIndexResult merge(List<ScoredGlobalIndexResult> results) {
+        if (results.isEmpty()) {
+            return createEmpty();
+        }
+        if (results.size() == 1) {
+            return results.get(0);
+        }
+
+        RoaringNavigableMap64 mergedRowIds = new RoaringNavigableMap64();
+        Map<Long, Float> mergedScores = new HashMap<>();
+        for (ScoredGlobalIndexResult result : results) {
+            RoaringNavigableMap64 rowIds = result.results();
+            ScoreGetter scoreGetter = result.scoreGetter();
+            for (long rowId : rowIds) {
+                if (!mergedRowIds.contains(rowId)) {
+                    mergedRowIds.add(rowId);
+                    mergedScores.put(rowId, scoreGetter.score(rowId));
+                }
+            }
+        }
+        return create(mergedRowIds, mergedScores::get);
+    }
+
+    /** Returns a new {@link ScoredGlobalIndexResult} from bitmap. */
+    static ScoredGlobalIndexResult create(RoaringNavigableMap64 bitmap, ScoreGetter scoreGetter) {
         return new ScoredGlobalIndexResult() {
             @Override
             public ScoreGetter scoreGetter() {
@@ -129,7 +156,7 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
 
             @Override
             public RoaringNavigableMap64 results() {
-                return lazyField.get();
+                return bitmap;
             }
         };
     }

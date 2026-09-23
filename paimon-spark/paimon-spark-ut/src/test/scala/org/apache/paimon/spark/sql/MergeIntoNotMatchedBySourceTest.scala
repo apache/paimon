@@ -220,4 +220,41 @@ trait MergeIntoNotMatchedBySourceTest extends PaimonSparkTestBase with PaimonTab
       }
     }
   }
+
+  test("Paimon MergeInto: not matched by source is not narrowed by target-only condition") {
+    withTable("source", "target") {
+
+      Seq((1, 100)).toDF("a", "b").createOrReplaceTempView("source")
+
+      createTable("target", "a INT, b INT, c STRING, pt STRING", Seq("a", "pt"), Seq("pt"))
+      spark.sql("""
+                  |INSERT INTO target VALUES
+                  |  (1, 10, 'c1', 'p1'), (2, 20, 'c2', 'p1'),
+                  |  (3, 30, 'c3', 'p2'), (4, 40, 'c4', 'p2')
+                  |""".stripMargin)
+
+      // `t.pt = 'p1'` only references the target, so it is a candidate for pruning the target
+      // before the join. Pruning it away would also drop the 'p2' rows from the population that
+      // WHEN NOT MATCHED BY SOURCE is defined over, silently skipping their update.
+      spark.sql("""
+                  |MERGE INTO target t
+                  |USING source s
+                  |ON t.a = s.a AND t.pt = 'p1'
+                  |WHEN MATCHED THEN
+                  |  UPDATE SET t.b = s.b
+                  |WHEN NOT MATCHED BY SOURCE THEN
+                  |  UPDATE SET t.c = 'stale'
+                  |""".stripMargin)
+
+      // a=1: matched (pt='p1')                      => b updated to 100
+      // a=2: not matched by source (pt='p1')        => c = 'stale'
+      // a=3, a=4: not matched by source (pt='p2', excluded by the target-only condition, so no
+      //           source row can ever match them)   => c = 'stale'
+      checkAnswer(
+        spark.sql("SELECT a, b, c, pt FROM target ORDER BY a"),
+        Row(1, 100, "c1", "p1") :: Row(2, 20, "stale", "p1") ::
+          Row(3, 30, "stale", "p2") :: Row(4, 40, "stale", "p2") :: Nil
+      )
+    }
+  }
 }

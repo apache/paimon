@@ -20,12 +20,18 @@ package org.apache.paimon.format.orc;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.shredding.ShreddingWritePlan;
+import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.SupportsWriterMetadata;
 import org.apache.paimon.format.orc.writer.OrcBulkWriter;
+import org.apache.paimon.format.orc.writer.RowDataVectorizer;
 import org.apache.paimon.format.orc.writer.Vectorizer;
+import org.apache.paimon.format.shredding.SupportsShreddingWritePlan;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.types.RowType;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataOutputStream;
@@ -39,6 +45,7 @@ import org.apache.orc.impl.writer.WriterEncryptionVariant;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
@@ -50,13 +57,14 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * Vectorizer} implementation to convert the element into an {@link
  * org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch}.
  */
-public class OrcWriterFactory implements FormatWriterFactory {
+public class OrcWriterFactory implements FormatWriterFactory, SupportsShreddingWritePlan {
+
+    private static final String COMPRESS_ATTRIBUTE = OrcConf.COMPRESS.getAttribute();
 
     private final Vectorizer<InternalRow> vectorizer;
     private final Properties writerProperties;
     private final Map<String, String> confMap;
-
-    private OrcFile.WriterOptions writerOptions;
+    private final boolean legacyTimestampLtzType;
     private final int writeBatchSize;
     private final MemorySize writeBatchMemory;
 
@@ -68,40 +76,56 @@ public class OrcWriterFactory implements FormatWriterFactory {
      */
     @VisibleForTesting
     OrcWriterFactory(Vectorizer<InternalRow> vectorizer) {
-        this(vectorizer, new Properties(), new Configuration(false), 1024, MemorySize.ZERO);
+        this(vectorizer, new Properties(), new Configuration(false), 1024, MemorySize.ZERO, false);
     }
 
-    /**
-     * Creates a new OrcBulkWriterFactory using the provided Vectorizer, Hadoop Configuration, ORC
-     * writer properties.
-     *
-     * @param vectorizer The vectorizer implementation to convert input record to a
-     *     VectorizerRowBatch.
-     * @param writerProperties Properties that can be used in ORC WriterOptions.
-     */
     public OrcWriterFactory(
             Vectorizer<InternalRow> vectorizer,
             Properties writerProperties,
             Configuration configuration,
             int writeBatchSize,
-            MemorySize writeBatchMemory) {
+            MemorySize writeBatchMemory,
+            boolean legacyTimestampLtzType) {
         this.vectorizer = checkNotNull(vectorizer);
-        this.writerProperties = checkNotNull(writerProperties);
+        this.writerProperties = upperCaseCompression(checkNotNull(writerProperties));
         this.confMap = new HashMap<>();
+        this.legacyTimestampLtzType = legacyTimestampLtzType;
 
         // Todo: Replace the Map based approach with a better approach
         for (Map.Entry<String, String> entry : configuration) {
             confMap.put(entry.getKey(), entry.getValue());
         }
+        String compress = confMap.get(COMPRESS_ATTRIBUTE);
+        if (compress != null) {
+            confMap.put(COMPRESS_ATTRIBUTE, compress.toUpperCase(Locale.ROOT));
+        }
         this.writeBatchSize = writeBatchSize;
         this.writeBatchMemory = writeBatchMemory;
+    }
+
+    /**
+     * ORC resolves the compression kind through a locale sensitive {@code toUpperCase}, which turns
+     * the 'i' of zlib into 'İ' under a Turkish or Azeri default locale and then matches no {@link
+     * CompressionKind}. Upper case the option once here instead.
+     */
+    private static Properties upperCaseCompression(Properties properties) {
+        String compress = properties.getProperty(COMPRESS_ATTRIBUTE);
+        if (compress == null) {
+            return properties;
+        }
+        Properties normalized = new Properties();
+        for (String name : properties.stringPropertyNames()) {
+            normalized.setProperty(name, properties.getProperty(name));
+        }
+        normalized.setProperty(COMPRESS_ATTRIBUTE, compress.toUpperCase(Locale.ROOT));
+        return normalized;
     }
 
     @Override
     public FormatWriter create(PositionOutputStream out, String compression) throws IOException {
         OrcFile.WriterOptions opts = getWriterOptions();
-        if (!writerProperties.containsKey(OrcConf.COMPRESS.getAttribute())) {
-            opts.compress(CompressionKind.valueOf(compression.toUpperCase()));
+        if (!writerProperties.containsKey(COMPRESS_ATTRIBUTE)) {
+            opts.compress(CompressionKind.valueOf(compression.toUpperCase(Locale.ROOT)));
         }
 
         opts.physicalWriter(
@@ -128,18 +152,58 @@ public class OrcWriterFactory implements FormatWriterFactory {
                 writeBatchMemory);
     }
 
-    @VisibleForTesting
-    protected OrcFile.WriterOptions getWriterOptions() {
-        if (null == writerOptions) {
-            Configuration conf = new ThreadLocalClassLoaderConfiguration();
-            for (Map.Entry<String, String> entry : confMap.entrySet()) {
-                conf.set(entry.getKey(), entry.getValue());
-            }
+    @Override
+    public FormatWriter createWithShreddingWritePlan(
+            PositionOutputStream out, String compression, ShreddingWritePlan writePlan)
+            throws IOException {
+        RowType refinedType = (RowType) OrcFileFormat.refineDataType(writePlan.physicalRowType());
+        Vectorizer<InternalRow> physicalVectorizer =
+                new RowDataVectorizer(
+                        OrcTypeUtil.convertToOrcSchema(refinedType),
+                        refinedType.getFields(),
+                        legacyTimestampLtzType);
+        return new OrcWriterFactory(
+                        physicalVectorizer,
+                        writerProperties,
+                        configuration(),
+                        writeBatchSize,
+                        writeBatchMemory,
+                        legacyTimestampLtzType)
+                .create(out, compression);
+    }
 
-            writerOptions = OrcFile.writerOptions(writerProperties, conf);
-            writerOptions.setSchema(this.vectorizer.getSchema());
+    @Override
+    public void commitShreddingMetadata(
+            FormatWriter writer, ShreddingWritePlan writePlan, String compression) {
+        Map<String, Map<String, String>> fieldMetadata = writePlan.fieldMetadata(compression);
+        if (fieldMetadata.isEmpty()) {
+            return;
         }
 
+        Map<String, byte[]> metadata = new HashMap<>();
+        metadata.put(
+                FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY,
+                FormatMetadataUtils.buildArrowSchemaMetadata(
+                        writePlan.physicalRowType(),
+                        fieldMetadata,
+                        OrcTypeUtil.PAIMON_ORC_FIELD_ID_KEY));
+        ((SupportsWriterMetadata) writer).addMetadata(metadata);
+    }
+
+    @VisibleForTesting
+    protected OrcFile.WriterOptions getWriterOptions() {
+        // create() writes per-file state into the returned options, so it cannot be cached.
+        OrcFile.WriterOptions writerOptions =
+                OrcFile.writerOptions(writerProperties, configuration());
+        writerOptions.setSchema(this.vectorizer.getSchema());
         return writerOptions;
+    }
+
+    private Configuration configuration() {
+        Configuration conf = new ThreadLocalClassLoaderConfiguration();
+        for (Map.Entry<String, String> entry : confMap.entrySet()) {
+            conf.set(entry.getKey(), entry.getValue());
+        }
+        return conf;
     }
 }

@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.format.csv.CsvOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FormatTable;
 
 import org.apache.flink.table.api.Schema;
@@ -27,6 +29,7 @@ import org.apache.flink.table.types.logical.RowType;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -86,7 +89,7 @@ public class FormatCatalogTable implements CatalogTable {
     public Map<String, String> getOptions() {
         if (cachedOptions == null) {
             cachedOptions = new HashMap<>();
-            String format = table.format().name().toLowerCase();
+            String format = table.format().name().toLowerCase(Locale.ROOT);
             Map<String, String> options = table.options();
             options.forEach(
                     (k, v) -> {
@@ -94,8 +97,13 @@ public class FormatCatalogTable implements CatalogTable {
                             cachedOptions.put(k, v);
                         }
                     });
-            if (options.containsKey("field-delimiter")) {
-                cachedOptions.put("csv.field-delimiter", options.get("field-delimiter"));
+            if ("csv".equals(format)) {
+                Options csvOptions = Options.fromMap(options);
+                if (csvOptions.contains(CsvOptions.FIELD_DELIMITER)) {
+                    cachedOptions.put(
+                            CsvOptions.FIELD_DELIMITER.key(),
+                            csvOptions.get(CsvOptions.FIELD_DELIMITER));
+                }
             }
             cachedOptions.put(CONNECTOR.key(), "filesystem");
             cachedOptions.put(PATH.key(), table.location());

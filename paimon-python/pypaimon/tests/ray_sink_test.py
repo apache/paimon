@@ -24,8 +24,13 @@ import pyarrow as pa
 from ray.data._internal.execution.interfaces import TaskContext
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.write.ray_datasink import PaimonDatasink
+from pypaimon.write.ray_datasink import (
+    PaimonDatasink,
+    _consume_write_results,
+    _cast_binary_to_table_schema,
+)
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.table_write import TableWrite
 
 
 class RaySinkTest(unittest.TestCase):
@@ -64,28 +69,63 @@ class RaySinkTest(unittest.TestCase):
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
 
+    @staticmethod
+    def _data_files_under(table):
+        table_path = table.file_io.to_filesystem_path(table.table_path)
+        data_files = []
+        for root, _, files in os.walk(table_path):
+            for file_name in files:
+                if file_name.endswith(('.parquet', '.blob')) or '.vector.' in file_name:
+                    data_files.append(os.path.join(root, file_name))
+        return data_files
+
+    def test_binary_restoration_uses_table_contract_and_preserves_strings(self):
+        batch = pa.table({
+            'blob': pa.array([b'x', None], type=pa.binary()),
+            'bytes': pa.array([b'y', b'z'], type=pa.large_binary()),
+            'text': pa.array(['中文', ''], type=pa.large_string()),
+        }).replace_schema_metadata({b'source': b'ray'})
+        target = pa.schema([('blob', pa.large_binary()), ('bytes', pa.binary()), ('text', pa.string())])
+        result = _cast_binary_to_table_schema(batch, target)
+        self.assertEqual(result.to_pydict(), batch.to_pydict())
+        self.assertEqual(result.schema.field('blob').type, pa.large_binary())
+        self.assertEqual(result.schema.field('bytes').type, pa.binary())
+        self.assertEqual(result.schema.field('text').type, pa.large_string())
+        self.assertEqual(result.schema.metadata, batch.schema.metadata)
+
     def test_init_and_serialization(self):
         """Test initialization, serialization, and table name."""
         datasink = PaimonDatasink(self.table, overwrite=False)
         self.assertEqual(datasink.table, self.table)
         self.assertFalse(datasink.overwrite)
+        self.assertIsNone(datasink.static_partition)
         self.assertIsNone(datasink._writer_builder)
         self.assertEqual(datasink._table_name, "test_db.test_table")
 
         datasink_overwrite = PaimonDatasink(self.table, overwrite=True)
         self.assertTrue(datasink_overwrite.overwrite)
 
+        datasink_partition_overwrite = PaimonDatasink(
+            self.table, static_partition={'dt': '2024-01-01'})
+        self.assertFalse(datasink_partition_overwrite.overwrite)
+        self.assertEqual(
+            datasink_partition_overwrite.static_partition,
+            {'dt': '2024-01-01'},
+        )
+
         # Test serialization
         datasink._writer_builder = Mock()
         state = datasink.__getstate__()
         self.assertIn('table', state)
         self.assertIn('overwrite', state)
+        self.assertIn('static_partition', state)
         self.assertIn('_writer_builder', state)
 
         new_datasink = PaimonDatasink.__new__(PaimonDatasink)
         new_datasink.__setstate__(state)
         self.assertEqual(new_datasink.table, self.table)
         self.assertFalse(new_datasink.overwrite)
+        self.assertIsNone(new_datasink.static_partition)
 
     def test_table_and_writer_builder_serializable(self):
         import pickle
@@ -120,6 +160,26 @@ class RaySinkTest(unittest.TestCase):
         except Exception as e:
             self.fail(f"Overwrite WriterBuilder is not serializable: {e}")
 
+    def test_write_builder_new_write_carries_static_partition(self):
+        batch_write = (
+            self.table
+            .new_batch_write_builder()
+            .overwrite({'dt': '2024-01-01'})
+            .new_write()
+        )
+        try:
+            self.assertEqual(batch_write.static_partition, {'dt': '2024-01-01'})
+        finally:
+            batch_write.close()
+
+        stream_builder = self.table.new_stream_write_builder()
+        self.assertFalse(hasattr(stream_builder, 'overwrite'))
+        stream_write = stream_builder.new_write()
+        try:
+            self.assertIsNone(stream_write.static_partition)
+        finally:
+            stream_write.close()
+
     def test_on_write_start(self):
         """Test on_write_start with normal and overwrite modes."""
         datasink = PaimonDatasink(self.table, overwrite=False)
@@ -130,6 +190,14 @@ class RaySinkTest(unittest.TestCase):
         datasink_overwrite = PaimonDatasink(self.table, overwrite=True)
         datasink_overwrite.on_write_start()
         self.assertIsNotNone(datasink_overwrite._writer_builder.static_partition)
+
+        datasink_partition_overwrite = PaimonDatasink(
+            self.table, static_partition={'dt': '2024-01-01'})
+        datasink_partition_overwrite.on_write_start()
+        self.assertEqual(
+            datasink_partition_overwrite._writer_builder.static_partition,
+            {'dt': '2024-01-01'},
+        )
 
     def test_write(self):
         """Test write method: empty blocks, multiple blocks, error handling, and resource cleanup."""
@@ -189,6 +257,25 @@ class RaySinkTest(unittest.TestCase):
             datasink.write([data_table], ctx)
             mock_builder.assert_called_once()
 
+        partition_datasink = PaimonDatasink(
+            self.table, static_partition={'dt': '2024-01-01'})
+        with patch.object(self.table, 'new_batch_write_builder') as mock_builder:
+            mock_write_builder = Mock()
+            mock_write_builder.overwrite.return_value = mock_write_builder
+            mock_write = Mock()
+            mock_write.prepare_commit.return_value = []
+            mock_write_builder.new_write.return_value = mock_write
+            mock_builder.return_value = mock_write_builder
+
+            data_table = pa.table({
+                'id': [1],
+                'name': ['Alice'],
+                'value': [1.1]
+            })
+            partition_datasink.write([data_table], ctx)
+            mock_write_builder.overwrite.assert_called_once_with(
+                {'dt': '2024-01-01'})
+
         invalid_table = pa.table({
             'wrong_column': [1, 2, 3]
         })
@@ -210,7 +297,108 @@ class RaySinkTest(unittest.TestCase):
             })
             with self.assertRaises(Exception):
                 datasink.write([data_table], ctx)
-            mock_write.close.assert_called_once()
+            mock_write.abort.assert_called_once()
+            mock_write.close.assert_not_called()
+
+        with patch.object(self.table, 'new_batch_write_builder') as mock_builder:
+            mock_write_builder = Mock()
+            mock_write_builder.overwrite.return_value = mock_write_builder
+            mock_write = Mock()
+            mock_write.prepare_commit.return_value = [Mock(spec=CommitMessage)]
+            mock_write.close.side_effect = Exception("Close error")
+            mock_write_builder.new_write.return_value = mock_write
+            mock_builder.return_value = mock_write_builder
+
+            data_table = pa.table({
+                'id': [1],
+                'name': ['Alice'],
+                'value': [1.1]
+            })
+            with self.assertRaises(Exception):
+                datasink.write([data_table], ctx)
+            mock_write.prepare_commit.assert_called_once()
+            mock_write.abort.assert_called_once()
+
+    def test_postpone_worker_uses_driver_bucket_plan_without_manifest_scan(self):
+        from pypaimon.write.postpone_bucket import (
+            PostponeBucketPlan,
+            PostponeBucketPlanner,
+        )
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False),
+            ('name', pa.string()),
+            ('value', pa.float64()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['id'],
+            options={
+                'bucket': '-2',
+            },
+        )
+        identifier = 'test_db.test_postpone_worker_plan'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        datasink = PaimonDatasink(
+            table,
+            postpone_bucket_plan=PostponeBucketPlan({(): 2}),
+        )
+        data = pa.Table.from_pydict({
+            'id': list(range(20)),
+            'name': ['name-{}'.format(i) for i in range(20)],
+            'value': [float(i) for i in range(20)],
+        }, schema=pa_schema)
+
+        with patch.object(
+            PostponeBucketPlanner,
+            '_load_bucket_metadata',
+            side_effect=AssertionError("worker must not scan manifests"),
+        ) as load:
+            messages = datasink.write([data], Mock(spec=TaskContext))
+
+        load.assert_not_called()
+        self.assertEqual({0, 1}, {message.bucket for message in messages})
+        self.assertEqual({2}, {message.total_buckets for message in messages})
+
+    def test_write_does_not_return_prepared_messages_when_dedicated_close_aborts(self):
+        from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        table_identifier = "test_db.test_blob_close_failure"
+        self.catalog.create_table(table_identifier, schema, False)
+        table = self.catalog.get_table(table_identifier)
+
+        datasink = PaimonDatasink(table, overwrite=False)
+        datasink.on_write_start()
+        ctx = Mock(spec=TaskContext)
+        data_table = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'payload': [b'a', b'b', b'c'],
+        }, schema=pa_schema)
+
+        original_close_current_writers = DedicatedFormatWriter._close_current_writers
+        close_current_calls = {'count': 0}
+
+        def fail_during_close(writer):
+            close_current_calls['count'] += 1
+            if close_current_calls['count'] == 1:
+                return original_close_current_writers(writer)
+            raise RuntimeError("Close error")
+
+        with patch.object(DedicatedFormatWriter, '_close_current_writers', fail_during_close):
+            with self.assertRaisesRegex(RuntimeError, "Close error"):
+                datasink.write([data_table], ctx)
+
+        self.assertEqual(close_current_calls['count'], 2)
+        self.assertEqual([], self._data_files_under(table))
 
     def test_on_write_complete(self):
         from ray.data.datasource.datasink import WriteResult
@@ -224,6 +412,36 @@ class RaySinkTest(unittest.TestCase):
             write_returns=[[], []]
         )
         datasink.on_write_complete(write_result)
+
+        # Empty overwrite must still reach TableCommit so overwrite semantics
+        # can delete the target range.
+        datasink = PaimonDatasink(self.table, overwrite=True)
+        datasink.on_write_start()
+        write_result = WriteResult(
+            num_rows=0,
+            size_bytes=0,
+            write_returns=[[], []]
+        )
+        mock_commit = Mock()
+        datasink._writer_builder.new_commit = Mock(return_value=mock_commit)
+        datasink.on_write_complete(write_result)
+
+        mock_commit.commit.assert_called_once_with([])
+        mock_commit.close.assert_called_once()
+
+        datasink = PaimonDatasink(self.table, static_partition={'dt': '2024-01-01'})
+        datasink.on_write_start()
+        write_result = WriteResult(
+            num_rows=0,
+            size_bytes=0,
+            write_returns=[[], []]
+        )
+        mock_commit = Mock()
+        datasink._writer_builder.new_commit = Mock(return_value=mock_commit)
+        datasink.on_write_complete(write_result)
+
+        mock_commit.commit.assert_called_once_with([])
+        mock_commit.close.assert_called_once()
 
         # Test with messages and filtering empty messages
         datasink = PaimonDatasink(self.table, overwrite=False)
@@ -290,51 +508,188 @@ class RaySinkTest(unittest.TestCase):
         datasink._writer_builder.new_commit = mock_new_commit
         with self.assertRaises(Exception):
             datasink.on_write_complete(write_result)
-        self.assertEqual(len(datasink._pending_commit_messages), 1)
+
+    def test_on_write_complete_without_on_write_start(self):
+        from ray.data.datasource.datasink import WriteResult
+
+        write_result = WriteResult(
+            num_rows=0,
+            size_bytes=0,
+            write_returns=[],
+        )
+
+        for overwrite, static_partition in [
+            (True, None),
+            (False, {'dt': '2024-01-01'}),
+        ]:
+            with self.subTest(
+                overwrite=overwrite,
+                static_partition=static_partition,
+            ):
+                table = Mock()
+                table.identifier.get_full_name.return_value = 'test_db.test_table'
+                writer_builder = table.new_batch_write_builder.return_value
+                writer_builder.overwrite.return_value = writer_builder
+                table_commit = writer_builder.new_commit.return_value
+
+                datasink = PaimonDatasink(
+                    table,
+                    overwrite=overwrite,
+                    static_partition=static_partition,
+                )
+                datasink.on_write_complete(write_result)
+
+                table.new_batch_write_builder.assert_called_once_with()
+                writer_builder.overwrite.assert_called_once_with(static_partition)
+                table_commit.commit.assert_called_once_with([])
+                table_commit.close.assert_called_once_with()
+
+    def test_table_write_ray_forwards_static_partition(self):
+        dataset = Mock()
+        table_write = TableWrite.__new__(TableWrite)
+        table_write.table = self.table
+        table_write.static_partition = {'dt': '2024-01-01'}
+
+        with patch('pypaimon.ray.shuffle.maybe_apply_repartition') as mock_repartition, \
+                patch('pypaimon.write.ray_datasink.PaimonDatasink') as mock_datasink_cls:
+            mock_repartition.return_value = dataset
+            datasink = mock_datasink_cls.return_value
+
+            table_write.write_ray(dataset, concurrency=2)
+
+            mock_repartition.assert_called_once_with(dataset, self.table, 'auto')
+            mock_datasink_cls.assert_called_once_with(
+                self.table,
+                overwrite=False,
+                static_partition={'dt': '2024-01-01'},
+            )
+            dataset.write_datasink.assert_called_once_with(
+                datasink,
+                concurrency=2,
+                ray_remote_args=None,
+            )
+
+    def test_table_write_ray_static_partition_argument_overrides_builder(self):
+        dataset = Mock()
+        table_write = TableWrite.__new__(TableWrite)
+        table_write.table = self.table
+        table_write.static_partition = {'dt': '2024-01-01'}
+
+        with patch('pypaimon.ray.shuffle.maybe_apply_repartition') as mock_repartition, \
+                patch('pypaimon.write.ray_datasink.PaimonDatasink') as mock_datasink_cls:
+            mock_repartition.return_value = dataset
+
+            table_write.write_ray(
+                dataset,
+                static_partition={'dt': '2024-01-02'},
+            )
+
+            mock_datasink_cls.assert_called_once_with(
+                self.table,
+                overwrite=False,
+                static_partition={'dt': '2024-01-02'},
+            )
 
     def test_on_write_failed(self):
-        # Test without pending messages (on_write_complete() never called)
         datasink = PaimonDatasink(self.table, overwrite=False)
         datasink.on_write_start()
-        self.assertEqual(datasink._pending_commit_messages, [])
-        error = Exception("Write job failed")
-        datasink.on_write_failed(error)  # Should not raise exception
-
-        # Test with pending messages (on_write_complete() was called but failed)
-        datasink = PaimonDatasink(self.table, overwrite=False)
-        datasink.on_write_start()
-        commit_msg1 = Mock(spec=CommitMessage)
-        commit_msg2 = Mock(spec=CommitMessage)
-        datasink._pending_commit_messages = [commit_msg1, commit_msg2]
-
-        mock_commit = Mock()
-        datasink._writer_builder.new_commit = Mock(return_value=mock_commit)
+        datasink._writer_builder.new_commit = Mock()
         error = Exception("Write job failed")
         datasink.on_write_failed(error)
 
-        mock_commit.abort.assert_called_once()
-        abort_args = mock_commit.abort.call_args[0][0]
-        self.assertEqual(len(abort_args), 2)
-        self.assertEqual(abort_args[0], commit_msg1)
-        self.assertEqual(abort_args[1], commit_msg2)
-        mock_commit.close.assert_called_once()
-        self.assertEqual(datasink._pending_commit_messages, [])
+        datasink._writer_builder.new_commit.assert_not_called()
 
-        # Test abort failure handling (should not raise exception)
-        datasink = PaimonDatasink(self.table, overwrite=False)
-        datasink.on_write_start()
-        commit_msg1 = Mock(spec=CommitMessage)
-        datasink._pending_commit_messages = [commit_msg1]
+    def test_consume_write_results_reports_late_failure(self):
+        import pickle
 
-        mock_commit = Mock()
-        mock_commit.abort.side_effect = Exception("Abort failed")
-        datasink._writer_builder.new_commit = Mock(return_value=mock_commit)
-        error = Exception("Write job failed")
-        datasink.on_write_failed(error)
+        message_col = '__messages__'
 
-        mock_commit.abort.assert_called_once()
-        mock_commit.close.assert_called_once()
-        self.assertEqual(datasink._pending_commit_messages, [])
+        class FailingResults:
+            def iter_batches(self, batch_format):
+                if batch_format != 'pyarrow':
+                    raise AssertionError(batch_format)
+                yield pa.table({
+                    message_col: pa.array(
+                        [pickle.dumps(['first'])], type=pa.binary()
+                    ),
+                })
+                raise RuntimeError('late failure')
+
+        coordinator = Mock()
+        with self.assertRaisesRegex(RuntimeError, 'late failure'):
+            _consume_write_results(
+                FailingResults(), coordinator, message_col
+            )
+
+        coordinator.on_write_complete.assert_not_called()
+        coordinator.on_write_failed.assert_called_once()
+
+    def test_consume_write_results_drains_errors_as_data(self):
+        import pickle
+
+        message_col = '__messages__'
+        error_col = '__errors__'
+        results = Mock()
+        results.iter_batches.return_value = iter([
+            pa.table({
+                message_col: pa.array([
+                    pickle.dumps(['first']),
+                    pickle.dumps([]),
+                    pickle.dumps(['last']),
+                ], type=pa.binary()),
+                error_col: pa.array(
+                    [None, 'worker failure', None], type=pa.string()
+                ),
+            }),
+        ])
+        coordinator = Mock()
+
+        with self.assertRaisesRegex(RuntimeError, 'worker failure'):
+            _consume_write_results(
+                results, coordinator, message_col, error_col
+            )
+
+        coordinator.on_write_complete.assert_not_called()
+        coordinator.on_write_failed.assert_called_once()
+
+    def test_consume_write_results_failure_preserves_completed_files(self):
+        import pickle
+
+        writer = self.table.new_batch_write_builder().new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1],
+            'name': ['Alice'],
+            'value': [1.1],
+        }, schema=self.pk_pa_schema))
+        messages = writer.prepare_commit()
+        writer.close()
+        paths = [
+            file.external_path or file.file_path
+            for message in messages
+            for file in message.new_files
+        ]
+
+        message_col = '__messages__'
+        error_col = '__errors__'
+        results = Mock()
+        results.iter_batches.return_value = iter([
+            pa.table({
+                message_col: pa.array([
+                    pickle.dumps(messages),
+                    pickle.dumps([]),
+                ], type=pa.binary()),
+                error_col: pa.array([None, 'worker failure'], type=pa.string()),
+            }),
+        ])
+        coordinator = PaimonDatasink(self.table, overwrite=False)
+        coordinator.on_write_start()
+
+        with self.assertRaisesRegex(RuntimeError, 'worker failure'):
+            _consume_write_results(
+                results, coordinator, message_col, error_col
+            )
+
+        self.assertTrue(all(self.table.file_io.exists(path) for path in paths))
 
 
 if __name__ == '__main__':

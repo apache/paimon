@@ -22,8 +22,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.PostponeUtils;
 
+import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
@@ -66,30 +66,27 @@ public class PostponeFixedBucketSink extends FlinkWriteSink<InternalRow> {
     }
 
     @Override
+    protected boolean writeOnly() {
+        return true;
+    }
+
+    @Override
+    protected StoreSinkWrite.Provider createWriteProvider(
+            CheckpointConfig checkpointConfig, boolean isStreaming, boolean hasSinkMaterializer) {
+        return StoreSinkWrite.createPostponeFixedBucketWriteProvider(
+                ignorePreviousFiles(), isStreaming, hasSinkMaterializer);
+    }
+
+    @Override
     protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory() {
-        if (overwritePartition == null) {
-            // The table has copied bucket option outside, no need to change.
-            return context ->
-                    new StoreCommitter(
-                            table,
-                            table.newCommit(context.commitUser())
-                                    .withOverwrite(overwritePartition)
-                                    .ignoreEmptyCommit(!context.streamingCheckpointEnabled())
-                                    // Need to check conflict
-                                    .appendCommitCheckConflict(true),
-                            context);
-        } else {
-            // When overwriting, the postpone bucket files need to be deleted, so using a postpone
-            // bucket table commit here
-            FileStoreTable tableForCommit = PostponeUtils.tableForCommit(table);
-            return context ->
-                    new StoreCommitter(
-                            tableForCommit,
-                            tableForCommit
-                                    .newCommit(context.commitUser())
-                                    .withOverwrite(overwritePartition)
-                                    .ignoreEmptyCommit(!context.streamingCheckpointEnabled()),
-                            context);
-        }
+        return context ->
+                new StoreCommitter(
+                        table,
+                        table.newPostponeFixedBucketWriteBuilder()
+                                .withOverwrite(overwritePartition)
+                                .newCommit(
+                                        context.commitUser(),
+                                        !context.streamingCheckpointEnabled()),
+                        context);
     }
 }

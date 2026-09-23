@@ -42,9 +42,23 @@ public class RowRangeIndex {
         }
     }
 
+    /** Builds an index from a bitmap, skipping sorting and merging for already ordered ranges. */
+    public static RowRangeIndex fromBitmap(RoaringNavigableMap64 bitmap) {
+        List<Range> ranges = bitmap.toRangeList();
+        // Bitmap order is unsigned; mixed signs still require signed sorting and merging.
+        if (ranges.size() > 1 && ranges.get(0).from > ranges.get(ranges.size() - 1).from) {
+            return create(ranges);
+        }
+        return new RowRangeIndex(ranges);
+    }
+
     public static RowRangeIndex create(List<Range> ranges) {
+        return create(ranges, true);
+    }
+
+    public static RowRangeIndex create(List<Range> ranges, boolean mergeAdjacent) {
         checkArgument(ranges != null, "Ranges cannot be null");
-        return new RowRangeIndex(Range.sortAndMergeOverlap(ranges, true));
+        return new RowRangeIndex(Range.sortAndMergeOverlap(ranges, mergeAdjacent));
     }
 
     public List<Range> ranges() {
@@ -54,6 +68,20 @@ public class RowRangeIndex {
     public boolean intersects(long start, long end) {
         int candidate = lowerBound(ends, start);
         return candidate < starts.length && starts[candidate] <= end;
+    }
+
+    public boolean contains(Range range) {
+        int candidate = lowerBound(ends, range.from);
+        return candidate < starts.length
+                && starts[candidate] <= range.from
+                && ends[candidate] >= range.to;
+    }
+
+    public boolean containsExactly(Range range) {
+        int candidate = lowerBound(starts, range.from);
+        return candidate < starts.length
+                && starts[candidate] == range.from
+                && ends[candidate] == range.to;
     }
 
     public List<Range> intersectedRanges(long start, long end) {

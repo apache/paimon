@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.avro;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
@@ -25,9 +26,11 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
+import org.apache.paimon.fs.CloseShieldOutputStream;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
@@ -37,6 +40,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.avro.Schema;
 import org.apache.avro.file.CodecFactory;
 import org.apache.avro.file.DataFileWriter;
+import org.apache.avro.io.EncoderFactory;
 
 import javax.annotation.Nullable;
 
@@ -64,12 +68,19 @@ public class AvroFileFormat extends FileFormat {
 
     private final Options options;
     private final int zstdLevel;
+    /** Bounds enforced by {@code DataFileWriter#setSyncInterval}. */
+    private static final long MIN_SYNC_INTERVAL = 32;
+
+    private static final long MAX_SYNC_INTERVAL = 1 << 30;
+
+    @Nullable private final MemorySize blockSize;
 
     public AvroFileFormat(FormatContext context) {
         super(IDENTIFIER);
 
         this.options = getIdentifierPrefixOptions(context.options());
         this.zstdLevel = context.zstdLevel();
+        this.blockSize = context.blockSize();
     }
 
     @Override
@@ -83,6 +94,37 @@ public class AvroFileFormat extends FileFormat {
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
         return new RowAvroWriterFactory(type);
+    }
+
+    public AvroBlockWriter createBlockWriter(
+            PositionOutputStream out, RowType rowType, String compression) throws IOException {
+        // Retain Avro's direct encoder for pre-encoded manifest records. The buffered encoder
+        // copies array-backed ByteBuffers into a temporary byte array for each appendEncoded call.
+        return createBlockWriter(out, rowType, compression, false);
+    }
+
+    private AvroBlockWriter createBlockWriter(
+            PositionOutputStream out,
+            RowType rowType,
+            String compression,
+            boolean useBufferedEncoder)
+            throws IOException {
+        Schema schema =
+                AvroSchemaConverter.convertToSchema(rowType, options.get(AVRO_ROW_NAME_MAPPING));
+        AvroRowDatumWriter datumWriter = new AvroRowDatumWriter(rowType);
+        DataFileWriter<InternalRow> writer = new DataFileWriter<>(datumWriter);
+        if (useBufferedEncoder) {
+            // Batch data-file field encodings before writing them to the Avro block buffer.
+            writer.setEncoder(
+                    outputStream -> EncoderFactory.get().binaryEncoder(outputStream, null));
+        }
+        writer.setCodec(createCodecFactory(compression));
+        if (blockSize != null) {
+            writer.setSyncInterval(avroSyncInterval(blockSize));
+        }
+        writer.setFlushOnEveryBlock(false);
+        writer.create(schema, new CloseShieldOutputStream(out));
+        return new AvroBlockWriter(writer, out, schema);
     }
 
     @Override
@@ -99,6 +141,21 @@ public class AvroFileFormat extends FileFormat {
         }
     }
 
+    /**
+     * Avro only accepts a sync interval between 32 bytes and 1 GiB; check it here so a bad {@code
+     * file.block-size} fails with the option name instead of inside the writer on an executor.
+     */
+    static int avroSyncInterval(MemorySize blockSize) {
+        long bytes = blockSize.getBytes();
+        if (bytes < MIN_SYNC_INTERVAL || bytes > MAX_SYNC_INTERVAL) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "%s for avro must be between 32 bytes and 1 gb, but was %s bytes.",
+                            CoreOptions.FILE_BLOCK_SIZE.key(), bytes));
+        }
+        return (int) bytes;
+    }
+
     private CodecFactory createCodecFactory(String compression) {
         if (options.contains(AVRO_OUTPUT_CODEC)) {
             return CodecFactory.fromString(options.get(AVRO_OUTPUT_CODEC));
@@ -113,50 +170,16 @@ public class AvroFileFormat extends FileFormat {
     /** A {@link FormatWriterFactory} to write {@link InternalRow}. */
     private class RowAvroWriterFactory implements FormatWriterFactory {
 
-        private final AvroWriterFactory<InternalRow> factory;
+        private final RowType rowType;
 
         private RowAvroWriterFactory(RowType rowType) {
-            this.factory =
-                    new AvroWriterFactory<>(
-                            (out, compression) -> {
-                                Schema schema =
-                                        AvroSchemaConverter.convertToSchema(
-                                                rowType, options.get(AVRO_ROW_NAME_MAPPING));
-                                AvroRowDatumWriter datumWriter = new AvroRowDatumWriter(rowType);
-                                DataFileWriter<InternalRow> dataFileWriter =
-                                        new DataFileWriter<>(datumWriter);
-                                dataFileWriter.setCodec(createCodecFactory(compression));
-                                dataFileWriter.setFlushOnEveryBlock(false);
-                                dataFileWriter.create(schema, out);
-                                return dataFileWriter;
-                            });
+            this.rowType = rowType;
         }
 
         @Override
         public FormatWriter create(PositionOutputStream out, String compression)
                 throws IOException {
-            AvroBulkWriter<InternalRow> writer = factory.create(out, compression);
-            return new FormatWriter() {
-
-                @Override
-                public void addElement(InternalRow element) throws IOException {
-                    writer.addElement(element);
-                }
-
-                @Override
-                public void close() throws IOException {
-                    writer.close();
-                }
-
-                @Override
-                public boolean reachTargetSize(boolean suggestedCheck, long targetSize)
-                        throws IOException {
-                    if (out != null) {
-                        return suggestedCheck && out.getPos() >= targetSize;
-                    }
-                    throw new IOException("Failed to get stream length: no open stream");
-                }
-            };
+            return createBlockWriter(out, rowType, compression, true);
         }
     }
 }

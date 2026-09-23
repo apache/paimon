@@ -24,6 +24,7 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.table.row.vector import Vector
 
 
@@ -69,6 +70,12 @@ class VectorClassTest(unittest.TestCase):
         v = Vector([])
         self.assertEqual(len(v), 0)
         self.assertEqual(v.to_list(), [])
+
+    def test_offset_row_legacy_positional_vector_indices(self):
+        row = OffsetRow(([1.0, 2.0],), 0, 1, None, None, {0})
+
+        self.assertEqual(row.get_vector(0).to_list(), [1.0, 2.0])
+        self.assertEqual(row._descriptor_field_indices, frozenset())
 
 
 class VectorFileDetectionTest(unittest.TestCase):
@@ -339,6 +346,247 @@ class VectorTableWriteReadTest(unittest.TestCase):
         result = read_builder.new_read().to_arrow(splits)
 
         self.assertEqual(result.num_rows, 3)
+
+    def test_vector_table_partial_update_non_vector_column(self):
+        vector_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('embedding', pa.list_(pa.float32(), 4)),
+        ])
+        opts = {
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'data-evolution.write-cols-optimization.enabled': 'true',
+            'vector.file.format': 'parquet',
+        }
+        s = Schema.from_pyarrow_schema(vector_schema, options=opts)
+        table_name = 'test_db.vector_de_seq'
+        self.catalog.create_table(table_name, s, False)
+
+        table = self.catalog.get_table(table_name)
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pydict(
+            {
+                'id': [1, 2],
+                'name': ['a', 'b'],
+                'embedding': [[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]],
+            },
+            schema=vector_schema,
+        ))
+        initial_messages = w.prepare_commit()
+        initial_files = [
+            file for message in initial_messages for file in message.new_files
+        ]
+        normal_file = next(
+            file for file in initial_files
+            if not DataFileMeta.is_vector_file(file.file_name)
+        )
+        vector_file = next(
+            file for file in initial_files
+            if DataFileMeta.is_vector_file(file.file_name)
+        )
+        self.assertIsNone(normal_file.write_cols)
+        self.assertEqual(['embedding'], vector_file.write_cols)
+        wb.new_commit().commit(initial_messages)
+        w.close()
+
+        from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+        table = self.catalog.get_table(table_name)
+        rb = table.new_read_builder()
+        rb = rb.with_projection(['name', '_ROW_ID'])
+        splits = rb.new_scan().plan().splits()
+        source = rb.new_read().to_arrow(splits)
+
+        update_data = pa.table({
+            '_ROW_ID': source.column('_ROW_ID'),
+            'name': pa.array(['updated', 'updated'], type=pa.string()),
+        })
+        updater = TableUpdateByRowId(
+            table, '_test_', BATCH_COMMIT_IDENTIFIER,
+        )
+        msgs = updater.update_columns(update_data, ['name'])
+        table.new_batch_write_builder().new_commit().commit(msgs)
+
+        table = self.catalog.get_table(table_name)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        result = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(result['name'], ['updated', 'updated'])
+
+    def test_backfill_vector_column_added_after_existing_rows(self):
+        from pypaimon.schema.data_types import AtomicType, VectorType
+        from pypaimon.schema.schema_change import SchemaChange
+        from pypaimon.utils.range import Range
+
+        table_name = 'test_db.vector_backfill_added_column'
+        base_schema = pa.schema([
+            ('id', pa.int64()),
+            ('image', pa.large_binary()),
+        ])
+        opts = {
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'vector.file.format': 'parquet',
+        }
+        self.catalog.create_table(
+            table_name,
+            Schema.from_pyarrow_schema(base_schema, options=opts),
+            False,
+        )
+        table = self.catalog.get_table(table_name)
+        wb = table.new_batch_write_builder()
+        writer = wb.new_write()
+        writer.write_arrow(pa.table({
+            'id': pa.array([1, 2, 3], type=pa.int64()),
+            'image': pa.array([b'a', b'b', b'c'], type=pa.large_binary()),
+        }))
+        commit = wb.new_commit()
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+        self.catalog.alter_table(
+            table_name,
+            [SchemaChange.add_column(
+                'embedding', VectorType(True, AtomicType('FLOAT'), 2))],
+            False,
+        )
+        table = self.catalog.get_table(table_name)
+        read_builder = table.new_read_builder().with_projection(
+            ['image', 'embedding', '_ROW_ID'])
+        read_builder.with_filter(
+            read_builder.new_predicate_builder().is_null('embedding'))
+        splits = (
+            read_builder.new_scan()
+            .with_row_ranges([Range(0, 2)])
+            .plan()
+            .splits()
+        )
+        pending = read_builder.new_read().to_arrow(splits).sort_by('_ROW_ID')
+        self.assertEqual([0, 1, 2], pending['_ROW_ID'].to_pylist())
+        self.assertEqual([b'a', b'b', b'c'], pending['image'].to_pylist())
+
+        updates = pa.table({
+            '_ROW_ID': pending['_ROW_ID'],
+            'embedding': pa.array(
+                [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0]],
+                type=pa.list_(pa.float32(), 2),
+            ),
+        })
+        wb = table.new_batch_write_builder()
+        messages = (
+            wb.new_update()
+            .with_update_type(['embedding'])
+            .update_by_arrow_with_row_id(updates)
+        )
+        commit = wb.new_commit()
+        commit.commit(messages)
+        commit.close()
+
+        table = self.catalog.get_table(table_name)
+        read_builder = table.new_read_builder().with_projection(
+            ['id', 'embedding'])
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()).sort_by('id')
+        self.assertEqual(
+            [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0]],
+            result['embedding'].to_pylist(),
+        )
+
+        retry_builder = table.new_read_builder().with_projection(
+            ['embedding', '_ROW_ID'])
+        retry_builder.with_filter(
+            retry_builder.new_predicate_builder().is_null('embedding'))
+        retry_splits = (
+            retry_builder.new_scan()
+            .with_row_ranges([Range(0, 2)])
+            .plan()
+            .splits()
+        )
+        self.assertEqual(
+            0,
+            retry_builder.new_read().to_arrow(retry_splits).num_rows,
+        )
+
+    def test_vector_table_partial_update_non_vector_column_with_rolling_files(self):
+        from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+        vector_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('embedding', pa.list_(pa.float32(), 4)),
+        ])
+        opts = {
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'vector.file.format': 'parquet',
+            'target-file-size': '1KB',
+        }
+        s = Schema.from_pyarrow_schema(vector_schema, options=opts)
+        table_name = 'test_db.vector_de_seq_rolling'
+        self.catalog.create_table(table_name, s, False)
+
+        write_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+        table = self.catalog.get_table(table_name)
+        wb = table.new_batch_write_builder()
+        w = wb.new_write().with_write_type(['id', 'name'])
+        for start in (0, 1000):
+            ids = list(range(start, start + 1000))
+            w.write_arrow(pa.Table.from_pydict(
+                {
+                    'id': ids,
+                    'name': [f'name_{i}_' + 'x' * 2048 for i in ids],
+                },
+                schema=write_schema,
+            ))
+        commit_messages = w.prepare_commit()
+        normal_files = [
+            f for msg in commit_messages for f in msg.new_files
+            if not DataFileMeta.is_vector_file(f.file_name)
+        ]
+        self.assertGreaterEqual(len(normal_files), 2)
+        for file in normal_files:
+            self.assertEqual(file.min_sequence_number, 0)
+            self.assertEqual(file.max_sequence_number, file.row_count - 1)
+        wb.new_commit().commit(commit_messages)
+        w.close()
+
+        table = self.catalog.get_table(table_name)
+        rb = table.new_read_builder().with_projection(['id', 'name', '_ROW_ID'])
+        splits = rb.new_scan().plan().splits()
+        source = rb.new_read().to_arrow(splits).sort_by('id')
+
+        update_data = pa.table({
+            '_ROW_ID': source.column('_ROW_ID'),
+            'name': pa.array(['updated'] * source.num_rows, type=pa.string()),
+        })
+        updater = TableUpdateByRowId(
+            table, '_test_', BATCH_COMMIT_IDENTIFIER,
+        )
+        msgs = updater.update_columns(update_data, ['name'])
+        update_normal_files = [
+            f for msg in msgs for f in msg.new_files
+            if not DataFileMeta.is_vector_file(f.file_name)
+        ]
+        self.assertGreaterEqual(len(update_normal_files), 2)
+        for file in update_normal_files:
+            self.assertEqual(file.min_sequence_number, 0)
+            self.assertEqual(file.max_sequence_number, file.row_count - 1)
+        table.new_batch_write_builder().new_commit().commit(msgs)
+
+        table = self.catalog.get_table(table_name)
+        rb = table.new_read_builder().with_projection(['id', 'name'])
+        splits = rb.new_scan().plan().splits()
+        result = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(result['id'], list(range(2000)))
+        self.assertEqual(result['name'], ['updated'] * 2000)
 
 
 if __name__ == '__main__':

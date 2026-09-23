@@ -120,12 +120,25 @@ class TagsTableTest(unittest.TestCase):
                 tzinfo=datetime.timezone.utc).timestamp() * 1000)
             self.assertEqual(_TAG_COMMIT_MS, ms)
 
-        # Until pypaimon Tag carries these fields they are surfaced as
-        # None — same trade-off as FileSystemCatalog.get_tag.
+        # Tags created without a retention carry no create-time / TTL.
         for value in arrow_table.column("create_time").to_pylist():
             self.assertIsNone(value)
         for value in arrow_table.column("time_retained").to_pylist():
             self.assertIsNone(value)
+
+    def test_surfaces_create_time_and_time_retained_for_ttl_tag(self):
+        self.table.create_tag("ttl", snapshot_id=7, time_retained="1d")
+
+        arrow_table = _read(self.catalog.get_table("db.t$tags"))
+        row = {
+            name: arrow_table.column(name).to_pylist()[0]
+            for name in arrow_table.column_names
+        }
+        self.assertEqual("ttl", row["tag_name"])
+        # create_time is a real timestamp; time_retained is the ISO-8601
+        # duration string (Java Duration.toString()).
+        self.assertIsInstance(row["create_time"], datetime.datetime)
+        self.assertEqual("PT24H", row["time_retained"])
 
 
 if __name__ == "__main__":

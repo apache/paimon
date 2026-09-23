@@ -273,7 +273,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY (f BOOLEAN)"))
                 .hasRootCauseInstanceOf(IllegalStateException.class)
                 .hasRootCauseMessage(
-                        "Column type f[DOUBLE] cannot be converted to BOOLEAN without loosing information.");
+                        "Column type f[DOUBLE] cannot be converted to BOOLEAN without losing information.");
     }
 
     @Test
@@ -351,6 +351,37 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                                         "1970-01-01 00:00:04.001", 3),
                                                 TimeZone.getDefault(),
                                                 3))
+                                + "]");
+    }
+
+    @Test
+    public void testModifyColumnTypeFromTimestampToBoundedString() {
+        // a bounded CHAR/VARCHAR target has to resolve to the same rule, then trim or pad
+        sql(
+                "CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b TIMESTAMP(3), d DATE, f TIME, g TIMESTAMP(3) WITH LOCAL TIME ZONE)");
+        sql(
+                "INSERT INTO T VALUES('paimon', TIMESTAMP '2023-06-06 12:00:00', DATE '2023-05-31', TIME '14:30:00', TO_TIMESTAMP_LTZ(4001, 3))");
+
+        sql("ALTER TABLE T MODIFY (b VARCHAR(10), d CHAR(12), f VARCHAR(5), g VARCHAR(10))");
+        List<Row> result = sql("SHOW CREATE TABLE T");
+        assertThat(result.toString())
+                .contains(
+                        "CREATE TABLE `PAIMON`.`default`.`T` (\n"
+                                + "  `a` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `b` VARCHAR(10),\n"
+                                + "  `d` CHAR(12),\n"
+                                + "  `f` VARCHAR(5),\n"
+                                + "  `g` VARCHAR(10),");
+        String localZoned =
+                DateTimeUtils.formatTimestamp(
+                        DateTimeUtils.parseTimestampData("1970-01-01 00:00:04.001", 3),
+                        TimeZone.getDefault(),
+                        3);
+        result = sql("SELECT * FROM T");
+        assertThat(result.stream().map(Objects::toString).collect(Collectors.toList()))
+                .containsExactly(
+                        "+I[paimon, 2023-06-06, 2023-05-31  , 14:30, "
+                                + localZoned.substring(0, 10)
                                 + "]");
     }
 
@@ -1605,13 +1636,13 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM T")).containsExactlyInAnyOrder(Row.of(1, 10), Row.of(2, 20));
         assertThatCode(() -> sql("ALTER TABLE T MODIFY v SMALLINT"))
                 .hasStackTraceContaining(
-                        "Column type v[INT] cannot be converted to SMALLINT without loosing information");
+                        "Column type v[INT] cannot be converted to SMALLINT without losing information");
         sql("ALTER TABLE T MODIFY v BIGINT");
         assertThat(sql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(Row.of(1, 10L), Row.of(2, 20L));
         assertThatCode(() -> sql("ALTER TABLE T MODIFY v INT"))
                 .hasStackTraceContaining(
-                        "Column type v[BIGINT] cannot be converted to INT without loosing information");
+                        "Column type v[BIGINT] cannot be converted to INT without losing information");
         // disable explicit type casting
         sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql("ALTER TABLE T MODIFY v INT");
@@ -1838,5 +1869,26 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                         anyCauseMatches(
                                 UnsupportedOperationException.class,
                                 "Cannot drop primary keys on a non-empty table."));
+    }
+
+    private static final String BLOB_TABLE_OPTIONS =
+            "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'bucket'='-1'";
+
+    @Test
+    public void testAddBlobColumnViaCommentDirective() {
+        sql("CREATE TABLE T (id INT, data STRING) WITH (" + BLOB_TABLE_OPTIONS + ")");
+
+        // bare directive — no user comment
+        sql("ALTER TABLE T ADD desc_col BYTES COMMENT '__BLOB_DESCRIPTOR_FIELD'");
+        // directive + user comment
+        sql("ALTER TABLE T ADD picture BYTES COMMENT '__BLOB_FIELD; profile picture'");
+
+        String createSql = sql("SHOW CREATE TABLE T").get(0).toString();
+        assertThat(createSql).doesNotContain("__BLOB");
+        assertThat(createSql).contains("`desc_col`");
+        assertThat(createSql).contains("`picture`");
+        assertThat(createSql).contains("COMMENT 'profile picture'");
+        assertThat(createSql).contains("'blob-field' = 'picture'");
+        assertThat(createSql).contains("'blob-descriptor-field' = 'desc_col'");
     }
 }

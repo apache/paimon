@@ -23,8 +23,9 @@ import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.source.DataTableBatchScan;
+import org.apache.paimon.table.source.AbstractBatchTableScan;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.PrimaryKeyBatchScan;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -109,9 +110,9 @@ public class BatchReadTagCreatorTest extends PrimaryKeyTableTestBase {
         TableScan.Plan plan = scan.plan();
 
         assertThat(plan.splits()).isNotEmpty();
-        assertThat(scan).isInstanceOf(DataTableBatchScan.class);
+        assertThat(scan).isInstanceOf(PrimaryKeyBatchScan.class);
 
-        DataTableBatchScan batchScan = (DataTableBatchScan) scan;
+        AbstractBatchTableScan batchScan = (AbstractBatchTableScan) scan;
         String tagName = batchScan.readProtectionTagName();
         assertThat(tagName).isNotNull();
         assertThat(tagName).startsWith(BatchReadTagCreator.BATCH_READ_TAG_PREFIX);
@@ -132,8 +133,8 @@ public class BatchReadTagCreatorTest extends PrimaryKeyTableTestBase {
         InnerTableScan scan = table.newScan();
         scan.plan();
 
-        assertThat(scan).isInstanceOf(DataTableBatchScan.class);
-        DataTableBatchScan batchScan = (DataTableBatchScan) scan;
+        assertThat(scan).isInstanceOf(PrimaryKeyBatchScan.class);
+        AbstractBatchTableScan batchScan = (AbstractBatchTableScan) scan;
         assertThat(batchScan.readProtectionTagName()).isNull();
     }
 }

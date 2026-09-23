@@ -22,6 +22,7 @@ import org.apache.paimon.Changelog;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.blob.ManagedBlobReferenceFile;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.GenericRow;
@@ -30,14 +31,17 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestIndexTestUtils;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.manifest.ManifestSidecar;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -51,9 +55,13 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StringUtils;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
@@ -150,6 +158,62 @@ public class LocalOrphanFilesCleanTest {
     @Test
     public void testNormallyRemoving() throws Throwable {
         normallyRemoving(tablePath);
+    }
+
+    @Test
+    void testOrphanCleanupProtectsReferencedSidecars() throws Exception {
+        commit(Collections.singletonList(TestPojo.next()));
+        ManifestIndexTestUtils.registerIndexReferences(
+                table.store(), table.snapshotManager().latestSnapshotId());
+        table.snapshotManager().invalidateCache();
+        table.createTag("sidecar-tag", table.snapshotManager().latestSnapshotId());
+        List<Path> sidecars = new ArrayList<>();
+        List<Path> unreferenced = new ArrayList<>();
+        for (ManifestFileMeta meta :
+                table.store()
+                        .manifestListFactory()
+                        .create()
+                        .readDataManifests(table.snapshotManager().latestSnapshot())) {
+            Path sidecar = new Path(manifestDir, ManifestSidecar.fileName(meta));
+            sidecars.add(sidecar);
+            Path guessed = new Path(manifestDir, meta.fileName() + ManifestSidecar.SUFFIX);
+            fileIO.newOutputStream(guessed, false).close();
+            unreferenced.add(guessed);
+        }
+        Path orphan = new Path(manifestDir, "manifest-orphan" + ManifestSidecar.SUFFIX);
+        fileIO.newOutputStream(orphan, false).close();
+        new LocalOrphanFilesClean(table, System.currentTimeMillis() + 2000).clean();
+        assertThat(fileIO.exists(orphan)).isFalse();
+        assertThat(sidecars).isNotEmpty();
+        for (Path sidecar : sidecars) {
+            assertThat(fileIO.exists(sidecar)).isTrue();
+        }
+        for (Path guessed : unreferenced) {
+            assertThat(fileIO.exists(guessed)).isFalse();
+        }
+    }
+
+    @Test
+    public void testKeepManagedBlobPack() throws Exception {
+        commit(Collections.singletonList(TestPojo.next()));
+
+        Path part1 = listSubDirs(tablePath, p -> p.getName().contains("=")).get(0);
+        Path part2 = listSubDirs(part1, p -> p.getName().contains("=")).get(0);
+        Path bucket = listSubDirs(part2, p -> p.getName().startsWith(BUCKET_PATH_PREFIX)).get(0);
+        Path managedBlob =
+                new Path(bucket, "orphan" + ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
+        Path ordinaryOrphan = new Path(bucket, "orphan.avro");
+        fileIO.newOutputStream(managedBlob, false).close();
+        fileIO.newOutputStream(ordinaryOrphan, false).close();
+
+        LocalOrphanFilesClean cleaner =
+                new LocalOrphanFilesClean(
+                        table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
+        List<Path> deleted = cleaner.clean().getDeletedFilesPath();
+
+        assertThat(fileIO.exists(managedBlob)).isTrue();
+        assertThat(fileIO.exists(ordinaryOrphan)).isFalse();
+        assertThat(deleted).doesNotContain(managedBlob);
     }
 
     public void normallyRemoving(Path dataPath) throws Throwable {
@@ -515,6 +579,57 @@ public class LocalOrphanFilesCleanTest {
                         table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
         List<Path> deleted = orphanFilesClean.clean().getDeletedFilesPath();
         validate(deleted, snapshotData, changelogData);
+    }
+
+    @Test
+    public void testPreservesManifestExtraFiles() throws Exception {
+        commit(generateData());
+        SnapshotManager snapshotManager = table.snapshotManager();
+        Snapshot snapshot = snapshotManager.latestSnapshot();
+        ManifestList manifestList = table.store().manifestListFactory().create();
+        List<ManifestFileMeta> manifests = manifestList.read(snapshot.deltaManifestList());
+        ManifestFileMeta meta = manifests.get(0);
+        String extraFile = "manifest-extra";
+        manifests.set(
+                0,
+                new ManifestFileMeta(
+                        meta.fileName(),
+                        meta.fileSize(),
+                        meta.numAddedFiles(),
+                        meta.numDeletedFiles(),
+                        meta.partitionStats(),
+                        meta.schemaId(),
+                        meta.minBucket(),
+                        meta.maxBucket(),
+                        meta.minLevel(),
+                        meta.maxLevel(),
+                        meta.minRowId(),
+                        meta.maxRowId(),
+                        null,
+                        Collections.singletonList(extraFile)));
+        Pair<String, Long> newManifestList = manifestList.write(manifests);
+        ObjectNode node =
+                (ObjectNode) JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(snapshot.toJson());
+        node.put("deltaManifestList", newManifestList.getKey());
+        node.put("deltaManifestListSize", newManifestList.getValue());
+        fileIO.overwriteFileUtf8(snapshotManager.snapshotPath(snapshot.id()), node.toString());
+        snapshotManager.invalidateCache();
+
+        Path extraPath = new Path(manifestDir, extraFile);
+        Path orphanPath = new Path(manifestDir, "orphan-extra");
+        fileIO.writeFile(extraPath, "extra file, not an Avro manifest", true);
+        fileIO.writeFile(orphanPath, "orphan", true);
+
+        LocalOrphanFilesClean cleaner =
+                new LocalOrphanFilesClean(
+                        table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
+        List<Path> deleted = cleaner.clean().getDeletedFilesPath();
+        assertThat(deleted)
+                .extracting(Path::getName)
+                .contains(orphanPath.getName())
+                .doesNotContain(extraFile);
+        assertThat(fileIO.exists(extraPath)).isTrue();
+        assertThat(fileIO.exists(orphanPath)).isFalse();
     }
 
     /** Manually make a FileNotFoundException to simulate snapshot expire while clean. */
@@ -970,7 +1085,7 @@ public class LocalOrphanFilesCleanTest {
         conf.set(CoreOptions.BUCKET, RANDOM.nextInt(3) + 1);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, tablePath),
+                        new FileSystemSchemaManager(fileIO, tablePath),
                         new Schema(
                                 rowType.getFields(),
                                 Arrays.asList("part1", "part2"),

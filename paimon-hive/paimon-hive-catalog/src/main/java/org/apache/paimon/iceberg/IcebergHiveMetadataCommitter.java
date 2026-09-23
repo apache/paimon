@@ -18,10 +18,12 @@
 
 package org.apache.paimon.iceberg;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.HiveCatalog;
+import org.apache.paimon.hive.HiveTableUtils;
 import org.apache.paimon.hive.HiveTypeUtils;
 import org.apache.paimon.hive.pool.CachedClientPool;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
@@ -90,10 +92,10 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
 
         table.options().forEach(hiveConf::set);
         if (uri != null) {
-            hiveConf.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
+            hiveConf.set("hive.metastore.uris", uri);
         }
 
-        if (hiveConf.get(HiveConf.ConfVars.METASTOREURIS.varname) == null) {
+        if (hiveConf.get("hive.metastore.uris") == null) {
             LOG.error(
                     "Can't find hive metastore uri to connect: "
                             + "either set {} for paimon table or set hive.metastore.uris "
@@ -126,7 +128,15 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
         try {
             commitMetadataImpl(newMetadataPath, baseMetadataPath);
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException(
+                    "Fail to commit iceberg metadata to hive metastore for table: "
+                            + icebergDatabases
+                            + "."
+                            + icebergTableName
+                            + " (paimon table: "
+                            + table.name()
+                            + ")",
+                    e);
         }
     }
 
@@ -263,6 +273,11 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
         return new FieldSchema(
                 dataField.name(),
                 HiveTypeUtils.toTypeInfo(dataField.type()).getTypeName(),
-                dataField.description());
+                normalizeColumnComment(dataField.description()));
+    }
+
+    @VisibleForTesting
+    static String normalizeColumnComment(@Nullable String comment) {
+        return HiveTableUtils.normalizeColumnComment(comment);
     }
 }

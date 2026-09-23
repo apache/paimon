@@ -15,10 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from dataclasses import dataclass
-from typing import List, Tuple, Optional
+from dataclasses import dataclass, field
+from typing import List, Tuple, Optional, TYPE_CHECKING
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+
+if TYPE_CHECKING:
+    from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 
 
 @dataclass
@@ -26,7 +29,29 @@ class CommitMessage:
     partition: Tuple
     bucket: int
     new_files: List[DataFileMeta]
-    check_from_snapshot: Optional[int] = -1
+    check_from_snapshot: Optional[int] = None
+    deleted_files: List[DataFileMeta] = field(default_factory=list)
+    index_adds: List['IndexManifestEntry'] = field(default_factory=list)
+    index_deletes: List['IndexManifestEntry'] = field(default_factory=list)
+    changelog_files: List[DataFileMeta] = field(default_factory=list)
+    total_buckets: Optional[int] = None
+    # Java CommitMessageImpl keeps compaction changes separate from data changes.
+    compact_before: List[DataFileMeta] = field(default_factory=list)
+    compact_after: List[DataFileMeta] = field(default_factory=list)
+    compact_changelog_files: List[DataFileMeta] = field(default_factory=list)
+    compact_index_adds: List['IndexManifestEntry'] = field(default_factory=list)
+    compact_index_deletes: List['IndexManifestEntry'] = field(default_factory=list)
 
     def is_empty(self):
-        return not self.new_files
+        return (
+            not self.new_files
+            and not self.deleted_files
+            and not self.index_adds
+            and not self.index_deletes
+            and not self.changelog_files
+            and not self.compact_before
+            and not self.compact_after
+            and not self.compact_changelog_files
+            and not self.compact_index_adds
+            and not self.compact_index_deletes
+        )

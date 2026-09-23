@@ -22,6 +22,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.beans.ConstructorProperties;
 import java.util.List;
 import java.util.Map;
 
@@ -30,6 +31,7 @@ import java.util.Map;
 public class MarkDonePartitionsRequest extends BasePartitionsRequest {
 
     @JsonCreator
+    @ConstructorProperties({FIELD_PARTITION_SPECS})
     public MarkDonePartitionsRequest(
             @JsonProperty(FIELD_PARTITION_SPECS) List<Map<String, String>> partitionSpecs) {
         super(partitionSpecs);

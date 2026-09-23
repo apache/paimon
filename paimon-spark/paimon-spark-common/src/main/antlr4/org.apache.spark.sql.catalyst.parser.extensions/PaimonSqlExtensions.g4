@@ -86,6 +86,18 @@ statement
       overwriteClause?                                                                      #copyIntoLocation
     | CREATE TABLE (IF NOT EXISTS)? target=multipartIdentifier
         LIKE source=multipartIdentifier ( . )*?                                             #createTableLike
+    | COPY INTO targetPath=STRING
+      FROM query=parenBlock
+      fileFormatClause
+      overwriteClause?                                                                      #copyIntoLocationFromQuery
+  ;
+
+// A parenthesized block with balanced parentheses, used to capture an inline subquery verbatim,
+// e.g. the (SELECT ...) in `COPY INTO <location> FROM (SELECT ...)`. A recursive rule is required
+// (rather than '(' .*? ')') so that nested parentheses such as `WHERE x IN (1, 2)` are matched
+// correctly. The raw subquery text is later extracted from the token stream by the AST builder.
+parenBlock
+  : '(' ( parenBlock | ~('(' | ')') )* ')'
   ;
 
 callArgument
@@ -145,7 +157,7 @@ forceClause
   ;
 
 onErrorClause
-  : ON_ERROR '=' ABORT_STATEMENT
+  : ON_ERROR '=' (ABORT_STATEMENT | CONTINUE | SKIP_FILE)
   ;
 
 overwriteClause
@@ -155,6 +167,7 @@ overwriteClause
 expression
     : constant
     | stringMap
+    | stringArray
     ;
 
 constant
@@ -166,6 +179,10 @@ constant
 
 stringMap
     : MAP '(' constant (',' constant)* ')'
+    ;
+
+stringArray
+    : ARRAY '(' (constant (',' constant)*)? ')'
     ;
 
 booleanValue
@@ -202,9 +219,11 @@ nonReserved
     : ALTER | AS | CALL | CREATE | DAYS | DELETE | EXISTS | HOURS | IF | LIKE
     | NOT | OF | OR | TABLE | REPLACE | RETAIN | VERSION | TAG
     | TRUE | FALSE
-    | MAP
-    | COPY | INTO | FROM | FILE_FORMAT | PATTERN | FORCE | ON_ERROR | ABORT_STATEMENT | OVERWRITE
+    | ARRAY | MAP
+    | COPY | INTO | FROM | FILE_FORMAT | PATTERN | FORCE | ON_ERROR | ABORT_STATEMENT | CONTINUE | SKIP_FILE | OVERWRITE
     | CSV
+    | JSON
+    | PARQUET
     ;
 
 ALTER: 'ALTER';
@@ -235,6 +254,7 @@ TRUE: 'TRUE';
 FALSE: 'FALSE';
 
 MAP: 'MAP';
+ARRAY: 'ARRAY';
 
 COPY: 'COPY';
 INTO: 'INTO';
@@ -244,8 +264,12 @@ PATTERN: 'PATTERN';
 FORCE: 'FORCE';
 ON_ERROR: 'ON_ERROR';
 ABORT_STATEMENT: 'ABORT_STATEMENT';
+CONTINUE: 'CONTINUE';
+SKIP_FILE: 'SKIP_FILE';
 OVERWRITE: 'OVERWRITE';
 CSV: 'CSV';
+JSON: 'JSON';
+PARQUET: 'PARQUET';
 
 PLUS: '+';
 MINUS: '-';

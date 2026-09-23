@@ -28,14 +28,15 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
@@ -49,6 +50,9 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Used to test schema evolution related logic. */
 public class SchemaEvolutionTest extends TableTestBase {
@@ -197,8 +201,53 @@ public class SchemaEvolutionTest extends TableTestBase {
                         .option(CoreOptions.SEQUENCE_FIELD.key(), "col1")
                         .build();
         TableSchema tableSchema =
-                SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);
+                SchemaUtils.forceCommit(new FileSystemSchemaManager(fileIO, tablePath), schema);
         table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+    }
+
+    @Test
+    public void testSchemaCompatibleTypeWidening() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        Path tablePath =
+                new Path(String.format("%s/%s.db/%s", warehouse, database, "WideningTable"));
+        // Paimon table has id INT, quantity INT, name STRING.
+        Schema baseSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("quantity", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .primaryKey("id")
+                        .build();
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(new FileSystemSchemaManager(fileIO, tablePath), baseSchema);
+
+        // Paimon INT, source BIGINT: Paimon can evolve INT -> BIGINT, compatible.
+        List<DataField> bigintFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "quantity", DataTypes.BIGINT()));
+        assertTrue(CdcActionCommonUtils.schemaCompatible(tableSchema, bigintFields));
+
+        // Paimon INT, source SMALLINT: source fits in Paimon INT as-is, compatible.
+        List<DataField> smallintFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "quantity", DataTypes.SMALLINT()));
+        assertTrue(CdcActionCommonUtils.schemaCompatible(tableSchema, smallintFields));
+
+        // Paimon STRING, source VARCHAR(20): source fits in Paimon STRING, compatible.
+        List<DataField> varcharFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "name", new VarCharType(true, 20)));
+        assertTrue(CdcActionCommonUtils.schemaCompatible(tableSchema, varcharFields));
+
+        // Paimon INT, source STRING: incompatible type families.
+        List<DataField> incompatibleFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "quantity", DataTypes.STRING()));
+        assertFalse(CdcActionCommonUtils.schemaCompatible(tableSchema, incompatibleFields));
     }
 
     @Test
@@ -213,7 +262,8 @@ public class SchemaEvolutionTest extends TableTestBase {
                 upDataFieldStream
                         .process(
                                 new UpdatedDataFieldsProcessFunction(
-                                        new SchemaManager(table.fileIO(), table.location()),
+                                        new FileSystemSchemaManager(
+                                                table.fileIO(), table.location()),
                                         identifier,
                                         catalogLoader,
                                         TypeMapping.defaultMapping()))

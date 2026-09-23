@@ -19,7 +19,6 @@
 package org.apache.paimon.benchmark.cache;
 
 import org.apache.paimon.benchmark.Benchmark;
-import org.apache.paimon.io.cache.Cache;
 import org.apache.paimon.io.cache.CacheKey;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.options.MemorySize;
@@ -51,32 +50,30 @@ public class CacheManagerBenchmark {
         assertThat(file2.createNewFile()).isTrue();
         CacheKey key2 = CacheKey.forPageIndex(new RandomAccessFile(file2, "r"), 0, 0);
 
-        for (Cache.CacheType cacheType : Cache.CacheType.values()) {
-            CacheManager cacheManager = new CacheManager(cacheType, MemorySize.ofBytes(10), 0.1);
-            benchmark.addCase(
-                    String.format("cache-%s", cacheType.toString()),
-                    5,
-                    () -> {
-                        try {
-                            final int count = 10;
-                            for (int i = 0; i < count; i++) {
-                                cacheManager.getPage(
-                                        i < count / 2 ? key1 : key2,
-                                        key -> {
-                                            try {
-                                                Thread.sleep(1000);
-                                            } catch (InterruptedException e) {
-                                                throw new RuntimeException(e);
-                                            }
-                                            return new byte[6];
-                                        },
-                                        key -> {});
-                            }
-                        } catch (Exception e) {
-                            throw new RuntimeException(e);
+        CacheManager cacheManager = new CacheManager(MemorySize.ofBytes(10), 0.1);
+        benchmark.addCase(
+                "cache-caffeine",
+                5,
+                () -> {
+                    try {
+                        final int count = 10;
+                        for (int i = 0; i < count; i++) {
+                            cacheManager.getPage(
+                                    i < count / 2 ? key1 : key2,
+                                    key -> {
+                                        try {
+                                            Thread.sleep(1000);
+                                        } catch (InterruptedException e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                        return new byte[6];
+                                    },
+                                    key -> {});
                         }
-                    });
-        }
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
         benchmark.run();
     }
 }

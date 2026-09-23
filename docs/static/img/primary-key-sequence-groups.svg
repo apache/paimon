@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="650" viewBox="0 0 960 650" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Independent versions for independent updates</title>
+<desc id="desc">For user 1, the initial profile is Ada in London at version 10, and the score is 40 at version 5. Update 1 has profile version 11 and clears city to null; its null score version skips the score group. Update 2 has an older profile version 9, which is ignored, and score version 6, which sets score to 50. The final row is Ada with null city at profile version 11 and score 50 at score version 6.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="958" height="648" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">Independent versions for independent updates</text>
+<text x="28" y="76" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Partial update without aggregate functions. Both sequence groups belong to user_id = 1.</text>
+<text x="28" y="122" font-size="19" font-weight="700" text-anchor="start" fill="#526277">Input</text>
+<text x="239" y="122" font-size="21" font-weight="700" text-anchor="start" fill="#2463b4">Profile group: name, city</text>
+<text x="601" y="122" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Score group: score</text>
+<text x="28" y="177" font-size="22" font-weight="700" text-anchor="start" fill="#172b4d">Initial row</text>
+<text x="28" y="205" font-size="17" font-weight="400" text-anchor="start" fill="#526277">Stored state</text>
+<rect x="223" y="143" width="347" height="91" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="239" y="174" font-size="21" font-weight="700" text-anchor="start" fill="#2463b4">Version 10</text>
+<text x="239" y="204" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Ada · London</text>
+<rect x="585" y="143" width="347" height="91" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="601" y="174" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Version 5</text>
+<text x="601" y="204" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Score = 40</text>
+<path d="M 396 237 L 396 260" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 758 237 L 758 260" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="28" y="302" font-size="22" font-weight="700" text-anchor="start" fill="#172b4d">Update 1</text>
+<text x="28" y="330" font-size="17" font-weight="400" text-anchor="start" fill="#526277">Profile advances</text>
+<rect x="223" y="268" width="347" height="108" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="239" y="299" font-size="21" font-weight="700" text-anchor="start" fill="#2463b4">Version 11 · accepted</text>
+<text x="239" y="329" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Ada · NULL</text>
+<text x="239" y="354" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Explicitly clear city</text>
+<rect x="585" y="268" width="347" height="108" rx="8" fill="#fff2d7" stroke="#9a5200" stroke-width="1.5"/>
+<text x="601" y="299" font-size="21" font-weight="700" text-anchor="start" fill="#9a5200">NULL version · skipped</text>
+<text x="601" y="329" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Input score = 999</text>
+<text x="601" y="354" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Keep stored score = 40</text>
+<path d="M 396 379 L 396 400" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 758 379 L 758 400" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="28" y="442" font-size="22" font-weight="700" text-anchor="start" fill="#172b4d">Update 2</text>
+<text x="28" y="470" font-size="17" font-weight="400" text-anchor="start" fill="#526277">Score advances</text>
+<rect x="223" y="408" width="347" height="108" rx="8" fill="#fff2d7" stroke="#9a5200" stroke-width="1.5"/>
+<text x="239" y="439" font-size="21" font-weight="700" text-anchor="start" fill="#9a5200">Version 9 · ignored</text>
+<text x="239" y="469" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Old · Paris</text>
+<text x="239" y="494" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Keep stored profile</text>
+<rect x="585" y="408" width="347" height="108" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="601" y="439" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Version 6 · accepted</text>
+<text x="601" y="469" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Score = 50</text>
+<text x="601" y="494" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Replace stored score</text>
+<path d="M 396 519 L 396 544" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 758 519 L 758 544" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="28" y="551" width="904" height="74" rx="8" fill="#f1ebfa" stroke="#7051a3" stroke-width="1.5"/>
+<text x="46" y="582" font-size="22" font-weight="700" text-anchor="start" fill="#7051a3">Final row</text>
+<text x="239" y="582" font-size="22" font-weight="700" text-anchor="start" fill="#7051a3">Ada · NULL</text>
+<text x="601" y="582" font-size="22" font-weight="700" text-anchor="start" fill="#7051a3">Score = 50</text>
+<text x="239" y="610" font-size="18" font-weight="400" text-anchor="start" fill="#526277">profile_version = 11</text>
+<text x="601" y="610" font-size="18" font-weight="400" text-anchor="start" fill="#526277">score_version = 6</text>
+</g>
+</svg>

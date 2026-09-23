@@ -19,8 +19,8 @@
 
 import threading
 from collections import deque
-from concurrent.futures import Executor, Future
-from typing import Callable, Collection, Dict, List, Optional
+from concurrent.futures import Future
+from typing import Callable, Collection, Dict, FrozenSet, List, NamedTuple, Optional
 
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, FieldRef
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -28,38 +28,29 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.schema.data_types import DataField
 
 
-class _DirectExecutor(Executor):
-    """Executor that runs callables in the calling thread."""
+class GlobalIndexEvaluation(NamedTuple):
+    """Matches and fields whose supported indexes contributed."""
 
-    def submit(self, fn, *args, **kwargs):
-        f = Future()
-        try:
-            result = fn(*args, **kwargs)
-            f.set_result(result)
-        except Exception as e:
-            f.set_exception(e)
-        return f
-
-    def shutdown(self, wait=True):
-        pass
+    result: GlobalIndexResult
+    contributing_field_ids: FrozenSet[int]
 
 
 class GlobalIndexEvaluator:
-    """Predicate evaluator for filtering data using global indexes."""
+    """Predicate evaluator for filtering data using global indexes.
+
+    Reader visit methods return Future internally — the evaluator no longer
+    dispatches to an executor.
+    """
 
     def __init__(
         self,
         fields: List[DataField],
         readers_function: Callable[[DataField], Collection[GlobalIndexReader]],
-        executor: Optional[Executor] = None,
     ):
         self._fields = fields
         self._field_by_name = {f.name: f for f in fields}
         self._readers_function = readers_function
         self._index_readers_cache: Dict[int, Collection[GlobalIndexReader]] = {}
-        self._reader_locks: Dict[int, threading.Lock] = {}
-        self._locks_lock = threading.Lock()
-        self._executor = executor if executor is not None else _DirectExecutor()
 
     def evaluate(
         self,
@@ -67,8 +58,17 @@ class GlobalIndexEvaluator:
     ) -> Optional[GlobalIndexResult]:
         if predicate is None:
             return None
-        future = self._visit_async(predicate)
-        return future.result()
+        evaluation = self._visit_async(predicate).result()
+        return evaluation.result if evaluation is not None else None
+
+    def evaluate_with_contributing_fields(
+        self,
+        predicate: Optional[Predicate]
+    ) -> Optional[GlobalIndexEvaluation]:
+        """Return matches and fields whose supported indexes contributed."""
+        if predicate is None:
+            return None
+        return self._visit_async(predicate).result()
 
     def _visit_async(self, predicate) -> Future:
         if isinstance(predicate, Predicate) and predicate.method in ('and', 'or'):
@@ -92,11 +92,8 @@ class GlobalIndexEvaluator:
 
         reader_futures = []
         for reader in readers:
-            lock = self._get_reader_lock(id(reader))
             reader_futures.append(
-                self._executor.submit(
-                    self._visit_reader, reader, predicate, field_ref, lock
-                )
+                self._visit_function(reader, predicate, field_ref)
             )
 
         all_done = Future()
@@ -113,7 +110,8 @@ class GlobalIndexEvaluator:
                 if remaining[0] == 0:
                     try:
                         all_done.set_result(
-                            self._combine_reader_results(reader_futures)
+                            self._combine_reader_results(
+                                reader_futures, field_id)
                         )
                     except Exception as e:
                         all_done.set_exception(e)
@@ -123,28 +121,27 @@ class GlobalIndexEvaluator:
 
         return all_done
 
-    def _visit_reader(self, reader, predicate, field_ref, lock):
-        with lock:
-            result = self._visit_function(reader, predicate, field_ref)
-            if result is not None:
-                result.results()
-            return result
-
     def _combine_reader_results(
-        self, reader_futures: List[Future]
-    ) -> Optional[GlobalIndexResult]:
+        self, reader_futures: List[Future], field_id: int,
+    ) -> Optional[GlobalIndexEvaluation]:
         compound_result: Optional[GlobalIndexResult] = None
         for f in reader_futures:
             child_result = f.result()
             if child_result is None:
                 continue
             if compound_result is not None:
-                compound_result = compound_result.and_(child_result)
+                # Readers answer the same predicate: an exact result intersected
+                # with a candidate superset remains exact.
+                is_exact = compound_result.is_exact() or child_result.is_exact()
+                compound_result = GlobalIndexResult.create(
+                    compound_result.and_(child_result).results(), is_exact=is_exact)
             else:
                 compound_result = child_result
             if compound_result.is_empty():
-                return compound_result
-        return compound_result
+                break
+        if compound_result is None:
+            return None
+        return GlobalIndexEvaluation(compound_result, frozenset([field_id]))
 
     def _visit_compound_async(self, predicate: Predicate) -> Future:
         children = self._flatten_children(predicate.method, predicate.literals)
@@ -176,26 +173,39 @@ class GlobalIndexEvaluator:
         return all_done
 
     def _combine_results(
-        self, results: List[Optional[GlobalIndexResult]], method: str
-    ) -> Optional[GlobalIndexResult]:
+        self, results: List[Optional[GlobalIndexEvaluation]], method: str
+    ) -> Optional[GlobalIndexEvaluation]:
+        contributing_field_ids = set()
         if method == 'or':
             compound_result = GlobalIndexResult.create_empty()
-            for child_result in results:
-                if child_result is None:
+            for child in results:
+                if child is None:
                     return None
-                compound_result = compound_result.or_(child_result)
-            return compound_result
+                compound_result = compound_result.or_(child.result)
+                contributing_field_ids.update(child.contributing_field_ids)
+            return GlobalIndexEvaluation(compound_result,
+                                         frozenset(contributing_field_ids))
         else:
             compound_result: Optional[GlobalIndexResult] = None
-            for child_result in results:
-                if child_result is not None:
+            for child in results:
+                if child is not None:
                     if compound_result is not None:
-                        compound_result = compound_result.and_(child_result)
+                        compound_result = compound_result.and_(child.result)
                     else:
-                        compound_result = child_result
+                        compound_result = child.result
+                    contributing_field_ids.update(
+                        child.contributing_field_ids)
                 if compound_result is not None and compound_result.is_empty():
-                    return compound_result
-            return compound_result
+                    break
+            if compound_result is None:
+                return None
+            if any(child is None for child in results):
+                # A dropped AND child can share a field with a supported child.
+                # Contributing field ids alone therefore cannot prove exactness.
+                compound_result = GlobalIndexResult.create(
+                    compound_result.results(), is_exact=False)
+            return GlobalIndexEvaluation(compound_result,
+                                         frozenset(contributing_field_ids))
 
     def _flatten_children(self, method: str, children) -> list:
         result = []
@@ -209,20 +219,12 @@ class GlobalIndexEvaluator:
                 result.append(child)
         return result
 
-    def _get_reader_lock(self, reader_id: int) -> threading.Lock:
-        with self._locks_lock:
-            lock = self._reader_locks.get(reader_id)
-            if lock is None:
-                lock = threading.Lock()
-                self._reader_locks[reader_id] = lock
-            return lock
-
     def _visit_function(
         self,
         reader: GlobalIndexReader,
         predicate: Predicate,
         field_ref: FieldRef
-    ) -> Optional[GlobalIndexResult]:
+    ) -> 'Future[Optional[GlobalIndexResult]]':
         method = predicate.method
         literals = predicate.literals
 
@@ -256,8 +258,11 @@ class GlobalIndexEvaluator:
             return reader.visit_like(field_ref, literals[0])
         elif method == 'between':
             return reader.visit_between(field_ref, literals[0], literals[1])
+        elif method == 'notBetween':
+            return reader.visit_not_between(field_ref, literals[0], literals[1])
 
-        return None
+        from pypaimon.globalindex.global_index_reader import _completed_future
+        return _completed_future(None)
 
     def close(self) -> None:
         for readers in self._index_readers_cache.values():

@@ -370,6 +370,18 @@ public class TagManager {
         }
     }
 
+    /** Get tag names without reading tag files. */
+    public List<String> tagNames(Predicate<String> filter) {
+        try {
+            return tagPaths(path -> true).stream()
+                    .map(path -> path.getName().substring(TAG_PREFIX.length()))
+                    .filter(filter)
+                    .collect(Collectors.toList());
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     /** Get all tagged snapshots sorted by snapshot id. */
     public List<Snapshot> taggedSnapshots() {
         return new ArrayList<>(tags().keySet());

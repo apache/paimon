@@ -24,16 +24,18 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
 
-/** Block-level in-memory cache with LRU eviction. Thread-safe. */
+/**
+ * In-memory cache with LRU eviction, holding data blocks bounded by total bytes and a {@link
+ * FileSizeMemo} bounded by entry count. Thread-safe.
+ */
 public class LocalMemoryCacheManager implements LocalCacheManager {
 
     private final long maxSizeBytes;
     private final int blockSize;
     private final Object lock = new Object();
     private final LinkedHashMap<BlockKey, byte[]> cache;
-    private final ConcurrentHashMap<String, Long> fileSizeCache = new ConcurrentHashMap<>();
+    private final FileSizeMemo fileSizeMemo = new FileSizeMemo();
 
     private long currentSize;
 
@@ -80,13 +82,31 @@ public class LocalMemoryCacheManager implements LocalCacheManager {
 
     @Override
     public long getFileSize(String filePath) {
-        Long size = fileSizeCache.get(filePath);
-        return size != null ? size : -1;
+        synchronized (lock) {
+            return fileSizeMemo.get(filePath);
+        }
     }
 
     @Override
     public void putFileSize(String filePath, long size) {
-        fileSizeCache.put(filePath, size);
+        synchronized (lock) {
+            fileSizeMemo.put(filePath, size);
+        }
+    }
+
+    @Override
+    public void invalidate(String filePathPrefix) {
+        synchronized (lock) {
+            Iterator<Map.Entry<BlockKey, byte[]>> iterator = cache.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<BlockKey, byte[]> entry = iterator.next();
+                if (entry.getKey().filePath.startsWith(filePathPrefix)) {
+                    currentSize -= entry.getValue().length;
+                    iterator.remove();
+                }
+            }
+            fileSizeMemo.invalidate(filePathPrefix);
+        }
     }
 
     private static class BlockKey {

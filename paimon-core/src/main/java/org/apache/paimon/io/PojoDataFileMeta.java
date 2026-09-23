@@ -23,13 +23,9 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.utils.Range;
-import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
 
-import java.time.ZoneId;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -82,6 +78,8 @@ public class PojoDataFileMeta implements DataFileMeta {
 
     private final @Nullable List<String> writeCols;
 
+    private final @Nullable long[] writeColsSequences;
+
     public PojoDataFileMeta(
             String fileName,
             long fileSize,
@@ -102,7 +100,8 @@ public class PojoDataFileMeta implements DataFileMeta {
             @Nullable List<String> valueStatsCols,
             @Nullable String externalPath,
             @Nullable Long firstRowId,
-            @Nullable List<String> writeCols) {
+            @Nullable List<String> writeCols,
+            @Nullable long[] writeColsSequences) {
         this.fileName = fileName;
         this.fileSize = fileSize;
 
@@ -127,6 +126,7 @@ public class PojoDataFileMeta implements DataFileMeta {
         this.externalPath = externalPath;
         this.firstRowId = firstRowId;
         this.writeCols = writeCols;
+        this.writeColsSequences = writeColsSequences == null ? null : writeColsSequences.clone();
     }
 
     @Override
@@ -205,15 +205,6 @@ public class PojoDataFileMeta implements DataFileMeta {
     }
 
     @Override
-    public long creationTimeEpochMillis() {
-        return creationTime
-                .toLocalDateTime()
-                .atZone(ZoneId.systemDefault())
-                .toInstant()
-                .toEpochMilli();
-    }
-
-    @Override
     public String fileFormat() {
         String[] split = fileName.split("\\.");
         if (split.length == 1) {
@@ -252,6 +243,12 @@ public class PojoDataFileMeta implements DataFileMeta {
         return writeCols;
     }
 
+    @Nullable
+    @Override
+    public long[] writeColsSequences() {
+        return writeColsSequences == null ? null : writeColsSequences.clone();
+    }
+
     @Override
     public PojoDataFileMeta upgrade(int newLevel) {
         checkArgument(newLevel > this.level);
@@ -275,7 +272,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                writeColsSequences);
     }
 
     @Override
@@ -301,7 +299,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 newExternalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                writeColsSequences);
     }
 
     @Override
@@ -326,7 +325,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 Collections.emptyList(),
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                writeColsSequences);
     }
 
     @Override
@@ -351,7 +351,34 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                writeColsSequences);
+    }
+
+    @Override
+    public PojoDataFileMeta withWriteColsSequences(long[] writeColsSequences) {
+        return new PojoDataFileMeta(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                creationTime,
+                deleteRowCount,
+                embeddedIndex,
+                fileSource,
+                valueStatsCols,
+                externalPath,
+                firstRowId,
+                writeCols,
+                writeColsSequences);
     }
 
     @Override
@@ -376,7 +403,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                writeColsSequences);
     }
 
     @Override
@@ -401,7 +429,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 newFirstRowId,
-                writeCols);
+                writeCols,
+                writeColsSequences);
     }
 
     @Override
@@ -426,7 +455,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                writeColsSequences);
     }
 
     @Override
@@ -451,7 +481,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 newExternalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                writeColsSequences);
     }
 
     @Override
@@ -476,38 +507,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
-    }
-
-    @Override
-    public RoaringBitmap32 toFileSelection(List<Range> rowRanges) {
-        RoaringBitmap32 selection = null;
-        if (rowRanges != null) {
-            if (firstRowId() == null) {
-                throw new IllegalStateException(
-                        "firstRowId is null, can't convert to file selection");
-            }
-            selection = new RoaringBitmap32();
-            Range fileRange = nonNullRowIdRange();
-            List<Range> result = new ArrayList<>();
-            for (Range expected : rowRanges) {
-                Range intersection = Range.intersection(fileRange, expected);
-                if (intersection != null) {
-                    result.add(intersection);
-                }
-            }
-
-            if (result.size() == 1 && result.get(0).equals(fileRange)) {
-                return null;
-            }
-
-            for (Range range : result) {
-                for (long rowId = range.from; rowId <= range.to; rowId++) {
-                    selection.add((int) (rowId - fileRange.from));
-                }
-            }
-        }
-        return selection;
+                writeCols,
+                writeColsSequences);
     }
 
     @Override
@@ -538,7 +539,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 && Objects.equals(valueStatsCols, that.valueStatsCols())
                 && Objects.equals(externalPath, that.externalPath().orElse(null))
                 && Objects.equals(firstRowId, that.firstRowId())
-                && Objects.equals(writeCols, that.writeCols());
+                && Objects.equals(writeCols, that.writeCols())
+                && Arrays.equals(writeColsSequences, that.writeColsSequences());
     }
 
     @Override
@@ -563,7 +565,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                Arrays.hashCode(writeColsSequences));
     }
 
     @Override
@@ -573,7 +576,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                         + "minKey: %s, maxKey: %s, keyStats: %s, valueStats: %s, "
                         + "minSequenceNumber: %d, maxSequenceNumber: %d, "
                         + "schemaId: %d, level: %d, extraFiles: %s, creationTime: %s, "
-                        + "deleteRowCount: %d, fileSource: %s, valueStatsCols: %s, externalPath: %s, firstRowId: %s, writeCols: %s}",
+                        + "deleteRowCount: %d, fileSource: %s, valueStatsCols: %s, externalPath: %s, "
+                        + "firstRowId: %s, writeCols: %s, writeColsSequences: %s}",
                 fileName,
                 fileSize,
                 rowCount,
@@ -593,6 +597,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                Arrays.toString(writeColsSequences));
     }
 }

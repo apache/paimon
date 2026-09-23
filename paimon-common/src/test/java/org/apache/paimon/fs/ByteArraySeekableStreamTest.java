@@ -66,11 +66,24 @@ public class ByteArraySeekableStreamTest {
     }
 
     @Test
+    public void testSeekToEnd() throws IOException {
+        for (int length : new int[] {0, 10}) {
+            try (ByteArraySeekableStream stream =
+                    new ByteArraySeekableStream(randomBytes(length))) {
+                stream.seek(length);
+                Assertions.assertThat(stream.getPos()).isEqualTo(length);
+                Assertions.assertThat(stream.available()).isZero();
+                Assertions.assertThat(stream.read()).isEqualTo(-1);
+            }
+        }
+    }
+
+    @Test
     public void testThrow() {
         int bl = 10;
         byte[] b = randomBytes(bl);
         ByteArraySeekableStream byteArraySeekableStream = new ByteArraySeekableStream(b);
-        Assertions.assertThatCode(() -> byteArraySeekableStream.seek(10))
-                .hasMessage("Can't seek position: 10, length is 10");
+        Assertions.assertThatCode(() -> byteArraySeekableStream.seek(11))
+                .hasMessage("Can't seek position: 11, length is 10");
     }
 }

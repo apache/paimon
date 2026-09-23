@@ -58,6 +58,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
     private final LookupLevels<T> lookupLevels;
     private final MergeFunctionWrapperFactory<T> wrapperFactory;
     private final boolean noSequenceField;
+    private final boolean forceRewriteLevelZeroForVectorIndex;
     @Nullable private final BucketedDvMaintainer dvMaintainer;
     private final IntFunction<String> level2FileFormat;
 
@@ -75,6 +76,8 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
             MergeSorter mergeSorter,
             MergeFunctionWrapperFactory<T> wrapperFactory,
             boolean produceChangelog,
+            boolean changelogIgnoreUpdateBefore,
+            boolean changelogIgnoreDelete,
             @Nullable BucketedDvMaintainer dvMaintainer,
             CoreOptions options,
             @Nullable RemoteLookupFileManager<T> remoteLookupFileManager) {
@@ -88,11 +91,14 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                 mfFactory,
                 mergeSorter,
                 produceChangelog,
+                changelogIgnoreUpdateBefore,
+                changelogIgnoreDelete,
                 dvMaintainer != null);
         this.dvMaintainer = dvMaintainer;
         this.lookupLevels = lookupLevels;
         this.wrapperFactory = wrapperFactory;
         this.noSequenceField = options.sequenceField().isEmpty();
+        this.forceRewriteLevelZeroForVectorIndex = options.primaryKeyVectorIndexEnabled();
         String fileFormat = options.fileFormatString();
         Map<Integer, String> fileFormatPerLevel = options.fileFormatPerLevel();
         this.level2FileFormat = level -> fileFormatPerLevel.getOrDefault(level, fileFormat);
@@ -133,6 +139,10 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
     protected UpgradeStrategy upgradeStrategy(int outputLevel, DataFileMeta file) {
         if (file.level() != 0) {
             return NO_CHANGELOG_NO_REWRITE;
+        }
+
+        if (forceRewriteLevelZeroForVectorIndex) {
+            return CHANGELOG_WITH_REWRITE;
         }
 
         // forcing rewriting when upgrading from level 0 to level x with different file formats

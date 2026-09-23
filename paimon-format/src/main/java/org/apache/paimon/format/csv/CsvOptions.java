@@ -23,6 +23,7 @@ import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.InlineElement;
+import org.apache.paimon.utils.Preconditions;
 
 import static org.apache.paimon.options.description.TextElement.text;
 
@@ -33,7 +34,7 @@ public class CsvOptions {
             ConfigOptions.key("csv.field-delimiter")
                     .stringType()
                     .defaultValue(",")
-                    .withFallbackKeys("field-delimiter", "seq")
+                    .withFallbackKeys("field-delimiter", "seq", "delimiter", "sep")
                     .withDescription("The field delimiter for CSV or TXT format");
 
     public static final ConfigOption<String> LINE_DELIMITER =
@@ -88,13 +89,31 @@ public class CsvOptions {
     private final Mode mode;
 
     public CsvOptions(Options options) {
-        this.fieldDelimiter = options.get(FIELD_DELIMITER);
+        this.fieldDelimiter = singleCharacter(options, FIELD_DELIMITER);
         this.lineDelimiter = options.get(LINE_DELIMITER);
+        Preconditions.checkArgument(
+                !lineDelimiter.isEmpty(), "'%s' must not be empty.", LINE_DELIMITER.key());
         this.nullLiteral = options.get(NULL_LITERAL);
         this.includeHeader = options.get(INCLUDE_HEADER);
-        this.quoteCharacter = options.get(QUOTE_CHARACTER);
-        this.escapeCharacter = options.get(ESCAPE_CHARACTER);
+        this.quoteCharacter = singleCharacter(options, QUOTE_CHARACTER);
+        this.escapeCharacter = singleCharacter(options, ESCAPE_CHARACTER);
         this.mode = options.get(MODE);
+    }
+
+    /**
+     * {@link CsvParser} keeps only the first character of these options while the writer emits the
+     * whole string, so a longer value is written and read differently. The line delimiter is
+     * deliberately not restricted here: {@code CustomLineReader} matches all of its bytes for the
+     * Paimon implementation.
+     */
+    private static String singleCharacter(Options options, ConfigOption<String> option) {
+        String value = options.get(option);
+        Preconditions.checkArgument(
+                value.length() == 1,
+                "'%s' must be a single character, but was '%s'.",
+                option.key(),
+                value);
+        return value;
     }
 
     public String fieldDelimiter() {

@@ -20,17 +20,39 @@ package org.apache.paimon.table.format;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.table.sink.CommitMessage;
 
 import javax.annotation.Nullable;
 
-/** {@link CommitMessage} implementation for format table. */
+/**
+ * {@link CommitMessage} implementation for format table.
+ *
+ * <p>Carries the row count and byte size of the one file it commits, counted while writing. The
+ * partition is not carried: {@link FormatTableCommit} derives it from the committer's target path,
+ * and deriving it once keeps the statistics and the registered partition from ever disagreeing.
+ */
 public class TwoPhaseCommitMessage implements CommitMessage {
 
+    private static final long serialVersionUID = 1L;
+
     private final TwoPhaseOutputStream.Committer committer;
+    private final long recordCount;
+    private final long fileSizeInBytes;
+
+    // Set once an abort must preserve the published target. Serializing the flag lets a later abort
+    // instance preserve it too.
+    private boolean preservePublishedTargetOnAbort;
 
     public TwoPhaseCommitMessage(TwoPhaseOutputStream.Committer committer) {
+        this(committer, PartitionStatistics.UNKNOWN, PartitionStatistics.UNKNOWN);
+    }
+
+    public TwoPhaseCommitMessage(
+            TwoPhaseOutputStream.Committer committer, long recordCount, long fileSizeInBytes) {
         this.committer = committer;
+        this.recordCount = recordCount;
+        this.fileSizeInBytes = fileSizeInBytes;
     }
 
     @Override
@@ -50,5 +72,23 @@ public class TwoPhaseCommitMessage implements CommitMessage {
 
     public TwoPhaseOutputStream.Committer getCommitter() {
         return committer;
+    }
+
+    void markPublishedTargetToPreserveOnAbort() {
+        preservePublishedTargetOnAbort = true;
+    }
+
+    boolean shouldPreservePublishedTargetOnAbort() {
+        return preservePublishedTargetOnAbort;
+    }
+
+    /** Rows in this file, or {@link PartitionStatistics#UNKNOWN} when nobody counted them. */
+    public long recordCount() {
+        return recordCount;
+    }
+
+    /** Bytes in this file, or {@link PartitionStatistics#UNKNOWN} when nobody measured them. */
+    public long fileSizeInBytes() {
+        return fileSizeInBytes;
     }
 }

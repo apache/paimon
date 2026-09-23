@@ -37,6 +37,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -216,12 +217,12 @@ public class NormalPartitionExpire implements PartitionExpire {
 
     private List<Map<String, String>> convertToPartitionString(
             List<List<String>> expiredPartValues) {
+        // Sort on the joined form, but build the partition from the original values: a value
+        // may itself contain DELIMITER, and splitting the joined string back apart would then
+        // shift every following field by one.
         return expiredPartValues.stream()
-                .map(values -> String.join(DELIMITER, values))
-                .sorted()
-                // Use split(DELIMITER, -1) to preserve trailing empty strings
-                .map(s -> s.split(DELIMITER, -1))
-                .map(strategy::toPartitionString)
+                .sorted(Comparator.comparing(values -> String.join(DELIMITER, values)))
+                .map(values -> strategy.toPartitionString(values.toArray()))
                 .limit(Math.min(expiredPartValues.size(), maxExpireNum))
                 .collect(Collectors.toList());
     }

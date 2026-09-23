@@ -21,6 +21,9 @@ package org.apache.paimon.mergetree.compact.aggregate.factory;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.mergetree.compact.aggregate.FieldMinAgg;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.TypeCheckUtils;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory for #{@link FieldMinAgg}. */
 public class FieldMinAggFactory implements FieldAggregatorFactory {
@@ -29,6 +32,11 @@ public class FieldMinAggFactory implements FieldAggregatorFactory {
 
     @Override
     public FieldMinAgg create(DataType fieldType, CoreOptions options, String field) {
+        checkArgument(
+                TypeCheckUtils.isComparable(fieldType),
+                "Data type for min column '%s' must be comparable but was '%s'.",
+                field,
+                fieldType);
         return new FieldMinAgg(identifier(), fieldType);
     }
 

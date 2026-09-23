@@ -26,6 +26,8 @@ from pypaimon.common.json_util import JSON
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_loader import SnapshotLoader
 
+EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM = 300
+
 
 class SnapshotManager:
     """Manager for snapshot files using unified FileIO."""
@@ -92,22 +94,74 @@ class SnapshotManager:
 
     def _get_latest_snapshot_from_filesystem(self) -> Optional[Snapshot]:
         """
-        Get the latest snapshot from filesystem by reading LATEST file.
-        
+        Get the latest snapshot from the filesystem. The LATEST file is only a
+        hint: when it is missing, stale, or unreadable, reconcile with a scan
+        of the snapshot files, like the Java SnapshotManager.findLatest.
+
+        If the hint indicates the table has snapshots but none can be resolved
+        (e.g. an unreadable LATEST plus a listing that an IO error truncated to
+        empty), fail closed rather than report the table as empty -- callers
+        such as the immutable-option guard must not mistake a populated table
+        for an empty one.
+
         Returns:
-            The latest snapshot, or None if not found
+            The latest snapshot, or None if the table genuinely has none
         """
-        if not self.file_io.exists(self.latest_file):
+        if not self.file_io.exists(self.snapshot_dir):
             return None
 
-        latest_content = self.read_latest_file()
-        latest_snapshot_id = int(latest_content.strip())
+        hint_id = None
+        hint_indicates_data = False
+        hint_read_error = None
+        if self.file_io.exists(self.latest_file):
+            try:
+                content = self.file_io.read_file_utf8(self.latest_file)
+                if content and content.strip():
+                    hint_indicates_data = True
+                    hint_id = int(content.strip())
+            except IOError as e:
+                # A present-but-unreadable hint most likely guards existing
+                # snapshots; remember the failure so we fail closed below.
+                hint_indicates_data = True
+                hint_read_error = e
+            except ValueError:
+                # Non-empty but corrupt hint; reconcile with a listing.
+                hint_indicates_data = True
 
-        snapshot_file = f"{self.snapshot_dir}/snapshot-{latest_snapshot_id}"
-        if not self.file_io.exists(snapshot_file):
+        # Trust the hint only when it points to an existing snapshot and no
+        # newer snapshot exists -- a lagging _commit_latest_hint leaves the
+        # hint stale. Otherwise reconcile with a directory listing (mirrors
+        # Java SnapshotManager.findLatest).
+        latest_snapshot_id = hint_id
+        if (latest_snapshot_id is None
+                or not self.file_io.exists(self.get_snapshot_path(latest_snapshot_id))
+                or self.file_io.exists(self.get_snapshot_path(latest_snapshot_id + 1))):
+            latest_snapshot_id = self._max_snapshot_id_from_listing()
+
+        if latest_snapshot_id is None:
+            if hint_indicates_data:
+                raise RuntimeError(
+                    f"Snapshot hint under {self.snapshot_dir} indicates existing "
+                    f"snapshots but none could be resolved"
+                    + (f": {hint_read_error}" if hint_read_error else ""))
             return None
 
+        snapshot_file = self.get_snapshot_path(latest_snapshot_id)
         return JSON.from_json(self.file_io.read_file_utf8(snapshot_file), Snapshot)
+
+    def _max_snapshot_id_from_listing(self) -> Optional[int]:
+        """Scan the snapshot directory for the largest snapshot-N file id."""
+        import re
+
+        snapshot_pattern = re.compile(r'^snapshot-(\d+)$')
+        max_snapshot_id = None
+        for file_info in self.file_io.list_status(self.snapshot_dir):
+            match = snapshot_pattern.match(file_info.path.split('/')[-1])
+            if match:
+                snapshot_id = int(match.group(1))
+                if max_snapshot_id is None or snapshot_id > max_snapshot_id:
+                    max_snapshot_id = snapshot_id
+        return max_snapshot_id
 
     def read_latest_file(self, max_retries: int = 5):
         """
@@ -158,19 +212,27 @@ class SnapshotManager:
         """Get the file path for the given snapshot ID."""
         return f"{self.snapshot_dir}/snapshot-{snapshot_id}"
 
-    def try_get_earliest_snapshot(self) -> Optional[Snapshot]:
+    def try_get_earliest_snapshot(
+        self, stop_snapshot_id: Optional[int] = None
+    ) -> Optional[Snapshot]:
         earliest_file = f"{self.snapshot_dir}/EARLIEST"
         if self.file_io.exists(earliest_file):
             earliest_content = self.file_io.read_file_utf8(earliest_file)
             earliest_snapshot_id = int(earliest_content.strip())
-            snapshot = self.get_snapshot_by_id(earliest_snapshot_id)
-            if snapshot is None:
-                logger.warning(
-                    "The earliest snapshot or changelog was once identified but disappeared. "
-                    "It might have been expired by other jobs operating on this table."
-                )
-            return snapshot
-        return self.get_snapshot_by_id(1)
+        else:
+            earliest_snapshot_id = 1
+
+        if stop_snapshot_id is None:
+            stop_snapshot_id = earliest_snapshot_id + EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM
+
+        for snapshot_id in range(earliest_snapshot_id, stop_snapshot_id + 1):
+            snapshot = self.get_snapshot_by_id(snapshot_id)
+            if snapshot is not None:
+                return snapshot
+        raise RuntimeError(
+            f"Cannot find earliest snapshot from #{earliest_snapshot_id} "
+            f"to #{stop_snapshot_id}."
+        )
 
     def earlier_or_equal_time_mills(self, timestamp: int) -> Optional[Snapshot]:
         """
@@ -182,10 +244,13 @@ class SnapshotManager:
         Returns:
             The latest snapshot with time_millis <= timestamp, or None if no such snapshot exists
         """
-        earliest_snap = self.try_get_earliest_snapshot()
         latest_snap = self.get_latest_snapshot()
 
-        if earliest_snap is None or latest_snap is None:
+        if latest_snap is None:
+            return None
+
+        earliest_snap = self.try_get_earliest_snapshot(latest_snap.id)
+        if earliest_snap is None:
             return None
 
         earliest = earliest_snap.id

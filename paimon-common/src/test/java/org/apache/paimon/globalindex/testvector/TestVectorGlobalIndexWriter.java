@@ -20,7 +20,7 @@ package org.apache.paimon.globalindex.testvector;
 
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 
@@ -40,16 +40,19 @@ import java.util.List;
  * <pre>
  *   [4 bytes] dimension (int)
  *   [4 bytes] count (int)
- *   [count * dim * 4 bytes] float vectors (row-major order)
+ *   For each vector:
+ *     [8 bytes] relative row id (long)
+ *     [dim * 4 bytes] float vector
  * </pre>
  */
-public class TestVectorGlobalIndexWriter implements GlobalIndexSingletonWriter {
+public class TestVectorGlobalIndexWriter implements GlobalIndexSingleColumnWriter {
 
     private static final String FILE_NAME_PREFIX = "test-vector";
 
     private final GlobalIndexFileWriter fileWriter;
     private final int dimension;
-    private final List<float[]> vectors;
+    private final List<VectorEntry> vectors;
+    private long rowCount;
 
     public TestVectorGlobalIndexWriter(GlobalIndexFileWriter fileWriter, int dimension) {
         this.fileWriter = fileWriter;
@@ -58,7 +61,8 @@ public class TestVectorGlobalIndexWriter implements GlobalIndexSingletonWriter {
     }
 
     @Override
-    public void write(Object fieldData) {
+    public void write(Object fieldData, long relativeRowId) {
+        rowCount++;
         if (fieldData == null) {
             throw new IllegalArgumentException("Vector field data must not be null");
         }
@@ -83,14 +87,14 @@ public class TestVectorGlobalIndexWriter implements GlobalIndexSingletonWriter {
         int expectedDim =
                 dimension > 0
                         ? dimension
-                        : (vectors.isEmpty() ? vector.length : vectors.get(0).length);
+                        : (vectors.isEmpty() ? vector.length : vectors.get(0).vector.length);
         if (vector.length != expectedDim) {
             throw new IllegalArgumentException(
                     String.format(
                             "Vector dimension mismatch: expected %d, but got %d",
                             expectedDim, vector.length));
         }
-        vectors.add(vector);
+        vectors.add(new VectorEntry(relativeRowId, vector));
     }
 
     @Override
@@ -99,7 +103,7 @@ public class TestVectorGlobalIndexWriter implements GlobalIndexSingletonWriter {
             return Collections.emptyList();
         }
 
-        int dim = dimension > 0 ? dimension : vectors.get(0).length;
+        int dim = dimension > 0 ? dimension : vectors.get(0).vector.length;
         int count = vectors.size();
 
         try {
@@ -113,21 +117,36 @@ public class TestVectorGlobalIndexWriter implements GlobalIndexSingletonWriter {
                 out.write(header.array());
 
                 // Vector data
+                ByteBuffer rowIdBuf = ByteBuffer.allocate(Long.BYTES);
+                rowIdBuf.order(ByteOrder.LITTLE_ENDIAN);
                 ByteBuffer vectorBuf = ByteBuffer.allocate(dim * Float.BYTES);
                 vectorBuf.order(ByteOrder.LITTLE_ENDIAN);
-                for (float[] vec : vectors) {
+                for (VectorEntry entry : vectors) {
+                    rowIdBuf.clear();
+                    rowIdBuf.putLong(entry.relativeRowId);
+                    out.write(rowIdBuf.array());
                     vectorBuf.clear();
                     for (int i = 0; i < dim; i++) {
-                        vectorBuf.putFloat(vec[i]);
+                        vectorBuf.putFloat(entry.vector[i]);
                     }
                     out.write(vectorBuf.array());
                 }
                 out.flush();
             }
 
-            return Collections.singletonList(new ResultEntry(fileName, count, null));
+            return Collections.singletonList(new ResultEntry(fileName, rowCount, null));
         } catch (IOException e) {
             throw new RuntimeException("Failed to write test vector index", e);
+        }
+    }
+
+    private static class VectorEntry {
+        private final long relativeRowId;
+        private final float[] vector;
+
+        private VectorEntry(long relativeRowId, float[] vector) {
+            this.relativeRowId = relativeRowId;
+            this.vector = vector;
         }
     }
 }

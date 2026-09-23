@@ -33,8 +33,8 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowKind;
@@ -299,7 +299,7 @@ public class OverwriteChangesProviderTest {
         Path path = new Path(tempDir.toUri());
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(new LocalFileIO(), path),
+                        new FileSystemSchemaManager(new LocalFileIO(), path),
                         new Schema(
                                 TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
                                 TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),

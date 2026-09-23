@@ -20,6 +20,7 @@ package org.apache.paimon.fileindex;
 
 import org.apache.paimon.fileindex.empty.EmptyFileIndexReader;
 import org.apache.paimon.fs.ByteArraySeekableStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -31,16 +32,43 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.paimon.utils.RandomUtil.randomBytes;
 import static org.apache.paimon.utils.RandomUtil.randomString;
+import static org.assertj.core.api.Assertions.tuple;
 
 /** Test for {@link FileIndexFormat}. */
 public class FileIndexFormatFormatTest {
 
     private static final Random RANDOM = new Random();
+
+    @Test
+    public void testCreateReaderClosesStreamOnBadMagic() {
+        byte[] notIndexFile = "this is definitely not a file index".getBytes();
+        AtomicBoolean closed = new AtomicBoolean();
+        SeekableInputStream counting =
+                new ByteArraySeekableStream(notIndexFile) {
+                    @Override
+                    public void close() throws IOException {
+                        closed.set(true);
+                        super.close();
+                    }
+                };
+        Throwable thrown =
+                Assertions.catchThrowable(
+                        () -> FileIndexFormat.createReader(counting, RowType.builder().build()));
+        // A throwing constructor never assigns the caller's try-with-resources resource,
+        // so closing the stream is the constructor's job.
+        Assertions.assertThat(closed.get()).isTrue();
+        Assertions.assertThat(thrown)
+                .isInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage("This file is not file index file.");
+    }
 
     @Test
     public void testWriteRead() throws IOException {
@@ -104,5 +132,40 @@ public class FileIndexFormatFormatTest {
         Assertions.assertThat(fileIndexFormatList.size()).isEqualTo(1);
         Assertions.assertThat(new ArrayList<>(fileIndexFormatList).get(0))
                 .isEqualTo(EmptyFileIndexReader.INSTANCE);
+    }
+
+    @Test
+    public void testIndexMetas() throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        Map<String, Map<String, byte[]>> indexes = new LinkedHashMap<>();
+        indexes.computeIfAbsent("user_id", key -> new LinkedHashMap<>())
+                .put("bitmap", new byte[] {1, 2, 3});
+        indexes.computeIfAbsent("user_id", key -> new LinkedHashMap<>())
+                .put("bloom-filter", new byte[] {4, 5});
+        indexes.computeIfAbsent("region", key -> new LinkedHashMap<>()).put("bitmap", null);
+
+        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos)) {
+            writer.writeColumnIndexes(indexes);
+        }
+
+        List<FileIndexFormat.FileIndexMeta> metas;
+        try (FileIndexFormat.Reader reader =
+                FileIndexFormat.createMetadataReader(
+                        new ByteArraySeekableStream(baos.toByteArray()))) {
+            metas = reader.indexMetas();
+        }
+
+        Assertions.assertThat(metas)
+                .extracting(
+                        FileIndexFormat.FileIndexMeta::columnName,
+                        FileIndexFormat.FileIndexMeta::indexType,
+                        FileIndexFormat.FileIndexMeta::sizeInBytes,
+                        FileIndexFormat.FileIndexMeta::empty)
+                .containsExactlyInAnyOrder(
+                        tuple("user_id", "bitmap", 3, false),
+                        tuple("user_id", "bloom-filter", 2, false),
+                        tuple("region", "bitmap", 0, true));
+        Assertions.assertThatThrownBy(() -> metas.clear())
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 }

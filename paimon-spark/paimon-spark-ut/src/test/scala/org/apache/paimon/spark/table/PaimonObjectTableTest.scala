@@ -21,6 +21,7 @@ package org.apache.paimon.spark.table
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
+import org.apache.paimon.spark.read.ObjectTableScan
 import org.apache.paimon.table.`object`.ObjectTable
 
 import org.apache.spark.sql.Row
@@ -35,7 +36,45 @@ class PaimonObjectTableTest extends PaimonSparkTestWithRestCatalogBase {
   }
 
   test("ObjectTable: read file metadata") {
-    val tableName = "object_table_test"
+    withObjectTable("object_table_metadata_test") {
+      tableName =>
+        checkAnswer(
+          sql(s"SELECT path, name FROM $tableName ORDER BY path"),
+          Seq(
+            Row("file1.txt", "file1.txt"),
+            Row("file2.txt", "file2.txt"),
+            Row("subdir/file3.txt", "file3.txt"))
+        )
+
+        // Verify schema has expected columns
+        checkAnswer(
+          sql(s"SELECT COUNT(*) FROM $tableName"),
+          Seq(Row(3))
+        )
+    }
+  }
+
+  test("ObjectTable: push down filters") {
+    withObjectTable("object_table_filter_pushdown_test") {
+      tableName =>
+        val filteredQuery =
+          s"SELECT path FROM $tableName WHERE name = 'file2.txt' AND length > 0"
+        checkAnswer(sql(filteredQuery), Seq(Row("file2.txt")))
+        assert(getScan(filteredQuery).asInstanceOf[ObjectTableScan].pushedDataFilters.size == 2)
+    }
+  }
+
+  test("ObjectTable: retain unsupported filters for post-scan evaluation") {
+    withObjectTable("object_table_post_scan_filter_test") {
+      tableName =>
+        val filteredQuery =
+          s"SELECT path FROM $tableName WHERE reverse(name) = 'txt.2elif'"
+        checkAnswer(sql(filteredQuery), Seq(Row("file2.txt")))
+        assert(getScan(filteredQuery).asInstanceOf[ObjectTableScan].pushedDataFilters.isEmpty)
+    }
+  }
+
+  private def withObjectTable(tableName: String)(testCode: String => Unit): Unit = {
     withTable(tableName) {
       sql(
         s"CREATE TABLE $tableName TBLPROPERTIES (" +
@@ -54,19 +93,7 @@ class PaimonObjectTableTest extends PaimonSparkTestWithRestCatalogBase {
       fileIO.mkdirs(new Path(basePath, "subdir"))
       fileIO.writeFile(new Path(basePath, "subdir/file3.txt"), "content3", false)
 
-      checkAnswer(
-        sql(s"SELECT path, name FROM $tableName ORDER BY path"),
-        Seq(
-          Row("file1.txt", "file1.txt"),
-          Row("file2.txt", "file2.txt"),
-          Row("subdir/file3.txt", "file3.txt"))
-      )
-
-      // Verify schema has expected columns
-      checkAnswer(
-        sql(s"SELECT COUNT(*) FROM $tableName"),
-        Seq(Row(3))
-      )
+      testCode(tableName)
     }
   }
 }

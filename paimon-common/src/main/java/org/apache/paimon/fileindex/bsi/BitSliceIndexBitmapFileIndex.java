@@ -95,10 +95,26 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
                             ? BitSliceIndexRoaringBitmap.map(input)
                             : BitSliceIndexRoaringBitmap.EMPTY;
 
-            return new Reader(dataType, rowNumber, positive, negative);
+            Reader reader = new Reader(dataType, rowNumber, positive, negative);
+            return valuesAreTruncated(dataType) ? new TruncatedValueReader(reader) : reader;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * Whether the value mapper loses information for this type. TIMESTAMP above microsecond
+     * precision is mapped with {@link Timestamp#toMicros()}, so two values that differ only below a
+     * microsecond share one indexed value.
+     */
+    private static boolean valuesAreTruncated(DataType dataType) {
+        if (dataType instanceof TimestampType) {
+            return ((TimestampType) dataType).getPrecision() > 6;
+        }
+        if (dataType instanceof LocalZonedTimestampType) {
+            return ((LocalZonedTimestampType) dataType).getPrecision() > 6;
+        }
+        return false;
     }
 
     private static class Writer extends FileIndexWriter {
@@ -240,7 +256,11 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
                                     .map(valueMapper)
                                     .map(
                                             value -> {
-                                                if (value < 0) {
+                                                if (value == Long.MIN_VALUE) {
+                                                    // Writer cannot store Long.MIN_VALUE, so no
+                                                    // row can match it
+                                                    return new RoaringBitmap32();
+                                                } else if (value < 0) {
                                                     return negative.eq(Math.abs(value));
                                                 } else {
                                                     return positive.eq(value);
@@ -262,7 +282,9 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
                                         .map(valueMapper)
                                         .map(
                                                 value -> {
-                                                    if (value < 0) {
+                                                    if (value == Long.MIN_VALUE) {
+                                                        return new RoaringBitmap32();
+                                                    } else if (value < 0) {
                                                         return negative.eq(Math.abs(value));
                                                     } else {
                                                         return positive.eq(value);
@@ -280,7 +302,10 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
             return new BitmapIndexResult(
                     () -> {
                         Long value = valueMapper.apply(literal);
-                        if (value < 0) {
+                        if (value == Long.MIN_VALUE) {
+                            // Nothing is less than Long.MIN_VALUE
+                            return new RoaringBitmap32();
+                        } else if (value < 0) {
                             return negative.gt(Math.abs(value));
                         } else {
                             return RoaringBitmap32.or(positive.lt(value), negative.isNotNull());
@@ -293,7 +318,10 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
             return new BitmapIndexResult(
                     () -> {
                         Long value = valueMapper.apply(literal);
-                        if (value < 0) {
+                        if (value == Long.MIN_VALUE) {
+                            // Writer cannot store Long.MIN_VALUE, so no row can match
+                            return new RoaringBitmap32();
+                        } else if (value < 0) {
                             return negative.gte(Math.abs(value));
                         } else {
                             return RoaringBitmap32.or(positive.lte(value), negative.isNotNull());
@@ -306,7 +334,10 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
             return new BitmapIndexResult(
                     () -> {
                         Long value = valueMapper.apply(literal);
-                        if (value < 0) {
+                        if (value == Long.MIN_VALUE) {
+                            // Everything is greater than Long.MIN_VALUE (writer cannot store it)
+                            return RoaringBitmap32.or(positive.isNotNull(), negative.isNotNull());
+                        } else if (value < 0) {
                             return RoaringBitmap32.or(
                                     positive.isNotNull(), negative.lt(Math.abs(value)));
                         } else {
@@ -320,7 +351,10 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
             return new BitmapIndexResult(
                     () -> {
                         Long value = valueMapper.apply(literal);
-                        if (value < 0) {
+                        if (value == Long.MIN_VALUE) {
+                            // All non-null rows satisfy x >= Long.MIN_VALUE
+                            return RoaringBitmap32.or(positive.isNotNull(), negative.isNotNull());
+                        } else if (value < 0) {
                             return RoaringBitmap32.or(
                                     positive.isNotNull(), negative.lte(Math.abs(value)));
                         } else {
@@ -337,6 +371,32 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
                         RoaringBitmap32 lte = visitLessOrEqual(fieldRef, to).get();
                         return RoaringBitmap32.and(gte, lte);
                     });
+        }
+    }
+
+    /**
+     * Reader for a column whose values the mapper truncated, so comparing a literal against the
+     * indexed value cannot answer the predicate: {@code ts <> '...000000000'} would drop a row
+     * whose nanoseconds differ, and {@code ts = '...'} would select it. Inheriting {@link
+     * FileIndexReader}'s {@code REMAIN} for those leaves the rows to be read and filtered.
+     * Null-ness survives truncation, so those two questions still come from the index.
+     */
+    private static class TruncatedValueReader extends FileIndexReader {
+
+        private final Reader reader;
+
+        public TruncatedValueReader(Reader reader) {
+            this.reader = reader;
+        }
+
+        @Override
+        public FileIndexResult visitIsNull(FieldRef fieldRef) {
+            return reader.visitIsNull(fieldRef);
+        }
+
+        @Override
+        public FileIndexResult visitIsNotNull(FieldRef fieldRef) {
+            return reader.visitIsNotNull(fieldRef);
         }
     }
 

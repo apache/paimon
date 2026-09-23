@@ -19,8 +19,8 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.{FullTextSearch, Predicate, TopN, VectorSearch}
-import org.apache.paimon.spark.read.VariantExtractionInfo
+import org.apache.paimon.predicate.{FullTextSearch, HybridSearch, Predicate, TopN, VectorSearch}
+import org.apache.paimon.spark.read.{BinPackingSplits, VariantExtractionInfo}
 import org.apache.paimon.table.{BucketMode, FileStoreTable, InnerTable}
 import org.apache.paimon.table.source.{DataSplit, Split}
 
@@ -37,15 +37,13 @@ case class PaimonScan(
     override val pushedLimit: Option[Int],
     override val pushedTopN: Option[TopN],
     override val pushedVectorSearch: Option[VectorSearch],
+    override val pushedHybridSearch: Option[HybridSearch] = None,
     override val pushedFullTextSearch: Option[FullTextSearch] = None,
     override val pushedVariantExtractions: Map[Seq[String], Seq[VariantExtractionInfo]] = Map.empty,
-    bucketedScanDisabled: Boolean = false)
+    override val pushedMapSelectedKeys: Map[String, Seq[String]] = Map.empty,
+    preserveDataGrouping: Boolean = false)
   extends PaimonBaseScan(table)
   with SupportsReportPartitioning {
-
-  def disableBucketedScan(): PaimonScan = {
-    copy(bucketedScanDisabled = true)
-  }
 
   @transient
   private lazy val extractBucketTransform: Option[Transform] = {
@@ -95,14 +93,16 @@ case class PaimonScan(
   }
 
   private def shouldDoBucketedScan: Boolean = {
-    !bucketedScanDisabled && conf.v2BucketingEnabled && extractBucketTransform.isDefined
+    preserveDataGrouping && extractBucketTransform.isDefined
   }
 
   // Since Spark 3.3
   override def outputPartitioning: Partitioning = {
-    extractBucketTransform
-      .map(bucket => new KeyGroupedPartitioning(Array(bucket), inputPartitions.size))
-      .getOrElse(new UnknownPartitioning(0))
+    if (shouldDoBucketedScan) {
+      new KeyGroupedPartitioning(Array(extractBucketTransform.get), inputPartitions.size)
+    } else {
+      new UnknownPartitioning(0)
+    }
   }
 
   override def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
@@ -110,13 +110,7 @@ case class PaimonScan(
       return super.getInputPartitions(splits)
     }
 
-    splits
-      .map(_.asInstanceOf[DataSplit])
-      .groupBy(_.bucket())
-      .map {
-        case (bucket, groupedSplits) =>
-          PaimonBucketedInputPartition(groupedSplits, bucket)
-      }
-      .toSeq
+    BinPackingSplits(coreOptions, readRowSizeRatio)
+      .packByBucket(splits.map(_.asInstanceOf[DataSplit]))
   }
 }

@@ -18,290 +18,258 @@
 
 package org.apache.paimon.globalindex.btree;
 
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
-import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.UnionGlobalIndexReader;
+import org.apache.paimon.globalindex.KeySerializer;
+import org.apache.paimon.globalindex.SortedFileGlobalIndexReader;
+import org.apache.paimon.globalindex.SortedIndexFileMeta;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.io.cache.CacheManager;
+import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
- * An Index Reader for BTree which dynamically filters file list by input predicate, then merge the
- * result by an {@link org.apache.paimon.globalindex.UnionGlobalIndexReader}. In the ideal situation
- * such as visiting an Equal predicate, only a very few files would be actually read.
+ * An Index Reader for BTree which dynamically filters file list by input predicate, then visits
+ * each selected file in parallel via an executor. Each index file is synchronized independently to
+ * allow maximum concurrency.
  */
-public class LazyFilteredBTreeReader implements GlobalIndexReader {
+public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIndexReader> {
 
-    private final BTreeFileMetaSelector fileSelector;
-    private final Map<Path, GlobalIndexReader> readerCache;
     private final KeySerializer keySerializer;
     private final CacheManager cacheManager;
     private final GlobalIndexFileReader fileReader;
+    private final Comparator<Object> comparator;
+    private final long totalRowCount;
+    @Nullable private final Pair<Object, Object> fullRangeBounds;
 
     public LazyFilteredBTreeReader(
             List<GlobalIndexIOMeta> files,
             KeySerializer keySerializer,
             GlobalIndexFileReader fileReader,
-            CacheManager cacheManager) {
-        this.fileSelector = new BTreeFileMetaSelector(files, keySerializer);
-        this.readerCache = new HashMap<>();
+            CacheManager cacheManager,
+            long fallbackScanMaxSize,
+            long totalRowCount,
+            ExecutorService executor) {
+        super(files, keySerializer, fallbackScanMaxSize, totalRowCount, executor);
         this.cacheManager = cacheManager;
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
+        this.comparator = keySerializer.createComparator();
+        this.totalRowCount = totalRowCount;
+        this.fullRangeBounds = fullRangeBounds(files);
     }
 
-    @Override
-    public Optional<GlobalIndexResult> visitIsNotNull(FieldRef fieldRef) {
-        Optional<List<GlobalIndexIOMeta>> selectedOpt = fileSelector.visitIsNotNull(fieldRef);
-        if (!selectedOpt.isPresent()) {
-            return Optional.empty();
+    @Nullable
+    private Pair<Object, Object> fullRangeBounds(List<GlobalIndexIOMeta> files) {
+        if (totalRowCount == 0 || files.isEmpty()) {
+            return null;
         }
-        List<GlobalIndexIOMeta> selected = selectedOpt.get();
-        if (selected.isEmpty()) {
-            return Optional.of(GlobalIndexResult.createEmpty());
-        }
-        return createUnionReader(selected).visitIsNotNull(fieldRef);
-    }
-
-    @Override
-    public Optional<GlobalIndexResult> visitIsNull(FieldRef fieldRef) {
-        Optional<List<GlobalIndexIOMeta>> selectedOpt = fileSelector.visitIsNull(fieldRef);
-        if (!selectedOpt.isPresent()) {
-            return Optional.empty();
-        }
-        List<GlobalIndexIOMeta> selected = selectedOpt.get();
-        if (selected.isEmpty()) {
-            return Optional.of(GlobalIndexResult.createEmpty());
-        }
-        return createUnionReader(selected).visitIsNull(fieldRef);
-    }
-
-    @Override
-    public Optional<GlobalIndexResult> visitStartsWith(FieldRef fieldRef, Object literal) {
-        Optional<List<GlobalIndexIOMeta>> selectedOpt =
-                fileSelector.visitStartsWith(fieldRef, literal);
-        if (!selectedOpt.isPresent()) {
-            return Optional.empty();
-        }
-        List<GlobalIndexIOMeta> selected = selectedOpt.get();
-        if (selected.isEmpty()) {
-            return Optional.of(GlobalIndexResult.createEmpty());
-        }
-        return createUnionReader(selected).visitStartsWith(fieldRef, literal);
-    }
-
-    @Override
-    public Optional<GlobalIndexResult> visitEndsWith(FieldRef fieldRef, Object literal) {
-        Optional<List<GlobalIndexIOMeta>> selectedOpt =
-                fileSelector.visitEndsWith(fieldRef, literal);
-        if (!selectedOpt.isPresent()) {
-            return Optional.empty();
-        }
-        List<GlobalIndexIOMeta> selected = selectedOpt.get();
-        if (selected.isEmpty()) {
-            return Optional.of(GlobalIndexResult.createEmpty());
-        }
-        return createUnionReader(selected).visitEndsWith(fieldRef, literal);
-    }
-
-    @Override
-    public Optional<GlobalIndexResult> visitContains(FieldRef fieldRef, Object literal) {
-        Optional<List<GlobalIndexIOMeta>> selectedOpt =
-                fileSelector.visitContains(fieldRef, literal);
-        if (!selectedOpt.isPresent()) {
-            return Optional.empty();
-        }
-        List<GlobalIndexIOMeta> selected = selectedOpt.get();
-        if (selected.isEmpty()) {
-            return Optional.of(GlobalIndexResult.createEmpty());
-        }
-        return createUnionReader(selected).visitContains(fieldRef, literal);
-    }
-
-    @Override
-    public Optional<GlobalIndexResult> visitLike(FieldRef fieldRef, Object literal) {
-        Optional<List<GlobalIndexIOMeta>> selectedOpt = fileSelector.visitLike(fieldRef, literal);
-        if (!selectedOpt.isPresent()) {
-            return Optional.empty();
-        }
-        List<GlobalIndexIOMeta> selected = selectedOpt.get();
-        if (selected.isEmpty()) {
-            return Optional.of(GlobalIndexResult.createEmpty());
-        }
-        return createUnionReader(selected).visitLike(fieldRef, literal);
-    }
-
-    @Override
-    public Optional<GlobalIndexResult> visitLessThan(FieldRef fieldRef, Object literal) {
-        Optional<List<GlobalIndexIOMeta>> selectedOpt =
-                fileSelector.visitLessThan(fieldRef, literal);
-        if (!selectedOpt.isPresent()) {
-            return Optional.empty();
-        }
-        List<GlobalIndexIOMeta> selected = selectedOpt.get();
-        if (selected.isEmpty()) {
-            return Optional.of(GlobalIndexResult.createEmpty());
-        }
-        return createUnionReader(selected).visitLessThan(fieldRef, literal);
-    }
-
-    @Override
-    public Optional<GlobalIndexResult> visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-        Optional<List<GlobalIndexIOMeta>> selectedOpt =
-                fileSelector.visitGreaterOrEqual(fieldRef, literal);
-        if (!selectedOpt.isPresent()) {
-            return Optional.empty();
-        }
-        List<GlobalIndexIOMeta> selected = selectedOpt.get();
-        if (selected.isEmpty()) {
-            return Optional.of(GlobalIndexResult.createEmpty());
-        }
-        return createUnionReader(selected).visitGreaterOrEqual(fieldRef, literal);
-    }
-
-    @Override
-    public Optional<GlobalIndexResult> visitNotEqual(FieldRef fieldRef, Object literal) {
-        Optional<List<GlobalIndexIOMeta>> selectedOpt =
-                fileSelector.visitNotEqual(fieldRef, literal);
-        if (!selectedOpt.isPresent()) {
-            return Optional.empty();
-        }
-        List<GlobalIndexIOMeta> selected = selectedOpt.get();
-        if (selected.isEmpty()) {
-            return Optional.of(GlobalIndexResult.createEmpty());
-        }
-        return createUnionReader(selected).visitNotEqual(fieldRef, literal);
-    }
-
-    @Override
-    public Optional<GlobalIndexResult> visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        Optional<List<GlobalIndexIOMeta>> selectedOpt =
-                fileSelector.visitLessOrEqual(fieldRef, literal);
-        if (!selectedOpt.isPresent()) {
-            return Optional.empty();
-        }
-        List<GlobalIndexIOMeta> selected = selectedOpt.get();
-        if (selected.isEmpty()) {
-            return Optional.of(GlobalIndexResult.createEmpty());
-        }
-        return createUnionReader(selected).visitLessOrEqual(fieldRef, literal);
-    }
-
-    @Override
-    public Optional<GlobalIndexResult> visitEqual(FieldRef fieldRef, Object literal) {
-        Optional<List<GlobalIndexIOMeta>> selectedOpt = fileSelector.visitEqual(fieldRef, literal);
-        if (!selectedOpt.isPresent()) {
-            return Optional.empty();
-        }
-        List<GlobalIndexIOMeta> selected = selectedOpt.get();
-        if (selected.isEmpty()) {
-            return Optional.of(GlobalIndexResult.createEmpty());
-        }
-        return createUnionReader(selected).visitEqual(fieldRef, literal);
-    }
-
-    @Override
-    public Optional<GlobalIndexResult> visitGreaterThan(FieldRef fieldRef, Object literal) {
-        Optional<List<GlobalIndexIOMeta>> selectedOpt =
-                fileSelector.visitGreaterThan(fieldRef, literal);
-        if (!selectedOpt.isPresent()) {
-            return Optional.empty();
-        }
-        List<GlobalIndexIOMeta> selected = selectedOpt.get();
-        if (selected.isEmpty()) {
-            return Optional.of(GlobalIndexResult.createEmpty());
-        }
-        return createUnionReader(selected).visitGreaterThan(fieldRef, literal);
-    }
-
-    @Override
-    public Optional<GlobalIndexResult> visitIn(FieldRef fieldRef, List<Object> literals) {
-        Optional<List<GlobalIndexIOMeta>> selectedOpt = fileSelector.visitIn(fieldRef, literals);
-        if (!selectedOpt.isPresent()) {
-            return Optional.empty();
-        }
-        List<GlobalIndexIOMeta> selected = selectedOpt.get();
-        if (selected.isEmpty()) {
-            return Optional.of(GlobalIndexResult.createEmpty());
-        }
-        return createUnionReader(selected).visitIn(fieldRef, literals);
-    }
-
-    @Override
-    public Optional<GlobalIndexResult> visitNotIn(FieldRef fieldRef, List<Object> literals) {
-        Optional<List<GlobalIndexIOMeta>> selectedOpt = fileSelector.visitNotIn(fieldRef, literals);
-        if (!selectedOpt.isPresent()) {
-            return Optional.empty();
-        }
-        List<GlobalIndexIOMeta> selected = selectedOpt.get();
-        if (selected.isEmpty()) {
-            return Optional.of(GlobalIndexResult.createEmpty());
-        }
-        return createUnionReader(selected).visitNotIn(fieldRef, literals);
-    }
-
-    @Override
-    public Optional<GlobalIndexResult> visitBetween(FieldRef fieldRef, Object from, Object to) {
-        Optional<List<GlobalIndexIOMeta>> selectedOpt =
-                fileSelector.visitBetween(fieldRef, from, to);
-        if (!selectedOpt.isPresent()) {
-            return Optional.empty();
-        }
-        List<GlobalIndexIOMeta> selected = selectedOpt.get();
-        if (selected.isEmpty()) {
-            return Optional.of(GlobalIndexResult.createEmpty());
-        }
-        return createUnionReader(selected).visitBetween(fieldRef, from, to);
-    }
-
-    /**
-     * Create a Union Reader for given files. The union reader is composed by readers from reader
-     * cache, so please do not close it.
-     */
-    private UnionGlobalIndexReader createUnionReader(List<GlobalIndexIOMeta> files) {
-        List<GlobalIndexReader> readers = new ArrayList<>();
-        for (GlobalIndexIOMeta meta : files) {
-            readers.add(
-                    readerCache.computeIfAbsent(
-                            meta.filePath(),
-                            name -> {
-                                try {
-                                    return new BTreeIndexReader(
-                                            keySerializer, fileReader, meta, cacheManager);
-                                } catch (IOException e) {
-                                    throw new RuntimeException(
-                                            "Can't create BTree index reader for " + name, e);
-                                }
-                            }));
-        }
-        return new UnionGlobalIndexReader(readers);
-    }
-
-    @Override
-    public void close() throws IOException {
-        IOException exception = null;
-        for (Map.Entry<Path, GlobalIndexReader> entry : this.readerCache.entrySet()) {
-            try {
-                entry.getValue().close();
-            } catch (IOException ioe) {
-                if (exception == null) {
-                    exception = ioe;
-                } else {
-                    exception.addSuppressed(ioe);
-                }
+        long remaining = totalRowCount;
+        Object min = null;
+        Object max = null;
+        for (GlobalIndexIOMeta file : files) {
+            // A file's min/max does not identify its row IDs. Only skip the entire reader
+            // when its scalar entries cover the complete local row-ID domain without gaps.
+            if (file.rowCount() < 0 || file.rowCount() > remaining) {
+                return null;
+            }
+            remaining -= file.rowCount();
+            SortedIndexFileMeta meta = SortedIndexFileMeta.deserialize(file.metadata());
+            if (meta.hasNulls() || meta.firstKey() == null || meta.lastKey() == null) {
+                return null;
+            }
+            Object first = keySerializer.deserialize(MemorySlice.wrap(meta.firstKey()));
+            Object last = keySerializer.deserialize(MemorySlice.wrap(meta.lastKey()));
+            if (min == null || comparator.compare(first, min) < 0) {
+                min = first;
+            }
+            if (max == null || comparator.compare(last, max) > 0) {
+                max = last;
             }
         }
-        if (exception != null) {
-            throw exception;
+        return remaining == 0 ? Pair.of(min, max) : null;
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
+            FieldRef fieldRef, Object literal) {
+        return visitWithAllMatch(
+                key -> literal != null && comparator.compare(key, literal) == 0,
+                () -> super.visitEqual(fieldRef, literal));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
+            FieldRef fieldRef, Object literal) {
+        return visitWithAllMatch(
+                key -> literal != null && comparator.compare(key, literal) < 0,
+                () -> super.visitLessThan(fieldRef, literal));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
+            FieldRef fieldRef, Object literal) {
+        return visitWithAllMatch(
+                key -> literal != null && comparator.compare(key, literal) <= 0,
+                () -> super.visitLessOrEqual(fieldRef, literal));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
+            FieldRef fieldRef, Object literal) {
+        return visitWithAllMatch(
+                key -> literal != null && comparator.compare(key, literal) > 0,
+                () -> super.visitGreaterThan(fieldRef, literal));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
+            FieldRef fieldRef, Object literal) {
+        return visitWithAllMatch(
+                key -> literal != null && comparator.compare(key, literal) >= 0,
+                () -> super.visitGreaterOrEqual(fieldRef, literal));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        return visitWithAllMatch(
+                key ->
+                        from != null
+                                && to != null
+                                && comparator.compare(key, from) >= 0
+                                && comparator.compare(key, to) <= 0,
+                () -> super.visitBetween(fieldRef, from, to));
+    }
+
+    // Only use for predicates whose matching keys form one contiguous interval.
+    private CompletableFuture<Optional<GlobalIndexResult>> visitWithAllMatch(
+            Predicate<Object> predicate,
+            Supplier<CompletableFuture<Optional<GlobalIndexResult>>> fallback) {
+        if (fullRangeBounds != null
+                && predicate.test(fullRangeBounds.getLeft())
+                && predicate.test(fullRangeBounds.getRight())) {
+            return CompletableFuture.completedFuture(
+                    Optional.of(GlobalIndexResult.fromRange(new Range(0, totalRowCount - 1))));
         }
+        return fallback.get();
+    }
+
+    @Override
+    protected Optional<GlobalIndexResult> visitIsNull(BTreeIndexReader reader) {
+        return reader.visitIsNull();
+    }
+
+    @Override
+    protected Optional<GlobalIndexResult> visitStartsWith(BTreeIndexReader reader, Object literal) {
+        return reader.visitStartsWith(literal);
+    }
+
+    @Override
+    protected Optional<GlobalIndexResult> visitEndsWith(BTreeIndexReader reader, Object literal) {
+        return reader.visitEndsWith(literal);
+    }
+
+    @Override
+    protected Optional<GlobalIndexResult> visitContains(BTreeIndexReader reader, Object literal) {
+        return reader.visitContains(literal);
+    }
+
+    @Override
+    protected Optional<GlobalIndexResult> visitLike(
+            BTreeIndexReader reader, FieldRef fieldRef, Object literal) {
+        return reader.visitLike(literal);
+    }
+
+    @Override
+    protected Optional<GlobalIndexResult> visitLessThan(BTreeIndexReader reader, Object literal) {
+        return reader.visitLessThan(literal);
+    }
+
+    @Override
+    protected Optional<GlobalIndexResult> visitGreaterOrEqual(
+            BTreeIndexReader reader, Object literal) {
+        return reader.visitGreaterOrEqual(literal);
+    }
+
+    @Override
+    protected Optional<GlobalIndexResult> visitLessOrEqual(
+            BTreeIndexReader reader, Object literal) {
+        return reader.visitLessOrEqual(literal);
+    }
+
+    @Override
+    protected Optional<GlobalIndexResult> visitEqual(BTreeIndexReader reader, Object literal) {
+        return reader.visitEqual(literal);
+    }
+
+    @Override
+    protected Optional<GlobalIndexResult> visitGreaterThan(
+            BTreeIndexReader reader, Object literal) {
+        return reader.visitGreaterThan(literal);
+    }
+
+    @Override
+    protected Optional<GlobalIndexResult> visitIn(BTreeIndexReader reader, List<Object> literals) {
+        return reader.visitIn(literals);
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitRange(
+            FieldRef fieldRef, Object from, Object to, boolean fromInclusive, boolean toInclusive) {
+        return visitRange(
+                fieldRef,
+                from,
+                to,
+                reader -> reader.visitRange(from, to, fromInclusive, toInclusive));
+    }
+
+    @Override
+    protected Optional<GlobalIndexResult> visitBetween(
+            BTreeIndexReader reader, Object from, Object to) {
+        return reader.visitBetween(from, to);
+    }
+
+    @Override
+    protected RoaringNavigableMap64 lessThan(BTreeIndexReader reader, Object literal) {
+        return bitmap(reader.visitLessThan(literal));
+    }
+
+    @Override
+    protected RoaringNavigableMap64 greaterThan(BTreeIndexReader reader, Object literal) {
+        return bitmap(reader.visitGreaterThan(literal));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitTopN(TopN topN) {
+        return visitAllFiles(reader -> reader.visitTopN(topN));
+    }
+
+    @Override
+    protected BTreeIndexReader openReader(GlobalIndexIOMeta meta) {
+        try {
+            return new BTreeIndexReader(keySerializer, fileReader, meta, cacheManager);
+        } catch (IOException e) {
+            throw new RuntimeException("Can't create BTree index reader for " + meta.filePath(), e);
+        }
+    }
+
+    private RoaringNavigableMap64 bitmap(Optional<GlobalIndexResult> result) {
+        return result.get().results();
     }
 }

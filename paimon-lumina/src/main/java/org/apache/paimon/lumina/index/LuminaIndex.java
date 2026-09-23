@@ -106,10 +106,10 @@ public class LuminaIndex implements Closeable {
             int k,
             float[] distances,
             long[] labels,
-            Map<String, String> searchOptions) {
+            Map<String, String> options) {
         ensureOpen();
         ensureSearcher();
-        searcher.search(n, queryVectors, k, distances, labels, filterSearchOptions(searchOptions));
+        searcher.search(n, queryVectors, k, distances, labels, filterOptions(options));
     }
 
     /** Search for k nearest neighbors with native pre-filtering on vector IDs. */
@@ -120,17 +120,11 @@ public class LuminaIndex implements Closeable {
             float[] distances,
             long[] labels,
             long[] filterIds,
-            Map<String, String> searchOptions) {
+            Map<String, String> options) {
         ensureOpen();
         ensureSearcher();
         searcher.searchWithFilter(
-                n,
-                queryVectors,
-                k,
-                distances,
-                labels,
-                filterIds,
-                filterSearchOptions(searchOptions));
+                n, queryVectors, k, distances, labels, filterIds, filterOptions(options));
     }
 
     /** Get the number of vectors (searcher mode). */
@@ -149,13 +143,12 @@ public class LuminaIndex implements Closeable {
     }
 
     /**
-     * Filters an options map to only include keys valid for Lumina SearchOptions. This mirrors
-     * paimon-cpp's {@code NormalizeSearchOptions} which extracts only search-relevant keys.
+     * Filters an options map to only include keys accepted by Lumina at query time.
      *
-     * <p>Valid search option prefixes: {@code search.*} (core search options) and {@code
-     * diskann.search.*} (DiskANN-specific search options).
+     * <p>Valid query-time prefixes: {@code search.*} (core query options) and {@code
+     * diskann.search.*} (DiskANN-specific query options).
      */
-    private static Map<String, String> filterSearchOptions(Map<String, String> options) {
+    private static Map<String, String> filterOptions(Map<String, String> options) {
         Map<String, String> searchOpts = new LinkedHashMap<>();
         for (Map.Entry<String, String> entry : options.entrySet()) {
             String key = entry.getKey();

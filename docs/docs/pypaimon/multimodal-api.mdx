@@ -1,0 +1,118 @@
+---
+title: "Multimodal API"
+description: "`pypaimon.multimodal` provides a compact interface for scalar, text, vector, and BLOB data on Paimon data-evolution tables without primary keys."
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Multimodal API
+
+`pypaimon.multimodal` provides a compact interface for scalar, text, vector, and BLOB data on Paimon data-evolution tables without primary keys. A connection wraps a catalog and a default database.
+
+Start with [Multimodal Tables](./multimodal-tables) to connect, define a schema, and add rows. Then follow the guide for your workload:
+
+| Task | Guide |
+| --- | --- |
+| Create or change rows | [Multimodal tables](./multimodal-tables) |
+| Read payloads and coordinate jobs | [Multimodal reads and row IDs](./multimodal-reading) |
+| Retrieve text and vector candidates | [Search](./multimodal-search) |
+| Store media | [BLOB storage](./blob), [object API](./blob-store), [video frames](./video) |
+| Import robotics datasets | [HDF5 and ROSBag](./dataset-ingestion), [LeRobot](./lerobot) |
+| Update selected columns | [Data evolution](./data-evolution) |
+| Train and process data | [PyTorch](./pytorch), [Ray Data](./ray-data), [Daft](./daft) |
+
+
+## Create and modify tables
+
+<span id="connect"></span>
+<span id="create"></span>
+<span id="add"></span>
+<span id="overwrite"></span>
+<span id="update"></span>
+<span id="delete"></span>
+<span id="merge"></span>
+
+Connect to a catalog, define scalar and payload columns, add rows, and apply overwrite, update, delete, or merge operations.
+
+[Read the guide](./multimodal-tables).
+
+## Read rows and payloads
+
+<span id="scan"></span>
+<span id="reading-blob-columns"></span>
+<span id="contiguous-windows-for-pytorch"></span>
+<span id="distributed-blob-processing-with-ray"></span>
+<span id="row-ids"></span>
+
+Filter and project rows, read BLOBs in batches, build training windows, and pass row IDs between retrieval and processing stages.
+
+[Read the guide](./multimodal-reading).
+
+## Search text and vectors
+
+<span id="create-index"></span>
+<span id="search"></span>
+<span id="search-hybrid"></span>
+<span id="search-vectors"></span>
+
+Create indexes and run single-vector, full-text, hybrid, or batch-vector queries. Includes pre-filter and result-filter semantics.
+
+[Read the guide](./multimodal-search).
+
+## Store video frames
+
+<span id="video-frame-storage"></span>
+<span id="update-frame-rows-and-replace-a-video"></span>
+<span id="read-with-pytorch-dataloader"></span>
+
+Write complete encoded videos with logical frame rows, replace a video payload, and decode frames in a PyTorch DataLoader.
+
+[Read the guide](./video).
+
+## Import HDF5 and ROSBag
+
+<span id="load-hdf5"></span>
+<span id="load-rosbag"></span>
+
+Transform local or remote HDF5 and ROSBag sources into table rows, with source-specific options and distributed ingestion paths.
+
+[Read the guide](./dataset-ingestion).
+
+## Work with LeRobot
+
+<span id="load-lerobot-dataset-v3"></span>
+<span id="capture-lerobot-frames-directly-into-paimon"></span>
+<span id="train-with-paimon-lerobot-data"></span>
+
+Import Dataset v3, capture frame data directly, retain component tags, and train from a complete Paimon table group.
+
+[Read the guide](./lerobot).
+
+## Use the BLOB object API
+
+<span id="blobs"></span>
+<span id="put-objects"></span>
+<span id="read-objects"></span>
+<span id="delete-objects"></span>
+<span id="update-columns"></span>
+
+Put, read, delete, and update objects using table columns as keys and payloads. For the lower-level storage API, see [BLOB Storage](./blob).
+
+[Read the guide](./blob-store).

@@ -22,6 +22,8 @@ import org.apache.paimon.memory.MemorySegment;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 
@@ -32,34 +34,49 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class BloomFilterTest {
 
     @Test
-    public void testOneSegmentBuilder() {
-        BloomFilter.Builder builder = BloomFilter.builder(100, 0.01);
+    public void testFixedBuilder() {
+        BloomFilter.Builder builder = BloomFilter.fixedBuilder(100, 0.01);
         int[] inputs = generateRandomInts(100);
         for (int input : inputs) {
             builder.addHash(Integer.hashCode(input));
         }
 
+        BloomFilter filter = buildFilter(builder);
         for (int input : inputs) {
-            Assertions.assertThat(builder.testHash(Integer.hashCode(input))).isTrue();
+            Assertions.assertThat(filter.testHash(Integer.hashCode(input))).isTrue();
         }
     }
 
     @Test
+    public void testDynamicBuilder() {
+        BloomFilter.Builder builder = BloomFilter.dynamicBuilder(0.01);
+        int[] inputs = generateRandomInts(100);
+        for (int input : inputs) {
+            builder.addHash(Integer.hashCode(input));
+        }
+
+        BloomFilter filter = buildFilter(builder);
+        Assertions.assertThat(filter.expectedEntries()).isEqualTo(100);
+        for (int input : inputs) {
+            Assertions.assertThat(filter.testHash(Integer.hashCode(input))).isTrue();
+        }
+    }
+
+    @Test
+    public void testEmptyDynamicBuilder() {
+        BloomFilter.Builder builder = BloomFilter.dynamicBuilder(0.01);
+        Assertions.assertThat(builder.build()).isNull();
+    }
+
+    @Test
     public void testEstimatedHashFunctions() {
-        Assertions.assertThat(BloomFilter.builder(1000, 0.01).getFilter().numHashFunctions())
-                .isEqualTo(7);
-        Assertions.assertThat(BloomFilter.builder(10_000, 0.01).getFilter().numHashFunctions())
-                .isEqualTo(7);
-        Assertions.assertThat(BloomFilter.builder(100_000, 0.01).getFilter().numHashFunctions())
-                .isEqualTo(7);
-        Assertions.assertThat(BloomFilter.builder(100_000, 0.01).getFilter().numHashFunctions())
-                .isEqualTo(7);
-        Assertions.assertThat(BloomFilter.builder(100_000, 0.05).getFilter().numHashFunctions())
-                .isEqualTo(4);
-        Assertions.assertThat(BloomFilter.builder(1_000_000, 0.01).getFilter().numHashFunctions())
-                .isEqualTo(7);
-        Assertions.assertThat(BloomFilter.builder(1_000_000, 0.05).getFilter().numHashFunctions())
-                .isEqualTo(4);
+        Assertions.assertThat(numHashFunctions(1000, 0.01)).isEqualTo(7);
+        Assertions.assertThat(numHashFunctions(10_000, 0.01)).isEqualTo(7);
+        Assertions.assertThat(numHashFunctions(100_000, 0.01)).isEqualTo(7);
+        Assertions.assertThat(numHashFunctions(100_000, 0.01)).isEqualTo(7);
+        Assertions.assertThat(numHashFunctions(100_000, 0.05)).isEqualTo(4);
+        Assertions.assertThat(numHashFunctions(1_000_000, 0.01)).isEqualTo(7);
+        Assertions.assertThat(numHashFunctions(1_000_000, 0.05)).isEqualTo(4);
     }
 
     @Test
@@ -138,5 +155,43 @@ public class BloomFilterTest {
         Arrays.stream(inputs2)
                 .forEach(
                         i -> Assertions.assertThat(filter.testHash(Integer.hashCode(i))).isFalse());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testProbeWithOffsetAndBorrowedSegment(boolean offHeap) {
+        MemorySegment original =
+                offHeap
+                        ? MemorySegment.allocateOffHeapMemory(75)
+                        : MemorySegment.allocateHeapMemory(75);
+        for (int i = 0; i < 11; i++) {
+            original.put(i, (byte) 0xff);
+        }
+        BloomFilter filter = new BloomFilter(10, 64);
+        filter.setMemorySegment(original, 11);
+        filter.addHash(42);
+        Assertions.assertThat(filter.testHash(42)).isTrue();
+        Assertions.assertThat(filter.testHash(43)).isFalse();
+
+        byte[] bytes = new byte[64];
+        original.get(11, bytes);
+        MemorySegment borrowed =
+                offHeap
+                        ? MemorySegment.allocateOffHeapMemory(64)
+                        : MemorySegment.allocateHeapMemory(64);
+        borrowed.put(0, bytes);
+        Assertions.assertThat(filter.testHash(42, borrowed)).isTrue();
+        Assertions.assertThat(filter.testHash(43, borrowed)).isFalse();
+        Assertions.assertThat(filter.getMemorySegment()).isSameAs(original);
+    }
+
+    private static int numHashFunctions(long expectedEntries, double fpp) {
+        return buildFilter(BloomFilter.fixedBuilder(expectedEntries, fpp)).numHashFunctions();
+    }
+
+    private static BloomFilter buildFilter(BloomFilter.Builder builder) {
+        BloomFilter filter = builder.build();
+        Assertions.assertThat(filter).isNotNull();
+        return filter;
     }
 }

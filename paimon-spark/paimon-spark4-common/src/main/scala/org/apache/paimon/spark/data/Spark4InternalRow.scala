@@ -19,8 +19,9 @@
 package org.apache.paimon.spark.data
 
 import org.apache.paimon.spark.AbstractSparkInternalRow
-import org.apache.paimon.types.RowType
+import org.apache.paimon.types.{GeographyType, GeometryType, RowType}
 
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.unsafe.types.{GeographyVal, GeometryVal, VariantVal}
 
 class Spark4InternalRow(rowType: RowType) extends AbstractSparkInternalRow(rowType) {
@@ -31,8 +32,22 @@ class Spark4InternalRow(rowType: RowType) extends AbstractSparkInternalRow(rowTy
   }
 
   override def getGeography(ordinal: Int): GeographyVal =
-    throw new UnsupportedOperationException("Paimon does not support Geography type")
+    SparkShimLoader.shim
+      .toSparkGeography(
+        row.getBinary(ordinal),
+        rowType.getTypeAt(ordinal).asInstanceOf[GeographyType].getCrs,
+        rowType
+          .getTypeAt(ordinal)
+          .asInstanceOf[GeographyType]
+          .getAlgorithm
+          .toString
+      )
+      .asInstanceOf[GeographyVal]
 
   override def getGeometry(ordinal: Int): GeometryVal =
-    throw new UnsupportedOperationException("Paimon does not support Geometry type")
+    SparkShimLoader.shim
+      .toSparkGeometry(
+        row.getBinary(ordinal),
+        rowType.getTypeAt(ordinal).asInstanceOf[GeometryType].getCrs)
+      .asInstanceOf[GeometryVal]
 }

@@ -20,6 +20,7 @@ package org.apache.paimon.format;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.RoaringBitmap32;
 
@@ -32,17 +33,19 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     private final Path file;
     private final long fileSize;
     @Nullable private final RoaringBitmap32 selection;
-
-    public FormatReaderContext(FileIO fileIO, Path file, long fileSize) {
-        this(fileIO, file, fileSize, null);
-    }
+    @Nullable private final ReadBatchSizer readBatchSizer;
 
     public FormatReaderContext(
-            FileIO fileIO, Path file, long fileSize, @Nullable RoaringBitmap32 selection) {
+            FileIO fileIO,
+            Path file,
+            long fileSize,
+            @Nullable RoaringBitmap32 selection,
+            @Nullable ReadBatchSizer readBatchSizer) {
         this.fileIO = fileIO;
         this.file = file;
         this.fileSize = fileSize;
         this.selection = selection;
+        this.readBatchSizer = readBatchSizer;
     }
 
     @Override
@@ -64,5 +67,11 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     @Override
     public RoaringBitmap32 selection() {
         return selection;
+    }
+
+    @Nullable
+    @Override
+    public ReadBatchSizer readBatchSizer() {
+        return readBatchSizer;
     }
 }

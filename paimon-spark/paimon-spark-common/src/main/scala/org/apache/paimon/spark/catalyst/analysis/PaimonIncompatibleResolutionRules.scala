@@ -21,6 +21,8 @@ package org.apache.paimon.spark.catalyst.analysis
 import org.apache.paimon.spark.catalyst.plans.logical.{PaimonTableValuedFunctions, PaimonTableValueFunction}
 
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.expressions.LateralSubquery
+import org.apache.spark.sql.catalyst.plans.logical.LateralJoin
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
 
@@ -31,6 +33,13 @@ case class PaimonIncompatibleResolutionRules(session: SparkSession) extends Rule
 
     case func: PaimonTableValueFunction if func.args.forall(_.resolved) =>
       PaimonTableValuedFunctions.resolvePaimonTableValuedFunction(session, func)
+
+    case lateralJoin @ LateralJoin(left, lateralSubquery: LateralSubquery, joinType, condition)
+        if left.resolved && lateralSubquery.plan.resolved &&
+          PaimonTableValuedFunctions.containsDynamicVectorSearch(lateralSubquery.plan) =>
+      PaimonTableValuedFunctions
+        .resolveLateralVectorSearch(left, lateralSubquery.plan, joinType, condition)
+        .getOrElse(lateralJoin)
 
   }
 

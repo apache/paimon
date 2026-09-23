@@ -49,13 +49,12 @@ import scala.collection.JavaConverters._
  * <p>Note: this rule must be placed before [[MergePaimonScalarSubqueries]], because
  * [[MergePaimonScalarSubqueries]] will merge subqueries.
  */
-object OptimizeMetadataOnlyDeleteFromPaimonTable
+case class OptimizeMetadataOnlyDeleteFromPaimonTable(spark: SparkSession)
   extends Rule[LogicalPlan]
   with ExpressionHelper
   with Logging {
 
-  lazy val spark: SparkSession = PaimonSparkSession.active
-  lazy val resolver: Resolver = spark.sessionState.conf.resolver
+  private def resolver: Resolver = spark.sessionState.conf.resolver
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
     plan.transform {
@@ -164,5 +163,13 @@ object OptimizeMetadataOnlyDeleteFromPaimonTable
         })
     }
     subquery.updateResult()
+  }
+}
+
+object OptimizeMetadataOnlyDeleteFromPaimonTable {
+
+  def isMetadataOnlyDelete(table: FileStoreTable, condition: Expression): Boolean = {
+    OptimizeMetadataOnlyDeleteFromPaimonTable(PaimonSparkSession.active)
+      .isMetadataOnlyDelete(table, condition)
   }
 }

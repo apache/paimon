@@ -17,31 +17,34 @@
 
 from typing import Dict, List, Optional, Union
 
-from pypaimon.api.api_response import GetTagResponse, PagedList
+from pypaimon.api.api_response import GetTagResponse, PagedList, Partition
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
-from pypaimon.catalog.catalog_exception import (
-    BranchAlreadyExistException,
-    BranchNotExistException,
-    DatabaseAlreadyExistException,
-    DatabaseNotExistException,
-    TableAlreadyExistException,
-    TableNotExistException,
-    TagAlreadyExistException,
-    TagNotExistException,
-)
+from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
+                                                BranchNotExistException,
+                                                DatabaseAlreadyExistException,
+                                                DatabaseNotExistException,
+                                                TableAlreadyExistException,
+                                                TableNotExistException,
+                                                TagAlreadyExistException,
+                                                TagNotExistException)
 from pypaimon.catalog.database import Database
+from pypaimon.common.file_io import FileIO
+from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.common.file_io import FileIO
-from pypaimon.common.identifier import Identifier
+from pypaimon.common.time_utils import (duration_to_iso8601,
+                                        local_datetime_to_system_zone_millis)
 from pypaimon.filesystem.caching_file_io import CachingFileIO
+from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
+from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
+from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.table import Table
 
@@ -58,7 +61,7 @@ class FileSystemCatalog(Catalog):
             FileIO.get(self.warehouse, self.catalog_options), self.catalog_options,
             self._cache_manager)
 
-    def list_databases(self) -> list:
+    def list_databases(self) -> List[str]:
         statuses = self.file_io.list_status(self.warehouse)
         database_names = []
         for status in statuses:
@@ -75,7 +78,8 @@ class FileSystemCatalog(Catalog):
         else:
             raise DatabaseNotExistException(name)
 
-    def create_database(self, name: str, ignore_if_exists: bool, properties: Optional[dict] = None):
+    def create_database(self, name: str, ignore_if_exists: bool,
+                        properties: Optional[Dict[str, str]] = None) -> None:
         try:
             self.get_database(name)
             if not ignore_if_exists:
@@ -86,7 +90,7 @@ class FileSystemCatalog(Catalog):
             path = self.get_database_path(name)
             self.file_io.mkdirs(path)
 
-    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False) -> None:
         try:
             self.get_database(name)
         except DatabaseNotExistException:
@@ -111,7 +115,7 @@ class FileSystemCatalog(Catalog):
 
         self.file_io.delete(db_path, True)
 
-    def list_tables(self, database_name: str) -> list:
+    def list_tables(self, database_name: str) -> List[str]:
         try:
             self.get_database(database_name)
         except DatabaseNotExistException:
@@ -142,11 +146,12 @@ class FileSystemCatalog(Catalog):
         table_schema = self.get_table_schema(identifier)
 
         # Create catalog environment for filesystem catalog
-        # Filesystem catalog doesn't support version management by default
+        from pypaimon.catalog.filesystem_catalog_loader import \
+            FileSystemCatalogLoader
         catalog_environment = CatalogEnvironment(
             identifier=identifier,
-            uuid=None,  # Filesystem catalog doesn't track table UUIDs
-            catalog_loader=None,  # No catalog loader for filesystem
+            uuid=None,
+            catalog_loader=FileSystemCatalogLoader(self.catalog_context),
             supports_version_management=False
         )
 
@@ -168,7 +173,7 @@ class FileSystemCatalog(Catalog):
             raise TableNotExistException(identifier)
         return sys_table
 
-    def create_table(self, identifier: Union[str, Identifier], schema: 'Schema', ignore_if_exists: bool):
+    def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool) -> None:
         if schema.options and schema.options.get(CoreOptions.AUTO_CREATE.key()):
             raise ValueError(f"The value of {CoreOptions.AUTO_CREATE.key()} property should be False.")
 
@@ -187,9 +192,13 @@ class FileSystemCatalog(Catalog):
             schema_manager = SchemaManager(self.file_io, table_path)
             schema_manager.create_table(schema)
 
-    def get_table_schema(self, identifier: Identifier):
+    def get_table_schema(self, identifier: Identifier) -> TableSchema:
         table_path = self.get_table_path(identifier)
-        table_schema = SchemaManager(self.file_io, table_path).latest()
+        table_schema = SchemaManager(
+            self.file_io,
+            table_path,
+            branch=identifier.get_branch_name_or_default(),
+        ).latest()
         if table_schema is None:
             raise TableNotExistException(identifier)
         return table_schema
@@ -207,7 +216,7 @@ class FileSystemCatalog(Catalog):
         identifier: Union[str, Identifier],
         changes: List[SchemaChange],
         ignore_if_not_exists: bool = False
-    ):
+    ) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
@@ -218,13 +227,18 @@ class FileSystemCatalog(Catalog):
             return
 
         table_path = self.get_table_path(identifier)
-        schema_manager = SchemaManager(self.file_io, table_path)
+        schema_manager = SchemaManager(
+            self.file_io,
+            table_path,
+            branch=identifier.get_branch_name_or_default(),
+        )
         try:
             schema_manager.commit_changes(changes)
         except Exception as e:
             raise RuntimeError(f"Failed to alter table {identifier.get_full_name()}: {e}") from e
 
-    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+    def rename_table(self, source_identifier: Union[str, Identifier],
+                     target_identifier: Union[str, Identifier]) -> None:
         if not isinstance(source_identifier, Identifier):
             source_identifier = Identifier.from_string(source_identifier)
         if not isinstance(target_identifier, Identifier):
@@ -250,10 +264,10 @@ class FileSystemCatalog(Catalog):
         target_path = self.get_table_path(target_identifier)
         self.file_io.rename(source_path, target_path)
 
-    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
+    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
-        
+
         # Check if table exists
         try:
             self.get_table(identifier)
@@ -261,7 +275,7 @@ class FileSystemCatalog(Catalog):
             if not ignore_if_not_exists:
                 raise
             return
-        
+
         # Delete the table directory
         table_path = self.get_table_path(identifier)
         self.file_io.delete(table_path, True)
@@ -270,12 +284,13 @@ class FileSystemCatalog(Catalog):
             self,
             identifier: Identifier,
             table_uuid: Optional[str],
+            base_snapshot_uuid: Optional[str],
             snapshot: Snapshot,
             statistics: List[PartitionStatistics]
     ) -> bool:
         raise NotImplementedError("This catalog does not support commit catalog")
 
-    def load_snapshot(self, identifier: Identifier):
+    def load_snapshot(self, identifier: Identifier) -> Optional[TableSnapshot]:
         raise NotImplementedError("Filesystem catalog does not support load_snapshot")
 
     def list_partitions_paged(
@@ -284,10 +299,9 @@ class FileSystemCatalog(Catalog):
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
             partition_name_pattern: Optional[str] = None,
-    ):
-        from pypaimon.api.api_response import Partition, PagedList
-        from pypaimon.manifest.manifest_list_manager import ManifestListManager
+    ) -> PagedList[Partition]:
         from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+        from pypaimon.manifest.manifest_list_manager import ManifestListManager
 
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
@@ -344,6 +358,7 @@ class FileSystemCatalog(Catalog):
         # Apply pattern filter with proper regex escaping
         if partition_name_pattern:
             import re
+
             # Escape special regex chars except '*', then replace '*' with '.*'
             escaped_pattern = re.escape(partition_name_pattern).replace(r'\*', '.*')
             regex = re.compile(escaped_pattern)
@@ -405,21 +420,18 @@ class FileSystemCatalog(Catalog):
             time_retained: Optional[str] = None,
             ignore_if_exists: bool = False,
     ) -> None:
-        if time_retained is not None:
-            # Python's Tag dataclass does not yet carry tag_create_time /
-            # tag_time_retained fields; supporting TTL on FileSystemCatalog
-            # requires extending Tag + TagManager and is tracked as a
-            # follow-up. Raise here instead of silently dropping the option,
-            # so callers cannot mistakenly believe the TTL took effect.
-            raise NotImplementedError(
-                "FileSystemCatalog does not yet support `time_retained` on "
-                "create_tag (requires extending the Python Tag dataclass + "
-                "TagManager).")
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         table = self.get_table(identifier)
         try:
-            table.create_tag(tag_name, snapshot_id, ignore_if_exists)
+            # Keyword args: FileStoreTable.create_tag orders time_retained after
+            # ignore_if_exists (Catalog orders it before), so pass by name.
+            table.create_tag(
+                tag_name,
+                snapshot_id,
+                ignore_if_exists=ignore_if_exists,
+                time_retained=time_retained,
+            )
         except ValueError as e:
             # ``table.create_tag`` honors ``ignore_if_exists`` internally, so
             # any "already exists" message that bubbles up here means the
@@ -453,16 +465,27 @@ class FileSystemCatalog(Catalog):
         tag = table.tag_manager().get(tag_name)
         if tag is None:
             raise TagNotExistException(tag_name)
-        # tag_create_time / tag_time_retained are not tracked on the
-        # filesystem side yet — the Python Tag dataclass inherits only
-        # Snapshot fields. Returning ``None`` for both keeps the response
-        # shape compatible with the Java contract while making the gap
-        # visible to callers.
+        # Surface tag_create_time as epoch millis and tag_time_retained as an
+        # ISO-8601 duration string (types match the Java REST GetTagResponse
+        # Long / String). The create-time is converted with the host's system
+        # default time zone, mirroring the Java REST path
+        # (RESTFileSystemCatalog#getTag uses
+        # tagCreateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()).
+        # This intentionally differs from the ``$tags`` system table, which is a
+        # zone-less Timestamp; both follow their respective Java conversions.
+        # Both fields are None for tags created without a retention
+        # (plain-snapshot tag files).
         return GetTagResponse(
             tag_name=tag_name,
             snapshot=tag.trim_to_snapshot(),
-            tag_create_time=None,
-            tag_time_retained=None,
+            tag_create_time=(
+                None if tag.tag_create_time is None
+                else local_datetime_to_system_zone_millis(tag.tag_create_time)
+            ),
+            tag_time_retained=(
+                None if tag.tag_time_retained is None
+                else duration_to_iso8601(tag.tag_time_retained)
+            ),
         )
 
     def list_tags_paged(

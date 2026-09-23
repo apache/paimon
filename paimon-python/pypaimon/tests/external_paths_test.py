@@ -24,8 +24,11 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.catalog import Identifier
-from pypaimon.common.options.core_options import CoreOptions, ExternalPathStrategy
-from pypaimon.common.external_path_provider import ExternalPathProvider
+from pypaimon.common.external_path_provider import (
+    EntropyInjectExternalPathProvider, ExternalPathProvider,
+    RoundRobinExternalPathProvider, WeightedExternalPathProvider, _murmur3_32)
+from pypaimon.common.options.core_options import (CoreOptions,
+                                                  ExternalPathStrategy)
 
 
 class ExternalPathProviderTest(unittest.TestCase):
@@ -40,7 +43,7 @@ class ExternalPathProviderTest(unittest.TestCase):
             "oss://bucket3/external",
         ]
         relative_path = "partition=value/bucket-0"
-        provider = ExternalPathProvider(external_paths, relative_path)
+        provider = RoundRobinExternalPathProvider(external_paths, relative_path)
 
         paths = [provider.get_next_external_data_path("file.parquet") for _ in range(6)]
 
@@ -56,17 +59,246 @@ class ExternalPathProviderTest(unittest.TestCase):
         self.assertIn("file.parquet", paths[0])
 
         # Test single path
-        single_provider = ExternalPathProvider(["oss://bucket/external"], "bucket-0")
+        single_provider = RoundRobinExternalPathProvider(["oss://bucket/external"], "bucket-0")
         single_path = single_provider.get_next_external_data_path("data.parquet")
         self.assertIn("bucket/external", single_path)
         self.assertIn("bucket-0", single_path)
         self.assertIn("data.parquet", single_path)
 
         # Test empty relative path
-        empty_provider = ExternalPathProvider(["oss://bucket/external"], "")
+        empty_provider = RoundRobinExternalPathProvider(["oss://bucket/external"], "")
         empty_path = empty_provider.get_next_external_data_path("file.parquet")
         self.assertIn("bucket/external", empty_path)
         self.assertIn("file.parquet", empty_path)
+
+    def test_factory_create_round_robin(self):
+        """Test ExternalPathProvider.create() with round-robin strategy."""
+        provider = ExternalPathProvider.create(
+            "round-robin", ["oss://a/path", "oss://b/path"], "bucket-0"
+        )
+        self.assertIsInstance(provider, RoundRobinExternalPathProvider)
+        paths = [provider.get_next_external_data_path("f.parquet") for _ in range(4)]
+        schemes_used = {p.split("://")[1].split("/")[0] for p in paths}
+        self.assertEqual(len(schemes_used), 2)
+
+    def test_factory_create_specific_fs(self):
+        """Test ExternalPathProvider.create() with specific-fs (falls through to round-robin)."""
+        provider = ExternalPathProvider.create(
+            "specific-fs", ["oss://bucket/path"]
+        )
+        self.assertIsInstance(provider, RoundRobinExternalPathProvider)
+
+    def test_factory_create_none(self):
+        """Test ExternalPathProvider.create() with none strategy returns None."""
+        provider = ExternalPathProvider.create("none", ["oss://bucket/path"])
+        self.assertIsNone(provider)
+
+    def test_factory_create_entropy_inject(self):
+        """Test ExternalPathProvider.create() with entropy-inject strategy."""
+        provider = ExternalPathProvider.create(
+            "entropy-inject", ["oss://a/path", "oss://b/path"], "bucket-0"
+        )
+        self.assertIsInstance(provider, EntropyInjectExternalPathProvider)
+
+    def test_factory_create_weighted(self):
+        """Test ExternalPathProvider.create() with weight-robin strategy."""
+        provider = ExternalPathProvider.create(
+            "weight-robin", ["oss://a/path", "oss://b/path"], "bucket-0", [10, 5]
+        )
+        self.assertIsInstance(provider, WeightedExternalPathProvider)
+
+    def test_factory_create_weighted_fallback(self):
+        """Test weight-robin falls back to round-robin when paths < 2 or no weights."""
+        provider = ExternalPathProvider.create(
+            "weight-robin", ["oss://a/path"], "bucket-0", [10]
+        )
+        self.assertIsInstance(provider, RoundRobinExternalPathProvider)
+
+        provider2 = ExternalPathProvider.create(
+            "weight-robin", ["oss://a/path", "oss://b/path"], "bucket-0", None
+        )
+        self.assertIsInstance(provider2, RoundRobinExternalPathProvider)
+
+
+class Murmur3HashTest(unittest.TestCase):
+    """Test murmur3_32 hash implementation for Java Guava compatibility."""
+
+    def test_empty_string(self):
+        """Empty string should produce a deterministic hash."""
+        result = _murmur3_32(b'')
+        # Guava: Hashing.murmur3_32().hashString("", UTF_8).asInt() == 0
+        self.assertEqual(result, 0)
+
+    def test_deterministic(self):
+        """Same input always produces same output."""
+        for s in [b'test', b'hello world', b'data-0001.blob']:
+            self.assertEqual(_murmur3_32(s), _murmur3_32(s))
+
+    def test_known_values(self):
+        """Verify against Guava Hashing.murmur3_32().hashString(s, UTF_8).asInt().
+
+        Values confirmed by running Java Guava 32.0.0.
+        """
+        self.assertEqual(_murmur3_32(b''), 0)
+        self.assertEqual(_murmur3_32(b'a'), 1009084850)
+        self.assertEqual(_murmur3_32(b'hello'), 613153351)
+        self.assertEqual(_murmur3_32(b'world'), -74040069)
+        self.assertEqual(_murmur3_32(b'test'), -1167338989)
+        self.assertEqual(_murmur3_32(b'data-abc.blob'), 894520562)
+        self.assertEqual(_murmur3_32(b'data-xyz.blob'), -822867934)
+
+    def test_signed_32bit_range(self):
+        """Result should be in signed 32-bit integer range."""
+        for s in [b'a', b'ab', b'abc', b'abcd', b'abcde']:
+            result = _murmur3_32(s)
+            self.assertGreaterEqual(result, -(2 ** 31))
+            self.assertLessEqual(result, 2 ** 31 - 1)
+
+
+class EntropyInjectExternalPathProviderTest(unittest.TestCase):
+    """Test EntropyInjectExternalPathProvider functionality."""
+
+    def test_hash_directory_structure(self):
+        """Hash directories should have depth=3 with 4-bit segments + remainder."""
+        provider = EntropyInjectExternalPathProvider(["oss://bucket/ext"], "bucket-0")
+        hash_dirs = provider._compute_hash("test-file.blob")
+        parts = hash_dirs.split("/")
+        self.assertEqual(len(parts), 4)
+        self.assertEqual(len(parts[0]), 4)
+        self.assertEqual(len(parts[1]), 4)
+        self.assertEqual(len(parts[2]), 4)
+        self.assertEqual(len(parts[3]), 8)
+        for part in parts:
+            self.assertTrue(all(c in ('0', '1') for c in part))
+
+    def test_deterministic_path(self):
+        """Same filename always produces same hash directories."""
+        provider = EntropyInjectExternalPathProvider(
+            ["oss://bucket/ext"], "dt=20240101/bucket-0"
+        )
+        hash1 = provider._compute_hash("data-001.parquet")
+        hash2 = provider._compute_hash("data-001.parquet")
+        self.assertEqual(hash1, hash2)
+
+    def test_path_format(self):
+        """Full path should include base/relative/hashDirs/fileName."""
+        provider = EntropyInjectExternalPathProvider(
+            ["oss://bucket/ext"], "dt=20240101/bucket-0"
+        )
+        path = provider.get_next_external_data_path("data-001.parquet")
+        self.assertIn("oss://bucket/ext", path)
+        self.assertIn("dt=20240101/bucket-0", path)
+        self.assertIn("data-001.parquet", path)
+        # Should have hash dirs between relative path and filename
+        parts_between = path.split("bucket-0/")[1].split("/data-001.parquet")[0]
+        self.assertEqual(len(parts_between.split("/")), 4)
+
+    def test_multi_path_rotation(self):
+        """Paths should rotate across external paths."""
+        provider = EntropyInjectExternalPathProvider(
+            ["oss://a/ext", "oss://b/ext", "oss://c/ext"], ""
+        )
+        paths = [provider.get_next_external_data_path(f"file-{i}.parquet") for i in range(6)]
+        bases = [p.split("://")[1][0] for p in paths]
+        self.assertEqual(set(bases), {'a', 'b', 'c'})
+
+
+class WeightedExternalPathProviderTest(unittest.TestCase):
+    """Test WeightedExternalPathProvider functionality."""
+
+    def test_weight_distribution(self):
+        """Paths should be selected roughly proportional to weights."""
+        import random as _random
+        _random.seed(42)
+        provider = WeightedExternalPathProvider(
+            ["oss://a/path", "oss://b/path"], "bucket-0", [90, 10]
+        )
+        counts = {"a": 0, "b": 0}
+        for i in range(10000):
+            path = provider.get_next_external_data_path(f"file-{i}.parquet")
+            if "://a/" in path:
+                counts["a"] += 1
+            else:
+                counts["b"] += 1
+
+        # With 90:10 weights, "a" should get ~90% (allow 5% tolerance)
+        ratio_a = counts["a"] / 10000
+        self.assertGreater(ratio_a, 0.85)
+        self.assertLess(ratio_a, 0.95)
+
+    def test_equal_weights(self):
+        """Equal weights should distribute roughly evenly."""
+        import random as _random
+        _random.seed(42)
+        provider = WeightedExternalPathProvider(
+            ["oss://a/path", "oss://b/path", "oss://c/path"], "bucket-0", [1, 1, 1]
+        )
+        counts = {"a": 0, "b": 0, "c": 0}
+        for i in range(9000):
+            path = provider.get_next_external_data_path(f"file-{i}.parquet")
+            for key in counts:
+                if f"://{key}/" in path:
+                    counts[key] += 1
+
+        for key in counts:
+            ratio = counts[key] / 9000
+            self.assertGreater(ratio, 0.28)
+            self.assertLess(ratio, 0.39)
+
+    def test_path_format(self):
+        """Path should include base/relative/fileName."""
+        provider = WeightedExternalPathProvider(
+            ["oss://a/path", "oss://b/path"], "dt=20240101/bucket-0", [5, 5]
+        )
+        path = provider.get_next_external_data_path("data.parquet")
+        self.assertIn("dt=20240101/bucket-0", path)
+        self.assertIn("data.parquet", path)
+
+    def test_mismatched_lengths_raises(self):
+        """Should raise ValueError if paths and weights have different lengths."""
+        with self.assertRaises(ValueError):
+            WeightedExternalPathProvider(
+                ["oss://a/path", "oss://b/path"], "bucket-0", [10]
+            )
+
+
+class WeightsParsingTest(unittest.TestCase):
+    """Test CoreOptions.data_file_external_paths_weights() parsing and validation."""
+
+    def test_valid_weights(self):
+        """Normal comma-separated positive integers."""
+        from pypaimon.common.options.core_options import CoreOptions
+        opts = CoreOptions.from_dict({"data-file.external-paths.weights": "10,5,15"})
+        self.assertEqual(opts.data_file_external_paths_weights(), [10, 5, 15])
+
+    def test_none_when_not_configured(self):
+        """Returns None when option is not set."""
+        from pypaimon.common.options.core_options import CoreOptions
+        opts = CoreOptions.from_dict({})
+        self.assertIsNone(opts.data_file_external_paths_weights())
+
+    def test_zero_weight_raises(self):
+        """Zero weight should raise ValueError."""
+        from pypaimon.common.options.core_options import CoreOptions
+        opts = CoreOptions.from_dict({"data-file.external-paths.weights": "10,0,5"})
+        with self.assertRaises(ValueError) as ctx:
+            opts.data_file_external_paths_weights()
+        self.assertIn("positive", str(ctx.exception))
+
+    def test_negative_weight_raises(self):
+        """Negative weight should raise ValueError."""
+        from pypaimon.common.options.core_options import CoreOptions
+        opts = CoreOptions.from_dict({"data-file.external-paths.weights": "10,-5"})
+        with self.assertRaises(ValueError) as ctx:
+            opts.data_file_external_paths_weights()
+        self.assertIn("positive", str(ctx.exception))
+
+    def test_empty_element_raises(self):
+        """Empty element like '10,,5' should raise ValueError (align with Java NumberFormatException)."""
+        from pypaimon.common.options.core_options import CoreOptions
+        opts = CoreOptions.from_dict({"data-file.external-paths.weights": "10,,5"})
+        with self.assertRaises(ValueError):
+            opts.data_file_external_paths_weights()
 
 
 class ExternalPathsConfigTest(unittest.TestCase):
@@ -188,6 +420,7 @@ class ExternalPathsConfigTest(unittest.TestCase):
         # Test with external paths configured
         provider = path_factory.create_external_path_provider(("value1",), 0)
         self.assertIsNotNone(provider)
+        self.assertIsInstance(provider, RoundRobinExternalPathProvider)
         path = provider.get_next_external_data_path("file.parquet")
         self.assertTrue("bucket1" in str(path) or "bucket2" in str(path))
         self.assertIn("dt=value1", str(path))
@@ -233,6 +466,55 @@ class ExternalPathsConfigTest(unittest.TestCase):
         table3 = self.catalog.get_table(table_name3)
         provider3 = table3.path_factory().create_external_path_provider((), 0)
         self.assertIsNone(provider3)
+
+    def test_create_entropy_inject_provider(self):
+        """Test creating EntropyInject provider from path factory."""
+        table_name = "test_db.entropy_test"
+        # Manually delete table directory if it exists
+        try:
+            table_path = self.catalog.get_table_path(Identifier.from_string(table_name))
+            if self.catalog.file_io.exists(table_path):
+                self.catalog.file_io.delete(table_path, recursive=True)
+        except Exception:
+            pass  # Table may not exist, ignore
+        options = {
+            CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(): "oss://bucket1/path1,oss://bucket2/path2",
+            CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(): ExternalPathStrategy.ENTROPY_INJECT,
+        }
+        pa_schema = pa.schema([("id", pa.int32()), ("name", pa.string())])
+        schema = Schema.from_pyarrow_schema(pa_schema, options=options)
+        self.catalog.create_table(table_name, schema, True)
+        table = self.catalog.get_table(table_name)
+        path_factory = table.path_factory()
+
+        provider = path_factory.create_external_path_provider((), 0)
+        self.assertIsNotNone(provider)
+        self.assertIsInstance(provider, EntropyInjectExternalPathProvider)
+
+    def test_create_weighted_provider(self):
+        """Test creating Weighted provider from path factory."""
+        table_name = "test_db.weighted_test"
+        # Manually delete table directory if it exists
+        try:
+            table_path = self.catalog.get_table_path(Identifier.from_string(table_name))
+            if self.catalog.file_io.exists(table_path):
+                self.catalog.file_io.delete(table_path, recursive=True)
+        except Exception:
+            pass  # Table may not exist, ignore
+        options = {
+            CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(): "oss://bucket1/path1,oss://bucket2/path2",
+            CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(): ExternalPathStrategy.WEIGHTED,
+            CoreOptions.DATA_FILE_EXTERNAL_PATHS_WEIGHTS.key(): "10,5",
+        }
+        pa_schema = pa.schema([("id", pa.int32()), ("name", pa.string())])
+        schema = Schema.from_pyarrow_schema(pa_schema, options=options)
+        self.catalog.create_table(table_name, schema, True)
+        table = self.catalog.get_table(table_name)
+        path_factory = table.path_factory()
+
+        provider = path_factory.create_external_path_provider((), 0)
+        self.assertIsNotNone(provider)
+        self.assertIsInstance(provider, WeightedExternalPathProvider)
 
 
 class ExternalPathsIntegrationTest(unittest.TestCase):

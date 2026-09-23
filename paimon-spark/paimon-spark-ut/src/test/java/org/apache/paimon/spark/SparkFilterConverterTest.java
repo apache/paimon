@@ -26,11 +26,15 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DateType;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 
+import org.apache.spark.sql.sources.AlwaysFalse;
+import org.apache.spark.sql.sources.AlwaysTrue;
 import org.apache.spark.sql.sources.EqualNullSafe;
 import org.apache.spark.sql.sources.EqualTo;
 import org.apache.spark.sql.sources.GreaterThan;
@@ -230,17 +234,52 @@ public class SparkFilterConverterTest {
     }
 
     @Test
+    public void testAlwaysTrueFalse() {
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "id", new IntType())));
+        SparkFilterConverter converter = new SparkFilterConverter(rowType);
+
+        assertThat(converter.convert(new AlwaysTrue())).isEqualTo(PredicateBuilder.alwaysTrue());
+        assertThat(converter.convert(new AlwaysFalse())).isEqualTo(PredicateBuilder.alwaysFalse());
+    }
+
+    @Test
+    public void testEqualToNaN() {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "f", new FloatType()),
+                                new DataField(1, "d", new DoubleType())));
+        SparkFilterConverter converter = new SparkFilterConverter(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        EqualTo eqNaNFloat = EqualTo.apply("f", Float.NaN);
+        assertThat(converter.convert(eqNaNFloat)).isEqualTo(builder.isNaN(0));
+
+        EqualTo eqNaNDouble = EqualTo.apply("d", Double.NaN);
+        assertThat(converter.convert(eqNaNDouble)).isEqualTo(builder.isNaN(1));
+
+        EqualTo eqFloat = EqualTo.apply("f", 1.0f);
+        assertThat(converter.convert(eqFloat)).isEqualTo(builder.equal(0, 1.0f));
+    }
+
+    @Test
     public void testIgnoreFailure() {
         List<DataField> dataFields = new ArrayList<>();
-        dataFields.add(new DataField(0, "id", new IntType()));
+        dataFields.add(new DataField(0, "id", new FloatType()));
         dataFields.add(new DataField(1, "name", new VarCharType(VarCharType.MAX_LENGTH)));
         RowType rowType = new RowType(dataFields);
         SparkFilterConverter converter = new SparkFilterConverter(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
 
-        Not not = Not.apply(StringStartsWith.apply("name", "paimon"));
-        assertThatThrownBy(() -> converter.convert(not, false))
-                .hasMessageContaining("Not(StringStartsWith(name,paimon)) is unsupported.");
-        assertThat(converter.convert(not, true)).isNull();
-        assertThat(converter.convertIgnoreFailure(not)).isNull();
+        Not notStartsWith = Not.apply(StringStartsWith.apply("name", "paimon"));
+        assertThat(converter.convert(notStartsWith))
+                .isEqualTo(builder.startsWith(1, fromString("paimon")).negate().get());
+
+        Not unsupported = Not.apply(EqualTo.apply("id", Float.NaN));
+        assertThatThrownBy(() -> converter.convert(unsupported, false))
+                .hasMessageContaining("is unsupported.");
+        assertThat(converter.convert(unsupported, true)).isNull();
+        assertThat(converter.convertIgnoreFailure(unsupported)).isNull();
     }
 }

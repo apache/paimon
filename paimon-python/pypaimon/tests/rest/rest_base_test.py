@@ -199,22 +199,15 @@ class RESTBaseTest(unittest.TestCase):
         self.assertTrue(os.path.exists(self.warehouse + "/default/test_table/dt=p1"))
         self.assertEqual(len(glob.glob(self.warehouse + "/default/test_table/manifest/*")), 3)
 
-    def _write_test_table(self, table):
+    def _write_test_table(self, table, data=None):
         write_builder = table.new_batch_write_builder()
-        table_pa_schema = self.pk_pa_schema if table.primary_keys else self.pa_schema
+        if data is None:
+            data = self.pk_expected if table.primary_keys else self.expected
 
         # first write
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
-        data1 = {
-            'user_id': [1, 2, 3, 4],
-            'item_id': [1001, 1002, 1003, 1004],
-            'behavior': ['a', 'b', 'c', None],
-            'dt': ['p1', 'p1', 'p2', 'p1'],
-            'long-dt': ['2024-10-10', '2024-10-10', '2024-10-10', '2024-01-01'],
-        }
-        pa_table = pa.Table.from_pydict(data1, schema=table_pa_schema)
-        table_write.write_arrow(pa_table)
+        table_write.write_arrow(data.slice(0, 4))
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
         table_commit.close()
@@ -222,15 +215,7 @@ class RESTBaseTest(unittest.TestCase):
         # second write
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
-        data2 = {
-            'user_id': [5, 6, 7, 8],
-            'item_id': [1005, 1006, 1007, 1008],
-            'behavior': ['e', 'f', 'g', 'h'],
-            'dt': ['p2', 'p1', 'p2', 'p2'],
-            'long-dt': ['2024-10-10', '2025-01-23', 'abcdefghijklmnopk', '2025-08-08'],
-        }
-        pa_table = pa.Table.from_pydict(data2, schema=table_pa_schema)
-        table_write.write_arrow(pa_table)
+        table_write.write_arrow(data.slice(4, 4))
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
         table_commit.close()

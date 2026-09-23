@@ -22,9 +22,12 @@ import unittest
 
 import pandas
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 
+from pypaimon.schema.data_types import AtomicType
+from pypaimon.schema.schema_change import Move, SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 
@@ -57,6 +60,7 @@ class SchemaEvolutionReadTest(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
+    @pytest.mark.python_plan
     def test_schema_evolution(self):
         # schema 0
         pa_schema = pa.schema([
@@ -127,6 +131,7 @@ class SchemaEvolutionReadTest(unittest.TestCase):
         }, schema=pa_schema)
         self.assertEqual(expected, actual)
 
+    @pytest.mark.python_plan
     def test_schema_evolution_type(self):
         # schema 0
         pa_schema = pa.schema([
@@ -202,6 +207,160 @@ class SchemaEvolutionReadTest(unittest.TestCase):
         }, schema=pa_schema)
         self.assertEqual(expected, actual)
 
+    def test_schema_evolution_type_promotion_unpartitioned(self):
+        # End-to-end via public API only (create -> write -> alter column type
+        # -> write -> read). A non-partitioned table whose read needs no column
+        # reordering takes the reader fast path that skips partition padding and
+        # index remapping. The file written before the type change keeps its old
+        # physical type, so it must be aligned to the promoted type to
+        # concatenate with the file written after; otherwise the read crashes
+        # with an Arrow schema mismatch. This is not specific to INT -> BIGINT:
+        # it applies to any type change of an existing column -- integer/float
+        # widening, DECIMAL precision/scale changes, and cross-type changes.
+        import decimal
+
+        # Each case: (name, old arrow type, new arrow type, new Paimon type,
+        # value written to the old-schema file, that same value as it should
+        # read back under the new type, value written to the new-schema file).
+        # The old write value and its expected read form differ for cross-type
+        # changes, where the old file is materialized under the new type.
+        cases = [
+            ("smallint_to_int", pa.int16(), pa.int32(), 'INT',
+             [10, 20], [10, 20], [30, 40]),
+            ("int_to_bigint", pa.int32(), pa.int64(), 'BIGINT',
+             [10, 20], [10, 20], [30, 40]),
+            ("float_to_double", pa.float32(), pa.float64(), 'DOUBLE',
+             [1.5, 2.5], [1.5, 2.5], [3.5, 4.5]),
+            ("decimal_precision_up",
+             pa.decimal128(10, 2), pa.decimal128(20, 2), 'DECIMAL(20, 2)',
+             [decimal.Decimal('1.23'), decimal.Decimal('4.56')],
+             [decimal.Decimal('1.23'), decimal.Decimal('4.56')],
+             [decimal.Decimal('7.89'), decimal.Decimal('0.12')]),
+            ("decimal_scale_up",
+             pa.decimal128(10, 2), pa.decimal128(10, 4), 'DECIMAL(10, 4)',
+             [decimal.Decimal('1.23'), decimal.Decimal('4.56')],
+             [decimal.Decimal('1.2300'), decimal.Decimal('4.5600')],
+             [decimal.Decimal('7.8901'), decimal.Decimal('0.1234')]),
+            ("int_to_string", pa.int32(), pa.string(), 'STRING',
+             [10, 20], ['10', '20'], ['a', 'b']),
+            # Lossy cross-type change: DOUBLE -> INT truncates (matches Java
+            # CastExecutors), so 1.2/2.8 read back as 1/2.
+            ("double_to_int", pa.float64(), pa.int32(), 'INT',
+             [1.2, 2.8], [1, 2], [3, 4]),
+            # Java's DECIMAL cast rounds half-up when reducing scale.
+            ("decimal_scale_down",
+             pa.decimal128(10, 4), pa.decimal128(10, 2), 'DECIMAL(10, 2)',
+             [decimal.Decimal('1.2345'), decimal.Decimal('-4.5650')],
+             [decimal.Decimal('1.23'), decimal.Decimal('-4.57')],
+             [decimal.Decimal('7.89'), decimal.Decimal('0.12')]),
+        ]
+
+        for (name, old_type, new_type, new_type_str,
+             write_vals, old_read_vals, new_vals) in cases:
+            with self.subTest(case=name):
+                table_name = f'default.promo_{name}'
+                old_schema = pa.schema([('k', pa.int64()), ('v', old_type)])
+                self.catalog.create_table(
+                    table_name, Schema.from_pyarrow_schema(old_schema), False)
+
+                # Write under the original schema (file stamped schema_id 0).
+                table = self.catalog.get_table(table_name)
+                write_builder = table.new_batch_write_builder()
+                table_write = write_builder.new_write()
+                table_commit = write_builder.new_commit()
+                table_write.write_arrow(pa.Table.from_pydict(
+                    {'k': [1, 2], 'v': write_vals}, schema=old_schema))
+                table_commit.commit(table_write.prepare_commit())
+                table_write.close()
+                table_commit.close()
+
+                # Widen column v through the catalog (new schema_id 1).
+                self.catalog.alter_table(
+                    table_name,
+                    [SchemaChange.update_column_type(
+                        'v', AtomicType(new_type_str))],
+                    False)
+
+                # Write under the promoted schema (file stamped schema_id 1).
+                table = self.catalog.get_table(table_name)
+                new_schema = pa.schema([('k', pa.int64()), ('v', new_type)])
+                write_builder = table.new_batch_write_builder()
+                table_write = write_builder.new_write()
+                table_commit = write_builder.new_commit()
+                table_write.write_arrow(pa.Table.from_pydict(
+                    {'k': [3, 4], 'v': new_vals}, schema=new_schema))
+                table_commit.commit(table_write.prepare_commit())
+                table_write.close()
+                table_commit.close()
+
+                # Plain full-table read spanning both schema versions.
+                read_builder = table.new_read_builder()
+                actual = read_builder.new_read().to_arrow(
+                    self._scan_table(read_builder))
+                expected = pa.Table.from_pydict(
+                    {'k': [1, 2, 3, 4], 'v': old_read_vals + new_vals},
+                    schema=new_schema)
+                self.assertEqual(expected, actual)
+
+    def test_schema_evolution_type_lossy_old_file_only(self):
+        # Reading ONLY old-schema files after a lossy type change (no
+        # newer-schema file in the splits). The output type must equal the
+        # current read schema regardless of which files the read spans, and the
+        # DECIMAL scale reduction rounds half-up, while DOUBLE -> INT still
+        # truncates. Neither conversion should raise on these old-file reads.
+        import decimal
+
+        cases = [
+            ("scale_down",
+             pa.decimal128(10, 4), pa.decimal128(10, 2), 'DECIMAL(10, 2)',
+             [decimal.Decimal('4.5678'), decimal.Decimal('-4.5650')],
+             [decimal.Decimal('4.57'), decimal.Decimal('-4.57')]),
+            ("scale_and_precision_down",
+             pa.decimal128(6, 3), pa.decimal128(3, 2), 'DECIMAL(3, 2)',
+             [decimal.Decimal('9.994'), decimal.Decimal('9.995'),
+              decimal.Decimal('-9.995'), decimal.Decimal('999.999')],
+             [decimal.Decimal('9.99'), None, None, None]),
+            ("double_to_int", pa.float64(), pa.int32(), 'INT',
+             [1.2, 2.8], [1, 2]),
+        ]
+
+        for name, old_type, new_type, new_type_str, write_vals, read_vals \
+                in cases:
+            with self.subTest(case=name):
+                table_name = f'default.lossy_old_only_{name}'
+                old_schema = pa.schema([('k', pa.int64()), ('v', old_type)])
+                self.catalog.create_table(
+                    table_name, Schema.from_pyarrow_schema(old_schema), False)
+
+                # Write under the original schema, then change the type. No
+                # write happens afterwards, so the read sees only this file.
+                table = self.catalog.get_table(table_name)
+                write_builder = table.new_batch_write_builder()
+                table_write = write_builder.new_write()
+                table_commit = write_builder.new_commit()
+                table_write.write_arrow(pa.Table.from_pydict(
+                    {'k': list(range(1, len(write_vals) + 1)), 'v': write_vals},
+                    schema=old_schema))
+                table_commit.commit(table_write.prepare_commit())
+                table_write.close()
+                table_commit.close()
+
+                self.catalog.alter_table(
+                    table_name,
+                    [SchemaChange.update_column_type(
+                        'v', AtomicType(new_type_str))],
+                    False)
+
+                table = self.catalog.get_table(table_name)
+                new_schema = pa.schema([('k', pa.int64()), ('v', new_type)])
+                read_builder = table.new_read_builder()
+                actual = read_builder.new_read().to_arrow(
+                    self._scan_table(read_builder))
+                expected = pa.Table.from_pydict(
+                    {'k': list(range(1, len(read_vals) + 1)), 'v': read_vals},
+                    schema=new_schema)
+                self.assertEqual(expected, actual)
+
     def test_schema_evolution_with_scan_filter(self):
         # schema 0
         pa_schema = pa.schema([
@@ -268,6 +427,7 @@ class SchemaEvolutionReadTest(unittest.TestCase):
         entries = new_scan.file_scanner.read_manifest_entries(manifest_files)
         self.assertEqual(1, len(entries))  # verify scan filter success for schema evolution
 
+    @pytest.mark.python_plan
     def test_schema_evolution_with_read_filter(self):
         # schema 0
         pa_schema = pa.schema([
@@ -364,11 +524,9 @@ class SchemaEvolutionReadTest(unittest.TestCase):
 
         table_read = read_builder.new_read()
         actual = table_read.to_arrow(splits)
+        # Old files supply NULL for behavior; NULL = 'g' cannot pass AND.
         expected = pa.Table.from_pydict({
-            'user_id': [1, 2, 4, 3, 7],
-            'item_id': [1001, 1002, 1004, 1003, 1007],
-            'dt': ["p1", "p1", "p1", "p2", "p2"],
-            'behavior': [None, None, None, None, "g"],
+            'user_id': [7], 'item_id': [1007], 'dt': ["p2"], 'behavior': ["g"],
         }, schema=pa_schema)
         self.assertEqual(expected, actual)
 
@@ -394,6 +552,293 @@ class SchemaEvolutionReadTest(unittest.TestCase):
             'behavior': [None, None, None, None, "e"],
         }, schema=pa_schema)
         self.assertEqual(expected, actual)
+
+    # ------------------------------------------------------------------
+    # Public-API end-to-end evolution cases (create -> write -> alter_table
+    # -> write -> read), the范式 promoted by
+    # test_schema_evolution_type_promotion_unpartitioned. Unlike the older
+    # white-box cases above (manual schema-N files + file.schema_id), these
+    # drive evolution purely through catalog.alter_table.
+    # ------------------------------------------------------------------
+
+    def _write(self, table, pa_table):
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+    def _read_rows(self, table, sort_key='k'):
+        read_builder = table.new_read_builder()
+        rows = read_builder.new_read().to_arrow(
+            self._scan_table(read_builder)).to_pylist()
+        return sorted(rows, key=lambda r: (r[sort_key] is None, r[sort_key]))
+
+    def _read_arrow(self, table, projection=None):
+        read_builder = table.new_read_builder()
+        if projection is not None:
+            read_builder = read_builder.with_projection(projection)
+        return read_builder.new_read().to_arrow(self._scan_table(read_builder))
+
+    def test_evolution_drop_column_then_read(self):
+        # A5: a column dropped after old data was written must disappear from
+        # the read; the old file's value for it is discarded, not surfaced.
+        name = 'default.evo_drop'
+        s0 = pa.schema([('k', pa.int64()), ('v', pa.string()), ('w', pa.string())])
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(s0), False)
+        table = self.catalog.get_table(name)
+        self._write(table, pa.Table.from_pydict(
+            {'k': [1, 2], 'v': ['a', 'b'], 'w': ['p', 'q']}, schema=s0))
+
+        self.catalog.alter_table(name, [SchemaChange.drop_column('v')], False)
+        table = self.catalog.get_table(name)
+        s1 = pa.schema([('k', pa.int64()), ('w', pa.string())])
+        self._write(table, pa.Table.from_pydict({'k': [3], 'w': ['r']}, schema=s1))
+
+        self.assertEqual(self._read_rows(table), [
+            {'k': 1, 'w': 'p'}, {'k': 2, 'w': 'q'}, {'k': 3, 'w': 'r'}])
+
+    def test_evolution_rename_column_then_read(self):
+        # A6: after rename the old file (written under the old name) and the
+        # new file (new name) must read back as the SAME logical column,
+        # matched by field id, not by name.
+        name = 'default.evo_rename'
+        s0 = pa.schema([('k', pa.int64()), ('v', pa.string())])
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(s0), False)
+        table = self.catalog.get_table(name)
+        self._write(table, pa.Table.from_pydict(
+            {'k': [1, 2], 'v': ['a', 'b']}, schema=s0))
+
+        self.catalog.alter_table(
+            name, [SchemaChange.rename_column('v', 'renamed')], False)
+        table = self.catalog.get_table(name)
+        s1 = pa.schema([('k', pa.int64()), ('renamed', pa.string())])
+        self._write(table, pa.Table.from_pydict(
+            {'k': [3], 'renamed': ['c']}, schema=s1))
+
+        self.assertEqual(self._read_rows(table), [
+            {'k': 1, 'renamed': 'a'},
+            {'k': 2, 'renamed': 'b'},
+            {'k': 3, 'renamed': 'c'}])
+
+    def test_evolution_column_position_then_read(self):
+        # A7: moving a column to FIRST must reorder the read schema; the old
+        # file (original order) must be remapped so values stay with their
+        # column.
+        name = 'default.evo_position'
+        s0 = pa.schema([('k', pa.int64()), ('a', pa.string()), ('b', pa.string())])
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(s0), False)
+        table = self.catalog.get_table(name)
+        self._write(table, pa.Table.from_pydict(
+            {'k': [1], 'a': ['a1'], 'b': ['b1']}, schema=s0))
+
+        self.catalog.alter_table(
+            name, [SchemaChange.update_column_position(Move.first('b'))], False)
+        table = self.catalog.get_table(name)
+        s1 = pa.schema([('b', pa.string()), ('k', pa.int64()), ('a', pa.string())])
+        self._write(table, pa.Table.from_pydict(
+            {'b': ['b2'], 'k': [2], 'a': ['a2']}, schema=s1))
+
+        arrow = self._read_arrow(table)
+        self.assertEqual(arrow.column_names, ['b', 'k', 'a'])
+        self.assertEqual(self._read_rows(table), [
+            {'b': 'b1', 'k': 1, 'a': 'a1'},
+            {'b': 'b2', 'k': 2, 'a': 'a2'}])
+
+    def test_evolution_multi_version_chain(self):
+        # A8: chain schema versions (add + type promotion), writing one batch
+        # per version then reading across all of them. Rename across versions
+        # is covered on its own by A6; this case isolates the add+promotion
+        # chain.
+        name = 'default.evo_chain'
+        s0 = pa.schema([('k', pa.int64()), ('a', pa.string()), ('n', pa.int32())])
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(s0), False)
+        table = self.catalog.get_table(name)
+        self._write(table, pa.Table.from_pydict(
+            {'k': [1], 'a': ['a1'], 'n': [10]}, schema=s0))
+
+        # v1: add column b
+        self.catalog.alter_table(
+            name, [SchemaChange.add_column('b', AtomicType('STRING'))], False)
+        table = self.catalog.get_table(name)
+        s1 = pa.schema([('k', pa.int64()), ('a', pa.string()),
+                        ('n', pa.int32()), ('b', pa.string())])
+        self._write(table, pa.Table.from_pydict(
+            {'k': [2], 'a': ['a2'], 'n': [20], 'b': ['b2']}, schema=s1))
+
+        # v2: promote n int32 -> int64
+        self.catalog.alter_table(
+            name, [SchemaChange.update_column_type('n', AtomicType('BIGINT'))],
+            False)
+        table = self.catalog.get_table(name)
+        s2 = pa.schema([('k', pa.int64()), ('a', pa.string()),
+                        ('n', pa.int64()), ('b', pa.string())])
+        self._write(table, pa.Table.from_pydict(
+            {'k': [3], 'a': ['a3'], 'n': [30], 'b': ['b3']}, schema=s2))
+
+        # v3: add column d
+        self.catalog.alter_table(
+            name, [SchemaChange.add_column('d', AtomicType('STRING'))], False)
+        table = self.catalog.get_table(name)
+        s3 = pa.schema([('k', pa.int64()), ('a', pa.string()),
+                        ('n', pa.int64()), ('b', pa.string()), ('d', pa.string())])
+        self._write(table, pa.Table.from_pydict(
+            {'k': [4], 'a': ['a4'], 'n': [40], 'b': ['b4'], 'd': ['d4']},
+            schema=s3))
+
+        self.assertEqual(self._read_rows(table), [
+            {'k': 1, 'a': 'a1', 'n': 10, 'b': None, 'd': None},
+            {'k': 2, 'a': 'a2', 'n': 20, 'b': 'b2', 'd': None},
+            {'k': 3, 'a': 'a3', 'n': 30, 'b': 'b3', 'd': None},
+            {'k': 4, 'a': 'a4', 'n': 40, 'b': 'b4', 'd': 'd4'}])
+
+    def test_evolution_projection_after_add_column(self):
+        # A10: projecting a subset that includes the newly added column must
+        # return NULL for that column on rows from old files.
+        name = 'default.evo_projection'
+        s0 = pa.schema([('k', pa.int64()), ('a', pa.string())])
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(s0), False)
+        table = self.catalog.get_table(name)
+        self._write(table, pa.Table.from_pydict(
+            {'k': [1, 2], 'a': ['a1', 'a2']}, schema=s0))
+
+        self.catalog.alter_table(
+            name, [SchemaChange.add_column('b', AtomicType('STRING'))], False)
+        table = self.catalog.get_table(name)
+        s1 = pa.schema([('k', pa.int64()), ('a', pa.string()), ('b', pa.string())])
+        self._write(table, pa.Table.from_pydict(
+            {'k': [3], 'a': ['a3'], 'b': ['b3']}, schema=s1))
+
+        rows = sorted(
+            self._read_arrow(table, projection=['k', 'b']).to_pylist(),
+            key=lambda r: r['k'])
+        self.assertEqual(rows, [
+            {'k': 1, 'b': None}, {'k': 2, 'b': None}, {'k': 3, 'b': 'b3'}])
+
+    def test_evolution_nullability_then_read(self):
+        # A11: relaxing NOT NULL -> nullable must let later NULLs read back
+        # while the old (non-null) file still reads correctly.
+        name = 'default.evo_nullability'
+        s0 = pa.schema([('k', pa.int64()),
+                        pa.field('v', pa.string(), nullable=False)])
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(s0), False)
+        table = self.catalog.get_table(name)
+        self._write(table, pa.Table.from_pydict(
+            {'k': [1, 2], 'v': ['a', 'b']}, schema=s0))
+
+        self.catalog.alter_table(
+            name, [SchemaChange.update_column_nullability('v', True)], False)
+        table = self.catalog.get_table(name)
+        s1 = pa.schema([('k', pa.int64()), ('v', pa.string())])
+        self._write(table, pa.Table.from_pydict({'k': [3], 'v': [None]}, schema=s1))
+
+        self.assertEqual(self._read_rows(table), [
+            {'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}, {'k': 3, 'v': None}])
+
+    def test_evolution_drop_then_readd_same_name(self):
+        # A13 (name-vs-field-id isolation): dropping v then adding a new v
+        # (fresh field id) must NOT revive the old file's v. Because columns
+        # are aligned by field id, the dropped v's id is gone and the re-added
+        # v's new id is absent from old files, so old rows read NULL. Covers
+        # same-type and changed-type re-add.
+        for label, readd_paimon, readd_arrow, new_val in [
+            ('same_type', 'STRING', pa.string(), ['new3']),
+            ('changed_type', 'INT', pa.int32(), [99]),
+        ]:
+            with self.subTest(case=label):
+                name = 'default.evo_drop_readd_{}'.format(label)
+                s0 = pa.schema([('k', pa.int64()), ('v', pa.string())])
+                self.catalog.create_table(
+                    name, Schema.from_pyarrow_schema(s0), False)
+                table = self.catalog.get_table(name)
+                self._write(table, pa.Table.from_pydict(
+                    {'k': [1, 2], 'v': ['old1', 'old2']}, schema=s0))
+
+                self.catalog.alter_table(
+                    name, [SchemaChange.drop_column('v')], False)
+                self.catalog.alter_table(
+                    name, [SchemaChange.add_column('v', AtomicType(readd_paimon))],
+                    False)
+                table = self.catalog.get_table(name)
+                s2 = pa.schema([('k', pa.int64()), ('v', readd_arrow)])
+                self._write(table, pa.Table.from_pydict(
+                    {'k': [3], 'v': new_val}, schema=s2))
+
+                self.assertEqual(self._read_rows(table), [
+                    {'k': 1, 'v': None},
+                    {'k': 2, 'v': None},
+                    {'k': 3, 'v': new_val[0]}])
+
+    def test_evolution_rename_then_add_same_name(self):
+        # A14 (name-vs-field-id isolation): rename a->b, then add a new a
+        # (fresh field id). Aligned by field id, reading old files b (old id)
+        # carries the old a-data and the new a (new id) reads NULL -- a
+        # name-based alignment would instead feed the old physical column 'a'
+        # to the new a and leave b empty.
+        name = 'default.evo_rename_readd'
+        s0 = pa.schema([('k', pa.int64()), ('a', pa.string())])
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(s0), False)
+        table = self.catalog.get_table(name)
+        self._write(table, pa.Table.from_pydict(
+            {'k': [1, 2], 'a': ['old1', 'old2']}, schema=s0))
+
+        self.catalog.alter_table(
+            name, [SchemaChange.rename_column('a', 'b')], False)
+        self.catalog.alter_table(
+            name, [SchemaChange.add_column('a', AtomicType('STRING'))], False)
+        table = self.catalog.get_table(name)
+        s2 = pa.schema([('k', pa.int64()), ('b', pa.string()), ('a', pa.string())])
+        self._write(table, pa.Table.from_pydict(
+            {'k': [3], 'b': ['B3'], 'a': ['A3']}, schema=s2))
+
+        self.assertEqual(self._read_rows(table), [
+            {'k': 1, 'b': 'old1', 'a': None},
+            {'k': 2, 'b': 'old2', 'a': None},
+            {'k': 3, 'b': 'B3', 'a': 'A3'}])
+
+    def test_evolution_column_swap_direct_rejected(self):
+        # A15a: a one-shot name swap is rejected -- renaming a->b while b
+        # still exists collides on the existing name. (Constraint check, this
+        # behaviour is correct.)
+        name = 'default.evo_swap_direct'
+        s0 = pa.schema([('k', pa.int64()), ('a', pa.string()), ('b', pa.string())])
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(s0), False)
+        # alter_table wraps the underlying ColumnAlreadyExistException in a
+        # RuntimeError (filesystem_catalog catch-all), so match on that.
+        with self.assertRaises(RuntimeError) as cm:
+            self.catalog.alter_table(name, [
+                SchemaChange.rename_column('a', 'b'),
+                SchemaChange.rename_column('b', 'a'),
+            ], False)
+        self.assertIn('already exists', str(cm.exception))
+
+    def test_evolution_column_swap_via_temp_name(self):
+        # A15b (name-vs-field-id isolation): a 3-step swap via a temp name
+        # keeps field ids stable, so on read the old data follows the id, not
+        # the name -- old 'a1' (id of a) ends up under column b, old 'b1'
+        # under column a. A name-based alignment would drop/misalign both.
+        name = 'default.evo_swap_temp'
+        s0 = pa.schema([('k', pa.int64()), ('a', pa.string()), ('b', pa.string())])
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(s0), False)
+        table = self.catalog.get_table(name)
+        self._write(table, pa.Table.from_pydict(
+            {'k': [1], 'a': ['a1'], 'b': ['b1']}, schema=s0))
+
+        self.catalog.alter_table(name, [
+            SchemaChange.rename_column('a', '__tmp'),
+            SchemaChange.rename_column('b', 'a'),
+            SchemaChange.rename_column('__tmp', 'b'),
+        ], False)
+        table = self.catalog.get_table(name)
+        s1 = pa.schema([('k', pa.int64()), ('b', pa.string()), ('a', pa.string())])
+        self._write(table, pa.Table.from_pydict(
+            {'k': [2], 'b': ['B2'], 'a': ['A2']}, schema=s1))
+
+        self.assertEqual(self._read_rows(table), [
+            {'k': 1, 'b': 'a1', 'a': 'b1'},
+            {'k': 2, 'b': 'B2', 'a': 'A2'}])
 
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()
@@ -431,3 +876,50 @@ class SchemaEvolutionReadTest(unittest.TestCase):
     def _scan_table(self, read_builder):
         splits = read_builder.new_scan().plan().splits()
         return splits
+
+
+@pytest.mark.parametrize('file_format', ['parquet', 'avro'])
+@pytest.mark.parametrize('evolution', ['rename', 'readd'])
+def test_cross_schema_filter_runs_after_field_id_mapping(tmp_path, file_format, evolution):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('k', pa.int64()), ('v', pa.string())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(
+        schema, options={'file.format': file_format}), False)
+
+    def write(table, values):
+        builder = table.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        try:
+            writer.write_arrow(pa.Table.from_pylist(values))
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+
+    write(catalog.get_table('default.t'), [{'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}])
+    if evolution == 'rename':
+        catalog.alter_table('default.t', [SchemaChange.rename_column('v', 'renamed')], False)
+        latest_rows = [{'k': 3, 'renamed': 'c'}, {'k': 4, 'renamed': 'b'}]
+    else:
+        catalog.alter_table('default.t', [SchemaChange.drop_column('v')], False)
+        catalog.alter_table('default.t', [SchemaChange.add_column('v', AtomicType('STRING'))], False)
+        latest_rows = [{'k': 3, 'v': 'b'}, {'k': 4, 'v': None}]
+    table = catalog.get_table('default.t').copy({'scan.native-plan.enabled': 'false'})
+    write(table, latest_rows)
+    # Read an unfiltered plan so manifest statistics cannot hide a reader bug.
+    splits = table.new_read_builder().new_scan().plan().splits()
+    pb = table.new_read_builder().new_predicate_builder()
+    cases = ([(pb.equal('renamed', 'b'), [2, 4]), (pb.equal('renamed', 'missing'), [])]
+             if evolution == 'rename' else [(pb.is_null('v'), [1, 2, 4]), (pb.equal('v', 'b'), [3])])
+    for predicate, expected in cases:
+        for limit in (None, 1):
+            builder = table.new_read_builder().with_filter(predicate).with_projection(['k'])
+            if limit is not None:
+                builder.with_limit(limit)
+            actual = builder.new_read().to_arrow(splits, parallelism=1).column('k').to_pylist()
+            if limit is None:
+                assert sorted(actual) == expected
+            else:
+                assert len(actual) == min(1, len(expected))
+                assert all(key in expected for key in actual)

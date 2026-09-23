@@ -25,7 +25,6 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.NestedProjectedRow;
 
 import javax.annotation.Nullable;
 
@@ -51,9 +50,7 @@ public class RowFileFormat extends FileFormat {
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> filters) {
-        NestedProjectedRow projection =
-                NestedProjectedRow.create(dataSchemaRowType, projectedRowType);
-        return new RowFormatReaderFactory(dataSchemaRowType, projection);
+        return new RowFormatReaderFactory(dataSchemaRowType, projectedRowType);
     }
 
     @Override

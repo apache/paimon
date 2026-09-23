@@ -71,13 +71,15 @@ public class CoordinatedWriteRestore implements WriteRestore {
             BinaryRow partition,
             int bucket,
             boolean scanDynamicBucketIndex,
-            boolean scanDeleteVectorsIndex) {
+            boolean scanDeleteVectorsIndex,
+            boolean scanVectorIndexPayloads) {
         ScanCoordinationRequest coordinationRequest =
                 new ScanCoordinationRequest(
                         serializeBinaryRow(partition),
                         bucket,
                         scanDynamicBucketIndex,
-                        scanDeleteVectorsIndex);
+                        scanDeleteVectorsIndex,
+                        scanVectorIndexPayloads);
         try {
             byte[] requestContent = serializeObject(coordinationRequest);
             Integer nextPageToken = null;
@@ -106,7 +108,8 @@ public class CoordinatedWriteRestore implements WriteRestore {
                     response.totalBuckets(),
                     response.extractDataFiles(),
                     response.extractDynamicBucketIndex(),
-                    response.extractDeletionVectorsIndex());
+                    response.extractDeletionVectorsIndex(),
+                    response.extractVectorIndexPayloads());
         } catch (IOException
                 | ExecutionException
                 | InterruptedException

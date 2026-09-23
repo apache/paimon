@@ -201,7 +201,7 @@ public class VectorizedDeltaBinaryPackedReader extends VectorizedReaderBase {
             rowId += n;
             remaining -= n;
         }
-        valuesRead = total - remaining;
+        valuesRead += total;
     }
 
     /**

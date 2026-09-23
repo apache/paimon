@@ -39,8 +39,8 @@ public class VariantSerializer extends SerializerSingleton<Variant> {
 
     @Override
     public void serialize(Variant record, DataOutputView target) throws IOException {
-        BinarySerializer.INSTANCE.serialize(record.value(), target);
-        BinarySerializer.INSTANCE.serialize(record.metadata(), target);
+        BinarySerializer.INSTANCE.serialize(record.valueBuffer(), target);
+        BinarySerializer.INSTANCE.serialize(record.metadataBuffer(), target);
     }
 
     @Override

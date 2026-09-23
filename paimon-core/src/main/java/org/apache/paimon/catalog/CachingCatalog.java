@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.MemorySize;
@@ -50,8 +51,10 @@ import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRE_AFTER_ACCESS;
 import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRE_AFTER_WRITE;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_MAX_MEMORY;
+import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SIDECAR_MAX_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_THRESHOLD;
+import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SOFT_VALUES;
 import static org.apache.paimon.options.CatalogOptions.CACHE_PARTITION_MAX_NUM;
 import static org.apache.paimon.options.CatalogOptions.CACHE_SNAPSHOT_MAX_NUM_PER_TABLE;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -69,6 +72,7 @@ public class CachingCatalog extends DelegateCatalog {
     protected Cache<String, Database> databaseCache;
     protected Cache<Identifier, Table> tableCache;
     @Nullable protected final SegmentsCache<Path> manifestCache;
+    @Nullable protected final SegmentsCache<Path> manifestSidecarCache;
     // partition cache will affect data latency
     @Nullable protected Cache<Identifier, List<Partition>> partitionCache;
     @Nullable protected DVMetaCache dvMetaCache;
@@ -97,7 +101,25 @@ public class CachingCatalog extends DelegateCatalog {
         }
 
         this.snapshotMaxNumPerTable = options.get(CACHE_SNAPSHOT_MAX_NUM_PER_TABLE);
-        this.manifestCache = SegmentsCache.create(manifestMaxMemory, manifestCacheThreshold);
+        boolean manifestCacheSoftValues = options.get(CACHE_MANIFEST_SOFT_VALUES);
+        this.manifestCache =
+                SegmentsCache.create(
+                        (int) CoreOptions.PAGE_SIZE.defaultValue().getBytes(),
+                        manifestMaxMemory,
+                        manifestCacheThreshold,
+                        expireAfterAccess,
+                        manifestCacheSoftValues);
+
+        MemorySize sidecarMaxMemory = options.get(CACHE_MANIFEST_SIDECAR_MAX_MEMORY);
+        this.manifestSidecarCache =
+                sidecarMaxMemory.getBytes() == 0
+                        ? manifestCache
+                        : SegmentsCache.create(
+                                (int) CoreOptions.PAGE_SIZE.defaultValue().getBytes(),
+                                sidecarMaxMemory,
+                                sidecarMaxMemory.getBytes(),
+                                expireAfterAccess,
+                                manifestCacheSoftValues);
 
         this.cachedPartitionMaxNum = options.get(CACHE_PARTITION_MAX_NUM);
 
@@ -290,6 +312,9 @@ public class CachingCatalog extends DelegateCatalog {
             if (manifestCache != null) {
                 storeTable.setManifestCache(manifestCache);
             }
+            if (manifestSidecarCache != null) {
+                storeTable.setManifestSidecarCache(manifestSidecarCache);
+            }
             if (dvMetaCache != null) {
                 storeTable.setDVMetaCache(dvMetaCache);
             }
@@ -324,6 +349,36 @@ public class CachingCatalog extends DelegateCatalog {
             partitionCache.put(identifier, result);
         }
         return result;
+    }
+
+    @Override
+    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        wrapped.createPartitions(identifier, partitions);
+        if (partitionCache != null) {
+            partitionCache.invalidate(identifier);
+        }
+    }
+
+    @Override
+    public void createPartitions(
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            boolean ignoreIfExists,
+            @Nullable List<PartitionStatistics> statistics,
+            boolean replaceStatistics,
+            @Nullable List<Map<String, String>> partitionOptions)
+            throws TableNotExistException {
+        wrapped.createPartitions(
+                identifier,
+                partitions,
+                ignoreIfExists,
+                statistics,
+                replaceStatistics,
+                partitionOptions);
+        if (partitionCache != null) {
+            partitionCache.invalidate(identifier);
+        }
     }
 
     @Override
@@ -385,6 +440,11 @@ public class CachingCatalog extends DelegateCatalog {
         if (manifestCache != null) {
             manifestCacheSize = manifestCache.estimatedSize();
             manifestCacheBytes = manifestCache.totalCacheBytes();
+        }
+        // Keep reporting total manifest metadata usage even though sidecars have their own budget.
+        if (manifestSidecarCache != null && manifestSidecarCache != manifestCache) {
+            manifestCacheSize += manifestSidecarCache.estimatedSize();
+            manifestCacheBytes += manifestSidecarCache.totalCacheBytes();
         }
         long partitionCacheSize = 0L;
         if (partitionCache != null) {

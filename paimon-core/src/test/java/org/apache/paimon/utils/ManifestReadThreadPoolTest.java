@@ -26,6 +26,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.util.Collections.emptyList;
@@ -125,6 +126,16 @@ public class ManifestReadThreadPoolTest {
     public void testForSingletonInput() {
         Iterable<Integer> re =
                 sequentialBatchedExecute(i -> singletonList(i + 1), singletonList(1), null);
+        re.forEach(i -> Assertions.assertThat(i).isEqualTo(2));
+    }
+
+    @Test
+    public void testNonPositiveThreadNumUsesDefaultExecutor() {
+        ExecutorService executor = ManifestReadThreadPool.getExecutorService(0);
+        Assertions.assertThat(executor).isNotInstanceOf(SemaphoredDelegatingExecutor.class);
+
+        Iterable<Integer> re =
+                sequentialBatchedExecute(i -> singletonList(i + 1), singletonList(1), 0);
         re.forEach(i -> Assertions.assertThat(i).isEqualTo(2));
     }
 

@@ -20,7 +20,12 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.utils.ObjectSerializerTestBase;
 
+import org.junit.jupiter.api.Test;
+
 import java.util.Arrays;
+import java.util.Collections;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link DataFileMetaSerializer}. */
 public class DataFileMetaSerializerTest extends ObjectSerializerTestBase<DataFileMeta> {
@@ -34,6 +39,47 @@ public class DataFileMetaSerializerTest extends ObjectSerializerTestBase<DataFil
 
     @Override
     protected DataFileMeta object() {
-        return gen.next().meta.copy(Arrays.asList("extra1", "extra2"));
+        return gen.next()
+                .meta
+                .copy(Arrays.asList("extra1", "extra2"))
+                .withWriteColsSequences(new long[] {3L, 42L});
+    }
+
+    @Test
+    void testCopyOperationsPreserveWriteColsSequences() {
+        DataFileMeta file = object();
+        assertWriteColsSequences(file.upgrade(file.level() + 1));
+        assertWriteColsSequences(file.rename("renamed.parquet"));
+        assertWriteColsSequences(file.copyWithoutStats());
+        assertWriteColsSequences(file.assignSequenceNumber(1L, 2L));
+        assertWriteColsSequences(file.assignFirstRowId(1L));
+        assertWriteColsSequences(file.newFirstRowId(null));
+        assertWriteColsSequences(file.copy(Collections.emptyList()));
+        assertWriteColsSequences(file.newExternalPath("external/renamed.parquet"));
+        assertWriteColsSequences(file.copy(new byte[] {1}));
+    }
+
+    @Test
+    void testLegacySerializerDropsWriteColsSequences() {
+        DataFileMetaWriteColsLegacySerializer legacy = new DataFileMetaWriteColsLegacySerializer();
+        DataFileMeta file = legacy.fromRow(legacy.toRow(object()));
+        assertThat(file.writeColsSequences()).isNull();
+    }
+
+    @Test
+    void testWriteColsSequencesAreDefensivelyCopied() {
+        long[] sequences = {3L, 42L};
+        DataFileMeta file = gen.next().meta.withWriteColsSequences(sequences);
+
+        sequences[0] = 100L;
+        assertWriteColsSequences(file);
+
+        long[] returned = file.writeColsSequences();
+        returned[1] = 100L;
+        assertWriteColsSequences(file);
+    }
+
+    private void assertWriteColsSequences(DataFileMeta file) {
+        assertThat(file.writeColsSequences()).containsExactly(3L, 42L);
     }
 }

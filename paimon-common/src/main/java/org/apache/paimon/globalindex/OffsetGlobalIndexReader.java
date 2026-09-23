@@ -18,19 +18,27 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FullTextSearch;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * A {@link GlobalIndexReader} that wraps another reader and applies an offset to all row IDs in the
  * results.
  */
-public class OffsetGlobalIndexReader implements GlobalIndexReader {
+public class OffsetGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
 
     private final GlobalIndexReader wrapped;
     private final long offset;
@@ -43,93 +51,239 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitIsNotNull(FieldRef fieldRef) {
-        return applyOffset(wrapped.visitIsNotNull(fieldRef));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(FieldRef fieldRef) {
+        return wrapped.visitIsNotNull(fieldRef).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitIsNull(FieldRef fieldRef) {
-        return applyOffset(wrapped.visitIsNull(fieldRef));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(FieldRef fieldRef) {
+        return wrapped.visitIsNull(fieldRef).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitStartsWith(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitStartsWith(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitStartsWith(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitEndsWith(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitEndsWith(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitEndsWith(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitEndsWith(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitContains(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitContains(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitContains(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitLike(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitLike(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsCandidates(
+            FieldRef fieldRef, List<Object> literals, @Nullable GlobalIndexResult candidates) {
+        GlobalIndexResult localCandidates = localCandidates(candidates);
+        if (localCandidates != null && localCandidates.results().isEmpty()) {
+            return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
+        }
+        CompletableFuture<Optional<GlobalIndexResult>> result =
+                wrapped instanceof ContainsRefiningGlobalIndexReader
+                        ? ((ContainsRefiningGlobalIndexReader) wrapped)
+                                .visitContainsCandidates(fieldRef, literals, localCandidates)
+                        : visitContainsConjunctionFallback(fieldRef, literals, localCandidates);
+        return result.thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitLessThan(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitLessThan(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsConjunction(
+            FieldRef fieldRef, List<Object> literals, @Nullable GlobalIndexResult candidates) {
+        GlobalIndexResult localCandidates = localCandidates(candidates);
+        if (localCandidates != null && localCandidates.results().isEmpty()) {
+            return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
+        }
+
+        CompletableFuture<Optional<GlobalIndexResult>> result;
+        if (wrapped instanceof ContainsRefiningGlobalIndexReader) {
+            result =
+                    ((ContainsRefiningGlobalIndexReader) wrapped)
+                            .visitContainsConjunction(fieldRef, literals, localCandidates);
+        } else {
+            result = visitContainsConjunctionFallback(fieldRef, literals, localCandidates);
+        }
+        return result.thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitGreaterOrEqual(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContains(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitArrayContains(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitNotEqual(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitNotEqual(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitArraysOverlap(
+            FieldRef fieldRef, List<Object> literals) {
+        return wrapped.visitArraysOverlap(fieldRef, literals).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitLessOrEqual(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContainsAll(
+            FieldRef fieldRef, List<Object> literals) {
+        return wrapped.visitArrayContainsAll(fieldRef, literals).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitEqual(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitEqual(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitLike(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitGreaterThan(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitGreaterThan(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitLessThan(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitIn(FieldRef fieldRef, List<Object> literals) {
-        return applyOffset(wrapped.visitIn(fieldRef, literals));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitGreaterOrEqual(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitNotIn(FieldRef fieldRef, List<Object> literals) {
-        return applyOffset(wrapped.visitNotIn(fieldRef, literals));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitNotEqual(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitBetween(FieldRef fieldRef, Object from, Object to) {
-        return applyOffset(wrapped.visitBetween(fieldRef, from, to));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitLessOrEqual(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<ScoredGlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
+    public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitEqual(fieldRef, literal).thenApply(this::applyOffset);
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitGreaterThan(fieldRef, literal).thenApply(this::applyOffset);
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitIn(
+            FieldRef fieldRef, List<Object> literals) {
+        return wrapped.visitIn(fieldRef, literals).thenApply(this::applyOffset);
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
+            FieldRef fieldRef, List<Object> literals) {
+        return wrapped.visitNotIn(fieldRef, literals).thenApply(this::applyOffset);
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitRange(
+            FieldRef fieldRef, Object from, Object to, boolean fromInclusive, boolean toInclusive) {
+        return wrapped.visitRange(fieldRef, from, to, fromInclusive, toInclusive)
+                .thenApply(this::applyOffset);
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        return wrapped.visitBetween(fieldRef, from, to).thenApply(this::applyOffset);
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitNotBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        return wrapped.visitNotBetween(fieldRef, from, to).thenApply(this::applyOffset);
+    }
+
+    @Override
+    public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
+            VectorSearch vectorSearch) {
         return wrapped.visitVectorSearch(vectorSearch.offsetRange(this.offset, this.to))
-                .map(r -> r.offset(offset));
+                .thenApply(opt -> opt.map(r -> r.offset(offset)));
     }
 
     @Override
-    public Optional<ScoredGlobalIndexResult> visitFullTextSearch(FullTextSearch fullTextSearch) {
-        return wrapped.visitFullTextSearch(fullTextSearch).map(r -> r.offset(offset));
+    public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitFullTextSearch(
+            FullTextSearch fullTextSearch) {
+        return wrapped.visitFullTextSearch(fullTextSearch.offsetRange(this.offset, this.to))
+                .thenApply(opt -> opt.map(r -> r.offset(offset)));
+    }
+
+    @Override
+    public CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> visitBatchVectorSearch(
+            BatchVectorSearch batchVectorSearch) {
+        return wrapped.visitBatchVectorSearch(batchVectorSearch.offsetRange(this.offset, this.to))
+                .thenApply(
+                        results -> {
+                            List<Optional<ScoredGlobalIndexResult>> offsetResults =
+                                    new ArrayList<>(results.size());
+                            for (Optional<ScoredGlobalIndexResult> result : results) {
+                                offsetResults.add(result.map(r -> r.offset(offset)));
+                            }
+                            return offsetResults;
+                        });
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitTopN(TopN topN) {
+        return wrapped.visitTopN(topN).thenApply(this::applyOffset);
     }
 
     private Optional<GlobalIndexResult> applyOffset(Optional<GlobalIndexResult> result) {
         return result.map(r -> r.offset(offset));
+    }
+
+    @Nullable
+    private GlobalIndexResult localCandidates(@Nullable GlobalIndexResult candidates) {
+        if (candidates == null) {
+            return null;
+        }
+        RoaringNavigableMap64 local = new RoaringNavigableMap64();
+        for (Range range : candidates.results().toRangeList()) {
+            long from = Math.max(range.from, offset);
+            long rangeTo = Math.min(range.to, to);
+            if (from <= rangeTo) {
+                local.addRange(new Range(from - offset, rangeTo - offset));
+            }
+        }
+        return GlobalIndexResult.create(local);
+    }
+
+    private CompletableFuture<Optional<GlobalIndexResult>> visitContainsConjunctionFallback(
+            FieldRef fieldRef, List<Object> literals, @Nullable GlobalIndexResult candidates) {
+        List<CompletableFuture<Optional<GlobalIndexResult>>> futures =
+                new ArrayList<>(literals.size());
+        for (Object literal : literals) {
+            futures.add(wrapped.visitContains(fieldRef, literal));
+        }
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .thenApply(
+                        ignored -> {
+                            Optional<GlobalIndexResult> result = Optional.empty();
+                            for (CompletableFuture<Optional<GlobalIndexResult>> future : futures) {
+                                Optional<GlobalIndexResult> current = future.join();
+                                if (!current.isPresent()) {
+                                    continue;
+                                }
+                                result =
+                                        Optional.of(
+                                                result.isPresent()
+                                                        ? result.get().and(current.get())
+                                                        : current.get());
+                            }
+                            if (result.isPresent() && candidates != null) {
+                                result = Optional.of(result.get().and(candidates));
+                            }
+                            return result;
+                        });
     }
 
     @Override

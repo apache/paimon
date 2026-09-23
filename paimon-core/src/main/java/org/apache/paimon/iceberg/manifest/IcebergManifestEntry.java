@@ -111,7 +111,16 @@ public class IcebergManifestEntry {
         return dataFile;
     }
 
+    public IcebergManifestEntry withFile(IcebergDataFileMeta file) {
+        return new IcebergManifestEntry(
+                status, snapshotId, sequenceNumber, fileSequenceNumber, file);
+    }
+
     public static RowType schema(RowType partitionType) {
+        return schema(partitionType, false);
+    }
+
+    public static RowType schema(RowType partitionType, boolean withFirstRowId) {
 
         RowType icebergPartition = icebergPartitionType(partitionType);
 
@@ -122,7 +131,9 @@ public class IcebergManifestEntry {
         fields.add(new DataField(4, "file_sequence_number", DataTypes.BIGINT()));
         fields.add(
                 new DataField(
-                        2, "data_file", IcebergDataFileMeta.schema(icebergPartition).notNull()));
+                        2,
+                        "data_file",
+                        IcebergDataFileMeta.schema(icebergPartition, withFirstRowId).notNull()));
         return new RowType(false, fields);
     }
 

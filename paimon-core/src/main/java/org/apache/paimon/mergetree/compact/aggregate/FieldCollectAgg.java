@@ -54,11 +54,9 @@ public class FieldCollectAgg extends FieldAggregator {
         this.distinct = distinct;
         this.elementGetter = InternalArray.createElementGetter(dataType.getElementType());
 
-        if (distinct
-                && dataType.getElementType()
-                        .getTypeRoot()
-                        .getFamilies()
-                        .contains(DataTypeFamily.CONSTRUCTED)) {
+        // The equaliser is built from the element type alone: retract() needs it whether or not
+        // the array is distinct, and agg() gates de-duplication on 'distinct' separately.
+        if (needsEqualiser(dataType.getElementType())) {
             DataType elementType = dataType.getElementType();
             List<DataType> fieldTypes =
                     elementType instanceof RowType
@@ -82,6 +80,19 @@ public class FieldCollectAgg extends FieldAggregator {
         }
     }
 
+    /**
+     * Whether elements of this type need the generated equaliser rather than {@link Object#equals}.
+     *
+     * <p>Constructed types need it because two rows holding the same values are not necessarily
+     * equal objects. Binary types need it for a blunter reason: an element of {@code BINARY},
+     * {@code VARBINARY}, {@code GEOMETRY} or {@code GEOGRAPHY} is a {@code byte[]}, which inherits
+     * identity equality from {@link Object}, so two arrays with the same content never compare
+     * equal and never share a hash bucket.
+     */
+    private static boolean needsEqualiser(DataType elementType) {
+        return elementType.is(DataTypeFamily.CONSTRUCTED) || BinaryMapKeys.isBinary(elementType);
+    }
+
     @Override
     public Object aggReversed(Object accumulator, Object inputField) {
         // we don't need to actually do the reverse here for this agg
@@ -100,7 +111,7 @@ public class FieldCollectAgg extends FieldAggregator {
             return accumulator == null ? inputField : accumulator;
         }
 
-        if (equaliser != null) {
+        if (distinct && equaliser != null) {
             List<Object> collection = new ArrayList<>();
             // do not need to distinct accumulator, because the accumulator is always distinct, no
             // need to distinct it every time

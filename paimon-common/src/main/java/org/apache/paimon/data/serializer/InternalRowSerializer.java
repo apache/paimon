@@ -59,7 +59,12 @@ public class InternalRowSerializer extends AbstractRowDataSerializer<InternalRow
 
     @Override
     public void serialize(InternalRow row, DataOutputView target) throws IOException {
-        binarySerializer.serialize(toBinaryRow(row), target);
+        BinaryRow binaryRow = toBinaryRow(row);
+        try {
+            binarySerializer.serialize(binaryRow, target);
+        } finally {
+            rowHelper.resetIfTooLarge(binaryRow);
+        }
     }
 
     @Override
@@ -132,7 +137,12 @@ public class InternalRowSerializer extends AbstractRowDataSerializer<InternalRow
     @Override
     public int serializeToPages(InternalRow row, AbstractPagedOutputView target)
             throws IOException {
-        return binarySerializer.serializeToPages(toBinaryRow(row), target);
+        BinaryRow binaryRow = toBinaryRow(row);
+        try {
+            return binarySerializer.serializeToPages(binaryRow, target);
+        } finally {
+            rowHelper.resetIfTooLarge(binaryRow);
+        }
     }
 
     @Override

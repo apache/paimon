@@ -51,6 +51,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** ITCase for spark reader. */
 public class SparkReadITCase extends SparkReadTestBase {
 
+    private static final String CHANGELOG_PRODUCER_WITHOUT_PRIMARY_KEYS =
+            "Can not set changelog-producer on table without primary keys";
+
     @Test
     public void testNormal() {
         innerTestSimpleType(spark.table("t1"));
@@ -311,10 +314,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                         () ->
                                 spark.sql(
                                         "CREATE TABLE T (a INT) TBLPROPERTIES ('changelog-producer' = 'input')"))
-                .rootCause()
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining(
-                        "Can not set changelog-producer on table without primary keys");
+                .satisfies(SparkReadITCase::assertChangelogProducerWithoutPrimaryKeys);
 
         spark.sql("CREATE TABLE T (a INT)");
 
@@ -322,10 +322,21 @@ public class SparkReadITCase extends SparkReadTestBase {
                         () ->
                                 spark.sql(
                                         "ALTER TABLE T SET TBLPROPERTIES('changelog-producer' 'input')"))
-                .rootCause()
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining(
-                        "Can not set changelog-producer on table without primary keys");
+                .satisfies(SparkReadITCase::assertChangelogProducerWithoutPrimaryKeys);
+    }
+
+    private static void assertChangelogProducerWithoutPrimaryKeys(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof RuntimeException
+                    && current.getMessage() != null
+                    && current.getMessage().contains(CHANGELOG_PRODUCER_WITHOUT_PRIMARY_KEYS)) {
+                return;
+            }
+            current = current.getCause();
+        }
+
+        assertThat(throwable).hasMessageContaining(CHANGELOG_PRODUCER_WITHOUT_PRIMARY_KEYS);
     }
 
     @Test

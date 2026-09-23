@@ -1,0 +1,90 @@
+---
+title: "Multimodal Table"
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Overview
+
+A multimodal table keeps metadata, binary payloads, embeddings, and text in one
+logical table. An ingestion pipeline can append records, enrich selected columns,
+and build indexes for filtering or retrieval.
+
+This chapter focuses on append tables with **Data Evolution**: column files share
+row IDs, so adding captions or replacing embeddings can leave large media payloads
+in their existing files. It is an append table with additional storage and update
+capabilities, not a primary-key table that deduplicates records by a business key.
+
+![One logical record combines normal columns, dedicated BLOB payloads, and optional dedicated vectors by row ID; indexes select matching row IDs for reads.](/img/multimodal-table-overview.svg)
+
+## Start Here
+
+Follow the [Quick Start](./quick-start) to create a table, write sample data, update
+selected columns, and build a scalar index. It uses Spark SQL in a configured
+Paimon catalog. The topic pages also provide Flink, Java, and Python examples where
+supported.
+
+| If you need to… | Read |
+| --- | --- |
+| Store images, audio, documents, or collections of binary objects | [BLOB Storage](./blob) |
+| Reuse payloads across tables or export a temporary URL | [BLOB References and Sharing](./blob-references) |
+| Address video frames while storing complete encoded videos | [Video Frame Storage](./video) |
+| Store fixed-dimension embeddings | [Vector Storage](./vector) |
+| Query metadata whose structure varies between rows | [Variant Storage](./variant) |
+| Backfill or replace selected columns; update and delete rows | [Data Evolution](./data-evolution) |
+| Understand file ranges, column versions, and row reconstruction | [File Layout and Reads](./data-evolution-file-layout) |
+| Compact column files or materialize logical deletions | [Data Evolution Maintenance](./data-evolution-maintenance) |
+| Choose an index and retrieve matching records | [Global Index](./global-index) |
+
+## Choose Storage and Indexing Separately
+
+Storage determines how values are represented and read. Indexes determine how
+queries find matching row IDs. A stored vector does not automatically have an ANN
+index, and a text column does not automatically have a full-text index.
+
+| Capability | Setup for this append-table workflow |
+| --- | --- |
+| Partial-column updates and managed BLOB storage | Enable `row-tracking.enabled` and `data-evolution.enabled` at table creation. |
+| Dedicated vector files | Enable both properties above and set `vector.file.format = vortex`. |
+| Global indexes | Use a Data Evolution table, load data, then explicitly build indexes. |
+| Variant | Use Parquet and a supported engine; Data Evolution is optional. |
+
+Data Evolution requires no primary key and `bucket = -1`, the default for append
+tables. The basic properties are:
+
+```sql
+'row-tracking.enabled' = 'true',
+'data-evolution.enabled' = 'true'
+```
+
+For JVM primary-key workloads, use the separate guides for
+[BLOB storage](../primary-key-table/blob-storage) and
+[indexes](../primary-key-table/global-index). Their requirements differ from this chapter.
+
+## Plan for Updates and Freshness
+
+- A normal-column update writes the selected columns over complete affected file
+  ranges. It saves I/O on untouched columns; it can still process more rows than
+  the update predicate matches.
+- Appending data does not refresh existing indexes. The default `fast` search mode
+  can omit uncovered rows; choose a [coverage policy](./global-index/manage-indexes#coverage-and-freshness).
+- Ordinary updates and compaction preserve row IDs. Some maintenance operations
+  reassign them; coordinate [row-ID lifetime](./data-evolution-maintenance#row-id-lifetime)
+  with BLOB views or applications that persist row references.

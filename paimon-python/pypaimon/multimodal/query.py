@@ -1,0 +1,842 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+from copy import copy
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import pyarrow as pa
+
+from pypaimon.common.where_parser import parse_where_clause
+from pypaimon.multimodal.blob_read import fetch_blob_bodies
+from pypaimon.schema.data_types import is_array_blob_type, is_blob_type, is_map_blob_type
+from pypaimon.table.special_fields import SpecialFields
+
+
+def _select_arrow_columns(batch, columns):
+    return batch.select(columns)
+
+
+class ScanQuery:
+    """Chainable scan wrapper for MultimodalTable."""
+
+    def __init__(
+            self,
+            table,
+            result_factory: Optional[Callable] = None):
+        self._table = table
+        self._predicate = None
+        self._projection = None
+        self._limit = None
+        self._include_row_id = False
+        self._result_factory = result_factory
+
+    def where(self, predicate):
+        predicate = self._coerce_predicate(predicate, "where()")
+        if predicate is not None:
+            self._predicate = self._and_predicate(self._predicate, predicate)
+        return self
+
+    def select(self, columns):
+        if isinstance(columns, str):
+            columns = [columns]
+        self._projection = list(columns)
+        return self
+
+    def with_row_id(self):
+        self._include_row_id = True
+        return self
+
+    def limit(self, limit: int):
+        self._limit = limit
+        return self
+
+    def to_arrow(self):
+        if self._result_factory is not None:
+            return self._read_global_index_result(self._result_factory(self))
+
+        read_builder = self._configured_read_builder()
+        scan = read_builder.new_scan()
+        plan = scan.plan()
+        return read_builder.new_read().to_arrow(plan.splits())
+
+    def to_arrow_batch_reader(self, *, blob_parallelism=None):
+        """Stream this scan as Arrow batches without collecting a table."""
+        if self._result_factory is not None:
+            raise TypeError(
+                "to_arrow_batch_reader is only supported on scan(), "
+                "not search queries."
+            )
+
+        read_builder = self._configured_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        return read_builder.new_read()._to_managed_arrow_batch_reader(
+            splits, blob_parallelism=blob_parallelism)
+
+    def _configured_read_builder(self, table=None):
+        read_builder = (
+            self._table if table is None else table
+        ).new_read_builder()
+        if self._predicate is not None:
+            read_builder = read_builder.with_filter(self._predicate)
+        projection = self._effective_projection()
+        if projection is not None:
+            read_builder = read_builder.with_projection(projection)
+        if self._limit is not None:
+            read_builder = read_builder.with_limit(self._limit)
+        return read_builder
+
+    def _effective_projection(self):
+        if self._projection is None:
+            if not self._include_row_id:
+                return None
+            projection = [field.name for field in self._table.fields]
+        else:
+            projection = list(self._projection)
+        if self._include_row_id and SpecialFields.ROW_ID.name not in projection:
+            projection.append(SpecialFields.ROW_ID.name)
+        return projection
+
+    def _read_global_index_result(self, result):
+        read_builder = self._configured_read_builder()
+        scan = read_builder.new_scan().with_global_index_result(result)
+        plan = scan.plan()
+        return read_builder.new_read().to_arrow(plan.splits())
+
+    def to_pandas(self):
+        return self.to_arrow().to_pandas()
+
+    def to_list(self) -> List[dict]:
+        return self.to_arrow().to_pylist()
+
+    def to_torch(
+            self,
+            streaming: bool = True,
+            prefetch_concurrency: int = 1,
+            *,
+            batch_format: str = "row",
+            batch_size: Optional[int] = None,
+            to_tensor_fn: Optional[Callable] = None,
+            shuffle: bool = False,
+            seed: int = 0,
+            buffer_size: int = 1000,
+            max_buffer_input_splits: int = 10):
+        """Read this scan as a PyTorch Dataset.
+
+        BLOB columns stay as serialized descriptors so DataLoader workers can
+        open and decode the referenced payload without materialising it in the
+        planning process. Use :class:`VideoFrameCollator` as ``collate_fn`` to
+        reuse one decoder session across rows that reference the same video.
+        """
+        if self._result_factory is not None:
+            raise TypeError(
+                "to_torch is only supported on scan(), not search queries."
+            )
+
+        from pypaimon.common.options.core_options import CoreOptions
+        read_table = self._table.copy({
+            CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"
+        })
+        read_builder = self._configured_read_builder(read_table)
+        splits = read_builder.new_scan().plan().splits()
+        return read_builder.new_read().to_torch(
+            splits,
+            streaming=streaming,
+            prefetch_concurrency=prefetch_concurrency,
+            batch_format=batch_format,
+            batch_size=batch_size,
+            to_tensor_fn=to_tensor_fn,
+            shuffle=shuffle,
+            seed=seed,
+            buffer_size=buffer_size,
+            max_buffer_input_splits=max_buffer_input_splits,
+        )
+
+    def to_contiguous_window_dataset(
+            self,
+            *,
+            window_size=None,
+            columns=None,
+            anchor_columns=None,
+            group_key="episode_index",
+            order_key="frame_index",
+            stride=1,
+            tail=None,
+            column_transforms=None,
+            pad_values=None,
+            adapter=None,
+            blob_parallelism=64,
+            frame_offsets=None,
+            delta_timestamps=None,
+            fps=None,
+            tolerance_s=None,
+            boundary=None):
+        """Build snapshot-pinned training windows from this single-table scan.
+
+        The Dataset indexes only ``group_key``, ``order_key``, and Paimon row
+        IDs, then reads projected values on demand. Each column has its own
+        relative frame offsets; unspecified columns use ``[0]``. Transforms
+        receive padded lists, including singleton windows, before ``adapter``
+        receives the sample. ``order_key`` must contain non-null integers that
+        increase by exactly one within each group. The Dataset sorts rows within
+        each group and never creates a window across groups.
+
+        Args:
+            window_size: Legacy forward window size. Mutually exclusive with
+                frame_offsets and delta_timestamps. Retains a single is_pad
+                mask instead of the new per-column masks.
+            columns: Value columns to return, excluding the group and order
+                keys. The scan projection is used when omitted.
+            anchor_columns: With window_size, columns using only the anchor.
+            group_key: Column identifying an independent row sequence.
+            order_key: Integer position column within each group.
+            stride: Distance between anchors, starting at each group's first row.
+            tail: Legacy boundary alias requiring window_size; cannot be used
+                together with boundary.
+            column_transforms: Per-column callables applied to value lists.
+            pad_values: Per-column raw padding values; otherwise repeat the
+                nearest endpoint. Padding happens before column transforms.
+            adapter: Callable that converts the complete sample mapping.
+            blob_parallelism: Maximum concurrent BLOB body reads per fetch.
+            frame_offsets: Mapping of columns to nonempty integer offset
+                sequences. Supports history, future, sparse and repeated frames.
+            delta_timestamps: Alternative per-column offsets in seconds, aligned
+                to the regular frame grid defined by fps within tolerance_s.
+            fps: Finite positive frame rate, required with delta_timestamps.
+            tolerance_s: Finite nonnegative seconds-conversion tolerance,
+                defaulting to 1e-4. Only valid with delta_timestamps.
+            boundary: Handling at both group ends: drop (default), pad, or error.
+                Drop retains only anchors valid for every requested offset.
+
+        Returns:
+            A snapshot-pinned ``ContiguousWindowDataset``. See that class for
+            padding, mask, transform, and adapter result semantics.
+        """
+        from pypaimon.multimodal.window_dataset import ContiguousWindowDataset
+        return ContiguousWindowDataset(
+            self,
+            window_size=window_size,
+            columns=columns,
+            anchor_columns=anchor_columns,
+            group_key=group_key,
+            order_key=order_key,
+            stride=stride,
+            tail=tail,
+            column_transforms=column_transforms,
+            pad_values=pad_values,
+            adapter=adapter,
+            blob_parallelism=blob_parallelism,
+            frame_offsets=frame_offsets,
+            delta_timestamps=delta_timestamps,
+            fps=fps,
+            tolerance_s=tolerance_s,
+            boundary=boundary,
+        )
+
+    def to_ray(
+            self,
+            *,
+            ray_remote_args: Optional[Dict[str, Any]] = None,
+            concurrency: Optional[int] = None,
+            override_num_blocks: Optional[int] = None,
+            **read_args):
+        """Read this scan as a Ray Dataset.
+
+        BLOB columns are read as serialized descriptors. Use
+        ``table.map_with_blobs(...)`` to fetch payload bytes on Ray workers.
+        """
+        if self._result_factory is not None:
+            raise TypeError("to_ray is only supported on scan(), not search queries.")
+
+        read_builder, file_io, visible_columns = self._blob_descriptor_query_read_builder()
+        plan = read_builder.new_scan().plan()
+        ds = read_builder.new_read().to_ray(
+            plan.splits(),
+            ray_remote_args=ray_remote_args,
+            concurrency=concurrency,
+            override_num_blocks=override_num_blocks,
+            **read_args)
+        if visible_columns is not None:
+            ds = ds.map_batches(
+                _select_arrow_columns,
+                fn_kwargs={"columns": visible_columns},
+                batch_format="pyarrow")
+        setattr(ds, "_paimon_blob_file_io", file_io)
+        setattr(ds, "_paimon_blob_columns", self._readable_blob_columns())
+        map_blob_cols, array_blob_cols = self._nested_blob_columns()
+        setattr(ds, "_paimon_map_blob_columns", map_blob_cols)
+        setattr(ds, "_paimon_array_blob_columns", array_blob_cols)
+        return ds
+
+    def read_blobs(
+            self, columns=None, *, parallelism: int = 64
+    ) -> Tuple[pa.Table, Dict[str, List[Any]]]:
+        """Materialise BLOB, MAP BLOB or ARRAY BLOB columns with concurrent,
+        coalesced ranged reads. Reads via blob-as-descriptor to skip the slow
+        row-by-row blob resolution on multi-group data-evolution splits.
+
+        ``columns`` picks the BLOB column(s) (default: all, intersected with
+        ``select(...)``). Scalar BLOB values are ``bytes|None``; ARRAY BLOB rows
+        are ``None`` or lists of these values; MAP BLOB rows are ``None`` or
+        key-value pairs with ``bytes|None`` values. Returns a
+        row-aligned ``(scalar_arrow_table, blobs_by_column)`` tuple. Use
+        :meth:`stream_blobs` for a memory-bounded read.
+
+        Unresolved blob-view columns are not supported and raise ``ValueError``.
+        """
+        blob_cols = self._resolve_blob_columns(columns)
+        read_builder, file_io = self._blob_descriptor_read_builder(blob_cols)
+        arrow = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        map_blob_cols, array_blob_cols = self._nested_blob_columns()
+        bodies = self._fetch_bodies(
+            file_io, arrow.select(blob_cols).to_pydict(), blob_cols,
+            parallelism, map_blob_cols, array_blob_cols)
+        scalar = arrow.select(self._scalar_columns(arrow.column_names))
+        return scalar, bodies
+
+    def stream_blobs(self, columns=None, *, parallelism: int = 64):
+        """Memory-bounded streaming variant of :meth:`read_blobs`, with the same
+        return shape per Arrow batch and one-batch peak memory.
+        """
+        # Validate eagerly so a bad column raises here, not on the first next().
+        blob_cols = self._resolve_blob_columns(columns)
+        read_builder, file_io = self._blob_descriptor_read_builder(blob_cols)
+        return self._iter_blobs(read_builder, file_io, blob_cols, parallelism)
+
+    def _iter_blobs(self, read_builder, file_io, blob_cols, parallelism):
+        map_blob_cols, array_blob_cols = self._nested_blob_columns()
+        with read_builder.new_read()._to_managed_arrow_batch_reader(
+                read_builder.new_scan().plan().splits()) as reader:
+            for batch in reader:
+                bodies = self._fetch_bodies(
+                    file_io, batch.select(blob_cols).to_pydict(), blob_cols,
+                    parallelism, map_blob_cols, array_blob_cols)
+                scalar = batch.select(self._scalar_columns(batch.schema.names))
+                yield scalar, bodies
+
+    def _blob_descriptor_query_read_builder(self):
+        from pypaimon.common.options.core_options import CoreOptions
+        read_table = self._table.copy({
+            CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"
+        })
+        read_builder = read_table.new_read_builder()
+        if self._predicate is not None:
+            read_builder = read_builder.with_filter(self._predicate)
+        projection = self._effective_projection()
+        if projection is not None:
+            internal_projection = list(projection)
+            for name in self._predicate_fields():
+                if name not in internal_projection:
+                    internal_projection.append(name)
+            read_builder = read_builder.with_projection(internal_projection)
+        if self._limit is not None:
+            read_builder = read_builder.with_limit(self._limit)
+        if projection is None:
+            return read_builder, read_table.file_io, None
+        internal_column_names = [field.name for field in read_builder.read_type()]
+        visible_columns = self._projected_output_columns(read_table, projection)
+        if visible_columns == internal_column_names:
+            visible_columns = None
+        return read_builder, read_table.file_io, visible_columns
+
+    @staticmethod
+    def _projected_output_columns(table, projection):
+        builder = table.new_read_builder().with_projection(projection)
+        return [field.name for field in builder.read_type()]
+
+    def _blob_descriptor_read_builder(self, blob_cols: List[str]):
+        """Blob-as-descriptor read builder with this query's filter/projection/limit;
+        returns ``(read_builder, file_io)``."""
+        from pypaimon.common.options.core_options import CoreOptions
+        read_table = self._table.copy({
+            CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"
+        })
+        read_builder = read_table.new_read_builder()
+        if self._predicate is not None:
+            read_builder = read_builder.with_filter(self._predicate)
+        projection = self._blob_read_projection(blob_cols)
+        if projection is not None:
+            read_builder = read_builder.with_projection(projection)
+        if self._limit is not None:
+            read_builder = read_builder.with_limit(self._limit)
+        return read_builder, read_table.file_io
+
+    @staticmethod
+    def _fetch_bodies(
+            file_io, data, blob_cols, parallelism, map_blob_cols=(), array_blob_cols=()):
+        # Decode each descriptor to a (uri, offset, length) range and read them all in
+        # one coalesced pass on ``file_io`` -- the read table's FileIO, which already
+        # carries the merged DLF/OSS token. Going through Blob.from_bytes here would
+        # build a BlobRef whose uri_reader re-resolves the URI via
+        # ``FileIO.get(uri, catalog_options)`` off the raw options (no merged token),
+        # failing with "endpoint should be non-empty" / "Init credential failed" unless
+        # the caller also passes fs.oss.* -- which users should not have to.
+        return fetch_blob_bodies(
+            file_io, data, blob_cols, parallelism, map_blob_cols, array_blob_cols)
+
+    def _nested_blob_columns(self):
+        return (
+            [field.name for field in self._table.fields if is_map_blob_type(field.type)],
+            [field.name for field in self._table.fields if is_array_blob_type(field.type)],
+        )
+
+    def _readable_blob_columns(self) -> List[str]:
+        return [
+            field.name for field in self._table.fields
+            if (is_blob_type(field.type) or is_map_blob_type(field.type)
+                or is_array_blob_type(field.type))
+        ]
+
+    def _resolve_blob_columns(self, columns) -> List[str]:
+        all_blob = self._readable_blob_columns()
+        if columns is None:
+            selected = all_blob
+            if self._projection is not None:
+                selected = [c for c in all_blob if c in self._projection]
+            if not selected:
+                raise ValueError("No BLOB column to read; pass columns=.")
+            return selected
+        if isinstance(columns, str):
+            columns = [columns]
+        columns = list(dict.fromkeys(columns))  # de-dup, keep order
+        for name in columns:
+            if name not in all_blob:
+                raise ValueError(f"Column {name!r} is not a BLOB column.")
+        return columns
+
+    def _blob_read_projection(self, blob_cols: List[str]) -> List[str]:
+        # Base on _effective_projection() (honours with_row_id), drop BLOB
+        # descriptors, then append the requested BLOB columns and every predicate
+        # column -- including predicate columns that are themselves BLOB (read as
+        # descriptor) -- so SplitRead keeps the row-level filter for where().
+        blob_set = set(self._readable_blob_columns())
+        effective = self._effective_projection()
+        if effective is None:
+            base = [f.name for f in self._table.fields if f.name not in blob_set]
+        else:
+            base = [name for name in effective if name not in blob_set]
+        for name in self._predicate_fields():
+            if name not in base and name not in blob_cols:
+                base.append(name)
+        return base + list(blob_cols)
+
+    def _scalar_columns(self, available) -> List[str]:
+        # Non-BLOB columns to expose, based on _effective_projection() so
+        # with_row_id() is honoured; drop BLOBs and predicate-only helpers, and
+        # skip unknown projected names to match to_arrow()'s silent drop.
+        blob_set = set(self._readable_blob_columns())
+        effective = self._effective_projection()
+        if effective is None:
+            return [name for name in available if name not in blob_set]
+        available = set(available)
+        return [name for name in effective
+                if name in available and name not in blob_set]
+
+    def _predicate_fields(self):
+        if self._predicate is None:
+            return ()
+        from pypaimon.read.push_down_utils import _get_all_fields
+        return _get_all_fields(self._predicate)
+
+    def _coerce_predicate(self, predicate, method):
+        if predicate is None:
+            return None
+        if isinstance(predicate, str):
+            return parse_where_clause(predicate, self._table.fields)
+        raise ValueError("%s expects a SQL-like string." % method)
+
+    def _and_predicate(self, left, right):
+        if left is None:
+            return right
+        from pypaimon.common.predicate_builder import PredicateBuilder
+        return PredicateBuilder.and_predicates([left, right])
+
+
+class _PreFilterQuery(ScanQuery):
+
+    def _for_execution(self):
+        from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+        query = copy(self)
+        query._table = self._table._copy_with_snapshot(TimeTravelUtil.resolve_snapshot(self._table))
+        return query
+
+    def to_arrow(self):
+        return ScanQuery.to_arrow(self._for_execution())
+
+    def __init__(
+            self,
+            table,
+            result_factory: Optional[Callable] = None,
+            pre_filter=None):
+        self._pre_filter = None
+        self._score_column = None
+        self._sort_by_score = False
+        super().__init__(table, result_factory=result_factory)
+        if pre_filter is not None:
+            self.pre_filter(pre_filter)
+
+    def with_score(self, column_name="_score"):
+        """Append relevance scores (higher is better) to data-evolution results."""
+        self._require_row_id_scores()
+        if not isinstance(column_name, str) or not column_name:
+            raise ValueError("Score column name must be a nonempty string.")
+        if (column_name in SpecialFields.SYSTEM_FIELD_NAMES
+                or column_name in {field.name for field in self._table.fields}):
+            raise ValueError("Score column name conflicts with a table column: %s" % column_name)
+        self._score_column = column_name
+        return self
+
+    def order_by_score(self):
+        """Return highest scores first, breaking ties by ascending row ID."""
+        self._require_row_id_scores()
+        self._sort_by_score = True
+        return self
+
+    def _require_row_id_scores(self):
+        if not self._table.options.data_evolution_enabled():
+            raise NotImplementedError("Search score output and ordering require a data-evolution table.")
+
+    def _metadata_only_result(self):
+        projection = self._effective_projection()
+        return (bool(self._score_column or self._sort_by_score)
+                and self._table.options.data_evolution_enabled()
+                and not self._table.options.query_auth_enabled
+                and self._predicate is None
+                and projection is not None
+                and all(name == SpecialFields.ROW_ID.name for name in projection))
+
+    def _read_global_index_result(self, result):
+        metadata_only = self._metadata_only_result()
+        if not (metadata_only or self._score_column or self._sort_by_score):
+            return super()._read_global_index_result(result)
+
+        row_id_name = SpecialFields.ROW_ID.name
+        projection = self._effective_projection()
+        added_row_id = projection is None or row_id_name not in projection
+        if metadata_only:
+            row_ids = pa.array(list(result.results()), type=pa.int64())
+            fields = [pa.field(row_id_name, pa.int64(), nullable=False)] * (len(projection) or 1)
+            table = pa.Table.from_arrays(
+                [row_ids] * len(fields), schema=pa.schema(fields))
+        else:
+            lookup = copy(self)
+            lookup._projection = (list(projection) if projection is not None
+                                  else [field.name for field in self._table.fields])
+            if added_row_id:
+                lookup._projection.append(row_id_name)
+            table = lookup._read_search_rows(result)
+        return self._finish_search_result(table, result, added_row_id)
+
+    def _read_search_rows(self, result):
+        projection = self._effective_projection()
+        if len(projection) == len(set(projection)):
+            return ScanQuery._read_global_index_result(self, result)
+        # Row tracking requires unique names while reading. Restore repeated
+        # output columns after reading their values once.
+        fields = self._configured_read_builder().read_type()
+        lookup = copy(self)
+        lookup._projection = list(dict.fromkeys(projection))
+        table = ScanQuery._read_global_index_result(lookup, result)
+        return table.select([table.column_names.index(field.name) for field in fields])
+
+    def _finish_search_result(self, table, result, added_row_id):
+        if self._score_column or self._sort_by_score:
+            row_ids = table.column(table.column_names.index(SpecialFields.ROW_ID.name)).to_pylist()
+            scores = []
+            if row_ids:
+                getter = result.score_getter()
+                scores = [getter(row_id) for row_id in row_ids]
+                if any(score is None for score in scores):
+                    raise ValueError("Missing score for a selected search row.")
+            if self._score_column:
+                if self._score_column in table.column_names:
+                    raise ValueError("Score column name conflicts with a projected column: %s" % self._score_column)
+                table = table.append_column(self._score_column, pa.array(scores, type=pa.float64()))
+            if self._sort_by_score:
+                order = sorted(range(len(row_ids)), key=lambda i: (-scores[i], row_ids[i]))
+                table = table.take(pa.array(order, type=pa.int64()))
+        if added_row_id:
+            table = table.select([i for i, name in enumerate(table.column_names) if name != SpecialFields.ROW_ID.name])
+        return table
+
+    def pre_filter(self, predicate):
+        predicate = self._coerce_predicate(predicate, "pre_filter()")
+        if predicate is not None:
+            self._pre_filter = self._and_predicate(self._pre_filter, predicate)
+        return self
+
+    # Blob reads bypass the search result_factory, so reject them (else a plain scan).
+    def read_blobs(self, *args, **kwargs):
+        raise TypeError("read_blobs is only supported on scan(), not search queries.")
+
+    def stream_blobs(self, *args, **kwargs):
+        raise TypeError("stream_blobs is only supported on scan(), not search queries.")
+
+    def to_ray(self, *args, **kwargs):
+        raise TypeError("to_ray is only supported on scan(), not search queries.")
+
+    def to_arrow_batch_reader(self, *args, **kwargs):
+        raise TypeError(
+            "to_arrow_batch_reader is only supported on scan(), "
+            "not search queries."
+        )
+
+    def to_contiguous_window_dataset(self, *args, **kwargs):
+        raise TypeError(
+            "to_contiguous_window_dataset is only supported on scan(), "
+            "not search queries."
+        )
+
+
+class VectorQuery(_PreFilterQuery):
+    """Chainable query wrapper for vector global-index search."""
+
+    def __init__(
+            self,
+            table,
+            vector,
+            vector_column,
+            vector_options=None,
+            pre_filter=None):
+        self._vector = vector
+        self._vector_column = vector_column
+        self._vector_options = dict(vector_options or {})
+        super().__init__(
+            table, result_factory=self._execute_vector, pre_filter=pre_filter)
+
+    def to_arrow(self, *, execution="local", concurrency=None, ray_remote_args=None):
+        """Execute a vector query locally or on Ray workers, returning an Arrow table.
+
+        Ray execution supports data-evolution tables. ``concurrency`` bounds
+        in-flight tasks (defaults to 4); ``ray_remote_args`` configures their
+        resources and retries. Result lookup runs on the driver.
+        """
+        if execution == "local":
+            if concurrency is not None or ray_remote_args is not None:
+                raise ValueError("Ray options require execution='ray'.")
+            return super().to_arrow()
+        if execution != "ray":
+            raise ValueError("execution must be 'local' or 'ray'.")
+
+        from pypaimon.ray.vector_search import _execute_vector_search
+
+        query = self._for_execution()
+        result = _execute_vector_search(
+            self._vector_search_builder(query),
+            concurrency=concurrency, ray_remote_args=ray_remote_args)
+        return query._read_global_index_result(result)
+
+    def to_pandas(self, *, execution="local", concurrency=None, ray_remote_args=None):
+        """Execute with the same options as to_arrow and return a DataFrame."""
+        return self.to_arrow(
+            execution=execution, concurrency=concurrency,
+            ray_remote_args=ray_remote_args).to_pandas()
+
+    def to_list(self, *, execution="local", concurrency=None, ray_remote_args=None) -> List[dict]:
+        """Execute with the same options as to_arrow and return rows."""
+        return self.to_arrow(
+            execution=execution, concurrency=concurrency,
+            ray_remote_args=ray_remote_args).to_pylist()
+
+    def _execute_vector(self, query):
+        return self._vector_search_builder(query).execute_local()
+
+    def _vector_search_builder(self, query):
+        limit = query._limit if query._limit is not None else 10
+        builder = (
+            query._table.new_vector_search_builder()
+            .with_vector_column(self._vector_column)
+            .with_query_vector(self._vector)
+            .with_limit(limit)
+            .with_options(self._vector_options)
+        )
+        if query._pre_filter is not None:
+            builder = builder.with_filter(query._pre_filter)
+        return builder
+
+
+class TextQuery(_PreFilterQuery):
+    """Chainable query wrapper for full-text global-index search."""
+
+    def __init__(self, table, text_query, pre_filter=None):
+        self._text_query = text_query
+        super().__init__(
+            table, result_factory=self._execute_fts, pre_filter=pre_filter)
+
+    def _execute_fts(self, query):
+        limit = query._limit if query._limit is not None else 10
+        builder = (
+            query._table.new_full_text_search_builder()
+            .with_query(self._text_query["column"], self._text_query["query"])
+            .with_limit(limit)
+        )
+        if query._pre_filter is not None:
+            builder = builder.with_filter(query._pre_filter)
+        return builder.execute_local()
+
+
+class HybridQuery(_PreFilterQuery):
+    """Chainable query wrapper for hybrid global-index search."""
+
+    def __init__(
+            self,
+            table,
+            vector_routes=None,
+            text_routes=None,
+            ranker="rrf",
+            route_limit=None,
+            pre_filter=None):
+        self._vector_routes = list(vector_routes or [])
+        self._text_routes = list(text_routes or [])
+        self._ranker = ranker
+        self._route_limit = route_limit
+        super().__init__(
+            table, result_factory=self._execute_hybrid, pre_filter=pre_filter)
+
+    def rerank(self, ranker):
+        self._ranker = ranker
+        return self
+
+    def _execute_hybrid(self, query):
+        final_limit = query._limit if query._limit is not None else 10
+        route_limit = self._route_limit or final_limit
+        builder = (
+            query._table.new_hybrid_search_builder()
+            .with_limit(final_limit)
+            .with_ranker(self._ranker)
+        )
+        for route in self._vector_routes:
+            builder = builder.add_vector_route(
+                route["column"],
+                route["vector"],
+                limit=route.get("limit") or route_limit,
+                weight=route["weight"],
+                options=route["options"],
+            )
+        for route in self._text_routes:
+            builder = builder.add_full_text_route(
+                route["column"],
+                route["query"],
+                limit=route.get("limit") or route_limit,
+                weight=route["weight"],
+                options=route["options"],
+            )
+        if query._pre_filter is not None:
+            builder = builder.with_filter(query._pre_filter)
+        return builder.execute_local()
+
+
+class BatchVectorQuery(_PreFilterQuery):
+    """Chainable query wrapper for batch vector global-index search."""
+
+    def __init__(
+            self,
+            table,
+            vectors,
+            vector_column,
+            vector_options=None,
+            pre_filter=None):
+        self._vectors = vectors
+        self._vector_column = vector_column
+        self._vector_options = dict(vector_options or {})
+        super().__init__(table, pre_filter=pre_filter)
+
+    def to_arrow(self, *, execution="local", concurrency=None, ray_remote_args=None):
+        """Return one Arrow table per query, optionally searching splits on Ray.
+
+        Ray execution supports data-evolution tables. ``concurrency`` bounds
+        in-flight tasks (defaults to 4); ``ray_remote_args`` configures their
+        resources and retries. Shared result lookup runs on the driver,
+        using the same snapshot as all workers, including refinement tasks.
+        """
+        if execution == "local":
+            if concurrency is not None or ray_remote_args is not None:
+                raise ValueError("Ray options require execution='ray'.")
+            query = self._for_execution()
+            return query._read_batch_results(query._execute_batch_vector(query))
+        if execution != "ray":
+            raise ValueError("execution must be 'local' or 'ray'.")
+
+        from pypaimon.ray.batch_vector_search import _execute_batch_vector_search
+
+        query = self._for_execution()
+        results = _execute_batch_vector_search(
+            self._batch_vector_search_builder(query),
+            concurrency=concurrency, ray_remote_args=ray_remote_args)
+        return query._read_batch_results(results)
+
+    def _read_batch_results(self, results):
+        from pypaimon.globalindex.global_index_result import GlobalIndexResult
+        from pypaimon.utils.roaring_bitmap import RoaringBitmap64
+
+        if (len(results) <= 1 or self._metadata_only_result()
+                or not self._configured_read_builder().read_type()):
+            return [self._read_global_index_result(result) for result in results]
+
+        row_ids = RoaringBitmap64()
+        for result in results:
+            row_ids = RoaringBitmap64.or_(row_ids, result.results())
+
+        lookup = copy(self)
+        # Each result is already top-k. A shared read must not apply that limit
+        # to the union; where() still filters the selected rows during lookup.
+        lookup._limit = None
+        projection = self._effective_projection()
+        lookup._projection = (list(projection) if projection is not None and (
+            projection or self._score_column or self._sort_by_score) else [f.name for f in self._table.fields])
+        added_row_id = SpecialFields.ROW_ID.name not in lookup._projection
+        if added_row_id:
+            lookup._projection.append(SpecialFields.ROW_ID.name)
+        fields = lookup._configured_read_builder().read_type()
+        row_id_column = next(i for i, field in enumerate(fields) if field.id == SpecialFields.ROW_ID.id)
+        table = lookup._read_search_rows(GlobalIndexResult.create(row_ids))
+        positions = {row_id: i for i, row_id in enumerate(table.column(row_id_column).to_pylist())}
+        output = []
+        for result in results:
+            # Keep the physical read order, rather than imposing score or row-id order.
+            selected = sorted(positions[row_id] for row_id in result.results() if row_id in positions)
+            if self._limit is not None:
+                selected = selected[:self._limit]
+            selected_table = table.take(pa.array(selected, type=pa.int64()))
+            output.append(self._finish_search_result(selected_table, result, added_row_id))
+        return output
+
+    def to_pandas(self, *, execution="local", concurrency=None, ray_remote_args=None):
+        """Return one DataFrame per query, using the same options as to_arrow."""
+        return [table.to_pandas() for table in self.to_arrow(
+            execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args)]
+
+    def to_list(self, *, execution="local", concurrency=None, ray_remote_args=None) -> List[List[dict]]:
+        """Return rows per query, using the same options as to_arrow."""
+        return [table.to_pylist() for table in self.to_arrow(
+            execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args)]
+
+    def _execute_batch_vector(self, query):
+        return self._batch_vector_search_builder(query).execute_batch_local()
+
+    def _batch_vector_search_builder(self, query):
+        limit = query._limit if query._limit is not None else 10
+        builder = (
+            query._table.new_batch_vector_search_builder()
+            .with_vector_column(self._vector_column)
+            .with_query_vectors(self._vectors)
+            .with_limit(limit)
+            .with_options(self._vector_options)
+        )
+        if query._pre_filter is not None:
+            builder = builder.with_filter(query._pre_filter)
+        return builder

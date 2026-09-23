@@ -71,6 +71,13 @@ public class DateTimeUtils {
                     .appendPattern(" [HH][H]:[mm][m]:[ss][s]")
                     .appendFraction(NANO_OF_SECOND, 0, 9, true)
                     .optionalEnd()
+                    .optionalStart()
+                    .appendPattern("'T'[HH][H]:[mm][m]")
+                    .optionalStart()
+                    .appendPattern(":[ss][s]")
+                    .appendFraction(NANO_OF_SECOND, 0, 9, true)
+                    .optionalEnd()
+                    .optionalEnd()
                     .toFormatter();
 
     /**
@@ -342,15 +349,31 @@ public class DateTimeUtils {
                 + milli;
     }
 
+    /**
+     * Whether the string is a non-negative decimal integer that fits in an {@code int}. Callers
+     * hand the string straight to {@link Integer#parseInt}, so the range matters as much as the
+     * characters.
+     */
     private static boolean isInteger(String s) {
-        boolean isInt = s.length() > 0;
+        if (s.isEmpty()) {
+            return false;
+        }
+        // Accumulate with overflow checking rather than a digit-count limit: a zero-padded
+        // component such as "00000002024" is still in range, so what matters is the value, not
+        // how many characters it took to write. Bailing out the moment the running value passes
+        // Integer.MAX_VALUE keeps the accumulator itself from overflowing a long.
+        long value = 0;
         for (int i = 0; i < s.length(); i++) {
-            if (s.charAt(i) < '0' || s.charAt(i) > '9') {
-                isInt = false;
-                break;
+            char c = s.charAt(i);
+            if (c < '0' || c > '9') {
+                return false;
+            }
+            value = value * 10 + (c - '0');
+            if (value > Integer.MAX_VALUE) {
+                return false;
             }
         }
-        return isInt;
+        return true;
     }
 
     private static boolean isIllegalDate(int y, int m, int d) {
@@ -610,7 +633,7 @@ public class DateTimeUtils {
 
     /** Returns the value of the timestamp to seconds since '1970-01-01 00:00:00' UTC. */
     public static long unixTimestamp(long ts) {
-        return ts / 1000;
+        return Math.floorDiv(ts, MILLIS_PER_SECOND);
     }
 
     // --------------------------------------------------------------------------------------------
@@ -649,8 +672,14 @@ public class DateTimeUtils {
     }
 
     public static Timestamp truncate(Timestamp ts, int precision) {
-        String fraction = Integer.toString(ts.toLocalDateTime().getNano());
-        if (fraction.length() <= precision) {
+        // Pad to 9 digits so leading zeros are preserved, then count the significant
+        // fractional digits by stripping trailing zeros (same approach as formatTimestamp).
+        String fraction = pad(9, ts.toLocalDateTime().getNano());
+        int significant = fraction.length();
+        while (significant > 0 && fraction.charAt(significant - 1) == '0') {
+            significant--;
+        }
+        if (significant <= precision) {
             return ts;
         } else {
             // need to truncate
@@ -667,7 +696,7 @@ public class DateTimeUtils {
 
     private static long zeroLastDigits(long l, int n) {
         long tenToTheN = (long) Math.pow(10, n);
-        return (l / tenToTheN) * tenToTheN;
+        return Math.floorDiv(l, tenToTheN) * tenToTheN;
     }
 
     private static String pad(int length, long v) {

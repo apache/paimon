@@ -22,6 +22,8 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.rest.RESTApi;
 import org.apache.paimon.rest.SimpleHttpClient;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -66,13 +68,17 @@ public class DLFECSTokenLoader implements DLFTokenLoader {
     }
 
     private static DLFToken getToken(String url) {
+        String token;
         try {
-            String token = SimpleHttpClient.INSTANCE.get(url);
-            return RESTApi.fromJson(token, DLFToken.class);
+            token = SimpleHttpClient.INSTANCE.get(url);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
-        } catch (Exception e) {
-            throw new RuntimeException("get token failed, error : " + e.getMessage(), e);
+        }
+        try {
+            return RESTApi.fromJson(token, DLFToken.class);
+        } catch (JsonProcessingException e) {
+            // The token response carries AK/SK/STS; never surface the body or Jackson's snippet.
+            throw new RuntimeException("Failed to parse ECS token response.");
         }
     }
 

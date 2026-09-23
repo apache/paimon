@@ -35,6 +35,8 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
@@ -57,7 +59,8 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
             IndexFileHandler indexFileHandler,
             StatsFileHandler statsFileHandler,
             boolean cleanEmptyDirectories,
-            int deleteFileThreadNum) {
+            int fileOperationThreadNum,
+            @Nullable Integer manifestReadParallelism) {
         super(
                 fileIO,
                 pathFactory,
@@ -66,11 +69,12 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
                 indexFileHandler,
                 statsFileHandler,
                 cleanEmptyDirectories,
-                deleteFileThreadNum);
+                fileOperationThreadNum,
+                manifestReadParallelism);
     }
 
     @Override
-    public void cleanUnusedDataFiles(Snapshot taggedSnapshot, Predicate<ExpireFileEntry> skipper) {
+    public void cleanDeletedDataFiles(Snapshot taggedSnapshot, Predicate<ExpireFileEntry> skipper) {
         Collection<ExpireFileEntry> manifestEntries;
         try {
             List<ManifestFileMeta> manifests =
@@ -96,13 +100,17 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
                 recordDeletionBuckets(entry);
             }
         }
-        deleteFiles(dataFileToDelete, fileIO::deleteQuietly);
+        executeAll(dataFileToDelete, fileIO::deleteQuietly);
+    }
+
+    public void cleanUnusedDataFiles(Snapshot taggedSnapshot, Predicate<ExpireFileEntry> skipper) {
+        cleanDeletedDataFiles(taggedSnapshot, skipper);
     }
 
     @Override
     public void cleanUnusedManifests(Snapshot taggedSnapshot, Set<String> skippingSet) {
         // doesn't clean changelog files because they are handled by SnapshotDeletion
-        cleanUnusedManifests(taggedSnapshot, skippingSet, true, false);
+        executeAll(planManifestsCleaner(taggedSnapshot, skippingSet, true, false));
     }
 
     public Predicate<ExpireFileEntry> dataFileSkipper(List<Snapshot> fromSnapshots)

@@ -31,14 +31,31 @@ import org.apache.paimon.data.variant.Variant;
 /** The array which is made up by several rows. */
 public class DataEvolutionArray implements InternalArray {
 
+    /** Sentinel for "no fallback"; positions with rowOffsets[pos] &lt; 0 stay null. */
+    public static final long NO_MISSING_FIELD_FALLBACK = Long.MIN_VALUE;
+
     private final InternalArray[] rows;
     private final int[] rowOffsets;
     private final int[] fieldOffsets;
 
+    /**
+     * Value to return from getLong(pos) when {@code rowOffsets[pos] &lt; 0}. Used by data-evolution
+     * null-count arrays to encode "field not physically present in any file in the group" as "all
+     * rowCount rows are null" instead of "unknown stats". {@link #NO_MISSING_FIELD_FALLBACK}
+     * disables the fallback.
+     */
+    private final long missingFieldLong;
+
     public DataEvolutionArray(int rowNumber, int[] rowOffsets, int[] fieldOffsets) {
+        this(rowNumber, rowOffsets, fieldOffsets, NO_MISSING_FIELD_FALLBACK);
+    }
+
+    public DataEvolutionArray(
+            int rowNumber, int[] rowOffsets, int[] fieldOffsets, long missingFieldLong) {
         this.rows = new InternalArray[rowNumber];
         this.rowOffsets = rowOffsets;
         this.fieldOffsets = fieldOffsets;
+        this.missingFieldLong = missingFieldLong;
     }
 
     public void setRow(int pos, InternalArray row) {
@@ -73,6 +90,16 @@ public class DataEvolutionArray implements InternalArray {
 
     @Override
     public boolean isNullAt(int pos) {
+        // rowOffsets[pos] == -1: field is absent from every file in the group, so every
+        //   logical row is null for it; with missingFieldLong set this is encoded as a
+        //   known count rather than "unknown stats" (isNullAt=false), so non-IS-NULL
+        //   predicates can prune the file.
+        // rowOffsets[pos] == -2: field exists in a file but its stats were not captured
+        //   (e.g. valueStatsCols did not include it). Treat as unknown stats so callers
+        //   stay conservative.
+        if (rowOffsets[pos] == -1 && missingFieldLong != NO_MISSING_FIELD_FALLBACK) {
+            return false;
+        }
         if (rowOffsets[pos] < 0) {
             return true;
         }
@@ -101,6 +128,9 @@ public class DataEvolutionArray implements InternalArray {
 
     @Override
     public long getLong(int pos) {
+        if (rowOffsets[pos] == -1 && missingFieldLong != NO_MISSING_FIELD_FALLBACK) {
+            return missingFieldLong;
+        }
         return chooseArray(pos).getLong(offsetInRow(pos));
     }
 

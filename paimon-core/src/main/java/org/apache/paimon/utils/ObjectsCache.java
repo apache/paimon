@@ -29,6 +29,7 @@ import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.function.Function;
 
 import static org.apache.paimon.utils.ObjectsFile.readFromIterator;
 
@@ -62,14 +63,26 @@ public abstract class ObjectsCache<K, V, S extends Segments> {
         this.cacheMetrics = cacheMetrics;
     }
 
+    /** Shares the byte cache with consumers using distinct whole-file and block keys. */
+    @SuppressWarnings("unchecked")
+    public SegmentsCache<Object> segmentsCache() {
+        return (SegmentsCache<Object>) (SegmentsCache<?>) cache;
+    }
+
     public List<V> read(K key, @Nullable Long fileSize, Filters<V> filters) throws IOException {
+        return read(key, fileSize, filters, Function.identity());
+    }
+
+    public <R> List<R> read(
+            K key, @Nullable Long fileSize, Filters<V> filters, Function<V, R> convertor)
+            throws IOException {
         @SuppressWarnings("unchecked")
         S segments = (S) cache.getIfPresents(key);
         if (segments != null) {
             if (cacheMetrics != null) {
                 cacheMetrics.increaseHitObject();
             }
-            return readFromSegments(segments, filters);
+            return readFromSegments(segments, filters, convertor);
         } else {
             if (cacheMetrics != null) {
                 cacheMetrics.increaseMissedObject();
@@ -80,18 +93,26 @@ public abstract class ObjectsCache<K, V, S extends Segments> {
             if (fileSize <= cache.maxElementSize()) {
                 segments = createSegments(key, fileSize);
                 cache.put(key, segments);
-                return readFromSegments(segments, filters);
+                return readFromSegments(segments, filters, convertor);
             } else {
                 return readFromIterator(
-                        reader.apply(key, fileSize),
+                        createFilteredIterator(key, fileSize, filters),
                         projectedSerializer,
                         filters.readFilter(),
-                        filters.readVFilter());
+                        filters.readVFilter(),
+                        convertor);
             }
         }
     }
 
-    protected abstract List<V> readFromSegments(S segments, Filters<V> filters) throws IOException;
+    /** Iterator for a file too large to cache; subclasses may push {@code filters} into it. */
+    protected CloseableIterator<InternalRow> createFilteredIterator(
+            K key, @Nullable Long fileSize, Filters<V> filters) throws IOException {
+        return reader.apply(key, fileSize);
+    }
+
+    protected abstract <R> List<R> readFromSegments(
+            S segments, Filters<V> filters, Function<V, R> convertor) throws IOException;
 
     protected abstract S createSegments(K k, @Nullable Long fileSize);
 

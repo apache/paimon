@@ -63,10 +63,12 @@ import java.util.Set;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.CLUSTERING_COLUMNS;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
+import static org.apache.paimon.CoreOptions.LOCAL_KV_DB_BLOCK_SIZE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.PK_CLUSTERING_OVERRIDE;
 import static org.apache.paimon.CoreOptions.SORT_SPILL_THRESHOLD;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ClusteringTableTest {
 
@@ -146,6 +148,31 @@ class ClusteringTableTest {
         input = Arrays.asList(GenericRow.of(1, 1111), GenericRow.of(2, 2222));
         writeRows(input);
         assertThat(readRows()).containsExactlyInAnyOrderElementsOf(input);
+    }
+
+    @Test
+    public void testInvalidKeyIndexBlockSize() throws Exception {
+        Identifier identifier = Identifier.create("default", "invalid_key_index_block_size");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.INT())
+                        .primaryKey("a")
+                        .option(DELETION_VECTORS_ENABLED.key(), "true")
+                        .option(BUCKET.key(), "1")
+                        .option(CLUSTERING_COLUMNS.key(), "b")
+                        .option(PK_CLUSTERING_OVERRIDE.key(), "true")
+                        .option(LOCAL_KV_DB_BLOCK_SIZE.key(), "0 bytes")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        Table invalidTable = catalog.getTable(identifier);
+
+        assertThatThrownBy(
+                        () ->
+                                writeRows(
+                                        invalidTable,
+                                        Arrays.asList(GenericRow.of(1, 10), GenericRow.of(2, 20))))
+                .hasMessageContaining("local-kv-db.block-size");
     }
 
     /** Test overlapping clustering ranges from multiple commits should be merged correctly. */

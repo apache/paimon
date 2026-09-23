@@ -18,11 +18,18 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Union
 
+from pypaimon.api.api_response import GetTagResponse, PagedList, Partition
+from pypaimon.catalog.database import Database
+from pypaimon.catalog.rest.property_change import PropertyChange
+from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
+from pypaimon.snapshot.table_snapshot import TableSnapshot
+from pypaimon.table.instant import Instant
+from pypaimon.table.table import Table
 
 
 class Catalog(ABC):
@@ -43,15 +50,16 @@ class Catalog(ABC):
         """List all database names in the catalog."""
 
     @abstractmethod
-    def get_database(self, name: str) -> 'Database':
+    def get_database(self, name: str) -> Database:
         """Get paimon database identified by the given name."""
 
     @abstractmethod
-    def create_database(self, name: str, ignore_if_exists: bool, properties: Optional[dict] = None):
+    def create_database(self, name: str, ignore_if_exists: bool,
+                        properties: Optional[Dict[str, str]] = None) -> None:
         """Create a database with properties."""
 
     @abstractmethod
-    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False) -> None:
         """Drop a database.
 
         Args:
@@ -71,7 +79,7 @@ class Catalog(ABC):
             List of table names.
         """
 
-    def alter_database(self, name: str, changes: list):
+    def alter_database(self, name: str, changes: List[PropertyChange]) -> None:
         """Alter database properties.
 
         Args:
@@ -86,15 +94,15 @@ class Catalog(ABC):
         )
 
     @abstractmethod
-    def get_table(self, identifier: Union[str, Identifier]) -> 'Table':
+    def get_table(self, identifier: Union[str, Identifier]) -> Table:
         """Get paimon table identified by the given Identifier."""
 
     @abstractmethod
-    def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
+    def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool) -> None:
         """Create table with schema."""
 
     @abstractmethod
-    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
+    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False) -> None:
         """Drop a table from the catalog.
 
         Args:
@@ -105,7 +113,8 @@ class Catalog(ABC):
             TableNotExistException: If table does not exist and ignore_if_not_exists is False
         """
 
-    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+    def rename_table(self, source_identifier: Union[str, Identifier],
+                     target_identifier: Union[str, Identifier]) -> None:
         """Rename a table.
 
         Args:
@@ -125,7 +134,7 @@ class Catalog(ABC):
         identifier: Union[str, Identifier],
         changes: List[SchemaChange],
         ignore_if_not_exists: bool = False
-    ):
+    ) -> None:
         """Alter table with schema changes."""
 
     def supports_version_management(self) -> bool:
@@ -138,14 +147,14 @@ class Catalog(ABC):
         return False
 
     @abstractmethod
-    def load_snapshot(self, identifier: Identifier):
+    def load_snapshot(self, identifier: Identifier) -> Optional[TableSnapshot]:
         """Load the snapshot of table identified by the given Identifier.
 
         Args:
             identifier: Path of the table
 
         Returns:
-            TableSnapshot instance
+            TableSnapshot instance, or None if no snapshot exists.
 
         Raises:
             NotImplementedError: If the catalog does not support version management
@@ -157,6 +166,7 @@ class Catalog(ABC):
             self,
             identifier: Identifier,
             table_uuid: Optional[str],
+            base_snapshot_uuid: Optional[str],
             snapshot: Snapshot,
             statistics: List[PartitionStatistics]
     ) -> bool:
@@ -166,6 +176,7 @@ class Catalog(ABC):
         Args:
             identifier: Path of the table
             table_uuid: UUID of the table to avoid wrong commit
+            base_snapshot_uuid: UUID of the snapshot on which the commit is based
             snapshot: Snapshot to be committed
             statistics: Statistics information of this change
 
@@ -174,11 +185,12 @@ class Catalog(ABC):
 
         """
 
-    def rollback_to(self, identifier, instant, from_snapshot=None):
+    def rollback_to(self, identifier: Union[str, Identifier], instant: Instant,
+                    from_snapshot: Optional[int] = None) -> None:
         """Rollback table by the given identifier and instant.
 
         Args:
-            identifier: Path of the table (Identifier instance).
+            identifier: Path of the table (Identifier or string).
             instant: The Instant (SnapshotInstant or TagInstant) to rollback to.
             from_snapshot: Optional snapshot ID. Success only occurs when the
                 latest snapshot is this snapshot.
@@ -189,6 +201,17 @@ class Catalog(ABC):
         """
         raise NotImplementedError(
             "rollback_to is not supported by this catalog."
+        )
+
+    def create_partitions(
+            self,
+            identifier: Union[str, Identifier],
+            partitions: List[Dict[str, str]],
+            ignore_if_exists: bool = True,
+    ) -> None:
+        raise NotImplementedError(
+            "create_partitions is not supported by this catalog. "
+            "Use REST catalog for partition creation."
         )
 
     def drop_partitions(
@@ -206,7 +229,7 @@ class Catalog(ABC):
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
             partition_name_pattern: Optional[str] = None,
-    ):
+    ) -> PagedList[Partition]:
         """List partitions of a table with pagination.
 
         Args:
@@ -360,7 +383,7 @@ class Catalog(ABC):
             self,
             identifier: Union[str, Identifier],
             tag_name: str,
-    ):
+    ) -> GetTagResponse:
         """Get a tag of a table.
 
         Args:
@@ -383,7 +406,7 @@ class Catalog(ABC):
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
             tag_name_prefix: Optional[str] = None,
-    ):
+    ) -> PagedList[str]:
         """List tags of a table with pagination.
 
         Args:
@@ -401,3 +424,6 @@ class Catalog(ABC):
         raise NotImplementedError(
             "list_tags_paged is not supported by this catalog."
         )
+
+    def auth_table_query(self, identifier: Identifier, select: Optional[List[str]]) -> TableQueryAuthResult:
+        raise NotImplementedError("auth_table_query not supported by this catalog")

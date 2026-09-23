@@ -76,6 +76,7 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_ASYNC;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_ASYNC_THREAD_NUMBER;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_REMOVE_NORMALIZE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_GROUP;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT;
@@ -144,8 +145,9 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         }
 
         Options options = Options.fromMap(table.options());
+        CoreOptions coreOptions = new CoreOptions(options);
 
-        if (new CoreOptions(options).mergeEngine() == FIRST_ROW) {
+        if (coreOptions.mergeEngine() == FIRST_ROW) {
             return ChangelogMode.insertOnly();
         }
 
@@ -157,6 +159,12 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             return ChangelogMode.all();
         }
 
+        if (coreOptions.primaryKeyNullable()) {
+            throw new UnsupportedOperationException(
+                    "Flink streaming reads with nullable primary keys require a full changelog. "
+                            + "Configure 'changelog-producer' to a value other than 'none'.");
+        }
+
         return ChangelogMode.upsert();
     }
 
@@ -166,8 +174,10 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             return createPushedAggregateScan();
         }
 
+        Table scanTable = tableForScan();
+
         WatermarkStrategy<RowData> watermarkStrategy = this.watermarkStrategy;
-        Options options = Options.fromMap(table.options());
+        Options options = Options.fromMap(scanTable.options());
         if (watermarkStrategy != null) {
             WatermarkEmitStrategy emitStrategy = options.get(SCAN_WATERMARK_EMIT_STRATEGY);
             if (emitStrategy == WatermarkEmitStrategy.ON_EVENT) {
@@ -189,10 +199,10 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         }
 
         FlinkSourceBuilder sourceBuilder =
-                new FlinkSourceBuilder(table)
+                new FlinkSourceBuilder(scanTable)
                         .sourceName(tableIdentifier.asSummaryString())
                         .sourceBounded(!unbounded)
-                        .projection(projectFields)
+                        .projection(projectFieldsForScan())
                         .predicate(predicate)
                         .partitionPredicate(partitionPredicate)
                         .limit(limit)
@@ -201,12 +211,24 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         return new PaimonDataStreamScanProvider(
                 !unbounded,
                 env ->
-                        sourceBuilder
-                                .sourceParallelism(inferSourceParallelism(env))
-                                .env(env)
-                                .build(),
+                        PostponeMergeOnRead.usesCustomSource(scanTable)
+                                ? sourceBuilder.env(env).build()
+                                : sourceBuilder
+                                        .sourceParallelism(inferSourceParallelism(env))
+                                        .env(env)
+                                        .build(),
                 tableIdentifier.asSummaryString(),
-                table);
+                table,
+                options.getOptional(SCAN_PARALLELISM));
+    }
+
+    protected Table tableForScan() {
+        return table;
+    }
+
+    @Nullable
+    protected int[][] projectFieldsForScan() {
+        return projectFields;
     }
 
     private ScanRuntimeProvider createPushedAggregateScan() {
@@ -245,6 +267,11 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             throw new UnsupportedOperationException(
                     "Currently, lookup dim table only support FileStoreTable but is "
                             + table.getClass().getName());
+        }
+
+        if (PostponeMergeOnRead.configured(table)) {
+            throw new UnsupportedOperationException(
+                    "Option 'postpone.merge-on-read' is not supported for lookup reads.");
         }
 
         if (limit != null) {
@@ -331,6 +358,10 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             List<AggregateExpression> aggregateExpressions,
             DataType producedDataType) {
         if (isUnbounded()) {
+            return false;
+        }
+
+        if (PostponeMergeOnRead.configured(table)) {
             return false;
         }
 

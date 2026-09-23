@@ -35,6 +35,7 @@ public class LuminaVectorGlobalIndexerFactory implements GlobalIndexerFactory {
 
     @Override
     public GlobalIndexer create(DataField field, Options options) {
-        return new LuminaVectorGlobalIndexer(field.type(), options);
+        Options fieldOptions = LuminaVectorIndexOptions.resolveFieldOptions(field.name(), options);
+        return new LuminaVectorGlobalIndexer(field.type(), fieldOptions);
     }
 }

@@ -22,13 +22,16 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.DecimalUtils;
 
-/** sum aggregate a field of a row. */
+/** Sum aggregate a field of a row. */
 public class FieldSumAgg extends FieldAggregator {
 
     private static final long serialVersionUID = 1L;
 
-    public FieldSumAgg(String name, DataType dataType) {
+    private final boolean failOnOverflow;
+
+    public FieldSumAgg(String name, DataType dataType, boolean failOnOverflow) {
         super(name, dataType);
+        this.failOnOverflow = failOnOverflow;
     }
 
     @Override
@@ -55,16 +58,16 @@ public class FieldSumAgg extends FieldAggregator {
                                 mergeFieldDD.scale());
                 break;
             case TINYINT:
-                sum = (byte) ((byte) accumulator + (byte) inputField);
+                sum = addByte((byte) accumulator, (byte) inputField);
                 break;
             case SMALLINT:
-                sum = (short) ((short) accumulator + (short) inputField);
+                sum = addShort((short) accumulator, (short) inputField);
                 break;
             case INTEGER:
-                sum = (int) accumulator + (int) inputField;
+                sum = addInt((int) accumulator, (int) inputField);
                 break;
             case BIGINT:
-                sum = (long) accumulator + (long) inputField;
+                sum = addLong((long) accumulator, (long) inputField);
                 break;
             case FLOAT:
                 sum = (float) accumulator + (float) inputField;
@@ -105,16 +108,16 @@ public class FieldSumAgg extends FieldAggregator {
                                 mergeFieldDD.scale());
                 break;
             case TINYINT:
-                sum = (byte) ((byte) accumulator - (byte) inputField);
+                sum = subtractByte((byte) accumulator, (byte) inputField);
                 break;
             case SMALLINT:
-                sum = (short) ((short) accumulator - (short) inputField);
+                sum = subtractShort((short) accumulator, (short) inputField);
                 break;
             case INTEGER:
-                sum = (int) accumulator - (int) inputField;
+                sum = subtractInt((int) accumulator, (int) inputField);
                 break;
             case BIGINT:
-                sum = (long) accumulator - (long) inputField;
+                sum = subtractLong((long) accumulator, (long) inputField);
                 break;
             case FLOAT:
                 sum = (float) accumulator - (float) inputField;
@@ -142,13 +145,13 @@ public class FieldSumAgg extends FieldAggregator {
                 return Decimal.fromBigDecimal(
                         decimal.toBigDecimal().negate(), decimal.precision(), decimal.scale());
             case TINYINT:
-                return (byte) -((byte) value);
+                return negateByte((byte) value);
             case SMALLINT:
-                return (short) -((short) value);
+                return negateShort((short) value);
             case INTEGER:
-                return -((int) value);
+                return negateInt((int) value);
             case BIGINT:
-                return -((long) value);
+                return negateLong((long) value);
             case FLOAT:
                 return -((float) value);
             case DOUBLE:
@@ -159,6 +162,106 @@ public class FieldSumAgg extends FieldAggregator {
                                 "type %s not support in %s",
                                 fieldType.getTypeRoot().toString(), this.getClass().getName());
                 throw new IllegalArgumentException(msg);
+        }
+    }
+
+    private byte addByte(byte a, byte b) {
+        int value = a + b;
+        if (failOnOverflow && (value > Byte.MAX_VALUE || value < Byte.MIN_VALUE)) {
+            throw new ArithmeticException(
+                    String.format("byte overflow: %d + %d = %d", a, b, value));
+        }
+        return (byte) value;
+    }
+
+    private short addShort(short a, short b) {
+        int value = a + b;
+        if (failOnOverflow && (value > Short.MAX_VALUE || value < Short.MIN_VALUE)) {
+            throw new ArithmeticException(
+                    String.format("short overflow: %d + %d = %d", a, b, value));
+        }
+        return (short) value;
+    }
+
+    private int addInt(int a, int b) {
+        try {
+            return failOnOverflow ? Math.addExact(a, b) : a + b;
+        } catch (ArithmeticException e) {
+            throw new ArithmeticException(String.format("int overflow: %d + %d", a, b));
+        }
+    }
+
+    private long addLong(long a, long b) {
+        try {
+            return failOnOverflow ? Math.addExact(a, b) : a + b;
+        } catch (ArithmeticException e) {
+            throw new ArithmeticException(String.format("long overflow: %d + %d", a, b));
+        }
+    }
+
+    private byte subtractByte(byte a, byte b) {
+        int value = a - b;
+        if (failOnOverflow && (value > Byte.MAX_VALUE || value < Byte.MIN_VALUE)) {
+            throw new ArithmeticException(
+                    String.format("byte overflow: %d - %d = %d", a, b, value));
+        }
+        return (byte) value;
+    }
+
+    private short subtractShort(short a, short b) {
+        int value = a - b;
+        if (failOnOverflow && (value > Short.MAX_VALUE || value < Short.MIN_VALUE)) {
+            throw new ArithmeticException(
+                    String.format("short overflow: %d - %d = %d", a, b, value));
+        }
+        return (short) value;
+    }
+
+    private int subtractInt(int a, int b) {
+        try {
+            return failOnOverflow ? Math.subtractExact(a, b) : a - b;
+        } catch (ArithmeticException e) {
+            throw new ArithmeticException(String.format("int overflow: %d - %d", a, b));
+        }
+    }
+
+    private long subtractLong(long a, long b) {
+        try {
+            return failOnOverflow ? Math.subtractExact(a, b) : a - b;
+        } catch (ArithmeticException e) {
+            throw new ArithmeticException(String.format("long overflow: %d - %d", a, b));
+        }
+    }
+
+    private byte negateByte(byte a) {
+        int value = -a;
+        if (failOnOverflow && (value > Byte.MAX_VALUE || value < Byte.MIN_VALUE)) {
+            throw new ArithmeticException(String.format("byte overflow: -%d = %d", a, value));
+        }
+        return (byte) value;
+    }
+
+    private short negateShort(short a) {
+        int value = -a;
+        if (failOnOverflow && (value > Short.MAX_VALUE || value < Short.MIN_VALUE)) {
+            throw new ArithmeticException(String.format("short overflow: -%d = %d", a, value));
+        }
+        return (short) value;
+    }
+
+    private int negateInt(int a) {
+        try {
+            return failOnOverflow ? Math.negateExact(a) : -a;
+        } catch (ArithmeticException e) {
+            throw new ArithmeticException(String.format("int overflow: -%d", a));
+        }
+    }
+
+    private long negateLong(long a) {
+        try {
+            return failOnOverflow ? Math.negateExact(a) : -a;
+        } catch (ArithmeticException e) {
+            throw new ArithmeticException(String.format("long overflow: -%d", a));
         }
     }
 }

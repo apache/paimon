@@ -99,8 +99,14 @@ public class KvQueryClient {
 
     private CompletableFuture<KvResponse> getResponse(
             final KvRequest request, final boolean forceUpdate) {
-        InetSocketAddress serverAddress =
-                queryLocation.getLocation(request.partition(), request.bucket(), forceUpdate);
+        InetSocketAddress serverAddress;
+        try {
+            serverAddress =
+                    queryLocation.getLocation(request.partition(), request.bucket(), forceUpdate);
+        } catch (Exception e) {
+            LOG.error("Failed to get location for bucket: " + request.bucket(), e);
+            return FutureUtils.completedExceptionally(e);
+        }
         if (serverAddress == null) {
             return FutureUtils.completedExceptionally(
                     new RuntimeException("Cannot find address for bucket: " + request.bucket()));

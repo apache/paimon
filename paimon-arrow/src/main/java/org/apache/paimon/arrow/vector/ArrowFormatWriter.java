@@ -18,6 +18,7 @@
 
 package org.apache.paimon.arrow.vector;
 
+import org.apache.paimon.arrow.ArrowBundleRecords;
 import org.apache.paimon.arrow.ArrowFieldTypeConversion;
 import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.arrow.writer.ArrowFieldWriter;
@@ -25,10 +26,14 @@ import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.arrow.writer.ArrowFieldWriters;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.arrow.memory.BufferAllocator;
@@ -51,13 +56,15 @@ public class ArrowFormatWriter implements AutoCloseable {
 
     private final VectorSchemaRoot vectorSchemaRoot;
     private final ArrowFieldWriter[] fieldWriters;
+    private final RowType rowType;
     private final int batchSize;
     private final BufferAllocator allocator;
     @Nullable private final Long memoryUsedMaxInBytes;
+    private final boolean closeAllocatorOnClose;
     private int rowId;
 
     public ArrowFormatWriter(RowType rowType, int writeBatchSize, boolean caseSensitive) {
-        this(rowType, writeBatchSize, caseSensitive, new RootAllocator(), null, null);
+        this(rowType, writeBatchSize, caseSensitive, new RootAllocator(), null, null, true);
     }
 
     public ArrowFormatWriter(
@@ -71,7 +78,8 @@ public class ArrowFormatWriter implements AutoCloseable {
                 caseSensitive,
                 new RootAllocator(),
                 memoryUsedMaxInBytes,
-                null);
+                null,
+                true);
     }
 
     public ArrowFormatWriter(
@@ -80,7 +88,7 @@ public class ArrowFormatWriter implements AutoCloseable {
             boolean caseSensitive,
             BufferAllocator allocator,
             @Nullable Long memoryUsedMaxInBytes) {
-        this(rowType, writeBatchSize, caseSensitive, allocator, memoryUsedMaxInBytes, null);
+        this(rowType, writeBatchSize, caseSensitive, allocator, memoryUsedMaxInBytes, null, true);
     }
 
     public ArrowFormatWriter(
@@ -95,7 +103,8 @@ public class ArrowFormatWriter implements AutoCloseable {
                 caseSensitive,
                 new RootAllocator(),
                 memoryUsedMaxInBytes,
-                shreddingSchemas);
+                shreddingSchemas,
+                true);
     }
 
     public ArrowFormatWriter(
@@ -112,8 +121,27 @@ public class ArrowFormatWriter implements AutoCloseable {
                 allocator,
                 memoryUsedMaxInBytes,
                 shreddingSchemas,
+                true);
+    }
+
+    private ArrowFormatWriter(
+            RowType rowType,
+            int writeBatchSize,
+            boolean caseSensitive,
+            BufferAllocator allocator,
+            @Nullable Long memoryUsedMaxInBytes,
+            @Nullable RowType shreddingSchemas,
+            boolean closeAllocatorOnClose) {
+        this(
+                rowType,
+                writeBatchSize,
+                caseSensitive,
+                allocator,
+                memoryUsedMaxInBytes,
+                shreddingSchemas,
                 ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR,
-                ArrowFieldWriterFactoryVisitor.INSTANCE);
+                ArrowFieldWriterFactoryVisitor.INSTANCE,
+                closeAllocatorOnClose);
     }
 
     public ArrowFormatWriter(
@@ -125,7 +153,31 @@ public class ArrowFormatWriter implements AutoCloseable {
             @Nullable RowType shreddingSchemas,
             ArrowFieldTypeConversion.ArrowFieldTypeVisitor fieldTypeVisitor,
             ArrowFieldWriterFactoryVisitor fieldWriterFactory) {
+        this(
+                rowType,
+                writeBatchSize,
+                caseSensitive,
+                allocator,
+                memoryUsedMaxInBytes,
+                shreddingSchemas,
+                fieldTypeVisitor,
+                fieldWriterFactory,
+                true);
+    }
+
+    private ArrowFormatWriter(
+            RowType rowType,
+            int writeBatchSize,
+            boolean caseSensitive,
+            BufferAllocator allocator,
+            @Nullable Long memoryUsedMaxInBytes,
+            @Nullable RowType shreddingSchemas,
+            ArrowFieldTypeConversion.ArrowFieldTypeVisitor fieldTypeVisitor,
+            ArrowFieldWriterFactoryVisitor fieldWriterFactory,
+            boolean closeAllocatorOnClose) {
         this.allocator = allocator;
+        this.closeAllocatorOnClose = closeAllocatorOnClose;
+        this.rowType = rowType;
 
         RowType outputRowType = replaceWithShreddingType(rowType, shreddingSchemas);
         vectorSchemaRoot =
@@ -154,6 +206,22 @@ public class ArrowFormatWriter implements AutoCloseable {
 
         this.batchSize = writeBatchSize;
         this.memoryUsedMaxInBytes = memoryUsedMaxInBytes;
+    }
+
+    public static ArrowFormatWriter forBorrowedAllocator(
+            RowType rowType,
+            int writeBatchSize,
+            boolean caseSensitive,
+            BufferAllocator allocator,
+            @Nullable Long memoryUsedMaxInBytes) {
+        return new ArrowFormatWriter(
+                rowType,
+                writeBatchSize,
+                caseSensitive,
+                allocator,
+                memoryUsedMaxInBytes,
+                null,
+                false);
     }
 
     public void flush() {
@@ -221,7 +289,9 @@ public class ArrowFormatWriter implements AutoCloseable {
     @Override
     public void close() {
         vectorSchemaRoot.close();
-        allocator.close();
+        if (closeAllocatorOnClose) {
+            allocator.close();
+        }
     }
 
     public int getBatchSize() {
@@ -238,6 +308,71 @@ public class ArrowFormatWriter implements AutoCloseable {
 
     public BufferAllocator getAllocator() {
         return allocator;
+    }
+
+    /** Returns whether direct Arrow consumption preserves this writer's row schema. */
+    public boolean isArrowBundleSchemaCompatible(ArrowBundleRecords bundle) {
+        return !bundle.getVectorSchemaRoot().getFieldVectors().isEmpty()
+                && bundle.hasIdentityMapping()
+                && hasSameLogicalLayout(rowType, bundle.getRowType())
+                && vectorSchemaRoot.getSchema().equals(bundle.getVectorSchemaRoot().getSchema());
+    }
+
+    private static boolean hasSameLogicalLayout(DataType left, DataType right) {
+        if (left == right) {
+            return true;
+        }
+        if (left == null
+                || right == null
+                || left.getClass() != right.getClass()
+                || left.isNullable() != right.isNullable()) {
+            return false;
+        }
+
+        if (left instanceof RowType) {
+            List<DataField> leftFields = ((RowType) left).getFields();
+            List<DataField> rightFields = ((RowType) right).getFields();
+            if (leftFields.size() != rightFields.size()) {
+                return false;
+            }
+            for (int i = 0; i < leftFields.size(); i++) {
+                DataField leftField = leftFields.get(i);
+                DataField rightField = rightFields.get(i);
+                if (!leftField.name().equals(rightField.name())
+                        || !hasSameLogicalLayout(leftField.type(), rightField.type())) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        if (left instanceof ArrayType) {
+            return hasSameLogicalLayout(
+                    ((ArrayType) left).getElementType(), ((ArrayType) right).getElementType());
+        }
+
+        if (left instanceof MapType) {
+            MapType leftMap = (MapType) left;
+            MapType rightMap = (MapType) right;
+            return hasSameLogicalLayout(leftMap.getKeyType(), rightMap.getKeyType())
+                    && hasSameLogicalLayout(leftMap.getValueType(), rightMap.getValueType());
+        }
+
+        if (left instanceof MultisetType) {
+            return hasSameLogicalLayout(
+                    ((MultisetType) left).getElementType(),
+                    ((MultisetType) right).getElementType());
+        }
+
+        if (left instanceof VectorType) {
+            VectorType leftVector = (VectorType) left;
+            VectorType rightVector = (VectorType) right;
+            return leftVector.getLength() == rightVector.getLength()
+                    && hasSameLogicalLayout(
+                            leftVector.getElementType(), rightVector.getElementType());
+        }
+
+        return left.equals(right);
     }
 
     private static RowType replaceWithShreddingType(

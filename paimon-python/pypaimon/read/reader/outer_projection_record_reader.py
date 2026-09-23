@@ -27,6 +27,7 @@ wrapper extracts the user-visible flat columns afterwards.
 
 from typing import Any, List, Optional
 
+from pypaimon.read.reader.field_indices import project_top_level_field_indices
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.table.row.internal_row import InternalRow
@@ -44,6 +45,7 @@ class OuterProjectionRecordReader(RecordReader[InternalRow]):
         file_io=None,
         blob_field_indices=None,
         vector_field_indices=None,
+        descriptor_field_indices=None,
     ):
         if not name_paths:
             raise ValueError("name_paths must be non-empty")
@@ -62,28 +64,28 @@ class OuterProjectionRecordReader(RecordReader[InternalRow]):
         self._inner = inner
         self._flat_arity = len(name_paths)
         self._file_io = file_io
-        self._blob_field_indices = None
-        if blob_field_indices is not None:
-            self._blob_field_indices = {
-                proj_pos
-                for proj_pos, spec in enumerate(self._specs)
-                if not spec.sub_names and spec.top_idx in blob_field_indices
-            }
-        self._vector_field_indices = None
-        if vector_field_indices is not None:
-            self._vector_field_indices = {
-                proj_pos
-                for proj_pos, spec in enumerate(self._specs)
-                if not spec.sub_names and spec.top_idx in vector_field_indices
-            }
+        self._blob_field_indices = project_top_level_field_indices(
+            blob_field_indices, self._specs)
+        self._descriptor_field_indices = project_top_level_field_indices(
+            descriptor_field_indices, self._specs)
+        self._vector_field_indices = project_top_level_field_indices(
+            vector_field_indices, self._specs)
+        self.file_io = self._file_io
+        self.blob_field_indices = self._blob_field_indices
+        self.descriptor_field_indices = self._descriptor_field_indices
+        self.vector_field_indices = self._vector_field_indices
+        self.blob_view_lookup = getattr(inner, 'blob_view_lookup', None)
 
     def read_batch(self) -> Optional[RecordIterator[InternalRow]]:
         inner_batch = self._inner.read_batch()
         if inner_batch is None:
             return None
+        self._refresh_blob_view_lookup(self._inner)
         return _OuterProjectionIterator(
             inner_batch, self._specs, self._flat_arity, self._file_io,
-            self._blob_field_indices, self._vector_field_indices)
+            self._blob_field_indices, self._vector_field_indices,
+            self._descriptor_field_indices,
+            blob_view_lookup=self.blob_view_lookup)
 
     def close(self) -> None:
         self._inner.close()
@@ -100,6 +102,8 @@ class _OuterProjectionIterator(RecordIterator[InternalRow]):
         file_io=None,
         blob_field_indices=None,
         vector_field_indices=None,
+        descriptor_field_indices=None,
+        blob_view_lookup=None,
     ):
         self._inner = inner
         self._specs = specs
@@ -107,7 +111,9 @@ class _OuterProjectionIterator(RecordIterator[InternalRow]):
         self._reused_row = OffsetRow(None, 0, flat_arity,
                                      file_io=file_io,
                                      blob_field_indices=blob_field_indices,
-                                     vector_field_indices=vector_field_indices)
+                                     vector_field_indices=vector_field_indices,
+                                     descriptor_field_indices=descriptor_field_indices,
+                                     blob_view_lookup=blob_view_lookup)
 
     def next(self) -> Optional[InternalRow]:
         inner_row = self._inner.next()

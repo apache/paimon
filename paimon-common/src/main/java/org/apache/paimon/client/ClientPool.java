@@ -68,7 +68,12 @@ public interface ClientPool<C, E extends Exception> {
                     client = ensureActiveClient(client);
                     return action.run(client);
                 } finally {
+                    // Return client to the deque, then check if close() raced us.
+                    // The deque's lock ensures either drainTo or remove sees the client.
                     clients.addFirst(client);
+                    if (this.clients == null && clients.remove(client)) {
+                        close(client);
+                    }
                 }
             }
         }

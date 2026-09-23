@@ -33,6 +33,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import com.aliyun.jindodata.common.JindoHadoopSystem;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
+import org.apache.hadoop.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -348,9 +349,9 @@ public abstract class HadoopCompliantFileIO implements FileIO {
          * @param bytes the number of bytes to skip.
          */
         public void skipFully(long bytes) throws IOException {
-            while (bytes > 0) {
-                bytes -= in.skip(bytes);
-            }
+            // hadoop's helper probes with read() before calling it EOF, because skip may return 0
+            // without being at the end. The loop this replaces subtracted that 0 and asked again.
+            IOUtils.skipFully(in, bytes);
         }
     }
 
@@ -432,6 +433,16 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         @Override
         public long getModificationTime() {
             return status.getModificationTime();
+        }
+
+        @Override
+        public long getAccessTime() {
+            return status.getAccessTime();
+        }
+
+        @Override
+        public String getOwner() {
+            return status.getOwner();
         }
     }
 }

@@ -130,10 +130,31 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
     protected void waitForResult(
             List<String> expected, FileStoreTable table, RowType rowType, List<String> primaryKeys)
             throws Exception {
-        waitForResult(false, expected, table, rowType, primaryKeys);
+        waitForResult(null, false, expected, table, rowType, primaryKeys);
     }
 
     protected void waitForResult(
+            JobClient client,
+            List<String> expected,
+            FileStoreTable table,
+            RowType rowType,
+            List<String> primaryKeys)
+            throws Exception {
+        waitForResult(client, false, expected, table, rowType, primaryKeys);
+    }
+
+    protected void waitForResult(
+            boolean withRegx,
+            List<String> expected,
+            FileStoreTable table,
+            RowType rowType,
+            List<String> primaryKeys)
+            throws Exception {
+        waitForResult(null, withRegx, expected, table, rowType, primaryKeys);
+    }
+
+    protected void waitForResult(
+            @Nullable JobClient client,
             boolean withRegx,
             List<String> expected,
             FileStoreTable table,
@@ -158,6 +179,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
                     break;
                 }
             }
+            checkJobNotTerminated(client);
             table = table.copyWithLatestSchema();
             Thread.sleep(1000);
         }
@@ -179,6 +201,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
                     || sortedExpected.equals(sortedActual)) {
                 break;
             }
+            checkJobNotTerminated(client);
             LOG.info("actual: " + sortedActual);
             LOG.info("expected: " + sortedExpected);
             Thread.sleep(1000);
@@ -261,8 +284,31 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             if (status == JobStatus.RUNNING) {
                 break;
             }
+            if (status.isGloballyTerminalState()) {
+                throwJobTerminated(client, status);
+            }
             Thread.sleep(1000);
         }
+    }
+
+    protected void checkJobNotTerminated(@Nullable JobClient client) throws Exception {
+        if (client == null) {
+            return;
+        }
+
+        JobStatus status = client.getJobStatus().get();
+        if (status.isGloballyTerminalState()) {
+            throwJobTerminated(client, status);
+        }
+    }
+
+    private void throwJobTerminated(JobClient client, JobStatus status) throws Exception {
+        try {
+            client.getJobExecutionResult().get();
+        } catch (Exception e) {
+            throw new AssertionError("CDC job terminated with status " + status + ".", e);
+        }
+        throw new AssertionError("CDC job terminated with status " + status + ".");
     }
 
     private <T> String getActionName(Class<T> clazz) {
@@ -425,6 +471,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
 
         private Map<String, String> catalogConfig = Collections.emptyMap();
         private Map<String, String> tableConfig = Collections.emptyMap();
+        private final List<String> tableConfigByTable = new ArrayList<>();
         @Nullable private Boolean ignoreIncompatible;
         @Nullable private Boolean mergeShards;
         @Nullable private String tablePrefix;
@@ -451,6 +498,11 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
 
         public SyncDatabaseActionBuilder<T> withTableConfig(Map<String, String> tableConfig) {
             this.tableConfig = tableConfig;
+            return this;
+        }
+
+        public SyncDatabaseActionBuilder<T> withTableConfigByTable(String... configs) {
+            this.tableConfigByTable.addAll(Arrays.asList(configs));
             return this;
         }
 
@@ -536,6 +588,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             args.addAll(mapToArgs(getConfKey(clazz), sourceConfig));
             args.addAll(mapToArgs("--catalog-conf", catalogConfig));
             args.addAll(mapToArgs("--table-conf", tableConfig));
+            args.addAll(listToMultiArgs("--table-conf-by-table", tableConfigByTable));
 
             args.addAll(nullableToArgs("--ignore-incompatible", ignoreIncompatible));
             args.addAll(nullableToArgs("--merge-shards", mergeShards));

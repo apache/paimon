@@ -46,6 +46,8 @@ import static org.apache.paimon.utils.InternalRowUtils.toStringArrayData;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
+import static org.apache.paimon.utils.SerializationUtils.presizedCapacity;
+import static org.apache.paimon.utils.SerializationUtils.readCount;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** A legacy version serializer for {@link CommitMessage}. */
@@ -55,8 +57,8 @@ public class CommitMessageLegacyV2Serializer {
     private IndexFileMetaLegacyV2Serializer indexEntrySerializer;
 
     public List<CommitMessage> deserializeList(DataInputView view) throws IOException {
-        int length = view.readInt();
-        List<CommitMessage> list = new ArrayList<>(length);
+        int length = readCount(view, getClass().getSimpleName());
+        List<CommitMessage> list = new ArrayList<>(presizedCapacity(length));
         for (int i = 0; i < length; i++) {
             list.add(deserialize(view));
         }
@@ -158,6 +160,7 @@ public class CommitMessageLegacyV2Serializer {
                     row.getInt(10),
                     fromStringArrayData(row.getArray(11)),
                     row.getTimestamp(12, 3),
+                    null,
                     null,
                     null,
                     null,

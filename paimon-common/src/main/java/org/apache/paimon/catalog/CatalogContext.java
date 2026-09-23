@@ -45,7 +45,7 @@ public class CatalogContext implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private final Options options;
-    private final SerializableConfiguration hadoopConf;
+    @Nullable private final SerializableConfiguration hadoopConf;
     @Nullable private final FileIOLoader preferIOLoader;
     @Nullable private final FileIOLoader fallbackIOLoader;
 
@@ -55,9 +55,7 @@ public class CatalogContext implements Serializable {
             @Nullable FileIOLoader preferIOLoader,
             @Nullable FileIOLoader fallbackIOLoader) {
         this.options = checkNotNull(options);
-        this.hadoopConf =
-                new SerializableConfiguration(
-                        hadoopConf == null ? getHadoopConfiguration(options) : hadoopConf);
+        this.hadoopConf = loadHadoopConfiguration(options, hadoopConf);
         this.preferIOLoader = preferIOLoader;
         this.fallbackIOLoader = fallbackIOLoader;
     }
@@ -99,7 +97,30 @@ public class CatalogContext implements Serializable {
 
     /** Return hadoop {@link Configuration}. */
     public Configuration hadoopConf() {
+        if (hadoopConf == null) {
+            throw new IllegalStateException(
+                    "Hadoop configuration is not available for this CatalogContext.");
+        }
         return hadoopConf.get();
+    }
+
+    @Nullable
+    private static SerializableConfiguration loadHadoopConfiguration(
+            Options options, @Nullable Configuration hadoopConf) {
+        try {
+            return new SerializableConfiguration(
+                    hadoopConf == null ? getHadoopConfiguration(options) : hadoopConf);
+        } catch (NoClassDefFoundError e) {
+            if (isHadoopClassNotFound(e)) {
+                return null;
+            }
+            throw e;
+        }
+    }
+
+    private static boolean isHadoopClassNotFound(NoClassDefFoundError e) {
+        String message = e.getMessage();
+        return message != null && message.startsWith("org/apache/hadoop/");
     }
 
     @Nullable

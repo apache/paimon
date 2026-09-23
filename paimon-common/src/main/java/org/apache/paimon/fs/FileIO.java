@@ -20,6 +20,7 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
 import org.apache.paimon.fs.local.LocalFileIO;
 
@@ -34,10 +35,13 @@ import java.io.Closeable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.InterruptedIOException;
 import java.io.OutputStreamWriter;
 import java.io.Serializable;
 import java.net.URI;
+import java.nio.channels.ClosedByInterruptException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -46,6 +50,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Queue;
@@ -246,6 +251,27 @@ public interface FileIO extends Serializable, Closeable {
      */
     boolean rename(Path src, Path dst) throws IOException;
 
+    default Optional<Path> archive(Path path, StorageType type) throws IOException {
+        throw new UnsupportedOperationException(
+                getClass().getName() + " does not support archive.");
+    }
+
+    default void restoreArchive(Path path, Duration duration) throws IOException {
+        throw new UnsupportedOperationException(
+                getClass().getName() + " does not support restore archive.");
+    }
+
+    default Optional<Path> unarchive(Path path, StorageType type) throws IOException {
+        throw new UnsupportedOperationException(
+                getClass().getName() + " does not support unarchive.");
+    }
+
+    default String createBlobPresignedUrl(
+            Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
+        throw new UnsupportedOperationException(
+                getClass().getName() + " does not support creating blob presigned URLs.");
+    }
+
     /**
      * Override this method to empty, many FileIO implementation classes rely on static variables
      * and do not have the ability to close them.
@@ -318,6 +344,32 @@ public interface FileIO extends Serializable, Closeable {
                 builder.append(line);
             }
             return builder.toString();
+        } catch (FileNotFoundException e) {
+            throw e;
+        } catch (InterruptedIOException | ClosedByInterruptException e) {
+            // An interrupted read says nothing about whether the file is still there.
+            throw e;
+        } catch (IOException e) {
+            // Some object stores throw a plain IOException for a file deleted during reading.
+            boolean missing;
+            try {
+                missing = !exists(path);
+            } catch (IOException | RuntimeException checkFailure) {
+                // Keep the original failure when the file cannot be confirmed to be gone.
+                if (checkFailure != e) {
+                    e.addSuppressed(checkFailure);
+                }
+                throw e;
+            }
+            if (!missing) {
+                throw e;
+            }
+            LOG.debug(
+                    "Read of {} failed and the file is gone, reporting it as not found.", path, e);
+            FileNotFoundException notFound =
+                    new FileNotFoundException("File " + path + " does not exist.");
+            notFound.initCause(e);
+            throw notFound;
         }
     }
 
@@ -355,10 +407,29 @@ public interface FileIO extends Serializable, Closeable {
      * implementations.
      */
     default void overwriteFileUtf8(Path path, String content) throws IOException {
-        try (PositionOutputStream out = newOutputStream(path, true)) {
+        // Some FileIO implementations (e.g. HDFS) rethrow the exact same exception instance from
+        // close() that was already thrown from write(), which makes the try-with-resources
+        // suppression mechanism fail with "Self-suppression not permitted". Therefore close the
+        // stream manually and only add suppressed exceptions that differ from the primary one.
+        IOException primaryException = null;
+        PositionOutputStream out = newOutputStream(path, true);
+        try {
             OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
             writer.write(content);
             writer.flush();
+        } catch (IOException e) {
+            primaryException = e;
+            throw e;
+        } finally {
+            try {
+                out.close();
+            } catch (IOException closeException) {
+                if (primaryException == null) {
+                    throw closeException;
+                } else if (primaryException != closeException) {
+                    primaryException.addSuppressed(closeException);
+                }
+            }
         }
     }
 
@@ -514,13 +585,13 @@ public interface FileIO extends Serializable, Closeable {
         if (loader != null) {
             Set<String> options =
                     config.options().keySet().stream()
-                            .map(String::toLowerCase)
+                            .map(s -> s.toLowerCase(Locale.ROOT))
                             .collect(Collectors.toSet());
             Set<String> missOptions = new HashSet<>();
             for (String[] keys : loader.requiredOptions()) {
                 boolean found = false;
                 for (String key : keys) {
-                    if (options.contains(key.toLowerCase())) {
+                    if (options.contains(key.toLowerCase(Locale.ROOT))) {
                         found = true;
                         break;
                     }

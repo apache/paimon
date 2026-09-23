@@ -25,6 +25,7 @@ from pypaimon.api.auth.base import AuthProvider
 from pypaimon.api.auth.dlf_signer import (
     DLFDefaultSigner,
     DLFOpenApiSigner,
+    DLFOpenApiV4Signer,
     DLFRequestSigner,
 )
 from pypaimon.api.token_loader import DLFToken, DLFTokenLoader
@@ -52,7 +53,9 @@ class DLFAuthProvider(AuthProvider):
         self.signer = self._create_signer(signing_algorithm)
 
     def _create_signer(self, signing_algorithm: str) -> DLFRequestSigner:
-        if signing_algorithm == DLFOpenApiSigner.IDENTIFIER:
+        if signing_algorithm == DLFOpenApiV4Signer.IDENTIFIER:
+            return DLFOpenApiV4Signer(self.region)
+        elif signing_algorithm == DLFOpenApiSigner.IDENTIFIER:
             return DLFOpenApiSigner()
         else:
             return DLFDefaultSigner(self.region)

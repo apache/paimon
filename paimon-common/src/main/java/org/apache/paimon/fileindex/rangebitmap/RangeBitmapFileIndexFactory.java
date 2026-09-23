@@ -20,6 +20,7 @@ package org.apache.paimon.fileindex.rangebitmap;
 
 import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.fileindex.FileIndexerFactory;
+import org.apache.paimon.fileindex.rangebitmap.dictionary.chunked.KeyFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
@@ -36,5 +37,10 @@ public class RangeBitmapFileIndexFactory implements FileIndexerFactory {
     @Override
     public FileIndexer create(DataType dataType, Options options) {
         return new RangeBitmapFileIndex(dataType, options);
+    }
+
+    @Override
+    public void validate(DataType dataType) {
+        KeyFactory.create(dataType);
     }
 }

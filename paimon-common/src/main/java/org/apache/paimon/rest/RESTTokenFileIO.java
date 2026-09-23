@@ -20,10 +20,12 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.ConfigOption;
@@ -43,7 +45,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
+import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -52,6 +54,7 @@ import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link FileIO} to support getting token from REST Server. */
 public class RESTTokenFileIO implements FileIO {
@@ -78,6 +81,24 @@ public class RESTTokenFileIO implements FileIO {
                     .build();
 
     private static final Logger LOG = LoggerFactory.getLogger(RESTTokenFileIO.class);
+
+    /** Sets the maximum number of cached FileIO instances. */
+    public static void setFileIOCacheMaximumSize(long maximumSize) {
+        checkArgument(maximumSize > 0, "Maximum cache size must be positive.");
+        FILE_IO_CACHE
+                .policy()
+                .eviction()
+                .orElseThrow(IllegalStateException::new)
+                .setMaximum(maximumSize);
+    }
+
+    static long fileIOCacheMaximumSize() {
+        return FILE_IO_CACHE
+                .policy()
+                .eviction()
+                .orElseThrow(IllegalStateException::new)
+                .getMaximum();
+    }
 
     private final CatalogContext catalogContext;
     private final Identifier identifier;
@@ -131,6 +152,13 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     @Override
+    public RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
+            throws IOException {
+        // the interface default would hide the inner FileIO's iterative listing override
+        return fileIO().listFilesIterative(path, recursive);
+    }
+
+    @Override
     public boolean exists(Path path) throws IOException {
         return fileIO().exists(path);
     }
@@ -151,6 +179,50 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     @Override
+    public boolean tryToWriteAtomic(Path path, String content) throws IOException {
+        // the interface default (temp file + rename) would bypass the inner FileIO's atomic
+        // override
+        return fileIO().tryToWriteAtomic(path, content);
+    }
+
+    @Override
+    public String createBlobPresignedUrl(
+            Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
+        if (!path.equals(tableRoot)) {
+            throw new IOException("Table root does not match RESTTokenFileIO bound table root.");
+        }
+        if (validity == null
+                || validity.isZero()
+                || validity.isNegative()
+                || validity.getNano() != 0) {
+            throw new IOException("Blob presigned URL validity must be positive whole seconds.");
+        }
+        final long validityMillis;
+        try {
+            validityMillis = validity.toMillis();
+        } catch (ArithmeticException e) {
+            throw new IOException("Blob presigned URL validity is too large.", e);
+        }
+
+        FileIOWithToken first = fileIOWithToken(validityMillis);
+        String url = first.fileIO.createBlobPresignedUrl(tableRoot, descriptor, validity);
+        if (hasRemainingLifetime(first.token, validityMillis)) {
+            return url;
+        }
+
+        // The first call materialized the range. Refresh and sign the cached object again so the
+        // returned URL has the requested lifetime.
+        FileIOWithToken refreshed = fileIOWithToken(validityMillis);
+        url = refreshed.fileIO.createBlobPresignedUrl(tableRoot, descriptor, validity);
+        if (!hasRemainingLifetime(refreshed.token, validityMillis)) {
+            throw new IOException(
+                    "Requested presigned URL validity exceeds the remaining "
+                            + "REST credential lifetime after refresh.");
+        }
+        return url;
+    }
+
+    @Override
     public boolean isObjectStore() {
         try {
             return fileIO().isObjectStore();
@@ -160,21 +232,32 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     public FileIO fileIO() throws IOException {
-        tryToRefreshToken();
+        return fileIOWithToken(0).fileIO;
+    }
 
-        FileIO fileIO = FILE_IO_CACHE.getIfPresent(token);
+    private FileIOWithToken fileIOWithToken(long minimumValidityMillis) throws IOException {
+        tryToRefreshToken(minimumValidityMillis);
+        RESTToken currentToken = token;
+        if (minimumValidityMillis > 0
+                && !hasRemainingLifetime(currentToken, minimumValidityMillis)) {
+            throw new IOException(
+                    "Requested presigned URL validity exceeds the remaining "
+                            + "REST credential lifetime after refresh.");
+        }
+
+        FileIO fileIO = FILE_IO_CACHE.getIfPresent(currentToken);
         if (fileIO != null) {
-            return fileIO;
+            return new FileIOWithToken(fileIO, currentToken);
         }
 
         synchronized (FILE_IO_CACHE) {
-            fileIO = FILE_IO_CACHE.getIfPresent(token);
+            fileIO = FILE_IO_CACHE.getIfPresent(currentToken);
             if (fileIO != null) {
-                return fileIO;
+                return new FileIOWithToken(fileIO, currentToken);
             }
 
             Options options = catalogContext.options();
-            options = new Options(RESTUtil.merge(options.toMap(), token.token()));
+            options = new Options(RESTUtil.merge(options.toMap(), currentToken.token()));
             options.set(FILE_IO_ALLOW_CACHE, false);
             CatalogContext context =
                     CatalogContext.create(
@@ -182,30 +265,50 @@ public class RESTTokenFileIO implements FileIO {
                             catalogContext.hadoopConf(),
                             catalogContext.preferIO(),
                             catalogContext.fallbackIO());
-            try {
-                fileIO = FileIO.get(path, context);
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-            FILE_IO_CACHE.put(token, fileIO);
-            return fileIO;
+            fileIO = FileIO.get(path, context);
+            FILE_IO_CACHE.put(currentToken, fileIO);
+            return new FileIOWithToken(fileIO, currentToken);
         }
     }
 
+    private boolean hasRemainingLifetime(RESTToken signingToken, long minimumValidityMillis) {
+        return signingToken == null
+                || signingToken.expireAtMillis() - currentTimeMillis() >= minimumValidityMillis;
+    }
+
+    long currentTimeMillis() {
+        return System.currentTimeMillis();
+    }
+
     private void tryToRefreshToken() {
-        if (shouldRefresh()) {
+        tryToRefreshToken(0);
+    }
+
+    private void tryToRefreshToken(long minimumValidityMillis) {
+        if (shouldRefresh(minimumValidityMillis)) {
             synchronized (this) {
-                if (shouldRefresh()) {
+                if (shouldRefresh(minimumValidityMillis)) {
                     refreshToken();
                 }
             }
         }
     }
 
-    private boolean shouldRefresh() {
+    private boolean shouldRefresh(long minimumValidityMillis) {
         return token == null
-                || token.expireAtMillis() - System.currentTimeMillis()
-                        < TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
+                || token.expireAtMillis() - currentTimeMillis()
+                        < Math.max(TOKEN_EXPIRATION_SAFE_TIME_MILLIS, minimumValidityMillis);
+    }
+
+    private static class FileIOWithToken {
+
+        private final FileIO fileIO;
+        private final RESTToken token;
+
+        private FileIOWithToken(FileIO fileIO, RESTToken token) {
+            this.fileIO = fileIO;
+            this.token = token;
+        }
     }
 
     private void refreshToken() {

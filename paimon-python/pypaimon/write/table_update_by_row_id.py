@@ -16,20 +16,193 @@
 # under the License.
 
 import bisect
-from typing import Dict, List, Optional, Tuple
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Set, Tuple
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.read.scanner.data_evolution_split_generator import (
+    DataEvolutionSplitGenerator,
+)
 from pypaimon.read.split import DataSplit
 from pypaimon.read.table_read import TableRead
-from pypaimon.utils.range import Range
-from pypaimon.schema.data_types import DataField
+from pypaimon.schema.data_types import (
+    DataField,
+    PyarrowFieldParser,
+    is_array_blob_type,
+    is_blob_file_field,
+    is_map_blob_type,
+)
+from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
+from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
+from pypaimon.write.row_utils import (
+    require_columns,
+    row_to_named_values,
+    value_for_arrow,
+)
+from pypaimon.write.writer.blob_writer import BlobWriter
+from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
+from pypaimon.write.writer.single_file_writer import SingleFileWriter
+from pypaimon.write.writer.write_buffer import WriteBuffer
+
+_ARROW_MAJOR = int(pa.__version__.split('.')[0])
+# Keep aligned with org.apache.parquet.hadoop.ParquetWriter.DEFAULT_BLOCK_SIZE.
+_DEFAULT_PARQUET_BLOCK_SIZE = 128 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class _FilesInfo:
+    """Snapshot view of target data files keyed by first_row_id.
+
+    Built once per merge by the driver and broadcast to workers so each task
+    avoids re-scanning the manifest.
+    """
+    snapshot_id: int
+    first_row_ids: List[int]
+    first_row_id_index: Dict[int, Tuple[DataSplit, List[DataFileMeta]]] = (
+        field(default_factory=dict)
+    )
+    valid_row_id_ranges: List[Range] = field(default_factory=list)
+
+
+class _RowIdUpdateFileWriter:
+    """Write one plain-Parquet update file for a row-id file group."""
+
+    _ROW_GROUP_MAX_ROWS = 1024 * 1024
+
+    @staticmethod
+    def supports_table(table):
+        options = table.options
+        return (not table.is_primary_key_table
+                and options.file_format(CoreOptions.FILE_FORMAT_PARQUET)
+                == CoreOptions.FILE_FORMAT_PARQUET
+                and not (options.variant_shredding_enabled()
+                         and options.variant_shredding_schema())
+                and not options.data_evolution_row_sidecar_enabled(False)
+                and not options.with_vector_format()
+                and options.changelog_producer() == ChangelogProducer.NONE
+                and not any(options.map_storage_layout(f.name) == 'shared-shredding'
+                            for f in table.fields)
+                and not any(is_blob_file_field(f) for f in table.fields))
+
+    def __init__(self, table, partition, column_names):
+        if not self.supports_table(table):
+            raise ValueError('Row-id update file writer requires plain Parquet without sidecars')
+        configured = table.options.file_block_size()
+        self._target_bytes = (configured.get_bytes() if configured is not None
+                              else _DEFAULT_PARQUET_BLOCK_SIZE)
+        if self._target_bytes <= 0:
+            raise ValueError('file.block-size must be positive')
+        self._data_writer = AppendOnlyDataWriter(
+            table, partition, 0, 0, table.options, write_cols=column_names)
+
+    @staticmethod
+    def _row_group_slice(batch, offset, count):
+        piece = batch.slice(offset, count)
+        # Arrow 6 nbytes counts full backing buffers even for slices. Compact
+        # the slice there so both accounting and retained buffers stay bounded.
+        if _ARROW_MAJOR < 7:
+            piece = pa.RecordBatch.from_arrays(
+                [pa.concat_arrays([column]) for column in piece.columns], schema=piece.schema)
+        return piece
+
+    def _row_groups(self, batches):
+        """Bound row-group buffering using Arrow-side bytes, not encoded size."""
+        buffer = WriteBuffer(self._data_writer._merge_data)
+        try:
+            for batch in batches:
+                offset = 0
+                while offset < batch.num_rows:
+                    count = min(batch.num_rows - offset,
+                                self._ROW_GROUP_MAX_ROWS - buffer.num_rows)
+                    piece = self._row_group_slice(batch, offset, count)
+                    available = self._target_bytes - buffer.nbytes
+                    if piece.nbytes > available:
+                        low, high = 0, count
+                        while low < high:
+                            middle = (low + high + 1) // 2
+                            if self._row_group_slice(piece, 0, middle).nbytes <= available:
+                                low = middle
+                            else:
+                                high = middle - 1
+                        count = low
+                        if count == 0 and buffer.num_rows:
+                            yield buffer.take()
+                            continue
+                        count = max(1, count)
+                        piece = self._row_group_slice(piece, 0, count)
+                    buffer.append(pa.Table.from_batches([piece]))
+                    offset += count
+                    del piece
+                    if buffer.nbytes >= self._target_bytes or buffer.num_rows >= self._ROW_GROUP_MAX_ROWS:
+                        yield buffer.take()
+                del batch
+            if buffer.num_rows:
+                yield buffer.take()
+        finally:
+            buffer.reset()
+
+    def write_batches(self, batches):
+        """Write one file while keeping input and output row groups bounded."""
+        writer = self._data_writer
+        file_name = '{}{}-0.parquet'.format(
+            writer.options.data_file_prefix(), uuid.uuid4())
+        file_path = writer._generate_file_path(file_name)
+        fields = []
+        groups = self._row_groups(batches)
+        file_writer = None
+        try:
+            for batch in groups:
+                if not batch.num_rows:
+                    continue
+                if file_writer is None:
+                    if writer.options.metadata_stats_enabled():
+                        fields = PyarrowFieldParser.to_paimon_schema(batch.schema)
+                    file_writer = SingleFileWriter(
+                        writer.file_io, file_path, batch.schema, writer.file_format,
+                        writer.compression, writer.zstd_level,
+                        fields, writer._get_column_stats,
+                        parquet_options=writer.parquet_writer_options)
+                file_writer.write(batch, row_group_size=batch.num_rows)
+                del batch
+            if file_writer is None:
+                return []
+            file_writer.close()
+            meta = writer._create_data_file_meta(
+                file_name=file_name,
+                file_path=file_path,
+                row_count=file_writer.row_count,
+                min_key=GenericRow([], []), max_key=GenericRow([], []),
+                key_stats=SimpleStats.empty_stats(),
+                value_stats=writer._collect_value_stats(
+                    None, fields, file_writer.column_stats),
+                min_sequence_number=0, max_sequence_number=0,
+            )
+            writer._finish_data_file(meta)
+            return [meta]
+        except Exception:
+            if file_writer is not None:
+                file_writer.abort()
+            raise
+        finally:
+            groups.close()
+
+    def abort(self):
+        self._data_writer.abort()
+
+    def close(self):
+        self._data_writer.close()
 
 
 class TableUpdateByRowId:
@@ -38,64 +211,130 @@ class TableUpdateByRowId:
 
     This update is designed for adding/updating specific columns in existing tables.
     Input data should contain _ROW_ID column.
+
+    Python is the writer-side source of truth for update-by-row-id. The Java
+    side ships the read path (``BlobFallbackRecordReader``) and pins the
+    on-disk blob delta layout via ``BlobUpdateTest`` only; there is no Java
+    writer. Changes to the blob delta layout here must stay compatible with
+    that reader.
     """
 
     FIRST_ROW_ID_COLUMN = '_FIRST_ROW_ID'
 
-    def __init__(self, table, commit_user: str, commit_identifier: int):
+    def __init__(
+            self, table, commit_user: str, commit_identifier: int,
+            _precomputed_files_info: Optional[_FilesInfo] = None,
+    ):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.commit_user = commit_user
         self.commit_identifier = commit_identifier
 
-        # Snapshot the current state once: a single ``first_row_id -> (split, files)``
-        # map is enough to drive every downstream lookup (partition, row-count, read).
-        (self.snapshot_id,
-         self.first_row_ids,
-         self._first_row_id_index,
-         self.total_row_count) = self._load_existing_files_info()
+        info = _precomputed_files_info or self._load_existing_files_info()
+        self.snapshot_id = info.snapshot_id
+        self.first_row_ids = info.first_row_ids
+        self._first_row_id_index = info.first_row_id_index
+        self.valid_row_id_ranges = info.valid_row_id_ranges
 
         self.commit_messages: List[CommitMessage] = []
+        self._updated_first_row_ids_by_column: Dict[str, Set[int]] = {}
 
-    def _load_existing_files_info(
-            self,
-    ) -> Tuple[int, List[int], Dict[int, Tuple[DataSplit, List[DataFileMeta]]], int]:
+    def _snapshot_files_info(self) -> _FilesInfo:
+        """Return the already loaded snapshot file index for broadcast."""
+        return _FilesInfo(
+            snapshot_id=self.snapshot_id,
+            first_row_ids=self.first_row_ids,
+            first_row_id_index=self._first_row_id_index,
+            valid_row_id_ranges=self.valid_row_id_ranges,
+        )
+
+    def _load_existing_files_info(self) -> _FilesInfo:
         """Scan the latest snapshot once and index files by ``first_row_id``.
 
-        Returns:
-            A 4-tuple of ``(snapshot_id, sorted_unique_first_row_ids, index, total_row_count)``
-            where ``index`` maps each ``first_row_id`` to the owning split and
-            the list of files with that id (a single id may belong to multiple
-            files when data evolution has split a logical row range).
+        Returns a :class:`_FilesInfo` whose ``first_row_id_index`` maps each
+        ``first_row_id`` to the owning split and the list of files with that
+        id (a single id may belong to multiple files when data evolution has
+        split a logical row range).
         """
-        plan = self.table.new_read_builder().new_scan().plan()
-        splits = plan.splits()
+        scan = self.table.new_read_builder().new_scan()
+        plan = scan.plan_for_write()
+        snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
+        return self._files_info_from_splits(snapshot_id, plan.splits())
 
+    @classmethod
+    def _files_info_from_entries(
+            cls,
+            table,
+            snapshot_id: int,
+            entries: List[ManifestEntry],
+    ) -> _FilesInfo:
+        """Build a file index from an already resolved snapshot entry set."""
+        splits = DataEvolutionSplitGenerator(
+            table,
+            table.options.source_split_target_size(),
+            table.options.source_split_open_file_cost(),
+        ).create_splits(entries)
+        return cls._files_info_from_splits(snapshot_id, splits)
+
+    @classmethod
+    def _files_info_from_splits(
+            cls, snapshot_id: int, splits: List[DataSplit]) -> _FilesInfo:
         index: Dict[int, Tuple[DataSplit, List[DataFileMeta]]] = {}
         row_id_ranges: List[Range] = []
         for split in splits:
+            files_with_row_id = [
+                file for file in split.files if file.first_row_id is not None
+            ]
+            data_files = [
+                file for file in files_with_row_id
+                if not DataFileMeta.is_blob_file(file.file_name)
+            ]
             for file in split.files:
-                if file.first_row_id is None or file.file_name.endswith('.blob'):
+                if (
+                        file.first_row_id is None
+                        or DataFileMeta.is_blob_file(file.file_name)
+                ):
                     continue
                 row_id_ranges.append(file.row_id_range())
+            for file in data_files:
+                target_files = [
+                    target_file
+                    for target_file in files_with_row_id
+                    if cls._overlaps(
+                        file.row_id_range(), target_file.row_id_range()
+                    )
+                ]
+
                 entry = index.get(file.first_row_id)
                 if entry is None:
-                    index[file.first_row_id] = (split, [file])
+                    index[file.first_row_id] = (split, target_files)
                 else:
-                    entry[1].append(file)
+                    existing_files = entry[1]
+                    existing_names = {
+                        existing.file_name for existing in existing_files
+                    }
+                    existing_files.extend(
+                        target_file
+                        for target_file in target_files
+                        if target_file.file_name not in existing_names
+                    )
 
-        # Multiple physical files may share the same first_row_id (data evolution);
-        # summing row_count per file would over-count logical rows and widen
-        # the _ROW_ID validation range incorrectly.
         if row_id_ranges:
             merged = Range.sort_and_merge_overlap(row_id_ranges, True, True)
-            total_row_count = sum(r.count() for r in merged)
         else:
-            total_row_count = 0
+            merged = []
 
-        snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
-        return snapshot_id, sorted(index.keys()), index, total_row_count
+        return _FilesInfo(
+            snapshot_id=snapshot_id,
+            first_row_ids=sorted(index.keys()),
+            first_row_id_index=index,
+            valid_row_id_ranges=merged,
+        )
+
+    @staticmethod
+    def _overlaps(left: Range, right: Range) -> bool:
+        return left.from_ <= right.to and right.from_ <= left.to
 
     def update_columns(self, data: pa.Table, column_names: List[str]) -> List[CommitMessage]:
         """
@@ -111,6 +350,7 @@ class TableUpdateByRowId:
 
         if not column_names:
             raise ValueError("column_names cannot be empty")
+        column_names = list(dict.fromkeys(column_names))
 
         if SpecialFields.ROW_ID.name not in data.column_names:
             raise ValueError(f"Input data must contain {SpecialFields.ROW_ID.name} column")
@@ -119,17 +359,110 @@ class TableUpdateByRowId:
             if col_name not in self.table.field_names:
                 raise ValueError(f"Column {col_name} not found in table schema")
 
-        sorted_data = data.sort_by([(SpecialFields.ROW_ID.name, "ascending")])
-        data_with_first_row_id = self._calculate_first_row_id(sorted_data)
+        data_with_first_row_id = self._calculate_first_row_id(data)
+        first_row_ids = set(
+            data_with_first_row_id[self.FIRST_ROW_ID_COLUMN].to_pylist()
+        )
+        overlapping = {}
+        for col_name in column_names:
+            ids = first_row_ids.intersection(
+                self._updated_first_row_ids_by_column.get(col_name, set()))
+            if ids:
+                overlapping[col_name] = sorted(ids)
+        if overlapping:
+            raise ValueError(
+                "Input batches contain overlapping first_row_ids by column: "
+                f"{overlapping}"
+            )
         self._write_by_first_row_id(data_with_first_row_id, column_names)
+        for col_name in column_names:
+            self._updated_first_row_ids_by_column.setdefault(
+                col_name, set()).update(first_row_ids)
+
+        return self.commit_messages
+
+    def update_row_columns(
+            self,
+            row,
+            row_ids: List[int],
+            column_names: List[str],
+    ) -> List[CommitMessage]:
+        return self.update_rows_columns([row], [row_ids], column_names)
+
+    def update_rows_columns(
+            self,
+            rows: List,
+            row_ids_by_row: List[List[int]],
+            column_names: List[str],
+    ) -> List[CommitMessage]:
+        if not column_names:
+            raise ValueError("column_names cannot be empty")
+        column_names = list(dict.fromkeys(column_names))
+        if len(rows) != len(row_ids_by_row):
+            raise ValueError(
+                "rows and row_ids_by_row must have the same length: "
+                f"{len(rows)} != {len(row_ids_by_row)}"
+            )
+
+        values_by_row = [
+            row_to_named_values(row, self.table.table_schema.fields)
+            for row in rows
+        ]
+        for values_by_name in values_by_row:
+            require_columns(values_by_name, column_names, "update_rows_columns")
+
+        row_entries = []
+        for values_by_name, row_ids in zip(values_by_row, row_ids_by_row):
+            row_entries.extend((row_id, values_by_name) for row_id in row_ids)
+
+        if not row_entries:
+            return []
+
+        row_entries.sort(key=lambda item: item[0])
+
+        for col_name in column_names:
+            if col_name not in self.table.field_names:
+                raise ValueError(f"Column {col_name} not found in table schema")
+
+        arrays = [
+            pa.array([row_id for row_id, _ in row_entries], type=pa.int64())
+        ]
+        fields = [pa.field(SpecialFields.ROW_ID.name, pa.int64())]
+        blob_object_columns: Dict[str, List[Any]] = {}
+
+        for col_name in column_names:
+            if self._is_blob_column(col_name):
+                blob_object_columns[col_name] = [
+                    values_by_name[col_name]
+                    for _, values_by_name in row_entries
+                ]
+                continue
+
+            table_field = self.table.field_dict[col_name]
+            arrow_field = PyarrowFieldParser.from_paimon_field(table_field)
+            arrays.append(
+                pa.array(
+                    [
+                        value_for_arrow(values_by_name[col_name], table_field)
+                        for _, values_by_name in row_entries
+                    ],
+                    type=arrow_field.type,
+                )
+            )
+            fields.append(arrow_field)
+
+        update_data = pa.Table.from_arrays(arrays, schema=pa.schema(fields))
+        data_with_first_row_id = self._calculate_first_row_id(update_data)
+        self._write_by_first_row_id(
+            data_with_first_row_id, column_names, blob_object_columns)
 
         return self.commit_messages
 
     def _calculate_first_row_id(self, data: pa.Table) -> pa.Table:
         """Append ``_FIRST_ROW_ID`` to *data* by looking up each ``_ROW_ID``.
 
-        Validates that every input ``_ROW_ID`` is unique and falls in
-        ``[0, total_row_count)``. Supports partial / non-consecutive updates.
+        Validates that every input ``_ROW_ID`` is unique and belongs to
+        a valid row_id range. Supports partial / non-consecutive updates.
         """
         row_id_arr = data[SpecialFields.ROW_ID.name]
         row_ids = row_id_arr.to_pylist()
@@ -142,15 +475,12 @@ class TableUpdateByRowId:
                 self.FIRST_ROW_ID_COLUMN, pa.array([], type=pa.int64()),
             )
 
-        # Vectorised range check (avoids a Python-level per-row loop).
-        min_id = pc.min(row_id_arr).as_py()
-        max_id = pc.max(row_id_arr).as_py()
-        if min_id < 0 or max_id >= self.total_row_count:
-            offending = min_id if min_id < 0 else max_id
-            raise ValueError(
-                f"Row ID {offending} is out of valid range "
-                f"[0, {self.total_row_count})"
-            )
+        for row_id in row_ids:
+            if not any(r.contains(row_id) for r in self.valid_row_id_ranges):
+                raise ValueError(
+                    f"Row ID {row_id} does not belong to any valid range "
+                    f"{[f'[{r.from_}, {r.to}]' for r in self.valid_row_id_ranges]}"
+                )
 
         if not self.first_row_ids:
             raise ValueError("The input sorted sequence is empty.")
@@ -166,10 +496,15 @@ class TableUpdateByRowId:
             pa.array(first_row_id_values, type=pa.int64()),
         )
 
-    def _write_by_first_row_id(self, data: pa.Table, column_names: List[str]):
+    def _write_by_first_row_id(
+            self,
+            data: pa.Table,
+            column_names: List[str],
+            blob_object_columns: Optional[Dict[str, List[Any]]] = None):
         """Write data grouped by first_row_id."""
         first_row_id_array = data[self.FIRST_ROW_ID_COLUMN]
         unique_first_row_ids = pc.unique(first_row_id_array).to_pylist()
+        first_row_id_values = first_row_id_array.to_pylist()
 
         for first_row_id in unique_first_row_ids:
             entry = self._first_row_id_index.get(first_row_id)
@@ -178,9 +513,25 @@ class TableUpdateByRowId:
             split, _files = entry
 
             group_data = data.filter(pc.equal(first_row_id_array, first_row_id))
-            self._write_group(split.partition, first_row_id, group_data, column_names)
+            group_blob_object_columns = None
+            if blob_object_columns:
+                group_indices = [
+                    i for i, value in enumerate(first_row_id_values)
+                    if value == first_row_id
+                ]
+                group_blob_object_columns = {
+                    col_name: [values[i] for i in group_indices]
+                    for col_name, values in blob_object_columns.items()
+                }
+            self._write_group(
+                split.partition,
+                first_row_id,
+                group_data,
+                column_names,
+                group_blob_object_columns,
+            )
 
-    def _read_original_file_data(self, first_row_id: int, column_names: List[str]) -> Optional[pa.Table]:
+    def _read_original_file_data(self, first_row_id: int, column_names: List[str]) -> pa.Table:
         """Read original file data for the given first_row_id.
 
         Only reads columns that exist in the original file and need to be updated.
@@ -192,16 +543,17 @@ class TableUpdateByRowId:
             column_names: The column names to update
 
         Returns:
-            PyArrow Table containing the original data for columns that exist in the file,
-            or None if no columns need to be read from the original file.
+            PyArrow Table containing the original values for the requested columns.
         """
+        table_read, origin_split = self._original_file_read(first_row_id, column_names)
+        original = table_read.to_arrow([origin_split])
+        return original.select(column_names)
+
+    def _original_file_read(self, first_row_id, column_names):
         wanted = set(column_names)
         read_fields: List[DataField] = [
-            field for field in self.table.fields if field.name in wanted
+            table_field for table_field in self.table.fields if table_field.name in wanted
         ]
-        if not read_fields:
-            return None
-
         entry = self._first_row_id_index.get(first_row_id)
         if entry is None:
             raise ValueError(f"No file found for first_row_id {first_row_id}")
@@ -213,24 +565,109 @@ class TableUpdateByRowId:
             bucket=owning_split.bucket,
             raw_convertible=True,
         )
-        table_read = TableRead(self.table, predicate=None, read_type=read_fields)
-        return table_read.to_arrow([origin_split])
+        # Keep _ROW_ID as a row-count anchor. If every requested column was
+        # added after the original file was written, reading only those
+        # missing columns can otherwise produce a zero-row table instead of
+        # one null value per original row.
+        table_read = TableRead(
+            self.table,
+            predicate=None,
+            read_type=read_fields + [SpecialFields.ROW_ID],
+        )
+        return table_read, origin_split
 
-    def _merge_update_with_original(self, original_data: Optional[pa.Table], update_data: pa.Table,
-                                    column_names: List[str], first_row_id: int) -> pa.Table:
+    def _merged_batches(self, first_row_id, data, column_names):
+        """Merge ordinary columns a batch at a time in physical row order."""
+        table_read, split = self._original_file_read(first_row_id, column_names)
+        updates = sorted(enumerate(data[SpecialFields.ROW_ID.name].to_pylist()),
+                         key=lambda item: item[1])
+        update_index = 0
+        offset = first_row_id
+        with table_read._to_managed_arrow_batch_reader([split]) as reader:
+            for batch in reader:
+                if not batch.num_rows:
+                    continue
+                row_ids = batch[SpecialFields.ROW_ID.name]
+                if row_ids.null_count:
+                    raise ValueError(
+                        'Original file group contains null _ROW_ID values')
+                row_id_values = row_ids.to_numpy(zero_copy_only=True)
+                if (row_id_values[0] != offset
+                        or (len(row_id_values) > 1
+                            and not np.all(np.diff(row_id_values) == 1))):
+                    raise ValueError(
+                        f'Original file group is not contiguous at row ID {offset}')
+                end = offset + batch.num_rows
+                selected = []
+                while update_index < len(updates) and updates[update_index][1] < end:
+                    if updates[update_index][1] < offset:
+                        raise ValueError(
+                            'Update row IDs precede the original file group')
+                    selected.append(updates[update_index][0])
+                    update_index += 1
+                original = pa.Table.from_batches([batch]).select(column_names)
+                if selected:
+                    merged, _ = self._merge_update_with_original(
+                        original, data.take(selected), column_names, offset)
+                else:
+                    merged = original
+                yield from merged.to_batches()
+                offset = end
+                del batch, original, merged
+        if update_index != len(updates):
+            raise ValueError('Update row IDs extend past the original file group')
+
+    def _write_group_streaming(self, partition, first_row_id, data, column_names):
+        writer = _RowIdUpdateFileWriter(
+            self.table, tuple(partition.values), column_names)
+        batches = self._merged_batches(first_row_id, data, column_names)
+        try:
+            files = writer.write_batches(batches)
+            self._assign_update_file_metadata(files, first_row_id, column_names, {})
+            if files:
+                self.commit_messages.append(CommitMessage(
+                    partition=tuple(partition.values), bucket=0, new_files=files,
+                    check_from_snapshot=self.snapshot_id))
+        except Exception:
+            writer.abort()
+            raise
+        finally:
+            batches.close()
+            writer.close()
+
+    def _merge_update_with_original(
+            self,
+            original_data: Optional[pa.Table],
+            update_data: pa.Table,
+            column_names: List[str],
+            first_row_id: int,
+            blob_object_columns: Optional[Dict[str, List[Any]]] = None,
+            blob_columns_with_baseline: Optional[Set[str]] = None,
+    ) -> Tuple[Optional[pa.Table], Dict[str, List[object]]]:
         """Merge update data with original data, preserving row order.
 
         For rows that have updates, use the update values.
         For rows without updates, use the original values (if available).
+
+        Blob delta files are anchored at the original file's first_row_id.
+        Existing Blob columns only need to span through their last updated
+        row because placeholders can fall back to older files. A Blob column
+        without a physical baseline spans the complete normal file and writes
+        real nulls for unchanged rows, so it does not create placeholders with
+        nowhere to fall back.
 
         Args:
             original_data: Original data from the file (may be None if no columns need to be read)
             update_data: Update data (may contain only partial rows)
             column_names: Column names being updated
             first_row_id: The first_row_id of this file group
+            blob_object_columns: Blob objects supplied by row-based updates
+            blob_columns_with_baseline: Blob columns backed by an existing physical file
 
         Returns:
-            Merged PyArrow Table with all rows
+            Normal merged PyArrow Table, and per-blob-column values list.
+            Blob value list lengths may differ when the updated columns do not
+            all have physical baselines.
         """
 
         # Get the _ROW_ID values from update_data to determine which rows are being updated
@@ -239,52 +676,423 @@ class TableUpdateByRowId:
             pa.scalar(first_row_id, type=pa.int64())
         ).cast(pa.int64())
 
-        # Build a boolean mask: True at positions that need to be updated
-        all_indices = pa.array(range(original_data.num_rows), type=pa.int64())
-        mask = pc.is_in(all_indices, relative_indices)
-
         # Build the merged table column by column
         merged_columns = {}
+        blob_columns: Dict[str, List[object]] = {}
+        update_by_col = {
+            col_name: update_data[col_name]
+            for col_name in column_names
+            if col_name in update_data.column_names
+        }
+        update_positions = {
+            int(relative_index.as_py()): idx
+            for idx, relative_index in enumerate(relative_indices)
+        }
+        sorted_updates = None
+        # Caller (_write_by_first_row_id) only enters this method with a
+        # non-empty group, so update_positions is non-empty here.
+        blob_columns_with_baseline = blob_columns_with_baseline or set()
         for col_name in column_names:
-            update_col = update_data[col_name].combine_chunks()
-            original_col = original_data[col_name].combine_chunks()
-            # replace_with_mask fills mask=True positions with update values in order
-            merged_columns[col_name] = pc.replace_with_mask(
-                original_col, mask, update_col.cast(original_col.type)
+            if self._is_blob_column(col_name):
+                has_baseline = col_name in blob_columns_with_baseline
+                blob_row_count = (
+                    max(update_positions) + 1
+                    if has_baseline else original_data.num_rows
+                )
+                missing_value = (
+                    self._blob_placeholder(col_name)
+                    if has_baseline else None
+                )
+                if blob_object_columns and col_name in blob_object_columns:
+                    update_values = blob_object_columns[col_name]
+                    blob_columns[col_name] = [
+                        update_values[update_positions[i]]
+                        if i in update_positions
+                        else missing_value
+                        for i in range(blob_row_count)
+                    ]
+                    continue
+                update_col = update_by_col[col_name]
+                blob_columns[col_name] = [
+                    update_col[update_positions[i]].as_py()
+                    if i in update_positions
+                    else missing_value
+                    for i in range(blob_row_count)
+                ]
+                continue
+            update_col = update_by_col[col_name]
+            original_col = original_data[col_name]
+            if sorted_updates is None:
+                sorted_updates = sorted(update_positions.items())
+                row_count = len(original_col)
+                for position, _ in sorted_updates:
+                    if position < 0 or position >= row_count:
+                        raise IndexError(
+                            f"Update position {position} is outside column "
+                            f"range [0, {row_count})")
+            merged_columns[col_name] = self._merge_chunked_column(
+                original_col, update_col, sorted_updates)
+
+        merged_table = None
+        if merged_columns:
+            merged_schema = pa.schema([
+                original_data.schema.field(name)
+                for name in merged_columns
+            ])
+            merged_table = pa.table(merged_columns, schema=merged_schema)
+
+        return merged_table, blob_columns
+
+    @classmethod
+    def _merge_chunked_column(
+            cls,
+            original_col: pa.ChunkedArray,
+            update_col: pa.ChunkedArray,
+            sorted_updates: List[Tuple[int, int]],
+    ) -> pa.ChunkedArray:
+        """Merge updates without flattening a column into one Arrow Array.
+
+        ``binary``, ``string`` and ``list`` use signed 32-bit offsets, so a
+        valid multi-chunk column can exceed 2 GiB while each individual Array
+        remains below the limit. Keep those chunks independent. If merging an
+        individual chunk still overflows (for example, the struct/list
+        fallback temporarily concatenates original and replacement values),
+        split that row range and retry.
+        """
+        update_chunk_offsets = cls._chunk_offsets(update_col)
+        sorted_updates_idx = 0
+        chunk_start_row = 0
+        merged_chunks: List[pa.Array] = []
+
+        for original_chunk in original_col.chunks:
+            chunk_end = chunk_start_row + len(original_chunk)
+            chunk_updates: List[Tuple[int, int]] = []
+            while (
+                    sorted_updates_idx < len(sorted_updates)
+                    and sorted_updates[sorted_updates_idx][0] < chunk_end
+            ):
+                position, update_index = sorted_updates[sorted_updates_idx]
+                chunk_updates.append((
+                    position - chunk_start_row, update_index))
+                sorted_updates_idx += 1
+
+            merged_chunks.extend(cls._merge_chunk_with_updates(
+                original_chunk,
+                update_col,
+                update_chunk_offsets,
+                chunk_updates,
+            ))
+            chunk_start_row = chunk_end
+
+        return pa.chunked_array(merged_chunks, type=original_col.type)
+
+    @classmethod
+    def _merge_chunk_with_updates(
+            cls,
+            original: pa.Array,
+            update_col: pa.ChunkedArray,
+            update_chunk_offsets: List[int],
+            updates: List[Tuple[int, int]],
+    ) -> List[pa.Array]:
+        if not updates:
+            return [original]
+
+        try:
+            replacements = cls._take_from_chunked_array(
+                update_col,
+                update_chunk_offsets,
+                [update_index for _, update_index in updates],
+            )
+            if replacements.type != original.type:
+                replacements = cls._coerce_column(
+                    replacements, original.type)
+
+            if len(updates) == len(original):
+                return [replacements]
+
+            mask_values = np.zeros(len(original), dtype=np.bool_)
+            for position, _ in updates:
+                mask_values[position] = True
+            mask = pa.array(mask_values)
+
+            try:
+                return [pc.replace_with_mask(original, mask, replacements)]
+            except pa.lib.ArrowNotImplementedError:
+                combined = pa.concat_arrays([original, replacements])
+                indices = np.arange(len(original), dtype=np.int64)
+                replacement_offset = len(original)
+                for replacement_index, (position, _) in enumerate(updates):
+                    indices[position] = replacement_offset + replacement_index
+                return [combined.take(pa.array(indices))]
+        except (pa.lib.ArrowInvalid,
+                pa.lib.ArrowCapacityError) as error:
+            if not cls._is_offset_overflow(error) or len(original) <= 1:
+                raise
+
+            split_at = len(original) // 2
+            left_updates = [
+                update for update in updates if update[0] < split_at
+            ]
+            right_updates = [
+                (position - split_at, update_index)
+                for position, update_index in updates
+                if position >= split_at
+            ]
+            return (
+                cls._merge_chunk_with_updates(
+                    original.slice(0, split_at),
+                    update_col,
+                    update_chunk_offsets,
+                    left_updates,
+                )
+                + cls._merge_chunk_with_updates(
+                    original.slice(split_at),
+                    update_col,
+                    update_chunk_offsets,
+                    right_updates,
+                )
             )
 
-        # Create the merged table
-        merged_table = pa.table(merged_columns)
+    @staticmethod
+    def _chunk_offsets(column: pa.ChunkedArray) -> List[int]:
+        offsets = [0]
+        for chunk in column.chunks:
+            offsets.append(offsets[-1] + len(chunk))
+        return offsets
 
-        return merged_table
+    @staticmethod
+    def _take_from_chunked_array(
+            column: pa.ChunkedArray,
+            chunk_offsets: List[int],
+            indices: List[int],
+    ) -> pa.Array:
+        """Take values without asking Arrow to combine unrelated chunks."""
+        if not indices:
+            return pa.array([], type=column.type)
 
-    def _write_group(self, partition: GenericRow, first_row_id: int,
-                     data: pa.Table, column_names: List[str]):
+        pieces: List[pa.Array] = []
+        current_chunk_index = None
+        current_local_indices: List[int] = []
+
+        def append_piece(chunk_index: int, local_indices: List[int]):
+            chunk = column.chunk(chunk_index)
+            start = local_indices[0]
+            if all(value == start + offset
+                   for offset, value in enumerate(local_indices)):
+                pieces.append(chunk.slice(start, len(local_indices)))
+            else:
+                pieces.append(chunk.take(pa.array(
+                    local_indices, type=pa.int64())))
+
+        for index in indices:
+            if index < 0 or index >= len(column):
+                raise IndexError(
+                    f"Update index {index} is outside column range "
+                    f"[0, {len(column)})")
+            chunk_index = bisect.bisect_right(chunk_offsets, index) - 1
+            local_index = index - chunk_offsets[chunk_index]
+            if current_chunk_index is None:
+                current_chunk_index = chunk_index
+            elif chunk_index != current_chunk_index:
+                append_piece(current_chunk_index, current_local_indices)
+                current_chunk_index = chunk_index
+                current_local_indices = []
+            current_local_indices.append(local_index)
+
+        append_piece(current_chunk_index, current_local_indices)
+        if len(pieces) == 1:
+            return pieces[0]
+        return pa.concat_arrays(pieces)
+
+    @staticmethod
+    def _is_offset_overflow(error: pa.lib.ArrowException) -> bool:
+        if isinstance(error, pa.lib.ArrowCapacityError):
+            return True
+        message = str(error).lower()
+        return (
+            "offset overflow" in message
+            or "too large to convert" in message
+        )
+
+    @staticmethod
+    def _coerce_column(col: pa.Array, target_type: pa.DataType) -> pa.Array:
+        try:
+            return col.cast(target_type)
+        except pa.lib.ArrowInvalid as error:
+            if TableUpdateByRowId._is_offset_overflow(error):
+                raise
+        except (pa.lib.ArrowNotImplementedError,
+                pa.lib.ArrowTypeError):
+            pass
+        pylist = col.to_pylist()
+        if pa.types.is_map(target_type):
+            converted = []
+            for row in pylist:
+                if row is None:
+                    converted.append(None)
+                elif isinstance(row, dict):
+                    if pa.types.is_struct(col.type) and any(
+                            v is None for v in row.values()):
+                        raise ValueError(
+                            "Cannot coerce schema-less dict input with null "
+                            "values to map type. PyArrow represents both "
+                            "missing dict keys and explicit null map values "
+                            "as None; pass an explicit map-typed array or "
+                            "list-of-pairs instead.")
+                    converted.append(list(row.items()))
+                else:
+                    converted.append(
+                        [tuple(pair) for pair in row])
+            pylist = converted
+        return pa.array(pylist, type=target_type)
+
+    def _is_blob_column(self, column_name: str) -> bool:
+        for table_field in self.table.fields:
+            if table_field.name == column_name:
+                return is_blob_file_field(table_field)
+        return False
+
+    def _blob_placeholder(self, column_name: str):
+        for table_field in self.table.fields:
+            if table_field.name == column_name:
+                if is_map_blob_type(table_field.type):
+                    return Blob.MAP_PLACE_HOLDER
+                return (
+                    Blob.ARRAY_PLACE_HOLDER
+                    if is_array_blob_type(table_field.type)
+                    else Blob.PLACE_HOLDER
+                )
+        return Blob.PLACE_HOLDER
+
+    def _write_group(
+            self,
+            partition: GenericRow,
+            first_row_id: int,
+            data: pa.Table,
+            column_names: List[str],
+            blob_object_columns: Optional[Dict[str, List[Any]]] = None):
         """Write a group of data with the same first_row_id.
 
         Reads the original file data, merges in the update values, and
         writes a single output file (rolling disabled) for the group.
         """
+        # Specialized writers still own their sidecars and physical encoding.
+        if _RowIdUpdateFileWriter.supports_table(self.table):
+            self._write_group_streaming(partition, first_row_id, data, column_names)
+            return
         original_data = self._read_original_file_data(first_row_id, column_names)
-        merged_data = self._merge_update_with_original(
-            original_data, data, column_names, first_row_id,
+        _, target_files = self._first_row_id_index[first_row_id]
+        blob_columns_with_baseline = {
+            column_name
+            for file in target_files
+            if DataFileMeta.is_blob_file(file.file_name)
+            for column_name in (file.write_cols or [])
+        }
+        merged_data, blob_columns = self._merge_update_with_original(
+            original_data,
+            data,
+            column_names,
+            first_row_id,
+            blob_object_columns,
+            blob_columns_with_baseline,
         )
 
-        file_store_write = FileStoreWrite(self.table, self.commit_user)
+        partition_tuple = tuple(partition.values)
+        new_files = []
+        file_store_write = None
+        blob_writers = []
+        success = False
         try:
-            file_store_write.disable_rolling()
-            file_store_write.write_cols = column_names
+            if merged_data is not None:
+                file_store_write = FileStoreWrite(self.table, self.commit_user)
+                file_store_write.disable_rolling()
+                file_store_write.write_cols = list(merged_data.column_names)
+                for batch in merged_data.to_batches():
+                    file_store_write.write(partition_tuple, 0, batch)
+                new_messages = file_store_write.prepare_commit(self.commit_identifier)
+                for msg in new_messages:
+                    new_files.extend(msg.new_files)
 
-            partition_tuple = tuple(partition.values)
-            for batch in merged_data.to_batches():
-                file_store_write.write(partition_tuple, 0, batch)
+            for column_name, values in blob_columns.items():
+                blob_writer = BlobWriter(
+                    self.table,
+                    partition_tuple,
+                    0,
+                    0,
+                    column_name,
+                    self.table.options,
+                    video=column_name in self.table.options.video_frame_fields(),
+                )
+                blob_writers.append(blob_writer)
+                arrow_type = original_data.schema.field(column_name).type
+                for value in values:
+                    blob_writer.write_blob(value, arrow_type)
+                new_files.extend(blob_writer.prepare_commit())
 
-            new_messages = file_store_write.prepare_commit(self.commit_identifier)
-            for msg in new_messages:
-                msg.check_from_snapshot = self.snapshot_id
-                for file in msg.new_files:
-                    file.first_row_id = first_row_id
-                    file.write_cols = column_names
-            self.commit_messages.extend(new_messages)
+            if new_files:
+                self._assign_update_file_metadata(
+                    new_files, first_row_id, column_names, blob_columns)
+                self.commit_messages.append(
+                    CommitMessage(
+                        partition=partition_tuple,
+                        bucket=0,
+                        new_files=new_files,
+                        check_from_snapshot=self.snapshot_id,
+                    )
+                )
+            success = True
         finally:
-            file_store_write.close()
+            if success:
+                if file_store_write is not None:
+                    file_store_write.close()
+                for blob_writer in blob_writers:
+                    blob_writer.close()
+            else:
+                if file_store_write is not None:
+                    file_store_write.abort()
+                for blob_writer in blob_writers:
+                    blob_writer.abort()
+
+    @staticmethod
+    def _assign_update_file_metadata(new_files: List[DataFileMeta], first_row_id: int,
+                                     column_names: List[str],
+                                     blob_columns: Dict[str, List[object]]):
+        blob_ends = {
+            column_name: first_row_id + len(values)
+            for column_name, values in blob_columns.items()
+        }
+        blob_starts = {}
+        # BlobWriter.prepare_commit preserves write/rolling order, which is required
+        # for assigning continuous row-id ranges to rolled blob files.
+        for file in new_files:
+            if DataFileMeta.is_blob_file(file.file_name):
+                file.write_cols = file.write_cols or column_names
+                if len(file.write_cols) != 1:
+                    raise RuntimeError(
+                        f"Blob update file {file.file_name} should contain "
+                        f"exactly one write column, got {file.write_cols}")
+                blob_column = file.write_cols[0]
+                blob_start = blob_starts.get(blob_column, first_row_id)
+                next_blob_start = blob_start + file.row_count
+                blob_end = blob_ends[blob_column]
+                if next_blob_start > blob_end:
+                    raise RuntimeError(
+                        f"Blob update file {file.file_name} row-id range "
+                        f"[{blob_start}, {next_blob_start - 1}] exceeds target range "
+                        f"[{first_row_id}, {blob_end - 1}]")
+                file.first_row_id = blob_start
+                # Only update-by-row-id blob delta files use the 0/0 sentinel;
+                # regular blob writes keep their per-row sequence range.
+                file.min_sequence_number = 0
+                file.max_sequence_number = 0
+                blob_starts[blob_column] = next_blob_start
+            else:
+                file.first_row_id = first_row_id
+
+        for blob_column, next_blob_start in blob_starts.items():
+            blob_end = blob_ends[blob_column]
+            if next_blob_start != blob_end:
+                raise RuntimeError(
+                    f"Blob update column {blob_column} covers row ids "
+                    f"[{first_row_id}, {next_blob_start - 1}], expected "
+                    f"[{first_row_id}, {blob_end - 1}]")

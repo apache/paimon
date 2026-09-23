@@ -18,38 +18,160 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.predicate.BatchVectorSearch;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.predicate.FunctionVisitor;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
 
 import java.io.Closeable;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 /** Index reader for global index, return {@link GlobalIndexResult}. */
-public interface GlobalIndexReader extends FunctionVisitor<Optional<GlobalIndexResult>>, Closeable {
+public interface GlobalIndexReader
+        extends FunctionVisitor<CompletableFuture<Optional<GlobalIndexResult>>>, Closeable {
 
     @Override
-    default Optional<GlobalIndexResult> visitAnd(List<Optional<GlobalIndexResult>> children) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    default Optional<GlobalIndexResult> visitOr(List<Optional<GlobalIndexResult>> children) {
-        throw new UnsupportedOperationException();
+    default CompletableFuture<Optional<GlobalIndexResult>> visitIsNaN(FieldRef fieldRef) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    default Optional<GlobalIndexResult> visitNonFieldLeaf(LeafPredicate predicate) {
+    default CompletableFuture<Optional<GlobalIndexResult>> visitNotStartsWith(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitNotEndsWith(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitNotContains(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitArrayContains(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitArraysOverlap(
+            FieldRef fieldRef, List<Object> literals) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitArrayContainsAll(
+            FieldRef fieldRef, List<Object> literals) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    /**
+     * Evaluate a bounded range. Flags specify whether each endpoint is included. Readers without a
+     * combined scan retain the supported bounds as candidate filters.
+     */
+    default CompletableFuture<Optional<GlobalIndexResult>> visitRange(
+            FieldRef fieldRef, Object from, Object to, boolean fromInclusive, boolean toInclusive) {
+        CompletableFuture<Optional<GlobalIndexResult>> lower =
+                fromInclusive
+                        ? visitGreaterOrEqual(fieldRef, from)
+                        : visitGreaterThan(fieldRef, from);
+        CompletableFuture<Optional<GlobalIndexResult>> upper =
+                toInclusive ? visitLessOrEqual(fieldRef, to) : visitLessThan(fieldRef, to);
+        return lower.thenCombine(
+                upper,
+                (left, right) -> {
+                    if (!left.isPresent()) {
+                        return right;
+                    }
+                    return right.isPresent() ? Optional.of(left.get().and(right.get())) : left;
+                });
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitNotLike(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitNotBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitAnd(
+            List<CompletableFuture<Optional<GlobalIndexResult>>> children) {
         throw new UnsupportedOperationException();
     }
 
-    default Optional<ScoredGlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitOr(
+            List<CompletableFuture<Optional<GlobalIndexResult>>> children) {
         throw new UnsupportedOperationException();
     }
 
-    default Optional<ScoredGlobalIndexResult> visitFullTextSearch(FullTextSearch fullTextSearch) {
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitNonFieldLeaf(
+            LeafPredicate predicate) {
         throw new UnsupportedOperationException();
+    }
+
+    default CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
+            VectorSearch vectorSearch) {
+        throw new UnsupportedOperationException();
+    }
+
+    default CompletableFuture<Optional<ScoredGlobalIndexResult>> visitFullTextSearch(
+            FullTextSearch fullTextSearch) {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Returns row candidates for the given TopN predicate.
+     *
+     * <p>The result may contain more than {@link TopN#limit()} rows when this reader owns multiple
+     * independent index files. Callers must still apply the final TopN operation.
+     */
+    default CompletableFuture<Optional<GlobalIndexResult>> visitTopN(TopN topN) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    /** Batch search; result {@code i} matches vector {@code i}. */
+    default CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> visitBatchVectorSearch(
+            BatchVectorSearch batchVectorSearch) {
+        List<CompletableFuture<Optional<ScoredGlobalIndexResult>>> futures = new ArrayList<>();
+        for (int i = 0; i < batchVectorSearch.vectorCount(); i++) {
+            futures.add(visitVectorSearch(batchVectorSearch.forIndex(i)));
+        }
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .thenApply(
+                        ignored -> {
+                            List<Optional<ScoredGlobalIndexResult>> results =
+                                    new ArrayList<>(futures.size());
+                            for (CompletableFuture<Optional<ScoredGlobalIndexResult>> future :
+                                    futures) {
+                                results.add(future.join());
+                            }
+                            return results;
+                        });
     }
 }

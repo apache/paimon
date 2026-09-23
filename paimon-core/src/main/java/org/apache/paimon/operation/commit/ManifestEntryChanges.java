@@ -170,7 +170,8 @@ public class ManifestEntryChanges {
             changedPartitions.add(file.partition());
         }
         for (IndexManifestEntry file : indexFileChanges) {
-            if (file.indexFile().indexType().equals(DELETION_VECTORS_INDEX)) {
+            if (file.indexFile().indexType().equals(DELETION_VECTORS_INDEX)
+                    || file.indexFile().globalIndexMeta() != null) {
                 changedPartitions.add(file.partition());
             }
         }

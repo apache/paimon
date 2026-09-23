@@ -55,8 +55,6 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
-import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.junit.jupiter.api.AfterEach;
@@ -634,12 +632,11 @@ class StoreMultiCommitterTest {
                         new CommittableStateManager<WrappedManifestCommittable>() {
                             @Override
                             public void initializeState(
-                                    StateInitializationContext context,
+                                    Committer.Context context,
                                     Committer<?, WrappedManifestCommittable> committer) {}
 
                             @Override
                             public void snapshotState(
-                                    StateSnapshotContext context,
                                     List<WrappedManifestCommittable> committables) {}
                         });
         return createTestHarness(operator);

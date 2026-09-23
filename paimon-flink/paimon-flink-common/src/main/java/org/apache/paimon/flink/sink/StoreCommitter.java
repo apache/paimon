@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.sink.listener.CommitListeners;
 import org.apache.paimon.io.DataFileMeta;
@@ -29,6 +30,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommit;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.utils.IOUtils;
 
 import javax.annotation.Nullable;
 
@@ -45,6 +47,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     private final TableCommitImpl commit;
     @Nullable private final CommitterMetrics committerMetrics;
     private final CommitListeners commitListeners;
+    @Nullable private final IOManager commitIOManager;
     private final boolean allowLogOffsetDuplicate;
 
     public StoreCommitter(FileStoreTable table, TableCommit commit, Context context) {
@@ -52,7 +55,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
 
         if (context.metricGroup() != null) {
             this.commit.withMetricRegistry(new FlinkMetricRegistry(context.metricGroup()));
-            this.committerMetrics = new CommitterMetrics(context.metricGroup().getIOMetricGroup());
+            this.committerMetrics = new CommitterMetrics(context.metricGroup());
         } else {
             this.committerMetrics = null;
         }
@@ -60,7 +63,16 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
         try {
             this.commitListeners = CommitListeners.create(context, table);
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException(
+                    "Failed to create commit listeners for table " + table.name(), e);
+        }
+
+        String[] tempDirs = context.tempDirs();
+        if (tempDirs == null) {
+            this.commitIOManager = null;
+        } else {
+            this.commitIOManager = IOManager.create(tempDirs);
+            this.commit.withIOManager(commitIOManager);
         }
         allowLogOffsetDuplicate = table.bucketMode() == BucketMode.BUCKET_UNAWARE;
     }
@@ -117,13 +129,12 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     }
 
     @Override
-    public Map<Long, List<Committable>> groupByCheckpoint(Collection<Committable> committables) {
-        try {
-            commitListeners.snapshotState();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+    public void snapshotState() throws Exception {
+        commitListeners.snapshotState();
+    }
 
+    @Override
+    public Map<Long, List<Committable>> groupByCheckpoint(Collection<Committable> committables) {
         Map<Long, List<Committable>> grouped = new HashMap<>();
         for (Committable c : committables) {
             grouped.computeIfAbsent(c.checkpointId(), k -> new ArrayList<>()).add(c);
@@ -133,8 +144,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
 
     @Override
     public void close() throws Exception {
-        commit.close();
-        commitListeners.close();
+        IOUtils.closeAll(commit, commitListeners, commitIOManager);
     }
 
     public boolean allowLogOffsetDuplicate() {

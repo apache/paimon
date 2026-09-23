@@ -18,15 +18,15 @@
 
 package org.apache.paimon.flink.source.assigners;
 
-import org.apache.paimon.codegen.Projection;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.flink.source.DynamicPartitionFilteringInfo;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.utils.BinPacking;
+import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.connector.source.DynamicFilteringData;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -37,6 +37,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Queue;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -50,6 +51,8 @@ import static org.apache.paimon.flink.utils.TableScanUtils.getSnapshotId;
  */
 public class PreAssignSplitAssigner implements SplitAssigner {
 
+    private static final Logger LOG = LoggerFactory.getLogger(PreAssignSplitAssigner.class);
+
     /** Default batch splits size to avoid exceed `akka.framesize`. */
     private final int splitBatchSize;
 
@@ -59,6 +62,8 @@ public class PreAssignSplitAssigner implements SplitAssigner {
 
     private final AtomicInteger numberOfPendingSplits;
     private final Collection<FileStoreSourceSplit> splits;
+    private final SerializableFunction<FileStoreSourceSplit, Long> weightFunc;
+    @Nullable private final SerializableFunction<FileStoreSourceSplit, ?> groupFunc;
 
     public PreAssignSplitAssigner(
             int splitBatchSize,
@@ -69,25 +74,115 @@ public class PreAssignSplitAssigner implements SplitAssigner {
 
     public PreAssignSplitAssigner(
             int splitBatchSize,
+            SplitEnumeratorContext<FileStoreSourceSplit> context,
+            Collection<FileStoreSourceSplit> splits,
+            SerializableFunction<FileStoreSourceSplit, Long> weightFunc) {
+        this(splitBatchSize, context.currentParallelism(), splits, weightFunc);
+    }
+
+    public PreAssignSplitAssigner(
+            int splitBatchSize,
+            SplitEnumeratorContext<FileStoreSourceSplit> context,
+            Collection<FileStoreSourceSplit> splits,
+            @Nullable SerializableFunction<FileStoreSourceSplit, Long> weightFunc,
+            @Nullable SerializableFunction<FileStoreSourceSplit, ?> groupFunc) {
+        this(splitBatchSize, context.currentParallelism(), splits, weightFunc, groupFunc);
+    }
+
+    public PreAssignSplitAssigner(
+            int splitBatchSize,
             int parallelism,
             Collection<FileStoreSourceSplit> splits,
-            Projection partitionRowProjection,
+            DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo,
             DynamicFilteringData dynamicFilteringData) {
         this(
                 splitBatchSize,
                 parallelism,
+                splits,
+                dynamicPartitionFilteringInfo,
+                dynamicFilteringData,
+                split -> split.split().rowCount());
+    }
+
+    public PreAssignSplitAssigner(
+            int splitBatchSize,
+            int parallelism,
+            Collection<FileStoreSourceSplit> splits,
+            DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo,
+            DynamicFilteringData dynamicFilteringData,
+            SerializableFunction<FileStoreSourceSplit, Long> weightFunc) {
+        this(
+                splitBatchSize,
+                parallelism,
                 splits.stream()
-                        .filter(s -> filter(partitionRowProjection, dynamicFilteringData, s))
-                        .collect(Collectors.toList()));
+                        .filter(
+                                s ->
+                                        dynamicPartitionFilteringInfo.mayMatch(
+                                                dynamicFilteringData, s.split()))
+                        .collect(Collectors.toList()),
+                weightFunc);
     }
 
     public PreAssignSplitAssigner(
             int splitBatchSize, int parallelism, Collection<FileStoreSourceSplit> splits) {
+        this(splitBatchSize, parallelism, splits, split -> split.split().rowCount());
+    }
+
+    public PreAssignSplitAssigner(
+            int splitBatchSize,
+            int parallelism,
+            Collection<FileStoreSourceSplit> splits,
+            SerializableFunction<FileStoreSourceSplit, Long> weightFunc) {
+        this(splitBatchSize, parallelism, splits, weightFunc, null);
+    }
+
+    public PreAssignSplitAssigner(
+            int splitBatchSize,
+            int parallelism,
+            Collection<FileStoreSourceSplit> splits,
+            SerializableFunction<FileStoreSourceSplit, Long> weightFunc,
+            @Nullable SerializableFunction<FileStoreSourceSplit, ?> groupFunc) {
         this.splitBatchSize = splitBatchSize;
         this.parallelism = parallelism;
         this.splits = splits;
-        this.pendingSplitAssignment = createBatchFairSplitAssignment(splits, parallelism);
+        this.weightFunc = weightFunc == null ? split -> split.split().rowCount() : weightFunc;
+        this.groupFunc = groupFunc;
+        this.pendingSplitAssignment =
+                createBatchFairSplitAssignment(splits, parallelism, this.weightFunc, groupFunc);
+        logSplitAssignmentSummary(
+                this.pendingSplitAssignment, parallelism, splits.size(), this.weightFunc);
         this.numberOfPendingSplits = new AtomicInteger(splits.size());
+    }
+
+    private static void logSplitAssignmentSummary(
+            Map<Integer, LinkedList<FileStoreSourceSplit>> assignment,
+            int parallelism,
+            int totalSplits,
+            SerializableFunction<FileStoreSourceSplit, Long> weightFunc) {
+        if (!LOG.isInfoEnabled()) {
+            return;
+        }
+
+        long totalWeight = 0L;
+        List<Integer> splitCounts = new ArrayList<>(parallelism);
+        List<Long> assignedWeights = new ArrayList<>(parallelism);
+        for (int i = 0; i < parallelism; i++) {
+            Collection<FileStoreSourceSplit> assignedSplits =
+                    assignment.getOrDefault(i, new LinkedList<>());
+            long assignedWeight = assignedSplits.stream().mapToLong(weightFunc::apply).sum();
+            splitCounts.add(assignedSplits.size());
+            assignedWeights.add(assignedWeight);
+            totalWeight += assignedWeight;
+        }
+
+        LOG.info(
+                "Created FAIR split assignment summary: parallelism={}, totalSplits={}, "
+                        + "totalWeight={}, splitCountsPerSubtask={}, assignedWeightsPerSubtask={}",
+                parallelism,
+                totalSplits,
+                totalWeight,
+                splitCounts,
+                assignedWeights);
     }
 
     @Override
@@ -132,16 +227,79 @@ public class PreAssignSplitAssigner implements SplitAssigner {
      * this method only reload restore for batch execute, because in streaming mode, we need to
      * assign certain bucket to certain task.
      */
-    private static Map<Integer, LinkedList<FileStoreSourceSplit>> createBatchFairSplitAssignment(
-            Collection<FileStoreSourceSplit> splits, int numReaders) {
-        List<List<FileStoreSourceSplit>> assignmentList =
-                BinPacking.packForFixedBinNumber(
-                        splits, split -> split.split().rowCount(), numReaders);
+    public static Map<Integer, LinkedList<FileStoreSourceSplit>> createBatchFairSplitAssignment(
+            Collection<FileStoreSourceSplit> splits,
+            int numReaders,
+            SerializableFunction<FileStoreSourceSplit, Long> weightFunc) {
+        return createBatchFairSplitAssignment(splits, numReaders, weightFunc, null);
+    }
+
+    public static Map<Integer, LinkedList<FileStoreSourceSplit>> createBatchFairSplitAssignment(
+            Collection<FileStoreSourceSplit> splits,
+            int numReaders,
+            SerializableFunction<FileStoreSourceSplit, Long> weightFunc,
+            @Nullable SerializableFunction<FileStoreSourceSplit, ?> groupFunc) {
+        List<List<FileStoreSourceSplit>> assignmentList;
+        if (groupFunc == null) {
+            assignmentList = BinPacking.packForFixedBinNumber(splits, weightFunc, numReaders);
+        } else {
+            List<GroupedSplit> groupedSplits = groupSplits(splits, weightFunc, groupFunc);
+            List<List<GroupedSplit>> groupedAssignment =
+                    BinPacking.packForFixedBinNumber(
+                            groupedSplits, GroupedSplit::weight, numReaders);
+            assignmentList =
+                    groupedAssignment.stream()
+                            .map(
+                                    group ->
+                                            group.stream()
+                                                    .flatMap(
+                                                            groupedSplit ->
+                                                                    groupedSplit.splits().stream())
+                                                    .collect(Collectors.toList()))
+                            .collect(Collectors.toList());
+        }
         Map<Integer, LinkedList<FileStoreSourceSplit>> assignment = new HashMap<>();
         for (int i = 0; i < assignmentList.size(); i++) {
             assignment.put(i, new LinkedList<>(assignmentList.get(i)));
         }
         return assignment;
+    }
+
+    private static List<GroupedSplit> groupSplits(
+            Collection<FileStoreSourceSplit> splits,
+            SerializableFunction<FileStoreSourceSplit, Long> weightFunc,
+            SerializableFunction<FileStoreSourceSplit, ?> groupFunc) {
+        Map<Object, List<FileStoreSourceSplit>> grouped = new HashMap<>();
+        for (FileStoreSourceSplit split : splits) {
+            grouped.computeIfAbsent(
+                            Objects.requireNonNull(groupFunc.apply(split)),
+                            ignored -> new ArrayList<>())
+                    .add(split);
+        }
+        return grouped.values().stream()
+                .map(
+                        group ->
+                                new GroupedSplit(
+                                        group, group.stream().mapToLong(weightFunc::apply).sum()))
+                .collect(Collectors.toList());
+    }
+
+    private static class GroupedSplit {
+        private final List<FileStoreSourceSplit> splits;
+        private final long weight;
+
+        private GroupedSplit(List<FileStoreSourceSplit> splits, long weight) {
+            this.splits = splits;
+            this.weight = weight;
+        }
+
+        private List<FileStoreSourceSplit> splits() {
+            return splits;
+        }
+
+        private long weight() {
+            return weight;
+        }
     }
 
     @Override
@@ -158,18 +316,14 @@ public class PreAssignSplitAssigner implements SplitAssigner {
     }
 
     public SplitAssigner ofDynamicPartitionPruning(
-            Projection partitionRowProjection, DynamicFilteringData dynamicFilteringData) {
+            DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo,
+            DynamicFilteringData dynamicFilteringData) {
         return new PreAssignSplitAssigner(
-                splitBatchSize, parallelism, splits, partitionRowProjection, dynamicFilteringData);
-    }
-
-    private static boolean filter(
-            Projection partitionRowProjection,
-            DynamicFilteringData dynamicFilteringData,
-            FileStoreSourceSplit sourceSplit) {
-        DataSplit dataSplit = (DataSplit) sourceSplit.split();
-        BinaryRow partition = dataSplit.partition();
-        FlinkRowData projected = new FlinkRowData(partitionRowProjection.apply(partition));
-        return dynamicFilteringData.contains(projected);
+                splitBatchSize,
+                parallelism,
+                splits,
+                dynamicPartitionFilteringInfo,
+                dynamicFilteringData,
+                weightFunc);
     }
 }

@@ -45,9 +45,12 @@ object PaimonDeleteTable extends Rule[LogicalPlan] with RowLevelHelper {
           table.getTable match {
             case paimonTable: FileStoreTable =>
               val relation = PaimonRelation.getPaimonRelation(d.table)
-              if (paimonTable.coreOptions().dataEvolutionEnabled()) {
+              if (
+                paimonTable.coreOptions().dataEvolutionEnabled()
+                && !paimonTable.coreOptions().deletionVectorsEnabled()
+              ) {
                 throw new RuntimeException(
-                  "Delete operation is not supported when data evolution is enabled yet.")
+                  "Can only perform deletion operation on data evolution tables with DeletionVector enabled.")
               }
               DeleteFromPaimonTableCommand(relation, paimonTable, condition)
 

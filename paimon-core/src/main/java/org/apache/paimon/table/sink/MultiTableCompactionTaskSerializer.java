@@ -33,13 +33,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
+import static org.apache.paimon.utils.SerializationUtils.presizedCapacity;
+import static org.apache.paimon.utils.SerializationUtils.readCount;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** Serializer for {@link MultiTableAppendCompactTask}. */
 public class MultiTableCompactionTaskSerializer
         implements VersionedSerializer<MultiTableAppendCompactTask> {
 
-    private static final int CURRENT_VERSION = 1;
+    private static final int CURRENT_VERSION = 2;
 
     private final DataFileMetaSerializer dataFileSerializer;
 
@@ -88,8 +90,8 @@ public class MultiTableCompactionTaskSerializer
     public List<MultiTableAppendCompactTask> deserializeList(int version, DataInputView view)
             throws IOException {
         checkVersion(version);
-        int length = view.readInt();
-        List<MultiTableAppendCompactTask> list = new ArrayList<>(length);
+        int length = readCount(view, getClass().getSimpleName());
+        List<MultiTableAppendCompactTask> list = new ArrayList<>(presizedCapacity(length));
         for (int i = 0; i < length; i++) {
             list.add(deserialize(view));
         }

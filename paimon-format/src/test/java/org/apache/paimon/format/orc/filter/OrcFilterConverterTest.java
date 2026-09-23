@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.orc.filter;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -75,10 +76,10 @@ public class OrcFilterConverterTest {
         test(
                 builder.in(0, Arrays.asList(1L, 2L, 3L)),
                 new OrcFilters.Or(
+                        new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1),
                         new OrcFilters.Or(
-                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1),
-                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 2)),
-                        new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 3)),
+                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 2),
+                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 3))),
                 true);
 
         test(
@@ -92,14 +93,14 @@ public class OrcFilterConverterTest {
         test(
                 builder.notIn(0, Arrays.asList(1L, 2L, 3L)),
                 new OrcFilters.And(
+                        new OrcFilters.Not(
+                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1)),
                         new OrcFilters.And(
                                 new OrcFilters.Not(
-                                        new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1)),
+                                        new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 2)),
                                 new OrcFilters.Not(
                                         new OrcFilters.Equals(
-                                                "long1", PredicateLeaf.Type.LONG, 2))),
-                        new OrcFilters.Not(
-                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 3))),
+                                                "long1", PredicateLeaf.Type.LONG, 3)))),
                 true);
 
         assertThat(
@@ -186,29 +187,29 @@ public class OrcFilterConverterTest {
                                 Collections.singletonList(
                                         new DataField(0, "testField", new BigIntType()))));
 
-        // Test IN with multiple values (≤20 values should be converted to OR of EQUALS)
+        // Test IN with multiple values
         test(
                 builder.in(0, Arrays.asList(1L, 2L, 3L)),
                 new OrcFilters.Or(
+                        new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 1L),
                         new OrcFilters.Or(
-                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 1L),
-                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 2L)),
-                        new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 3L)),
+                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 2L),
+                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 3L))),
                 true);
 
-        // Test NOT IN with multiple values (should be converted to AND of NOT EQUALS)
+        // Test NOT IN with multiple values
         test(
                 builder.notIn(0, Arrays.asList(1L, 2L, 3L)),
                 new OrcFilters.And(
+                        new OrcFilters.Not(
+                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 1L)),
                         new OrcFilters.And(
                                 new OrcFilters.Not(
                                         new OrcFilters.Equals(
-                                                "testField", PredicateLeaf.Type.LONG, 1L)),
+                                                "testField", PredicateLeaf.Type.LONG, 2L)),
                                 new OrcFilters.Not(
                                         new OrcFilters.Equals(
-                                                "testField", PredicateLeaf.Type.LONG, 2L))),
-                        new OrcFilters.Not(
-                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 3L))),
+                                                "testField", PredicateLeaf.Type.LONG, 3L)))),
                 true);
     }
 
@@ -234,6 +235,80 @@ public class OrcFilterConverterTest {
                         new OrcFilters.In(
                                 "testField", PredicateLeaf.Type.LONG, manyValues.toArray())),
                 true);
+    }
+
+    /**
+     * {@link PredicateBuilder#in(int, List)} special-cases an empty literal list the same way it
+     * special-cases more than 20, building a raw {@code In} leaf rather than an OR chain - so an
+     * empty list reaches {@link OrcPredicateFunctionVisitor#visitIn} exactly like the many-values
+     * case above. Unlike parquet-mr, Hive's own {@code SearchArgument.Builder.in(...)} rejects a
+     * zero-length varargs call with {@code IllegalArgumentException("Can't create in expression
+     * with no arguments")}, so this predicate must never reach it - the visitor has to decline the
+     * pushdown for an empty literal list instead of building an {@code OrcFilters.In} with an empty
+     * array.
+     */
+    @Test
+    public void testInPredicateWithEmptyValuesIsNotPushedDown() {
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(0, "testField", new BigIntType()))));
+
+        assertThat(
+                        builder.in(0, Collections.emptyList())
+                                .visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+        assertThat(
+                        builder.notIn(0, Collections.emptyList())
+                                .visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+
+        // or()/and() only fold away AlwaysFalse.INSTANCE, not an empty In leaf, so the leaf
+        // survives into a compound; a declined child must decline the whole compound, not crash.
+        assertThat(
+                        PredicateBuilder.or(
+                                        builder.in(0, Collections.emptyList()),
+                                        builder.equal(0, 1L))
+                                .visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+        assertThat(
+                        PredicateBuilder.and(
+                                        builder.notIn(0, Collections.emptyList()),
+                                        builder.equal(0, 1L))
+                                .visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+    }
+
+    @Test
+    public void testIsNaN() {
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Arrays.asList(
+                                        new DataField(0, "floatField", new FloatType()),
+                                        new DataField(1, "doubleField", new DoubleType()))));
+
+        // ORC has no isNaN SearchArgument leaf, so the visitor must skip push-down and
+        // return Optional.empty() instead of throwing UnsupportedOperationException.
+        assertThat(builder.isNaN(0).visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+        assertThat(builder.isNaN(1).visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+    }
+
+    @Test
+    public void testNotLike() {
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(0, "stringField", new VarCharType()))));
+
+        assertThat(
+                        builder.notLike(0, BinaryString.fromString("%value%"))
+                                .visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
     }
 
     private void test(Predicate predicate, OrcFilters.Predicate orcPredicate, boolean canPushDown) {
@@ -270,7 +345,7 @@ public class OrcFilterConverterTest {
                 Tuple4.of(new MultisetType(new TimeType()), null, null, false),
                 Tuple4.of(new ArrayType(new TimeType()), null, null, false),
                 Tuple4.of(new MapType(new BooleanType(), new BooleanType()), null, null, false),
-                Tuple4.of(new TimeType(), null, null, false),
+                Tuple4.of(new TimeType(), PredicateLeaf.Type.LONG, 10, true),
                 Tuple4.of(new BinaryType(), PredicateLeaf.Type.STRING, LocalDateTime.now(), false),
                 Tuple4.of(
                         new VarBinaryType(), PredicateLeaf.Type.STRING, LocalDateTime.now(), false),

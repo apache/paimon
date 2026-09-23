@@ -45,6 +45,8 @@ public interface WriteBuffer {
     /** Record size of this table. */
     int size();
 
+    boolean isEmpty();
+
     /** Memory occupancy size of this table. */
     long memoryOccupancy();
 

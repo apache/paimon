@@ -21,10 +21,13 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.io.DataFileMetaWriteColsLegacySerializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
+import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.utils.FunctionWithIOException;
+import org.apache.paimon.utils.ObjectSerializer;
 
 import javax.annotation.Nullable;
 
@@ -37,6 +40,8 @@ import java.util.Objects;
 import java.util.OptionalLong;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
+import static org.apache.paimon.utils.SerializationUtils.presizedCapacity;
+import static org.apache.paimon.utils.SerializationUtils.readCount;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** Incremental split for batch and streaming. */
@@ -44,7 +49,7 @@ public class IncrementalSplit implements Split {
 
     private static final long serialVersionUID = 1L;
 
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
 
     private long snapshotId;
     private BinaryRow partition;
@@ -191,7 +196,27 @@ public class IncrementalSplit implements Split {
     }
 
     private void writeObject(ObjectOutputStream objectOutputStream) throws IOException {
-        DataOutputViewStreamWrapper out = new DataOutputViewStreamWrapper(objectOutputStream);
+        serialize(new DataOutputViewStreamWrapper(objectOutputStream));
+    }
+
+    private void readObject(ObjectInputStream objectInputStream)
+            throws IOException, ClassNotFoundException {
+        assign(deserialize(new DataInputViewStreamWrapper(objectInputStream)));
+    }
+
+    protected void assign(IncrementalSplit other) {
+        snapshotId = other.snapshotId;
+        partition = other.partition;
+        bucket = other.bucket;
+        totalBuckets = other.totalBuckets;
+        beforeFiles = other.beforeFiles;
+        beforeDeletionFiles = other.beforeDeletionFiles;
+        afterFiles = other.afterFiles;
+        afterDeletionFiles = other.afterDeletionFiles;
+        isStreaming = other.isStreaming;
+    }
+
+    public void serialize(DataOutputView out) throws IOException {
         out.writeInt(VERSION);
         out.writeLong(snapshotId);
         serializeBinaryRow(partition, out);
@@ -216,39 +241,52 @@ public class IncrementalSplit implements Split {
         out.writeBoolean(isStreaming);
     }
 
-    private void readObject(ObjectInputStream objectInputStream)
-            throws IOException, ClassNotFoundException {
-        DataInputViewStreamWrapper in = new DataInputViewStreamWrapper(objectInputStream);
+    public static IncrementalSplit deserialize(DataInputView in) throws IOException {
         int version = in.readInt();
-        if (version != VERSION) {
+        if (version < 1 || version > VERSION) {
             throw new UnsupportedOperationException("Unsupported version: " + version);
         }
 
-        snapshotId = in.readLong();
-        partition = deserializeBinaryRow(in);
-        bucket = in.readInt();
-        totalBuckets = in.readInt();
+        long snapshotId = in.readLong();
+        BinaryRow partition = deserializeBinaryRow(in);
+        int bucket = in.readInt();
+        int totalBuckets = in.readInt();
 
-        DataFileMetaSerializer dataFileMetaSerializer = new DataFileMetaSerializer();
+        ObjectSerializer<DataFileMeta> dataFileMetaSerializer =
+                version == 1
+                        ? new DataFileMetaWriteColsLegacySerializer()
+                        : new DataFileMetaSerializer();
         FunctionWithIOException<DataInputView, DeletionFile> deletionFileSerializer =
                 DeletionFile::deserialize;
 
-        int beforeNumber = in.readInt();
-        beforeFiles = new ArrayList<>(beforeNumber);
+        int beforeNumber = readCount(in, "IncrementalSplit");
+        List<DataFileMeta> beforeFiles = new ArrayList<>(presizedCapacity(beforeNumber));
         for (int i = 0; i < beforeNumber; i++) {
             beforeFiles.add(dataFileMetaSerializer.deserialize(in));
         }
 
-        beforeDeletionFiles = DeletionFile.deserializeList(in, deletionFileSerializer);
+        List<DeletionFile> beforeDeletionFiles =
+                DeletionFile.deserializeList(in, deletionFileSerializer);
 
-        int fileNumber = in.readInt();
-        afterFiles = new ArrayList<>(fileNumber);
+        int fileNumber = readCount(in, "IncrementalSplit");
+        List<DataFileMeta> afterFiles = new ArrayList<>(presizedCapacity(fileNumber));
         for (int i = 0; i < fileNumber; i++) {
             afterFiles.add(dataFileMetaSerializer.deserialize(in));
         }
 
-        afterDeletionFiles = DeletionFile.deserializeList(in, deletionFileSerializer);
+        List<DeletionFile> afterDeletionFiles =
+                DeletionFile.deserializeList(in, deletionFileSerializer);
 
-        isStreaming = in.readBoolean();
+        boolean isStreaming = in.readBoolean();
+        return new IncrementalSplit(
+                snapshotId,
+                partition,
+                bucket,
+                totalBuckets,
+                beforeFiles,
+                beforeDeletionFiles,
+                afterFiles,
+                afterDeletionFiles,
+                isStreaming);
     }
 }

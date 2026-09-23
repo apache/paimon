@@ -26,6 +26,7 @@ import org.apache.parquet.column.ParquetProperties.WriterVersion;
 import org.apache.parquet.compression.CompressionCodecFactory;
 import org.apache.parquet.crypto.FileEncryptionProperties;
 import org.apache.parquet.hadoop.api.WriteSupport;
+import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.io.OutputFile;
@@ -58,7 +59,7 @@ public class ParquetWriter<T> implements Closeable {
     // max size (bytes) to write as padding and the min size of a row group
     public static final int MAX_PADDING_SIZE_DEFAULT = 8 * 1024 * 1024; // 8MB
 
-    private final InternalParquetRecordWriter<T> writer;
+    private final ColumnCompressionRecordWriter<T> writer;
     private final CompressionCodecFactory codecFactory;
 
     ParquetWriter(
@@ -67,6 +68,7 @@ public class ParquetWriter<T> implements Closeable {
             WriteSupport<T> writeSupport,
             CompressionCodecName compressionCodecName,
             CompressionCodecFactory codecFactory,
+            Map<ColumnPath, CompressionCodecName> columnCompressionCodecNames,
             long rowGroupSize,
             boolean validating,
             Configuration conf,
@@ -99,8 +101,6 @@ public class ParquetWriter<T> implements Closeable {
         fileWriter.start();
 
         this.codecFactory = codecFactory;
-        CompressionCodecFactory.BytesInputCompressor compressor =
-                codecFactory.getCompressor(compressionCodecName);
 
         final Map<String, String> extraMetadata;
         if (encodingProps.getExtraMetaData() == null
@@ -130,13 +130,15 @@ public class ParquetWriter<T> implements Closeable {
         }
 
         this.writer =
-                new InternalParquetRecordWriter<T>(
+                new ColumnCompressionRecordWriter<T>(
                         fileWriter,
                         writeSupport,
                         schema,
                         extraMetadata,
                         rowGroupSize,
-                        compressor,
+                        codecFactory,
+                        new ColumnCompressionCodecs(
+                                compressionCodecName, columnCompressionCodecNames),
                         validating,
                         encodingProps);
     }
@@ -188,6 +190,7 @@ public class ParquetWriter<T> implements Closeable {
         private ParquetFileWriter.Mode mode;
         private CompressionCodecFactory codecFactory = null;
         private CompressionCodecName codecName = DEFAULT_COMPRESSION_CODEC_NAME;
+        private final Map<ColumnPath, CompressionCodecName> columnCodecNames = new HashMap<>();
         private long rowGroupSize = DEFAULT_BLOCK_SIZE;
         private int maxPaddingSize = MAX_PADDING_SIZE_DEFAULT;
         private boolean enableValidation = DEFAULT_IS_VALIDATING_ENABLED;
@@ -237,6 +240,18 @@ public class ParquetWriter<T> implements Closeable {
          */
         public SELF withCompressionCodec(CompressionCodecName codecName) {
             this.codecName = codecName;
+            return self();
+        }
+
+        /**
+         * Set the compression codec used by the specified column for the constructed writer.
+         *
+         * @param columnPath the path of the column (dot-string)
+         * @param codecName a {@code CompressionCodecName}
+         * @return this builder for method chaining.
+         */
+        public SELF withCompressionCodec(String columnPath, CompressionCodecName codecName) {
+            this.columnCodecNames.put(ColumnPath.fromDotString(columnPath), codecName);
             return self();
         }
 
@@ -658,6 +673,7 @@ public class ParquetWriter<T> implements Closeable {
                     getWriteSupport(conf),
                     codecName,
                     codecFactory,
+                    columnCodecNames,
                     rowGroupSize,
                     enableValidation,
                     conf,

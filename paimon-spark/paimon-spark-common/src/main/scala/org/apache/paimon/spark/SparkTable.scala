@@ -19,9 +19,9 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.spark.read.ObjectTableScanBuilder
-import org.apache.paimon.spark.rowops.PaimonSparkCopyOnWriteOperation
+import org.apache.paimon.spark.rowops.{PaimonSparkCopyOnWriteOperation, PaimonSparkDeltaOperation}
 import org.apache.paimon.table.`object`.ObjectTable
-import org.apache.paimon.table.{FileStoreTable, Table}
+import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
 
 import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsRowLevelOperations, TableCapability}
 import org.apache.spark.sql.connector.read.ScanBuilder
@@ -40,14 +40,17 @@ import java.util.{EnumSet => JEnumSet, Set => JSet}
  * If this base class implemented `SupportsRowLevelOperations`, Spark 4.1 would immediately call
  * `newRowLevelOperationBuilder` on tables whose V2 write is disabled (e.g. dynamic bucket or
  * primary-key tables that fall back to V1 write) and fail before Paimon has a chance to rewrite the
- * plan to a V1 command. Likewise, deletion-vector, row-tracking, and data-evolution tables need to
- * stay on Paimon's V1 postHoc path even when `useV2Write=true`, so they must also not expose
+ * plan to a V1 command. Likewise, data-evolution and fixed-length CHAR tables need to stay on
+ * Paimon's V1 postHoc path even when `useV2Write=true`, so they must also not expose
  * `SupportsRowLevelOperations`.
  *
  * Tables that DO support V2 row-level operations use the [[SparkTableWithRowLevelOps]] subclass
  * instead; the [[SparkTable.of]] factory picks the right variant via
- * [[SparkTable.supportsV2RowLevelOps]], which is kept in lockstep with
- * `RowLevelHelper.shouldFallbackToV1`.
+ * [[SparkTable.supportsV2RowLevelOps]]. Append-only tables, including row-tracking-only tables,
+ * expose `SupportsRowLevelOperations` so DELETE, UPDATE, and MERGE INTO can go through the V2
+ * copy-on-write path when the table has no PK, deletion vectors, data evolution, or CHAR columns;
+ * unaware-bucket deletion-vector append tables expose it so DELETE can go through the delta path
+ * (see [[SparkTable.supportsV2DeltaOps]]).
  */
 case class SparkTable(override val table: Table) extends PaimonSparkTableBase(table)
 
@@ -63,7 +66,8 @@ class SparkTableWithRowLevelOps(tableArg: Table)
       info: RowLevelOperationInfo): RowLevelOperationBuilder = {
     table match {
       case t: FileStoreTable =>
-        () => new PaimonSparkCopyOnWriteOperation(t, info)
+        if (SparkTable.supportsV2DeltaOps(this)) { () => new PaimonSparkDeltaOperation(t, info) }
+        else { () => new PaimonSparkCopyOnWriteOperation(t, info) }
       case _ =>
         throw new UnsupportedOperationException(
           "Row-level write operation is only supported for FileStoreTable. " +
@@ -93,12 +97,11 @@ object SparkTable {
    * Whether the given table supports Paimon's V2 row-level operations, i.e. whether it is safe to
    * expose [[SupportsRowLevelOperations]] to Spark.
    *
-   * This must stay in sync with
-   * `org.apache.paimon.spark.catalyst.analysis.RowLevelHelper#shouldFallbackToV1` — the two
-   * predicates are logical complements. If they diverge, Spark 4.1's row-level rewrite rules (which
-   * fire in the main Resolution batch) will intercept DML on tables that Paimon expects to handle
-   * through its postHoc V1 fallback, leaving primary-key / deletion-vector / row-tracking /
-   * data-evolution tables with broken MERGE/UPDATE/DELETE dispatch.
+   * Append-only tables return `true` here so that `SparkTable.of` wraps them as
+   * `SparkTableWithRowLevelOps`, enabling Spark's V2 copy-on-write DELETE, UPDATE, and MERGE INTO
+   * paths. Row-tracking append-only tables require Spark 4.0+ because Spark 3.5 does not have the
+   * metadata-aware `DataWriter.write(metadata, data)` path needed to preserve row-tracking metadata
+   * for rewritten rows.
    *
    * Per-version shims for Spark 3.2/3.3/3.4 each ship their own
    * `org.apache.paimon.spark.SparkTable` (class + companion) that shadows this one at packaging
@@ -109,14 +112,49 @@ object SparkTable {
    * `NoSuchMethodError` at the first DML statement.
    */
   private[spark] def supportsV2RowLevelOps(sparkTable: SparkTable): Boolean = {
+    supportsV2CopyOnWriteOps(sparkTable) || supportsV2DeltaOps(sparkTable)
+  }
+
+  private def supportsV2CopyOnWriteOps(sparkTable: SparkTable): Boolean = {
+    if (org.apache.spark.SPARK_VERSION < "3.5") return false
+    if (!sparkTable.useV2Write) return false
+    sparkTable.getTable match {
+      case fs: FileStoreTable =>
+        val supportsRowTrackingCopyOnWrite =
+          !sparkTable.coreOptions.rowTrackingEnabled() || org.apache.spark.SPARK_VERSION >= "4.0"
+        fs.primaryKeys().isEmpty &&
+        supportsRowTrackingCopyOnWrite &&
+        !sparkTable.coreOptions.deletionVectorsEnabled() &&
+        !sparkTable.coreOptions.dataEvolutionEnabled() &&
+        !SparkTypeUtils.containsCharType(fs.rowType())
+      case _ => false
+    }
+  }
+
+  /**
+   * Whether the table takes the delta-based row-level path ([[PaimonSparkDeltaOperation]]): an
+   * unaware-bucket append-only table with deletion vectors enabled. Bucketed append tables are
+   * excluded because commit conflict detection does not cover concurrent deletion-vector index
+   * changes of the same bucket (`IndexManifestFileHandler` overwrites the whole bucket's index);
+   * row-tracking deletion-vector tables are excluded until the delta path defines the row lineage
+   * semantics for rewritten rows.
+   *
+   * The Spark 3.2/3.3/3.4 shim `SparkTable` companions must expose a method with this exact
+   * signature (hard-coded `false`), same as [[supportsV2RowLevelOps]]. Public because the Spark 4.1
+   * rewrite scope (`PureAppendOnlyScope.targetsV2DeltaTable`) delegates to it as the single source
+   * of truth for the delta gating conditions.
+   */
+  def supportsV2DeltaOps(sparkTable: SparkTable): Boolean = {
     if (org.apache.spark.SPARK_VERSION < "3.5") return false
     if (!sparkTable.useV2Write) return false
     sparkTable.getTable match {
       case fs: FileStoreTable =>
         fs.primaryKeys().isEmpty &&
-        !sparkTable.coreOptions.deletionVectorsEnabled() &&
+        fs.bucketMode() == BucketMode.BUCKET_UNAWARE &&
+        sparkTable.coreOptions.deletionVectorsEnabled() &&
         !sparkTable.coreOptions.rowTrackingEnabled() &&
-        !sparkTable.coreOptions.dataEvolutionEnabled()
+        !sparkTable.coreOptions.dataEvolutionEnabled() &&
+        !SparkTypeUtils.containsCharType(fs.rowType())
       case _ => false
     }
   }

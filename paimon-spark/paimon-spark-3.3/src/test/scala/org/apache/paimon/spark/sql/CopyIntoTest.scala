@@ -18,4 +18,4 @@
 
 package org.apache.paimon.spark.sql
 
-class CopyIntoTest extends CopyIntoTestBase {}
+class CopyIntoTest extends CopyIntoTestBase with CopyIntoOnErrorTest {}

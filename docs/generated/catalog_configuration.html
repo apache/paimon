@@ -51,6 +51,12 @@ under the License.
             <td>Cache expiration policy: marks cache entries to expire after a specified duration has passed since their last refresh.</td>
         </tr>
         <tr>
+            <td><h5>cache.manifest-sidecar.max-memory</h5></td>
+            <td style="word-wrap: break-word;">64 mb</td>
+            <td>MemorySize</td>
+            <td>Controls the maximum memory for the separate manifest sidecar cache. This budget is additional to the manifest content cache. Set to 0 to reuse the manifest content cache. It uses 'cache.expire-after-access' and 'cache.manifest.soft-values'.</td>
+        </tr>
+        <tr>
             <td><h5>cache.manifest.max-memory</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
@@ -69,6 +75,12 @@ under the License.
             <td>Controls the threshold of small manifest file.</td>
         </tr>
         <tr>
+            <td><h5>cache.manifest.soft-values</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>If true (default), manifest cache entries are held with soft references and may be reclaimed by the GC under memory pressure. This can trigger a cache-thrash spiral where reclaimed entries are refetched, spiking heap and forcing further reclamation. Set to false to hold entries with strong references, breaking the spiral; the cache then stays bounded by weight up to 'cache.manifest.max-memory' (size the total heap memory to at least roughly twice that value).</td>
+        </tr>
+        <tr>
             <td><h5>cache.partition.max-num</h5></td>
             <td style="word-wrap: break-word;">0</td>
             <td>Long</td>
@@ -85,6 +97,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>Boolean</td>
             <td>Indicates whether this catalog is case-sensitive.</td>
+        </tr>
+        <tr>
+            <td><h5>catalog-options-table.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to support the sys.catalog_options table.</td>
         </tr>
         <tr>
             <td><h5>client-pool-size</h5></td>

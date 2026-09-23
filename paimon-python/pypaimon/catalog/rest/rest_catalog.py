@@ -17,11 +17,12 @@
 
 import logging
 from typing import Any, Callable, Dict, List, Optional, Union
-from pypaimon.api.api_response import GetTableResponse, PagedList, ErrorResponse
+from pypaimon.api.api_response import ErrorResponse, GetTableResponse, GetTagResponse, PagedList, Partition
 from pypaimon.api.rest_api import RESTApi
-from pypaimon.catalog.catalog_exception import IllegalArgumentError
+from pypaimon.catalog.catalog_exception import IllegalArgumentError, IllegalStateError
 from pypaimon.api.rest_exception import (NoSuchResourceException, AlreadyExistsException,
-                                         ForbiddenException, BadRequestException)
+                                         ForbiddenException, BadRequestException,
+                                         ServiceFailureException, NotImplementedException)
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
@@ -38,6 +39,7 @@ from pypaimon.catalog.database import Database
 from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.catalog.rest.table_metadata import TableMetadata
+from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.common.options.config import CatalogOptions, FuseOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
@@ -48,10 +50,14 @@ from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
+from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.format.format_table import FormatTable, Format
 from pypaimon.table.iceberg.iceberg_table import IcebergTable
+from pypaimon.table.instant import Instant
 from pypaimon.table.object.object_table import ObjectTable
+from pypaimon.table.table import Table
+
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +105,7 @@ class RESTCatalog(Catalog):
             self,
             identifier: Identifier,
             table_uuid: Optional[str],
+            base_snapshot_uuid: Optional[str],
             snapshot: Snapshot,
             statistics: List[PartitionStatistics]
     ) -> bool:
@@ -108,6 +115,7 @@ class RESTCatalog(Catalog):
         Args:
             identifier: Path of the table
             table_uuid: UUID of the table to avoid wrong commit
+            base_snapshot_uuid: UUID of the snapshot on which the commit is based
             snapshot: Snapshot to be committed
             statistics: Statistics information of this change
 
@@ -119,7 +127,13 @@ class RESTCatalog(Catalog):
             TableNoPermissionException: If no permission to access this table
         """
         try:
-            return self.rest_api.commit_snapshot(identifier, table_uuid, snapshot, statistics)
+            return self.rest_api.commit_snapshot(
+                identifier,
+                table_uuid,
+                base_snapshot_uuid,
+                snapshot,
+                statistics,
+            )
         except NoSuchResourceException as e:
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
@@ -135,7 +149,8 @@ class RESTCatalog(Catalog):
                              database_name_pattern: Optional[str] = None) -> PagedList[str]:
         return self.rest_api.list_databases_paged(max_results, page_token, database_name_pattern)
 
-    def create_database(self, name: str, ignore_if_exists: bool, properties: Dict[str, str] = None):
+    def create_database(self, name: str, ignore_if_exists: bool,
+                        properties: Optional[Dict[str, str]] = None) -> None:
         try:
             self.rest_api.create_database(name, properties)
         except AlreadyExistsException as e:
@@ -158,7 +173,7 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise DatabaseNoPermissionException(name) from e
 
-    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False) -> None:
         if not cascade:
             try:
                 tables = self.list_tables(name)
@@ -180,7 +195,7 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise DatabaseNoPermissionException(name) from e
 
-    def alter_database(self, name: str, changes: List[PropertyChange]):
+    def alter_database(self, name: str, changes: List[PropertyChange]) -> None:
         try:
             set_properties, remove_keys = PropertyChange.get_set_properties_to_remove_keys(changes)
             self.rest_api.alter_database(name, list(remove_keys), set_properties)
@@ -218,14 +233,14 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise DatabaseNoPermissionException(database_name) from e
 
-    def get_table(self, identifier: Union[str, Identifier]):
+    def get_table(self, identifier: Union[str, Identifier]) -> Table:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         if identifier.is_system_table():
             return self._load_system_table(identifier)
         return self._load_data_table(identifier)
 
-    def _load_data_table(self, identifier: Identifier):
+    def _load_data_table(self, identifier: Identifier) -> Union[FormatTable, IcebergTable, ObjectTable, FileStoreTable]:
         return self.load_table(
             identifier,
             lambda path: self.file_io_for_data(path, identifier),
@@ -233,7 +248,7 @@ class RESTCatalog(Catalog):
             self.load_table_metadata,
         )
 
-    def _load_system_table(self, identifier: Identifier):
+    def _load_system_table(self, identifier: Identifier) -> Table:
         from pypaimon.table.system import system_table_loader
 
         base_identifier = Identifier.create(
@@ -249,7 +264,7 @@ class RESTCatalog(Catalog):
             raise TableNotExistException(identifier)
         return sys_table
 
-    def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
+    def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
@@ -258,7 +273,8 @@ class RESTCatalog(Catalog):
             if not ignore_if_exists:
                 raise TableAlreadyExistException(identifier) from e
 
-    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+    def rename_table(self, source_identifier: Union[str, Identifier],
+                     target_identifier: Union[str, Identifier]) -> None:
         if not isinstance(source_identifier, Identifier):
             source_identifier = Identifier.from_string(source_identifier)
         if not isinstance(target_identifier, Identifier):
@@ -272,7 +288,7 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise TableNoPermissionException(source_identifier) from e
 
-    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
+    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
@@ -282,6 +298,28 @@ class RESTCatalog(Catalog):
                 raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
+
+    def create_partitions(
+        self,
+        identifier: Union[str, Identifier],
+        partitions: List[Dict[str, str]],
+        ignore_if_exists: bool = True,
+    ) -> None:
+        """Register partitions. A catalog operation: it does not touch table data."""
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.create_partitions(identifier, partitions, ignore_if_exists)
+        except NoSuchResourceException as e:
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+        except AlreadyExistsException as e:
+            raise IllegalStateError(
+                "Some partitions of table {} already exist: {}".format(
+                    identifier.get_full_name(), e)) from e
+        except BadRequestException as e:
+            raise IllegalArgumentError(str(e)) from e
 
     def drop_partitions(
         self,
@@ -311,7 +349,7 @@ class RESTCatalog(Catalog):
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
             partition_name_pattern: Optional[str] = None,
-    ):
+    ) -> PagedList[Partition]:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
@@ -331,7 +369,7 @@ class RESTCatalog(Catalog):
         identifier: Union[str, Identifier],
         changes: List[SchemaChange],
         ignore_if_not_exists: bool = False
-    ):
+    ) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
@@ -342,7 +380,8 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
 
-    def rollback_to(self, identifier, instant, from_snapshot=None):
+    def rollback_to(self, identifier: Union[str, Identifier], instant: Instant,
+                    from_snapshot: Optional[int] = None) -> None:
         """Rollback table by the given identifier and instant.
 
         Args:
@@ -370,7 +409,7 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
 
-    def load_snapshot(self, identifier: Union[str, Identifier]) -> Optional['TableSnapshot']:
+    def load_snapshot(self, identifier: Union[str, Identifier]) -> Optional[TableSnapshot]:
         """Load the latest snapshot for table.
 
         Args:
@@ -516,7 +555,7 @@ class RESTCatalog(Catalog):
         except BadRequestException as e:
             raise IllegalArgumentError(str(e)) from e
 
-    def get_tag(self, identifier: Union[str, Identifier], tag_name: str):
+    def get_tag(self, identifier: Union[str, Identifier], tag_name: str) -> GetTagResponse:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
@@ -664,7 +703,7 @@ class RESTCatalog(Catalog):
                    internal_file_io: Callable[[str], Any],
                    external_file_io: Callable[[str], Any],
                    metadata_loader: Callable[[Identifier], TableMetadata],
-                   ):
+                   ) -> Union[FormatTable, IcebergTable, ObjectTable, FileStoreTable]:
         metadata = metadata_loader(identifier)
         schema = metadata.schema
         table_type = schema.options.get(CoreOptions.TYPE.key(), "").strip().lower()
@@ -756,3 +795,19 @@ class RESTCatalog(Catalog):
                ) -> FileStoreTable:
         """Create FileStoreTable with dynamic options and catalog environment"""
         return FileStoreTable(file_io, catalog_environment.identifier, table_path, table_schema, catalog_environment)
+
+    def auth_table_query(self, identifier: Identifier,
+                         select: Optional[List[str]] = None) -> TableQueryAuthResult:
+        try:
+            response = self.rest_api.auth_table_query(identifier, select)
+            return TableQueryAuthResult(response.filter, response.column_masking)
+        except NoSuchResourceException as e:
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+        except ServiceFailureException as e:
+            raise RuntimeError(e.args[0] if e.args else str(e)) from e
+        except NotImplementedException as e:
+            raise NotImplementedError(e.args[0] if e.args else str(e)) from e
+        except BadRequestException as e:
+            raise RuntimeError(str(e)) from e

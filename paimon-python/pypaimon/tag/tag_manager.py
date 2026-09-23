@@ -17,10 +17,12 @@
 
 import logging
 import os
+from datetime import datetime, timedelta
 from typing import Optional
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.json_util import JSON
+from pypaimon.common.time_utils import parse_duration_nanos
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.tag.tag import Tag
 
@@ -118,16 +120,19 @@ class TagManager:
             self,
             snapshot: Snapshot,
             tag_name: str,
-            ignore_if_exists: bool = False
+            ignore_if_exists: bool = False,
+            time_retained: Optional[str] = None
     ) -> None:
         """
         Create a tag from given snapshot and save it in the storage.
-        
+
         Args:
             snapshot: The snapshot to tag
             tag_name: Name for the tag
             ignore_if_exists: If True, don't raise error if tag already exists
-            
+            time_retained: Optional retention (e.g. ``"1d"``, ``"12h"``); when
+                set, the tag carries a create-time and TTL.
+
         Raises:
             ValueError: If tag_name is blank or tag already exists (when ignore_if_exists=False)
         """
@@ -139,7 +144,7 @@ class TagManager:
                 return
             raise ValueError(f"Tag '{tag_name}' already exists.")
 
-        self._create_or_replace_tag(snapshot, tag_name)
+        self._create_or_replace_tag(snapshot, tag_name, time_retained)
 
     def list_tags(self):
         """List all tags."""
@@ -161,7 +166,8 @@ class TagManager:
     def _create_or_replace_tag(
             self,
             snapshot: Snapshot,
-            tag_name: str
+            tag_name: str,
+            time_retained: Optional[str] = None
     ) -> None:
         """
         Internal method to create or replace a tag.
@@ -173,7 +179,27 @@ class TagManager:
         if not self.file_io.exists(tag_dir):
             self.file_io.mkdirs(tag_dir)
 
-        content = JSON.to_json(snapshot)
+        # Mirror Java TagManager.createOrReplaceTag: when no retention is set,
+        # write the plain Snapshot JSON (no tag-specific fields) so the file
+        # stays readable by older readers. Only write the richer Tag JSON when a
+        # retention (and thus a create-time) is present.
+        if time_retained is not None:
+            # parse_duration_nanos keeps sub-millisecond units exactly. Python's
+            # timedelta is microsecond-resolution, so reject sub-microsecond
+            # retentions (e.g. "1ns") instead of silently writing a zero-TTL tag.
+            nanos = parse_duration_nanos(time_retained)
+            micros, sub_micro = divmod(nanos, 1000)
+            if sub_micro:
+                raise ValueError(
+                    f"time_retained '{time_retained}' specifies sub-microsecond "
+                    f"precision, which pypaimon cannot represent (Python timedelta "
+                    f"resolution is microseconds). Use a value of at least 1 microsecond."
+                )
+            retained = timedelta(microseconds=micros)
+            tag = Tag.from_snapshot_and_tag_ttl(snapshot, retained, datetime.now())
+            content = JSON.to_json(tag)
+        else:
+            content = JSON.to_json(snapshot)
 
         self.file_io.overwrite_file_utf8(tag_path, content)
 
@@ -199,13 +225,20 @@ class TagManager:
         self.file_io.delete_quietly(path)
         return True
 
-    def replace_tag(self, snapshot: Snapshot, tag_name: str) -> None:
+    def replace_tag(
+            self,
+            snapshot: Snapshot,
+            tag_name: str,
+            time_retained: Optional[str] = None
+    ) -> None:
         """
         Replace an existing tag with a new snapshot.
 
         Args:
             snapshot: The new snapshot to associate with the tag
             tag_name: Name of the tag to replace
+            time_retained: Optional retention (e.g. ``"1d"``); when set, the
+                replaced tag carries a create-time and TTL.
 
         Raises:
             ValueError: If tag_name is blank or tag doesn't exist
@@ -216,7 +249,7 @@ class TagManager:
         if not self.tag_exists(tag_name):
             raise ValueError(f"Tag '{tag_name}' doesn't exist.")
 
-        self._create_or_replace_tag(snapshot, tag_name)
+        self._create_or_replace_tag(snapshot, tag_name, time_retained)
 
     def rename_tag(self, old_name: str, new_name: str) -> None:
         """

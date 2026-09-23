@@ -1,0 +1,232 @@
+---
+title: "Global Index"
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Global Index
+
+<span id="overview" />
+
+Global indexes map predicates or search requests to row IDs, which Paimon uses to
+read matching table rows. Choose scalar indexes for filtering, vector indexes for
+similarity search, and full-text indexes for scored text retrieval. Hybrid search
+combines scored routes; it is a query API rather than another stored index type.
+
+This guide covers Data Evolution append tables. Primary-key tables have a separate
+[index configuration and lifecycle](../primary-key-table/global-index).
+
+## Choose an Index
+
+| Index Type | Best For | Notes |
+|---|---|---|
+| [BTree](./global-index/btree) | Scalar filters on numeric, string, date, and timestamp columns | Best when predicates are selective, such as equality, IN, range, and null checks. |
+| [Bitmap](./global-index/bitmap) | Enum-like dimensions and tag columns | Best for equality, IN, string prefix match, complement predicates, and null checks over compressed row-id bitmaps. |
+| [Multivalue](./global-index/multivalue) | Membership tests on arrays of supported scalar elements | Best for `ARRAY_CONTAINS`, `ARRAYS_OVERLAP`, and `ARRAY_CONTAINS_ALL`. |
+| [FM](./global-index/fm) | Exact substring filters on character columns | Supports needles of any byte length and partitions the indexed text for bounded-memory construction and demand-loaded reads. |
+| [Vector](./global-index/vector) | Top-K similarity search on embeddings | Uses ANN algorithms. Tune build-time and search-time options to balance recall, latency, and index size. |
+| [Full-Text](./global-index/full-text) | Keyword search over text columns | Uses full-text scoring and tokenizer configuration stored with each index file. |
+| [Hybrid Search](./global-index/hybrid-search) | Combining multiple vector routes, multiple full-text routes, or vector and full-text retrieval together | Runs multiple scored routes and merges them with a ranker before reading rows. |
+
+:::caution Index coverage affects results
+
+The default search mode is `fast`. If an index covers only part of the table,
+matching rows outside that coverage can be omitted. Creating a table or appending
+data does not build a global index. Read [Coverage and Freshness](./global-index/manage-indexes#coverage-and-freshness)
+before using indexed queries on changing data.
+
+:::
+
+## Prerequisites
+
+Start with a [configured Paimon catalog](./quick-start). Data Evolution requires
+an append table with row tracking enabled. The following examples assume the `db`
+database exists and that SQL uses that database. Load data before building indexes.
+
+`global-index.enabled` defaults to `true`; setting it does not create index files.
+
+The example table below is shared by the BTree, Bitmap, Multivalue, Vector, and
+Full-Text guides. It contains three-dimensional sample vectors and is partitioned
+by `dt`, so the partition-scoped build and drop examples also apply. Create and
+populate it once using one of the following alternatives.
+
+<Tabs groupId="global-index-create-table">
+
+<TabItem value="sql" label="Spark SQL">
+
+```sql
+CREATE TABLE my_table (
+    id INT,
+    name STRING,
+    category STRING,
+    tag STRING,
+    tags ARRAY<STRING>,
+    embedding ARRAY<FLOAT>,
+    content STRING,
+    dt STRING
+) PARTITIONED BY (dt) TBLPROPERTIES (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+
+INSERT INTO my_table VALUES
+    (101, 'a200', 'electronics', 'vip', array('blue', 'green'),
+     array(1.0f, 0.0f, 0.0f), 'paimon lake format and search', '2026-06-18'),
+    (102, 'a300', 'electronics', 'trial', array('green'),
+     array(0.9f, 0.1f, 0.0f), 'paimon full text search', '2026-06-18'),
+    (103, 'a400', 'books', 'standard', array('red'),
+     array(0.0f, 1.0f, 0.0f), 'vector search tutorial', '2026-06-19');
+```
+
+</TabItem>
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+```sql
+SET 'execution.runtime-mode' = 'batch';
+
+CREATE TABLE my_table (
+    id INT,
+    name STRING,
+    category STRING,
+    tag STRING,
+    tags ARRAY<STRING>,
+    embedding ARRAY<FLOAT>,
+    content STRING,
+    dt STRING
+) PARTITIONED BY (dt) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+
+INSERT INTO my_table VALUES
+    (101, 'a200', 'electronics', 'vip', ARRAY['blue', 'green'],
+     ARRAY[CAST(1.0 AS FLOAT), CAST(0.0 AS FLOAT), CAST(0.0 AS FLOAT)],
+     'paimon lake format and search', '2026-06-18'),
+    (102, 'a300', 'electronics', 'trial', ARRAY['green'],
+     ARRAY[CAST(0.9 AS FLOAT), CAST(0.1 AS FLOAT), CAST(0.0 AS FLOAT)],
+     'paimon full text search', '2026-06-18'),
+    (103, 'a400', 'books', 'standard', ARRAY['red'],
+     ARRAY[CAST(0.0 AS FLOAT), CAST(1.0 AS FLOAT), CAST(0.0 AS FLOAT)],
+     'vector search tutorial', '2026-06-19');
+```
+
+Wait for the insert job to finish before building an index.
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+For the partition-scoped Python build and rebuild examples, create the table with
+this setup. It puts `dt` first to work around the current SDK's partition-predicate
+handling; keep the partition column in that position when following those examples.
+
+```python
+import pyarrow as pa
+from pypaimon import Schema
+
+# `catalog` is the configured Paimon catalog; database `db` already exists.
+pa_schema = pa.schema([
+    ('dt', pa.string()),
+    ('id', pa.int32()),
+    ('name', pa.string()),
+    ('category', pa.string()),
+    ('tag', pa.string()),
+    ('tags', pa.list_(pa.string())),
+    ('embedding', pa.list_(pa.float32())),
+    ('content', pa.string()),
+])
+schema = Schema.from_pyarrow_schema(
+    pa_schema,
+    partition_keys=['dt'],
+    options={
+        'row-tracking.enabled': 'true',
+        'data-evolution.enabled': 'true',
+    },
+)
+catalog.create_table('db.my_table', schema, ignore_if_exists=False)
+table = catalog.get_table('db.my_table')
+data = pa.Table.from_pydict({
+    'dt': ['2026-06-18', '2026-06-18', '2026-06-19'],
+    'id': [101, 102, 103],
+    'name': ['a200', 'a300', 'a400'],
+    'category': ['electronics', 'electronics', 'books'],
+    'tag': ['vip', 'trial', 'standard'],
+    'tags': [['blue', 'green'], ['green'], ['red']],
+    'embedding': [[1.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.0, 1.0, 0.0]],
+    'content': ['paimon lake format and search', 'paimon full text search',
+                'vector search tutorial'],
+}, schema=pa_schema)
+
+builder = table.new_batch_write_builder()
+write = builder.new_write()
+commit = builder.new_commit()
+try:
+    write.write_arrow(data)
+    commit.commit(write.prepare_commit())
+finally:
+    write.close()
+    commit.close()
+```
+
+</TabItem>
+
+</Tabs>
+
+The sample vectors illustrate the API; they are not model-generated embeddings.
+For real data, use the same model, dimension, and preprocessing for stored and
+query vectors. The Hybrid Search guide creates a separate table with two vector columns.
+
+## Lifecycle
+
+1. Load rows into the table.
+2. [Build indexes](./global-index/manage-indexes#build-an-index) for the columns and partitions used by queries.
+3. [Inspect row-ID coverage](./global-index/manage-indexes#inspect-index-coverage).
+4. Query through the relevant index or search API, then build again after ingesting more rows.
+
+Use [Manage Global Indexes](./global-index/manage-indexes) for SQL/Python build and drop
+examples, inspection queries, and visibility callbacks.
+
+## Coverage and Freshness
+
+Choose `fast`, `full`, or `detail` according to how queries should include uncovered
+rows. See the [search-mode comparison](./global-index/manage-indexes#coverage-and-freshness).
+Updates to indexed values also need an
+[update policy and index refresh](./global-index/manage-indexes#update-indexed-columns);
+row-ID coverage alone does not prove that indexed values are current.
+
+## Build Options
+
+See [shared options](./global-index/manage-indexes#shared-options) for shard sizing,
+build parallelism, update policy, and search modes. Each index page documents its
+own format and tuning options.
+
+<span id="btree-index" />
+<span id="bitmap-index" />
+<span id="multivalue-index" />
+<span id="fm-index" />
+<span id="vector-index" />
+<span id="full-text-index" />
+<span id="hybrid-search" />
+
+Use the [index selection table](#choose-an-index) above to open build and query examples.

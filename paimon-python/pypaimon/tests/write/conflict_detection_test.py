@@ -19,9 +19,13 @@ import unittest
 from dataclasses import dataclass
 from typing import List
 
+from pypaimon.index.index_file_meta import IndexFileMeta
+from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
+from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.commit.conflict_detection import (
     ConflictDetection,
@@ -127,6 +131,49 @@ class TestCheckRowIdExistence(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("Row ID existence conflict", str(result))
 
+    def test_no_conflict_when_blob_file_range_is_covered(self):
+        detection = self._make_detection()
+        base = [_make_entry("f1", kind=0, first_row_id=0, row_count=100)]
+        delta = [_make_entry("p1.blob", kind=0, first_row_id=20, row_count=10)]
+        self.assertIsNone(
+            detection.check_row_id_existence(base, delta, next_row_id=200))
+
+    def test_no_conflict_when_vector_file_range_is_covered(self):
+        detection = self._make_detection()
+        base = [_make_entry("f1", kind=0, first_row_id=0, row_count=100)]
+        delta = [_make_entry("p1.vector.0", kind=0, first_row_id=20, row_count=10)]
+        self.assertIsNone(
+            detection.check_row_id_existence(base, delta, next_row_id=200))
+
+    def test_conflict_when_blob_file_range_is_not_covered(self):
+        detection = self._make_detection()
+        base = [_make_entry("f1", kind=0, first_row_id=0, row_count=100)]
+        delta = [_make_entry("p1.blob", kind=0, first_row_id=95, row_count=10)]
+        result = detection.check_row_id_existence(base, delta, next_row_id=200)
+        self.assertIsNotNone(result)
+        self.assertIn("Row ID existence conflict", str(result))
+
+    def test_no_conflict_when_blob_file_range_is_covered_by_multiple_files(self):
+        detection = self._make_detection()
+        base = [
+            _make_entry("f1", kind=0, first_row_id=0, row_count=50),
+            _make_entry("f2", kind=0, first_row_id=50, row_count=50),
+        ]
+        delta = [_make_entry("p1.blob", kind=0, first_row_id=25, row_count=50)]
+        self.assertIsNone(
+            detection.check_row_id_existence(base, delta, next_row_id=200))
+
+    def test_conflict_when_blob_file_range_is_only_covered_by_base_blob_file(self):
+        detection = self._make_detection()
+        base = [
+            _make_entry("f1", kind=0, first_row_id=0, row_count=50),
+            _make_entry("p0.blob", kind=0, first_row_id=50, row_count=50),
+        ]
+        delta = [_make_entry("p1.blob", kind=0, first_row_id=60, row_count=10)]
+        result = detection.check_row_id_existence(base, delta, next_row_id=200)
+        self.assertIsNotNone(result)
+        self.assertIn("Row ID existence conflict", str(result))
+
     def test_skip_newly_appended_files(self):
         detection = self._make_detection()
         base = []
@@ -167,6 +214,239 @@ class TestCheckRowIdExistence(unittest.TestCase):
         delta = [_make_entry("p1", kind=0, first_row_id=0, row_count=100)]
         self.assertIsNone(
             detection.check_row_id_existence(base, delta, next_row_id=None))
+
+
+class TestCheckRowIdRangeConflicts(unittest.TestCase):
+
+    def _make_detection(self):
+        return ConflictDetection(
+            data_evolution_enabled=True,
+            snapshot_manager=None,
+            manifest_list_manager=None,
+            table=None,
+            commit_scanner=None,
+        )
+
+    def test_reports_dedicated_file_spanning_data_files(self):
+        detection = self._make_detection()
+        entries = [
+            _make_entry("f1", kind=0, first_row_id=0, row_count=2),
+            _make_entry("f2", kind=0, first_row_id=2, row_count=2),
+            _make_entry("p1.blob", kind=0, first_row_id=0, row_count=4),
+        ]
+
+        result = detection.check_row_id_range_conflicts("COMPACT", entries)
+
+        self.assertIsNotNone(result)
+        self.assertIn("dedicated file", str(result))
+        self.assertIn("p1.blob", str(result))
+        self.assertIn("spans multiple data file ranges", str(result))
+        self.assertIn("f1", str(result))
+        self.assertIn("f2", str(result))
+
+    def test_allows_adjacent_data_files(self):
+        detection = self._make_detection()
+        entries = [
+            _make_entry("f1", kind=0, first_row_id=0, row_count=2),
+            _make_entry("f2", kind=0, first_row_id=2, row_count=2),
+        ]
+
+        result = detection.check_row_id_range_conflicts("COMPACT", entries)
+
+        self.assertIsNone(result)
+
+    def test_allows_dedicated_file_covered_by_one_data_file(self):
+        detection = self._make_detection()
+        entries = [
+            _make_entry("f1", kind=0, first_row_id=0, row_count=4),
+            _make_entry("p1.blob", kind=0, first_row_id=1, row_count=2),
+        ]
+
+        result = detection.check_row_id_range_conflicts("COMPACT", entries)
+
+        self.assertIsNone(result)
+
+
+class TestOverwriteConflictDetection(unittest.TestCase):
+
+    def _make_detection(self):
+        return ConflictDetection(
+            data_evolution_enabled=True,
+            snapshot_manager=None,
+            manifest_list_manager=None,
+            table=None,
+            commit_scanner=None,
+        )
+
+    def test_deleted_files_trigger_overwrite_commit(self):
+        detection = self._make_detection()
+        entries = [
+            _make_entry("f1", kind=0),
+            _make_entry("f2", kind=1),
+        ]
+        self.assertTrue(detection.should_be_overwrite_commit(entries, []))
+
+    def test_deletion_vector_index_files_trigger_overwrite_commit(self):
+        detection = self._make_detection()
+        index_entry = IndexManifestEntry(
+            kind=0,
+            partition=_EMPTY_PARTITION,
+            bucket=0,
+            index_file=IndexFileMeta(
+                index_type=IndexManifestFile.DELETION_VECTORS_INDEX,
+                file_name="dv",
+                file_size=1,
+                row_count=1,
+            ),
+        )
+        self.assertTrue(detection.should_be_overwrite_commit([], [index_entry]))
+
+    def test_delete_entry_missing_from_base_conflicts(self):
+        detection = self._make_detection()
+        result = detection.check_conflicts(
+            latest_snapshot=None,
+            base_entries=[],
+            delta_entries=[_make_entry("missing", kind=1)],
+            commit_kind="OVERWRITE",
+        )
+        self.assertIsNotNone(result)
+        self.assertIn("File deletion conflicts", str(result))
+
+    def test_bucket_num_mismatch_conflicts(self):
+        detection = self._make_detection()
+        old = _make_entry("old")
+        new = _make_entry("new")
+        new.total_buckets = 2
+
+        result = detection.check_conflicts(
+            latest_snapshot=None,
+            base_entries=[old],
+            delta_entries=[new],
+            commit_kind="APPEND",
+        )
+
+        self.assertIsNotNone(result)
+        self.assertIn("Total buckets", str(result))
+
+
+class _FakeSnapshot:
+
+    def __init__(self, snapshot_id, commit_kind, next_row_id=None):
+        self.id = snapshot_id
+        self.commit_kind = commit_kind
+        self.next_row_id = next_row_id
+
+
+class _FakeSnapshotManager:
+
+    def __init__(self, snapshots):
+        self._by_id = {s.id: s for s in snapshots}
+
+    def get_snapshot_by_id(self, snapshot_id):
+        return self._by_id.get(snapshot_id)
+
+
+class _FakeCommitScanner:
+
+    def __init__(self, entries_by_snapshot_id, raw_entries_by_snapshot_id=None):
+        self._by_id = entries_by_snapshot_id
+        self._raw_by_id = raw_entries_by_snapshot_id or {}
+
+    def read_incremental_entries_from_changed_partitions(self, snapshot, _):
+        return self._by_id.get(snapshot.id, [])
+
+    def read_incremental_raw_entries_from_changed_partitions(self, snapshot, _):
+        return self._raw_by_id.get(snapshot.id, self._by_id.get(snapshot.id, []))
+
+
+class _FakeTable:
+
+    def __init__(self, schema_manager):
+        self.schema_manager = schema_manager
+
+
+class TestCheckRowIdFromSnapshot(unittest.TestCase):
+
+    def _make_detection(self, snapshots, raw_entries_by_snapshot_id):
+        detection = ConflictDetection(
+            data_evolution_enabled=True,
+            snapshot_manager=_FakeSnapshotManager(snapshots),
+            manifest_list_manager=None,
+            table=_FakeTable(_FakeSchemaManager([_DEFAULT_SCHEMA])),
+            commit_scanner=_FakeCommitScanner({}, raw_entries_by_snapshot_id),
+        )
+        detection._row_id_check_from_snapshot = 1
+        return detection
+
+    def _blob_delta(self):
+        return [_make_entry("d.blob", first_row_id=0, row_count=51,
+                            write_cols=["col_a"])]
+
+    def test_compact_blob_delete_raises_at_first_match(self):
+        check_snap = _FakeSnapshot(1, "APPEND", next_row_id=200)
+        compact1 = _FakeSnapshot(2, "COMPACT", next_row_id=200)
+        compact2 = _FakeSnapshot(3, "COMPACT", next_row_id=200)
+        entries = {
+            2: [_make_entry("first.blob", kind=1, first_row_id=0, row_count=200)],
+            3: [_make_entry("second.blob", kind=1, first_row_id=0, row_count=200)],
+        }
+        detection = self._make_detection(
+            [check_snap, compact1, compact2], entries)
+        result = detection.check_row_id_from_snapshot(compact2, self._blob_delta())
+        self.assertIsNotNone(result)
+        self.assertIn("snapshot 2", str(result))
+        self.assertIn("COMPACT", str(result))
+
+    def test_compact_other_file_type_does_not_raise(self):
+        check_snap = _FakeSnapshot(1, "APPEND", next_row_id=200)
+        compact_snap = _FakeSnapshot(2, "COMPACT", next_row_id=200)
+        compact_entries = [
+            _make_entry("old.parquet", kind=1, first_row_id=0, row_count=100),
+            _make_entry("merged.parquet", kind=0, first_row_id=0, row_count=200),
+        ]
+        detection = self._make_detection(
+            [check_snap, compact_snap], {2: compact_entries})
+        self.assertIsNone(
+            detection.check_row_id_from_snapshot(compact_snap, self._blob_delta()))
+
+    def test_missing_intermediate_snapshot_fails_closed(self):
+        check_snap = _FakeSnapshot(1, "APPEND", next_row_id=200)
+        latest_snap = _FakeSnapshot(3, "COMPACT", next_row_id=200)
+        detection = self._make_detection(
+            [check_snap, latest_snap], {3: []})
+
+        with self.assertRaisesRegex(
+                RuntimeError, "snapshot 2 cannot be found"):
+            detection.check_row_id_from_snapshot(
+                latest_snap,
+                self._blob_delta(),
+                check_compaction=False,
+            )
+
+    def test_compact_no_conflict_when_no_matching_delete(self):
+        check_snap = _FakeSnapshot(1, "APPEND", next_row_id=400)
+        compact_snap = _FakeSnapshot(2, "COMPACT", next_row_id=400)
+        col_a_delta = self._blob_delta()
+        col_b_delta = [_make_entry("d.parquet", first_row_id=0, row_count=51,
+                                   write_cols=["col_b"])]
+        cases = [
+            ("disjoint_range", col_a_delta, [
+                _make_entry("old.blob", kind=1, first_row_id=200, row_count=200),
+            ]),
+            ("add_only", col_a_delta, [
+                _make_entry("merged.blob", kind=0, first_row_id=0, row_count=200),
+            ]),
+            ("other_column_shard", col_b_delta, [
+                _make_entry("old.parquet", kind=1, first_row_id=0, row_count=100,
+                            write_cols=["col_a"]),
+            ]),
+        ]
+        for name, delta, compact_entries in cases:
+            with self.subTest(case=name):
+                detection = self._make_detection(
+                    [check_snap, compact_snap], {2: compact_entries})
+                self.assertIsNone(
+                    detection.check_row_id_from_snapshot(compact_snap, delta))
 
 
 class TestRowIdColumnConflictChecker(unittest.TestCase):
@@ -231,6 +511,44 @@ class TestRowIdColumnConflictChecker(unittest.TestCase):
         committed = _make_file("c1", row_count=100, first_row_id=0,
                                write_cols=["col_b"])
         self.assertTrue(checker.conflicts_with(committed))
+
+    def test_null_write_cols_excludes_dedicated_fields(self):
+        schema = TableSchema(
+            id=1,
+            fields=[
+                DataField(1, "value", AtomicType("INT")),
+                DataField(2, "blob", AtomicType("BLOB")),
+            ],
+            highest_field_id=2,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'data-evolution.write-cols-optimization.enabled': 'true',
+            },
+        )
+        checker = self._make_checker([
+            _make_file(
+                "normal.parquet",
+                row_count=100,
+                first_row_id=0,
+                schema_id=1,
+                write_cols=None,
+            ),
+        ], schema)
+        self.assertFalse(checker.conflicts_with(_make_file(
+            "blob.blob",
+            row_count=100,
+            first_row_id=0,
+            schema_id=1,
+            write_cols=["blob"],
+        )))
+        self.assertTrue(checker.conflicts_with(_make_file(
+            "value.parquet",
+            row_count=100,
+            first_row_id=0,
+            schema_id=1,
+            write_cols=["value"],
+        )))
 
     def test_no_conflict_committed_file_no_row_id(self):
         delta_files = [

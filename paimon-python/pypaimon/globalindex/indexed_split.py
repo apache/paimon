@@ -15,13 +15,28 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""
-IndexedSplit wraps a Split with row ranges and optional scores.
+"""IndexedSplit wraps a Split with row ranges and optional scores.
+
+Ranges use the coordinate system of the table read path: stable row IDs for
+row-tracked tables and split-local physical positions for tables without row
+tracking.
 """
 
 from typing import List, Optional
 
 from pypaimon.read.split import Split
+
+
+def scores_for_ranges(score_getter, row_ranges):
+    """Scores follow row-id order, as in Java IndexedSplit, not relevance order."""
+    scores = []
+    for row_range in row_ranges:
+        for row_id in range(row_range.from_, row_range.to + 1):
+            score = score_getter(row_id)
+            if score is None:
+                raise ValueError("Missing score for selected row id %s" % row_id)
+            scores.append(score)
+    return scores
 
 
 class IndexedSplit(Split):
@@ -30,7 +45,7 @@ class IndexedSplit(Split):
         self,
         data_split: 'Split',
         row_ranges: List['Range'],
-        scores: Optional[List[float]] = None
+        scores: Optional[List[float]] = None,
     ):
         self._data_split = data_split
         self._row_ranges = row_ranges
@@ -41,7 +56,7 @@ class IndexedSplit(Split):
         return self._data_split
 
     def row_ranges(self) -> List['Range']:
-        """Return the row ranges from global index."""
+        """Return ranges in the coordinate system of the read path."""
         return self._row_ranges
 
     def scores(self) -> Optional[List[float]]:
@@ -91,6 +106,10 @@ class IndexedSplit(Split):
         return self._data_split.file_size
 
     @property
+    def is_streaming(self):
+        return getattr(self._data_split, 'is_streaming', False)
+
+    @property
     def raw_convertible(self):
         """Delegate to data_split."""
         return self._data_split.raw_convertible
@@ -99,6 +118,11 @@ class IndexedSplit(Split):
     def data_deletion_files(self):
         """Delegate to data_split."""
         return self._data_split.data_deletion_files
+
+    @property
+    def snapshot_id(self):
+        """Delegate to data_split."""
+        return self._data_split.snapshot_id
 
     def contains_row_id(self, row_id: int) -> bool:
         """Check if the given row ID is in the row ranges."""
@@ -128,13 +152,19 @@ class IndexedSplit(Split):
     def __eq__(self, other):
         if not isinstance(other, IndexedSplit):
             return False
-        return (self._data_split == other._data_split and
-                self._row_ranges == other._row_ranges and
-                self._scores == other._scores)
+        return (
+            self._data_split == other._data_split
+            and self._row_ranges == other._row_ranges
+            and self._scores == other._scores
+        )
 
     def __hash__(self):
         scores_hash = tuple(self._scores) if self._scores else None
-        return hash((id(self._data_split), tuple(self._row_ranges), scores_hash))
+        return hash((
+            id(self._data_split),
+            tuple(self._row_ranges),
+            scores_hash,
+        ))
 
     def __repr__(self):
         return (f"IndexedSplit(data_split={self._data_split}, "

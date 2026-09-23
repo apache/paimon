@@ -24,12 +24,33 @@ T = TypeVar("T")
 
 def json_field(json_name: str, **kwargs):
     """Create a field with custom JSON name"""
-    return field(metadata={"json_name": json_name}, **kwargs)
+    metadata = kwargs.pop("metadata", {})
+    return field(metadata={"json_name": json_name, **metadata}, **kwargs)
 
 
 def optional_json_field(json_name: str, json_include: str):
     """Create a field with custom JSON name"""
     return field(metadata={"json_name": json_name, "json_include": json_include}, default=None)
+
+
+def json_field_with_codec(json_name: str, encoder, decoder, json_include: str = "non_null"):
+    """Create an optional field with a custom JSON name and value codec.
+
+    ``encoder`` maps the Python value to its JSON representation on serialization;
+    ``decoder`` maps the JSON representation back to the Python value on
+    deserialization. Both are only invoked for non-``None`` values. This is used
+    for fields whose on-disk JSON shape must match a non-trivial Java/Jackson
+    encoding (e.g. ``LocalDateTime`` arrays, ``Duration`` decimal seconds).
+    """
+    return field(
+        metadata={
+            "json_name": json_name,
+            "json_include": json_include,
+            "encoder": encoder,
+            "decoder": decoder,
+        },
+        default=None,
+    )
 
 
 class JSON:
@@ -65,6 +86,12 @@ class JSON:
                 if field_info.metadata.get("json_include", None) == "non_null":
                     continue
 
+            # Custom value codec (e.g. Java LocalDateTime / Duration encodings)
+            encoder = field_info.metadata.get("encoder")
+            if encoder is not None and field_value is not None:
+                result[json_name] = encoder(field_value)
+                continue
+
             # Handle nested objects
             if hasattr(field_value, "to_dict"):
                 result[json_name] = field_value.to_dict()
@@ -93,9 +120,13 @@ class JSON:
         # Create field name mapping (json_name -> field_name)
         field_mapping = {}
         type_mapping = {}
+        decoder_mapping = {}
         for field_info in fields(target_class):
             json_name = field_info.metadata.get("json_name", field_info.name)
             field_mapping[json_name] = field_info.name
+            decoder = field_info.metadata.get("decoder")
+            if decoder is not None:
+                decoder_mapping[json_name] = decoder
             origin_type = getattr(field_info.type, '__origin__', None)
             args = getattr(field_info.type, '__args__', None)
             field_type = field_info.type
@@ -113,7 +144,13 @@ class JSON:
         for json_name, value in data.items():
             if json_name in field_mapping:
                 field_name = field_mapping[json_name]
-                if json_name in type_mapping:
+                if json_name in decoder_mapping:
+                    kwargs[field_name] = (
+                        None if value is None else decoder_mapping[json_name](value)
+                    )
+                elif value is None:
+                    kwargs[field_name] = None
+                elif json_name in type_mapping:
                     tp = getattr(type_mapping[json_name], '__origin__', None)
                     if tp in (list, List):
                         item_type = getattr(type_mapping[json_name], '__args__', None)[0]
@@ -129,5 +166,15 @@ class JSON:
                         kwargs[field_name] = JSON.__from_dict(value, type_mapping[json_name])
                 else:
                     kwargs[field_name] = value
+
+        for field_info in fields(target_class):
+            json_name = field_info.metadata.get("json_name", field_info.name)
+            if (
+                json_name not in data
+                and "json_missing_default" in field_info.metadata
+            ):
+                kwargs[field_info.name] = field_info.metadata[
+                    "json_missing_default"
+                ]
 
         return target_class(**kwargs)

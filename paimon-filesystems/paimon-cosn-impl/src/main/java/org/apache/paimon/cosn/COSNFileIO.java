@@ -21,6 +21,7 @@ package org.apache.paimon.cosn;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.SensitiveConfigUtils;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -32,6 +33,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -51,8 +53,10 @@ public class COSNFileIO extends HadoopCompliantFileIO {
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {
                 {
-                    put(COSN_USER_INFO_KEY_ID.toLowerCase(), COSN_USER_INFO_KEY_ID);
-                    put(COSN_USER_INFO_KEY_SECRET.toLowerCase(), COSN_USER_INFO_KEY_SECRET);
+                    put(COSN_USER_INFO_KEY_ID.toLowerCase(Locale.ROOT), COSN_USER_INFO_KEY_ID);
+                    put(
+                            COSN_USER_INFO_KEY_SECRET.toLowerCase(Locale.ROOT),
+                            COSN_USER_INFO_KEY_SECRET);
                 }
             };
     /**
@@ -76,14 +80,14 @@ public class COSNFileIO extends HadoopCompliantFileIO {
             for (String prefix : CONFIG_PREFIXES) {
                 if (key.startsWith(prefix)) {
                     String value = context.options().get(key);
-                    if (CASE_SENSITIVE_KEYS.containsKey(key.toLowerCase())) {
-                        key = CASE_SENSITIVE_KEYS.get(key.toLowerCase());
+                    if (CASE_SENSITIVE_KEYS.containsKey(key.toLowerCase(Locale.ROOT))) {
+                        key = CASE_SENSITIVE_KEYS.get(key.toLowerCase(Locale.ROOT));
                     }
                     hadoopOptions.set(key, value);
-                    LOG.warn(
+                    LOG.debug(
                             "Adding config entry for {} as {} to Hadoop config",
                             key,
-                            hadoopOptions.get(key));
+                            SensitiveConfigUtils.redactValue(key, hadoopOptions.get(key)));
                 }
             }
         }

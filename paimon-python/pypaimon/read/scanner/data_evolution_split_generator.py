@@ -18,8 +18,9 @@
 from collections import defaultdict
 from typing import List, Optional, Tuple
 
-from pypaimon.globalindex.indexed_split import IndexedSplit
+from pypaimon.globalindex.indexed_split import IndexedSplit, scores_for_ranges
 from pypaimon.utils.range import Range
+from pypaimon.utils.range_helper import RangeHelper
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.scanner.split_generator import AbstractSplitGenerator
@@ -38,30 +39,23 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         open_file_cost: int,
         deletion_files_map=None,
         row_ranges: Optional[List] = None,
-        score_getter=None
+        score_getter=None,
+        group_stats_filter=None,
+        snapshot_id: Optional[int] = None,
     ):
-        super().__init__(table, target_split_size, open_file_cost, deletion_files_map)
+        super().__init__(
+            table, target_split_size, open_file_cost, deletion_files_map,
+            snapshot_id)
         self.row_ranges = row_ranges
         self.score_getter = score_getter
+        self.group_stats_filter = group_stats_filter
 
     def create_splits(self, file_entries: List[ManifestEntry]) -> List[Split]:
         """
         Create splits for data evolution tables.
         """
-        def sort_key(manifest_entry: ManifestEntry) -> tuple:
-            first_row_id = (
-                manifest_entry.file.first_row_id
-                if manifest_entry.file.first_row_id is not None
-                else float('-inf')
-            )
-            is_blob = 1 if DataFileMeta.is_blob_file(manifest_entry.file.file_name) else 0
-            max_seq = manifest_entry.file.max_sequence_number
-            return first_row_id, is_blob, -max_seq
-
-        sorted_entries = sorted(file_entries, key=sort_key)
-
         partitioned_files = defaultdict(list)
-        for entry in sorted_entries:
+        for entry in file_entries:
             partitioned_files[(tuple(entry.partition.values), entry.bucket)].append(entry)
 
         slice_row_ranges = None  # Row ID ranges for slice-based filtering
@@ -76,14 +70,23 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             return max(sum(f.file_size for f in file_list), self.open_file_cost)
 
         splits = []
-        for key, sorted_entries_list in partitioned_files.items():
-            if not sorted_entries_list:
+        for key, entries_list in partitioned_files.items():
+            if not entries_list:
                 continue
 
-            data_files: List[DataFileMeta] = [e.file for e in sorted_entries_list]
+            data_files: List[DataFileMeta] = [e.file for e in entries_list]
 
             # Split files by firstRowId for data evolution
             split_by_row_id = self._split_by_row_id(data_files)
+            if self.group_stats_filter is not None:
+                split_by_row_id = [
+                    group for group in split_by_row_id
+                    if self.group_stats_filter.may_match(group)
+                ]
+                split_by_row_id = [
+                    [file.copy_without_stats() for file in group]
+                    for group in split_by_row_id
+                ]
 
             # Pack the split groups for optimal split sizes
             packed_files = self._pack_for_ordered(
@@ -97,7 +100,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             ]
 
             splits += self._build_split_from_pack_for_data_evolution(
-                flatten_packed_files, packed_files, sorted_entries_list
+                flatten_packed_files, packed_files, entries_list
             )
 
         # merge slice_row_ranges and self.row_ranges
@@ -107,7 +110,9 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             slice_row_ranges = Range.and_(slice_row_ranges, self.row_ranges)
 
         # Wrap splits with IndexedSplit for slice-based filtering or row_ranges
-        if slice_row_ranges:
+        if slice_row_ranges is not None:
+            if not slice_row_ranges:
+                return []
             splits = self._wrap_to_indexed_splits(splits, slice_row_ranges)
 
         return splits
@@ -152,7 +157,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                     partition=file_entries[0].partition,
                     bucket=file_entries[0].bucket,
                     raw_convertible=raw_convertible,
-                    data_deletion_files=data_deletion_files
+                    data_deletion_files=data_deletion_files,
+                    snapshot_id=self.snapshot_id,
                 )
                 splits.append(split)
         return splits
@@ -286,8 +292,14 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                         filtered_blob_entries.append(entry)
                         break
             
-            # Combine filtered non-blob and blob files
-            filtered_entries = filtered_non_blob_entries + filtered_blob_entries
+            kept_entries = {
+                id(entry)
+                for entry in filtered_non_blob_entries + filtered_blob_entries
+            }
+            filtered_entries = [
+                entry for entry in file_entries
+                if id(entry) in kept_entries
+            ]
             
             if filtered_entries:
                 filtered_partitioned_files[key] = filtered_entries
@@ -296,26 +308,9 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
     @staticmethod
     def _split_by_row_id(files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
-        """
-        Split files by row ID for data evolution tables.
-        Files are grouped by their overlapping row ID ranges.
-        """
-        list_ranges = [file.row_id_range() for file in files]
-
-        if not list_ranges:
-            return []
-
-        sorted_ranges = Range.sort_and_merge_overlap(list_ranges, True, False)
-
-        range_to_files = {}
-        for file in files:
-            file_range = file.row_id_range()
-            for r in sorted_ranges:
-                if r.overlaps(file_range):
-                    range_to_files.setdefault(r, []).append(file)
-                    break
-
-        return list(range_to_files.values())
+        """Group data-evolution files with overlapping row-id ranges (an original file and its
+        column deltas) via the shared RangeHelper; fails fast on a file missing first_row_id."""
+        return RangeHelper(lambda f: f.non_null_row_id_range()).merge_overlapping_ranges(files)
 
     def _wrap_to_indexed_splits(self, splits: List[Split], row_ranges: List[Range]) -> List[Split]:
         """
@@ -341,14 +336,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 # No intersection, skip this split
                 continue
 
-            # Create scores array if score_getter is provided
-            scores = None
-            if self.score_getter is not None:
-                scores = []
-                for r in expected:
-                    for row_id in range(r.from_, r.to + 1):
-                        score = self.score_getter(row_id)
-                        scores.append(score if score is not None else 0.0)
+            scores = (scores_for_ranges(self.score_getter, expected)
+                      if self.score_getter is not None else None)
 
             indexed_splits.append(IndexedSplit(split, expected, scores))
 

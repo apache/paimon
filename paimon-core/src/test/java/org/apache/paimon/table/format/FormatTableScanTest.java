@@ -20,7 +20,9 @@ package org.apache.paimon.table.format;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.csv.CsvOptions;
 import org.apache.paimon.format.json.JsonOptions;
@@ -30,8 +32,11 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.apache.paimon.types.DataTypes;
@@ -44,20 +49,24 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH;
+import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
+import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
 import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Test for {@link FormatTableScan}. */
@@ -90,32 +99,6 @@ public class FormatTableScanTest {
     }
 
     @TestTemplate
-    void testValidDataFileNames() {
-        // Test valid data file names
-        String[] fileNames = {"File.txt", "file.txt", "123file.txt", "data", "Test_file.log"};
-        for (String fileName : fileNames) {
-            assertTrue(
-                    FormatTableScan.isDataFileName(fileName),
-                    "Filename '" + fileName + "' should be valid");
-        }
-    }
-
-    @TestTemplate
-    void testInvalidDataFileNames() {
-        String[] fileNames = {".hidden", "_file.txt"};
-        for (String fileName : fileNames) {
-            assertFalse(
-                    FormatTableScan.isDataFileName(fileName),
-                    "Filename '" + fileName + "' should be invalid");
-        }
-    }
-
-    @TestTemplate
-    void testNullInput() {
-        assertFalse(FormatTableScan.isDataFileName(null), "Null input should return false");
-    }
-
-    @TestTemplate
     void testComputeScanPathAndLevelNoPartitionKeys() {
         List<String> partitionKeys = Collections.emptyList();
         RowType partitionType = RowType.of();
@@ -123,7 +106,11 @@ public class FormatTableScanTest {
 
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        defaultTableLocation, partitionKeys, partitionFilter, partitionType, false);
+                        defaultTableLocation,
+                        partitionKeys,
+                        FormatTableScan.extractPartitionPredicate(partitionFilter),
+                        partitionType,
+                        false);
 
         assertThat(result.getLeft()).isEqualTo(defaultTableLocation);
         assertThat(result.getRight()).isEqualTo(0);
@@ -150,7 +137,7 @@ public class FormatTableScanTest {
                 FormatTableScan.computeScanPathAndLevel(
                         defaultTableLocation,
                         partitionType.getFieldNames(),
-                        null,
+                        Optional.empty(),
                         partitionType,
                         false);
 
@@ -169,7 +156,7 @@ public class FormatTableScanTest {
                 FormatTableScan.computeScanPathAndLevel(
                         tableLocation,
                         partitionKeys,
-                        partitionFilter,
+                        FormatTableScan.extractPartitionPredicate(partitionFilter),
                         partitionType,
                         enablePartitionValueOnly);
 
@@ -210,7 +197,7 @@ public class FormatTableScanTest {
                 FormatTableScan.computeScanPathAndLevel(
                         tableLocation,
                         partitionKeys,
-                        partitionFilter,
+                        FormatTableScan.extractPartitionPredicate(partitionFilter),
                         partitionType,
                         enablePartitionValueOnly);
         String partitionPath = enablePartitionValueOnly ? "2023/12" : "year=2023/month=12";
@@ -238,6 +225,31 @@ public class FormatTableScanTest {
     }
 
     @TestTemplate
+    void testComputeScanPathWithDateEqualityFilter() {
+        Path tableLocation = new Path(tmpPath.toUri());
+        RowType datePartitionType = RowType.builder().field("dt", DataTypes.DATE()).build();
+        List<String> datePartitionKeys = datePartitionType.getFieldNames();
+
+        PredicateBuilder builder = new PredicateBuilder(datePartitionType);
+        Predicate equalityPredicate =
+                builder.equal(0, (int) java.time.LocalDate.parse("2026-05-01").toEpochDay());
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromPredicate(datePartitionType, equalityPredicate);
+
+        Pair<Path, Integer> result =
+                FormatTableScan.computeScanPathAndLevel(
+                        tableLocation,
+                        datePartitionKeys,
+                        FormatTableScan.extractPartitionPredicate(partitionFilter),
+                        datePartitionType,
+                        enablePartitionValueOnly);
+        String partitionPath = enablePartitionValueOnly ? "2026-05-01" : "dt=2026-05-01";
+
+        assertThat(result.getLeft().toString()).isEqualTo(tableLocation + partitionPath);
+        assertThat(result.getRight()).isEqualTo(0);
+    }
+
+    @TestTemplate
     void testComputeScanPathWithFirstLevel() throws IOException {
         Path tableLocation = new Path(tmpPath.toUri());
         // Create equality predicate for only the first partition key
@@ -250,7 +262,7 @@ public class FormatTableScanTest {
                 FormatTableScan.computeScanPathAndLevel(
                         tableLocation,
                         partitionKeys,
-                        partitionFilter,
+                        FormatTableScan.extractPartitionPredicate(partitionFilter),
                         partitionType,
                         enablePartitionValueOnly);
 
@@ -292,7 +304,7 @@ public class FormatTableScanTest {
                 FormatTableScan.computeScanPathAndLevel(
                         tableLocation,
                         partitionKeys,
-                        partitionFilter,
+                        FormatTableScan.extractPartitionPredicate(partitionFilter),
                         partitionType,
                         enablePartitionValueOnly);
 
@@ -327,7 +339,7 @@ public class FormatTableScanTest {
                 FormatTableScan.computeScanPathAndLevel(
                         tableLocation,
                         partitionKeys,
-                        partitionFilter,
+                        FormatTableScan.extractPartitionPredicate(partitionFilter),
                         partitionType,
                         enablePartitionValueOnly);
 
@@ -367,7 +379,7 @@ public class FormatTableScanTest {
                 FormatTableScan.computeScanPathAndLevel(
                         tableLocation,
                         partitionKeys,
-                        partitionFilter,
+                        FormatTableScan.extractPartitionPredicate(partitionFilter),
                         partitionType,
                         enablePartitionValueOnly);
 
@@ -390,7 +402,7 @@ public class FormatTableScanTest {
                 FormatTableScan.computeScanPathAndLevel(
                         tableLocation,
                         partitionKeys,
-                        partitionFilter,
+                        FormatTableScan.extractPartitionPredicate(partitionFilter),
                         partitionType,
                         enablePartitionValueOnly);
 
@@ -423,7 +435,7 @@ public class FormatTableScanTest {
                 FormatTableScan.computeScanPathAndLevel(
                         tableLocation,
                         partitionKeys,
-                        partitionFilter,
+                        FormatTableScan.extractPartitionPredicate(partitionFilter),
                         partitionType,
                         enablePartitionValueOnly);
 
@@ -457,7 +469,7 @@ public class FormatTableScanTest {
                 FormatTableScan.computeScanPathAndLevel(
                         tableLocation,
                         partitionKeys,
-                        partitionFilter,
+                        FormatTableScan.extractPartitionPredicate(partitionFilter),
                         partitionType,
                         enablePartitionValueOnly);
 
@@ -491,7 +503,7 @@ public class FormatTableScanTest {
                 FormatTableScan.computeScanPathAndLevel(
                         tableLocation,
                         partitionKeys,
-                        partitionFilter,
+                        FormatTableScan.extractPartitionPredicate(partitionFilter),
                         partitionType,
                         enablePartitionValueOnly);
 
@@ -524,7 +536,7 @@ public class FormatTableScanTest {
                 FormatTableScan.computeScanPathAndLevel(
                         tableLocation,
                         partitionKeys,
-                        partitionFilter,
+                        FormatTableScan.extractPartitionPredicate(partitionFilter),
                         partitionType,
                         enablePartitionValueOnly);
 
@@ -554,7 +566,7 @@ public class FormatTableScanTest {
 
         Map<String, String> result =
                 FormatTableScan.extractLeadingEqualityPartitionSpecWhenOnlyAnd(
-                        partitionKeys, equalityPredicate);
+                        partitionKeys, equalityPredicate, type);
 
         assertThat(result).hasSize(3);
         assertThat(result.get("year")).isEqualTo("2023");
@@ -581,7 +593,7 @@ public class FormatTableScanTest {
 
         Map<String, String> result =
                 FormatTableScan.extractLeadingEqualityPartitionSpecWhenOnlyAnd(
-                        partitionKeys, mixedPredicate);
+                        partitionKeys, mixedPredicate, type);
 
         assertThat(result).isNotNull();
         assertThat(result).hasSize(2);
@@ -609,7 +621,7 @@ public class FormatTableScanTest {
 
         Map<String, String> result =
                 FormatTableScan.extractLeadingEqualityPartitionSpecWhenOnlyAnd(
-                        partitionKeys, mixedPredicate);
+                        partitionKeys, mixedPredicate, type);
         assertThat(result).hasSize(1);
         assertThat(result.get("year")).isEqualTo("2023");
         assertThat(result.containsKey("month")).isFalse();
@@ -635,7 +647,7 @@ public class FormatTableScanTest {
 
         Map<String, String> result =
                 FormatTableScan.extractLeadingEqualityPartitionSpecWhenOnlyAnd(
-                        partitionKeys, mixedPredicate);
+                        partitionKeys, mixedPredicate, type);
 
         assertThat(result).isEmpty();
     }
@@ -656,7 +668,7 @@ public class FormatTableScanTest {
 
         Map<String, String> result =
                 FormatTableScan.extractLeadingEqualityPartitionSpecWhenOnlyAnd(
-                        partitionKeys, nonEqualityPredicate);
+                        partitionKeys, nonEqualityPredicate, type);
 
         assertThat(result).isEmpty();
     }
@@ -676,7 +688,7 @@ public class FormatTableScanTest {
 
         Map<String, String> result =
                 FormatTableScan.extractLeadingEqualityPartitionSpecWhenOnlyAnd(
-                        partitionKeys, orPredicate);
+                        partitionKeys, orPredicate, type);
 
         assertThat(result).isEmpty();
     }
@@ -705,6 +717,36 @@ public class FormatTableScanTest {
             List<Split> splits = scan.plan().splits();
             assertThat(splits).hasSize(5);
         }
+    }
+
+    @TestTemplate
+    void testPositiveLimitDoesNotPruneUnknownRowCountSplits() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path headerOnlyFile = new Path(tableLocation, "00-header-only.csv");
+        Path dataFile = new Path(tableLocation, "01-data.csv");
+        fileIO.mkdirs(tableLocation);
+        fileIO.writeFile(headerOnlyFile, "id,name\n", false);
+        fileIO.writeFile(dataFile, "id,name\n42,later\n", false);
+
+        Map<String, String> options = new HashMap<>();
+        options.put(FILE_FORMAT.key(), "csv");
+        options.put(CsvOptions.INCLUDE_HEADER.key(), "true");
+        options.put(SOURCE_SPLIT_TARGET_SIZE.key(), "32b");
+        options.put(SOURCE_SPLIT_OPEN_FILE_COST.key(), "32b");
+        FormatTable formatTable =
+                createFormatTableWithOptions(tableLocation, FormatTable.Format.CSV, options);
+        assertThat(formatTable.newReadBuilder().newScan().plan().splits()).hasSize(2);
+
+        ReadBuilder readBuilder = formatTable.newReadBuilder().withLimit(1);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        List<String> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+            reader.forEachRemaining(
+                    row -> rows.add(row.getInt(0) + "," + row.getString(1).toString()));
+        }
+
+        assertThat(rows).containsExactly("42,later");
     }
 
     @TestTemplate
@@ -760,8 +802,175 @@ public class FormatTableScanTest {
         // Parquet files should NOT be split, should be a single split
         assertThat(splits).hasSize(1);
         FormatDataSplit split = (FormatDataSplit) splits.get(0);
-        assertThat(split.filePath()).isEqualTo(parquetFile);
-        assertThat(split.offset()).isEqualTo(0);
+        assertThat(split.files()).hasSize(1);
+        assertThat(split.files().get(0).filePath()).isEqualTo(parquetFile);
+        assertThat(split.files().get(0).offset()).isEqualTo(0);
+    }
+
+    @TestTemplate
+    public void testCreateSplitsSkipsCommitterStagingFiles() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path dataFile = new Path(tableLocation, "data.csv");
+        writeTestFile(fileIO, dataFile, 100);
+        // Committer staging trees hold files whose names look exactly like data files; only the
+        // directories above them say they are uncommitted. A recursive listing sees them all.
+        for (String staging :
+                Arrays.asList(
+                        "_temporary/0/_temporary/attempt_202607271200_0001_m_000010_15",
+                        "__magic/job-6e7f/tasks/attempt_202607271200_0001_m_000010_15/__base",
+                        "__magic_job-6e7f/tasks/attempt_202607271200_0001_m_000010_15/__base",
+                        ".hive-staging_hive_2026-07-27_12-00-00_000_1/-ext-10000")) {
+            writeTestFile(
+                    fileIO, new Path(new Path(tableLocation, staging), "part-00010.csv"), 100);
+        }
+
+        FormatTable formatTable =
+                createFormatTableWithOptions(
+                        tableLocation, FormatTable.Format.CSV, Collections.emptyMap());
+        List<Split> splits = new FormatTableScan(formatTable, null, null).plan().splits();
+
+        assertThat(splits).hasSize(1);
+        assertThat(((FormatDataSplit) splits.get(0)).files())
+                .extracting(FormatDataSplit.FileMeta::filePath)
+                .containsExactly(dataFile);
+    }
+
+    @TestTemplate
+    public void testStagingTreesAreNotEnumerated() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO setupFileIO = LocalFileIO.create();
+        writeTestFile(setupFileIO, new Path(tableLocation, "data.csv"), 100);
+        // A staging tree with many task attempts, which is what a large job leaves behind. A
+        // recursive listing walks all of it and then throws it away.
+        for (int attempt = 0; attempt < 20; attempt++) {
+            writeTestFile(
+                    setupFileIO,
+                    new Path(
+                            tableLocation,
+                            String.format(
+                                    "__magic_job-6e7f/tasks/attempt_202607271200_0001_m_%06d_15"
+                                            + "/__base/part-%05d.csv",
+                                    attempt, attempt)),
+                    100);
+        }
+
+        AtomicInteger listCount = new AtomicInteger(0);
+        AtomicInteger enumerated = new AtomicInteger(0);
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public FileStatus[] listStatus(Path path) throws IOException {
+                        listCount.getAndIncrement();
+                        FileStatus[] statuses = super.listStatus(path);
+                        enumerated.addAndGet(statuses.length);
+                        return statuses;
+                    }
+                };
+        FormatTable formatTable =
+                FormatTable.builder()
+                        .fileIO(fileIO)
+                        .identifier(Identifier.create("test_db", "test_table"))
+                        .rowType(
+                                RowType.builder()
+                                        .field("id", DataTypes.INT())
+                                        .field("name", DataTypes.STRING())
+                                        .build())
+                        .partitionKeys(Collections.emptyList())
+                        .location(tableLocation.toString())
+                        .format(FormatTable.Format.CSV)
+                        .options(Collections.emptyMap())
+                        .build();
+
+        // What a recursive listing costs on the same tree, for comparison.
+        FileStatus[] recursive = fileIO.listFiles(tableLocation, true);
+        int recursiveListings = listCount.getAndSet(0);
+        int recursiveEntries = enumerated.getAndSet(0);
+
+        List<Split> splits = new FormatTableScan(formatTable, null, null).plan().splits();
+
+        assertThat(splits).hasSize(1);
+        // The recursive listing walks the whole staging tree and returns all of it, leaving the
+        // caller to throw 20 of the 21 files away.
+        assertEquals(21, recursive.length);
+        // Planning skips the staging tree at its root: one listing of the table directory, and the
+        // two entries in it. The recursive baseline is only compared against, not pinned: its
+        // exact cost belongs to FileIO, which this test does not exercise.
+        assertEquals(1, listCount.get());
+        assertEquals(2, enumerated.get());
+        assertThat(recursiveListings).isGreaterThan(listCount.get());
+        assertThat(recursiveEntries).isGreaterThan(enumerated.get());
+    }
+
+    @TestTemplate
+    public void testCreateSplitsKeepsFilesUnderAStagingLikeTableLocation() throws IOException {
+        // The '_' rule applies below the listed directory only: a warehouse path with a leading
+        // underscore must not make the whole table read as empty.
+        Path tableLocation = new Path(new Path(tmpPath.toUri()), "_warehouse/db/t");
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path dataFile = new Path(tableLocation, "data.csv");
+        writeTestFile(fileIO, dataFile, 100);
+
+        FormatTable formatTable =
+                createFormatTableWithOptions(
+                        tableLocation, FormatTable.Format.CSV, Collections.emptyMap());
+        List<Split> splits = new FormatTableScan(formatTable, null, null).plan().splits();
+
+        assertThat(splits).hasSize(1);
+        assertThat(((FormatDataSplit) splits.get(0)).files())
+                .extracting(FormatDataSplit.FileMeta::filePath)
+                .containsExactly(dataFile);
+    }
+
+    @TestTemplate
+    public void testCreateSplitsSkipsStagingFilesInsidePartitions() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO fileIO = LocalFileIO.create();
+        String partition = enablePartitionValueOnly ? "2024/1" : "year=2024/month=1";
+        Path partitionPath = new Path(tableLocation, partition);
+        Path dataFile = new Path(partitionPath, "data.csv");
+        writeTestFile(fileIO, dataFile, 100);
+        writeTestFile(
+                fileIO,
+                new Path(
+                        partitionPath,
+                        "__magic_job-6e7f/tasks/attempt_202607271200_0001_m_000010_15"
+                                + "/__base/part-00010.csv"),
+                100);
+
+        FormatTable formatTable = createYearMonthFormatTable(LocalFileIO.create(), tableLocation);
+        List<Split> splits = new FormatTableScan(formatTable, null, null).plan().splits();
+
+        assertThat(splits).hasSize(1);
+        assertThat(((FormatDataSplit) splits.get(0)).files())
+                .extracting(FormatDataSplit.FileMeta::filePath)
+                .containsExactly(dataFile);
+    }
+
+    @TestTemplate
+    public void testCreateSplitsReadsTheDefaultPartitionDirectory() throws IOException {
+        // In the value-only layout the directory of a null partition value is the default
+        // partition name, which starts with '_'. It is the listed root here, and the root is
+        // never judged, so its files are read while what is staged inside it is not.
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO fileIO = LocalFileIO.create();
+        String defaultPartName = PARTITION_DEFAULT_NAME.defaultValue();
+        String partition =
+                enablePartitionValueOnly
+                        ? "2024/" + defaultPartName
+                        : "year=2024/month=" + defaultPartName;
+        Path partitionPath = new Path(tableLocation, partition);
+        Path dataFile = new Path(partitionPath, "data.csv");
+        writeTestFile(fileIO, dataFile, 100);
+        writeTestFile(fileIO, new Path(partitionPath, "_temporary/attempt/part-00010.csv"), 100);
+
+        FormatTable formatTable = createYearMonthFormatTable(LocalFileIO.create(), tableLocation);
+        List<Split> splits = new FormatTableScan(formatTable, null, null).plan().splits();
+
+        assertThat(splits).hasSize(1);
+        assertThat(((FormatDataSplit) splits.get(0)).files())
+                .extracting(FormatDataSplit.FileMeta::filePath)
+                .containsExactly(dataFile);
     }
 
     @TestTemplate
@@ -907,5 +1116,452 @@ public class FormatTableScanTest {
                         .distinct()
                         .collect(java.util.stream.Collectors.toList());
         assertEquals(Arrays.asList("4", "5", "6", "7", "8", "9"), month);
+    }
+
+    @TestTemplate
+    void testFindPartitionsWithAndPartitionPredicate() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO setupFileIO = LocalFileIO.create();
+
+        // Create partition directories for years 2022 to 2026, 12 months each (60 partitions)
+        for (int year = 2022; year <= 2026; year++) {
+            String partPath = enablePartitionValueOnly ? String.valueOf(year) : "year=" + year;
+            for (int month = 1; month <= 12; month++) {
+                String monthPart =
+                        enablePartitionValueOnly
+                                ? partPath + "/" + month
+                                : partPath + "/month=" + month;
+                setupFileIO.mkdirs(new Path(tableLocation, monthPart));
+            }
+        }
+
+        AtomicInteger listCount = new AtomicInteger(0);
+        LocalFileIO localFileIO =
+                new LocalFileIO() {
+                    @Override
+                    public FileStatus[] listStatus(Path path) throws IOException {
+                        listCount.getAndIncrement();
+                        return super.listStatus(path);
+                    }
+                };
+
+        RowType rowType =
+                RowType.builder()
+                        .field("year", DataTypes.INT())
+                        .field("month", DataTypes.INT())
+                        .field("a", DataTypes.INT())
+                        .build();
+
+        FormatTable formatTable =
+                FormatTable.builder()
+                        .fileIO(localFileIO)
+                        .identifier(Identifier.create("test_db", "test_table"))
+                        .rowType(rowType)
+                        .partitionKeys(Arrays.asList("year", "month"))
+                        .location(tableLocation.toString())
+                        .format(FormatTable.Format.CSV)
+                        .options(
+                                Collections.singletonMap(
+                                        FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH.key(),
+                                        String.valueOf(enablePartitionValueOnly)))
+                        .build();
+
+        // Simulate a static pushdown (year = 2024) combined with a runtime/DPP partition filter
+        // (month > 3 AND month < 10): each is a DefaultPartitionPredicate and the scan combines
+        // them via PartitionPredicate.and, exactly like BaseScan / runtime filtering does. The
+        // combined predicate must still prune partition directories; otherwise it falls back to a
+        // full table-root listing.
+        PredicateBuilder builder = new PredicateBuilder(formatTable.partitionType());
+        PartitionPredicate yearFilter =
+                PartitionPredicate.fromPredicate(
+                        formatTable.partitionType(), builder.equal(0, 2024));
+        PartitionPredicate monthFilter =
+                PartitionPredicate.fromPredicate(
+                        formatTable.partitionType(),
+                        PredicateBuilder.and(builder.greaterThan(1, 3), builder.lessThan(1, 10)));
+        PartitionPredicate combined =
+                PartitionPredicate.and(Arrays.asList(yearFilter, monthFilter));
+
+        FormatTableScan scan = new FormatTableScan(formatTable, combined, null);
+        List<Pair<LinkedHashMap<String, String>, Path>> result = scan.findPartitions();
+
+        // Should prune to year=2024 and list its months only once (months 4-9).
+        assertEquals(6, result.size());
+        assertEquals(1, listCount.get());
+        List<String> months =
+                result.stream()
+                        .map(pair -> pair.getKey().get("month"))
+                        .sorted()
+                        .distinct()
+                        .collect(java.util.stream.Collectors.toList());
+        assertEquals(Arrays.asList("4", "5", "6", "7", "8", "9"), months);
+    }
+
+    @TestTemplate
+    void testFindPartitionsWithOrCrossFieldPredicate() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        createYearMonthPartitionDirs(LocalFileIO.create(), tableLocation);
+
+        AtomicInteger listCount = new AtomicInteger(0);
+        FormatTable formatTable =
+                createYearMonthFormatTable(countingFileIO(listCount), tableLocation);
+
+        // (year = 2024 AND month < 6) OR (year = 2025 AND month >= 6): a cross-field OR that the
+        // old per-field split model could not express, so it used to fall back to listing every
+        // year directory.
+        PredicateBuilder builder = new PredicateBuilder(formatTable.partitionType());
+        Predicate orPredicate =
+                PredicateBuilder.or(
+                        PredicateBuilder.and(builder.equal(0, 2024), builder.lessThan(1, 6)),
+                        PredicateBuilder.and(builder.equal(0, 2025), builder.greaterOrEqual(1, 6)));
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromPredicate(formatTable.partitionType(), orPredicate);
+
+        FormatTableScan scan = new FormatTableScan(formatTable, partitionFilter, null);
+        List<Pair<LinkedHashMap<String, String>, Path>> result = scan.findPartitions();
+
+        // Only year=2024 and year=2025 are descended: root + 2 year dirs = 3 list calls.
+        assertEquals(3, listCount.get());
+        // 2024 months 1-5 (5) + 2025 months 6-12 (7) = 12 partitions.
+        assertEquals(12, result.size());
+        for (Pair<LinkedHashMap<String, String>, Path> pair : result) {
+            int year = Integer.parseInt(pair.getKey().get("year"));
+            int month = Integer.parseInt(pair.getKey().get("month"));
+            assertTrue(
+                    (year == 2024 && month < 6) || (year == 2025 && month >= 6),
+                    "unexpected partition " + year + "-" + month);
+        }
+    }
+
+    @TestTemplate
+    void testFindPartitionsWithNestedAndOr() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        createYearMonthPartitionDirs(LocalFileIO.create(), tableLocation);
+
+        AtomicInteger listCount = new AtomicInteger(0);
+        FormatTable formatTable =
+                createYearMonthFormatTable(countingFileIO(listCount), tableLocation);
+
+        // year > 2022 AND (month = 1 OR month = 12)
+        PredicateBuilder builder = new PredicateBuilder(formatTable.partitionType());
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.greaterThan(0, 2022),
+                        PredicateBuilder.or(builder.equal(1, 1), builder.equal(1, 12)));
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromPredicate(formatTable.partitionType(), predicate);
+
+        FormatTableScan scan = new FormatTableScan(formatTable, partitionFilter, null);
+        List<Pair<LinkedHashMap<String, String>, Path>> result = scan.findPartitions();
+
+        // year=2022 pruned; 2023-2026 descended: root + 4 year dirs = 5 list calls.
+        assertEquals(5, listCount.get());
+        // 4 years x months {1, 12} = 8 partitions.
+        assertEquals(8, result.size());
+        for (Pair<LinkedHashMap<String, String>, Path> pair : result) {
+            int year = Integer.parseInt(pair.getKey().get("year"));
+            int month = Integer.parseInt(pair.getKey().get("month"));
+            assertTrue(
+                    year > 2022 && (month == 1 || month == 12),
+                    "unexpected partition " + year + "-" + month);
+        }
+    }
+
+    @TestTemplate
+    void testFindPartitionsWithOrSingleField() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        createYearMonthPartitionDirs(LocalFileIO.create(), tableLocation);
+
+        AtomicInteger listCount = new AtomicInteger(0);
+        FormatTable formatTable =
+                createYearMonthFormatTable(countingFileIO(listCount), tableLocation);
+
+        // year = 2023 OR year = 2025 (single-field OR now prunes too)
+        PredicateBuilder builder = new PredicateBuilder(formatTable.partitionType());
+        Predicate predicate = PredicateBuilder.or(builder.equal(0, 2023), builder.equal(0, 2025));
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromPredicate(formatTable.partitionType(), predicate);
+
+        FormatTableScan scan = new FormatTableScan(formatTable, partitionFilter, null);
+        List<Pair<LinkedHashMap<String, String>, Path>> result = scan.findPartitions();
+
+        // Only year=2023 and year=2025 descended: root + 2 = 3 list calls.
+        assertEquals(3, listCount.get());
+        // 2 years x 12 months = 24 partitions.
+        assertEquals(24, result.size());
+        List<String> years =
+                result.stream()
+                        .map(pair -> pair.getKey().get("year"))
+                        .distinct()
+                        .sorted()
+                        .collect(java.util.stream.Collectors.toList());
+        assertEquals(Arrays.asList("2023", "2025"), years);
+    }
+
+    @TestTemplate
+    void testFindPartitionsWithPrefixAndOrPredicate() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        createYearMonthPartitionDirs(LocalFileIO.create(), tableLocation);
+
+        AtomicInteger listCount = new AtomicInteger(0);
+        FormatTable formatTable =
+                createYearMonthFormatTable(countingFileIO(listCount), tableLocation);
+
+        // year = 2024 is pushed into the scan-path prefix. The remaining OR on month must not read
+        // the unbound prefix slot and accidentally prune the whole subtree.
+        PredicateBuilder builder = new PredicateBuilder(formatTable.partitionType());
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.equal(0, 2024),
+                        PredicateBuilder.or(builder.equal(1, 1), builder.equal(1, 12)));
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromPredicate(formatTable.partitionType(), predicate);
+
+        FormatTableScan scan = new FormatTableScan(formatTable, partitionFilter, null);
+        List<Pair<LinkedHashMap<String, String>, Path>> result = scan.findPartitions();
+
+        // The equality prefix narrows the scan to year=2024, so only its month directory is listed.
+        assertEquals(1, listCount.get());
+        assertEquals(2, result.size());
+        List<String> months =
+                result.stream()
+                        .map(pair -> pair.getKey().get("month"))
+                        .distinct()
+                        .sorted()
+                        .collect(java.util.stream.Collectors.toList());
+        assertEquals(Arrays.asList("1", "12"), months);
+        assertTrue(result.stream().allMatch(pair -> "2024".equals(pair.getKey().get("year"))));
+    }
+
+    @TestTemplate
+    void testFindPartitionsWithNullDefaultPartitionInOrPredicate() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+
+        AtomicInteger listCount = new AtomicInteger(0);
+        FormatTable formatTable = createDtHourFormatTable(countingFileIO(listCount), tableLocation);
+        createDtHourPartitionDirs(
+                LocalFileIO.create(),
+                tableLocation,
+                formatTable.defaultPartName(),
+                Arrays.asList(
+                        Pair.of(formatTable.defaultPartName(), "10"),
+                        Pair.of("20260625", "10"),
+                        Pair.of("20260624", "20"),
+                        Pair.of("20260101", "10")));
+
+        // The default partition name should be treated as null while pruning.
+        PredicateBuilder builder = new PredicateBuilder(formatTable.partitionType());
+        Predicate predicate =
+                PredicateBuilder.or(
+                        builder.isNull(0),
+                        PredicateBuilder.and(
+                                builder.equal(0, BinaryString.fromString("20260625")),
+                                builder.equal(1, BinaryString.fromString("10"))));
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromPredicate(formatTable.partitionType(), predicate);
+
+        FormatTableScan scan = new FormatTableScan(formatTable, partitionFilter, null);
+        List<Pair<LinkedHashMap<String, String>, Path>> result = scan.findPartitions();
+
+        // Only the default dt partition and dt=20260625 are descended: root + 2 = 3 list calls.
+        assertEquals(3, listCount.get());
+        assertEquals(2, result.size());
+        assertContainsDefaultAndConcreteDt(result, formatTable.defaultPartName());
+    }
+
+    @TestTemplate
+    void testListPartitionEntriesWithNullDefaultPartitionInOnlyValuePath() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        FormatTable formatTable = createDtHourFormatTable(LocalFileIO.create(), tableLocation);
+        createDtHourPartitionDirs(
+                LocalFileIO.create(),
+                tableLocation,
+                formatTable.defaultPartName(),
+                Arrays.asList(
+                        Pair.of(formatTable.defaultPartName(), "10"), Pair.of("20260625", "10")));
+
+        FormatTableScan scan = new FormatTableScan(formatTable, null, null);
+        List<org.apache.paimon.manifest.PartitionEntry> entries = scan.listPartitionEntries();
+
+        assertEquals(2, entries.size());
+        assertTrue(entries.stream().anyMatch(entry -> entry.partition().isNullAt(0)));
+        assertTrue(
+                entries.stream()
+                        .anyMatch(
+                                entry ->
+                                        !entry.partition().isNullAt(0)
+                                                && BinaryString.fromString("20260625")
+                                                        .equals(entry.partition().getString(0))));
+    }
+
+    @TestTemplate
+    void testTopNPartitions() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO fileIO = LocalFileIO.create();
+        FormatTable formatTable = createYearMonthFormatTable(fileIO, tableLocation);
+        String defaultPartName = formatTable.defaultPartName();
+
+        String nullPartition =
+                enablePartitionValueOnly
+                        ? defaultPartName + "/1"
+                        : "year=" + defaultPartName + "/month=1";
+        writeTestFile(fileIO, new Path(tableLocation, nullPartition + "/data.csv"), 10);
+
+        String empty2026 = enablePartitionValueOnly ? "2026/1" : "year=2026/month=1";
+        fileIO.mkdirs(new Path(tableLocation, empty2026));
+        assertThat(
+                        yearMonthPartitions(
+                                new FormatTableScan(formatTable, null, null).topNPartitions(1, 1)))
+                .containsExactly("null/1");
+
+        String data2025 = enablePartitionValueOnly ? "2025/1" : "year=2025/month=1";
+        writeTestFile(fileIO, new Path(tableLocation, data2025 + "/data.csv"), 10);
+        assertThat(
+                        yearMonthPartitions(
+                                new FormatTableScan(formatTable, null, null).topNPartitions(1, 1)))
+                .containsExactly("2025/1");
+
+        String data2026 = enablePartitionValueOnly ? "2026/2" : "year=2026/month=2";
+        writeTestFile(fileIO, new Path(tableLocation, data2026 + "/data.csv"), 10);
+        String data2026Month3 = enablePartitionValueOnly ? "2026/3" : "year=2026/month=3";
+        writeTestFile(fileIO, new Path(tableLocation, data2026Month3 + "/data.csv"), 10);
+        FormatTableScan scan = new FormatTableScan(formatTable, null, null);
+        assertThat(yearMonthPartitions(scan.topNPartitions(1, 1)))
+                .containsExactly("2026/3", "2026/2");
+        assertThat(yearMonthPartitions(scan.topNPartitions(2, 1)))
+                .containsExactly("2026/3", "2026/2", "2025/1");
+        assertThat(yearMonthPartitions(scan.topNPartitions(1, 2))).containsExactly("2026/3");
+
+        PredicateBuilder builder = new PredicateBuilder(formatTable.partitionType());
+        PartitionPredicate upTo2025 =
+                PartitionPredicate.fromPredicate(
+                        formatTable.partitionType(), builder.lessOrEqual(0, 2025));
+        assertThat(
+                        yearMonthPartitions(
+                                new FormatTableScan(formatTable, upTo2025, null)
+                                        .topNPartitions(1, 1)))
+                .containsExactly("2025/1");
+    }
+
+    private List<String> yearMonthPartitions(List<BinaryRow> partitions) {
+        return partitions.stream()
+                .map(
+                        row ->
+                                (row.isNullAt(0) ? "null" : row.getInt(0))
+                                        + "/"
+                                        + (row.isNullAt(1) ? "null" : row.getInt(1)))
+                .collect(java.util.stream.Collectors.toList());
+    }
+
+    private void createYearMonthPartitionDirs(LocalFileIO fileIO, Path tableLocation)
+            throws IOException {
+        for (int year = 2022; year <= 2026; year++) {
+            String partPath = enablePartitionValueOnly ? String.valueOf(year) : "year=" + year;
+            for (int month = 1; month <= 12; month++) {
+                String monthPart =
+                        enablePartitionValueOnly
+                                ? partPath + "/" + month
+                                : partPath + "/month=" + month;
+                fileIO.mkdirs(new Path(tableLocation, monthPart));
+            }
+        }
+    }
+
+    private void createDtHourPartitionDirs(
+            LocalFileIO fileIO,
+            Path tableLocation,
+            String defaultPartName,
+            List<Pair<String, String>> partitions)
+            throws IOException {
+        for (Pair<String, String> partition : partitions) {
+            String dt = partition.getLeft();
+            String hour = partition.getRight();
+            String partPath;
+            if (enablePartitionValueOnly) {
+                partPath = dt + "/" + hour;
+            } else {
+                partPath =
+                        String.format(
+                                "dt=%s/hour=%s",
+                                dt == null ? defaultPartName : dt,
+                                hour == null ? defaultPartName : hour);
+            }
+            fileIO.mkdirs(new Path(tableLocation, partPath));
+        }
+    }
+
+    private FormatTable createYearMonthFormatTable(LocalFileIO fileIO, Path tableLocation) {
+        RowType rowType =
+                RowType.builder()
+                        .field("year", DataTypes.INT())
+                        .field("month", DataTypes.INT())
+                        .field("a", DataTypes.INT())
+                        .build();
+        return FormatTable.builder()
+                .fileIO(fileIO)
+                .identifier(Identifier.create("test_db", "test_table"))
+                .rowType(rowType)
+                .partitionKeys(Arrays.asList("year", "month"))
+                .location(tableLocation.toString())
+                .format(FormatTable.Format.CSV)
+                .options(
+                        Collections.singletonMap(
+                                FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH.key(),
+                                String.valueOf(enablePartitionValueOnly)))
+                .build();
+    }
+
+    private FormatTable createDtHourFormatTable(LocalFileIO fileIO, Path tableLocation) {
+        RowType rowType =
+                RowType.builder()
+                        .field("dt", DataTypes.STRING())
+                        .field("hour", DataTypes.STRING())
+                        .field("a", DataTypes.INT())
+                        .build();
+        return FormatTable.builder()
+                .fileIO(fileIO)
+                .identifier(Identifier.create("test_db", "test_table"))
+                .rowType(rowType)
+                .partitionKeys(Arrays.asList("dt", "hour"))
+                .location(tableLocation.toString())
+                .format(FormatTable.Format.CSV)
+                .options(
+                        Collections.singletonMap(
+                                FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH.key(),
+                                String.valueOf(enablePartitionValueOnly)))
+                .build();
+    }
+
+    private void assertContainsDefaultAndConcreteDt(
+            List<Pair<LinkedHashMap<String, String>, Path>> result, String defaultPartName) {
+        List<String> dts =
+                result.stream()
+                        .map(pair -> pair.getKey().get("dt"))
+                        .distinct()
+                        .sorted()
+                        .collect(java.util.stream.Collectors.toList());
+        assertEquals(Arrays.asList("20260625", defaultPartName), dts);
+        assertTrue(
+                result.stream()
+                        .anyMatch(
+                                pair ->
+                                        defaultPartName.equals(pair.getKey().get("dt"))
+                                                && "10".equals(pair.getKey().get("hour"))));
+        assertTrue(
+                result.stream()
+                        .anyMatch(
+                                pair ->
+                                        "20260625".equals(pair.getKey().get("dt"))
+                                                && "10".equals(pair.getKey().get("hour"))));
+    }
+
+    private LocalFileIO countingFileIO(AtomicInteger listCount) {
+        return new LocalFileIO() {
+            @Override
+            public FileStatus[] listStatus(Path path) throws IOException {
+                listCount.getAndIncrement();
+                return super.listStatus(path);
+            }
+        };
     }
 }

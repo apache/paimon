@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="460" viewBox="0 0 900 460" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Flink streaming compaction</title>
+<desc id="desc">Input reaches the writer without a bucket-key shuffle. Committables pass through the compact coordinator and workers to the committer. The coordinator discovers small files from committed snapshots, and workers compact asynchronously. Setting write-only to true removes the background compaction operators.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="1" y="1" width="898" height="458" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="42" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">Flink streaming compaction</text>
+<text x="28" y="73" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Unaware-bucket append · background compaction enabled</text>
+<rect x="345" y="101" width="362" height="169" rx="8" fill="#f0faf7" stroke="#b8dcd2" stroke-width="1.5"/>
+<text x="526" y="126" font-size="18" fill="#087f6e" font-weight="700" text-anchor="middle">Background compaction operators</text>
+<rect x="28" y="148" width="128" height="92" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/><text x="92.0" y="182" font-size="19" fill="#2463b4" font-weight="700" text-anchor="middle">Input</text><text x="92.0" y="212" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">insert-only</text>
+<rect x="190" y="148" width="126" height="92" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/><text x="253.0" y="182" font-size="19" fill="#2463b4" font-weight="700" text-anchor="middle">Writer</text><text x="253.0" y="212" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">new files</text>
+<rect x="363" y="148" width="155" height="92" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/><text x="440.5" y="182" font-size="19" fill="#087f6e" font-weight="700" text-anchor="middle">Coordinator</text><text x="440.5" y="212" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">parallelism = 1</text>
+<rect x="552" y="148" width="137" height="92" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/><text x="620.5" y="182" font-size="19" fill="#087f6e" font-weight="700" text-anchor="middle">Workers</text><text x="620.5" y="212" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">async rewrite</text>
+<rect x="733" y="148" width="139" height="92" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/><text x="802.5" y="182" font-size="19" fill="#2463b4" font-weight="700" text-anchor="middle">Committer</text><text x="802.5" y="212" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">snapshots</text>
+<path d="M 156 194 H 182" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 316 194 H 355" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 518 194 H 544" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 689 194 H 725" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="28" y="272" font-size="17" fill="#526277" font-weight="400" text-anchor="start">No bucket-key shuffle</text>
+<rect x="363" y="326" width="509" height="73" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="617" y="355" font-size="21" fill="#172b4d" font-weight="700" text-anchor="middle">Table snapshots and data files</text>
+<text x="617" y="381" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Committed files are candidates for later compaction</text>
+<path d="M 440 326 V 279" fill="none" stroke="#526277" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+<text x="458" y="302" font-size="17" fill="#526277" font-weight="400" text-anchor="start">discover files</text>
+<path d="M 802 240 V 318" fill="none" stroke="#526277" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+<text x="819" y="285" font-size="17" fill="#526277" font-weight="400" text-anchor="start">commit</text>
+<text x="28" y="436" font-size="17" fill="#526277" font-weight="400" text-anchor="start">write-only = true removes the background operators; pre-commit compaction is separate.</text>
+</g>
+</svg>

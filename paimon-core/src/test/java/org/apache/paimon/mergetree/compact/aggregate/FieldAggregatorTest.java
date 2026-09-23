@@ -27,6 +27,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldBoolAndAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldBoolOrAggFactory;
@@ -51,6 +52,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
@@ -64,6 +66,7 @@ import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.HllSketchUtil;
 import org.apache.paimon.utils.RoaringBitmap32;
 import org.apache.paimon.utils.RoaringBitmap64;
+import org.apache.paimon.utils.TypeCheckUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -75,8 +78,11 @@ import java.util.AbstractMap;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -412,6 +418,92 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldListAggWithDefaultDelimiterIgnoringBlankValues() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                new CoreOptions(new HashMap<>()),
+                                "fieldName");
+        BinaryString result =
+                Stream.of(
+                                BinaryString.fromString("user1"),
+                                BinaryString.fromString(""),
+                                BinaryString.fromString(" "),
+                                BinaryString.fromString("   "),
+                                BinaryString.fromString("\t"),
+                                BinaryString.fromString("\n"),
+                                BinaryString.fromString("\r"),
+                                BinaryString.fromString("\r\n"),
+                                BinaryString.fromString(" \t\n "),
+                                BinaryString.fromString(" \t\n\r\n \u3000 "),
+                                BinaryString.fromString("user2"),
+                                BinaryString.fromString("\u3000"),
+                                BinaryString.fromString("\u2000"))
+                        .sequential()
+                        .reduce((l, r) -> (BinaryString) fieldListaggAgg.agg(l, r))
+                        .orElse(null);
+
+        assertNotNull(result);
+        assertThat(result.toString()).isEqualTo("user1,user2");
+    }
+
+    @Test
+    public void testFieldListAggWithDefaultDelimiterAndDistinctIgnoringBlankValues() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
+
+        BinaryString result =
+                Stream.of(
+                                BinaryString.fromString("user1"),
+                                BinaryString.fromString("user2"),
+                                BinaryString.fromString("user1"),
+                                BinaryString.fromString("user3"),
+                                BinaryString.fromString(""),
+                                BinaryString.fromString(" "),
+                                BinaryString.fromString("   "),
+                                BinaryString.fromString("\t"),
+                                BinaryString.fromString("\n"),
+                                BinaryString.fromString("\r"),
+                                BinaryString.fromString("\r\n"),
+                                BinaryString.fromString(" \t\n "),
+                                BinaryString.fromString(" \t\n\r\n \u3000 "),
+                                BinaryString.fromString("user2"),
+                                BinaryString.fromString("user3"),
+                                BinaryString.fromString("\u3000"),
+                                BinaryString.fromString("\u2000"))
+                        .sequential()
+                        .reduce((l, r) -> (BinaryString) fieldListaggAgg.agg(l, r))
+                        .orElse(null);
+
+        assertNotNull(result);
+        assertEquals("user1,user2,user3", result.toString());
+    }
+
+    @Test
+    public void testFieldListAggFirstNonBlankValueWithoutLeadingDelimiter() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                new CoreOptions(new HashMap<>()),
+                                "fieldName");
+
+        BinaryString accumulator = null;
+        accumulator = (BinaryString) fieldListaggAgg.agg(accumulator, BinaryString.fromString(" "));
+        accumulator =
+                (BinaryString)
+                        fieldListaggAgg.agg(accumulator, BinaryString.fromString("first line"));
+
+        assertThat(accumulator.toString()).isEqualTo("first line");
+    }
+
+    @Test
     public void testFieldMaxAgg() {
         FieldMaxAgg fieldMaxAgg = new FieldMaxAggFactory().create(new IntType(), null, null);
         Integer accumulator = 1;
@@ -428,8 +520,109 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldMaxMinAggWithBooleanType() {
+        FieldMaxAgg fieldMaxAgg = new FieldMaxAggFactory().create(new BooleanType(), null, null);
+        assertThat(fieldMaxAgg.agg(null, true)).isEqualTo(true);
+        assertThat(fieldMaxAgg.agg(false, null)).isEqualTo(false);
+        assertThat(fieldMaxAgg.agg(false, false)).isEqualTo(false);
+        assertThat(fieldMaxAgg.agg(false, true)).isEqualTo(true);
+        assertThat(fieldMaxAgg.agg(true, false)).isEqualTo(true);
+        assertThat(fieldMaxAgg.agg(true, true)).isEqualTo(true);
+
+        FieldMinAgg fieldMinAgg = new FieldMinAggFactory().create(new BooleanType(), null, null);
+        assertThat(fieldMinAgg.agg(null, false)).isEqualTo(false);
+        assertThat(fieldMinAgg.agg(true, null)).isEqualTo(true);
+        assertThat(fieldMinAgg.agg(true, true)).isEqualTo(true);
+        assertThat(fieldMinAgg.agg(true, false)).isEqualTo(false);
+        assertThat(fieldMinAgg.agg(false, true)).isEqualTo(false);
+        assertThat(fieldMinAgg.agg(false, false)).isEqualTo(false);
+    }
+
+    @Test
+    public void testFieldMaxMinAggComparableTypesAreAllSupported() {
+        // The factory admits a field iff TypeCheckUtils.isComparable, so every admitted type must
+        // be one InternalRowUtils.compare can actually order. Keep the two in lockstep: a new
+        // comparable type must be added to compare() in the same change.
+        Map<DataType, Object> samples = new LinkedHashMap<>();
+        samples.put(DataTypes.BOOLEAN(), true);
+        samples.put(DataTypes.TINYINT(), (byte) 1);
+        samples.put(DataTypes.SMALLINT(), (short) 1);
+        samples.put(DataTypes.INT(), 1);
+        samples.put(DataTypes.BIGINT(), 1L);
+        samples.put(DataTypes.FLOAT(), 1.0f);
+        samples.put(DataTypes.DOUBLE(), 1.0d);
+        samples.put(DataTypes.DECIMAL(4, 2), Decimal.fromUnscaledLong(1, 4, 2));
+        samples.put(DataTypes.CHAR(1), BinaryString.fromString("a"));
+        samples.put(DataTypes.VARCHAR(1), BinaryString.fromString("a"));
+        samples.put(DataTypes.BINARY(1), new byte[] {1});
+        samples.put(DataTypes.VARBINARY(1), new byte[] {1});
+        samples.put(DataTypes.DATE(), 1);
+        samples.put(DataTypes.TIME(), 1);
+        samples.put(DataTypes.TIMESTAMP(), Timestamp.fromEpochMillis(1));
+        samples.put(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(), Timestamp.fromEpochMillis(1));
+
+        for (Map.Entry<DataType, Object> entry : samples.entrySet()) {
+            DataType type = entry.getKey();
+            Object value = entry.getValue();
+            assertThat(TypeCheckUtils.isComparable(type)).as("isComparable(%s)", type).isTrue();
+            assertThat(new FieldMaxAggFactory().create(type, null, "f").agg(value, value))
+                    .as("max on %s", type)
+                    .isEqualTo(value);
+            assertThat(new FieldMinAggFactory().create(type, null, "f").agg(value, value))
+                    .as("min on %s", type)
+                    .isEqualTo(value);
+        }
+
+        // Guard against a new comparable type root slipping in without being covered above: the
+        // sampled roots must be exactly the roots that are not excluded by isComparable.
+        Set<DataTypeRoot> sampledRoots = new HashSet<>();
+        samples.keySet().forEach(type -> sampledRoots.add(type.getTypeRoot()));
+        Set<DataTypeRoot> expectedRoots = new HashSet<>(Arrays.asList(DataTypeRoot.values()));
+        expectedRoots.removeAll(
+                Arrays.asList(
+                        DataTypeRoot.MAP,
+                        DataTypeRoot.MULTISET,
+                        DataTypeRoot.ROW,
+                        DataTypeRoot.ARRAY,
+                        DataTypeRoot.VECTOR,
+                        DataTypeRoot.VARIANT,
+                        DataTypeRoot.BLOB,
+                        DataTypeRoot.GEOMETRY,
+                        DataTypeRoot.GEOGRAPHY));
+        assertThat(sampledRoots)
+                .as("a comparable type root must be covered here and in InternalRowUtils.compare")
+                .isEqualTo(expectedRoots);
+    }
+
+    @Test
+    public void testFieldMaxMinAggWithIncomparableTypeShouldFail() {
+        // These types have no ordering, so max/min must be rejected when the aggregator is
+        // created rather than failing later during merging.
+        for (DataType incomparable :
+                Arrays.asList(
+                        DataTypes.ARRAY(DataTypes.INT()),
+                        DataTypes.MAP(DataTypes.INT(), DataTypes.INT()),
+                        DataTypes.MULTISET(DataTypes.INT()),
+                        DataTypes.ROW(DataTypes.FIELD(0, "f0", DataTypes.INT())),
+                        DataTypes.VARIANT(),
+                        DataTypes.BLOB(),
+                        DataTypes.GEOMETRY(),
+                        DataTypes.GEOGRAPHY(),
+                        DataTypes.VECTOR(3, DataTypes.FLOAT()))) {
+            assertThatThrownBy(() -> new FieldMaxAggFactory().create(incomparable, null, "label"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
+                            "Data type for max column 'label' must be comparable but was");
+            assertThatThrownBy(() -> new FieldMinAggFactory().create(incomparable, null, "label"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
+                            "Data type for min column 'label' must be comparable but was");
+        }
+    }
+
+    @Test
     public void testFieldSumIntAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new IntType(), null, null);
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new IntType());
         assertThat(fieldSumAgg.agg(null, 10)).isEqualTo(10);
         assertThat(fieldSumAgg.agg(1, 10)).isEqualTo(11);
         assertThat(fieldSumAgg.retract(10, 5)).isEqualTo(5);
@@ -438,8 +631,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductIntAgg() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new IntType(), null, null);
+        FieldProductAgg fieldProductAgg = new FieldProductAggFactory().create(new IntType());
         assertThat(fieldProductAgg.agg(null, 10)).isEqualTo(10);
         assertThat(fieldProductAgg.agg(1, 10)).isEqualTo(10);
         assertThat(fieldProductAgg.retract(10, 5)).isEqualTo(2);
@@ -448,7 +640,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumByteAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new TinyIntType(), null, null);
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new TinyIntType());
         assertThat(fieldSumAgg.agg(null, (byte) 10)).isEqualTo((byte) 10);
         assertThat(fieldSumAgg.agg((byte) 1, (byte) 10)).isEqualTo((byte) 11);
         assertThat(fieldSumAgg.retract((byte) 10, (byte) 5)).isEqualTo((byte) 5);
@@ -457,8 +649,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductByteAgg() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new TinyIntType(), null, null);
+        FieldProductAgg fieldProductAgg = new FieldProductAggFactory().create(new TinyIntType());
         assertThat(fieldProductAgg.agg(null, (byte) 10)).isEqualTo((byte) 10);
         assertThat(fieldProductAgg.agg((byte) 1, (byte) 10)).isEqualTo((byte) 10);
         assertThat(fieldProductAgg.retract((byte) 10, (byte) 5)).isEqualTo((byte) 2);
@@ -467,8 +658,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductShortAgg() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new SmallIntType(), null, null);
+        FieldProductAgg fieldProductAgg = new FieldProductAggFactory().create(new SmallIntType());
         assertThat(fieldProductAgg.agg(null, (short) 10)).isEqualTo((short) 10);
         assertThat(fieldProductAgg.agg((short) 1, (short) 10)).isEqualTo((short) 10);
         assertThat(fieldProductAgg.retract((short) 10, (short) 5)).isEqualTo((short) 2);
@@ -477,7 +667,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumShortAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new SmallIntType(), null, null);
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new SmallIntType());
         assertThat(fieldSumAgg.agg(null, (short) 10)).isEqualTo((short) 10);
         assertThat(fieldSumAgg.agg((short) 1, (short) 10)).isEqualTo((short) 11);
         assertThat(fieldSumAgg.retract((short) 10, (short) 5)).isEqualTo((short) 5);
@@ -486,7 +676,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumLongAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new BigIntType(), null, null);
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new BigIntType());
         assertThat(fieldSumAgg.agg(null, 10L)).isEqualTo(10L);
         assertThat(fieldSumAgg.agg(1L, 10L)).isEqualTo(11L);
         assertThat(fieldSumAgg.retract(10L, 5L)).isEqualTo(5L);
@@ -495,8 +685,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductLongAgg() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new BigIntType(), null, null);
+        FieldProductAgg fieldProductAgg = new FieldProductAggFactory().create(new BigIntType());
         assertThat(fieldProductAgg.agg(null, 10L)).isEqualTo(10L);
         assertThat(fieldProductAgg.agg(1L, 10L)).isEqualTo(10L);
         assertThat(fieldProductAgg.retract(10L, 5L)).isEqualTo(2L);
@@ -504,9 +693,37 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldProductOverflowDisabled() {
+        assertProductOverflowDisabled(
+                new TinyIntType(), Byte.MIN_VALUE, (byte) 2, (byte) -1, (byte) 0);
+        assertProductOverflowDisabled(
+                new SmallIntType(), Short.MIN_VALUE, (short) 2, (short) -1, (short) 0);
+        assertProductOverflowDisabled(new IntType(), Integer.MIN_VALUE, 2, -1, 0);
+        assertProductOverflowDisabled(new BigIntType(), Long.MIN_VALUE, 2L, -1L, 0L);
+    }
+
+    private void assertProductOverflowDisabled(
+            DataType type, Object min, Object two, Object minusOne, Object zero) {
+        CoreOptions coreOptions =
+                CoreOptions.fromMap(
+                        Collections.singletonMap("fields.f.product.fail-on-overflow", "false"));
+        for (FieldProductAgg agg :
+                new FieldProductAgg[] {
+                    new FieldProductAggFactory().create(type),
+                    new FieldProductAggFactory().create(type, coreOptions, "f")
+                }) {
+            assertThat(agg.agg(min, two)).isEqualTo(zero);
+            assertThat(agg.agg(min, minusOne)).isEqualTo(min);
+            assertThat(agg.retract(min, minusOne)).isEqualTo(min);
+            assertThatThrownBy(() -> agg.retract(min, zero))
+                    .isInstanceOf(ArithmeticException.class)
+                    .hasMessage("/ by zero");
+        }
+    }
+
+    @Test
     public void testFieldProductByteOverflow() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new TinyIntType(), null, null);
+        FieldProductAgg fieldProductAgg = createProductWithOverflowCheck(new TinyIntType());
         assertThatThrownBy(() -> fieldProductAgg.agg((byte) 64, (byte) 2))
                 .isInstanceOf(ArithmeticException.class);
         assertThatThrownBy(() -> fieldProductAgg.agg((byte) -64, (byte) 4))
@@ -515,8 +732,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductShortOverflow() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new SmallIntType(), null, null);
+        FieldProductAgg fieldProductAgg = createProductWithOverflowCheck(new SmallIntType());
         assertThatThrownBy(() -> fieldProductAgg.agg((short) 1000, (short) 100))
                 .isInstanceOf(ArithmeticException.class);
         assertThatThrownBy(() -> fieldProductAgg.agg(Short.MIN_VALUE, (short) 2))
@@ -525,8 +741,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductIntOverflow() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new IntType(), null, null);
+        FieldProductAgg fieldProductAgg = createProductWithOverflowCheck(new IntType());
         assertThatThrownBy(() -> fieldProductAgg.agg(100_000, 100_000))
                 .isInstanceOf(ArithmeticException.class);
         assertThatThrownBy(() -> fieldProductAgg.agg(Integer.MIN_VALUE, -1))
@@ -535,8 +750,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductLongOverflow() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new BigIntType(), null, null);
+        FieldProductAgg fieldProductAgg = createProductWithOverflowCheck(new BigIntType());
         assertThatThrownBy(() -> fieldProductAgg.agg(Long.MAX_VALUE, 2L))
                 .isInstanceOf(ArithmeticException.class);
         assertThatThrownBy(() -> fieldProductAgg.agg(Long.MIN_VALUE, -1L))
@@ -545,40 +759,163 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductByteRetractOverflow() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new TinyIntType(), null, null);
+        FieldProductAgg fieldProductAgg = createProductWithOverflowCheck(new TinyIntType());
         assertThatThrownBy(() -> fieldProductAgg.retract(Byte.MIN_VALUE, (byte) -1))
                 .isInstanceOf(ArithmeticException.class);
     }
 
     @Test
     public void testFieldProductShortRetractOverflow() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new SmallIntType(), null, null);
+        FieldProductAgg fieldProductAgg = createProductWithOverflowCheck(new SmallIntType());
         assertThatThrownBy(() -> fieldProductAgg.retract(Short.MIN_VALUE, (short) -1))
                 .isInstanceOf(ArithmeticException.class);
     }
 
     @Test
     public void testFieldProductIntRetractOverflow() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new IntType(), null, null);
+        FieldProductAgg fieldProductAgg = createProductWithOverflowCheck(new IntType());
         assertThatThrownBy(() -> fieldProductAgg.retract(Integer.MIN_VALUE, -1))
                 .isInstanceOf(ArithmeticException.class);
     }
 
     @Test
     public void testFieldProductLongRetractOverflow() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new BigIntType(), null, null);
+        FieldProductAgg fieldProductAgg = createProductWithOverflowCheck(new BigIntType());
         assertThatThrownBy(() -> fieldProductAgg.retract(Long.MIN_VALUE, -1L))
                 .isInstanceOf(ArithmeticException.class);
     }
 
+    private FieldProductAgg createProductWithOverflowCheck(DataType type) {
+        return new FieldProductAggFactory()
+                .create(
+                        type,
+                        CoreOptions.fromMap(
+                                Collections.singletonMap(
+                                        "fields.f.product.fail-on-overflow", "true")),
+                        "f");
+    }
+
+    @Test
+    public void testFieldSumOverflowDisabled() {
+        assertSumOverflowDisabled(
+                new TinyIntType(), Byte.MIN_VALUE, Byte.MAX_VALUE, (byte) 1, (byte) -1);
+        assertSumOverflowDisabled(
+                new SmallIntType(), Short.MIN_VALUE, Short.MAX_VALUE, (short) 1, (short) -1);
+        assertSumOverflowDisabled(new IntType(), Integer.MIN_VALUE, Integer.MAX_VALUE, 1, -1);
+        assertSumOverflowDisabled(new BigIntType(), Long.MIN_VALUE, Long.MAX_VALUE, 1L, -1L);
+    }
+
+    private void assertSumOverflowDisabled(
+            DataType type, Object min, Object max, Object one, Object minusOne) {
+        CoreOptions coreOptions =
+                CoreOptions.fromMap(
+                        Collections.singletonMap("fields.f.sum.fail-on-overflow", "false"));
+        for (FieldSumAgg agg :
+                new FieldSumAgg[] {
+                    new FieldSumAggFactory().create(type),
+                    new FieldSumAggFactory().create(type, coreOptions, "f")
+                }) {
+            assertThat(agg.agg(max, one)).isEqualTo(min);
+            assertThat(agg.agg(min, minusOne)).isEqualTo(max);
+            assertThat(agg.retract(min, one)).isEqualTo(max);
+            assertThat(agg.retract(max, minusOne)).isEqualTo(min);
+            assertThat(agg.retract(null, min)).isEqualTo(min);
+        }
+    }
+
+    @Test
+    public void testFieldSumByteOverflow() {
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new TinyIntType());
+        assertThatThrownBy(() -> fieldSumAgg.agg(Byte.MAX_VALUE, (byte) 1))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.agg(Byte.MIN_VALUE, (byte) -1))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumShortOverflow() {
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new SmallIntType());
+        assertThatThrownBy(() -> fieldSumAgg.agg(Short.MAX_VALUE, (short) 1))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.agg(Short.MIN_VALUE, (short) -1))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumIntOverflow() {
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new IntType());
+        assertThatThrownBy(() -> fieldSumAgg.agg(Integer.MAX_VALUE, 1))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.agg(Integer.MIN_VALUE, -1))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumLongOverflow() {
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new BigIntType());
+        assertThatThrownBy(() -> fieldSumAgg.agg(Long.MAX_VALUE, 1L))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.agg(Long.MIN_VALUE, -1L))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumByteRetractOverflow() {
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new TinyIntType());
+        assertThatThrownBy(() -> fieldSumAgg.retract(Byte.MIN_VALUE, (byte) 1))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.retract(Byte.MAX_VALUE, (byte) -1))
+                .isInstanceOf(ArithmeticException.class);
+        // retract(null, MIN_VALUE) negates inputField, which also overflows.
+        assertThatThrownBy(() -> fieldSumAgg.retract(null, Byte.MIN_VALUE))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumShortRetractOverflow() {
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new SmallIntType());
+        assertThatThrownBy(() -> fieldSumAgg.retract(Short.MIN_VALUE, (short) 1))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.retract(Short.MAX_VALUE, (short) -1))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.retract(null, Short.MIN_VALUE))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumIntRetractOverflow() {
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new IntType());
+        assertThatThrownBy(() -> fieldSumAgg.retract(Integer.MIN_VALUE, 1))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.retract(Integer.MAX_VALUE, -1))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.retract(null, Integer.MIN_VALUE))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumLongRetractOverflow() {
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new BigIntType());
+        assertThatThrownBy(() -> fieldSumAgg.retract(Long.MIN_VALUE, 1L))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.retract(Long.MAX_VALUE, -1L))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.retract(null, Long.MIN_VALUE))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    private FieldSumAgg createSumWithOverflowCheck(DataType type) {
+        return new FieldSumAggFactory()
+                .create(
+                        type,
+                        CoreOptions.fromMap(
+                                Collections.singletonMap("fields.f.sum.fail-on-overflow", "true")),
+                        "f");
+    }
+
     @Test
     public void testFieldProductFloatAgg() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new FloatType(), null, null);
+        FieldProductAgg fieldProductAgg = new FieldProductAggFactory().create(new FloatType());
         assertThat(fieldProductAgg.agg(null, (float) 10)).isEqualTo((float) 10);
         assertThat(fieldProductAgg.agg((float) 1, (float) 10)).isEqualTo((float) 10);
         assertThat(fieldProductAgg.retract((float) 10, (float) 5)).isEqualTo((float) 2);
@@ -587,7 +924,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumFloatAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new FloatType(), null, null);
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new FloatType());
         assertThat(fieldSumAgg.agg(null, (float) 10)).isEqualTo((float) 10);
         assertThat(fieldSumAgg.agg((float) 1, (float) 10)).isEqualTo((float) 11);
         assertThat(fieldSumAgg.retract((float) 10, (float) 5)).isEqualTo((float) 5);
@@ -596,8 +933,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductDoubleAgg() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new DoubleType(), null, null);
+        FieldProductAgg fieldProductAgg = new FieldProductAggFactory().create(new DoubleType());
         assertThat(fieldProductAgg.agg(null, (double) 10)).isEqualTo((double) 10);
         assertThat(fieldProductAgg.agg((double) 1, (double) 10)).isEqualTo((double) 10);
         assertThat(fieldProductAgg.retract((double) 10, (double) 5)).isEqualTo((double) 2);
@@ -606,7 +942,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumDoubleAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new DoubleType(), null, null);
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new DoubleType());
         assertThat(fieldSumAgg.agg(null, (double) 10)).isEqualTo((double) 10);
         assertThat(fieldSumAgg.agg((double) 1, (double) 10)).isEqualTo((double) 11);
         assertThat(fieldSumAgg.retract((double) 10, (double) 5)).isEqualTo((double) 5);
@@ -615,8 +951,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductDecimalAgg() {
-        FieldProductAgg fieldProductAgg =
-                new FieldProductAggFactory().create(new DecimalType(), null, null);
+        FieldProductAgg fieldProductAgg = new FieldProductAggFactory().create(new DecimalType());
         assertThat(fieldProductAgg.agg(null, toDecimal(10))).isEqualTo(toDecimal(10));
         assertThat(fieldProductAgg.agg(toDecimal(1), toDecimal(10))).isEqualTo(toDecimal(10));
         assertThat(fieldProductAgg.retract(toDecimal(10), toDecimal(5))).isEqualTo(toDecimal(2));
@@ -625,7 +960,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumDecimalAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new DecimalType(), null, null);
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new DecimalType());
         assertThat(fieldSumAgg.agg(null, toDecimal(10))).isEqualTo(toDecimal(10));
         assertThat(fieldSumAgg.agg(toDecimal(1), toDecimal(10))).isEqualTo(toDecimal(11));
         assertThat(fieldSumAgg.retract(toDecimal(10), toDecimal(5))).isEqualTo(toDecimal(5));
@@ -653,6 +988,8 @@ public class FieldAggregatorTest {
                                         DataTypes.FIELD(1, "k1", DataTypes.INT()),
                                         DataTypes.FIELD(2, "v", DataTypes.STRING()))),
                         Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.emptyList(),
                         Integer.MAX_VALUE);
 
         InternalArray accumulator;
@@ -692,6 +1029,8 @@ public class FieldAggregatorTest {
                         FieldNestedUpdateAggFactory.NAME,
                         DataTypes.ARRAY(elementRowType),
                         Collections.emptyList(),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.emptyList(),
                         Integer.MAX_VALUE);
 
         InternalArray accumulator = null;
@@ -715,6 +1054,145 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldNestedUpdateAggFactoryWithSequenceFieldPrerequisite() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () ->
+                                new FieldNestedUpdateAggFactory()
+                                        .create(
+                                                DataTypes.ARRAY(elementRowType),
+                                                CoreOptions.fromMap(
+                                                        ImmutableMap.of(
+                                                                "fields.fieldName.nested-sequence-field",
+                                                                "seq")),
+                                                "fieldName"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Option 'fields.<field-name>.nested-sequence-field' requires "
+                                + "'fields.<field-name>.nested-key' to be configured.");
+
+        FieldNestedUpdateAgg seqAgg =
+                new FieldNestedUpdateAggFactory()
+                        .create(
+                                DataTypes.ARRAY(elementRowType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of(
+                                                "fields.fieldName.nested-key",
+                                                "k0,k1",
+                                                "fields.fieldName.nested-sequence-field",
+                                                "seq")),
+                                "fieldName");
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        InternalArray accumulator = null;
+        accumulator = (InternalArray) seqAgg.agg(accumulator, singletonArray(row(0, 1, "A", 1)));
+        accumulator = (InternalArray) seqAgg.agg(accumulator, singletonArray(row(0, 1, "B", 2)));
+
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "B", 2));
+
+        accumulator =
+                (InternalArray) seqAgg.agg(accumulator, singletonArray(row(0, 1, "b_Late", 1)));
+
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "B", 2));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggFactoryWithNestedKeyNullStrategyPrerequisite() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () ->
+                                new FieldNestedUpdateAggFactory()
+                                        .create(
+                                                DataTypes.ARRAY(elementRowType),
+                                                CoreOptions.fromMap(
+                                                        ImmutableMap.of(
+                                                                "fields.fieldName.nested-key-null-strategy",
+                                                                "merge")),
+                                                "fieldName"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Option 'fields.<field-name>.nested-key-null-strategy' requires "
+                                + "'fields.<field-name>.nested-key' to be configured.");
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        // verify merge behavior
+        FieldNestedUpdateAgg mergeAgg =
+                new FieldNestedUpdateAggFactory()
+                        .create(
+                                DataTypes.ARRAY(elementRowType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of(
+                                                "fields.fieldName.nested-key",
+                                                "k0,k1",
+                                                "fields.fieldName.nested-key-null-strategy",
+                                                "merge")),
+                                "fieldName");
+
+        InternalArray mergeAccumulator = null;
+        mergeAccumulator =
+                (InternalArray)
+                        mergeAgg.agg(mergeAccumulator, singletonArray(row(0, null, "A", 1)));
+
+        assertThat(unnest(mergeAccumulator, elementGetter)).containsExactly(row(0, null, "A", 1));
+
+        // verify ignore behavior
+        FieldNestedUpdateAgg ignoreAgg =
+                new FieldNestedUpdateAggFactory()
+                        .create(
+                                DataTypes.ARRAY(elementRowType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of(
+                                                "fields.fieldName.nested-key",
+                                                "k0,k1",
+                                                "fields.fieldName.nested-key-null-strategy",
+                                                "ignore")),
+                                "fieldName");
+
+        InternalArray ignoreAccumulator = null;
+        ignoreAccumulator =
+                (InternalArray) ignoreAgg.agg(ignoreAccumulator, singletonArray(row(0, 1, "A", 1)));
+        ignoreAccumulator =
+                (InternalArray)
+                        ignoreAgg.agg(ignoreAccumulator, singletonArray(row(0, null, "B", 2)));
+
+        assertThat(unnest(ignoreAccumulator, elementGetter)).containsExactly(row(0, 1, "A", 1));
+
+        // verify error behavior
+        FieldNestedUpdateAgg errorAgg =
+                new FieldNestedUpdateAggFactory()
+                        .create(
+                                DataTypes.ARRAY(elementRowType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of(
+                                                "fields.fieldName.nested-key",
+                                                "k0,k1",
+                                                "fields.fieldName.nested-key-null-strategy",
+                                                "error")),
+                                "fieldName");
+
+        assertThatThrownBy(() -> errorAgg.agg(null, singletonArray(row(0, null, "B", 2))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
+    }
+
+    @Test
     public void testFieldNestedAppendAggWithCountLimit() {
         DataType elementRowType =
                 DataTypes.ROW(
@@ -725,6 +1203,8 @@ public class FieldAggregatorTest {
                 new FieldNestedUpdateAgg(
                         FieldNestedUpdateAggFactory.NAME,
                         DataTypes.ARRAY(elementRowType),
+                        Collections.emptyList(),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
                         Collections.emptyList(),
                         2);
 
@@ -749,10 +1229,896 @@ public class FieldAggregatorTest {
                 .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 1, "B"), row(0, 1, "b")));
     }
 
+    @Test
+    public void testFieldNestedAppendAggWithCountLimitOnFirstInputArray() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()));
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Collections.emptyList(),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.emptyList(),
+                        2);
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+        InternalArray accumulator =
+                (InternalArray)
+                        agg.agg(null, array(row(0, 1, "B"), null, row(0, 1, "b"), row(0, 1, "C")));
+
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 1, "B"), row(0, 1, "b")));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWithCountLimitUpdatesExistingKeyAtLimitWithoutSequence() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.emptyList(),
+                        2);
+
+        InternalArray accumulator = null;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B")));
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(1, 2, "C")));
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B_updated")));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated"), row(1, 2, "C")));
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(2, 3, "D")));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated"), row(1, 2, "C")));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWithCountLimitOnFirstInputArrayWithoutSequence() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.emptyList(),
+                        2);
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+        InternalArray accumulator =
+                (InternalArray)
+                        agg.agg(
+                                null,
+                                array(
+                                        row(0, 1, "B"),
+                                        row(1, 2, "C"),
+                                        row(2, 3, "D"),
+                                        row(0, 1, "B_updated")));
+
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated"), row(1, 2, "C")));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWithSequenceField() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.singletonList("seq"),
+                        Integer.MAX_VALUE);
+
+        InternalArray accumulator;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        InternalRow current = row(0, 0, "A", 1);
+        accumulator = (InternalArray) agg.agg(null, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(current));
+
+        current = row(0, 1, "B", 2);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 0, "A", 1), row(0, 1, "B", 2)));
+
+        current = row(0, 1, "b", 3);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 0, "A", 1), row(0, 1, "b", 3)));
+
+        current = row(0, 1, "B_late", 2);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 0, "A", 1), row(0, 1, "b", 3)));
+
+        current = row(0, 1, "b", 3);
+        accumulator = (InternalArray) agg.retract(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(row(0, 0, "A", 1)));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWithMultipleSequenceFields() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()),
+                        DataTypes.FIELD(4, "ts", DataTypes.TIMESTAMP(3)));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Arrays.asList("seq", "ts"),
+                        Integer.MAX_VALUE);
+
+        InternalArray accumulator = null;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        org.apache.paimon.data.Timestamp ts1 =
+                org.apache.paimon.data.Timestamp.fromEpochMillis(1000L);
+        org.apache.paimon.data.Timestamp ts2 =
+                org.apache.paimon.data.Timestamp.fromEpochMillis(2000L);
+        org.apache.paimon.data.Timestamp ts3 =
+                org.apache.paimon.data.Timestamp.fromEpochMillis(3000L);
+
+        InternalRow current = row(1, 0, "A", 1, ts2);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        current = row(0, 1, "B", 2, ts1);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(1, 0, "A", 1, ts2), row(0, 1, "B", 2, ts1)));
+
+        current = row(1, 1, "C", 1, ts2);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(
+                                row(1, 0, "A", 1, ts2),
+                                row(0, 1, "B", 2, ts1),
+                                row(1, 1, "C", 1, ts2)));
+
+        current = row(1, 0, "A_late_updated_by_ts", 1, ts1);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(
+                                row(1, 0, "A", 1, ts2),
+                                row(0, 1, "B", 2, ts1),
+                                row(1, 1, "C", 1, ts2)));
+
+        current = row(1, 0, "A_updated_by_ts", 1, ts3);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(
+                                row(1, 0, "A_updated_by_ts", 1, ts3),
+                                row(0, 1, "B", 2, ts1),
+                                row(1, 1, "C", 1, ts2)));
+
+        // Try to update with a smaller 1st seq, even if the 2nd seq (ts) is larger
+        // Result: Should be IGNORED because the 1st seq field (1 < 2) takes higher priority.
+        current = row(0, 1, "b_ignored", 1, ts3);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(
+                                row(1, 0, "A_updated_by_ts", 1, ts3),
+                                row(0, 1, "B", 2, ts1),
+                                row(1, 1, "C", 1, ts2)));
+
+        // Update with the SAME 1st seq, but a larger 2nd seq (ts)
+        // Result: Should be SUCCESSFULLY UPDATED because seq (2 == 2) and ts (ts2 > ts1).
+        current = row(0, 1, "B_updated_by_ts", 2, ts2);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(
+                                row(1, 0, "A_updated_by_ts", 1, ts3),
+                                row(0, 1, "B_updated_by_ts", 2, ts2),
+                                row(1, 1, "C", 1, ts2)));
+
+        // Update with a larger 1st seq, even if the 2nd seq (ts) is smaller
+        // Result: Should be SUCCESSFULLY UPDATED because the 1st seq field (3 > 2) wins.
+        current = row(0, 1, "B_updated_by_seq", 3, ts1);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(
+                                row(1, 0, "A_updated_by_ts", 1, ts3),
+                                row(0, 1, "B_updated_by_seq", 3, ts1),
+                                row(1, 1, "C", 1, ts2)));
+
+        // Retract the latest row matching the current state
+        current = row(0, 1, "B_updated_by_seq", 3, ts1);
+        accumulator = (InternalArray) agg.retract(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(
+                                row(1, 0, "A_updated_by_ts", 1, ts3), row(1, 1, "C", 1, ts2)));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWithCountLimitWithSequenceFieldWithoutNestedKey() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+
+        // Verify that the same precondition check applies even when a count limit is specified
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () ->
+                                new FieldNestedUpdateAggFactory()
+                                        .create(
+                                                DataTypes.ARRAY(elementRowType),
+                                                CoreOptions.fromMap(
+                                                        ImmutableMap.of(
+                                                                "fields.fieldName.nested-sequence-field",
+                                                                "seq",
+                                                                "fields.fieldName.count-limit",
+                                                                "2")),
+                                                "fieldName"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Option 'fields.<field-name>.nested-sequence-field' requires "
+                                + "'fields.<field-name>.nested-key' to be configured.");
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAggFactory()
+                        .create(
+                                DataTypes.ARRAY(elementRowType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of(
+                                                "fields.fieldName.nested-key", "k0,k1",
+                                                "fields.fieldName.nested-sequence-field", "seq",
+                                                "fields.fieldName.count-limit", "2")),
+                                "fieldName");
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        InternalArray accumulator = null;
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "A", 1)));
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 2, "B", 2)));
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 3, "C", 3)));
+        accumulator =
+                (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "A_Update", 4)));
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 2, "B_Late", 1)));
+
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrder(row(0, 1, "A_Update", 4), row(0, 2, "B", 2));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWithCountLimitWithSequenceField() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.singletonList("seq"),
+                        2); // Enforce count limit = 2
+
+        InternalArray accumulator = null;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        InternalRow current = row(0, 1, "B", 1);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(row(0, 1, "B", 1)));
+
+        current = row(0, 1, "B_updated", 2);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        // The existing row should be updated, and the total size remains 1
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Collections.singletonList(row(0, 1, "B_updated", 2)));
+
+        current = row(1, 2, "C", 3); // Different nested key (1, 2)
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated", 2), row(1, 2, "C", 3)));
+
+        current = row(0, 3, "D", 4); // Another different nested key (0, 3)
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+
+        // count limit is 2, so the third element will be dropped
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated", 2), row(1, 2, "C", 3)));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWithCountLimitUpdatesExistingKeyAtLimit() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.singletonList("seq"),
+                        2);
+
+        InternalArray accumulator = null;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B", 1)));
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(1, 2, "C", 3)));
+
+        accumulator =
+                (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B_updated", 4)));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated", 4), row(1, 2, "C", 3)));
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(2, 3, "D", 5)));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated", 4), row(1, 2, "C", 3)));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWithCountLimitOnFirstInputArrayWithSequence() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.singletonList("seq"),
+                        2);
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+        InternalArray accumulator =
+                (InternalArray)
+                        agg.agg(
+                                null,
+                                array(
+                                        row(0, 1, "B", 1),
+                                        row(1, 2, "C", 3),
+                                        row(2, 3, "D", 5),
+                                        row(0, 1, "B_updated", 4)));
+
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated", 4), row(1, 2, "C", 3)));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWhenNestedKeyNullUseMergeStrategy() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.emptyList(),
+                        Integer.MAX_VALUE);
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        // Empty accumulator.
+        InternalArray accumulatorEmpty;
+        InternalRow current = row(0, null, "C", 3);
+
+        // case 1: partially null nested key (some PK fields are null)
+        accumulatorEmpty = (InternalArray) agg.agg(null, singletonArray(current));
+        assertThat(unnest(accumulatorEmpty, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(current));
+
+        // case 2: fully null nested key (all PK fields are null)
+        current = row(null, null, "D", 4);
+        accumulatorEmpty = (InternalArray) agg.agg(null, singletonArray(current));
+        assertThat(unnest(accumulatorEmpty, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(current));
+
+        // Non-empty accumulator.
+        InternalArray accumulator;
+
+        current = row(0, 0, "A", 1);
+        accumulator = (InternalArray) agg.agg(null, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(current));
+
+        current = row(0, 1, "B", 2);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 0, "A", 1), row(0, 1, "B", 2)));
+
+        // case 1: partially null nested key (some PK fields are null)
+        current = row(0, null, "C", 3);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 0, "A", 1), row(0, 1, "B", 2), row(0, null, "C", 3)));
+
+        // case 2: fully null nested key (all PK fields are null)
+        current = row(null, null, "D", 4);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(
+                                row(0, 0, "A", 1),
+                                row(0, 1, "B", 2),
+                                row(0, null, "C", 3),
+                                row(null, null, "D", 4)));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWhenNestedKeyNullUseIgnoreStrategy() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.IGNORE, // use ignore strategy
+                        Collections.emptyList(),
+                        Integer.MAX_VALUE);
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        // Empty accumulator.
+        InternalArray accumulatorEmpty;
+
+        // case 1: partially null nested key (some PK fields are null)
+        accumulatorEmpty = (InternalArray) agg.agg(null, singletonArray(row(0, null, "C", 3)));
+        assertThat(unnest(accumulatorEmpty, elementGetter)).isEmpty();
+
+        // case 2: fully null nested key (all PK fields are null)
+        accumulatorEmpty = (InternalArray) agg.agg(null, singletonArray(row(null, null, "D", 4)));
+        assertThat(unnest(accumulatorEmpty, elementGetter)).isEmpty();
+
+        // Non-empty accumulator.
+        InternalArray accumulator;
+
+        InternalRow current = row(0, 0, "A", 1);
+        accumulator = (InternalArray) agg.agg(null, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(current));
+
+        current = row(0, 1, "B", 2);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 0, "A", 1), row(0, 1, "B", 2)));
+
+        // case 1: partially null nested key (some PK fields are null)
+        current = row(0, null, "C", 3);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 0, "A", 1), row(0, 1, "B", 2)));
+
+        // case 2: fully null nested key (all PK fields are null)
+        current = row(null, null, "D", 4);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 0, "A", 1), row(0, 1, "B", 2)));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWhenNestedKeyNullUseThrowErrorStrategy() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.ERROR, // use error strategy
+                        Collections.emptyList(),
+                        Integer.MAX_VALUE);
+
+        // Empty accumulator.
+        // case 1: partially null nested key (some PK fields are null)
+        assertThatThrownBy(() -> agg.agg(null, singletonArray(row(0, null, "C", 3))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
+
+        // case 2: fully null nested key (all PK fields are null)
+        assertThatThrownBy(() -> agg.agg(null, singletonArray(row(null, null, "D", 4))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
+
+        // Non-empty accumulator.
+        InternalArray accumulator;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        InternalRow current = row(0, 0, "A", 1);
+        accumulator = (InternalArray) agg.agg(null, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(current));
+
+        current = row(0, 1, "B", 2);
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 0, "A", 1), row(0, 1, "B", 2)));
+
+        // case 1: partially null nested key (some PK fields are null)
+        InternalArray finalAccumulator1 = accumulator;
+        assertThatThrownBy(() -> agg.agg(finalAccumulator1, singletonArray(row(0, null, "C", 3))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
+
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 0, "A", 1), row(0, 1, "B", 2)));
+
+        // case 2: fully null nested key (all PK fields are null)
+        InternalArray finalAccumulator2 = accumulator;
+        assertThatThrownBy(
+                        () -> agg.agg(finalAccumulator2, singletonArray(row(null, null, "D", 4))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
+
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 0, "A", 1), row(0, 1, "B", 2)));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWithCountLimitWhenNestedKeyNullUseMergeStrategy() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE, // use merge strategy
+                        Collections.singletonList("seq"),
+                        3);
+
+        InternalArray accumulator = null;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B", 1)));
+        accumulator =
+                (InternalArray) agg.agg(accumulator, singletonArray(row(null, 2, "NULL_2", 2)));
+        accumulator =
+                (InternalArray)
+                        agg.agg(accumulator, singletonArray(row(null, null, "NULL_NULL", 3)));
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(1, 2, "C", 5)));
+
+        accumulator =
+                (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B_updated", 4)));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(
+                                row(0, 1, "B_updated", 4),
+                                row(null, 2, "NULL_2", 2),
+                                row(null, null, "NULL_NULL", 3)));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWithCountLimitWhenNestedKeyNullUseIgnoreStrategy() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.IGNORE, // use ignore strategy
+                        Collections.singletonList("seq"),
+                        3);
+
+        InternalArray accumulator = null;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B", 1)));
+        accumulator =
+                (InternalArray) agg.agg(accumulator, singletonArray(row(null, 2, "NULL_2", 2)));
+        accumulator =
+                (InternalArray)
+                        agg.agg(accumulator, singletonArray(row(null, null, "NULL_NULL", 3)));
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(1, 2, "C", 3)));
+
+        accumulator =
+                (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B_updated", 4)));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated", 4), row(1, 2, "C", 3)));
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(2, 3, "D", 5)));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(
+                                row(0, 1, "B_updated", 4), row(1, 2, "C", 3), row(2, 3, "D", 5)));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWithCountLimitWhenNestedKeyNullUseThrowErrorStrategy() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.ERROR, // use error strategy
+                        Collections.singletonList("seq"),
+                        3);
+
+        InternalArray accumulator = null;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B", 1)));
+
+        InternalArray finalAccumulator = accumulator;
+        assertThatThrownBy(
+                        () -> agg.agg(finalAccumulator, singletonArray(row(null, 2, "NULL_2", 2))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
+
+        assertThatThrownBy(
+                        () ->
+                                agg.agg(
+                                        finalAccumulator,
+                                        singletonArray(row(null, null, "NULL_NULL", 3))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(1, 2, "C", 3)));
+
+        accumulator =
+                (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B_updated", 4)));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated", 4), row(1, 2, "C", 3)));
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(2, 3, "D", 5)));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(
+                                row(0, 1, "B_updated", 4), row(1, 2, "C", 3), row(2, 3, "D", 5)));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggRetractAppliesNestedKeyNullStrategyToAccumulator() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()));
+
+        // Build an accumulator containing a null nested key.
+        FieldNestedUpdateAgg mergeAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.emptyList(),
+                        Integer.MAX_VALUE);
+
+        InternalArray accumulator = null;
+        accumulator = (InternalArray) mergeAgg.agg(accumulator, singletonArray(row(0, null, "A")));
+        accumulator = (InternalArray) mergeAgg.agg(accumulator, singletonArray(row(1, 0, "B")));
+        accumulator = (InternalArray) mergeAgg.agg(accumulator, singletonArray(row(1, 1, "C")));
+
+        // IGNORE behavior: rows with null nested keys in the accumulator should be ignored.
+        FieldNestedUpdateAgg ignoreAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.IGNORE,
+                        Collections.emptyList(),
+                        Integer.MAX_VALUE);
+
+        InternalArray result =
+                (InternalArray) ignoreAgg.retract(accumulator, singletonArray(row(1, 0, "B")));
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        assertThat(unnest(result, elementGetter)).containsExactly(row(1, 1, "C"));
+
+        // ERROR behavior: rows with null nested keys in the accumulator should throw exception.
+        FieldNestedUpdateAgg errorAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.ERROR,
+                        Collections.emptyList(),
+                        Integer.MAX_VALUE);
+
+        final InternalArray acc = accumulator;
+        assertThatThrownBy(() -> errorAgg.retract(acc, singletonArray(row(1, 0, "B"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggRetractAppliesNestedKeyNullStrategyToRetractInput() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()));
+
+        // Build an accumulator without null nested keys.
+        FieldNestedUpdateAgg mergeAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.emptyList(),
+                        Integer.MAX_VALUE);
+
+        InternalArray accumulator = null;
+        accumulator = (InternalArray) mergeAgg.agg(accumulator, singletonArray(row(0, 0, "A")));
+        accumulator = (InternalArray) mergeAgg.agg(accumulator, singletonArray(row(1, 1, "B")));
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        // IGNORE behavior: rows with null nested keys in the retract input should be ignored.
+        FieldNestedUpdateAgg ignoreAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.IGNORE,
+                        Collections.emptyList(),
+                        Integer.MAX_VALUE);
+
+        InternalArray result =
+                (InternalArray) ignoreAgg.retract(accumulator, singletonArray(row(0, null, "X")));
+
+        assertThat(unnest(result, elementGetter))
+                .containsExactlyInAnyOrder(row(0, 0, "A"), row(1, 1, "B"));
+
+        // ERROR behavior: rows with null nested keys in the retract input should throw exception.
+        FieldNestedUpdateAgg errorAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.ERROR,
+                        Collections.emptyList(),
+                        Integer.MAX_VALUE);
+
+        final InternalArray acc = accumulator;
+
+        assertThatThrownBy(() -> errorAgg.retract(acc, singletonArray(row(0, null, "X"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
+    }
+
     private List<Object> unnest(InternalArray array, InternalArray.ElementGetter elementGetter) {
         return IntStream.range(0, array.size())
                 .mapToObj(i -> elementGetter.getElementOrNull(array, i))
                 .collect(Collectors.toList());
+    }
+
+    private GenericArray array(InternalRow... rows) {
+        return new GenericArray(rows);
     }
 
     private GenericArray singletonArray(InternalRow row) {
@@ -761,6 +2127,15 @@ public class FieldAggregatorTest {
 
     private InternalRow row(Integer k0, Integer k1, String v) {
         return GenericRow.of(k0, k1, BinaryString.fromString(v));
+    }
+
+    private InternalRow row(Integer k0, Integer k1, String v, Integer seq) {
+        return GenericRow.of(k0, k1, BinaryString.fromString(v), seq);
+    }
+
+    private InternalRow row(
+            Object k0, Object k1, String v, Object seq, org.apache.paimon.data.Timestamp ts) {
+        return GenericRow.of(k0, k1, BinaryString.fromString(v), seq, ts);
     }
 
     @Test
@@ -788,6 +2163,144 @@ public class FieldAggregatorTest {
                                 new GenericArray(new int[] {1, 1, 2}),
                                 new GenericArray(new int[] {2, 3}));
         assertThat(unnest(result, elementGetter)).containsExactlyInAnyOrder(1, 2, 3);
+    }
+
+    /**
+     * Elements of a binary array are {@code byte[]}, which has identity equality, so distinct
+     * collection has to compare them by content rather than dropping them into a {@link
+     * java.util.HashSet}.
+     */
+    @Test
+    public void testFieldCollectAggWithDistinctBinary() {
+        FieldCollectAgg agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(DataTypes.VARBINARY(10)),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(DataTypes.VARBINARY(10));
+
+        InternalArray result =
+                (InternalArray)
+                        agg.agg(
+                                new GenericArray(new Object[] {new byte[] {1, 2}}),
+                                new GenericArray(
+                                        new Object[] {new byte[] {1, 2}, new byte[] {3, 4}}));
+
+        assertThat(unnest(result, elementGetter))
+                .usingRecursiveFieldByFieldElementComparator()
+                .containsExactlyInAnyOrder(new byte[] {1, 2}, new byte[] {3, 4});
+    }
+
+    /** Retraction of a binary element must match by content too. */
+    @Test
+    public void testFieldCollectAggRetractWithDistinctBinary() {
+        FieldCollectAgg agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(DataTypes.VARBINARY(10)),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(DataTypes.VARBINARY(10));
+
+        InternalArray result =
+                (InternalArray)
+                        agg.retract(
+                                new GenericArray(
+                                        new Object[] {new byte[] {1, 2}, new byte[] {3, 4}}),
+                                new GenericArray(new Object[] {new byte[] {1, 2}}));
+
+        assertThat(unnest(result, elementGetter))
+                .usingRecursiveFieldByFieldElementComparator()
+                .containsExactly(new byte[] {3, 4});
+    }
+
+    /**
+     * A {@code GEOMETRY} or {@code GEOGRAPHY} element is a WKB {@code byte[]} just like a binary
+     * one, so distinct collection has to compare it by content as well.
+     */
+    @Test
+    public void testFieldCollectAggWithDistinctGeospatial() {
+        for (DataType elementType : Arrays.asList(DataTypes.GEOMETRY(), DataTypes.GEOGRAPHY())) {
+            FieldCollectAgg agg =
+                    new FieldCollectAggFactory()
+                            .create(
+                                    DataTypes.ARRAY(elementType),
+                                    CoreOptions.fromMap(
+                                            ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                    "fieldName");
+            InternalArray.ElementGetter elementGetter =
+                    InternalArray.createElementGetter(elementType);
+
+            InternalArray result =
+                    (InternalArray)
+                            agg.agg(
+                                    new GenericArray(new Object[] {new byte[] {1, 2}}),
+                                    new GenericArray(
+                                            new Object[] {new byte[] {1, 2}, new byte[] {3, 4}}));
+
+            assertThat(unnest(result, elementGetter))
+                    .as(elementType.toString())
+                    .usingRecursiveFieldByFieldElementComparator()
+                    .containsExactlyInAnyOrder(new byte[] {1, 2}, new byte[] {3, 4});
+        }
+    }
+
+    /**
+     * Retraction compares by content even when the array is not distinct: a retracted binary
+     * element must still be removed from the accumulator.
+     */
+    @Test
+    public void testFieldCollectAggRetractWithBinary() {
+        FieldCollectAgg agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(DataTypes.VARBINARY(10)),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "false")),
+                                "fieldName");
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(DataTypes.VARBINARY(10));
+
+        InternalArray result =
+                (InternalArray)
+                        agg.retract(
+                                new GenericArray(
+                                        new Object[] {new byte[] {1, 2}, new byte[] {3, 4}}),
+                                new GenericArray(new Object[] {new byte[] {1, 2}}));
+
+        assertThat(unnest(result, elementGetter))
+                .usingRecursiveFieldByFieldElementComparator()
+                .containsExactly(new byte[] {3, 4});
+    }
+
+    /** Without distinct, a binary array keeps duplicates: the equaliser must not de-duplicate. */
+    @Test
+    public void testFieldCollectAggKeepsDuplicatesWithBinary() {
+        FieldCollectAgg agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(DataTypes.VARBINARY(10)),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "false")),
+                                "fieldName");
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(DataTypes.VARBINARY(10));
+
+        InternalArray result =
+                (InternalArray)
+                        agg.agg(
+                                new GenericArray(new Object[] {new byte[] {1, 2}}),
+                                new GenericArray(
+                                        new Object[] {new byte[] {1, 2}, new byte[] {3, 4}}));
+
+        assertThat(unnest(result, elementGetter))
+                .usingRecursiveFieldByFieldElementComparator()
+                .containsExactly(new byte[] {1, 2}, new byte[] {1, 2}, new byte[] {3, 4});
     }
 
     @Test
@@ -1178,6 +2691,91 @@ public class FieldAggregatorTest {
         assertThat(toJavaMap(result)).containsExactlyInAnyOrderEntriesOf(toMap(3, "C"));
     }
 
+    /**
+     * A binary key is a {@code byte[]}, which has identity equality, so without wrapping it the
+     * merged map keeps one entry per occurrence instead of one per distinct key.
+     */
+    @Test
+    public void testFieldMergeMapAggWithBinaryKey() {
+        FieldMergeMapAgg agg =
+                new FieldMergeMapAggFactory()
+                        .create(
+                                DataTypes.MAP(DataTypes.VARBINARY(10), DataTypes.INT()),
+                                null,
+                                null);
+
+        Map<Object, Object> first = new HashMap<>();
+        first.put(new byte[] {1, 2}, 1);
+        Map<Object, Object> second = new HashMap<>();
+        second.put(new byte[] {1, 2}, 2);
+        second.put(new byte[] {3, 4}, 3);
+
+        InternalMap merged = (InternalMap) agg.agg(new GenericMap(first), new GenericMap(second));
+
+        assertThat(merged.size()).isEqualTo(2);
+        assertThat(binaryKeyed(merged)).containsOnlyKeys("0102", "0304").containsValues(2, 3);
+    }
+
+    /** The same for retraction: a retracted binary key must match the accumulated one. */
+    @Test
+    public void testFieldMergeMapAggRetractWithBinaryKey() {
+        FieldMergeMapAgg agg =
+                new FieldMergeMapAggFactory()
+                        .create(
+                                DataTypes.MAP(DataTypes.VARBINARY(10), DataTypes.INT()),
+                                null,
+                                null);
+
+        Map<Object, Object> acc = new HashMap<>();
+        acc.put(new byte[] {1, 2}, 1);
+        acc.put(new byte[] {3, 4}, 2);
+        Map<Object, Object> retract = new HashMap<>();
+        retract.put(new byte[] {1, 2}, 1);
+
+        InternalMap result =
+                (InternalMap) agg.retract(new GenericMap(acc), new GenericMap(retract));
+
+        assertThat(result.size()).isEqualTo(1);
+        assertThat(binaryKeyed(result)).containsOnlyKeys("0304");
+    }
+
+    /** A {@code GEOMETRY} key is a WKB {@code byte[]} and must be merged by content as well. */
+    @Test
+    public void testFieldMergeMapAggWithGeospatialKey() {
+        FieldMergeMapAgg agg =
+                new FieldMergeMapAggFactory()
+                        .create(DataTypes.MAP(DataTypes.GEOMETRY(), DataTypes.INT()), null, null);
+
+        Map<Object, Object> first = new HashMap<>();
+        first.put(new byte[] {1, 2}, 1);
+        Map<Object, Object> second = new HashMap<>();
+        second.put(new byte[] {1, 2}, 2);
+        second.put(new byte[] {3, 4}, 3);
+
+        InternalMap merged = (InternalMap) agg.agg(new GenericMap(first), new GenericMap(second));
+
+        assertThat(merged.size()).isEqualTo(2);
+        assertThat(binaryKeyed(merged)).containsOnlyKeys("0102", "0304").containsValues(2, 3);
+    }
+
+    /** Render an {@code InternalMap} with binary keys as hex so it can be asserted by value. */
+    private Map<String, Object> binaryKeyed(InternalMap map) {
+        InternalArray.ElementGetter keyGetter =
+                InternalArray.createElementGetter(DataTypes.VARBINARY(10));
+        InternalArray.ElementGetter valueGetter =
+                InternalArray.createElementGetter(DataTypes.INT());
+        Map<String, Object> out = new HashMap<>();
+        for (int i = 0; i < map.size(); i++) {
+            byte[] key = (byte[]) keyGetter.getElementOrNull(map.keyArray(), i);
+            StringBuilder hex = new StringBuilder();
+            for (byte b : key) {
+                hex.append(String.format("%02x", b));
+            }
+            out.put(hex.toString(), valueGetter.getElementOrNull(map.valueArray(), i));
+        }
+        return out;
+    }
+
     @Test
     public void testFieldThetaSketchAgg() {
         FieldThetaSketchAgg agg =
@@ -1302,7 +2900,8 @@ public class FieldAggregatorTest {
                                         DataTypes.FIELD(0, "k", DataTypes.INT()),
                                         DataTypes.FIELD(1, "v1", DataTypes.INT()),
                                         DataTypes.FIELD(2, "v2", DataTypes.STRING()))),
-                        Collections.singletonList("k"));
+                        Collections.singletonList("k"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE);
 
         InternalArray accumulator;
         InternalArray.ElementGetter elementGetter =
@@ -1327,6 +2926,92 @@ public class FieldAggregatorTest {
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
         assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 1, "B"), row(1, 2, "C")));
+
+        // Verify MERGE strategy keeps rows with null nested keys.
+        current = row(null, 0, "D");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B"), row(1, 2, "C"), row(null, 0, "D")));
+    }
+
+    @Test
+    public void testFieldNestedPartialUpdateAggWithNestedKeyNullUseIgnoreStrategy() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k", DataTypes.INT()),
+                        DataTypes.FIELD(1, "v1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v2", DataTypes.STRING()));
+        FieldNestedPartialUpdateAgg agg =
+                new FieldNestedPartialUpdateAgg(
+                        FieldNestedPartialUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "k", DataTypes.INT()),
+                                        DataTypes.FIELD(1, "v1", DataTypes.INT()),
+                                        DataTypes.FIELD(2, "v2", DataTypes.STRING()))),
+                        Collections.singletonList("k"),
+                        CoreOptions.NestedKeyNullStrategy.IGNORE);
+
+        InternalArray accumulator;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        InternalRow current = row(0, 0, null);
+        accumulator = (InternalArray) agg.agg(null, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(current));
+
+        // Verify rows with null nested keys are ignored.
+        current = row(null, null, "A_ignore");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(row(0, 0, null)));
+
+        // Verify IGNORE strategy is also applied during the first aggregation.
+        current = row(null, null, "FirstInput");
+        InternalArray result = (InternalArray) agg.agg(null, singletonArray(current));
+        assertThat(unnest(result, elementGetter)).isEmpty();
+    }
+
+    @Test
+    public void testFieldNestedPartialUpdateAggWithNestedKeyNullUseThrowErrorStrategy() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k", DataTypes.INT()),
+                        DataTypes.FIELD(1, "v1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v2", DataTypes.STRING()));
+        FieldNestedPartialUpdateAgg agg =
+                new FieldNestedPartialUpdateAgg(
+                        FieldNestedPartialUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "k", DataTypes.INT()),
+                                        DataTypes.FIELD(1, "v1", DataTypes.INT()),
+                                        DataTypes.FIELD(2, "v2", DataTypes.STRING()))),
+                        Collections.singletonList("k"),
+                        CoreOptions.NestedKeyNullStrategy.ERROR);
+
+        InternalArray accumulator;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        InternalRow current = row(0, 0, null);
+        accumulator = (InternalArray) agg.agg(null, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(current));
+
+        // Verify ERROR strategy rejects rows with null nested keys.
+        assertThatThrownBy(() -> agg.agg(accumulator, singletonArray(row(null, 0, "A", 2))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
+
+        // Verify ERROR strategy is also applied during the first aggregation.
+        assertThatThrownBy(() -> agg.agg(null, singletonArray(row(null, null, "FirstInput"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
     }
 
     private Map<Object, Object> toMap(Object... kvs) {
@@ -1384,6 +3069,87 @@ public class FieldAggregatorTest {
                 createExpectedEntry("key1", "A1"),
                 createExpectedEntry("key2", "B"),
                 createExpectedEntry("key3", "C"));
+    }
+
+    /**
+     * With a binary key the timestamp comparison never runs, because the lookup of the existing
+     * entry misses: the newer row is appended as a second entry under the same logical key, and a
+     * null row fails to remove anything.
+     */
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggWithBinaryKey() {
+        MapType mapType =
+                DataTypes.MAP(
+                        DataTypes.VARBINARY(10),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
+        FieldMergeMapWithKeyTimeAgg agg = new FieldMergeMapWithKeyTimeAgg("test", mapType, 1);
+
+        Object acc = agg.agg(null, binaryKeyedMap(new byte[] {1, 2}, "A", "100"));
+
+        // Newer timestamp for the same key wins, and does not become a second entry.
+        acc = agg.agg(acc, binaryKeyedMap(new byte[] {1, 2}, "A1", "200"));
+        InternalMap merged = (InternalMap) acc;
+        assertThat(merged.size()).isEqualTo(1);
+        assertThat(firstRowValue(merged)).isEqualTo("A1");
+
+        // Older timestamp is ignored rather than appended.
+        acc = agg.agg(acc, binaryKeyedMap(new byte[] {1, 2}, "A0", "050"));
+        merged = (InternalMap) acc;
+        assertThat(merged.size()).isEqualTo(1);
+        assertThat(firstRowValue(merged)).isEqualTo("A1");
+
+        // A null row is a tombstone and must remove the entry.
+        Map<Object, Object> tombstone = new HashMap<>();
+        tombstone.put(new byte[] {1, 2}, null);
+        acc = agg.agg(acc, new GenericMap(tombstone));
+        assertThat(((InternalMap) acc).size()).isEqualTo(0);
+    }
+
+    /** The same walk with a {@code GEOMETRY} key, which is a WKB {@code byte[]} as well. */
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggWithGeospatialKey() {
+        MapType mapType =
+                DataTypes.MAP(
+                        DataTypes.GEOMETRY(),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
+        FieldMergeMapWithKeyTimeAgg agg = new FieldMergeMapWithKeyTimeAgg("test", mapType, 1);
+
+        Object acc = agg.agg(null, binaryKeyedMap(new byte[] {1, 2}, "A", "100"));
+
+        acc = agg.agg(acc, binaryKeyedMap(new byte[] {1, 2}, "A1", "200"));
+        InternalMap merged = (InternalMap) acc;
+        assertThat(merged.size()).isEqualTo(1);
+        assertThat(firstRowValue(merged)).isEqualTo("A1");
+
+        acc = agg.agg(acc, binaryKeyedMap(new byte[] {1, 2}, "A0", "050"));
+        merged = (InternalMap) acc;
+        assertThat(merged.size()).isEqualTo(1);
+        assertThat(firstRowValue(merged)).isEqualTo("A1");
+
+        Map<Object, Object> tombstone = new HashMap<>();
+        tombstone.put(new byte[] {1, 2}, null);
+        acc = agg.agg(acc, new GenericMap(tombstone));
+        assertThat(((InternalMap) acc).size()).isEqualTo(0);
+    }
+
+    private GenericMap binaryKeyedMap(byte[] key, String value, String ts) {
+        Map<Object, Object> map = new HashMap<>();
+        map.put(key, GenericRow.of(BinaryString.fromString(value), BinaryString.fromString(ts)));
+        return new GenericMap(map);
+    }
+
+    private String firstRowValue(InternalMap map) {
+        InternalArray.ElementGetter valueGetter =
+                InternalArray.createElementGetter(
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
+        InternalRow row = (InternalRow) valueGetter.getElementOrNull(map.valueArray(), 0);
+        return row.getString(0).toString();
     }
 
     private Map.Entry<BinaryString, InternalRow> createEntry(String key, String value, String ts) {

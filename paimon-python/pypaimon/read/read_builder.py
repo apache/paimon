@@ -15,19 +15,39 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List, Optional
+import ast
+from typing import List, Optional, Sequence, Union
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.read.explain import ExplainResult, ExplainSplitInfo, PruningStat
 from pypaimon.read.explain_render import render_predicate
+from pypaimon.read.push_down_utils import predicate_field_names
+from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.split import Split
 from pypaimon.read.table_read import TableRead
 from pypaimon.read.table_scan import TableScan
-from pypaimon.schema.data_types import DataField
+from pypaimon.schema.data_types import AtomicType, DataField, MapType
 from pypaimon.table.special_fields import SpecialFields
-from pypaimon.utils.projection import Projection, is_row_type
+from pypaimon.utils.projection import MapKey, Projection, is_row_type
+
+
+ProjectionPath = Sequence[Union[int, MapKey]]
+
+
+class _ReadPredicateBuilder(PredicateBuilder):
+
+    def __init__(self, fields, unsupported_fields):
+        super().__init__(fields)
+        self._unsupported_fields = unsupported_fields
+
+    def _get_field_index(self, field: str) -> int:
+        if field in self._unsupported_fields:
+            raise NotImplementedError(
+                "Filtering projected MAP keys is not supported: {}".format(
+                    field))
+        return super()._get_field_index(field)
 
 
 class ReadBuilder:
@@ -39,32 +59,37 @@ class ReadBuilder:
         self.table: FileStoreTable = table
         self._predicate: Optional[Predicate] = None
         # ``_projection`` stores the user-facing name list from
-        # :meth:`with_projection`. When dotted names are present,
+        # :meth:`with_projection`. When nested selectors are present,
         # ``_nested_paths`` is also populated and takes precedence
         # in ``read_type()`` and downstream consumers.
         self._projection: Optional[List[str]] = None
-        self._nested_paths: Optional[List[List[int]]] = None
+        self._nested_paths: Optional[List[ProjectionPath]] = None
+        self._partition_filter: Optional[Predicate] = None
         self._limit: Optional[int] = None
 
     def with_filter(self, predicate: Predicate) -> 'ReadBuilder':
         self._predicate = predicate
         return self
 
+    def with_partition_filter(self, partition_filter: Predicate) -> 'ReadBuilder':
+        self._partition_filter = partition_filter
+        return self
+
     def with_projection(self, projection: List[str]) -> 'ReadBuilder':
         """Project to the given column names.
 
         Names containing a dot (e.g. ``"struct.subfield"``) walk into ROW
-        children and are translated into a nested projection. Top-level-
-        only callers see the same observable behaviour as before — the
-        dotted form is opt-in. Unknown names are silently skipped to
+        children. A quoted bracket selector on a top-level
+        ``MAP<STRING, ...>`` selects one literal key (e.g.
+        ``"attrs['key.with.dots']"``). Unknown names are silently skipped to
         preserve the pre-existing contract.
 
-        Precedence: if a dotted name matches an actual top-level field, the
-        top-level match wins and the name is not walked as a struct path.
+        An exact top-level field match takes precedence over both forms.
         """
         self._projection = projection
-        if projection and any('.' in name for name in projection):
-            self._nested_paths = self._resolve_dotted_paths(projection)
+        if projection and any(
+                '.' in name or '[' in name for name in projection):
+            self._nested_paths = self._resolve_projection_paths(projection)
         else:
             self._nested_paths = None
         return self
@@ -74,13 +99,18 @@ class ReadBuilder:
         return self
 
     def new_scan(self) -> TableScan:
-        return TableScan(
+        self._validate_map_key_filter()
+        scan = TableScan(
             table=self.table,
             predicate=self._predicate,
-            limit=self._limit
+            limit=self._limit,
+            partition_predicate=self._partition_filter,
         )
+        scan._read_type = self._scan_read_type()
+        return scan
 
     def new_read(self) -> TableRead:
+        self._validate_map_key_filter()
         return TableRead(
             table=self.table,
             predicate=self._predicate,
@@ -102,7 +132,8 @@ class ReadBuilder:
         return Projection.of(self._nested_paths).to_name_paths(table_fields)
 
     def new_predicate_builder(self) -> PredicateBuilder:
-        return PredicateBuilder(self.read_type())
+        return _ReadPredicateBuilder(
+            self.read_type(), self._map_key_output_names())
 
     def explain(self, verbose: bool = False) -> ExplainResult:
         """Produce a structured scan plan for this builder.
@@ -155,51 +186,141 @@ class ReadBuilder:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _resolve_dotted_paths(self, names: List[str]) -> List[List[int]]:
-        """Translate dotted-name projection entries into integer paths
-        against the current table schema. Names without dots produce
-        length-1 paths.
-        """
+    def _resolve_projection_paths(self, names: List[str]) -> List[ProjectionPath]:
+        """Translate ROW paths and MAP-key selectors into internal paths."""
         table_fields = self.table.fields
         if self.table.options.row_tracking_enabled():
             table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
         top_index = {f.name: i for i, f in enumerate(table_fields)}
 
-        paths: List[List[int]] = []
+        paths: List[ProjectionPath] = []
         for name in names:
             # Dot can be part of a top-level field name, not only a struct path
             # separator. Top-level match takes precedence over struct walk.
             if name in top_index:
                 paths.append([top_index[name]])
                 continue
-            if '.' not in name:
+
+            map_selector = _map_key_selector(name, table_fields)
+            if map_selector is not None:
+                top, key = map_selector
+                paths.append([top_index[top], MapKey(key)])
                 continue
-            parts = name.split('.')
+
+            if "." not in name:
+                continue
+
+            # Preserve the original ROW-path semantics before considering a
+            # dotted top-level field name as the path prefix.
+            parts = name.split(".")
             top = parts[0]
-            if top not in top_index:
+            if top in top_index:
+                path = _resolve_row_path(table_fields, top_index[top], parts[1:])
+                if path is not None:
+                    paths.append(path)
+                    continue
+
+            candidates = [
+                field_name
+                for field_name in top_index
+                if name.startswith(field_name + ".")
+                and is_row_type(table_fields[top_index[field_name]].type)
+            ]
+            if not candidates:
                 continue
-            path = [top_index[top]]
-            current_field = table_fields[path[0]]
-            ok = True
-            for part in parts[1:]:
-                if not is_row_type(current_field.type):
-                    ok = False
-                    break
-                child_fields = current_field.type.fields
-                child_idx = next(
-                    (i for i, f in enumerate(child_fields) if f.name == part),
-                    -1)
-                if child_idx < 0:
-                    ok = False
-                    break
-                path.append(child_idx)
-                current_field = child_fields[child_idx]
-            if ok:
+            top = max(candidates, key=len)
+            prefix_length = len(top) + 1
+            parts = name[prefix_length:].split(".")
+            path = _resolve_row_path(table_fields, top_index[top], parts)
+            if path is not None:
                 paths.append(path)
         return paths
 
+    def _validate_map_key_filter(self):
+        if self._predicate is None or not self._nested_paths:
+            return
+        unsupported = (
+            predicate_field_names(self._predicate)
+            & self._map_key_output_names()
+        )
+        if unsupported:
+            raise NotImplementedError(
+                "Filtering projected MAP keys is not supported: {}".format(
+                    sorted(unsupported)))
 
-def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
+    def _map_key_output_names(self):
+        if not self._nested_paths:
+            return set()
+        return {
+            field.name
+            for field, path in zip(self.read_type(), self._nested_paths)
+            if any(isinstance(step, MapKey) for step in path)
+        }
+
+    def _scan_read_type(self):
+        if not self._nested_paths:
+            return self.read_type()
+        table_fields = self.table.fields
+        if self.table.options.row_tracking_enabled():
+            table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
+        seen = set()
+        fields = []
+        for path in self._nested_paths:
+            if path[0] not in seen:
+                seen.add(path[0])
+                fields.append(table_fields[path[0]])
+        return fields
+
+
+def _resolve_row_path(
+    table_fields: List[DataField], top_index: int, parts: List[str]
+) -> Optional[List[int]]:
+    """Walk ROW children from a top-level field; return None for invalid paths."""
+    path = [top_index]
+    current_field = table_fields[top_index]
+    for part in parts:
+        if not is_row_type(current_field.type):
+            return None
+        child_fields = current_field.type.fields
+        child_idx = next((i for i, f in enumerate(child_fields) if f.name == part), -1)
+        if child_idx < 0:
+            return None
+        path.append(child_idx)
+        current_field = child_fields[child_idx]
+    return path
+
+
+def _map_key_selector(name, table_fields):
+    if not name.endswith("]"):
+        return None
+    candidates = [
+        field
+        for field in table_fields
+        if _is_string_key_map(field.type) and name.startswith(field.name + "[")
+    ]
+    for field in sorted(
+        candidates, key=lambda candidate: len(candidate.name), reverse=True
+    ):
+        prefix_length = len(field.name)
+        selector = name[prefix_length:]
+        try:
+            key = ast.literal_eval(selector[1:-1])
+        except (SyntaxError, ValueError):
+            continue
+        if isinstance(key, str):
+            return field.name, key
+    return None
+
+
+def _is_string_key_map(data_type) -> bool:
+    return (
+        isinstance(data_type, MapType)
+        and isinstance(data_type.key, AtomicType)
+        and data_type.key.type.upper() == 'STRING'
+    )
+
+
+def _build_explain_result(table, scan: TableScan, plan, stats: Optional[ScanStats],
                           predicate, projection, limit, verbose: bool) -> ExplainResult:
     """Translate one (Plan, ScanStats) pair into an ExplainResult."""
     splits: List[Split] = plan.splits()
@@ -207,9 +328,14 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
     table_schema = table.table_schema
     bucket_mode_str = _safe_bucket_mode(table)
 
-    partition_pruning = _partition_pruning(stats, scan)
-    bucket_pruning = _bucket_pruning(stats, scan)
-    file_skipping = _file_skipping(stats, scan)
+    # Native plans expose split metadata without Python pruning counters.
+    native_planned = stats is None
+    if native_planned:
+        partition_pruning = bucket_pruning = file_skipping = None
+    else:
+        partition_pruning = _partition_pruning(stats, scan)
+        bucket_pruning = _bucket_pruning(stats, scan)
+        file_skipping = _file_skipping(stats, scan)
 
     files_per_split = [len(getattr(s, 'files', []) or []) for s in splits]
     sizes = [int(getattr(s, 'file_size', 0) or 0) for s in splits]
@@ -229,6 +355,8 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
     splits_with_dv = 0
     splits_all_above_l0 = 0
     split_infos: List[ExplainSplitInfo] = []
+
+    plan_has_auth = any(isinstance(s, QueryAuthSplit) for s in splits)
 
     for split in splits:
         files = getattr(split, 'files', []) or []
@@ -262,6 +390,7 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
                 level_histogram=per_split_levels,
                 deletion_file_count=dv_count_here,
                 file_paths=list(getattr(split, 'file_paths', []) or []),
+                data_files=list(files),
             ))
 
     fps_min, fps_max, fps_avg = _min_max_avg(files_per_split)
@@ -301,6 +430,8 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
         split_size_avg=sz_avg,
         split_size_p50=sz_p50,
         split_size_p95=sz_p95,
+        has_auth=plan_has_auth,
+        native_planned=native_planned,
         splits=split_infos if verbose else None,
     )
 

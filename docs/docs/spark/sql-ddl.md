@@ -1,6 +1,5 @@
 ---
-title: "SQL DDL"
-sidebar_position: 2
+title: "Create Tables, Views, and Tags"
 ---
 
 <!--
@@ -22,158 +21,48 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# SQL DDL
+# Create Tables, Views, and Tags
+
+Create tables, views, and tags after selecting a [Paimon catalog](./catalogs). Use
+[Alter Tables](./sql-alter) to evolve an existing schema and [Format Table Partitions](./format-table)
+for catalog-managed partition DDL.
+
+| Command | Creates data? | Use it for |
+| --- | --- | --- |
+| `CREATE TABLE` | No | Define an empty table with explicit columns and properties. |
+| `CREATE TABLE ... AS SELECT` | Yes | Create and populate a table from query results. |
+| `CREATE TABLE ... LIKE` | No | Copy a source table definition; requires Spark 3.4+. |
+| `REPLACE TABLE` | Only with `AS SELECT` | Replace an existing table definition; requires Spark 3.4+ for the behavior below. |
+| `CREATE OR REPLACE TABLE` | Only with `AS SELECT` | Create a missing table or replace one that exists. |
+
+The examples assume `USE paimon.default` with a configured [catalog](./catalogs). In
+`SparkGenericCatalog`, include `USING paimon` when creating or replacing a Paimon table.
 
 ## Catalog
 
-### Create Catalog
+<span id="create-catalog"></span>
+<span id="create-filesystem-catalog"></span>
+<span id="creating-hive-catalog"></span>
+<span id="creating-jdbc-catalog"></span>
+<span id="creating-rest-catalog"></span>
+<span id="bear-token"></span>
+<span id="dlf-ak"></span>
+<span id="dlf-sts-token"></span>
 
-Paimon catalogs currently support three types of metastores:
-
-* `filesystem` metastore (default), which stores both metadata and table files in filesystems.
-* `hive` metastore, which additionally stores metadata in Hive metastore. Users can directly access the tables from Hive.
-* `jdbc` metastore, which additionally stores metadata in relational databases such as MySQL, Postgres, etc.
-
-See [CatalogOptions](../maintenance/configurations#catalogoptions) for detailed options when creating a catalog.
-
-#### Create Filesystem Catalog
-
-The following Spark SQL registers and uses a Paimon catalog named `my_catalog`. Metadata and table files are stored under `hdfs:///path/to/warehouse`.
-
-The following shell command registers a paimon catalog named `paimon`. Metadata and table files are stored under `hdfs:///path/to/warehouse`.
-
-```bash
-spark-sql ... \
-    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.paimon.warehouse=hdfs:///path/to/warehouse
-```
-
-You can define any default table options with the prefix `spark.sql.catalog.paimon.table-default.` for tables created in the catalog.
-
-After `spark-sql` is started, you can switch to the `default` database of the `paimon` catalog with the following SQL.
-
-```sql
-USE paimon.default;
-```
-
-#### Creating Hive Catalog
-
-By using Paimon Hive catalog, changes to the catalog will directly affect the corresponding Hive metastore. Tables created in such catalog can also be accessed directly from Hive.
-
-To use Hive catalog, Database name, Table name and Field names should be **lower** case.
-
-Your Spark installation should be able to detect, or already contains Hive dependencies. See [here](https://spark.apache.org/docs/latest/sql-data-sources-hive-tables.html) for more information.
-
-The following shell command registers a Paimon Hive catalog named `paimon`. Metadata and table files are stored under `hdfs:///path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
-
-```bash
-spark-sql ... \
-    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.paimon.warehouse=hdfs:///path/to/warehouse \
-    --conf spark.sql.catalog.paimon.metastore=hive \
-    --conf spark.sql.catalog.paimon.uri=thrift://<hive-metastore-host-name>:<port>
-```
-
-You can define any default table options with the prefix `spark.sql.catalog.paimon.table-default.` for tables created in the catalog.
-
-After `spark-sql` is started, you can switch to the `default` database of the `paimon` catalog with the following SQL.
-
-```sql
-USE paimon.default;
-```
-
-Also, you can create [SparkGenericCatalog](./quick-start).
-
-**Synchronizing Partitions into Hive Metastore**
-
-By default, Paimon does not synchronize newly created partitions into Hive metastore. Users will see an unpartitioned table in Hive. Partition push-down will be carried out by filter push-down instead.
-
-If you want to see a partitioned table in Hive and also synchronize newly created partitions into Hive metastore, please set the table property `metastore.partitioned-table` to true. Also see [CoreOptions](../maintenance/configurations#coreoptions).
-
-#### Creating JDBC Catalog
-
-By using the Paimon JDBC catalog, changes to the catalog will be directly stored in relational databases such as SQLite, MySQL, postgres, etc.
-
-Currently, lock configuration is only supported for MySQL and SQLite. If you are using a different type of database for catalog storage, please do not configure `lock.enabled`.
-
-Paimon JDBC Catalog in Spark needs to correctly add the corresponding jar package for connecting to the database. You should first download JDBC  connector bundled jar and add it to classpath. such as MySQL, postgres
-
-| database type | Bundle Name          | SQL Client JAR                                                             |
-|:--------------|:---------------------|:---------------------------------------------------------------------------|
-| mysql         | mysql-connector-java | [Download](https://mvnrepository.com/artifact/mysql/mysql-connector-java)  |
-| postgres      | postgresql           | [Download](https://mvnrepository.com/artifact/org.postgresql/postgresql)   |
-
-```bash
-spark-sql ... \
-    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.paimon.warehouse=hdfs:///path/to/warehouse \
-    --conf spark.sql.catalog.paimon.metastore=jdbc \
-    --conf spark.sql.catalog.paimon.uri=jdbc:mysql://<host>:<port>/<databaseName> \
-    --conf spark.sql.catalog.paimon.jdbc.user=... \
-    --conf spark.sql.catalog.paimon.jdbc.password=...
-    
-```
-
-```sql
-USE paimon.default;
-```
-#### Creating REST Catalog
-
-By using the Paimon REST catalog, changes to the catalog will be directly stored in remote server.
-
-##### bear token
-```bash
-spark-sql ... \
-    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.paimon.metastore=rest \
-    --conf spark.sql.catalog.paimon.uri=<catalog server url> \
-    --conf spark.sql.catalog.paimon.token.provider=bear \
-    --conf spark.sql.catalog.paimon.token=<token>
-    
-```
-
-##### dlf ak
-```bash
-spark-sql ... \
-    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.paimon.metastore=rest \
-    --conf spark.sql.catalog.paimon.uri=<catalog server url> \
-    --conf spark.sql.catalog.paimon.token.provider=dlf \
-    --conf spark.sql.catalog.paimon.dlf.access-key-id=<access-key-id> \
-    --conf spark.sql.catalog.paimon.dlf.access-key-secret=<security-token>
-    
-```
-
-##### dlf sts token
-```bash
-spark-sql ... \
-    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.paimon.metastore=rest \
-    --conf spark.sql.catalog.paimon.uri=<catalog server url> \
-    --conf spark.sql.catalog.paimon.token.provider=dlf \
-    --conf spark.sql.catalog.paimon.dlf.access-key-id=<access-key-id> \
-    --conf spark.sql.catalog.paimon.dlf.access-key-secret=<access-key-secret> \
-    --conf spark.sql.catalog.paimon.dlf.security-token=<security-token>
-    
-    
-```
-
-```sql
-USE paimon.default;
-```
+See [Catalogs](./catalogs) for filesystem, Hive, JDBC, REST, and `SparkGenericCatalog` setup.
 
 ## Table
 
 ### Create Table
 
-After use Paimon catalog, you can create and drop tables. Tables created in Paimon Catalogs are managed by the catalog.
-When the table is dropped from catalog, its table files will also be deleted.
+Tables created without an external location are managed by the catalog. Dropping a managed
+table also deletes its files. See [Create External Table](#create-external-table) for Hive
+catalog ownership rules.
 
-The following SQL assumes that you have registered and are using a Paimon catalog. It creates a managed table named 
-`my_table` with five columns in the catalog's `default` database, where `dt`, `hh` and `user_id` are the primary keys.
+Create an unpartitioned primary key table:
 
 ```sql
-CREATE TABLE my_table (
+CREATE TABLE events (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -184,103 +73,98 @@ CREATE TABLE my_table (
 );
 ```
 
-You can create partitioned table:
+To partition the data by date and hour, declare `PARTITIONED BY`. For a primary key table,
+the primary key must include every partition column:
 
 ```sql
-CREATE TABLE my_table (
+CREATE TABLE partitioned_events (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
     dt STRING,
     hh STRING
-) PARTITIONED BY (dt, hh) TBLPROPERTIES (
-    'primary-key' = 'dt,hh,user_id'
-);
+) PARTITIONED BY (dt, hh)
+TBLPROPERTIES ('primary-key' = 'dt,hh,user_id');
 ```
+
+Omit `primary-key` to create an append table. For storage layout and table options, see
+[Primary Key Tables](../primary-key-table/) and [Append Tables](../append-table/).
+
+### Manage Format Table Partitions
+
+See [Format Table Partitions](./format-table) for partition registration, custom locations,
+statistics, and mixed-version writer requirements.
 
 ### Create External Table
 
-When the catalog's `metastore` type is `hive`, if the `location` is specified when creating a table, that table will be considered an external table; otherwise, it will be a managed table. 
-
-When you drop an external table, only the metadata in Hive will be removed, and the actual data files will not be deleted; whereas dropping a managed table will also delete the data.
+In a Hive catalog, specifying `LOCATION` creates an external table. Dropping that table removes
+its Hive metadata and keeps the data files. Without `LOCATION`, the table is managed and dropping
+it also deletes its files.
 
 ```sql
-CREATE TABLE my_table (
+CREATE TABLE external_events (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
     dt STRING,
     hh STRING
-) PARTITIONED BY (dt, hh) TBLPROPERTIES (
-    'primary-key' = 'dt,hh,user_id'
-) LOCATION '/path/to/table';
+) PARTITIONED BY (dt, hh)
+TBLPROPERTIES ('primary-key' = 'dt,hh,user_id')
+LOCATION '/path/to/external_events';
 ```
 
-Furthermore, if there is already data stored in the specified location, you can create the table without explicitly specifying the fields, partitions and props or other information. 
-In this case, the new table will inherit them all from the existing table's metadata.
-
-However, if you manually specify them, you need to ensure that they are consistent with those of the existing table (props can be a subset). Therefore, it is strongly recommended not to specify them.
+To register an existing Paimon table at a location, let Paimon load its schema, partitioning,
+and properties from that location:
 
 ```sql
-CREATE TABLE my_table LOCATION '/path/to/table';
+CREATE TABLE registered_events LOCATION '/path/to/existing_paimon_table';
 ```
+
+If you specify columns or partitioning, they must match the existing table. Supplied table
+properties may be a subset of the existing properties. Omitting those declarations avoids
+repeating metadata already stored with the table.
 
 ### Create Table As Select
 
-Table can be created and populated by the results of a query, for example, we have a sql like this: `CREATE TABLE table_b AS SELECT id, name FORM table_a`,
-The resulting table `table_b` will be equivalent to create the table and insert the data with the following statement:
-`CREATE TABLE table_b (id INT, name STRING); INSERT INTO table_b SELECT id, name FROM table_a;`
+`CREATE TABLE ... AS SELECT` (CTAS) derives the schema from a query and writes its result to
+a new table. Declare the target partitioning, primary key, and storage properties on the new
+table as needed.
 
-We can specify the primary key or partition when use `CREATE TABLE AS SELECT`, for syntax, please refer to the following sql.
+Create a small source table for the following examples:
 
 ```sql
-CREATE TABLE my_table (
-     user_id BIGINT,
-     item_id BIGINT
-);
-CREATE TABLE my_table_as AS SELECT * FROM my_table;
-
-/* partitioned table*/
-CREATE TABLE my_table_partition (
-      user_id BIGINT,
-      item_id BIGINT,
-      behavior STRING,
-      dt STRING,
-      hh STRING
-) PARTITIONED BY (dt, hh);
-CREATE TABLE my_table_partition_as PARTITIONED BY (dt) AS SELECT * FROM my_table_partition;
-
-/* change TBLPROPERTIES */
-CREATE TABLE my_table_options (
-       user_id BIGINT,
-       item_id BIGINT
-) TBLPROPERTIES ('file.format' = 'orc');
-CREATE TABLE my_table_options_as TBLPROPERTIES ('file.format' = 'parquet') AS SELECT * FROM my_table_options;
-
-
-/* primary key */
-CREATE TABLE my_table_pk (
-     user_id BIGINT,
-     item_id BIGINT,
-     behavior STRING,
-     dt STRING,
-     hh STRING
-) TBLPROPERTIES (
-    'primary-key' = 'dt,hh,user_id'
-);
-CREATE TABLE my_table_pk_as TBLPROPERTIES ('primary-key' = 'dt') AS SELECT * FROM my_table_pk;
-
-/* primary key + partition */
-CREATE TABLE my_table_all (
+CREATE TABLE source_events (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
     dt STRING,
     hh STRING
-) PARTITIONED BY (dt, hh) TBLPROPERTIES (
-    'primary-key' = 'dt,hh,user_id'
 );
-CREATE TABLE my_table_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM my_table_all;
+INSERT INTO source_events VALUES (1, 10, 'pv', '2025-01-01', '00');
+```
+
+Each statement below creates a separate target:
+
+```sql
+-- Copy query results into an append table.
+CREATE TABLE events_copy AS SELECT * FROM source_events;
+
+-- Partition the target by date.
+CREATE TABLE events_by_date PARTITIONED BY (dt)
+AS SELECT * FROM source_events;
+
+-- Choose a file format for the target.
+CREATE TABLE events_parquet TBLPROPERTIES ('file.format' = 'parquet')
+AS SELECT * FROM source_events;
+
+-- Create a primary key table.
+CREATE TABLE events_by_user TBLPROPERTIES ('primary-key' = 'user_id')
+AS SELECT * FROM source_events;
+
+-- Combine partitioning and a primary key.
+CREATE TABLE events_by_date_user PARTITIONED BY (dt)
+TBLPROPERTIES ('primary-key' = 'dt,user_id')
+AS SELECT * FROM source_events;
 ```
 
 ### Replace Table
@@ -323,8 +207,9 @@ SELECT * FROM my_table VERSION AS OF 1;
 `REPLACE TABLE` requires the table to exist. If the table does not exist, use
 `CREATE OR REPLACE TABLE` instead.
 
-`REPLACE TABLE` does not accept `AS SELECT`. To replace a table and populate it with query results,
-use `CREATE OR REPLACE TABLE ... AS SELECT`.
+Both `REPLACE TABLE ... AS SELECT` and `CREATE OR REPLACE TABLE ... AS SELECT` are supported.
+The former requires an existing target; the latter also creates the target when it is missing.
+For example, given a source table with columns `(user_id BIGINT, item_id BIGINT, behavior STRING)`:
 
 ```sql
 CREATE OR REPLACE TABLE my_table
@@ -335,9 +220,28 @@ TBLPROPERTIES (
 AS SELECT user_id, item_id, behavior FROM source_table;
 ```
 
-When the existing table and target table use different table types,
-uses its fallback drop+create behavior instead of snapshot-preserving replace
-behavior.
+Snapshot preservation depends on the replacement path and catalog support. Keep the provider,
+table type, and partitioning unchanged to use the in-place path. A replacement that changes
+these can fall back to dropping and recreating the table, losing its snapshot history. A catalog
+that does not support in-place replacement can also fall back to drop-and-create.
+
+When a replacement query reads its own target, Paimon pins the source read to the existing
+snapshot. On a partitioned table, restate the partitioning:
+
+```sql
+CREATE TABLE replace_example (id INT, dt STRING) PARTITIONED BY (dt);
+INSERT INTO replace_example VALUES (1, 'a'), (2, 'b');
+
+REPLACE TABLE replace_example PARTITIONED BY (dt)
+AS SELECT * FROM replace_example WHERE dt = 'a';
+
+SELECT * FROM replace_example;
+-- 1  a
+```
+
+A self-referencing replacement that would change the provider, table type, or partitioning
+is rejected before the table is dropped. Write the query result to a separate table first if
+that change is needed.
 
 ### Create Table Like
 
@@ -374,36 +278,47 @@ CREATE TABLE target_tbl LIKE source_tbl;
 
 ## View
 
-Views are based on the result-set of an SQL query, when using `org.apache.paimon.spark.SparkCatalog`, views are managed by paimon itself. 
-And in this case, views are supported when the `metastore` type is `hive` or `rest`.
+A persistent view stores a query definition in the Paimon catalog. With `SparkCatalog`,
+persistent views are supported by Hive, REST, and JDBC metastores. Temporary views belong to
+the Spark session and use an unqualified name.
 
 ### Create Or Replace View
 
-CREATE VIEW constructs a virtual table that has no physical data.
+These examples read the `events` table from [Create Table](#create-table):
 
 ```sql
--- create a view or a temporary view. (temporary view should not specify database name)
-CREATE [TEMPORARY] VIEW <mydb>.v1 AS SELECT * FROM t1;
+-- Persistent view in the selected catalog and database.
+CREATE VIEW event_view AS SELECT user_id, behavior FROM events;
+CREATE OR REPLACE VIEW event_view
+AS SELECT user_id, behavior FROM events WHERE behavior = 'pv';
 
--- create a view or a temporary view, if a view of same name already exists, it will be replaced. (temporary view should not specify database name)
-CREATE OR REPLACE [TEMPORARY] VIEW <mydb>.v1 AS SELECT * FROM t1;
+-- Session-scoped view; do not qualify the temporary view name with a database.
+CREATE TEMPORARY VIEW temporary_events AS SELECT * FROM events;
+CREATE OR REPLACE TEMPORARY VIEW temporary_events
+AS SELECT * FROM events WHERE behavior = 'pv';
 ```
+
+See [Views](../concepts/views) for catalog-specific behavior and
+[`alter_view_dialect`](./procedures/metadata#alter_view_dialect) for dialect management.
 
 ### Drop View
 
-DROP VIEW removes the metadata associated with a specified view from the catalog.
-
 ```sql
--- drop a view or a temporary view.
-DROP VIEW <mydb>.v1;
+DROP VIEW event_view;
+DROP VIEW temporary_events;
 ```
 
 ## Tag
+
+Tags retain named snapshots for later reads. The examples below assume `T` has committed data
+and snapshots `1` and `2` exist. See [Manage Tags](../maintenance/manage-tags) for retention and
+[Time Travel](./sql-query#batch-time-travel) for reading a tag.
+
 ### Create Or Replace Tag
-Create or replace a tag syntax with the following options.
-- Create a tag with or without the snapshot id and time retention.
-- Create an existed tag is not failed if using `IF NOT EXISTS` syntax.
-- Update a tag using `REPLACE TAG` or `CREATE OR REPLACE TAG` syntax.
+
+Specify a snapshot and retention period, or omit them to tag the latest snapshot without an
+explicit retention period. `IF NOT EXISTS` leaves an existing tag unchanged; `REPLACE TAG`
+updates an existing tag.
 
 ```sql
 -- create a tag based on the latest snapshot and no retention.
@@ -421,13 +336,13 @@ ALTER TABLE T CREATE TAG `TAG-3` AS OF VERSION 1;
 -- create a tag based on snapshot-2 and retain it for 12 hour.
 ALTER TABLE T CREATE TAG `TAG-4` AS OF VERSION 2 RETAIN 12 HOURS;
 
--- replace a existed tag with new snapshot id and new retention
+-- replace an existing tag with new snapshot id and new retention
 ALTER TABLE T REPLACE TAG `TAG-4` AS OF VERSION 2 RETAIN 24 HOURS;
 
--- create or replace a tag, create tag if it not exist, replace tag if it exists.
+-- Create the tag if missing, or replace it if it exists.
 ALTER TABLE T CREATE OR REPLACE TAG `TAG-5` AS OF VERSION 2 RETAIN 24 HOURS;
 ```
-NOTE: If tag.automatic-creation is set, only one auto-tag could be created for one snapshot.
+When `tag.automatic-creation` is enabled, only one automatic tag can be created per snapshot.
 
 ### Delete Tag
 Delete a tag or multiple tags of a table.
@@ -436,7 +351,7 @@ Delete a tag or multiple tags of a table.
 ALTER TABLE T DELETE TAG `TAG-1`;
 
 -- delete a tag if it exists.
-ALTER TABLE T DELETE TAG IF EXISTS `TAG-1`
+ALTER TABLE T DELETE TAG IF EXISTS `TAG-1`;
 
 -- delete multiple tags, delimiter is ','.
 ALTER TABLE T DELETE TAG `TAG-1,TAG-2`;

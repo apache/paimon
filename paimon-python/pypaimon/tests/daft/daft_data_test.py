@@ -39,9 +39,39 @@ from pypaimon.daft.daft_paimon import _read_table
 from pypaimon.daft.daft_predicate_visitor import convert_filters_to_paimon
 
 
+def _contains_expr(py_expr):
+    from daft.expressions import Expression
+
+    expr_text = str(Expression._from_pyexpr(py_expr))
+    return "contains" in expr_text
+
+
+def _predicate_leaves(predicate):
+    if predicate is None:
+        return []
+    if predicate.method in ("and", "or"):
+        result = []
+        for child in predicate.literals:
+            result.extend(_predicate_leaves(child))
+        return result
+    return [(predicate.method, predicate.field, tuple(predicate.literals or []))]
+
+
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
+
+
+class _UnserializableFileIoMarker:
+    def __reduce__(self):
+        raise TypeError("file io marker should not be serialized")
+
+
+class _UnserializableStorageConfig:
+    multithreaded_io = False
+
+    def __reduce__(self):
+        raise TypeError("storage config marker should not be serialized")
 
 
 def _write_to_paimon(table, arrow_table, mode="append", overwrite_partition=None):
@@ -59,12 +89,23 @@ def _write_to_paimon(table, arrow_table, mode="append", overwrite_partition=None
         table_commit.close()
 
 
+async def _collect_paimon_source_batches(source, pushdowns):
+    batches = []
+    fallback_task_count = 0
+    async for task in source.get_tasks(pushdowns):
+        if type(task).__name__ == "_PaimonPKSplitTask":
+            fallback_task_count += 1
+        async for batch in task.read():
+            batches.append(batch.to_pydict())
+    assert fallback_task_count > 0
+    return batches
+
+
 async def _read_paimon_source_batches(
     table,
     filter_expr=None,
     columns=None,
     limit=None,
-    call_push_filters=True,
 ):
     from daft import context, runners
     from daft.daft import StorageConfig
@@ -76,21 +117,8 @@ async def _read_paimon_source_batches(
     storage_config = StorageConfig(runners.get_or_create_runner().name != "ray", io_config)
     source = PaimonDataSource(table, storage_config=storage_config, catalog_options={})
 
-    if filter_expr is not None and call_push_filters:
-        pushed_filters, remaining_filters = source.push_filters([filter_expr._expr])
-        assert pushed_filters
-        assert not remaining_filters
-
-    batches = []
-    fallback_task_count = 0
     pushdowns = Pushdowns(filters=filter_expr, columns=columns, limit=limit)
-    async for task in source.get_tasks(pushdowns):
-        if type(task).__name__ == "_PaimonPKSplitTask":
-            fallback_task_count += 1
-        async for batch in task.read():
-            batches.append(batch.to_pydict())
-    assert fallback_task_count > 0
-    return batches
+    return await _collect_paimon_source_batches(source, pushdowns)
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +217,224 @@ def test_read_paimon_schema_matches(append_only_table):
     assert "name" in schema.column_names()
     assert "value" in schema.column_names()
     assert "dt" in schema.column_names()
+
+
+def test_read_paimon_source_is_serializable(append_only_table):
+    """The Daft source must not serialize live table/file_io/storage objects."""
+    from daft.pickle import dumps, loads
+
+    from pypaimon.daft.daft_datasource import PaimonDataSource
+
+    table, _ = append_only_table
+    table.file_io._unserializable_marker = _UnserializableFileIoMarker()
+
+    source = PaimonDataSource(
+        table,
+        storage_config=_UnserializableStorageConfig(),
+        catalog_options={},
+    )
+
+    restored = loads(dumps(source))
+
+    assert restored is not source
+    assert restored.schema.column_names() == source.schema.column_names()
+    assert restored._table is not table
+    assert restored._table.identifier.get_full_name() == table.identifier.get_full_name()
+    assert restored._storage_config.multithreaded_io is False
+
+
+def test_source_serialization_preserves_explicit_io_config_for_native_task(
+    append_only_table, monkeypatch
+):
+    from daft.io import IOConfig, S3Config
+    from daft.io.pushdowns import Pushdowns
+    from daft.io.source import DataSourceTask
+    from daft.pickle import dumps, loads
+
+    from pypaimon.daft.daft_paimon import _source_for_table
+
+    table, warehouse = append_only_table
+    _write_to_paimon(
+        table,
+        pa.table(
+            {
+                "id": [1],
+                "name": ["a"],
+                "value": [1.0],
+                "dt": ["2024-01-01"],
+            }
+        ),
+    )
+
+    explicit_values = (
+        "https://explicit.example",
+        "explicit-key",
+        "explicit-secret",
+        "explicit-token",
+    )
+    explicit_io_config = IOConfig(
+        s3=S3Config(
+            endpoint_url=explicit_values[0],
+            key_id=explicit_values[1],
+            access_key=explicit_values[2],
+            session_token=explicit_values[3],
+        )
+    )
+    catalog_options = {
+        "warehouse": str(warehouse),
+        "fs.s3.endpoint": "https://catalog.example",
+        "fs.s3.accessKeyId": "catalog-key",
+        "fs.s3.accessKeySecret": "catalog-secret",
+        "fs.s3.securityToken": "catalog-token",
+    }
+
+    source = _source_for_table(
+        table,
+        catalog_options=catalog_options,
+        io_config=explicit_io_config,
+    )
+    restored = loads(dumps(source))
+
+    captured = {}
+    sentinel = object()
+
+    def capture_parquet(**kwargs):
+        captured.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(DataSourceTask, "parquet", capture_parquet)
+
+    async def first_task():
+        async for task in restored.get_tasks(Pushdowns()):
+            return task
+        raise AssertionError("Expected at least one native task")
+
+    assert asyncio.run(first_task()) is sentinel
+    assert captured["storage_config"] is restored._storage_config
+
+    for storage_config in (source._storage_config, restored._storage_config):
+        s3 = storage_config.io_config.s3
+        assert (
+            s3.endpoint_url,
+            s3.key_id,
+            s3.access_key,
+            s3.session_token,
+        ) == explicit_values
+
+
+def test_read_paimon_serialized_source_uses_current_filter_for_fallback(local_paimon_catalog):
+    """A serialized source must plan from the filters in the current request."""
+    from daft import context, runners
+    from daft.daft import StorageConfig
+    from daft.io.pushdowns import Pushdowns
+    from daft.pickle import dumps, loads
+
+    from pypaimon.daft.daft_datasource import PaimonDataSource
+
+    catalog, _ = local_paimon_catalog
+    schema = pypaimon.Schema.from_pyarrow_schema(
+        pa.schema([
+            pa.field("id", pa.int64()),
+            pa.field("name", pa.string()),
+        ]),
+        options={
+            "file.format": "avro",
+            "source.split.target-size": "800b",
+            "source.split.open-file-cost": "600b",
+        },
+    )
+    catalog.create_table("test_db.avro_serialized_pushdown_filter", schema, ignore_if_exists=False)
+    table = catalog.get_table("test_db.avro_serialized_pushdown_filter")
+    _write_to_paimon(table, pa.table({"id": [1], "name": ["first"]}))
+    _write_to_paimon(table, pa.table({"id": [999], "name": ["match"]}))
+
+    io_config = context.get_context().daft_planning_config.default_io_config
+    storage_config = StorageConfig(runners.get_or_create_runner().name != "ray", io_config)
+    source = PaimonDataSource(table, storage_config=storage_config, catalog_options={})
+
+    restored = loads(dumps(source))
+    batches = asyncio.run(
+        _collect_paimon_source_batches(
+            restored,
+            Pushdowns(filters=col("id") == 999, limit=1),
+        )
+    )
+
+    assert batches == [{"id": [999], "name": ["match"]}]
+
+
+def test_read_paimon_remote_ray_task_is_serializable(pk_table, monkeypatch):
+    """A fallback PK split task must reopen the table from metadata on Ray workers.
+
+    Splits that need an LSM merge (here, overlapping primary-key writes) are read
+    by the pypaimon reader task. Under the Ray runner that task is pickled to
+    remote workers, so it must serialize only rebuildable metadata -- never the
+    live table / file_io / storage objects.
+    """
+    from daft import runners
+    from daft.io.pushdowns import Pushdowns
+    from daft.pickle import dumps, loads
+
+    from pypaimon.daft.daft_datasource import PaimonDataSource
+
+    class _RayRunner:
+        name = "ray"
+
+    table, _ = pk_table
+    # Two overlapping writes on id=1 create non-raw-convertible splits that
+    # require the pypaimon merge reader (the fallback _PaimonPKSplitTask).
+    _write_to_paimon(
+        table,
+        pa.table(
+            {
+                "id": pa.array([1, 2], pa.int64()),
+                "name": pa.array(["old_a", "old_b"], pa.string()),
+                "dt": pa.array(["2024-01-01", "2024-01-01"], pa.string()),
+            }
+        ),
+    )
+    _write_to_paimon(
+        table,
+        pa.table(
+            {
+                "id": pa.array([1], pa.int64()),
+                "name": pa.array(["new_a"], pa.string()),
+                "dt": pa.array(["2024-01-01"], pa.string()),
+            }
+        ),
+    )
+    table.file_io._unserializable_marker = _UnserializableFileIoMarker()
+
+    source = PaimonDataSource(
+        table,
+        storage_config=_UnserializableStorageConfig(),
+        catalog_options={},
+    )
+    monkeypatch.setattr(runners, "get_or_create_runner", lambda: _RayRunner())
+
+    async def first_task():
+        async for task in source.get_tasks(Pushdowns()):
+            return task
+        raise AssertionError("Expected at least one task")
+
+    async def read_task(task):
+        rows = []
+        async for batch in task.read():
+            rows.append(batch.to_pydict())
+        return rows
+
+    task = asyncio.run(first_task())
+    assert type(task).__name__ == "_PaimonPKSplitTask"
+
+    restored_task = loads(dumps(task))
+    batches = asyncio.run(read_task(restored_task))
+
+    merged = {
+        _id: name
+        for batch in batches
+        for _id, name in zip(batch["id"], batch["name"])
+    }
+    assert merged == {1: "new_a", 2: "old_b"}
 
 
 # ---------------------------------------------------------------------------
@@ -409,8 +655,8 @@ def test_read_paimon_pk_fallback_filters_before_projection(pk_table):
     assert batches == [{"name": ["new_a"], "id": [1]}]
 
 
-def test_read_paimon_fallback_plans_pushdown_filter_without_push_filters(local_paimon_catalog):
-    """Fallback planning must use Pushdowns.filters even if push_filters was not called."""
+def test_read_paimon_fallback_plans_current_pushdown_filter(local_paimon_catalog):
+    """Fallback planning must use the filter from the current request."""
     catalog, _ = local_paimon_catalog
     schema = pypaimon.Schema.from_pyarrow_schema(
         pa.schema([
@@ -433,11 +679,37 @@ def test_read_paimon_fallback_plans_pushdown_filter_without_push_filters(local_p
             table,
             filter_expr=col("id") == 999,
             limit=1,
-            call_push_filters=False,
         )
     )
 
     assert batches == [{"id": [999], "name": ["match"]}]
+
+
+def test_read_paimon_fallback_not_in_filter_excludes_nulls_before_limit(local_paimon_catalog):
+    """Fallback datasource tasks must satisfy pushed NOT IN filters before limit."""
+    catalog, _ = local_paimon_catalog
+    pa_schema = pa.schema([
+        pa.field("id", pa.int64()),
+        pa.field("name", pa.string()),
+    ])
+    schema = pypaimon.Schema.from_pyarrow_schema(
+        pa_schema,
+        options={"file.format": "row"},
+    )
+    catalog.create_table("test_db.row_not_in_filter_limit", schema, ignore_if_exists=False)
+    table = catalog.get_table("test_db.row_not_in_filter_limit")
+    _write_to_paimon(table, pa.table({"id": [None], "name": ["null-row"]}, schema=pa_schema))
+    _write_to_paimon(table, pa.table({"id": [3], "name": ["match"]}, schema=pa_schema))
+
+    batches = asyncio.run(
+        _read_paimon_source_batches(
+            table,
+            filter_expr=~col("id").is_in([1, 2]),
+            limit=1,
+        )
+    )
+
+    assert batches == [{"id": [3], "name": ["match"]}]
 
 
 def test_read_paimon_fallback_keeps_limit_above_remaining_filter(local_paimon_catalog):
@@ -561,6 +833,125 @@ def test_read_paimon_partition_filter(append_only_table):
     assert all(dt == "2024-01-01" for dt in result.column("dt").to_pylist())
 
 
+def test_partition_filter_prunes_at_plan_level(append_only_table):
+    """Regression: Daft routes partition predicates to pushdowns.partition_filters
+    (a separate channel from pushdowns.filters). They must become a plan-time
+    predicate so plan() prunes partitions, instead of planning every split and
+    skipping in Python (a full-table plan)."""
+    from daft import context, runners
+    from daft.daft import StorageConfig
+    from daft.io.pushdowns import Pushdowns
+
+    from pypaimon.daft.daft_datasource import PaimonDataSource
+
+    table, _ = append_only_table
+    data = pa.table(
+        {
+            "id": pa.array([1, 2, 3], pa.int64()),
+            "name": pa.array(["a", "b", "c"], pa.string()),
+            "value": pa.array([1.0, 2.0, 3.0], pa.float64()),
+            "dt": pa.array(["2024-01-01", "2024-01-02", "2024-01-03"], pa.string()),
+        }
+    )
+    _write_to_paimon(table, data)
+
+    io_config = context.get_context().daft_planning_config.default_io_config
+    storage_config = StorageConfig(runners.get_or_create_runner().name != "ray", io_config)
+    source = PaimonDataSource(table, storage_config=storage_config, catalog_options={})
+
+    pushdowns = Pushdowns(partition_filters=(col("dt") == "2024-01-02"))
+
+    state = source._read_pushdown_state(table, pushdowns)
+    # partition filter must become a plan-time predicate
+    assert state.planning_predicate is not None
+
+    pruned = source._scan_read_builder(table, state).new_scan().plan().splits()
+    all_splits = table.new_read_builder().new_scan().plan().splits()
+
+    # pruning reduced the planned splits, and only the matching partition remains
+    assert 0 < len(pruned) < len(all_splits)
+    assert all(s.partition.to_dict().get("dt") == "2024-01-02" for s in pruned)
+
+
+def test_row_and_partition_filters_both_reach_planning_predicate(append_only_table):
+    """filters and partition_filters arrive on separate Daft channels; both must
+    fold into the planning predicate (via _and_predicates)."""
+    from daft import context, runners
+    from daft.daft import StorageConfig
+    from daft.io.pushdowns import Pushdowns
+
+    from pypaimon.daft.daft_datasource import PaimonDataSource
+
+    table, _ = append_only_table
+    _write_to_paimon(table, pa.table(
+        {
+            "id": pa.array([1, 2, 3], pa.int64()),
+            "name": pa.array(["a", "b", "c"], pa.string()),
+            "value": pa.array([1.0, 2.0, 3.0], pa.float64()),
+            "dt": pa.array(["2024-01-01", "2024-01-02", "2024-01-02"], pa.string()),
+        }
+    ))
+
+    io_config = context.get_context().daft_planning_config.default_io_config
+    storage_config = StorageConfig(runners.get_or_create_runner().name != "ray", io_config)
+    source = PaimonDataSource(table, storage_config=storage_config, catalog_options={})
+    pushdowns = Pushdowns(filters=(col("id") > 1),
+                          partition_filters=(col("dt") == "2024-01-02"))
+
+    state = source._read_pushdown_state(table, pushdowns)
+    # both channels combined into one AND planning predicate
+    assert state.planning_predicate is not None
+    assert state.planning_predicate.method == "and"
+
+    pruned = source._scan_read_builder(table, state).new_scan().plan().splits()
+    assert pruned and all(s.partition.to_dict().get("dt") == "2024-01-02" for s in pruned)
+
+
+def test_isnull_partition_filter_keeps_null_partition(append_only_table):
+    """isNull must NOT be pushed to plan pruning: plan pruning would drop the
+    null partition and the Python post-filter can't restore it. It must be left
+    to the post-filter so col(dt).is_null() still returns the null-partition row."""
+    table, _ = append_only_table
+    _write_to_paimon(table, pa.table(
+        {
+            "id": pa.array([1, 2], pa.int64()),
+            "name": pa.array(["a", "b"], pa.string()),
+            "value": pa.array([1.0, 2.0], pa.float64()),
+            "dt": pa.array([None, "2024-01-02"], pa.string()),
+        }
+    ))
+
+    result = _read_table(table).where(col("dt").is_null()).to_arrow()
+
+    assert result.num_rows == 1
+    assert result.column("id").to_pylist() == [1]
+    assert result.column("dt").to_pylist() == [None]
+
+
+def test_isnull_partition_filter_not_pushed_even_for_pk_table(pk_table):
+    """isNull must be excluded from plan pushdown for ALL tables. The row gate
+    (_can_plan_predicate) would allow isNull on a PK table without deletion
+    vectors; the partition path must be stricter (_predicate_contains_is_null),
+    else a PK table would lose its null partition."""
+    from daft import context, runners
+    from daft.daft import StorageConfig
+    from daft.io.pushdowns import Pushdowns
+
+    from pypaimon.daft.daft_datasource import PaimonDataSource
+
+    table, _ = pk_table
+    io_config = context.get_context().daft_planning_config.default_io_config
+    storage_config = StorageConfig(runners.get_or_create_runner().name != "ray", io_config)
+    source = PaimonDataSource(table, storage_config=storage_config, catalog_options={})
+
+    st_null = source._read_pushdown_state(
+        table, Pushdowns(partition_filters=col("dt").is_null()))
+    assert st_null.planning_predicate is None  # would be non-None via _can_plan_predicate
+    st_eq = source._read_pushdown_state(
+        table, Pushdowns(partition_filters=col("dt") == "2024-01-02"))
+    assert st_eq.planning_predicate is not None
+
+
 def test_read_paimon_row_filter(append_only_table):
     """Row-level filter should be applied after reading data."""
     table, _ = append_only_table
@@ -674,6 +1065,108 @@ class TestFilterPushdown:
         result = df.to_pydict()
         assert result["id"] == [2, 3, 4]
 
+    def test_filter_pushdown_splits_supported_conjuncts(self, filter_table):
+        unsupported = col("value").contains(col("id"))
+        cases = [
+            ((col("id") == 1) & unsupported, [("equal", "id", (1,))]),
+            (unsupported & (col("id") == 1), [("equal", "id", (1,))]),
+            (
+                (col("id") == 1) & (unsupported & (col("value") == "a")),
+                [("equal", "id", (1,)), ("equal", "value", ("a",))],
+            ),
+        ]
+
+        for expr, expected_leaves in cases:
+            pushed_filters, remaining_filters, predicate = convert_filters_to_paimon(filter_table, expr._expr)
+
+            assert len(pushed_filters) == len(expected_leaves)
+            assert len(remaining_filters) == 1
+            assert _contains_expr(remaining_filters[0])
+            assert _predicate_leaves(predicate) == expected_leaves
+
+    def test_filter_pushdown_does_not_split_or_with_unsupported_branch(self, filter_table):
+        expr = (col("id") == 1) | col("value").contains(col("id"))
+
+        pushed_filters, remaining_filters, predicate = convert_filters_to_paimon(filter_table, expr._expr)
+
+        assert pushed_filters == []
+        assert remaining_filters == [expr._expr]
+        assert predicate is None
+
+    def test_filter_pushdown_pushes_supported_or_conjunct(self, filter_table):
+        supported_or = (col("id") == 1) | (col("id") == 2)
+        expr = supported_or & col("value").contains(col("id"))
+
+        pushed_filters, remaining_filters, predicate = convert_filters_to_paimon(filter_table, expr._expr)
+
+        assert len(pushed_filters) == 1
+        assert len(remaining_filters) == 1
+        assert _contains_expr(remaining_filters[0])
+        assert predicate is not None
+        assert predicate.method == "or"
+        assert _predicate_leaves(predicate) == [("equal", "id", (1,)), ("equal", "id", (2,))]
+
+    def test_filter_pushdown_rewrites_supported_not_predicates(self, filter_table):
+        cases = [
+            (~(col("id") == 1), [("notEqual", "id", (1,))]),
+            (~col("id").is_in([1, 2]), [("notIn", "id", (1, 2))]),
+            (~col("id").between(1, 3), [("notBetween", "id", (1, 3))]),
+            (~col("value").is_null(), [("isNotNull", "value", ())]),
+            (~col("value").not_null(), [("isNull", "value", ())]),
+        ]
+
+        for expr, expected_leaves in cases:
+            pushed_filters, remaining_filters, predicate = convert_filters_to_paimon(filter_table, expr._expr)
+
+            assert len(pushed_filters) == 1
+            assert remaining_filters == []
+            assert _predicate_leaves(predicate) == expected_leaves
+
+    def test_filter_pushdown_supported_not_predicates_read_path(self, local_paimon_catalog):
+        catalog, tmp_path = local_paimon_catalog
+        pa_schema = pa.schema([
+            ("id", pa.int64()),
+            ("value", pa.string()),
+        ])
+        paimon_schema = pypaimon.Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table("test_db.filter_not_read", paimon_schema, ignore_if_exists=True)
+        table = catalog.get_table("test_db.filter_not_read")
+
+        data = pa.table(
+            {
+                "id": [1, 2, 3, 4, 5],
+                "value": ["a", "b", None, "d", None],
+            },
+            schema=pa_schema,
+        )
+        _write_to_paimon(table, data)
+
+        cases = [
+            (~(col("id") == 1), [2, 3, 4, 5]),
+            (~col("id").is_in([1, 3]), [2, 4, 5]),
+            (~col("id").between(2, 4), [1, 5]),
+            (~col("value").is_null(), [1, 2, 4]),
+            (~col("value").not_null(), [3, 5]),
+        ]
+
+        for expr, expected_ids in cases:
+            result = _read_table(table).where(expr).select("id").sort("id").to_pydict()
+
+            assert result["id"] == expected_ids
+
+    def test_filter_pushdown_does_not_demorgan_not_compound_predicates(self, filter_table):
+        expressions = [
+            ~((col("id") == 1) & (col("value") == "a")),
+            ~((col("id") == 1) | (col("value") == "a")),
+        ]
+
+        for expr in expressions:
+            pushed_filters, remaining_filters, predicate = convert_filters_to_paimon(filter_table, expr._expr)
+
+            assert pushed_filters == []
+            assert remaining_filters == [expr._expr]
+            assert predicate is None
+
     def test_unsupported_expression_remains_in_daft(self, filter_table):
         expressions = [
             col("id") == lit(1).cast("int64"),
@@ -717,6 +1210,32 @@ class TestFilterPushdown:
         result = df.sort("id").to_pydict()
 
         assert result["id"] == [1, 3]
+
+    def test_mixed_conjunctive_expression_is_filtered_by_daft(self, local_paimon_catalog):
+        catalog, tmp_path = local_paimon_catalog
+        pa_schema = pa.schema([
+            ("id", pa.int64()),
+            ("value", pa.string()),
+            ("pattern", pa.string()),
+        ])
+        paimon_schema = pypaimon.Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table("test_db.filter_mixed_conjunctive", paimon_schema, ignore_if_exists=True)
+        table = catalog.get_table("test_db.filter_mixed_conjunctive")
+
+        data = pa.table(
+            {
+                "id": [1, 1, 2, 3],
+                "value": ["alpha", "bravo", "alps", "charlie"],
+                "pattern": ["lp", "zz", "lp", "lie"],
+            }
+        )
+        _write_to_paimon(table, data)
+
+        df = _read_table(table).where((col("id") == 1) & col("value").contains(col("pattern")))
+        result = df.sort("value").to_pydict()
+
+        assert result["id"] == [1]
+        assert result["value"] == ["alpha"]
 
 
 # ---------------------------------------------------------------------------

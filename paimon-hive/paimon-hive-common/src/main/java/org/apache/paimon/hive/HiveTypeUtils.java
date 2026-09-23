@@ -45,6 +45,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.hadoop.hive.common.type.HiveChar;
 import org.apache.hadoop.hive.common.type.HiveVarchar;
@@ -236,6 +237,11 @@ public class HiveTypeUtils {
         }
 
         @Override
+        public TypeInfo visit(VectorType vectorType) {
+            return TypeInfoFactory.getListTypeInfo(vectorType.getElementType().accept(this));
+        }
+
+        @Override
         protected TypeInfo defaultMethod(org.apache.paimon.types.DataType dataType) {
             throw new UnsupportedOperationException("Unsupported type: " + dataType);
         }
@@ -304,7 +310,7 @@ public class HiveTypeUtils {
             } else if (TypeInfoFactory.dateTypeInfo.equals(atomic)) {
                 return DataTypes.DATE();
             } else if (TypeInfoFactory.timestampTypeInfo.equals(atomic)) {
-                return DataTypes.TIMESTAMP_MILLIS();
+                return DataTypes.TIMESTAMP();
             }
 
             throw new UnsupportedOperationException(

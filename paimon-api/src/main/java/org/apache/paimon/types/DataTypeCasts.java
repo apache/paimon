@@ -179,9 +179,9 @@ public final class DataTypeCasts {
 
     /**
      * allowExplicit false : Returns whether the source type can be safely cast to the target type
-     * without loosing information. Implicit casts are used for type widening and type
-     * generalization (finding a common supertype for a set of types). Implicit casts are similar to
-     * the Java semantics (e.g. this is not possible: {@code int x = (String) z}).
+     * without losing information. Implicit casts are used for type widening and type generalization
+     * (finding a common supertype for a set of types). Implicit casts are similar to the Java
+     * semantics (e.g. this is not possible: {@code int x = (String) z}).
      *
      * <p>allowExplicit true : Returns whether the source type can be cast to the target type.
      * Explicit casts correspond to the SQL cast specification and represent the logic behind a
@@ -211,6 +211,11 @@ public final class DataTypeCasts {
             return true;
         }
 
+        if (sourceType.isAnyOf(DataTypeRoot.GEOMETRY, DataTypeRoot.GEOGRAPHY)
+                || targetType.isAnyOf(DataTypeRoot.GEOMETRY, DataTypeRoot.GEOGRAPHY)) {
+            return false;
+        }
+
         return compatibleCastingRules
                 .get(targetType.getTypeRoot())
                 .contains(sourceType.getTypeRoot());
@@ -228,6 +233,11 @@ public final class DataTypeCasts {
         // ignore nullability during compare
         if (sourceType.copy(true).equals(targetType.copy(true))) {
             return true;
+        }
+
+        if (sourceType.isAnyOf(DataTypeRoot.GEOMETRY, DataTypeRoot.GEOGRAPHY)
+                || targetType.isAnyOf(DataTypeRoot.GEOMETRY, DataTypeRoot.GEOGRAPHY)) {
+            return false;
         }
 
         final DataTypeRoot sourceRoot = sourceType.getTypeRoot();

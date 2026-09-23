@@ -100,8 +100,6 @@ public class CdcRecordUtils {
             }
 
             DataType type = dataFields.get(idx).type();
-            // TODO TypeUtils.castFromString cannot deal with complex types like arrays and
-            //  maps. Change type of CdcRecord#field if needed.
             try {
                 genericRow.setField(idx, TypeUtils.castFromCdcValueString(value, type));
             } catch (Exception e) {

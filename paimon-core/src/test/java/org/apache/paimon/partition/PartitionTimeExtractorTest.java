@@ -93,6 +93,28 @@ public class PartitionTimeExtractorTest {
     }
 
     @Test
+    public void testPatternWithPrefixVariableNames() {
+        PartitionTimeExtractor extractor =
+                new PartitionTimeExtractor("$dt1-$dt-$dt2 00:00:00", null);
+        assertThat(
+                        extractor.extract(
+                                Arrays.asList("dt1", "dt", "dt2"),
+                                Arrays.asList("2023", "01", "02")))
+                .isEqualTo(LocalDateTime.parse("2023-01-02T00:00:00"));
+
+        extractor = new PartitionTimeExtractor("$t $t2:$t3:$t4", null);
+        assertThat(
+                        extractor.extract(
+                                Arrays.asList("t", "t4", "t2", "t3"),
+                                Arrays.asList("2023-01-01", "03", "01", "02")))
+                .isEqualTo(LocalDateTime.parse("2023-01-01T01:02:03"));
+
+        extractor = new PartitionTimeExtractor("$dt1$dt", "MMyyyydd");
+        assertThat(extractor.extract(Arrays.asList("dt", "dt1"), Arrays.asList("01", "022023")))
+                .isEqualTo(LocalDateTime.parse("2023-02-01T00:00:00"));
+    }
+
+    @Test
     public void testExtractNonDateFormattedPartition() {
         PartitionTimeExtractor extractor = new PartitionTimeExtractor("$ds", "yyyyMMdd");
         assertThatThrownBy(

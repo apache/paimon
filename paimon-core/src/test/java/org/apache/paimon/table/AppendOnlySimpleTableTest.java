@@ -54,6 +54,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -77,6 +78,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchMergeHandler;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.commons.math3.random.RandomDataGenerator;
@@ -85,6 +87,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -97,11 +100,13 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -194,11 +199,69 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         try (BatchTableWrite write = writeBuilder.newWrite()) {
             if (ordered) {
                 assertThatThrownBy(() -> write.write(rowData(1, 10, 100L)))
-                        .hasMessageContaining("FileNotFoundException");
+                        .hasMessageContaining("Failed to restore existing files")
+                        .hasRootCauseInstanceOf(java.io.FileNotFoundException.class);
             } else {
                 // no exception
                 write.write(rowData(1, 10, 100L));
             }
+        }
+    }
+
+    @Test
+    public void testBucketedAppendOrderedSequenceNumbers() throws Exception {
+        innerTestBucketedAppendSequenceNumbers(true);
+    }
+
+    @Test
+    public void testBucketedAppendUnorderedSequenceNumbers() throws Exception {
+        innerTestBucketedAppendSequenceNumbers(false);
+    }
+
+    private void innerTestBucketedAppendSequenceNumbers(boolean ordered) throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(BUCKET, 2);
+                            options.set(BUCKET_KEY, "a");
+                            options.set(WRITE_ONLY, true);
+                            options.set(BUCKET_APPEND_ORDERED, ordered);
+                        });
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<DataFileMeta> batch1Files =
+                table.newReadBuilder().newScan().plan().splits().stream()
+                        .flatMap(s -> ((DataSplit) s).dataFiles().stream())
+                        .collect(Collectors.toList());
+        long batch1MaxSequenceNumber =
+                batch1Files.stream().mapToLong(DataFileMeta::maxSequenceNumber).max().getAsLong();
+        Set<String> batch1FileNames =
+                batch1Files.stream().map(DataFileMeta::fileName).collect(Collectors.toSet());
+
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(rowData(1, 20, 200L));
+            commit.commit(write.prepareCommit());
+        }
+
+        long batch2MinSequenceNumber =
+                table.newReadBuilder().newScan().plan().splits().stream()
+                        .flatMap(s -> ((DataSplit) s).dataFiles().stream())
+                        .filter(file -> !batch1FileNames.contains(file.fileName()))
+                        .mapToLong(s -> ((DataFileMeta) s).minSequenceNumber())
+                        .min()
+                        .getAsLong();
+
+        if (ordered) {
+            assertThat(batch2MinSequenceNumber).isGreaterThan(batch1MaxSequenceNumber);
+        } else {
+            assertThat(batch2MinSequenceNumber).isEqualTo(0L);
         }
     }
 
@@ -319,44 +382,51 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     public void testDiscardDuplicateFilesMultiThread() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
-                        options -> options.set(CoreOptions.COMMIT_DISCARD_DUPLICATE_FILES, true));
+                        options -> {
+                            options.set(CoreOptions.COMMIT_DISCARD_DUPLICATE_FILES, true);
+                            options.set(CoreOptions.COMMIT_MAX_RETRIES, 50);
+                            options.set(CoreOptions.COMMIT_MAX_RETRY_WAIT, Duration.ofMillis(100));
+                        });
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-        List<List<CommitMessage>> messages = new ArrayList<>();
-        for (int i = 0; i < 10; i++) {
-            try (BatchTableWrite write = writeBuilder.newWrite()) {
-                write.write(rowData(1, 10, 100L));
-                messages.add(write.prepareCommit());
-            }
+        List<CommitMessage> messages;
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            write.write(rowData(1, 10, 100L));
+            messages = write.prepareCommit();
         }
-        Runnable doCommit =
-                () -> {
-                    ThreadLocalRandom rnd = ThreadLocalRandom.current();
-                    for (int i = 0; i < 10; i++) {
-                        try (BatchTableCommit commit = writeBuilder.newCommit()) {
-                            commit.commit(messages.get(rnd.nextInt(messages.size())));
-                        } catch (Exception e) {
-                            throw new RuntimeException(e);
-                        }
-                    }
-                };
 
-        Runnable asserter =
-                () -> {
-                    List<Split> splits = table.newReadBuilder().newScan().plan().splits();
-                    assertThat(splits.size()).isEqualTo(1);
-                    assertTrue(splits.get(0).convertToRawFiles().get().size() <= 10);
-                };
-
-        // test multiple threads
-        ExecutorService pool = Executors.newCachedThreadPool();
+        int commitThreadNum = 5;
+        CountDownLatch ready = new CountDownLatch(commitThreadNum);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(commitThreadNum);
         List<Future<?>> futures = new ArrayList<>();
-        for (int i = 0; i < 10; i++) {
-            futures.add(pool.submit(doCommit));
+        try {
+            for (int i = 0; i < commitThreadNum; i++) {
+                futures.add(
+                        pool.submit(
+                                () -> {
+                                    try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                                        ready.countDown();
+                                        assertThat(start.await(10, TimeUnit.SECONDS)).isTrue();
+                                        commit.commit(messages);
+                                    } catch (Exception e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                }));
+            }
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            for (Future<?> future : futures) {
+                future.get();
+            }
+        } finally {
+            start.countDown();
+            pool.shutdown();
+            assertThat(pool.awaitTermination(1, TimeUnit.MINUTES)).isTrue();
         }
-        for (Future<?> future : futures) {
-            future.get();
-        }
-        asserter.run();
+
+        List<Split> splits = table.newReadBuilder().newScan().plan().splits();
+        assertThat(splits).hasSize(1);
+        assertThat(splits.get(0).convertToRawFiles().get()).hasSize(1);
     }
 
     @Test
@@ -602,7 +672,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         assertThat(getResult(read, splits, binaryRow(2), 0, toString))
                 .hasSameElementsAs(Arrays.asList("201|binary", "201|binary"));
 
-        // projection contains unknown index or
+        // OR includes a field outside the output projection.
         read =
                 table.newRead()
                         .withFilter(
@@ -610,10 +680,9 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                         .withProjection(new int[] {3, 2})
                         .executeFilter();
         assertThat(getResult(read, splits, binaryRow(2), 0, toString))
-                .hasSameElementsAs(
-                        Arrays.asList("200|binary", "201|binary", "202|binary", "201|binary"));
+                .hasSameElementsAs(Arrays.asList("201|binary", "201|binary"));
 
-        // projection contains unknown index and
+        // AND must evaluate the unprojected partition field too.
         read =
                 table.newRead()
                         .withFilter(
@@ -621,8 +690,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                         .withProjection(new int[] {3, 2})
                         .executeFilter();
         assertThat(getResult(read, splits, binaryRow(1), 0, toString)).isEmpty();
-        assertThat(getResult(read, splits, binaryRow(2), 0, toString))
-                .hasSameElementsAs(Arrays.asList("201|binary", "201|binary"));
+        assertThat(getResult(read, splits, binaryRow(2), 0, toString)).isEmpty();
     }
 
     @Test
@@ -1094,6 +1162,53 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testParquetFilterOnUnprojectedColumn(boolean fileIndexEnabled) throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("status", DataTypes.STRING())
+                        .build();
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        rowType,
+                        options -> {
+                            options.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                            options.set(WRITE_ONLY, true);
+                            if (fileIndexEnabled) {
+                                options.set("file-index.bitmap.columns", "status");
+                            }
+                        });
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(0, BinaryString.fromString("A")));
+            write.write(GenericRow.of(1, BinaryString.fromString("B")));
+            write.write(GenericRow.of(2, null));
+            write.write(GenericRow.of(3, BinaryString.fromString("A")));
+            commit.commit(write.prepareCommit());
+        }
+
+        ReadBuilder readBuilder =
+                table.newReadBuilder()
+                        .withFilter(
+                                new PredicateBuilder(rowType)
+                                        .equal(1, BinaryString.fromString("A")))
+                        .withReadType(rowType.project(new int[] {0}));
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan().splits())) {
+            reader.forEachRemaining(
+                    row -> {
+                        assertThat(row.getFieldCount()).isEqualTo(1);
+                        ids.add(row.getInt(0));
+                    });
+        }
+        // ReadBuilder filtering is inclusive: all matching rows must survive projection.
+        assertThat(ids).contains(0, 3);
+    }
+
     @Test
     public void testTopNResultFilterParquetRowRanges() throws Exception {
         RowType rowType =
@@ -1255,6 +1370,43 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         }
 
         // avoid unstable failure from `SimpleTableTestBase.after`.
+        Thread.sleep(1_000);
+    }
+
+    @Test
+    public void testLimitWithCloseableIterator() throws Exception {
+        RowType rowType = RowType.builder().field("id", DataTypes.INT()).build();
+        Consumer<Options> configure =
+                options -> {
+                    options.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                    options.set(WRITE_ONLY, true);
+                    options.set(SOURCE_SPLIT_TARGET_SIZE, MemorySize.ofMebiBytes(256));
+                };
+        FileStoreTable table = createUnawareBucketFileStoreTable(rowType, configure);
+
+        int rowCount = 5000;
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        for (int i = 0; i < rowCount; i++) {
+            write.write(GenericRow.of(i));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        int limit = 10;
+        TableScan.Plan plan = table.newScan().withLimit(limit).plan();
+        RecordReader<InternalRow> reader =
+                table.newRead().withLimit(limit).createReader(plan.splits());
+        AtomicInteger count = new AtomicInteger(0);
+        try (CloseableIterator<InternalRow> iterator = reader.toCloseableIterator()) {
+            while (iterator.hasNext()) {
+                iterator.next();
+                count.incrementAndGet();
+            }
+        }
+        assertThat(count.get()).isEqualTo(limit);
+
         Thread.sleep(1_000);
     }
 
@@ -1658,7 +1810,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         }
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),
@@ -1676,7 +1828,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         configure.accept(conf);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 ROW_TYPE.getFields(),
                                 Collections.emptyList(),
@@ -1694,7 +1846,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         configure.accept(conf);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -1934,7 +2086,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         table.createBranch(BRANCH_NAME, "tag1");
 
         // Modify schema on main (add a column)
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("new_col", DataTypes.INT()));
 
         // Merge should fail due to schema mismatch
@@ -1959,7 +2111,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         table.createBranch(BRANCH_NAME, "tag1");
 
         SchemaManager branchSchemaManager =
-                new SchemaManager(table.fileIO(), table.location(), BRANCH_NAME);
+                new FileSystemSchemaManager(table.fileIO(), table.location(), BRANCH_NAME);
         branchSchemaManager.commitChanges(SchemaChange.addColumn("source_col", DataTypes.INT()));
         FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
         try (BatchTableWrite write =
@@ -1971,7 +2123,8 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         branchSchemaManager.commitChanges(
                 Collections.singletonList(SchemaChange.dropColumn("source_col")));
 
-        SchemaManager mainSchemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager mainSchemaManager =
+                new FileSystemSchemaManager(table.fileIO(), table.location());
         mainSchemaManager.commitChanges(SchemaChange.addColumn("target_col", DataTypes.INT()));
         mainSchemaManager.commitChanges(
                 Collections.singletonList(SchemaChange.dropColumn("target_col")));
@@ -2194,7 +2347,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
 
         // Directly write a new schema to the branch with row-tracking disabled
         SchemaManager branchSchemaManager =
-                new SchemaManager(table.fileIO(), table.location(), BRANCH_NAME);
+                new FileSystemSchemaManager(table.fileIO(), table.location(), BRANCH_NAME);
         TableSchema branchSchema = branchSchemaManager.latest().get();
         Map<String, String> newOptions = new HashMap<>(branchSchema.options());
         newOptions.remove("row-tracking.enabled");

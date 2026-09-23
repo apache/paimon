@@ -107,6 +107,29 @@ class LocalDiskCacheManagerTest {
     }
 
     @Test
+    void testDifferentBlockSizesDoNotSharePhysicalBlocks() {
+        LocalDiskCacheManager smallBlocks = new LocalDiskCacheManager(cacheDir, Long.MAX_VALUE, 4);
+        byte[] data = "four".getBytes();
+        smallBlocks.putBlock("f", 0, data);
+
+        LocalDiskCacheManager largeBlocks = new LocalDiskCacheManager(cacheDir, Long.MAX_VALUE, 8);
+        assertThat(largeBlocks.getBlock("f", 0)).isNull();
+        assertThat(largeBlocks.currentSize()).isZero();
+    }
+
+    @Test
+    void testManagerDiscoversBlockWrittenAfterConstruction() {
+        LocalDiskCacheManager first = new LocalDiskCacheManager(cacheDir, Long.MAX_VALUE, 64);
+        LocalDiskCacheManager second = new LocalDiskCacheManager(cacheDir, Long.MAX_VALUE, 64);
+        byte[] data = "shared block".getBytes();
+
+        first.putBlock("f", 0, data);
+
+        assertThat(second.getBlock("f", 0)).isEqualTo(data);
+        assertThat(second.currentSize()).isEqualTo(data.length);
+    }
+
+    @Test
     void testCacheDirCreated() {
         String deepDir = tempDir.resolve("sub").resolve("deep").toString();
         new LocalDiskCacheManager(deepDir, Long.MAX_VALUE, 64);

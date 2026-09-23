@@ -43,7 +43,6 @@ import scala.collection.JavaConverters._
  */
 abstract class FormatTableBatchWriteBase(
     table: FormatTable,
-    overwriteDynamic: Option[Boolean],
     overwritePartitions: Option[Map[String, String]],
     writeSchema: StructType)
   extends Logging
@@ -51,12 +50,10 @@ abstract class FormatTableBatchWriteBase(
 
   protected val batchWriteBuilder: BatchWriteBuilder = {
     val builder = table.newBatchWriteBuilder()
-    // todo: add test for static overwrite the whole table
-    if (overwriteDynamic.contains(true)) {
-      builder.withOverwrite()
-    } else {
-      overwritePartitions.foreach(partitions => builder.withOverwrite(partitions.asJava))
-    }
+    // Which partitions an overwrite that names none replaces is the table's
+    // `dynamic-partition-overwrite` to answer, and the builder carries the mode Spark resolved
+    // in that option, so an empty spec here means the statement, not the mode.
+    overwritePartitions.foreach(partitions => builder.withOverwrite(partitions.asJava))
     builder
   }
 

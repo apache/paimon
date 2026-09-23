@@ -1,0 +1,4887 @@
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+import datetime
+import os
+import shutil
+import tempfile
+import unittest
+import uuid
+from dataclasses import replace
+from unittest.mock import Mock, patch
+
+import pyarrow as pa
+import pyarrow.compute as pc
+import ray
+
+from pypaimon import CatalogFactory, Schema
+from pypaimon.ray import (
+    WhenMatched, WhenNotMatched, merge_into, read_paimon,
+    source_col, target_col, lit,
+)
+
+try:
+    import datafusion  # noqa: F401
+    _HAS_DATAFUSION = True
+except ImportError:
+    _HAS_DATAFUSION = False
+
+_SKIP_CONDITION = not _HAS_DATAFUSION
+_SKIP_REASON = "pypaimon[datafusion] is required for condition expressions"
+
+_TEST_NUM_PARTITIONS = 2
+
+
+class RayDataEvolutionMergeIntoTest(unittest.TestCase):
+
+    pa_schema = pa.schema([
+        ('id', pa.int32()),
+        ('name', pa.string()),
+        ('age', pa.int32()),
+    ])
+
+    de_options = {
+        'row-tracking.enabled': 'true',
+        'data-evolution.enabled': 'true',
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = tempfile.mkdtemp()
+        cls.warehouse = os.path.join(cls.tempdir, 'warehouse')
+        cls.catalog_options = {'warehouse': cls.warehouse}
+        cls.catalog = CatalogFactory.create(cls.catalog_options)
+        cls.catalog.create_database('default', True)
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True, num_cpus=2)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            if ray.is_initialized():
+                ray.shutdown()
+        except Exception:
+            pass
+        shutil.rmtree(cls.tempdir, ignore_errors=True)
+
+    def _create_table(self, options=None):
+        opts = options if options is not None else self.de_options
+        name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        s = Schema.from_pyarrow_schema(self.pa_schema, options=opts)
+        self.catalog.create_table(name, s, False)
+        return name
+
+    def _source(self, ids=(1,)):
+        return pa.Table.from_pydict(
+            {
+                'id': pa.array(list(ids), type=pa.int32()),
+                'name': ['x'] * len(ids),
+                'age': [10] * len(ids),
+            },
+            schema=self.pa_schema,
+        )
+
+    def _write(self, target, data):
+        table = self.catalog.get_table(target)
+        wb = table.new_batch_write_builder()
+        writer = wb.new_write()
+        writer.write_arrow(data)
+        wb.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+    def _read_sorted(self, target):
+        table = self.catalog.get_table(target)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        return rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+
+    def _snapshot_id(self, target):
+        table = self.catalog.get_table(target)
+        snap = table.snapshot_manager().get_latest_snapshot()
+        return snap.id if snap is not None else None
+
+    def _compact_all_data_files(self, table):
+        """Replace all current data files with one COMPACT output file."""
+        from pypaimon.table.special_fields import SpecialFields
+
+        read_builder = table.new_read_builder().with_projection(
+            list(table.field_names) + [SpecialFields.ROW_ID.name]
+        )
+        plan = read_builder.new_scan().plan_for_write()
+        old_files = [
+            file for split in plan.splits() for file in split.files
+        ]
+        current = read_builder.new_read().to_arrow(plan.splits()).sort_by(
+            [(SpecialFields.ROW_ID.name, 'ascending')]
+        ).select(list(table.field_names))
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(current)
+        messages = writer.prepare_commit()
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(len(messages[0].new_files), 1)
+        messages[0].new_files = [
+            messages[0].new_files[0].assign_first_row_id(0)
+        ]
+        messages[0].deleted_files.extend(old_files)
+
+        commit = write_builder.new_commit()
+        file_store_commit = commit.file_store_commit
+        original_try_commit = file_store_commit._try_commit
+        file_store_commit._try_commit = (
+            lambda commit_kind, *args, **kwargs:
+            original_try_commit('COMPACT', *args, **kwargs)
+        )
+        try:
+            commit.commit(messages)
+        finally:
+            writer.close()
+            commit.close()
+
+    def _reassign_partition_row_ids(self, table, partition_value):
+        """Commit the metadata-only OVERWRITE produced by row-id reassignment."""
+        from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+        from pypaimon.manifest.manifest_list_manager import ManifestListManager
+        from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
+
+        latest = table.snapshot_manager().get_latest_snapshot()
+        manifest_file = ManifestFileManager(table)
+        manifest_list = ManifestListManager(table)
+        entries = manifest_file.read_entries_parallel(
+            manifest_list.read_all(latest), drop_stats=False)
+        next_row_id = latest.next_row_id
+        reassigned = []
+        for entry in entries:
+            if entry.partition.values[0] == partition_value:
+                entry = entry.assign_first_row_id(next_row_id)
+                next_row_id += entry.file.row_count
+            reassigned.append(entry)
+
+        token = str(uuid.uuid4())
+        manifests = manifest_file.rolling_write(
+            reassigned, 1 << 30, 'manifest-{}'.format(token))
+        base_manifest_list = 'manifest-list-{}-0'.format(token)
+        delta_manifest_list = 'manifest-list-{}-1'.format(token)
+        manifest_list.write(base_manifest_list, manifests)
+        manifest_list.write(delta_manifest_list, [])
+        snapshot = replace(
+            latest,
+            id=latest.id + 1,
+            base_manifest_list=base_manifest_list,
+            delta_manifest_list=delta_manifest_list,
+            delta_record_count=0,
+            commit_user='reassign-row-id-test',
+            commit_identifier=0,
+            commit_kind='OVERWRITE',
+            time_millis=latest.time_millis + 1,
+            next_row_id=next_row_id,
+            uuid=str(uuid.uuid4()),
+        )
+        self.assertTrue(RenamingSnapshotCommit(
+            table.snapshot_manager()).commit(latest.uuid, snapshot, []))
+
+    def _merge_and_capture_self_merge_plan(self, **kwargs):
+        from pypaimon.ray.data_evolution_merge_join import (
+            build_self_merge_update_plan as real_build_plan,
+        )
+
+        captured = {}
+
+        def capture(**plan_kwargs):
+            plan = real_build_plan(**plan_kwargs)
+            captured['plan'] = plan
+            return plan
+
+        with patch(
+                'pypaimon.ray.data_evolution_merge_into.'
+                'build_self_merge_update_plan',
+                side_effect=capture,
+        ):
+            result = merge_into(**kwargs)
+        return result, captured['plan']
+
+    def test_paimon_source_table_pins_snapshot(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+
+        target = self._create_table()
+        source = self._create_table()
+        self._write(source, self._source(ids=(1,)))
+        expected_snapshot_id = self._snapshot_id(source)
+
+        fake_ds = Mock()
+        fake_ds.schema.return_value = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('age', pa.int32()),
+        ])
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                return_value=fake_ds,
+        ) as mock_read_paimon:
+            m._prepare(
+                target, source, self.catalog_options,
+                [WhenMatched.update('*')], [], ['id'],
+            )
+
+        mock_read_paimon.assert_called_once_with(
+            source,
+            self.catalog_options,
+            snapshot_id=expected_snapshot_id,
+            projection=['id', 'name', 'age'],
+        )
+
+    def test_paimon_source_does_not_use_compressed_size(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+
+        target = self._create_table()
+        source = self._create_table()
+        self._write(target, self._source(ids=(0,)))
+        value = 'x' * 1_000_000
+        source_data = pa.Table.from_pydict(
+            {
+                'id': pa.array(list(range(16)), type=pa.int32()),
+                'name': [value] * 16,
+                'age': [10] * 16,
+            },
+            schema=self.pa_schema,
+        )
+        self._write(source, source_data)
+        source_table = self.catalog.get_table(source)
+        splits = source_table.new_read_builder().new_scan().plan().splits()
+        compressed_size = sum(split.file_size for split in splits)
+        self.assertLess(compressed_size * 10, source_data.nbytes)
+
+        real_resolve = m._resolve_num_partitions
+        resolved = []
+
+        def capture(*args, **kwargs):
+            result = real_resolve(*args, **kwargs)
+            resolved.append((args, kwargs, result))
+            return result
+
+        with patch(
+                'ray.cluster_resources', return_value={'CPU': 320},
+        ), patch.object(
+                m, '_resolve_num_partitions', side_effect=capture,
+        ), patch.object(
+                m, '_build_datasets', return_value=(None, None, None, set()),
+        ), patch.object(
+                m, '_execute_and_commit', return_value={},
+        ):
+            merge_into(
+                target=target,
+                source=source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+            )
+
+        self.assertEqual(len(resolved), 1)
+        args, kwargs, result = resolved[0]
+        self.assertEqual(args, (None, None))
+        self.assertIsNotNone(kwargs.pop('data_context'))
+        self.assertEqual(kwargs, {
+            'min_partitions': 200,
+            'unknown_num_partitions': 200,
+        })
+        self.assertEqual(result, 200)
+
+    def test_matched_execution_uses_target_context(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+
+        source_context = Mock(
+            target_max_block_size=512,
+            default_hash_shuffle_parallelism=7,
+        )
+        target_context = Mock(
+            target_max_block_size=128,
+            default_hash_shuffle_parallelism=3,
+        )
+        source_ds = Mock(context=source_context)
+        update_ds = Mock(context=target_context)
+        delete_ds = Mock(context=target_context)
+        ctx = Mock(is_self_merge=False)
+        snapshot = Mock(total_record_count=1)
+        table = Mock()
+        table.snapshot_manager().get_latest_snapshot.return_value = snapshot
+
+        with patch.object(
+                m, '_prepare',
+                return_value=(table, source_ds, [], [], ctx),
+        ), patch.object(
+                m, '_estimate_merge_input_size_bytes', return_value=512,
+        ), patch.object(
+                m, '_build_datasets',
+                return_value=(update_ds, delete_ds, None, ['age']),
+        ) as build_datasets, patch.object(
+                m, 'distributed_update_apply', return_value=([], 0, []),
+        ) as update_apply, patch.object(
+                m, 'distributed_delete_apply', return_value=([], 0, []),
+        ) as delete_apply, patch(
+                'ray.cluster_resources', return_value={'CPU': 320},
+        ):
+            merge_into(
+                target='default.target',
+                source=source_ds,
+                catalog_options={'warehouse': '/tmp/warehouse'},
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+            )
+            default_source_partitions = build_datasets.call_args.args[7]
+            default_update_partitions = (
+                update_apply.call_args.kwargs['num_partitions']
+            )
+            default_delete_partitions = (
+                delete_apply.call_args.kwargs['num_partitions']
+            )
+
+            build_datasets.reset_mock()
+            update_apply.reset_mock()
+            delete_apply.reset_mock()
+            merge_into(
+                target='default.target',
+                source=source_ds,
+                catalog_options={'warehouse': '/tmp/warehouse'},
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+                num_partitions=11,
+            )
+
+        # The source-left branch would use 7 partitions.
+        self.assertEqual(default_source_partitions, 7)
+        # Both matched results inherit the target-left context: 512 / 128 = 4.
+        self.assertEqual(default_update_partitions, 4)
+        self.assertEqual(default_delete_partitions, 4)
+        # An explicit value still applies to every branch and execution stage.
+        self.assertEqual(build_datasets.call_args.args[7], 11)
+        self.assertEqual(
+            build_datasets.call_args.kwargs['requested_num_partitions'], 11
+        )
+        self.assertEqual(
+            update_apply.call_args.kwargs['num_partitions'], 11
+        )
+        self.assertEqual(
+            delete_apply.call_args.kwargs['num_partitions'], 11
+        )
+
+    def test_no_clause_raises(self):
+        target = self._create_table()
+        with self.assertRaises(ValueError):
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+    def test_unconditional_non_last_matched_rejected(self):
+        target = self._create_table()
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[
+                    WhenMatched.update('*'),
+                    WhenMatched.update({'age': 's.age'}, condition='s.age > 10'),
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('when_matched', str(ctx.exception))
+        self.assertIn('unreachable', str(ctx.exception))
+
+    def test_unconditional_non_last_not_matched_rejected(self):
+        target = self._create_table()
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_not_matched=[
+                    WhenNotMatched(insert='*'),
+                    WhenNotMatched(insert='*', condition='s.age > 10'),
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('when_not_matched', str(ctx.exception))
+        self.assertIn('unreachable', str(ctx.exception))
+
+    def test_non_de_table_rejected(self):
+        target = self._create_table(options={'row-tracking.enabled': 'true'})
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('data-evolution.enabled', str(ctx.exception))
+
+    def test_no_row_tracking_rejected(self):
+        target = self._create_table(options={'data-evolution.enabled': 'true'})
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('row-tracking.enabled', str(ctx.exception))
+
+    def test_source_missing_on_col_raises(self):
+        target = self._create_table()
+        bad_source = pa.Table.from_pydict(
+            {'name': ['x'], 'age': [10]},
+            schema=pa.schema([('name', pa.string()), ('age', pa.int32())]),
+        )
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=bad_source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn("'id'", str(ctx.exception))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_not_matched_condition_rejects_target_refs(self):
+        target = self._create_table()
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_not_matched=[
+                    WhenNotMatched(insert='*', condition='t.age > 10')
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('t.', str(ctx.exception))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_condition_unknown_source_col_rejected(self):
+        target = self._create_table()
+        self._write(target, self._source())
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[
+                    WhenMatched.update('*', condition='s.nonexistent > 0')
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('nonexistent', str(ctx.exception))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_condition_unknown_target_col_rejected(self):
+        target = self._create_table()
+        self._write(target, self._source())
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[
+                    WhenMatched.update('*', condition='s.age > t.nonexistent')
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('nonexistent', str(ctx.exception))
+
+    def test_matched_update_star(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([2, 3, 4], type=pa.int32()),
+                'name': ['b2', 'c2', 'd'],
+                'age': pa.array([22, 33, 40], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update('*')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['a', 'b2', 'c2'])
+        self.assertEqual(out['age'], [10, 22, 33])
+
+    def test_matched_delete(self):
+        options = dict(self.de_options)
+        options['deletion-vectors.enabled'] = 'true'
+        target = self._create_table(options=options)
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        metrics = merge_into(
+            target=target,
+            source=pa.Table.from_pydict(
+                {
+                    'id': pa.array([2, 3], type=pa.int32()),
+                    'name': ['ignored', 'ignored'],
+                    'age': pa.array([99, 99], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.delete()],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(metrics, {
+            'num_matched': 2, 'num_inserted': 0, 'num_unchanged': 0,
+        })
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1])
+        self.assertEqual(out['name'], ['a'])
+        self.assertEqual(out['age'], [10])
+
+    def test_not_matched_insert_appends_unmatched(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([2, 3, 4], type=pa.int32()),
+                'name': ['b2', 'c2', 'd'],
+                'age': pa.array([22, 33, 40], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_not_matched=[WhenNotMatched(insert='*')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3, 4])
+        self.assertEqual(out['name'], ['a', 'b', 'c', 'd'])
+        self.assertEqual(out['age'], [10, 20, 30, 40])
+
+    def test_combined_update_and_insert(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['a', 'b'],
+                    'age': pa.array([10, 20], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([2, 3], type=pa.int32()),
+                'name': ['b2', 'c'],
+                'age': pa.array([22, 30], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        metrics = merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update('*')],
+            when_not_matched=[WhenNotMatched(insert='*')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['a', 'b2', 'c'])
+        self.assertEqual(out['age'], [10, 22, 30])
+        self.assertEqual(metrics, {
+            'num_matched': 1, 'num_inserted': 1, 'num_unchanged': 0,
+        })
+
+    def test_on_with_renamed_columns_star(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['a', 'b'],
+                    'age': pa.array([10, 20], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source_schema = pa.schema([
+            ('uid', pa.int32()),
+            ('name', pa.string()),
+            ('age', pa.int32()),
+        ])
+        source = pa.Table.from_pydict(
+            {
+                'uid': pa.array([2, 3], type=pa.int32()),
+                'name': ['b2', 'c'],
+                'age': pa.array([22, 30], type=pa.int32()),
+            },
+            schema=source_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on={'id': 'uid'},
+            when_matched=[WhenMatched.update('*')],
+            when_not_matched=[WhenNotMatched(insert='*')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['a', 'b2', 'c'])
+        self.assertEqual(out['age'], [10, 22, 30])
+
+    def test_insert_into_empty_target(self):
+        target = self._create_table()
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2, 3], type=pa.int32()),
+                'name': ['a', 'b', 'c'],
+                'age': pa.array([10, 20, 30], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_not_matched=[WhenNotMatched(insert='*')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['a', 'b', 'c'])
+        self.assertEqual(out['age'], [10, 20, 30])
+
+    def test_insert_into_truncated_target_uses_empty_fast_path(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(0,)))
+        table = self.catalog.get_table(target)
+        commit = table.new_batch_write_builder().new_commit()
+        commit.truncate_table()
+        commit.close()
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot.total_record_count, 0)
+
+        real_resolve = m._resolve_num_partitions
+        resolved = []
+
+        def capture(*args, **kwargs):
+            result = real_resolve(*args, **kwargs)
+            resolved.append((args, kwargs, result))
+            return result
+
+        with patch(
+                'ray.cluster_resources', return_value={'CPU': 320},
+        ), patch.object(
+                m, '_resolve_num_partitions', side_effect=capture,
+        ), patch.object(
+                ray.data.Dataset,
+                'join',
+                side_effect=AssertionError('empty target must not be joined'),
+        ):
+            metrics = merge_into(
+                target=target,
+                source=self._source(ids=(1,)),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+                when_not_matched=[WhenNotMatched(insert='*')],
+            )
+
+        self.assertEqual(metrics['num_inserted'], 1)
+        self.assertEqual(self._read_sorted(target)['id'], [1])
+        self.assertEqual(len(resolved), 1)
+        args, kwargs, result = resolved[0]
+        self.assertIsNone(args[0])
+        self.assertGreater(args[1], 0)
+        self.assertIsNotNone(kwargs.pop('data_context'))
+        self.assertEqual(kwargs, {
+            'min_partitions': 1,
+            'unknown_num_partitions': 200,
+        })
+        self.assertEqual(result, 1)
+
+    def test_insert_into_truncated_target_preserves_write_parallelism(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(0,)))
+        table = self.catalog.get_table(target)
+        commit = table.new_batch_write_builder().new_commit()
+        commit.truncate_table()
+        commit.close()
+
+        real_write = m.distributed_write_collect_msgs
+        write_blocks = []
+
+        def capture(insert_ds, *args, **kwargs):
+            insert_ds = insert_ds.materialize()
+            write_blocks.append(insert_ds.num_blocks())
+            return real_write(insert_ds, *args, **kwargs)
+
+        with patch.object(
+                m, 'distributed_write_collect_msgs', side_effect=capture,
+        ):
+            metrics = merge_into(
+                target=target,
+                source=self._source(ids=range(1, 31)),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_not_matched=[WhenNotMatched(insert='*')],
+                num_partitions=3,
+            )
+
+        self.assertEqual(metrics['num_inserted'], 30)
+        self.assertEqual(write_blocks, [3])
+        self.assertEqual(
+            self._read_sorted(target)['id'], list(range(1, 31))
+        )
+
+    def test_multi_source_match_raises_by_default(self):
+        # One target row matched by several source rows: the winning value is
+        # undefined (Spark DE's checkCardinality=false), so we refuse by default.
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['a'],
+                    'age': pa.array([10], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 1], type=pa.int32()),
+                'name': ['x', 'y'],
+                'age': pa.array([100, 200], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        with self.assertRaises(Exception) as ctx:
+            merge_into(
+                target=target,
+                source=source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn("multiple source rows", str(ctx.exception))
+
+    def test_blob_table_merge_into_updates_and_inserts_blob_column(self):
+        blob_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('payload', pa.large_binary()),
+        ])
+        name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            blob_schema, options=self.de_options)
+        self.catalog.create_table(name, schema, False)
+        self._write(
+            name,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['Alice', 'Bob'],
+                    'payload': pa.array(
+                        [b'blob-1', b'blob-2'], type=pa.large_binary()),
+                },
+                schema=blob_schema,
+            ),
+        )
+
+        metrics = merge_into(
+            target=name,
+            source=pa.Table.from_pydict(
+                {
+                    'id': pa.array([2, 3], type=pa.int32()),
+                    'name': ['Bobby', 'Cindy'],
+                    'payload': pa.array(
+                        [b'blob-2-updated', b'blob-3'],
+                        type=pa.large_binary()),
+                },
+                schema=blob_schema,
+            ),
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update('*')],
+            when_not_matched=[WhenNotMatched(insert='*')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        table = self.catalog.get_table(name)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        out = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['Alice', 'Bobby', 'Cindy'])
+        self.assertEqual(
+            out['payload'], [b'blob-1', b'blob-2-updated', b'blob-3'])
+        self.assertEqual(metrics, {
+            'num_matched': 1, 'num_inserted': 1, 'num_unchanged': 0,
+        })
+
+    def test_blob_table_merge_into_inserts_null_for_unspecified_blob_column(self):
+        blob_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('payload', pa.large_binary()),
+        ])
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+        name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            blob_schema, options=self.de_options)
+        self.catalog.create_table(name, schema, False)
+
+        metrics = merge_into(
+            target=name,
+            source=pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['Alice'],
+                },
+                schema=source_schema,
+            ),
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_not_matched=[WhenNotMatched(insert={
+                'id': source_col('id'),
+                'name': source_col('name'),
+            })],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        table = self.catalog.get_table(name)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        out = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(out['id'], [1])
+        self.assertEqual(out['name'], ['Alice'])
+        self.assertEqual(out['payload'], [None])
+        self.assertEqual(metrics, {
+            'num_matched': 0, 'num_inserted': 1, 'num_unchanged': 0,
+        })
+
+    def test_blob_table_feature_update(self):
+        blob_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', pa.large_binary()),
+            ('feature', pa.int32()),
+        ])
+        name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            blob_schema, options=self.de_options)
+        self.catalog.create_table(name, schema, False)
+        self._write(
+            name,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'payload': [b'aa', b'bbb', b'cccc'],
+                    'feature': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=blob_schema,
+            ),
+        )
+
+        num_partitions = _TEST_NUM_PARTITIONS
+        records_to_process = ray.data.from_arrow(pa.Table.from_pydict({
+            'id': pa.array([1, 3], type=pa.int32()),
+        }))
+        target_rows = read_paimon(
+            name,
+            self.catalog_options,
+            projection=['id', 'payload'],
+        )
+        selected = records_to_process.join(
+            target_rows,
+            join_type='inner',
+            num_partitions=num_partitions,
+            on=['id'],
+        )
+
+        def compute_feature(batch):
+            payloads = batch['payload'].to_pylist()
+            return pa.Table.from_pydict({
+                'id': batch['id'],
+                'new_feature': pa.array(
+                    [len(v) if v is not None else 0 for v in payloads],
+                    type=pa.int32(),
+                ),
+            })
+
+        updates = selected.map_batches(compute_feature, batch_format='pyarrow')
+        metrics = merge_into(
+            target=name,
+            source=updates,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[
+                WhenMatched.update({'feature': source_col('new_feature')})
+            ],
+            num_partitions=num_partitions,
+        )
+
+        table = self.catalog.get_table(name)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        out = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['feature'], [2, 20, 4])
+        self.assertEqual(out['payload'], [b'aa', b'bbb', b'cccc'])
+        self.assertEqual(metrics, {
+            'num_matched': 2, 'num_inserted': 0, 'num_unchanged': 0,
+        })
+
+    def test_blob_descriptor_resolve_and_merge(self):
+        from pypaimon.table.row.blob import BlobDescriptor, Blob
+        from pypaimon.common.uri_reader import UriReaderFactory
+
+        blob_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', pa.large_binary()),
+            ('feature', pa.int32()),
+        ])
+        name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            blob_schema, options=self.de_options)
+        self.catalog.create_table(name, schema, False)
+        self._write(
+            name,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'payload': [b'aa', b'bbb', b'cccc'],
+                    'feature': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=blob_schema,
+            ),
+        )
+
+        num_partitions = _TEST_NUM_PARTITIONS
+        input_ids = ray.data.from_arrow(pa.Table.from_pydict({
+            'id': pa.array([1, 3], type=pa.int32()),
+        }))
+
+        target_rows = read_paimon(
+            name,
+            self.catalog_options,
+            projection=['id', 'payload'],
+            dynamic_options={'blob-as-descriptor': 'true'},
+        )
+
+        matched = input_ids.join(
+            target_rows, join_type='inner',
+            num_partitions=num_partitions, on=['id'],
+        )
+
+        uri_factory = UriReaderFactory(self.catalog_options)
+
+        def resolve_and_compute(batch):
+            features = []
+            for desc_bytes in batch['payload'].to_pylist():
+                desc = BlobDescriptor.deserialize(desc_bytes)
+                reader = uri_factory.create(desc.uri)
+                data = Blob.from_descriptor(reader, desc).to_data()
+                features.append(len(data) * 100)
+            return pa.Table.from_pydict({
+                'id': batch['id'],
+                'new_feature': pa.array(features, type=pa.int32()),
+            })
+
+        updates = matched.map_batches(
+            resolve_and_compute, batch_format='pyarrow')
+        metrics = merge_into(
+            target=name,
+            source=updates,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[
+                WhenMatched.update({'feature': source_col('new_feature')})
+            ],
+            num_partitions=num_partitions,
+        )
+
+        table = self.catalog.get_table(name)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        out = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['feature'], [200, 20, 400])
+        self.assertEqual(out['payload'], [b'aa', b'bbb', b'cccc'])
+        self.assertEqual(metrics['num_matched'], 2)
+
+    def test_combined_writes_single_snapshot(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['a', 'b'],
+                    'age': pa.array([10, 20], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+        before = self._snapshot_id(target)
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([2, 3], type=pa.int32()),
+                'name': ['b2', 'c'],
+                'age': pa.array([22, 30], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update('*')],
+            when_not_matched=[WhenNotMatched(insert='*')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        after = self._snapshot_id(target)
+        self.assertEqual(after, before + 1)
+
+    def test_empty_target_matched_update_is_noop(self):
+        target = self._create_table()
+        before = self._snapshot_id(target)
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2], type=pa.int32()),
+                'name': ['a', 'b'],
+                'age': pa.array([10, 20], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update('*')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(self._snapshot_id(target), before)
+
+    def test_matched_update_with_no_matches_is_noop(self):
+        target = self._create_table()
+        self._write(target, self._source(ids=(1,)))
+        before = self._snapshot_id(target)
+
+        result = merge_into(
+            target=target,
+            source=self._source(ids=(2,)),
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update('*')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 0)
+        self.assertEqual(self._snapshot_id(target), before)
+        self.assertEqual(self._read_sorted(target)['id'], [1])
+
+    def test_matched_on_partitioned_table(self):
+        pt_schema = pa.schema([
+            ('pt', pa.string()),
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+        name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        s = Schema.from_pyarrow_schema(
+            pt_schema, partition_keys=['pt'], options=self.de_options,
+        )
+        self.catalog.create_table(name, s, False)
+
+        table = self.catalog.get_table(name)
+        wb = table.new_batch_write_builder()
+        writer = wb.new_write()
+        writer.write_arrow(pa.Table.from_pydict(
+            {
+                'pt': ['a', 'a'],
+                'id': pa.array([1, 2], type=pa.int32()),
+                'name': ['old_1', 'old_2'],
+            },
+            schema=pt_schema,
+        ))
+        wb.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        source = pa.Table.from_pydict(
+            {
+                'pt': ['a'],
+                'id': pa.array([1], type=pa.int32()),
+                'name': ['new_1'],
+            },
+            schema=pt_schema,
+        )
+
+        # Non-partition column update should succeed
+        merge_into(
+            target=name,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update({'name': source_col('name')})],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        out = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(out['name'], ['new_1', 'old_2'])
+        self.assertEqual(out['pt'], ['a', 'a'])
+
+        # Partition column update should be rejected
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=name,
+                source=source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update({'pt': source_col('pt')})],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('partition', str(ctx.exception))
+
+    def test_partitioned_insert_allowed(self):
+        pt_schema = pa.schema([
+            ('pt', pa.string()),
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+        name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        s = Schema.from_pyarrow_schema(
+            pt_schema, partition_keys=['pt'], options=self.de_options,
+        )
+        self.catalog.create_table(name, s, False)
+
+        source = pa.Table.from_pydict(
+            {
+                'pt': ['a', 'b'],
+                'id': pa.array([1, 2], type=pa.int32()),
+                'name': ['x', 'y'],
+            },
+            schema=pt_schema,
+        )
+
+        merge_into(
+            target=name,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_not_matched=[WhenNotMatched(insert='*')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        table = self.catalog.get_table(name)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        out = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(out['id'], [1, 2])
+        self.assertEqual(out['pt'], ['a', 'b'])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_matched_update_with_condition(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2, 3], type=pa.int32()),
+                'name': ['a2', 'b2', 'c2'],
+                'age': pa.array([15, 25, 45], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update('*', condition='s.age > t.age + 10')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['a', 'b', 'c2'])
+        self.assertEqual(out['age'], [10, 20, 45])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_matched_condition_with_source_on_key(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2, 3], type=pa.int32()),
+                'name': ['a2', 'b2', 'c2'],
+                'age': pa.array([15, 25, 35], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update('*', condition='s.id >= 2')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['a', 'b2', 'c2'])
+        self.assertEqual(out['age'], [10, 25, 35])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_not_matched_insert_with_condition(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['a'],
+                    'age': pa.array([10], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([2, 3, 4], type=pa.int32()),
+                'name': ['b', 'c', 'd'],
+                'age': pa.array([15, 25, 5], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_not_matched=[
+                WhenNotMatched(insert='*', condition='s.age >= 10')
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['a', 'b', 'c'])
+        self.assertEqual(out['age'], [10, 15, 25])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_combined_with_conditions(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['a', 'b'],
+                    'age': pa.array([10, 20], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2, 3, 4], type=pa.int32()),
+                'name': ['a2', 'b2', 'c', 'd'],
+                'age': pa.array([50, 5, 30, 8], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        metrics = merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update('*', condition='s.age > t.age')],
+            when_not_matched=[
+                WhenNotMatched(insert='*', condition='s.age > 10')
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['a2', 'b', 'c'])
+        self.assertEqual(out['age'], [50, 20, 30])
+        self.assertEqual(metrics['num_matched'], 1)
+        self.assertEqual(metrics['num_inserted'], 1)
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_condition_no_rows_match_is_noop(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['a', 'b'],
+                    'age': pa.array([10, 20], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2], type=pa.int32()),
+                'name': ['a2', 'b2'],
+                'age': pa.array([5, 5], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update('*', condition='s.age > t.age')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2])
+        self.assertEqual(out['name'], ['a', 'b'])
+        self.assertEqual(out['age'], [10, 20])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_duplicate_source_filtered_by_condition(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['a'],
+                    'age': pa.array([10], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 1], type=pa.int32()),
+                'name': ['x', 'y'],
+                'age': pa.array([5, 20], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[
+                WhenMatched.update('*', condition='s.age > t.age')
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1])
+        self.assertEqual(out['name'], ['y'])
+        self.assertEqual(out['age'], [20])
+
+    def test_matched_partial_update(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['a', 'b'],
+                    'age': pa.array([10, 20], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2], type=pa.int32()),
+                'name': ['a2', 'b2'],
+                'age': pa.array([99, 88], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update({'age': 's.age'})],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2])
+        self.assertEqual(out['name'], ['a', 'b'])
+        self.assertEqual(out['age'], [99, 88])
+
+    def test_insert_partial_mapping(self):
+        target = self._create_table()
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2], type=pa.int32()),
+                'name': ['a', 'b'],
+                'age': pa.array([10, 20], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_not_matched=[
+                WhenNotMatched(insert={'id': 's.id', 'name': 's.name'})
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2])
+        self.assertEqual(out['name'], ['a', 'b'])
+        self.assertEqual(out['age'], [None, None])
+
+    def test_update_with_literal(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['old'],
+                    'age': pa.array([10], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1], type=pa.int32()),
+                'name': ['ignored'],
+                'age': pa.array([99], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update({'name': 'updated'})],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['name'], ['updated'])
+        self.assertEqual(out['age'], [10])
+
+    def test_invalid_target_column_rejected(self):
+        target = self._create_table()
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update({'nonexistent': 's.id'})],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('nonexistent', str(ctx.exception))
+
+    def test_invalid_target_ref_rejected(self):
+        target = self._create_table()
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update({'name': 't.nme'})],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('nme', str(ctx.exception))
+
+    def test_empty_mapping_rejected(self):
+        target = self._create_table()
+        with self.assertRaises(ValueError):
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update({})],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+    def test_insert_target_ref_rejected(self):
+        target = self._create_table()
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_not_matched=[
+                    WhenNotMatched(insert={'name': 't.name'})
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('t.', str(ctx.exception))
+
+    def test_matched_update_with_target_ref(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['old'],
+                    'age': pa.array([10], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1], type=pa.int32()),
+                'name': ['ignored'],
+                'age': pa.array([99], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update({'age': 's.age', 'name': 't.name'})],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['name'], ['old'])
+        self.assertEqual(out['age'], [99])
+
+    def test_callable_value_rejected(self):
+        target = self._create_table()
+        with self.assertRaises(TypeError):
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update({'name': lambda r: r})],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+    def test_source_missing_referenced_col(self):
+        target = self._create_table()
+        source = pa.Table.from_pydict(
+            {'id': pa.array([1], type=pa.int32())},
+            schema=pa.schema([('id', pa.int32())]),
+        )
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update({'name': 's.name'})],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('name', str(ctx.exception))
+
+    def test_partial_insert_auto_fills_on_key(self):
+        target = self._create_table()
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2], type=pa.int32()),
+                'name': ['a', 'b'],
+                'age': pa.array([10, 20], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_not_matched=[
+                WhenNotMatched(insert={'name': 's.name'})
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2])
+        self.assertEqual(out['name'], ['a', 'b'])
+
+    def test_partial_insert_renamed_on_key_auto_filled(self):
+        target = self._create_table()
+
+        source_schema = pa.schema([
+            ('uid', pa.int32()),
+            ('name', pa.string()),
+            ('age', pa.int32()),
+        ])
+        source = pa.Table.from_pydict(
+            {
+                'uid': pa.array([1, 2], type=pa.int32()),
+                'name': ['a', 'b'],
+                'age': pa.array([10, 20], type=pa.int32()),
+            },
+            schema=source_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on={'id': 'uid'},
+            when_not_matched=[
+                WhenNotMatched(insert={'name': 's.name'})
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2])
+        self.assertEqual(out['name'], ['a', 'b'])
+
+    def test_explicit_source_ref_not_remapped_by_on_key(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['old'],
+                    'age': pa.array([10], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source_schema = pa.schema([
+            ('uid', pa.int32()),
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('age', pa.int32()),
+        ])
+        source = pa.Table.from_pydict(
+            {
+                'uid': pa.array([1], type=pa.int32()),
+                'id': pa.array([42], type=pa.int32()),
+                'name': ['new'],
+                'age': pa.array([99], type=pa.int32()),
+            },
+            schema=source_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on={'id': 'uid'},
+            when_matched=[WhenMatched.update({
+                'age': source_col('id'),
+            })],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['age'], [42])
+        self.assertEqual(out['name'], ['old'])
+
+    def test_renamed_on_key_missing_source_col_rejected(self):
+        target = self._create_table()
+        source_schema = pa.schema([
+            ('uid', pa.int32()),
+            ('name', pa.string()),
+            ('age', pa.int32()),
+        ])
+        source = pa.Table.from_pydict(
+            {
+                'uid': pa.array([1], type=pa.int32()),
+                'name': ['a'],
+                'age': pa.array([10], type=pa.int32()),
+            },
+            schema=source_schema,
+        )
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=source,
+                catalog_options=self.catalog_options,
+                on={'id': 'uid'},
+                when_matched=[WhenMatched.update({
+                    'id': source_col('id'),
+                })],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('id', str(ctx.exception))
+
+    def test_lit_prevents_column_ref_interpretation(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['old'],
+                    'age': pa.array([10], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1], type=pa.int32()),
+                'name': ['ignored'],
+                'age': pa.array([99], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update({
+                'name': lit('s.active'),
+            })],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['name'], ['s.active'])
+        self.assertEqual(out['age'], [10])
+
+    def test_source_col_helper(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['old'],
+                    'age': pa.array([10], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1], type=pa.int32()),
+                'name': ['new'],
+                'age': pa.array([99], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update({
+                'age': source_col('age'),
+            })],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['name'], ['old'])
+        self.assertEqual(out['age'], [99])
+
+    def test_target_col_helper(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['keep'],
+                    'age': pa.array([10], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1], type=pa.int32()),
+                'name': ['ignored'],
+                'age': pa.array([99], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update({
+                'age': source_col('age'),
+                'name': target_col('name'),
+            })],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['name'], ['keep'])
+        self.assertEqual(out['age'], [99])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_multi_matched_clause_fall_through(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2, 3], type=pa.int32()),
+                'name': ['a2', 'b2', 'c2'],
+                'age': pa.array([99, 88, 77], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[
+                WhenMatched.update('*', condition='s.age > 80'),
+                WhenMatched.update('*'),
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['a2', 'b2', 'c2'])
+        self.assertEqual(out['age'], [99, 88, 77])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_multi_not_matched_clause_fall_through(self):
+        target = self._create_table()
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2, 3], type=pa.int32()),
+                'name': ['a', 'b', 'c'],
+                'age': pa.array([25, 15, 5], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_not_matched=[
+                WhenNotMatched(insert='*', condition='s.age >= 20'),
+                WhenNotMatched(insert='*'),
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_multi_matched_null_falls_through(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2, 3], type=pa.int32()),
+                'name': ['a2', 'b2', 'c2'],
+                'age': pa.array([None, 50, 60], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[
+                WhenMatched.update('*', condition='s.age > 40'),
+                WhenMatched.update('*'),
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['a2', 'b2', 'c2'])
+        self.assertEqual(out['age'], [None, 50, 60])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_multi_not_matched_null_falls_through(self):
+        target = self._create_table()
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2], type=pa.int32()),
+                'name': ['a', 'b'],
+                'age': pa.array([None, 25], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_not_matched=[
+                WhenNotMatched(insert='*', condition='s.age > 20'),
+                WhenNotMatched(insert='*'),
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2])
+        self.assertEqual(out['age'], [None, 25])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_multi_clause_no_match_skipped(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['a', 'b'],
+                    'age': pa.array([10, 20], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2], type=pa.int32()),
+                'name': ['a2', 'b2'],
+                'age': pa.array([5, 5], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[
+                WhenMatched.update('*', condition='s.age > 50'),
+                WhenMatched.update('*', condition='s.age > 30'),
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['name'], ['a', 'b'])
+        self.assertEqual(out['age'], [10, 20])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_multi_clause_first_wins(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['old'],
+                    'age': pa.array([10], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1], type=pa.int32()),
+                'name': ['first'],
+                'age': pa.array([99], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[
+                WhenMatched.update({'name': 's.name'},
+                                   condition='s.age > 50'),
+                WhenMatched.update({'age': 's.age'},
+                                   condition='s.age > 10'),
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['name'], ['first'])
+        self.assertEqual(out['age'], [10])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_multi_clause_duplicate_source_one_actionable(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['a'],
+                    'age': pa.array([10], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 1], type=pa.int32()),
+                'name': ['x', 'y'],
+                'age': pa.array([99, 5], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[
+                WhenMatched.update('*', condition='s.age > 50'),
+                WhenMatched.update('*', condition='s.age > 80'),
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['name'], ['x'])
+        self.assertEqual(out['age'], [99])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_multi_clause_duplicate_both_actionable_raises(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['a'],
+                    'age': pa.array([10], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 1], type=pa.int32()),
+                'name': ['x', 'y'],
+                'age': pa.array([99, 50], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        with self.assertRaises(Exception) as ctx:
+            merge_into(
+                target=target,
+                source=source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[
+                    WhenMatched.update('*', condition='s.age > 80'),
+                    WhenMatched.update('*', condition='s.age > 30'),
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('multiple source rows', str(ctx.exception))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_multi_clause_duplicate_update_delete_raises(self):
+        options = dict(self.de_options)
+        options['deletion-vectors.enabled'] = 'true'
+        target = self._create_table(options=options)
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['a'],
+                    'age': pa.array([10], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 1], type=pa.int32()),
+                'name': ['x', 'y'],
+                'age': pa.array([99, 5], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        with self.assertRaises(Exception) as ctx:
+            merge_into(
+                target=target,
+                source=source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[
+                    WhenMatched.update('*', condition='s.age > 50'),
+                    WhenMatched.delete(condition='s.age < 10'),
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('multiple source rows', str(ctx.exception))
+
+    def test_self_merge_update_literal(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update({'age': lit(99)})],
+        )
+
+        self.assertEqual(result['num_matched'], 3)
+        out = self._read_sorted(target)
+        self.assertEqual(out['age'], [99, 99, 99])
+        self.assertEqual(out['name'], ['a', 'b', 'c'])
+
+    def test_self_merge_rejects_concurrent_row_id_reassignment(self):
+        from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
+
+        schema = pa.schema([
+            ('id', pa.int32()),
+            ('pt', pa.string()),
+            ('value', pa.int32()),
+        ])
+        target = 'default.tbl_{}'.format(uuid.uuid4().hex[:8])
+        self.catalog.create_table(
+            target,
+            Schema.from_pyarrow_schema(
+                schema,
+                partition_keys=['pt'],
+                options=self.de_options,
+            ),
+            False,
+        )
+        self._write(target, pa.table({
+            'id': pa.array([1, 2], type=pa.int32()),
+            'pt': ['p1', 'p2'],
+            'value': pa.array([10, 20], type=pa.int32()),
+        }, schema=schema))
+        table = self.catalog.get_table(target)
+        self.assertEqual(table.primary_keys, [])
+        real_atomic_commit = RenamingSnapshotCommit.commit
+        injected = [False]
+
+        def reassign_then_fail_cas(commit, base_uuid, snapshot, statistics):
+            if not injected[0] and snapshot.commit_kind == 'APPEND':
+                injected[0] = True
+                self._reassign_partition_row_ids(table, 'p1')
+                return False
+            return real_atomic_commit(
+                commit, base_uuid, snapshot, statistics)
+
+        error = None
+        with patch.object(
+                RenamingSnapshotCommit,
+                'commit',
+                new=reassign_then_fail_cas,
+        ):
+            try:
+                merge_into(
+                    target=target,
+                    source=target,
+                    catalog_options=self.catalog_options,
+                    on=['_ROW_ID'],
+                    when_matched=[WhenMatched.update({'value': lit(99)})],
+                    num_partitions=_TEST_NUM_PARTITIONS,
+                )
+            except RuntimeError as exc:
+                error = exc
+
+        self.assertTrue(injected[0])
+        output = self._read_sorted(target)
+        self.assertIsNotNone(
+            error,
+            'commit silently succeeded with partial result {}'.format(output),
+        )
+        self.assertRegex(str(error), 'Row ID existence conflict')
+        self.assertEqual(output['value'], [10, 20])
+
+    def test_self_merge_update_bypasses_routing_shuffle(self):
+        options = dict(self.de_options)
+        options.update({
+            'source.split.target-size': '1gb',
+            'source.split.open-file-cost': '1b',
+        })
+        target = self._create_table(options=options)
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        table = self.catalog.get_table(target)
+        packed_splits = table.new_read_builder().new_scan().plan_for_write().splits()
+        self.assertEqual(len(packed_splits), 1)
+
+        with patch.object(
+                ray.data.Dataset,
+                'groupby',
+                side_effect=AssertionError('routing shuffle is not allowed'),
+        ):
+            result, plan = self._merge_and_capture_self_merge_plan(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update({'age': lit(99)})],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(len(plan.file_groups), 2)
+        self.assertEqual(result['num_matched'], 4)
+        self.assertEqual(self._read_sorted(target)['age'], [99, 99, 99, 99])
+
+    def test_self_merge_rebases_staged_updates_after_compaction(self):
+        from pypaimon.data.generic_variant import GenericVariant
+        from pypaimon.data.variant_path import variant_get, variant_replace
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+
+        options = dict(self.de_options)
+        options.update({
+            'commit.max-retries': '0',
+            'data-evolution.row-id-conflict-rewrite.max-size': '1 B',
+            'global-index.enabled': 'true',
+            'bucket': '-1',
+        })
+        variant_type = pa.struct([
+            pa.field('value', pa.binary(), nullable=False),
+            pa.field('metadata', pa.binary(), nullable=False),
+        ])
+        schema = pa.schema([
+            ('id', pa.int32()),
+            ('content_key', pa.string()),
+            ('clip_id', pa.string()),
+            ('payload', variant_type),
+            ('topic_schema', pa.string()),
+        ])
+        target = 'default.tbl_{}'.format(uuid.uuid4().hex[:8])
+        self.catalog.create_table(
+            target,
+            Schema.from_pyarrow_schema(schema, options=options),
+            False,
+        )
+
+        def payload(values):
+            return GenericVariant.to_arrow_array([
+                GenericVariant.from_python({
+                    'angular_velocity': {'y': value, 'z': value + 1.0},
+                    'linear_acceleration': {
+                        'y': value + 2.0,
+                        'z': value + 3.0,
+                    },
+                })
+                for value in values
+            ])
+
+        self._write(
+            target,
+            pa.table({
+                'id': pa.array([1, 2], type=pa.int32()),
+                'content_key': ['topic.imu', 'topic.imu'],
+                'clip_id': ['clip-a', 'clip-b'],
+                'payload': payload([1.0, 10.0]),
+                'topic_schema': [None, None],
+            }, schema=schema),
+        )
+        table = self.catalog.get_table(target)
+        self.assertGreater(table.create_global_index('content_key'), 0)
+
+        # Keep the second content key outside the existing global index.
+        self._write(
+            target,
+            pa.table({
+                'id': pa.array([3, 4], type=pa.int32()),
+                'content_key': [
+                    'topic.imu_filtered', 'topic.imu_filtered',
+                ],
+                'clip_id': ['clip-a', 'clip-b'],
+                'payload': payload([20.0, 30.0]),
+                'topic_schema': [None, None],
+            }, schema=schema),
+        )
+        real_apply = merge_module.distributed_self_merge_update_apply
+        stale_paths = []
+
+        def stage_then_compact(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            stale_paths.extend(
+                file.file_path
+                for message in result[0]
+                for file in message.new_files
+            )
+            self._compact_all_data_files(table)
+            return result
+
+        path_types = {
+            '$.angular_velocity.y': pa.float64(),
+            '$.angular_velocity.z': pa.float64(),
+            '$.linear_acceleration.y': pa.float64(),
+            '$.linear_acceleration.z': pa.float64(),
+        }
+
+        def negate_imu_yz(rows):
+            values = variant_get(rows['payload'], path_types)
+            return variant_replace(
+                rows['payload'],
+                {
+                    path: pc.negate(value)
+                    for path, value in values.items()
+                },
+                strict=True,
+            )
+
+        with patch.object(
+                merge_module,
+                'distributed_self_merge_update_apply',
+                side_effect=stage_then_compact,
+        ), patch(
+                'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
+        ):
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                read_columns=['payload'],
+                when_matched=[WhenMatched.update({
+                    'payload': negate_imu_yz,
+                    'topic_schema': lit('imu_yz_negated_v1'),
+                }, condition=(
+                    "t.content_key IN "
+                    "('topic.imu', 'topic.imu_filtered') "
+                    "AND t.clip_id IN ('clip-a', 'clip-b') "
+                    "AND (t.topic_schema IS NULL OR "
+                    "t.topic_schema <> 'imu_yz_negated_v1')"
+                ))],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 4)
+        output = self._read_sorted(target)
+        decoded = [
+            GenericVariant.from_arrow_struct(value).to_python()
+            for value in output['payload']
+        ]
+        self.assertEqual(
+            [row['angular_velocity']['y'] for row in decoded],
+            [-1.0, -10.0, -20.0, -30.0],
+        )
+        self.assertEqual(
+            output['topic_schema'],
+            ['imu_yz_negated_v1'] * 4,
+        )
+        self.assertEqual(
+            output['content_key'],
+            [
+                'topic.imu', 'topic.imu',
+                'topic.imu_filtered', 'topic.imu_filtered',
+            ],
+        )
+        self.assertTrue(stale_paths)
+        # Match Spark: replaced staging files are left for orphan cleanup.
+        self.assertTrue(all(os.path.exists(path) for path in stale_paths))
+
+    def test_self_merge_compaction_retry_checks_core_rollback(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+        from pypaimon.ray import row_id_conflict_rewriter as rewriter_module
+        from pypaimon.write.file_store_commit import FileStoreCommit
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        table = self.catalog.get_table(target)
+        real_apply = merge_module.distributed_self_merge_update_apply
+        real_rewrite = rewriter_module._rewrite_updates
+        real_commit_init = FileStoreCommit.__init__
+        rollbacks = []
+
+        def stage_then_compact(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            self._compact_all_data_files(table)
+            return result
+
+        rewrite_calls = [0]
+
+        def miss_precommit_race(*args, **kwargs):
+            rewrite_calls[0] += 1
+            if rewrite_calls[0] == 1:
+                return None
+            return real_rewrite(*args, **kwargs)
+
+        def init_with_rollback(commit, *args, **kwargs):
+            real_commit_init(commit, *args, **kwargs)
+            commit.rollback = Mock()
+            commit.rollback.try_to_rollback.return_value = False
+            rollbacks.append(commit.rollback)
+
+        with patch.object(
+                merge_module,
+                'distributed_self_merge_update_apply',
+                side_effect=stage_then_compact,
+        ), patch.object(
+                rewriter_module,
+                '_rewrite_updates',
+                side_effect=miss_precommit_race,
+        ), patch.object(
+                FileStoreCommit,
+                '__init__',
+                new=init_with_rollback,
+        ), patch.object(
+                FileStoreCommit,
+                '_commit_retry_wait',
+        ) as commit_retry_wait, patch.object(
+                rewriter_module,
+                '_retry_wait',
+        ) as ray_retry_wait:
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update({'age': lit(99)})],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 4)
+        self.assertEqual(self._read_sorted(target)['age'], [99, 99, 99, 99])
+        commit_retry_wait.assert_not_called()
+        self.assertTrue(any(
+            rollback.try_to_rollback.called for rollback in rollbacks
+        ))
+        ray_retry_wait.assert_called_once()
+        self.assertEqual(ray_retry_wait.call_args[0][1], 0)
+        self.assertEqual(rewrite_calls[0], 2)
+
+    def test_self_merge_rebases_again_after_second_compaction(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+        from pypaimon.ray import row_id_conflict_rewriter as rewriter_module
+        from pypaimon.write.write_builder import BatchWriteBuilder
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        table = self.catalog.get_table(target)
+        real_apply = merge_module.distributed_self_merge_update_apply
+        real_rewrite = rewriter_module._rewrite_updates
+        real_new_commit = BatchWriteBuilder.new_commit
+        coordinator_commit_users = []
+
+        def capture_new_commit(write_builder):
+            commit = real_new_commit(write_builder)
+            if (
+                    write_builder.table.options
+                    .data_evolution_row_id_conflict_rewrite_max_size() == 0
+            ):
+                coordinator_commit_users.append(write_builder.commit_user)
+            return commit
+
+        def stage_then_compact(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            self._compact_all_data_files(table)
+            return result
+
+        rewrite_snapshot_ids = []
+
+        def miss_precommit_race(
+                rewrite_table, messages, latest_snapshot, **kwargs):
+            rewrite_snapshot_ids.append(latest_snapshot.id)
+            if len(rewrite_snapshot_ids) == 1:
+                return None
+            return real_rewrite(
+                rewrite_table,
+                messages,
+                latest_snapshot,
+                **kwargs,
+            )
+
+        retry_counts = []
+
+        def compact_before_first_retry(_table, retry_count):
+            retry_counts.append(retry_count)
+            if retry_count == 0:
+                # Change the current row-id boundary before the second
+                # compaction so the next commit observes the same
+                # RowIdExistenceConflict used by Spark's retry loop.
+                self._write(target, self._source(ids=(5, 6)))
+                self._compact_all_data_files(table)
+
+        with patch.object(
+                merge_module,
+                'distributed_self_merge_update_apply',
+                side_effect=stage_then_compact,
+        ), patch.object(
+                rewriter_module,
+                '_rewrite_updates',
+                side_effect=miss_precommit_race,
+        ), patch.object(
+            rewriter_module,
+            '_retry_wait',
+            side_effect=compact_before_first_retry,
+        ), patch.object(
+            BatchWriteBuilder,
+            'new_commit',
+            new=capture_new_commit,
+        ):
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update({'age': lit(99)})],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 4)
+        output = self._read_sorted(target)
+        self.assertEqual(output['id'], [1, 2, 3, 4, 5, 6])
+        self.assertEqual(output['age'], [99, 99, 99, 99, 10, 10])
+        self.assertEqual(retry_counts, [0, 1])
+        self.assertEqual(len(rewrite_snapshot_ids), 3)
+        self.assertEqual(rewrite_snapshot_ids[0], rewrite_snapshot_ids[1])
+        self.assertGreater(rewrite_snapshot_ids[2], rewrite_snapshot_ids[1])
+        self.assertEqual(len(coordinator_commit_users), 3)
+        self.assertEqual(len(set(coordinator_commit_users)), 1)
+
+    def test_self_merge_uncertain_commit_then_compaction_is_duplicate(self):
+        from pypaimon.ray import row_id_conflict_rewriter as rewriter_module
+        from pypaimon.write.write_builder import BatchWriteBuilder
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        table = self.catalog.get_table(target)
+        base_snapshot_id = self._snapshot_id(target)
+        real_new_commit = BatchWriteBuilder.new_commit
+        coordinator_commit_users = []
+        duplicate_results = []
+        atomic_attempts = []
+        injected = [False]
+
+        def inject_uncertain_commit(write_builder):
+            commit = real_new_commit(write_builder)
+            if (
+                    injected[0]
+                    or write_builder.table.options
+                    .data_evolution_row_id_conflict_rewrite_max_size() != 0
+            ):
+                return commit
+
+            injected[0] = True
+            coordinator_commit_users.append(write_builder.commit_user)
+            file_store_commit = commit.file_store_commit
+            real_atomic_commit = file_store_commit.snapshot_commit.commit
+            real_duplicate_check = file_store_commit._is_duplicate_commit
+
+            def track_duplicate(*args, **kwargs):
+                result = real_duplicate_check(*args, **kwargs)
+                duplicate_results.append(result)
+                return result
+
+            def commit_then_compact_and_timeout(
+                    base_uuid, snapshot, statistics):
+                atomic_attempts.append(snapshot.id)
+                self.assertTrue(real_atomic_commit(
+                    base_uuid, snapshot, statistics,
+                ))
+                self._compact_all_data_files(table)
+                raise TimeoutError('lost snapshot commit response')
+
+            file_store_commit._is_duplicate_commit = track_duplicate
+            file_store_commit.snapshot_commit.commit = (
+                commit_then_compact_and_timeout
+            )
+            file_store_commit._commit_retry_wait = Mock()
+            return commit
+
+        with patch.object(
+            BatchWriteBuilder,
+            'new_commit',
+            new=inject_uncertain_commit,
+        ), patch.object(
+            rewriter_module,
+            '_rewrite_updates',
+            wraps=rewriter_module._rewrite_updates,
+        ) as rewrite_updates:
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update({'age': lit(99)})],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertTrue(injected[0])
+        self.assertEqual(result['num_matched'], 4)
+        self.assertEqual(self._read_sorted(target)['age'], [99, 99, 99, 99])
+        self.assertEqual(atomic_attempts, [base_snapshot_id + 1])
+        self.assertEqual(duplicate_results, [False, True])
+        self.assertEqual(len(coordinator_commit_users), 1)
+        self.assertEqual(
+            table.snapshot_manager().get_snapshot_by_id(
+                base_snapshot_id + 1
+            ).commit_user,
+            coordinator_commit_users[0],
+        )
+        self.assertEqual(
+            table.snapshot_manager().get_snapshot_by_id(
+                base_snapshot_id + 2
+            ).commit_kind,
+            'COMPACT',
+        )
+        self.assertEqual(self._snapshot_id(target), base_snapshot_id + 2)
+        rewrite_updates.assert_not_called()
+
+    def test_self_merge_rejects_concurrent_overwrite(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        table = self.catalog.get_table(target)
+        real_apply = merge_module.distributed_self_merge_update_apply
+        staging_paths = []
+
+        def stage_then_overwrite(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            staging_paths.extend(
+                file.external_path or file.file_path
+                for message in result[0]
+                for file in message.new_files
+            )
+            replacement = pa.Table.from_pydict(
+                {
+                    'id': pa.array([30, 40], type=pa.int32()),
+                    'name': ['replacement', 'replacement'],
+                    'age': pa.array([30, 40], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            )
+            write_builder = table.new_batch_write_builder().overwrite({})
+            writer = write_builder.new_write()
+            commit = write_builder.new_commit()
+            try:
+                writer.write_arrow(replacement)
+                commit.commit(writer.prepare_commit())
+            finally:
+                writer.close()
+                commit.close()
+            return result
+
+        with patch.object(
+                merge_module,
+                'distributed_self_merge_update_apply',
+                side_effect=stage_then_overwrite,
+        ), self.assertRaises(Exception):
+            merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update({'age': lit(99)})],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        output = self._read_sorted(target)
+        self.assertEqual(output['id'], [30, 40])
+        self.assertEqual(output['age'], [30, 40])
+        self.assertTrue(staging_paths)
+        # Match Spark: failed staging files are left for orphan cleanup.
+        self.assertTrue(
+            all(os.path.exists(path) for path in staging_paths)
+        )
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_update_and_delete(self):
+        options = dict(self.de_options)
+        options['deletion-vectors.enabled'] = 'true'
+        target = self._create_table(options=options)
+        self._write(target, self._source(ids=(1, 2, 3, 4)))
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[
+                WhenMatched.update(
+                    {'age': lit(99)}, condition='t.id <= 2',
+                ),
+                WhenMatched.delete(condition='t.id = 3'),
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 3)
+        output = self._read_sorted(target)
+        self.assertEqual(output['id'], [1, 2, 4])
+        self.assertEqual(output['age'], [99, 99, 10])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_update_delete_does_not_rebase_after_compaction(self):
+        from pypaimon.ray import row_id_conflict_rewriter as rewriter_module
+
+        options = dict(self.de_options)
+        options['deletion-vectors.enabled'] = 'true'
+        target = self._create_table(options=options)
+        self._write(target, self._source(ids=(1, 2, 3, 4)))
+        table = self.catalog.get_table(target)
+        real_commit = (
+            rewriter_module.commit_self_merge_with_compaction_retry
+        )
+        real_rewrite = rewriter_module._rewrite_updates
+        rewrite_results = []
+
+        def compact_then_commit(*args, **kwargs):
+            self._compact_all_data_files(table)
+            return real_commit(*args, **kwargs)
+
+        def assert_rewrite_disabled(*args, **kwargs):
+            result = real_rewrite(*args, **kwargs)
+            rewrite_results.append(result)
+            return result
+
+        with patch.object(
+                rewriter_module,
+                'commit_self_merge_with_compaction_retry',
+                side_effect=compact_then_commit,
+        ), patch.object(
+                rewriter_module,
+                '_rewrite_updates',
+                side_effect=assert_rewrite_disabled,
+        ), self.assertRaises(Exception):
+            merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[
+                    WhenMatched.update(
+                        {'age': lit(99)}, condition='t.id <= 2',
+                    ),
+                    WhenMatched.delete(condition='t.id = 3'),
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertTrue(rewrite_results)
+        self.assertTrue(all(result is None for result in rewrite_results))
+        output = self._read_sorted(target)
+        self.assertEqual(output['id'], [1, 2, 3, 4])
+        self.assertEqual(output['age'], [10, 10, 10, 10])
+
+    def test_self_merge_compaction_rebase_keeps_logical_conflicts(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        table = self.catalog.get_table(target)
+        real_apply = merge_module.distributed_self_merge_update_apply
+
+        def stage_then_update_and_compact(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            write_builder = table.new_batch_write_builder()
+            update = write_builder.new_update()
+            predicate = update.new_predicate_builder().equal('id', 2)
+            messages = update.update_by_predicate(
+                predicate,
+                {'age': 100},
+            )
+            write_builder.new_commit().commit(messages)
+            self._compact_all_data_files(table)
+            return result
+
+        def increment_age(rows):
+            return pc.add(rows['age'], 1)
+
+        with patch.object(
+                merge_module,
+                'distributed_self_merge_update_apply',
+                side_effect=stage_then_update_and_compact,
+        ), self.assertRaises(Exception) as ctx:
+            merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                read_columns=['age'],
+                when_matched=[WhenMatched.update({
+                    'age': increment_age,
+                })],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertIn("multiple 'MERGE INTO'", str(ctx.exception))
+        self.assertEqual(self._read_sorted(target)['age'][1], 100)
+
+    def test_self_merge_missing_logical_snapshot_fails_closed(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+        from pypaimon.snapshot.snapshot_manager import SnapshotManager
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        table = self.catalog.get_table(target)
+        real_apply = merge_module.distributed_self_merge_update_apply
+        real_get_snapshot = SnapshotManager.get_snapshot_by_id
+        hidden_snapshot = {'id': None}
+
+        def get_snapshot_except_hidden(manager, snapshot_id):
+            if snapshot_id == hidden_snapshot['id']:
+                return None
+            return real_get_snapshot(manager, snapshot_id)
+
+        def stage_then_update_and_compact(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            write_builder = table.new_batch_write_builder()
+            update = write_builder.new_update()
+            predicate = update.new_predicate_builder().equal('id', 2)
+            messages = update.update_by_predicate(predicate, {'age': 100})
+            write_builder.new_commit().commit(messages)
+            logical_snapshot_id = self._snapshot_id(target)
+            self._compact_all_data_files(table)
+            hidden_snapshot['id'] = logical_snapshot_id
+            return result
+
+        def increment_age(rows):
+            return pc.add(rows['age'], 1)
+
+        with patch.object(
+                merge_module,
+                'distributed_self_merge_update_apply',
+                side_effect=stage_then_update_and_compact,
+        ), patch.object(
+                SnapshotManager,
+                'get_snapshot_by_id',
+                new=get_snapshot_except_hidden,
+        ), self.assertRaisesRegex(
+                RuntimeError,
+                "snapshot .* cannot be found",
+        ):
+            merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                read_columns=['age'],
+                when_matched=[WhenMatched.update({
+                    'age': increment_age,
+                })],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(self._read_sorted(target)['age'][1], 100)
+
+    def test_self_merge_compaction_rebase_preserves_other_column_update(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        table = self.catalog.get_table(target)
+        real_apply = merge_module.distributed_self_merge_update_apply
+
+        def stage_then_update_and_compact(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            self._write(target, self._source(ids=(5,)))
+            write_builder = table.new_batch_write_builder()
+            update = write_builder.new_update()
+            predicate = update.new_predicate_builder().equal('id', 2)
+            messages = update.update_by_predicate(
+                predicate,
+                {'name': 'concurrent'},
+            )
+            write_builder.new_commit().commit(messages)
+            self._compact_all_data_files(table)
+            return result
+
+        def increment_age(rows):
+            return pc.add(rows['age'], 1)
+
+        with patch.object(
+                merge_module,
+                'distributed_self_merge_update_apply',
+                side_effect=stage_then_update_and_compact,
+        ), patch(
+                'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
+        ):
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                read_columns=['age'],
+                when_matched=[WhenMatched.update({
+                    'age': increment_age,
+                })],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 4)
+        output = self._read_sorted(target)
+        self.assertEqual(output['age'], [11, 11, 11, 11, 10])
+        self.assertEqual(
+            output['name'],
+            ['x', 'concurrent', 'x', 'x', 'x'],
+        )
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_filters_file_group_in_batches(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+        from pypaimon.ray import data_evolution_merge_join as join_module
+        from pypaimon.write.file_store_commit import _abort_commit_messages
+
+        options = dict(self.de_options)
+        options['read.batch-size'] = '2'
+        target = self._create_table(options=options)
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3, 4, 5, 6], type=pa.int32()),
+                    'name': ['a', 'b', 'c', 'd', 'e', 'f'],
+                    'age': pa.array([0, 2, 0, 4, 0, 6], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        clauses = [WhenMatched.update(
+            {'age': lit(99)}, condition='t.age = t.id',
+        )]
+        table, source_ds, matched, not_matched, ctx = merge_module._prepare(
+            target,
+            target,
+            self.catalog_options,
+            clauses,
+            [],
+            ['_ROW_ID'],
+        )
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        plan, _, _, _ = merge_module._build_datasets(
+            table,
+            target,
+            source_ds,
+            matched,
+            not_matched,
+            ctx,
+            snapshot,
+            _TEST_NUM_PARTITIONS,
+            None,
+        )
+        self.assertIsNone(plan.predicate)
+        self.assertEqual(len(plan.file_groups), 1)
+
+        context = join_module._SelfMergeUpdateContext(
+            table=plan.table,
+            scan_table=plan.scan_table,
+            predicate=plan.predicate,
+            read_type=plan.read_type,
+            clauses=plan.clauses,
+            update_cols=plan.update_cols,
+            update_schema=plan.update_schema,
+            row_id_name=plan.row_id_name,
+            snapshot_id=plan.snapshot_id,
+            callable_input_columns=plan.callable_input_columns,
+        )
+        batch_sizes = []
+        real_build_transform = join_module._build_matched_transform
+
+        def tracked_build_transform(*args, **kwargs):
+            real_transform = real_build_transform(*args, **kwargs)
+
+            def tracked_transform(batch):
+                batch_sizes.append(batch.num_rows)
+                return real_transform(batch)
+
+            return tracked_transform
+
+        messages = []
+        try:
+            with patch.object(
+                    join_module,
+                    '_build_matched_transform',
+                    side_effect=tracked_build_transform,
+            ):
+                messages, count, row_ids = (
+                    join_module._apply_self_merge_update_group(
+                        context, plan.file_groups[0], True,
+                    )
+                )
+
+            self.assertEqual(batch_sizes, [2, 2, 2])
+            self.assertEqual(count, 3)
+            self.assertEqual(row_ids, [1, 3, 5])
+        finally:
+            _abort_commit_messages(table, messages)
+
+    def test_self_merge_update_aborts_other_groups_after_failure(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+        from pypaimon.ray.data_evolution_merge_join import (
+            distributed_self_merge_update_apply,
+        )
+
+        options = dict(self.de_options)
+        options.update({
+            'source.split.target-size': '1b',
+            'source.split.open-file-cost': '1b',
+        })
+        target = self._create_table(options=options)
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+
+        table, source_ds, matched, not_matched, ctx = merge_module._prepare(
+            target,
+            target,
+            self.catalog_options,
+            [WhenMatched.update({'age': lit(99)})],
+            [],
+            ['_ROW_ID'],
+        )
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        plan, _, _, _ = merge_module._build_datasets(
+            table,
+            target,
+            source_ds,
+            matched,
+            not_matched,
+            ctx,
+            snapshot,
+            _TEST_NUM_PARTITIONS,
+            None,
+        )
+        self.assertGreaterEqual(len(plan.file_groups), 2)
+
+        before = set()
+        for root, _, files in os.walk(self.warehouse):
+            before.update(os.path.join(root, name) for name in files)
+
+        for data_file in plan.file_groups[-1].files:
+            data_file.file_path += '.missing'
+
+        with self.assertRaises(Exception):
+            distributed_self_merge_update_apply(
+                plan,
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        after = set()
+        for root, _, files in os.walk(self.warehouse):
+            after.update(os.path.join(root, name) for name in files)
+        self.assertEqual(before, after)
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_callable_assignment(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        def increment_age(rows):
+            if rows.column_names != ['age', '_ROW_ID']:
+                raise AssertionError(rows.column_names)
+            return pc.add(rows['age'], 1)
+
+        with patch.object(
+                ray.data.Dataset,
+                'groupby',
+                side_effect=AssertionError('routing shuffle is not allowed'),
+        ):
+            result, plan = self._merge_and_capture_self_merge_plan(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                read_columns=['age'],
+                when_matched=[WhenMatched.update(
+                    {
+                        'age': increment_age,
+                        'name': lit('updated'),
+                    },
+                    condition='t.id IN (1, 3)',
+                )],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 2)
+        self.assertEqual(
+            self._read_sorted(target),
+            {
+                'id': [1, 2, 3],
+                'name': ['updated', 'b', 'updated'],
+                'age': [11, 20, 31],
+            },
+        )
+        self.assertEqual(
+            [field.name for field in plan.read_type],
+            ['_ROW_ID', 'id', 'age'],
+        )
+        self.assertEqual(plan.callable_input_columns, ['age', '_ROW_ID'])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_callable_updates_variant_path(self):
+        from pypaimon.data.generic_variant import GenericVariant
+        from pypaimon.data.variant_path import variant_get, variant_replace
+
+        variant_type = pa.struct([
+            pa.field('value', pa.binary(), nullable=False),
+            pa.field('metadata', pa.binary(), nullable=False),
+        ])
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', variant_type),
+        ])
+        target = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        self.catalog.create_table(
+            target,
+            Schema.from_pyarrow_schema(pa_schema, options=self.de_options),
+            False,
+        )
+        payload = GenericVariant.to_arrow_array([
+            GenericVariant.from_python({'value': 1.5}),
+            GenericVariant.from_python({'value': 2.5}),
+        ])
+        self._write(target, pa.table({
+            'id': pa.array([1, 2], type=pa.int32()),
+            'payload': payload,
+        }, schema=pa_schema))
+
+        def negate_value(rows):
+            values = variant_get(
+                rows['payload'], '$.value', pa.float64()
+            )
+            return variant_replace(
+                rows['payload'], '$.value', pc.negate(values), strict=True
+            )
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            read_columns=['payload'],
+            when_matched=[WhenMatched.update(
+                {'payload': negate_value}, condition='t.id = 2',
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 1)
+        output = self._read_sorted(target)['payload']
+        decoded = [
+            GenericVariant.from_arrow_struct(value).to_python()
+            for value in output
+        ]
+        self.assertEqual(decoded, [{'value': 1.5}, {'value': -2.5}])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_no_match_does_not_invoke_callable(self):
+        target = self._create_table()
+        self._write(target, self._source())
+
+        def should_not_run(_rows):
+            raise AssertionError("Callable must not run without matched rows")
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            read_columns=['age'],
+            when_matched=[WhenMatched.update(
+                {'age': should_not_run}, condition='t.id = 99',
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 0)
+        self.assertEqual(self._read_sorted(target)['age'], [10])
+
+    def test_self_merge_callable_validation(self):
+        target = self._create_table()
+
+        with self.assertRaisesRegex(
+                ValueError, 'Callable SET values require read_columns'):
+            merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update({
+                    'age': lambda rows: rows['age'],
+                })],
+            )
+
+        with self.assertRaisesRegex(
+                ValueError, 'read_columns requires a callable SET value'):
+            merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                read_columns=['age'],
+                when_matched=[WhenMatched.update({'age': lit(99)})],
+            )
+
+        with self.assertRaisesRegex(
+                ValueError, "Read column 'missing' is not in target"):
+            merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                read_columns=['missing'],
+                when_matched=[WhenMatched.update({
+                    'age': lambda rows: rows['missing'],
+                })],
+            )
+
+        source = self._create_table()
+        with self.assertRaisesRegex(
+                TypeError, 'callables are only supported for self-merge'):
+            merge_into(
+                target=target,
+                source=source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                read_columns=['age'],
+                when_matched=[WhenMatched.update({
+                    'age': lambda rows: rows['age'],
+                })],
+            )
+
+    def test_self_merge_callable_rejects_invalid_result(self):
+        from pypaimon.ray.data_evolution_merge_transform import (
+            _resolve_spec_array,
+        )
+
+        batch = pa.table({'t.age': pa.array([10], type=pa.int32())})
+        callable_input = pa.table({
+            'age': pa.array([10], type=pa.int32()),
+        })
+
+        with self.assertRaisesRegex(
+                ValueError, 'must return a pyarrow.Array'):
+            _resolve_spec_array(
+                lambda rows: rows['age'].to_pylist(),
+                batch,
+                set(batch.column_names),
+                [],
+                pa.int32(),
+                callable_input=callable_input,
+            )
+
+        with self.assertRaisesRegex(
+                ValueError, 'length must match matched row count'):
+            _resolve_spec_array(
+                lambda _rows: pa.array([], type=pa.int32()),
+                batch,
+                set(batch.column_names),
+                [],
+                pa.int32(),
+                callable_input=callable_input,
+            )
+
+    def test_self_merge_callable_preserves_chunked_result(self):
+        from pypaimon.ray.data_evolution_merge_transform import (
+            _resolve_spec_array,
+        )
+
+        batch = pa.table({'t.age': pa.array([10, 20], type=pa.int32())})
+        callable_input = pa.table({
+            'age': pa.array([10, 20], type=pa.int32()),
+        })
+
+        def chunked_result(_rows):
+            return pa.chunked_array([
+                pa.array([10], type=pa.int64()),
+                pa.array([20], type=pa.int64()),
+            ])
+
+        result = _resolve_spec_array(
+            chunked_result,
+            batch,
+            set(batch.column_names),
+            [],
+            pa.int32(),
+            callable_input=callable_input,
+        )
+        self.assertIsInstance(result, pa.ChunkedArray)
+        self.assertEqual(result.num_chunks, 2)
+        self.assertEqual(result.type, pa.int32())
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_condition_pushes_down_predicate(self):
+        from pypaimon.common.options.core_options import (
+            CoreOptions, GlobalIndexSearchMode,
+        )
+
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+        result, plan = self._merge_and_capture_self_merge_plan(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update(
+                {'age': lit(99)}, condition='t.id IN (1, 3)',
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 2)
+        self.assertEqual(
+            self._read_sorted(target),
+            {
+                'id': [1, 2, 3],
+                'name': ['a', 'b', 'c'],
+                'age': [99, 20, 99],
+            },
+        )
+        predicate = plan.predicate
+        self.assertEqual(predicate.method, 'in')
+        self.assertEqual(predicate.field, 'id')
+        self.assertEqual(predicate.literals, [1, 3])
+        self.assertEqual(
+            plan.scan_table.table_schema.options.get(
+                CoreOptions.SCALAR_INDEX_SEARCH_MODE.key()),
+            GlobalIndexSearchMode.FULL.value,
+        )
+        self.assertEqual(
+            plan.scan_table.table_schema.fields,
+            plan.table.table_schema.fields,
+        )
+        self.assertEqual(
+            plan.scan_table.table_schema.id,
+            plan.table.table_schema.id,
+        )
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_large_or_condition_pushes_down_predicate(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([0, 1, 2], type=pa.int32()),
+                    'name': ['Alice', 'Alice', 'Alice'],
+                    'age': pa.array([10, 11, 12], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+        condition = "t.name = 'Alice' AND ({})".format(
+            ' OR '.join(
+                '(t.id = {} AND t.age = {})'.format(i, i + 10)
+                for i in range(2000)
+            )
+        )
+
+        result, plan = self._merge_and_capture_self_merge_plan(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update(
+                {'age': lit(99)}, condition=condition,
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 3)
+        self.assertEqual(self._read_sorted(target)['age'], [99, 99, 99])
+        predicate = plan.predicate
+        self.assertEqual(predicate.method, 'and')
+        self.assertEqual(
+            (predicate.literals[0].field,
+             predicate.literals[0].literals),
+            ('name', ['Alice']),
+        )
+        large_or = predicate.literals[1]
+        self.assertEqual(large_or.method, 'or')
+        self.assertEqual(len(large_or.literals), 2000)
+        self.assertTrue(all(
+            child.method == 'and' and len(child.literals) == 2
+            for child in large_or.literals
+        ))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_pushdown_handles_evolved_file_groups(self):
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.schema.schema_change import SchemaChange
+
+        options = dict(self.de_options)
+        options.update({
+            'global-index.enabled': 'true',
+            'bucket': '-1',
+        })
+        target = self._create_table(options=options)
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['a', 'b'],
+                    'age': pa.array([10, 20], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        table = self.catalog.get_table(target)
+        self.assertGreater(table.create_global_index('id'), 0)
+
+        # This append is intentionally not covered by the existing index.
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([3, 4], type=pa.int32()),
+                    'name': ['c', 'd'],
+                    'age': pa.array([30, 40], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        from pypaimon.index.index_file_handler import IndexFileHandler
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        indexed_ranges = {
+            (
+                entry.index_file.global_index_meta.row_range_start,
+                entry.index_file.global_index_meta.row_range_end,
+            )
+            for entry in IndexFileHandler(table).scan(snapshot)
+        }
+        self.assertEqual({(0, 1)}, indexed_ranges)
+
+        first_result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update(
+                {'age': lit(99)}, condition='t.id IN (2, 3)',
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+        self.assertEqual(first_result['num_matched'], 2)
+
+        self.catalog.alter_table(
+            target,
+            [SchemaChange.add_column('note', AtomicType('STRING'))],
+            False,
+        )
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update(
+                {'name': lit('updated')},
+                condition='t.id IN (1, 4) AND t.note IS NULL',
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 2)
+        self.assertEqual(
+            self._read_sorted(target),
+            {
+                'id': [1, 2, 3, 4],
+                'name': ['updated', 'b', 'c', 'updated'],
+                'age': [10, 99, 99, 40],
+                'note': [None, None, None, None],
+            },
+        )
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_delete_condition_pushes_down_predicate(self):
+        from pypaimon.ray.ray_paimon import read_paimon as real_read_paimon
+
+        options = dict(self.de_options)
+        options['deletion-vectors.enabled'] = 'true'
+        target = self._create_table(options=options)
+        self._write(target, self._source(ids=(1, 2, 3)))
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                wraps=real_read_paimon,
+        ) as mock_read:
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.delete(condition='s.id = 2')],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 1)
+        self.assertEqual(self._read_sorted(target)['id'], [1, 3])
+        predicate = mock_read.call_args[1]['filter']
+        self.assertEqual((predicate.method, predicate.field, predicate.literals),
+                         ('equal', 'id', [2]))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_multiple_conditions_push_down_or(self):
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2, 3)))
+
+        result, plan = self._merge_and_capture_self_merge_plan(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[
+                WhenMatched.update(
+                    {'age': lit(11)}, condition='t.id = 1',
+                ),
+                WhenMatched.update(
+                    {'age': lit(33)}, condition='s.id = 3',
+                ),
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 2)
+        predicate = plan.predicate
+        self.assertEqual(predicate.method, 'or')
+        self.assertEqual(
+            [(p.field, p.literals) for p in predicate.literals],
+            [('id', [1]), ('id', [3])],
+        )
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_unconditional_clause_disables_pushdown(self):
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2, 3)))
+
+        result, plan = self._merge_and_capture_self_merge_plan(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[
+                WhenMatched.update(
+                    {'age': lit(11)}, condition='t.id = 1',
+                ),
+                WhenMatched.update({'age': lit(99)}),
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 3)
+        self.assertIsNone(plan.predicate)
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_column_comparison_fails_open(self):
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2, 3)))
+
+        result, plan = self._merge_and_capture_self_merge_plan(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update(
+                {'name': lit('same')}, condition='t.age = s.age',
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 3)
+        self.assertIsNone(plan.predicate)
+        self.assertEqual(self._read_sorted(target)['name'],
+                         ['same', 'same', 'same'])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_pushdown_preserves_field_case(self):
+        case_schema = pa.schema([
+            ('UserID', pa.int32()),
+            ('Value', pa.int32()),
+        ])
+        target = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            case_schema, options=self.de_options,
+        )
+        self.catalog.create_table(target, schema, False)
+        self._write(target, pa.Table.from_pydict(
+            {'UserID': [1, 2, 3], 'Value': [10, 20, 30]},
+            schema=case_schema,
+        ))
+
+        result, plan = self._merge_and_capture_self_merge_plan(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update(
+                {'Value': lit(99)},
+                condition='t.UserID IN (1, 3)',
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 2)
+        predicate = plan.predicate
+        self.assertEqual(predicate.field, 'UserID')
+        table = self.catalog.get_table(target)
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        out = read_builder.new_read().to_arrow(splits).sort_by('UserID')
+        self.assertEqual(out['Value'].to_pylist(), [99, 20, 99])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_date_condition_fails_open(self):
+        date_schema = pa.schema([
+            ('id', pa.int32()),
+            ('event_date', pa.date32()),
+            ('value', pa.int32()),
+        ])
+        target = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            date_schema, options=self.de_options,
+        )
+        self.catalog.create_table(target, schema, False)
+        self._write(target, pa.Table.from_pydict({
+            'id': [1, 2],
+            'event_date': [
+                datetime.date(2026, 1, 1),
+                datetime.date(2026, 1, 2),
+            ],
+            'value': [10, 20],
+        }, schema=date_schema))
+
+        result, plan = self._merge_and_capture_self_merge_plan(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update(
+                {'value': lit(99)},
+                condition="t.event_date = '2026-01-01'",
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 1)
+        self.assertIsNone(plan.predicate)
+        table = self.catalog.get_table(target)
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        out = read_builder.new_read().to_arrow(splits).sort_by('id')
+        self.assertEqual(out['value'].to_pylist(), [99, 20])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_double_condition_fails_open(self):
+        double_schema = pa.schema([
+            ('id', pa.int32()),
+            ('metric', pa.float64()),
+            ('value', pa.int32()),
+        ])
+        target = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            double_schema, options=self.de_options,
+        )
+        self.catalog.create_table(target, schema, False)
+        self._write(target, pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'metric': [float('nan'), -1.0, 1.0],
+            'value': [10, 20, 30],
+        }, schema=double_schema))
+
+        result, plan = self._merge_and_capture_self_merge_plan(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update(
+                {'value': lit(99)}, condition='t.metric > 0',
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 2)
+        self.assertIsNone(plan.predicate)
+        table = self.catalog.get_table(target)
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        out = read_builder.new_read().to_arrow(splits).sort_by('id')
+        self.assertEqual(out['value'].to_pylist(), [99, 20, 99])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_like_condition_fails_open(self):
+        string_schema = pa.schema([
+            ('id', pa.int32()),
+            ('text', pa.string()),
+            ('value', pa.int32()),
+        ])
+        target = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            string_schema, options=self.de_options,
+        )
+        self.catalog.create_table(target, schema, False)
+        self._write(target, pa.Table.from_pydict({
+            'id': [0, 1, 2, 3, 4],
+            'text': ['n', '\\n', '\n', 'line\nbreak', 'linebreak'],
+            'value': [10, 20, 30, 40, 50],
+        }, schema=string_schema))
+
+        result, plan = self._merge_and_capture_self_merge_plan(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update(
+                {'value': lit(99)}, condition=r"t.text LIKE '%\n%'",
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 4)
+        self.assertIsNone(plan.predicate)
+        table = self.catalog.get_table(target)
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        out = read_builder.new_read().to_arrow(splits).sort_by('id')
+        self.assertEqual(out['value'].to_pylist(), [99, 99, 30, 99, 99])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_out_of_range_integer_fails_open(self):
+        int_schema = pa.schema([
+            ('id', pa.int64()),
+            ('value', pa.int32()),
+        ])
+        target = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            int_schema, options=self.de_options,
+        )
+        self.catalog.create_table(target, schema, False)
+        self._write(target, pa.Table.from_pydict({
+            'id': [-1, 0, 1],
+            'value': [10, 20, 30],
+        }, schema=int_schema))
+
+        result, plan = self._merge_and_capture_self_merge_plan(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update(
+                {'value': lit(99)},
+                condition='t.id < 9223372036854775808',
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 3)
+        self.assertIsNone(plan.predicate)
+        table = self.catalog.get_table(target)
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        out = read_builder.new_read().to_arrow(splits).sort_by('id')
+        self.assertEqual(out['value'].to_pylist(), [99, 99, 99])
+
+    def test_self_merge_update_star(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update('*')],
+        )
+
+        self.assertEqual(result['num_matched'], 3)
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['a', 'b', 'c'])
+        self.assertEqual(out['age'], [10, 20, 30])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_with_condition(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update({'age': lit(99)}, condition='t.age > 15')],
+        )
+
+        self.assertEqual(result['num_matched'], 2)
+        out = self._read_sorted(target)
+        self.assertEqual(out['age'], [10, 99, 99])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_with_source_condition(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update(
+                {'name': lit('updated')},
+                condition='s.age > 15',
+            )],
+        )
+
+        self.assertEqual(result['num_matched'], 2)
+        out = self._read_sorted(target)
+        self.assertEqual(out['name'], ['a', 'updated', 'updated'])
+        self.assertEqual(out['age'], [10, 20, 30])
+
+    def test_self_merge_rejects_not_matched(self):
+        target = self._create_table()
+        self._write(target, self._source(ids=(1,)))
+
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update('*')],
+                when_not_matched=[WhenNotMatched(insert='*')],
+            )
+        self.assertIn('Self-merge', str(ctx.exception))
+
+    def test_self_merge_partial_set(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['old_a', 'old_b'],
+                    'age': pa.array([10, 20], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update({'name': lit('updated')})],
+        )
+
+        self.assertEqual(result['num_matched'], 2)
+        out = self._read_sorted(target)
+        self.assertEqual(out['name'], ['updated', 'updated'])
+        self.assertEqual(out['age'], [10, 20])
+
+    def test_self_merge_source_col_row_id(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['a', 'b'],
+                    'age': pa.array([10, 20], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update({'name': source_col('_ROW_ID')})],
+        )
+
+        self.assertEqual(result['num_matched'], 2)
+        out = self._read_sorted(target)
+        for v in out['name']:
+            self.assertTrue(int(v) >= 0)
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_condition_on_row_id(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[
+                WhenMatched.update(
+                    {'age': lit(99)},
+                    condition='s._ROW_ID >= 0',
+                ),
+            ],
+        )
+
+        self.assertEqual(result['num_matched'], 3)
+        out = self._read_sorted(target)
+        self.assertEqual(out['age'], [99, 99, 99])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_condition_on_target_row_id(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[
+                WhenMatched.update(
+                    {'age': lit(99)},
+                    condition='t._ROW_ID >= 0',
+                ),
+            ],
+        )
+
+        self.assertEqual(result['num_matched'], 3)
+        out = self._read_sorted(target)
+        self.assertEqual(out['age'], [99, 99, 99])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_multi_clause_fall_through(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[
+                WhenMatched.update({'name': lit('old')}, condition='s.age <= 10'),
+                WhenMatched.update({'name': lit('young')}, condition='s.age <= 20'),
+                WhenMatched.update({'name': lit('senior')}),
+            ],
+        )
+
+        self.assertEqual(result['num_matched'], 3)
+        out = self._read_sorted(target)
+        self.assertEqual(out['name'], ['old', 'young', 'senior'])
+        self.assertEqual(out['age'], [10, 20, 30])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_blob_source_condition(self):
+        blob_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('picture', pa.large_binary()),
+        ])
+        tbl_name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        s = Schema.from_pyarrow_schema(blob_schema, options=self.de_options)
+        self.catalog.create_table(tbl_name, s, False)
+
+        self._write(
+            tbl_name,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['a', 'b'],
+                    'picture': [None, None],
+                },
+                schema=blob_schema,
+            ),
+        )
+
+        result = merge_into(
+            target=tbl_name,
+            source=tbl_name,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[
+                WhenMatched.update(
+                    {'name': lit('updated')},
+                    condition='s.picture IS NULL',
+                ),
+            ],
+        )
+
+        self.assertEqual(result['num_matched'], 2)
+        out = self._read_sorted(tbl_name)
+        self.assertEqual(out['name'], ['updated', 'updated'])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_blob_target_condition_allowed(self):
+        blob_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('picture', pa.large_binary()),
+        ])
+        tbl_name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        s = Schema.from_pyarrow_schema(blob_schema, options=self.de_options)
+        self.catalog.create_table(tbl_name, s, False)
+
+        self._write(
+            tbl_name,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['a'],
+                    'picture': [None],
+                },
+                schema=blob_schema,
+            ),
+        )
+
+        result = merge_into(
+            target=tbl_name,
+            source=tbl_name,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[
+                WhenMatched.update(
+                    {'name': lit('x')},
+                    condition='t.picture IS NOT NULL',
+                ),
+            ],
+        )
+
+        self.assertEqual(result['num_matched'], 0)
+        out = self._read_sorted(tbl_name)
+        self.assertEqual(out['name'], ['a'])
+
+
+class TargetProjectionTest(unittest.TestCase):
+
+    def _clause(self, spec, condition=None):
+        from pypaimon.ray import data_evolution_merge_into as m
+        return m._NormalizedClause(spec=spec, condition=condition)
+
+    def test_unconditional_set_excludes_target_update_col(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+        cols = m._resolve_target_projection(
+            [self._clause({'feature': 's.feature'})],
+            ['id'], ['feature'], ['id', 'feature', 'image'],
+        )
+        self.assertEqual(['id'], cols)
+
+    def test_condition_adds_referenced_target_cols(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+        cols = m._resolve_target_projection(
+            [self._clause({'feature': 's.feature'}, condition='s.age > t.age')],
+            ['id'], ['feature'], ['id', 'feature', 'age', 'image'],
+        )
+        self.assertIn('age', cols)
+        self.assertIn('id', cols)
+
+    def test_matched_source_projection_prunes_unneeded_cols(self):
+        from pypaimon.ray.data_evolution_merge_join import (
+            _resolve_source_projection,
+        )
+        from pypaimon.ray.data_evolution_merge_transform import (
+            LiteralValue,
+            SourceColumnRef,
+            TargetColumnRef,
+        )
+
+        cols = _resolve_source_projection(
+            [
+                self._clause(
+                    {
+                        'age': SourceColumnRef('id'),
+                        'name': TargetColumnRef('name'),
+                        'note': LiteralValue('literal'),
+                    },
+                    condition="s.status = 't.fake' AND s.score > t.score",
+                )
+            ],
+            ['uid'],
+            ['uid', 'id', 'name', 'status', 'score', 'payload'],
+        )
+        self.assertEqual(['uid', 'id', 'status', 'score'], cols)
+
+    def test_literal_update_source_projection_keeps_only_join_key(self):
+        from pypaimon.ray.data_evolution_merge_join import (
+            _resolve_source_projection,
+        )
+        from pypaimon.ray.data_evolution_merge_transform import LiteralValue
+
+        cols = _resolve_source_projection(
+            [self._clause({'name': LiteralValue('updated')})],
+            ['id'],
+            ['id', 'name', 'age', 'payload'],
+        )
+        self.assertEqual(['id'], cols)
+
+    def test_matched_update_selects_needed_source_cols(self):
+        from pypaimon.ray.data_evolution_merge_join import build_matched_update_ds
+        from pypaimon.ray.data_evolution_merge_transform import SourceColumnRef
+
+        source_ds = Mock()
+        source_ds.schema.return_value = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('payload', pa.string()),
+        ])
+        selected_ds = Mock()
+        source_renamed = Mock()
+        source_ds.select_columns.return_value = selected_ds
+        selected_ds.rename_columns.return_value = source_renamed
+
+        target_ds = Mock()
+        target_ds.schema.return_value = pa.schema([
+            ('_ROW_ID', pa.int64()),
+            ('id', pa.int32()),
+        ])
+        target_renamed = Mock()
+        joined = Mock()
+        result = object()
+        target_ds.rename_columns.return_value = target_renamed
+        target_renamed.join.return_value = joined
+        joined.map_batches.return_value = result
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                return_value=target_ds,
+        ):
+            out = build_matched_update_ds(
+                target_identifier='default.target',
+                source_ds=source_ds,
+                target_on=['id'],
+                source_on=['id'],
+                clauses=[self._clause({'name': SourceColumnRef('name')})],
+                target_field_names=['id', 'name'],
+                target_pa_schema=pa.schema([
+                    ('id', pa.int32()),
+                    ('name', pa.string()),
+                ]),
+                update_cols=['name'],
+                catalog_options={'warehouse': '/tmp/warehouse'},
+                num_partitions=1,
+                resolve_target_projection=lambda *args: ['id'],
+            )
+
+        self.assertIs(out, result)
+        source_ds.select_columns.assert_called_once_with(['id', 'name'])
+        selected_ds.rename_columns.assert_called_once_with({
+            'id': 's.id',
+            'name': 's.name',
+        })
+        self.assertEqual(
+            target_renamed.join.call_args.kwargs['num_partitions'], 1
+        )
+
+    def test_matched_update_uses_target_left_context(self):
+        from pypaimon.ray.data_evolution_merge_join import (
+            build_matched_update_ds,
+        )
+        from pypaimon.ray.data_evolution_merge_transform import SourceColumnRef
+
+        source_ds = Mock()
+        source_ds.schema.return_value = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+        selected_ds = Mock()
+        source_renamed = Mock()
+        source_renamed.context = Mock(
+            target_max_block_size=512,
+            default_hash_shuffle_parallelism=7,
+        )
+        source_ds.select_columns.return_value = selected_ds
+        selected_ds.rename_columns.return_value = source_renamed
+
+        target_ds = Mock()
+        target_ds.schema.return_value = pa.schema([
+            ('_ROW_ID', pa.int64()),
+            ('id', pa.int32()),
+        ])
+        target_renamed = Mock()
+        target_renamed.context = Mock(
+            target_max_block_size=128,
+            default_hash_shuffle_parallelism=3,
+        )
+        joined = Mock()
+        target_ds.rename_columns.return_value = target_renamed
+        target_renamed.join.return_value = joined
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                return_value=target_ds,
+        ), patch(
+                'ray.cluster_resources', return_value={'CPU': 320},
+        ), patch(
+                'ray.data.context.DataContext.get_current',
+                side_effect=AssertionError('must use target Dataset context'),
+        ):
+            build_matched_update_ds(
+                target_identifier='default.target',
+                source_ds=source_ds,
+                target_on=['id'],
+                source_on=['id'],
+                clauses=[self._clause({'name': SourceColumnRef('name')})],
+                target_field_names=['id', 'name'],
+                target_pa_schema=pa.schema([
+                    ('id', pa.int32()),
+                    ('name', pa.string()),
+                ]),
+                update_cols=['name'],
+                catalog_options={'warehouse': '/tmp/warehouse'},
+                num_partitions=None,
+                estimated_size_bytes=512,
+                resolve_target_projection=lambda *args: ['id'],
+            )
+
+        join_kwargs = target_renamed.join.call_args.kwargs
+        # Target context: ceil(512 / 128) = 4. Source context would resolve 7.
+        self.assertEqual(join_kwargs['num_partitions'], 4)
+
+    def test_not_matched_insert_selects_needed_source_cols(self):
+        from pypaimon.ray.data_evolution_merge_join import (
+            build_not_matched_insert_ds,
+        )
+        from pypaimon.ray.data_evolution_merge_transform import SourceColumnRef
+
+        source_ds = Mock()
+        source_ds.schema.return_value = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('payload', pa.string()),
+        ])
+        selected_ds = Mock()
+        source_renamed = Mock()
+        repartitioned = Mock()
+        result = object()
+        source_ds.select_columns.return_value = selected_ds
+        selected_ds.rename_columns.return_value = source_renamed
+        source_renamed.repartition.return_value = repartitioned
+        repartitioned.map_batches.return_value = result
+
+        out = build_not_matched_insert_ds(
+            target_identifier='default.target',
+            source_ds=source_ds,
+            target_on=['id'],
+            source_on=['id'],
+            clauses=[self._clause({'name': SourceColumnRef('name')})],
+            target_field_names=['id', 'name'],
+            target_pa_schema=pa.schema([
+                ('id', pa.int32()),
+                ('name', pa.string()),
+            ]),
+            catalog_options={'warehouse': '/tmp/warehouse'},
+            num_partitions=1,
+            target_empty=True,
+        )
+
+        self.assertIs(out, result)
+        source_ds.select_columns.assert_called_once_with(['id', 'name'])
+        selected_ds.rename_columns.assert_called_once_with({
+            'id': 's.id',
+            'name': 's.name',
+        })
+        source_renamed.repartition.assert_called_once_with(1)
+
+
+class MergeConditionUnitTest(unittest.TestCase):
+
+    @staticmethod
+    def _predicate_fields():
+        return Schema.from_pyarrow_schema(pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('MixedCase', pa.int32()),
+            ('flag', pa.bool_()),
+            ('event_date', pa.date32()),
+            ('event_time', pa.timestamp('us')),
+            ('amount', pa.decimal128(30, 2)),
+            ('float_value', pa.float32()),
+            ('double_value', pa.float64()),
+        ])).fields
+
+    def test_rewrite_condition(self):
+        from pypaimon.ray.merge_condition import rewrite_condition
+        self.assertEqual(
+            rewrite_condition('s.age > t.age + 10'),
+            '"s.age" > "t.age" + 10',
+        )
+
+    def test_rewrite_condition_preserves_string_literals(self):
+        from pypaimon.ray.merge_condition import rewrite_condition
+        self.assertEqual(
+            rewrite_condition("s.status = 't.active' AND s.age > t.age"),
+            '"s.status" = \'t.active\' AND "s.age" > "t.age"',
+        )
+
+    def test_remap_source_on_keys(self):
+        from pypaimon.ray.merge_condition import (
+            remap_source_on_keys, rewrite_condition,
+        )
+        rewritten = rewrite_condition('s.id > 1 AND s.age > t.age')
+        remapped = remap_source_on_keys(rewritten, {'id': 'id'})
+        self.assertEqual(remapped, '"t.id" > 1 AND "s.age" > "t.age"')
+
+    def test_remap_source_on_keys_renamed(self):
+        from pypaimon.ray.merge_condition import (
+            remap_source_on_keys, rewrite_condition,
+        )
+        rewritten = rewrite_condition('s.uid > 1')
+        remapped = remap_source_on_keys(rewritten, {'uid': 'id'})
+        self.assertEqual(remapped, '"t.id" > 1')
+
+    def test_remap_preserves_string_literals(self):
+        from pypaimon.ray.merge_condition import (
+            remap_source_on_keys, rewrite_condition,
+        )
+        rewritten = rewrite_condition("s.note = '\"s.id\"' AND s.id = 1")
+        remapped = remap_source_on_keys(rewritten, {'id': 'id'})
+        self.assertEqual(
+            remapped,
+            '"s.note" = \'\"s.id\"\' AND "t.id" = 1',
+        )
+
+    def test_extract_target_columns(self):
+        from pypaimon.ray.merge_condition import extract_target_columns
+        self.assertEqual(
+            extract_target_columns('s.name = t.name AND s.age > t.age'),
+            {'name', 'age'},
+        )
+
+    def test_extract_target_columns_ignores_string_literals(self):
+        from pypaimon.ray.merge_condition import extract_target_columns
+        self.assertEqual(
+            extract_target_columns("s.name = 't.fake' AND s.age > t.age"),
+            {'age'},
+        )
+
+    def test_extract_columns(self):
+        from pypaimon.ray.merge_condition import extract_columns
+        self.assertEqual(
+            extract_columns('s.id = t.id AND s.age > t.age'),
+            {'s.id', 't.id', 's.age', 't.age'},
+        )
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_parse_simple_self_merge_predicate(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        predicate = try_parse_self_merge_predicate(
+            't.id IN (1, 3) AND s.name = \'s.literal\'',
+            self._predicate_fields(),
+        )
+        self.assertEqual(predicate.method, 'and')
+        self.assertEqual(
+            [(p.field, p.literals) for p in predicate.literals],
+            [('id', [1, 3]), ('name', ['s.literal'])],
+        )
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_parse_self_merge_predicate_ast_subset(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        cases = [
+            ('t.id != 1', 'notEqual', 'id', [1]),
+            ('t.id NOT IN (1, 2)', 'notIn', 'id', [1, 2]),
+            ('t.id BETWEEN 1 AND 2', 'between', 'id', [1, 2]),
+            ('t.id NOT BETWEEN 1 AND 2', 'notBetween', 'id', [1, 2]),
+            ('t.event_date IS NULL', 'isNull', 'event_date', None),
+            ('t.event_date IS NOT NULL', 'isNotNull', 'event_date', None),
+        ]
+        for condition, method, field, literals in cases:
+            with self.subTest(condition=condition):
+                predicate = try_parse_self_merge_predicate(
+                    condition, self._predicate_fields(),
+                )
+                self.assertEqual(
+                    (predicate.method, predicate.field, predicate.literals),
+                    (method, field, literals),
+                )
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_predicate_preserves_field_case(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        predicate = try_parse_self_merge_predicate(
+            't.MixedCase = 1', self._predicate_fields(),
+        )
+        self.assertEqual(predicate.field, 'MixedCase')
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_column_comparison_is_not_pushed_down(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        self.assertIsNone(try_parse_self_merge_predicate(
+            't.id = s.id', self._predicate_fields(),
+        ))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_function_is_not_pushed_down(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        self.assertIsNone(try_parse_self_merge_predicate(
+            'abs(t.id) > 1', self._predicate_fields(),
+        ))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_predicate_parse_failure_is_logged(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        with self.assertLogs(
+                'pypaimon.ray.merge_condition', level='DEBUG') as logs:
+            self.assertIsNone(try_parse_self_merge_predicate(
+                't.id =', self._predicate_fields(),
+            ))
+        self.assertIn('Unable to push down', '\n'.join(logs.output))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_unsafe_literal_types_fail_open(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        conditions = [
+            "t.event_date = '2026-01-01'",
+            "t.event_time = '2026-01-01 01:02:03'",
+            't.amount = 12345678901234567890.12',
+            't.float_value > 0',
+            't.double_value > 0',
+        ]
+        for condition in conditions:
+            with self.subTest(condition=condition):
+                self.assertIsNone(try_parse_self_merge_predicate(
+                    condition, self._predicate_fields(),
+                ))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_invalid_literals_fail_open(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        conditions = [
+            "t.flag = 'true'",
+            't.name = bare_value',
+            't.name IN (NULL)',
+        ]
+        for condition in conditions:
+            with self.subTest(condition=condition):
+                self.assertIsNone(try_parse_self_merge_predicate(
+                    condition, self._predicate_fields(),
+                ))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_boolean_literal_is_pushed_down(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        predicate = try_parse_self_merge_predicate(
+            't.flag = TRUE', self._predicate_fields(),
+        )
+        self.assertEqual((predicate.field, predicate.literals),
+                         ('flag', [True]))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_like_condition_is_not_pushed_down(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        self.assertIsNone(try_parse_self_merge_predicate(
+            r"t.name LIKE '%\n%'", self._predicate_fields(),
+        ))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_out_of_range_integers_fail_open(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        conditions = [
+            't.id < 9223372036854775808',
+            't.id > -9223372036854775809',
+            't.id IN (1, 9223372036854775808)',
+            't.id BETWEEN -9223372036854775809 AND 1',
+        ]
+        for condition in conditions:
+            with self.subTest(condition=condition):
+                self.assertIsNone(try_parse_self_merge_predicate(
+                    condition, self._predicate_fields(),
+                ))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_filter_batch(self):
+        from pypaimon.ray.merge_condition import filter_batch
+        batch = pa.table({
+            's.id': pa.array([1, 2, 3], type=pa.int32()),
+            's.age': pa.array([10, 25, 30], type=pa.int32()),
+            't.age': pa.array([20, 20, 20], type=pa.int32()),
+        })
+        result = filter_batch(batch, 's.age > t.age')
+        self.assertEqual(result.column('s.id').to_pylist(), [2, 3])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_filter_batch_preserves_partition_order(self):
+        from pypaimon.ray.merge_condition import filter_batch
+
+        batch_size = 20_000
+        expected = list(range(4 * batch_size))
+        source = pa.table({
+            't.id': pa.chunked_array([
+                pa.array(
+                    range(i * batch_size, (i + 1) * batch_size),
+                    type=pa.int64(),
+                )
+                for i in range(4)
+            ]),
+        })
+
+        result = filter_batch(
+            source, '"t.id" >= 0', _pre_rewritten=True,
+        )
+
+        self.assertEqual(result.column('t.id').to_pylist(), expected)
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_filter_batch_preserves_large_offset_chunks(self):
+        from pypaimon.ray.merge_condition import filter_batch
+
+        child_count = 1_100_000_000
+
+        def large_list():
+            return pa.ListArray.from_arrays(
+                pa.array([0, child_count], type=pa.int32()),
+                pa.nulls(child_count),
+            )
+
+        batch = pa.table({
+            't._ROW_ID': pa.chunked_array([
+                pa.array([0], type=pa.int64()),
+                pa.array([1], type=pa.int64()),
+            ]),
+            't.payload': pa.chunked_array([large_list(), large_list()]),
+        })
+
+        result = filter_batch(
+            batch, '"t._ROW_ID" >= 0', _pre_rewritten=True,
+        )
+
+        self.assertEqual(result.column('t._ROW_ID').to_pylist(), [0, 1])
+        payload = result.column('t.payload')
+        self.assertEqual(payload.num_chunks, 2)
+        self.assertEqual(
+            [len(chunk.values) for chunk in payload.chunks],
+            [child_count, child_count],
+        )
+
+
+if __name__ == '__main__':
+    unittest.main()

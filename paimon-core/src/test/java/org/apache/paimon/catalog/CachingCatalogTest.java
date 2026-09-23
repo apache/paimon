@@ -22,11 +22,17 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestSidecar;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -47,6 +53,8 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 
 import java.io.FileNotFoundException;
@@ -56,6 +64,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -65,11 +74,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
+import static java.util.Collections.singletonMap;
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRE_AFTER_ACCESS;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_MAX_MEMORY;
+import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SIDECAR_MAX_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_THRESHOLD;
+import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SOFT_VALUES;
 import static org.apache.paimon.options.CatalogOptions.CACHE_PARTITION_MAX_NUM;
 import static org.apache.paimon.options.CatalogOptions.CACHE_SNAPSHOT_MAX_NUM_PER_TABLE;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -334,6 +346,86 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testCreatePartitionsInvalidatesPartitionCache() throws Exception {
+        Catalog wrapped = Mockito.mock(Catalog.class);
+        TestableCachingCatalog catalog =
+                new TestableCachingCatalog(wrapped, EXPIRATION_TTL, ticker);
+        Identifier identifier = new Identifier("db", "tbl");
+        Map<String, String> spec = singletonMap("dt", "20260717");
+        Partition created = new Partition(spec, 0, 0, 0, 0, -1, false);
+        when(wrapped.listPartitions(identifier)).thenReturn(emptyList(), singletonList(created));
+
+        assertThat(catalog.listPartitions(identifier)).isEmpty();
+        catalog.createPartitions(identifier, singletonList(spec));
+
+        assertThat(catalog.listPartitions(identifier)).containsExactly(created);
+    }
+
+    @Test
+    public void testCreatePartitionsWithIgnoreIfExistsInvalidatesPartitionCache() throws Exception {
+        Catalog wrapped = Mockito.mock(Catalog.class);
+        TestableCachingCatalog catalog =
+                new TestableCachingCatalog(wrapped, EXPIRATION_TTL, ticker);
+        Identifier identifier = new Identifier("db", "tbl");
+        Map<String, String> spec = singletonMap("dt", "20260717");
+        Partition created = new Partition(spec, 0, 0, 0, 0, -1, false);
+        when(wrapped.listPartitions(identifier)).thenReturn(emptyList(), singletonList(created));
+
+        assertThat(catalog.listPartitions(identifier)).isEmpty();
+        catalog.createPartitions(identifier, singletonList(spec), false, null, false, null);
+
+        assertThat(catalog.listPartitions(identifier)).containsExactly(created);
+    }
+
+    @Test
+    public void testCreatePartitionsWithStatisticsForwardsAndInvalidatesPartitionCache()
+            throws Exception {
+        Catalog wrapped = Mockito.mock(Catalog.class);
+        TestableCachingCatalog catalog =
+                new TestableCachingCatalog(wrapped, EXPIRATION_TTL, ticker);
+        Identifier identifier = new Identifier("db", "tbl");
+        Map<String, String> spec = singletonMap("dt", "20260717");
+        Partition created = new Partition(spec, 3, 300, 1, 1000, -1, false);
+        List<PartitionStatistics> statistics =
+                singletonList(new PartitionStatistics(spec, 3, 300, 1, 1000, -1));
+        when(wrapped.listPartitions(identifier)).thenReturn(emptyList(), singletonList(created));
+
+        assertThat(catalog.listPartitions(identifier)).isEmpty();
+        catalog.createPartitions(identifier, singletonList(spec), true, statistics, false, null);
+
+        // Dropping the forward would leave the statistics unreported and nothing else would say so.
+        Mockito.verify(wrapped)
+                .createPartitions(identifier, singletonList(spec), true, statistics, false, null);
+        // A report changes what a partition holds, so the cached listing is stale after it.
+        assertThat(catalog.listPartitions(identifier)).containsExactly(created);
+    }
+
+    @Test
+    public void testCreatePartitionsWithOptionsForwardsAndInvalidatesPartitionCache()
+            throws Exception {
+        Catalog wrapped = Mockito.mock(Catalog.class);
+        TestableCachingCatalog catalog =
+                new TestableCachingCatalog(wrapped, EXPIRATION_TTL, ticker);
+        Identifier identifier = new Identifier("db", "tbl");
+        Map<String, String> spec = singletonMap("dt", "20260717");
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PATH.key(), "file:/archive/dt=20260717");
+        options.put("owner", "data-platform");
+        List<Map<String, String>> partitionOptions = singletonList(options);
+        Partition created = new Partition(spec, 0, 0, 0, 0, -1, false);
+        when(wrapped.listPartitions(identifier)).thenReturn(emptyList(), singletonList(created));
+
+        assertThat(catalog.listPartitions(identifier)).isEmpty();
+        catalog.createPartitions(
+                identifier, singletonList(spec), true, null, false, partitionOptions);
+
+        Mockito.verify(wrapped)
+                .createPartitions(
+                        identifier, singletonList(spec), true, null, false, partitionOptions);
+        assertThat(catalog.listPartitions(identifier)).containsExactly(created);
+    }
+
+    @Test
     public void testDeadlock() throws Exception {
         Catalog underlyCatalog = this.catalog;
         TestableCachingCatalog catalog =
@@ -537,5 +629,150 @@ class CachingCatalogTest extends CatalogTestBase {
         caching = (CachingCatalog) CachingCatalog.tryToCreate(catalog, options);
         assertThat(caching.manifestCache.maxMemorySize()).isEqualTo(MemorySize.ofMebiBytes(256));
         assertThat(caching.manifestCache.maxElementSize()).isEqualTo(Long.MAX_VALUE);
+
+        // soft values default to on and the manifest cache inherits the catalog idle TTL
+        assertThat(caching.manifestCache.softValues()).isTrue();
+        assertThat(caching.manifestCache.ttl()).isEqualTo(CACHE_EXPIRE_AFTER_ACCESS.defaultValue());
+
+        // soft values can be turned off to opt into strong references; the cache still inherits
+        // the catalog idle TTL
+        options.set(CACHE_MANIFEST_SOFT_VALUES, false);
+        caching = (CachingCatalog) CachingCatalog.tryToCreate(catalog, options);
+        assertThat(caching.manifestCache.softValues()).isFalse();
+        assertThat(caching.manifestCache.ttl()).isEqualTo(CACHE_EXPIRE_AFTER_ACCESS.defaultValue());
+    }
+
+    @Test
+    public void testManifestSidecarCacheOptions() {
+        Options options = new Options();
+        CachingCatalog caching = new CachingCatalog(catalog, options);
+        assertThat(CACHE_MANIFEST_SIDECAR_MAX_MEMORY.defaultValue())
+                .isEqualTo(MemorySize.ofMebiBytes(64));
+        assertThat(caching.manifestSidecarCache).isNotSameAs(caching.manifestCache);
+        assertThat(caching.manifestSidecarCache.maxMemorySize())
+                .isEqualTo(MemorySize.ofMebiBytes(64));
+        assertThat(caching.manifestSidecarCache.maxElementSize())
+                .isEqualTo(MemorySize.ofMebiBytes(64).getBytes());
+
+        options.set(CACHE_MANIFEST_SIDECAR_MAX_MEMORY, MemorySize.ofMebiBytes(8));
+        caching = new CachingCatalog(catalog, options);
+        assertThat(caching.manifestSidecarCache).isNotSameAs(caching.manifestCache);
+        assertThat(caching.manifestSidecarCache.maxMemorySize())
+                .isEqualTo(MemorySize.ofMebiBytes(8));
+        assertThat(caching.manifestSidecarCache.maxElementSize())
+                .isEqualTo(MemorySize.ofMebiBytes(8).getBytes());
+        assertThat(caching.manifestSidecarCache.ttl())
+                .isEqualTo(CACHE_EXPIRE_AFTER_ACCESS.defaultValue());
+        assertThat(caching.manifestSidecarCache.softValues()).isTrue();
+
+        options.set(CACHE_MANIFEST_SMALL_FILE_MEMORY, MemorySize.ofBytes(0));
+        options.set(CACHE_EXPIRE_AFTER_ACCESS, Duration.ofMinutes(2));
+        options.set(CACHE_MANIFEST_SOFT_VALUES, false);
+        caching = new CachingCatalog(catalog, options);
+        assertThat(caching.manifestCache).isNull();
+        assertThat(caching.manifestSidecarCache.maxMemorySize())
+                .isEqualTo(MemorySize.ofMebiBytes(8));
+        assertThat(caching.manifestSidecarCache.ttl()).isEqualTo(Duration.ofMinutes(2));
+        assertThat(caching.manifestSidecarCache.softValues()).isFalse();
+
+        options.set(CACHE_MANIFEST_SIDECAR_MAX_MEMORY, MemorySize.ofBytes(0));
+        options.set(CACHE_MANIFEST_SMALL_FILE_MEMORY, MemorySize.ofMebiBytes(1));
+        caching = new CachingCatalog(catalog, options);
+        assertThat(caching.manifestCache).isNotNull();
+        assertThat(caching.manifestSidecarCache).isSameAs(caching.manifestCache);
+
+        options.set(CACHE_MANIFEST_SMALL_FILE_MEMORY, MemorySize.ofBytes(0));
+        caching = new CachingCatalog(catalog, options);
+        assertThat(caching.manifestCache).isNull();
+        assertThat(caching.manifestSidecarCache).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testManifestSidecarCacheSharedAcrossTableCopies(boolean separate) throws Exception {
+        Options options = new Options();
+        options.set(CACHE_MANIFEST_SOFT_VALUES, false);
+        options.set(
+                CACHE_MANIFEST_SIDECAR_MAX_MEMORY,
+                separate ? MemorySize.ofMebiBytes(1) : MemorySize.ofBytes(0));
+        CachingCatalog caching = new CachingCatalog(catalog, options);
+        Identifier id = Identifier.create("db", "sidecar_cache");
+        caching.createTable(id, DEFAULT_TABLE_SCHEMA, false);
+        caching.alterTable(
+                id,
+                SchemaChange.setOption(CoreOptions.MANIFEST_SIDECAR_ENABLED.key(), "true"),
+                false);
+        FileStoreTable table = (FileStoreTable) caching.getTable(id);
+        assertThat(table.getManifestSidecarCache()).isSameAs(caching.manifestSidecarCache);
+        writeTableForTestManifestCache(table);
+        ManifestFileMeta meta =
+                table.store()
+                        .manifestListFactory()
+                        .create()
+                        .readDataManifests(table.latestSnapshot().get())
+                        .get(0);
+        PartitionPredicate partition = PartitionPredicate.ALWAYS_TRUE;
+        assertThat(
+                        table.store()
+                                .manifestFileFactory()
+                                .create()
+                                .selectBlocks(meta, null, partition, null))
+                .isNotNull();
+        Path sidecar = new Path(table.location(), "manifest/" + ManifestSidecar.fileName(meta));
+        assertThat(caching.manifestSidecarCache.getIfPresents(sidecar)).isNotNull();
+        if (separate) {
+            assertThat(caching.manifestCache.getIfPresents(sidecar)).isNull();
+        } else {
+            assertThat(caching.manifestCache.getIfPresents(sidecar)).isNotNull();
+        }
+        assertThat(caching.estimatedCacheSizes().manifestCacheSize())
+                .isEqualTo(
+                        caching.manifestCache.estimatedSize()
+                                + (separate ? caching.manifestSidecarCache.estimatedSize() : 0));
+        assertThat(caching.estimatedCacheSizes().manifestCacheBytes())
+                .isEqualTo(
+                        caching.manifestCache.totalCacheBytes()
+                                + (separate ? caching.manifestSidecarCache.totalCacheBytes() : 0));
+
+        // A copied table and a new ManifestFile must reuse cached bytes even after the file is
+        // gone.
+        fileIO.delete(sidecar, false);
+        for (FileStoreTable copy :
+                new FileStoreTable[] {
+                    table.copy(singletonMap("a", "b")),
+                    table.copy(table.schema()),
+                    (FileStoreTable) caching.getTable(id)
+                }) {
+            assertThat(copy.getManifestSidecarCache()).isSameAs(caching.manifestSidecarCache);
+            assertThat(
+                            copy.store()
+                                    .manifestFileFactory()
+                                    .create()
+                                    .selectBlocks(meta, null, partition, null))
+                    .isNotNull();
+        }
+    }
+
+    @Test
+    public void testManifestSidecarCachePropagatesToFallbackTable() throws Exception {
+        CachingCatalog caching = new CachingCatalog(catalog, new Options());
+        Identifier id = Identifier.create("db", "sidecar_fallback");
+        caching.createTable(id, DEFAULT_TABLE_SCHEMA, false);
+        caching.getTable(id).createBranch("fallback");
+        caching.alterTable(
+                id,
+                SchemaChange.setOption(CoreOptions.SCAN_FALLBACK_BRANCH.key(), "fallback"),
+                false);
+        FallbackReadFileStoreTable table = (FallbackReadFileStoreTable) caching.getTable(id);
+        for (FallbackReadFileStoreTable copy :
+                new FallbackReadFileStoreTable[] {
+                    table, (FallbackReadFileStoreTable) table.copy(singletonMap("a", "b"))
+                }) {
+            assertThat(copy.getManifestSidecarCache()).isSameAs(caching.manifestSidecarCache);
+            assertThat(copy.wrapped().getManifestSidecarCache())
+                    .isSameAs(caching.manifestSidecarCache);
+            assertThat(copy.other().getManifestSidecarCache())
+                    .isSameAs(caching.manifestSidecarCache);
+        }
     }
 }

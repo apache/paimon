@@ -30,14 +30,38 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Statistics of a partition, fields inside may be negative, indicating that some data has been
- * removed.
+ * Statistics of a partition.
+ *
+ * <p>The numeric fields are read on two planes, and a negative value means a different thing on
+ * each. Which plane an instance belongs to follows from where it came from, never from the value:
+ *
+ * <ul>
+ *   <li><b>Delta plane</b> — what a commit changed. A negative value is a decrement, and the server
+ *       adds it to what it already holds. This is what a table snapshot commit reports.
+ *   <li><b>Observation plane</b> — what a partition currently holds, as returned by {@code
+ *       listPartitions}. A negative value ({@link #UNKNOWN}) means nobody ever reported that field,
+ *       and {@code 0} means an exact zero. The two are not interchangeable: a consumer that treats
+ *       unknown as zero plans against an empty partition that may hold a billion rows.
+ * </ul>
+ *
+ * <p>Unknown is per field, not per partition: a reporter that only knows the file count leaves the
+ * record count {@link #UNKNOWN} and fills the rest. Use {@link #isKnown(long)} rather than
+ * comparing against {@code -1}; any negative value on the observation plane is unknown.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 @Public
 public class PartitionStatistics implements Serializable {
 
     private static final long serialVersionUID = 1L;
+
+    /**
+     * Canonical encoding of "this field was never reported" on the observation plane. Any negative
+     * value carries the same meaning; this is the one to write.
+     */
+    public static final long UNKNOWN = -1L;
+
+    /** Format tables have no buckets, so their bucket count is always unknown. */
+    public static final int UNKNOWN_TOTAL_BUCKETS = -1;
 
     public static final String FIELD_SPEC = "spec";
     public static final String FIELD_RECORD_COUNT = "recordCount";
@@ -80,6 +104,20 @@ public class PartitionStatistics implements Serializable {
         this.fileCount = fileCount;
         this.lastFileCreationTime = lastFileCreationTime;
         this.totalBuckets = totalBuckets;
+    }
+
+    /** Statistics of a partition nobody ever reported on: every field {@link #UNKNOWN}. */
+    public static PartitionStatistics unknown(Map<String, String> spec) {
+        return new PartitionStatistics(
+                spec, UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN_TOTAL_BUCKETS);
+    }
+
+    /**
+     * Whether an observation-plane field carries a real measurement. Never apply this to a
+     * delta-plane value, where a negative number is a decrement rather than a missing measurement.
+     */
+    public static boolean isKnown(long value) {
+        return value >= 0;
     }
 
     @JsonGetter(FIELD_SPEC)

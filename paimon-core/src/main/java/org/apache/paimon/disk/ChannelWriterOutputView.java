@@ -65,7 +65,9 @@ public final class ChannelWriterOutputView extends AbstractPagedOutputView imple
     public void close() throws IOException {
         if (!writer.isClosed()) {
             int currentPositionInSegment = getCurrentPositionInSegment();
-            writeCompressed(currentSegment, currentPositionInSegment);
+            if (currentPositionInSegment > 0) {
+                writeCompressed(currentSegment, currentPositionInSegment);
+            }
             clear();
             this.writeBytes = writer.getSize();
             this.writer.close();

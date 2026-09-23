@@ -18,11 +18,14 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.options.Options;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
 
 import static org.apache.paimon.rest.RESTUtil.encodeString;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Resource paths for REST catalog. */
 public class ResourcePaths {
@@ -35,13 +38,18 @@ public class ResourcePaths {
     protected static final String TAGS = "tags";
     protected static final String SNAPSHOTS = "snapshots";
     protected static final String CONSUMERS = "consumers";
+    protected static final String SCHEMAS = "schemas";
     protected static final String VIEWS = "views";
+    protected static final String SEMANTIC_VIEWS = "semantic-views";
     protected static final String TABLE_DETAILS = "table-details";
     protected static final String VIEW_DETAILS = "view-details";
     protected static final String ROLLBACK = "rollback";
     protected static final String REGISTER = "register";
     protected static final String FUNCTIONS = "functions";
     protected static final String FUNCTION_DETAILS = "function-details";
+    protected static final String PERMISSIONS = "permissions";
+    protected static final String POLICIES = "policies";
+    protected static final String LABELS = "labels";
     protected static final String ID = "id";
 
     private static final Joiner SLASH = Joiner.on("/").skipNulls();
@@ -58,6 +66,74 @@ public class ResourcePaths {
 
     public ResourcePaths(String prefix) {
         this.prefix = encodeString(prefix);
+    }
+
+    /** Labels attached to one entity, whose canonical name is encoded as a single segment. */
+    @Experimental
+    public String labels(String entityType, String entityName) {
+        checkArgument(
+                entityType != null && !entityType.trim().isEmpty(), "entityType must not be blank");
+        checkArgument(
+                entityName != null && !entityName.trim().isEmpty(), "entityName must not be blank");
+        return SLASH.join(
+                V1, prefix, LABELS, encodePathSegment(entityType), encodePathSegment(entityName));
+    }
+
+    @Experimental
+    public String label(String entityType, String entityName, String key) {
+        checkArgument(key != null && !key.trim().isEmpty(), "key must not be blank");
+        return SLASH.join(labels(entityType, entityName), encodePathSegment(key));
+    }
+
+    private static String encodePathSegment(String value) {
+        // Form encoding leaves dot segments unchanged, but they must be treated as names here.
+        if (".".equals(value) || "..".equals(value)) {
+            return value.replace(".", "%2E");
+        }
+        return encodeString(value);
+    }
+
+    /** Semantic view names are encoded as independent path segments. */
+    @Experimental
+    public String semanticViews(String database) {
+        checkArgument(database != null && !database.trim().isEmpty(), "database must not be blank");
+        return SLASH.join(V1, prefix, DATABASES, encodePathSegment(database), SEMANTIC_VIEWS);
+    }
+
+    @Experimental
+    public String semanticView(String database, String semanticView) {
+        checkArgument(
+                semanticView != null && !semanticView.trim().isEmpty(),
+                "semanticView must not be blank");
+        return SLASH.join(semanticViews(database), encodePathSegment(semanticView));
+    }
+
+    @Experimental
+    public String permissions() {
+        return SLASH.join(V1, prefix, PERMISSIONS);
+    }
+
+    @Experimental
+    public String grantPermission() {
+        return SLASH.join(permissions(), "grant");
+    }
+
+    @Experimental
+    public String revokePermission() {
+        return SLASH.join(permissions(), "revoke");
+    }
+
+    /** Policy collection nested below its attachment resource. */
+    @Experimental
+    public String policies(PermissionResource resource) {
+        resource.validatePolicyAttachment();
+        return SLASH.join(table(resource.getDatabase(), resource.getTable()), POLICIES);
+    }
+
+    /** Action endpoint for dropping one policy from its attachment resource. */
+    @Experimental
+    public String dropPolicy(PermissionResource resource) {
+        return SLASH.join(policies(resource), "drop");
     }
 
     public String databases() {
@@ -191,6 +267,21 @@ public class ResourcePaths {
                 SNAPSHOTS);
     }
 
+    public String schemas(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                SCHEMAS);
+    }
+
+    public String schemas(String databaseName, String objectName, String version) {
+        return SLASH.join(schemas(databaseName, objectName), encodeString(version));
+    }
+
     public String authTable(String databaseName, String objectName) {
         return SLASH.join(
                 V1,
@@ -211,6 +302,18 @@ public class ResourcePaths {
                 TABLES,
                 encodeString(objectName),
                 PARTITIONS);
+    }
+
+    public String dropPartitions(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                PARTITIONS,
+                "drop");
     }
 
     public String markDonePartitions(String databaseName, String objectName) {
@@ -235,6 +338,18 @@ public class ResourcePaths {
                 encodeString(objectName),
                 PARTITIONS,
                 "list-by-names");
+    }
+
+    public String listPartitionsByFilter(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                PARTITIONS,
+                "list-by-filter");
     }
 
     public String branches(String databaseName, String objectName) {
@@ -271,19 +386,6 @@ public class ResourcePaths {
                 BRANCHES,
                 encodeString(branch),
                 "forward");
-    }
-
-    public String renameBranch(String databaseName, String tableName, String branch) {
-        return SLASH.join(
-                V1,
-                prefix,
-                DATABASES,
-                encodeString(databaseName),
-                TABLES,
-                encodeString(tableName),
-                BRANCHES,
-                encodeString(branch),
-                "rename");
     }
 
     public String tags(String databaseName, String objectName) {

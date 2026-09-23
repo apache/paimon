@@ -181,7 +181,7 @@ public class CompactDatabaseProcedure extends BaseProcedure {
 
         // Create InternalRow with the parameters for CompactProcedure
         // Parameters: table, partitions, compact_strategy, order_strategy, order_by, where,
-        // options, partition_idle_time
+        // options, partition_idle_time, buckets
         InternalRow compactArgs =
                 newInternalRow(
                         UTF8String.fromString(tableName), // table
@@ -191,7 +191,8 @@ public class CompactDatabaseProcedure extends BaseProcedure {
                         null, // order_by
                         null, // where
                         options == null ? null : UTF8String.fromString(options), // options
-                        null // partition_idle_time
+                        null, // partition_idle_time
+                        null // buckets
                         );
 
         InternalRow[] result = compactProcedure.call(compactArgs);

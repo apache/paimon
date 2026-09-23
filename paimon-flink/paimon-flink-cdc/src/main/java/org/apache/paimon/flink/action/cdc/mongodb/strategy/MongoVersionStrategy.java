@@ -35,6 +35,7 @@ import org.apache.flink.configuration.Configuration;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -82,8 +83,12 @@ public interface MongoVersionStrategy {
             List<ComputedColumn> computedColumns,
             Configuration mongodbConfig)
             throws JsonProcessingException {
+        if (jsonNode == null || jsonNode.isNull()) {
+            return null;
+        }
         SchemaAcquisitionMode mode =
-                SchemaAcquisitionMode.valueOf(mongodbConfig.get(START_MODE).toUpperCase());
+                SchemaAcquisitionMode.valueOf(
+                        mongodbConfig.get(START_MODE).toUpperCase(Locale.ROOT));
         ObjectNode objectNode =
                 JsonSerdeUtil.asSpecificNodeType(jsonNode.asText(), ObjectNode.class);
         JsonNode idNode = objectNode.get(ID_FIELD);
@@ -157,8 +162,7 @@ public interface MongoVersionStrategy {
         computedColumns.forEach(
                 computedColumn -> {
                     String columnName = computedColumn.columnName();
-                    String fieldReference = computedColumn.fieldReference();
-                    String computedValue = computedColumn.eval(parsedRow.get(fieldReference));
+                    String computedValue = computedColumn.evalFromRecord(parsedRow);
 
                     resultMap.put(columnName, computedValue);
                     schemaBuilder.column(columnName, computedColumn.columnType());

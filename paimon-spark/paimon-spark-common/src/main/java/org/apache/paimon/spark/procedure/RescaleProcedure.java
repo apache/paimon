@@ -104,8 +104,6 @@ public class RescaleProcedure extends BaseProcedure {
         checkArgument(
                 partitions == null || where == null,
                 "partitions and where cannot be used together.");
-        String finalWhere = partitions != null ? SparkProcedureUtils.toWhere(partitions) : where;
-
         return modifySparkTable(
                 tableIdent,
                 sparkTable -> {
@@ -127,17 +125,24 @@ public class RescaleProcedure extends BaseProcedure {
                     // So we use strict mode to make sure nothing is lost.
                     Map<String, String> dynamicOptions = new HashMap<>();
                     dynamicOptions.put(
-                            CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(),
+                            CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT.key(),
                             String.valueOf(snapshot.id()));
                     fileStoreTable = fileStoreTable.copy(dynamicOptions);
 
                     DataSourceV2Relation relation = createRelation(tableIdent, sparkTable);
-                    PartitionPredicate partitionPredicate =
-                            SparkProcedureUtils.convertToPartitionPredicate(
-                                    finalWhere,
-                                    fileStoreTable.schema().logicalPartitionType(),
-                                    spark(),
-                                    relation);
+                    PartitionPredicate partitionPredicate;
+                    if (partitions != null) {
+                        partitionPredicate =
+                                SparkProcedureUtils.convertPartitionsToPartitionPredicate(
+                                        partitions, fileStoreTable, spark());
+                    } else {
+                        partitionPredicate =
+                                SparkProcedureUtils.convertToPartitionPredicate(
+                                        where,
+                                        fileStoreTable.schema().logicalPartitionType(),
+                                        spark(),
+                                        relation);
+                    }
 
                     if (bucketNum == null) {
                         checkArgument(
@@ -181,7 +186,7 @@ public class RescaleProcedure extends BaseProcedure {
         FileStoreTable rescaledTable = table.copy(table.schema().copy(bucketOptions));
 
         PaimonSparkWriter writer = PaimonSparkWriter.apply(rescaledTable);
-        writer.writeBuilder().withOverwrite();
+        writer.withOverwrite();
         writer.commit(writer.write(datasetForRead));
     }
 

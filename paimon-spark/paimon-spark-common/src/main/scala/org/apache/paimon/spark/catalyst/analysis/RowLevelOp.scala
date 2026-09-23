@@ -46,11 +46,8 @@ sealed trait RowLevelOp {
 
 case object Delete extends RowLevelOp {
 
-  override val supportedMergeEngine: Seq[MergeEngine] = Seq(
-    MergeEngine.DEDUPLICATE,
-    MergeEngine.PARTIAL_UPDATE,
-    MergeEngine.AGGREGATE,
-    MergeEngine.FIRST_ROW)
+  override val supportedMergeEngine: Seq[MergeEngine] =
+    Seq(MergeEngine.DEDUPLICATE, MergeEngine.PARTIAL_UPDATE, MergeEngine.AGGREGATE)
 
   override val supportAppendOnlyTable: Boolean = true
 

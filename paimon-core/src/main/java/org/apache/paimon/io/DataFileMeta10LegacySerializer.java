@@ -44,6 +44,8 @@ import static org.apache.paimon.utils.InternalRowUtils.toStringArrayData;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
+import static org.apache.paimon.utils.SerializationUtils.presizedCapacity;
+import static org.apache.paimon.utils.SerializationUtils.readCount;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** Serializer for {@link DataFileMeta} with 1.0 snapshot version. */
@@ -115,8 +117,8 @@ public class DataFileMeta10LegacySerializer implements Serializable {
     }
 
     public final List<DataFileMeta> deserializeList(DataInputView source) throws IOException {
-        int size = source.readInt();
-        List<DataFileMeta> records = new ArrayList<>(size);
+        int size = readCount(source, getClass().getSimpleName());
+        List<DataFileMeta> records = new ArrayList<>(presizedCapacity(size));
         for (int i = 0; i < size; i++) {
             records.add(deserialize(source));
         }
@@ -145,6 +147,7 @@ public class DataFileMeta10LegacySerializer implements Serializable {
                 row.isNullAt(14) ? null : row.getBinary(14),
                 row.isNullAt(15) ? null : FileSource.fromByteValue(row.getByte(15)),
                 row.isNullAt(16) ? null : fromStringArrayData(row.getArray(16)),
+                null,
                 null,
                 null,
                 null);

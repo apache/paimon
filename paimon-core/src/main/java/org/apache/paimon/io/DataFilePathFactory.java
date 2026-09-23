@@ -18,6 +18,7 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.fs.ExternalPathProvider;
@@ -86,10 +87,8 @@ public class DataFilePathFactory {
         return newPathFromName(newFileName(dataFilePrefix, ".blob"));
     }
 
-    /** Create a new blob file path under the given external storage path for descriptor fields. */
-    public Path newExternalStorageBlobPath(String externalStoragePath) {
-        String fileName = newFileName(dataFilePrefix, ".blob");
-        return new Path(externalStoragePath, fileName);
+    public Path newVideoPath() {
+        return newPathFromName(newFileName(dataFilePrefix, ".video"));
     }
 
     public Path newChangelogPath() {
@@ -209,8 +208,11 @@ public class DataFilePathFactory {
     }
 
     private static boolean isTextFormat(String formatIdentifier) {
-        return "json".equalsIgnoreCase(formatIdentifier)
-                || "csv".equalsIgnoreCase(formatIdentifier);
+        // Keep this list in step with CoreOptions.formatTableFileCompression, which groups the
+        // same three formats: they are the ones whose codec is recovered from the file name.
+        return CoreOptions.FILE_FORMAT_JSON.equalsIgnoreCase(formatIdentifier)
+                || CoreOptions.FILE_FORMAT_CSV.equalsIgnoreCase(formatIdentifier)
+                || CoreOptions.FILE_FORMAT_TEXT.equalsIgnoreCase(formatIdentifier);
     }
 
     @Nullable

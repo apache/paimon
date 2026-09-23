@@ -26,6 +26,7 @@ import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
 
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
@@ -186,16 +187,18 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
 
     @Override
     public void writeVariant(int pos, Variant variant) {
-        byte[] value = variant.value();
-        byte[] metadata = variant.metadata();
-        int totalSize = 4 + value.length + metadata.length;
+        ByteBuffer value = variant.valueBuffer();
+        ByteBuffer metadata = variant.metadataBuffer();
+        int valueSize = value.remaining();
+        int metadataSize = metadata.remaining();
+        int totalSize = 4 + valueSize + metadataSize;
         final int roundedSize = roundNumberOfBytesToNearestWord(totalSize);
         ensureCapacity(roundedSize);
         zeroOutPaddingBytes(totalSize);
 
-        segment.putInt(cursor, value.length);
-        segment.put(cursor + 4, value, 0, value.length);
-        segment.put(cursor + 4 + value.length, metadata, 0, metadata.length);
+        segment.putInt(cursor, valueSize);
+        segment.put(cursor + 4, value, valueSize);
+        segment.put(cursor + 4 + valueSize, metadata, metadataSize);
 
         setOffsetAndSize(pos, cursor, totalSize);
         cursor += roundedSize;
@@ -203,7 +206,12 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
 
     @Override
     public void writeBlob(int pos, Blob blob) {
-        byte[] bytes = blob.toData();
+        byte[] bytes;
+        if (blob instanceof BlobData) {
+            bytes = blob.toData();
+        } else {
+            bytes = Blob.serializeBlob(blob);
+        }
         writeBinary(pos, bytes, 0, bytes.length);
     }
 

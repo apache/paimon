@@ -1,5 +1,5 @@
 ---
-title: "RESTCatalog"
+title: "REST Catalog"
 sidebar_position: 5
 ---
 
@@ -22,45 +22,60 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# RESTCatalog
+<a id="restcatalog"></a>
+<a id="overview"></a>
 
-## Overview
+# REST Catalog
 
-Paimon REST Catalog provides a lightweight implementation to access the catalog service. Paimon could access the
-catalog service through a catalog server which implements REST API. You can see all APIs in [REST API](./rest-api).
+The REST Catalog is a Paimon catalog client that talks to a remote service over HTTP. The service
+implements the [REST Catalog API](./rest-api) and owns the backend-specific catalog logic.
+Compute engines use the client to discover tables and perform catalog operations.
 
-![](/img/rest-catalog.svg)
+[![The engine sends catalog requests to a REST service, which manages catalog metadata. The engine reads and writes data files through the storage implementation.](/img/concepts-rest-catalog.svg)](/img/concepts-rest-catalog.svg)
 
-## Key Features
+<a id="key-features"></a>
 
-1. User Defined Technology-Specific Logic Implementation
-    - All technology-specific logic within the catalog server.
-    - This ensures that the user can define logic that could be owned by the user.
-2. Decoupled Architecture
-    - The REST Catalog interacts with the catalog server through a well-defined REST API.
-    - This decoupling allows for independent evolution and scaling of the catalog server and clients.
-3. Language Agnostic
-    - Developers can implement the catalog server in any programming language, provided that it adheres to the specified REST API.
-    - This flexibility enables teams to utilize their existing tech stacks and expertise.
-4. Support for Any Catalog Backend
-    - REST Catalog is designed to work with any catalog backend.
-    - As long as they implement the relevant APIs, they can seamlessly integrate with REST Catalog.
+## How It Works
 
-## Conclusion
+1. The client connects to the service URI and identifies the warehouse to use.
+2. The service authenticates requests and handles database, table, and other supported metadata operations.
+3. The client obtains table metadata and accesses files through the configured filesystem or object store.
+   When supported and enabled, the service can provide temporary data-access credentials.
 
-REST Catalog offers adaptable solution for accessing the catalog service. According to [REST API](./rest-api) is decoupled
-from the catalog service.
+The catalog service does not need to proxy the contents of every data file. Catalog API access
+and storage access are separate parts of the connection. Server capabilities determine which
+optional table, permission, policy, and snapshot operations are available.
 
-Technology-specific Logic is encapsulated on the catalog server. At the same time, the catalog server supports any
-backend and languages.
+<a id="token-provider"></a>
 
-## Token Provider
+## Connect an Engine
 
-RESTCatalog supports multiple access authentication methods, including the following:
+Configure `metastore = rest`, the service `uri`, the `warehouse`, and an authentication provider.
+For REST Catalog, the warehouse identifies the server-side catalog or instance; use the value
+expected by your service rather than assuming it is a filesystem path.
 
-1. [Bear Token](./bear).
-2. [DLF Token](./dlf).
+Choose the authentication guide for your service:
 
-## REST Open API
+| Provider | Guide |
+| --- | --- |
+| Bearer token (`token.provider = bear`) | [Bearer Token](./bear), including a Flink SQL catalog example |
+| Alibaba Cloud DLF (`token.provider = dlf`) | [DLF Token](./dlf), including access keys, STS, and ECS roles |
 
-See [REST API](./rest-api).
+## Work with Tables and Files
+
+| Task | Guide |
+| --- | --- |
+| Understand Paimon Tables, Format Tables, and Object Tables | [Tables](./tables) |
+| Access files using catalog, database, and table names | [Paimon Virtual Storage](./pvfs) |
+| Use the catalog from Java | [REST Java API](../../program-api/rest-api) |
+
+<a id="rest-open-api"></a>
+
+## API References
+
+- [REST Catalog API](./rest-api): the OpenAPI contract for catalog operations.
+- [REST Management API](./management-api): permissions, row filters, column masking, and the
+  corresponding Spark SQL procedures.
+
+These references describe the client/server contracts. Check that your server implements an
+operation before relying on it.

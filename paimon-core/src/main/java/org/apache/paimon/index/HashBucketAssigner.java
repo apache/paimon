@@ -46,7 +46,6 @@ public class HashBucketAssigner implements BucketAssigner {
     private final int assignId;
     private final long targetBucketRowNumber;
     private final int maxBucketsNum;
-    private int maxBucketId;
 
     private final Map<BinaryRow, PartitionIndex> partitionIndex;
 
@@ -59,6 +58,7 @@ public class HashBucketAssigner implements BucketAssigner {
             int assignId,
             long targetBucketRowNumber,
             int maxBucketsNum) {
+        PartitionIndex.validateMaxBuckets(maxBucketsNum);
         this.snapshotManager = snapshotManager;
         this.commitUser = commitUser;
         this.indexFileHandler = indexFileHandler;
@@ -88,12 +88,9 @@ public class HashBucketAssigner implements BucketAssigner {
             this.partitionIndex.put(partition, index);
         }
 
-        int assigned = index.assign(hash, this::isMyBucket, maxBucketsNum, maxBucketId);
+        int assigned = index.assign(hash, this::isMyBucket, maxBucketsNum);
         if (LOG.isDebugEnabled()) {
             LOG.debug("Assign {} to the partition {} key hash {}", assigned, partition, hash);
-        }
-        if (assigned > maxBucketId) {
-            maxBucketId = assigned;
         }
         return assigned;
     }

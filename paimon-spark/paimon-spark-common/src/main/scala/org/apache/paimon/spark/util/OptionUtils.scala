@@ -18,7 +18,8 @@
 
 package org.apache.paimon.spark.util
 
-import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.catalog.{CatalogUtils, Identifier}
 import org.apache.paimon.options.ConfigOption
 import org.apache.paimon.spark.{SparkCatalogOptions, SparkConnectorOptions}
 import org.apache.paimon.table.Table
@@ -109,8 +110,28 @@ object OptionUtils extends SQLConfHelper with Logging {
     getOptionString(SparkConnectorOptions.MERGE_SCHEMA).toBoolean
   }
 
+  def hiveStyleDynamicPartitionEnabled(): Boolean = {
+    getOptionString(SparkConnectorOptions.HIVE_STYLE_DYNAMIC_PARTITION_ENABLED).toBoolean
+  }
+
   def writeMergeSchemaExplicitCastEnabled(): Boolean = {
     getOptionString(SparkConnectorOptions.EXPLICIT_CAST).toBoolean
+  }
+
+  def writeMergeSchemaTypeWideningEnabled(): Boolean = {
+    getOptionString(SparkConnectorOptions.TYPE_WIDENING).toBoolean
+  }
+
+  def dataEvolutionUpdateConflictRetryMaxAttempts(): Int = {
+    getOptionString(SparkConnectorOptions.DATA_EVOLUTION_UPDATE_CONFLICT_RETRY_MAX_ATTEMPTS).toInt
+  }
+
+  def dataEvolutionUpdateConflictRetryWaitMs(): Long = {
+    getOptionString(SparkConnectorOptions.DATA_EVOLUTION_UPDATE_CONFLICT_RETRY_WAIT_MS).toLong
+  }
+
+  def legacyTimestampMappingEnabled(): Boolean = {
+    getOptionString(SparkConnectorOptions.LEGACY_TIMESTAMP_MAPPING).toBoolean
   }
 
   def v1FunctionEnabled(): Boolean = {
@@ -123,6 +144,14 @@ object OptionUtils extends SQLConfHelper with Logging {
 
   def sourceSplitTargetSizeWithColumnPruning(): Boolean = {
     getOptionString(SparkConnectorOptions.SOURCE_SPLIT_TARGET_SIZE_WITH_COLUMN_PRUNING).toBoolean
+  }
+
+  def formatTableRepairCollectStatistics(): Boolean = {
+    getOptionString(SparkConnectorOptions.FORMAT_TABLE_REPAIR_COLLECT_STATISTICS).toBoolean
+  }
+
+  def formatTableStatisticsParallelism(): Int = {
+    getOptionString(SparkConnectorOptions.FORMAT_TABLE_STATISTICS_PARALLELISM).toInt
   }
 
   private def mergeSQLConf(extraOptions: JMap[String, String]): JMap[String, String] = {
@@ -165,15 +194,53 @@ object OptionUtils extends SQLConfHelper with Logging {
       catalogName: String = null,
       ident: Identifier = null,
       extraOptions: JMap[String, String] = new JHashMap[String, String]()): T = {
-    val mergedOptions = if (catalogName != null && ident != null) {
-      mergeSQLConfWithIdentifier(extraOptions, catalogName, ident)
-    } else {
-      mergeSQLConf(extraOptions)
-    }
+    val mergedOptions = getMergedOptions(catalogName, ident, extraOptions)
     if (mergedOptions.isEmpty) {
       table
     } else {
       table.copy(mergedOptions).asInstanceOf[T]
     }
+  }
+
+  private def getMergedOptions(
+      catalogName: String = null,
+      ident: Identifier = null,
+      extraOptions: JMap[String, String] = new JHashMap[String, String]()): JMap[String, String] = {
+    if (catalogName != null && ident != null) {
+      mergeSQLConfWithIdentifier(extraOptions, catalogName, ident)
+    } else {
+      mergeSQLConf(extraOptions)
+    }
+  }
+
+  def usePaimonFormatTableImplementation(
+      catalogName: String,
+      ident: Identifier,
+      catalogOptions: JMap[String, String],
+      tableOptions: JMap[String, String]): Boolean = {
+    val mergedOptions =
+      new JHashMap[String, String](CatalogUtils.tableDefaultOptions(catalogOptions))
+    mergedOptions.putAll(tableOptions)
+    mergedOptions.putAll(getMergedOptions(catalogName, ident))
+    new CoreOptions(mergedOptions).formatTableImplementationIsPaimon
+  }
+
+  def withBranchFromOptions(
+      catalogName: String = null,
+      identifier: Identifier = null,
+      extraOptions: JMap[String, String] = new JHashMap[String, String]()
+  ): Identifier = {
+    if (identifier != null && !identifier.isSystemTable) {
+      val branch =
+        getMergedOptions(catalogName, identifier, extraOptions).get(CoreOptions.BRANCH.key)
+      if (branch != null && identifier.getBranchName == null) {
+        logWarning(
+          s"Using deprecated 'spark.paimon.branch=$branch' to access table '${identifier.getTableName}'. " +
+            s"Please migrate to '${identifier.getTableName}$$branch_$branch' syntax, as 'spark.paimon.branch' " +
+            s"will be removed in a future version.")
+        return new Identifier(identifier.getDatabaseName, identifier.getTableName, branch)
+      }
+    }
+    identifier
   }
 }

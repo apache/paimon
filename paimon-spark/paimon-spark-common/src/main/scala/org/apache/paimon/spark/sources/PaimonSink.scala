@@ -20,7 +20,7 @@ package org.apache.paimon.spark.sources
 
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.{InsertInto, Overwrite}
-import org.apache.paimon.spark.commands.{SchemaHelper, WriteIntoPaimonTable}
+import org.apache.paimon.spark.commands.{SchemaEvolutionHelper, WriteIntoPaimonTable}
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.{DataFrame, PaimonUtils, SQLContext}
@@ -35,7 +35,7 @@ class PaimonSink(
     outputMode: OutputMode,
     options: Options)
   extends Sink
-  with SchemaHelper {
+  with SchemaEvolutionHelper {
 
   override def addBatch(batchId: Long, data: DataFrame): Unit = {
     val saveMode = if (outputMode == OutputMode.Complete()) {

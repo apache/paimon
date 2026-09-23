@@ -109,6 +109,10 @@ public class DebeziumBsonRecordParser extends DebeziumJsonRecordParser {
 
     @Override
     protected void setRoot(CdcSourceRecord record) {
+        // Store current record for metadata access. Assign the field directly instead of calling
+        // super.setRoot, because DebeziumJsonRecordParser#setRoot also parses the Debezium value
+        // schema, which carries no field information for BSON documents.
+        this.currentRecord = record;
         root = (JsonNode) record.getValue();
         if (root.has(FIELD_SCHEMA)) {
             root = root.get(FIELD_PAYLOAD);

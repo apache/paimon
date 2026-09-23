@@ -28,7 +28,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.privilege.NoPrivilegeException;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -52,7 +51,6 @@ import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.PartitionEventType;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.jupiter.api.function.Executable;
 import org.junit.rules.TemporaryFolder;
 import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
@@ -78,7 +76,6 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** IT cases for using Paimon {@link HiveCatalog} together with Paimon Hive connector. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
@@ -1380,32 +1377,6 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testFileBasedPrivilege() throws Exception {
-        tEnv.executeSql("CREATE TABLE t ( a INT, b INT )");
-        tEnv.executeSql("INSERT INTO t VALUES (1, 10), (2, 20)").await();
-        tEnv.executeSql("CALL sys.init_file_based_privilege('root-passwd')");
-
-        Map<String, String> rootCatalogProperties = new HashMap<>();
-        rootCatalogProperties.put("user", "root");
-        rootCatalogProperties.put("password", "root-passwd");
-        registerHiveCatalog("my_hive_root", rootCatalogProperties);
-        tEnv.executeSql("USE CATALOG my_hive_root");
-        tEnv.executeSql("CALL sys.create_privileged_user('test', 'test-passwd')");
-        tEnv.executeSql("CALL sys.grant_privilege_to_user('test', 'SELECT', 'test_db')");
-
-        Map<String, String> testCatalogProperties = new HashMap<>();
-        testCatalogProperties.put("user", "test");
-        testCatalogProperties.put("password", "test-passwd");
-        registerHiveCatalog("my_hive_test", testCatalogProperties);
-        tEnv.executeSql("USE CATALOG my_hive_test");
-        tEnv.executeSql("USE test_db");
-        assertThat(collect("SELECT * FROM t ORDER BY a"))
-                .containsExactly(Row.of(1, 10), Row.of(2, 20));
-        assertNoPrivilege(() -> tEnv.executeSql("INSERT INTO t VALUES (3, 30)").await());
-        assertNoPrivilege(() -> tEnv.executeSql("DROP TABLE t").await());
-    }
-
-    @Test
     public void testMarkDone() throws Exception {
         sEnv.executeSql(
                 "CREATE TABLE mark_done_t1 (a INT, dt STRING) WITH ('continuous.discovery-interval' = '1s')");
@@ -1839,15 +1810,6 @@ public abstract class HiveCatalogITCaseBase {
                 .await();
         tEnv.executeSql("INSERT INTO t_repair_hive VALUES(1, 'login', '2020-01-02', '09')").await();
         return tEnv;
-    }
-
-    private void assertNoPrivilege(Executable executable) {
-        Exception e = assertThrows(Exception.class, executable);
-        if (e.getCause() != null) {
-            assertThat(e).hasRootCauseInstanceOf(NoPrivilegeException.class);
-        } else {
-            assertThat(e).isInstanceOf(NoPrivilegeException.class);
-        }
     }
 
     protected List<Row> collect(String sql) throws Exception {

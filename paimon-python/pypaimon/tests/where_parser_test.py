@@ -17,7 +17,7 @@
 
 import unittest
 
-from pypaimon.cli.where_parser import parse_where_clause, _tokenize, _cast_literal
+from pypaimon.common.where_parser import parse_where_clause, _tokenize, _cast_literal
 from pypaimon.schema.data_types import ArrayType, AtomicType, DataField
 
 

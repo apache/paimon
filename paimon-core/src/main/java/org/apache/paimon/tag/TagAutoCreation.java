@@ -37,6 +37,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.SortedMap;
@@ -94,16 +95,19 @@ public class TagAutoCreation {
 
         this.periodHandler.validateDelay(delay);
 
-        SortedMap<Snapshot, List<String>> tags = tagManager.tags(periodHandler::isAutoTag);
+        // Auto-created tag times advance with snapshot IDs. Read only the latest tag to restore
+        // progress instead of reading every tag file.
+        List<String> tagNames = tagManager.tagNames(periodHandler::isAutoTag);
+        tagNames.sort(Comparator.comparing(periodHandler::tagToTime, Comparator.reverseOrder()));
 
-        if (tags.isEmpty()) {
+        if (tagNames.isEmpty()) {
             this.nextSnapshot =
                     firstNonNull(snapshotManager.earliestSnapshotId(), FIRST_SNAPSHOT_ID);
         } else {
-            Snapshot lastTag = tags.lastKey();
-            this.nextSnapshot = lastTag.id() + 1;
+            String tagName = tagNames.get(0);
+            Tag tag = tagManager.getOrThrow(tagName);
+            this.nextSnapshot = tag.trimToSnapshot().id() + 1;
 
-            String tagName = checkAndGetOneAutoTag(tags.get(lastTag));
             LocalDateTime time = periodHandler.tagToTime(tagName);
             this.nextTag = periodHandler.nextTagTime(time);
         }

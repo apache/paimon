@@ -38,13 +38,44 @@ import java.io.File;
 import java.io.IOException;
 import java.security.PrivilegedAction;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLKEY;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link CachedClientPool}. */
 public class TestCachedClientPool {
+
+    @Test
+    public void testExtractKeyUnknownElementErrorMessage() {
+        assertThatThrownBy(
+                        () ->
+                                CachedClientPool.extractKey(
+                                        HiveMetaStoreClient.class.getName(),
+                                        "conf",
+                                        new Configuration()))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("Unknown key element conf");
+    }
+
+    @Test
+    public void testExtractKeyUnderATurkishDefaultLocale() {
+        // UGI contains an 'I', so a locale-sensitive uppercase asks the enum for UGİ
+        Locale original = Locale.getDefault();
+        Locale.setDefault(new Locale("tr", "TR"));
+        try {
+            assertThat(
+                            CachedClientPool.extractKey(
+                                    HiveMetaStoreClient.class.getName(),
+                                    "ugi",
+                                    new Configuration()))
+                    .isNotNull();
+        } finally {
+            Locale.setDefault(original);
+        }
+    }
 
     @Test
     public void testCacheKeyNotSame() {

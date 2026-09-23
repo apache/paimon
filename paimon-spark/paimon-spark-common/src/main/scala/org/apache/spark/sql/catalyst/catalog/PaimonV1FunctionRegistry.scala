@@ -19,7 +19,7 @@
 package org.apache.spark.sql.catalyst.catalog
 
 import org.apache.paimon.function.{Function => PaimonFunction}
-import org.apache.paimon.spark.catalog.functions.V1FunctionConverter
+import org.apache.paimon.spark.catalog.functions.FileFunctionConverter
 
 import org.apache.spark.sql.{PaimonUtils, SparkSession}
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, SQLConfHelper}
@@ -27,7 +27,7 @@ import org.apache.spark.sql.catalyst.analysis.{FunctionAlreadyExistsException, F
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistry.FunctionBuilder
 import org.apache.spark.sql.catalyst.expressions.{AggregateWindowFunction, Expression, ExpressionInfo, FrameLessOffsetWindowFunction, Lag, Lead, NthValue, WindowExpression}
 import org.apache.spark.sql.catalyst.expressions.aggregate._
-import org.apache.spark.sql.catalyst.parser.extensions.UnResolvedPaimonV1Function
+import org.apache.spark.sql.catalyst.parser.extensions.{PaimonFunctionLookup, UnResolvedPaimonV1Function}
 import org.apache.spark.sql.errors.QueryCompilationErrors
 import org.apache.spark.sql.hive.HiveUDFExpressionBuilder
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
@@ -37,26 +37,42 @@ import java.util.Locale
 
 case class PaimonV1FunctionRegistry(session: SparkSession) extends SQLConfHelper {
 
-  // ================== Start Public API ===================
-
-  /**
-   * Register the function and resolves it to an Expression if not registered, otherwise returns the
-   * registered Expression.
-   */
+  /** Resolve a v1 function (SQL or file) to an Expression. */
   def registerAndResolveFunction(u: UnResolvedPaimonV1Function): Expression = {
-    val resolvedFun = resolvePersistentFunctionInternal(
-      u.funcIdent,
-      u.func,
-      u.arguments,
-      functionRegistry,
-      makeFunctionBuilder)
-    validateFunction(resolvedFun, u.arguments.length, u)
+    val qualifiedIdent = qualifyIdentifier(u.funcIdent)
+    val sqlFunc = u.func
+      .filter(PaimonFunctionLookup.isPaimonSQLFunction)
+      .orElse(Option(sqlFunctionCache.get(qualifiedIdent)))
+    if (sqlFunc.isDefined) {
+      // SQL UDFs resolve into a Spark `SQLFunctionExpression` (Spark 4.0+ only, via the shim), which
+      // Spark's own `ResolveSQLFunctions` rule then inlines.
+      if (u.isDistinct || u.filter.isDefined || u.ignoreNulls) {
+        throw new UnsupportedOperationException(
+          s"SQL function ${u.funcIdent} does not support DISTINCT, FILTER or IGNORE NULLS.")
+      }
+      val resolvedFun = SparkShimLoader.shim.resolvePaimonSQLFunction(
+        u.funcIdent,
+        sqlFunc.get,
+        u.arguments,
+        session.sessionState.sqlParser)
+      sqlFunctionCache.putIfAbsent(qualifiedIdent, sqlFunc.get)
+      resolvedFun
+    } else {
+      // File (Hive) function: register into the function registry and resolve via the Hive builder.
+      val resolvedFun = resolvePersistentFunctionInternal(
+        u.funcIdent,
+        u.func,
+        u.arguments,
+        functionRegistry,
+        makeFunctionBuilder)
+      validateFunction(resolvedFun, u.arguments.length, u)
+    }
   }
 
-  /** Check if the function is registered. */
+  /** Check if the function is registered (file function in Hive registry or SQL function in cache). */
   def isRegistered(funcIdent: FunctionIdentifier): Boolean = {
     val qualifiedIdent = qualifyIdentifier(funcIdent)
-    functionRegistry.functionExists(qualifiedIdent)
+    functionRegistry.functionExists(qualifiedIdent) || sqlFunctionCache.containsKey(qualifiedIdent)
   }
 
   /** Unregister the function. */
@@ -65,17 +81,18 @@ case class PaimonV1FunctionRegistry(session: SparkSession) extends SQLConfHelper
     if (functionRegistry.functionExists(qualifiedIdent)) {
       functionRegistry.dropFunction(qualifiedIdent)
     }
+    sqlFunctionCache.remove(qualifiedIdent)
   }
 
-  // ================== End Public API ===================
-
-  // Most copy from spark
   private val functionResourceLoader: FunctionResourceLoader =
     SparkShimLoader.shim.classicApi.sessionResourceLoader(session)
   private val functionRegistry: FunctionRegistry = new SimpleFunctionRegistry
   private val functionExpressionBuilder: FunctionExpressionBuilder = HiveUDFExpressionBuilder
 
-  /** Look up a persistent scalar function by name and resolves it to an Expression. */
+  // SQL functions bypass the Hive registry; cache them here to avoid repeated catalog IO.
+  private val sqlFunctionCache =
+    new java.util.concurrent.ConcurrentHashMap[FunctionIdentifier, PaimonFunction]()
+
   private def resolvePersistentFunctionInternal[T](
       funcIdent: FunctionIdentifier,
       func: Option[PaimonFunction],
@@ -83,44 +100,27 @@ case class PaimonV1FunctionRegistry(session: SparkSession) extends SQLConfHelper
       registry: FunctionRegistryBase[T],
       createFunctionBuilder: CatalogFunction => FunctionRegistryBase[T]#FunctionBuilder): T = {
 
-    val name = funcIdent
-    // `synchronized` is used to prevent multiple threads from concurrently resolving the
-    // same function that has not yet been loaded into the function registry. This is needed
-    // because calling `registerFunction` twice with `overrideIfExists = false` can lead to
-    // a FunctionAlreadyExistsException.
+    // Synchronized: registerFunction with overrideIfExists=false throws on concurrent duplicate loads.
     synchronized {
-      val qualifiedIdent = qualifyIdentifier(name)
+      val qualifiedIdent = qualifyIdentifier(funcIdent)
       if (registry.functionExists(qualifiedIdent)) {
-        // This function has been already loaded into the function registry.
         registry.lookupFunction(qualifiedIdent, arguments)
       } else {
-        // The function has not been loaded to the function registry, which means
-        // that the function is a persistent function (if it actually has been registered
-        // in the metastore). We need to first put the function in the function registry.
         require(func.isDefined, "Function must be defined")
-        val catalogFunction = V1FunctionConverter.toV1Function(func.get)
+        val catalogFunction = FileFunctionConverter.toCatalogFunction(func.get)
         loadFunctionResources(catalogFunction.resources)
-        // Please note that qualifiedName is provided by the user. However,
-        // catalogFunction.identifier.unquotedString is returned by the underlying
-        // catalog. So, it is possible that qualifiedName is not exactly the same as
-        // catalogFunction.identifier.unquotedString (difference is on case-sensitivity).
-        // At here, we preserve the input from the user.
+        // Preserve user-provided identifier (case-sensitivity may differ from catalog).
         val funcMetadata = catalogFunction.copy(identifier = qualifiedIdent)
         registerFunction(
           funcMetadata,
           overrideIfExists = false,
           registry = registry,
           functionBuilder = createFunctionBuilder(funcMetadata))
-        // Now, we need to create the Expression.
         registry.lookupFunction(qualifiedIdent, arguments)
       }
     }
   }
 
-  /**
-   * Loads resources such as JARs and Files for a function. Every resource is represented by a tuple
-   * (resource type, resource uri).
-   */
   private def loadFunctionResources(resources: Seq[FunctionResource]): Unit = {
     resources.foreach(functionResourceLoader.loadResource)
   }
@@ -153,7 +153,6 @@ case class PaimonV1FunctionRegistry(session: SparkSession) extends SQLConfHelper
       "hive")
   }
 
-  /** Constructs a [[FunctionBuilder]] based on the provided function metadata. */
   private def makeFunctionBuilder(func: CatalogFunction): FunctionBuilder = {
     val className = func.className
     if (!PaimonUtils.classIsLoadable(className)) {
@@ -164,15 +163,10 @@ case class PaimonV1FunctionRegistry(session: SparkSession) extends SQLConfHelper
     (input) => functionExpressionBuilder.makeExpression(name, clazz, input)
   }
 
-  /**
-   * Qualifies the function identifier with the current database if not specified, and normalize all
-   * the names.
-   */
   private def qualifyIdentifier(ident: FunctionIdentifier): FunctionIdentifier = {
     FunctionIdentifier(funcName = format(ident.funcName), database = ident.database)
   }
 
-  /** Formats object names, taking into account case sensitivity. */
   protected def format(name: String): String = {
     if (conf.caseSensitiveAnalysis) name else name.toLowerCase(Locale.ROOT)
   }

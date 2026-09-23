@@ -27,9 +27,7 @@ import org.apache.paimon.utils.CloseableIterator;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.List;
 
 /**
  * A {@link MergeFunction} for lookup, this wrapper only considers the latest high level record,
@@ -43,7 +41,9 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
     private final KeyValueBuffer candidates;
     private boolean containLevel0;
     private InternalRow currentKey;
-    @Nullable private Comparator<KeyValue> sequenceComparator;
+
+    /** Position of the record {@link #pickHighLevel} chose, -1 when there is none. */
+    private int highLevelIndex = -1;
 
     public LookupMergeFunction(
             MergeFunction<KeyValue> mergeFunction,
@@ -55,16 +55,12 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         this.candidates = KeyValueBuffer.createHybridBuffer(options, keyType, valueType, ioManager);
     }
 
-    /** Set the sequence comparator for picking high level records. */
-    public void setSequenceComparator(@Nullable Comparator<KeyValue> sequenceComparator) {
-        this.sequenceComparator = sequenceComparator;
-    }
-
     @Override
     public void reset() {
         candidates.reset();
         currentKey = null;
         containLevel0 = false;
+        highLevelIndex = -1;
     }
 
     @Override
@@ -83,26 +79,22 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
     @Nullable
     public KeyValue pickHighLevel() {
         KeyValue highLevel = null;
+        highLevelIndex = -1;
+        int index = 0;
         try (CloseableIterator<KeyValue> iterator = candidates.iterator()) {
             while (iterator.hasNext()) {
                 KeyValue kv = iterator.next();
                 // records that has not been stored on the disk yet, such as the data in the write
                 // buffer being at level -1
-                if (kv.level() <= 0) {
-                    continue;
-                }
-                if (highLevel == null) {
-                    highLevel = kv;
-                } else if (sequenceComparator != null) {
-                    // When sequence comparator is set, use it to pick the record with highest
-                    // sequence value, which represents the latest record
-                    if (sequenceComparator.compare(kv, highLevel) > 0) {
+                if (kv.level() > 0) {
+                    // For high-level comparison logic (not involving Level 0), only the value of
+                    // the minimum Level should be selected
+                    if (highLevel == null || kv.level() < highLevel.level()) {
                         highLevel = kv;
+                        highLevelIndex = index;
                     }
-                } else if (kv.level() < highLevel.level()) {
-                    // Without sequence comparator, fall back to picking the minimum level
-                    highLevel = kv;
                 }
+                index++;
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -121,28 +113,23 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
     @Override
     public KeyValue getResult() {
         mergeFunction.reset();
-        KeyValue highLevel = pickHighLevel();
-
-        // Collect records to merge: level-0 records and the picked high level record
-        List<KeyValue> toMerge = new ArrayList<>();
+        // match the high level record by its position: once the candidates have spilled, every
+        // iteration deserializes fresh KeyValue instances, so the one picked above is never the
+        // same object as the one seen here
+        pickHighLevel();
+        int index = 0;
         try (CloseableIterator<KeyValue> iterator = candidates.iterator()) {
             while (iterator.hasNext()) {
                 KeyValue kv = iterator.next();
-                if (kv.level() <= 0 || kv == highLevel) {
-                    toMerge.add(kv);
+                // records that has not been stored on the disk yet, such as the data in the write
+                // buffer being at level -1
+                if (kv.level() <= 0 || index == highLevelIndex) {
+                    mergeFunction.add(kv);
                 }
+                index++;
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
-        }
-
-        // When sequence comparator is set, sort by sequence so highest sequence is added last
-        if (sequenceComparator != null) {
-            toMerge.sort(sequenceComparator);
-        }
-
-        for (KeyValue kv : toMerge) {
-            mergeFunction.add(kv);
         }
         return mergeFunction.getResult();
     }
@@ -190,6 +177,10 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
 
         public void withIOManager(@Nullable IOManager ioManager) {
             this.ioManager = ioManager;
+        }
+
+        public MergeFunctionFactory<KeyValue> wrapped() {
+            return wrapped;
         }
 
         @Override

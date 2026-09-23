@@ -30,43 +30,16 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import dev.vortex.api.DType;
-import org.junit.jupiter.api.BeforeAll;
-
 import java.math.BigDecimal;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.data.BinaryString.fromString;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** Test for Vortex file format read/write using the base test framework. */
 public class VortexFileFormatReadWriteTest extends FormatReadWriteTest {
 
     protected VortexFileFormatReadWriteTest() {
         super("vortex");
-    }
-
-    @BeforeAll
-    static void checkNativeLibrary() {
-        assumeTrue(isNativeAvailable(), "Vortex native library not available, skipping tests");
-    }
-
-    private static boolean isNativeAvailable() {
-        try {
-            dev.vortex.jni.NativeLoader.loadJni();
-            return true;
-        } catch (Throwable t) {
-            return false;
-        }
-    }
-
-    private static boolean isFixedSizeListSupported() {
-        try {
-            DType.newFixedSizeList(DType.newInt(false), 2, false);
-            return true;
-        } catch (Throwable t) {
-            return false;
-        }
     }
 
     @Override

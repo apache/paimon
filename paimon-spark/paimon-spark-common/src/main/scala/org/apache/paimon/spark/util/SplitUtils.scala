@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.util
 
 import org.apache.paimon.table.format.FormatDataSplit
-import org.apache.paimon.table.source.{DataSplit, Split}
+import org.apache.paimon.table.source.{DataSplit, Split, Splits}
 
 import java.util.{Collections => JCollections}
 
@@ -27,12 +27,15 @@ import scala.collection.JavaConverters._
 
 object SplitUtils {
 
+  /** Only metadata is read here, so peeling the authorization wrapper exposes no rows. */
+  private def underlying(split: Split): Split = Splits.underlying(split)
+
   def splitSize(split: Split): Long = {
-    split match {
+    underlying(split) match {
       case ds: DataSplit =>
         ds.dataFiles().asScala.map(_.fileSize).sum
       case fs: FormatDataSplit =>
-        if (fs.length() == null) fs.fileSize() else fs.length().longValue()
+        fs.totalSize()
       case _ => 0
     }
   }
@@ -40,15 +43,15 @@ object SplitUtils {
   def fileCount(split: Split): Long = dataFileCount(split) + deleteFileCount(split)
 
   def dataFileCount(split: Split): Long = {
-    split match {
+    underlying(split) match {
       case ds: DataSplit => ds.dataFiles().size()
-      case _: FormatDataSplit => 1
+      case fs: FormatDataSplit => fs.fileCount()
       case _ => 0
     }
   }
 
   def deleteFileCount(split: Split): Long = {
-    split match {
+    underlying(split) match {
       case ds: DataSplit =>
         ds.deletionFiles()
           .orElse(JCollections.emptyList())

@@ -20,9 +20,9 @@ package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.ListBulkLoader;
 import org.apache.paimon.lookup.ListState;
-import org.apache.paimon.lookup.rocksdb.RocksDBBulkLoader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.KeyProjectedRow;
@@ -59,7 +59,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
                         "join-key-index",
                         InternalSerializers.create(
                                 TypeUtils.project(projectedType, joinKeyRow.indexMapping())),
-                        InternalSerializers.create(projectedType),
+                        InternalSerializers.create(cacheValueRowType()),
                         lruCacheSize);
         bootstrap();
     }
@@ -83,7 +83,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
         joinKeyRow.replaceRow(row);
         if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
             if (predicate == null || predicate.test(row)) {
-                state.add(joinKeyRow, row);
+                state.add(joinKeyRow, wrapForCache(row));
             }
         } else {
             throw new RuntimeException(
@@ -132,7 +132,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
                 if (currentKey != null && values.size() > 0) {
                     try {
                         bulkLoader.write(currentKey, values);
-                    } catch (RocksDBBulkLoader.WriteException e) {
+                    } catch (BulkLoader.WriteException e) {
                         throw new RuntimeException(e);
                     }
                 }

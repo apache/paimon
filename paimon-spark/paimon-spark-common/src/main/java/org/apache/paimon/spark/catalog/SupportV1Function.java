@@ -21,11 +21,13 @@ package org.apache.paimon.spark.catalog;
 import org.apache.paimon.function.Function;
 
 import org.apache.spark.sql.catalyst.FunctionIdentifier;
-import org.apache.spark.sql.catalyst.catalog.CatalogFunction;
 import org.apache.spark.sql.catalyst.expressions.Expression;
 import org.apache.spark.sql.catalyst.parser.extensions.UnResolvedPaimonV1Function;
 
-/** Catalog supports v1 function. */
+/**
+ * Catalog supports v1 function, i.e. functions surfaced through Spark's v1 (session / persistent)
+ * function mechanism: file (Hive) functions and SQL functions.
+ */
 public interface SupportV1Function extends WithPaimonCatalog {
 
     boolean v1FunctionEnabled();
@@ -33,14 +35,12 @@ public interface SupportV1Function extends WithPaimonCatalog {
     /** Look up the function in the catalog. */
     Function getFunction(FunctionIdentifier funcIdent) throws Exception;
 
-    void createV1Function(CatalogFunction v1Function, boolean ignoreIfExists) throws Exception;
+    /** Create a v1 function (file or SQL) from an already-built Paimon {@link Function}. */
+    void createV1Function(Function function, boolean ignoreIfExists) throws Exception;
 
     boolean v1FunctionRegistered(FunctionIdentifier funcIdent);
 
-    /**
-     * Register the function and resolves it to an Expression if not registered, otherwise returns
-     * the registered Expression.
-     */
+    /** Resolve a v1 function reference (file or SQL) to an Expression. */
     Expression registerAndResolveV1Function(UnResolvedPaimonV1Function unresolvedV1Function)
             throws Exception;
 

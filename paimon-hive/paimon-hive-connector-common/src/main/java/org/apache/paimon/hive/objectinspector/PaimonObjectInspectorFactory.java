@@ -24,11 +24,16 @@ import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VectorType;
 
+import org.apache.hadoop.hive.common.type.HiveChar;
+import org.apache.hadoop.hive.common.type.HiveVarchar;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;
 import org.apache.hadoop.hive.serde2.typeinfo.PrimitiveTypeInfo;
@@ -54,16 +59,22 @@ public class PaimonObjectInspectorFactory {
             case VARBINARY:
                 return PrimitiveObjectInspectorFactory.getPrimitiveJavaObjectInspector(
                         (PrimitiveTypeInfo) HiveTypeUtils.toTypeInfo(logicalType));
+            case BLOB:
+                return new PaimonBlobObjectInspector();
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) logicalType;
                 return new PaimonDecimalObjectInspector(
                         decimalType.getPrecision(), decimalType.getScale());
             case CHAR:
                 CharType charType = (CharType) logicalType;
-                return new PaimonCharObjectInspector(charType.getLength());
+                if (charType.getLength() > HiveChar.MAX_CHAR_LENGTH) {
+                    return new PaimonStringObjectInspector();
+                } else {
+                    return new PaimonCharObjectInspector(charType.getLength());
+                }
             case VARCHAR:
                 VarCharType varCharType = (VarCharType) logicalType;
-                if (varCharType.getLength() == VarCharType.MAX_LENGTH) {
+                if (varCharType.getLength() > HiveVarchar.MAX_VARCHAR_LENGTH) {
                     return new PaimonStringObjectInspector();
                 } else {
                     return new PaimonVarcharObjectInspector(varCharType.getLength());
@@ -81,9 +92,15 @@ public class PaimonObjectInspectorFactory {
             case ARRAY:
                 ArrayType arrayType = (ArrayType) logicalType;
                 return new PaimonListObjectInspector(arrayType.getElementType());
+            case VECTOR:
+                VectorType vectorType = (VectorType) logicalType;
+                return new PaimonListObjectInspector(vectorType.getElementType());
             case MAP:
                 MapType mapType = (MapType) logicalType;
                 return new PaimonMapObjectInspector(mapType.getKeyType(), mapType.getValueType());
+            case MULTISET:
+                MultisetType multisetType = (MultisetType) logicalType;
+                return new PaimonMapObjectInspector(multisetType.getElementType(), new IntType());
             case ROW:
                 List<String> fieldComments =
                         ((RowType) logicalType)

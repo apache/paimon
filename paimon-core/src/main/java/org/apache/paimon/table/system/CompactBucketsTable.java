@@ -263,8 +263,6 @@ public class CompactBucketsTable implements DataTable, ReadonlyTable {
             DataSplit dataSplit = (DataSplit) split;
             // in case of schema evolution
             for (DataFileMeta file : dataSplit.dataFiles()) {
-                System.out.println(
-                        "File schema id " + file.schemaId() + ", base schema id " + baseSchemaId);
                 if (file.schemaId() > baseSchemaId) {
                     throw new RuntimeException(
                             String.format(

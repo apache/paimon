@@ -16,6 +16,7 @@
 # under the License.
 
 import logging
+import os
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -25,6 +26,65 @@ import pyarrow  # noqa: F401
 import pyarrow.fs as pafs
 
 from pypaimon.common.options import Options
+
+_LOG = logging.getLogger(__name__)
+
+
+def supports_pread(stream) -> bool:
+    """Check if the stream supports position-based reads (thread-safe I/O)."""
+    if hasattr(stream, 'read_at'):
+        return True
+    if hasattr(stream, 'fileno'):
+        try:
+            stream.fileno()
+            return True
+        except Exception:
+            pass
+    return False
+
+
+def pread(stream, length: int, offset: int) -> bytes:
+    """Position-based read without changing the stream cursor. Thread-safe."""
+    if hasattr(stream, 'read_at'):
+        return stream.read_at(length, offset)
+    return os.pread(stream.fileno(), length, offset)
+
+
+_COALESCE_VIEW_MAX_RETAINED_AMPLIFICATION = 2.0
+# Bound per-object opens; 16 cuts them by 75% for default 64-range batches.
+_MAX_RANGE_LANES_PER_PATH = 16
+_RANGE_REQUEST_WEIGHT = 1 << 20
+
+
+def create_temp_path(path: str) -> str:
+    """Create the hidden temporary path used for an atomic write."""
+    separator = max(path.rfind('/'), path.rfind('\\'))
+    return f"{path[:separator + 1]}.{path[separator + 1:]}.{uuid.uuid4()}.tmp"
+
+
+def _coalesce_ranges(items, max_gap, max_span):
+    """Group ``(idx, path, offset, length)`` (length >= 0) into merged spans:
+    ``[(path, span_offset, span_length, [(idx, offset, length), ...])]``."""
+    from collections import defaultdict
+    by_path = defaultdict(list)
+    for it in items:
+        by_path[it[1]].append(it)
+    spans = []
+    for path, group in by_path.items():
+        group.sort(key=lambda x: x[2])
+        cur, start, end = [], None, None
+        for idx, _, off, length in group:
+            stop = off + length
+            if cur and off - end <= max_gap and stop - start <= max_span:
+                cur.append((idx, off, length))
+                end = max(end, stop)
+            else:
+                if cur:
+                    spans.append((path, start, end - start, cur))
+                cur, start, end = [(idx, off, length)], off, stop
+        if cur:
+            spans.append((path, start, end - start, cur))
+    return spans
 
 
 class FileIO(ABC):
@@ -111,6 +171,307 @@ class FileIO(ABC):
         else:
             self.mkdirs(path)
 
+    def read_file_range(self, path, offset, length):
+        """Read a byte range. Thread-safe. ``length < 0`` = read to EOF (pread
+        can't express that, so seek + read)."""
+        stream = self.new_input_stream(path)
+        try:
+            if length >= 0 and supports_pread(stream):
+                return pread(stream, length, offset)
+            stream.seek(offset)
+            return stream.read() if length < 0 else stream.read(length)
+        finally:
+            stream.close()
+
+    def read_ranges_coalesced(self, ranges, parallelism):
+        """Read ``ranges`` (each ``None`` or ``(path, offset, length)``), returning
+        bytes in the same order. Same-file nearby ranges are merged into one read
+        to cut round trips, then sliced. Each worker lane reuses one exclusive
+        stream for consecutive spans of the same path. Negative length (read to
+        EOF) is read on its own, never merged.
+
+        A failed read propagates and aborts the whole batch (unlike a per-row
+        ``file.open()`` loop that fails one row at a time).
+        """
+        max_gap, max_span = self._resolve_coalesce_limits()
+        return self._read_ranges_coalesced(
+            ranges, parallelism, max_gap, max_span,
+            max_retained_amplification=0, return_views=False)
+
+    def read_ranges_coalesced_views(self, ranges, parallelism, *,
+                                    max_retained_amplification=(
+                                        _COALESCE_VIEW_MAX_RETAINED_AMPLIFICATION)):
+        """Read coalesced ranges as zero-copy ``memoryview`` slices.
+
+        Member ranges from the same merged span share the span's backing buffer
+        instead of allocating one ``bytes`` object per member. Callers must
+        accept the Python buffer protocol. Use :meth:`read_ranges_coalesced`
+        when concrete ``bytes`` results are required. Each view keeps its backing
+        buffer alive. Sparse spans use independent views so they do not retain
+        excessive gap bytes; set ``max_retained_amplification`` to a non-positive
+        value to always share the merged buffer.
+        """
+        max_gap, max_span = self._resolve_coalesce_limits()
+        return self._read_ranges_coalesced(
+            ranges, parallelism, max_gap, max_span, max_retained_amplification,
+            return_views=True)
+
+    def _resolve_coalesce_limits(self):
+        from pypaimon.common.options.config import FileIOOptions
+        properties = getattr(self, "properties", None)
+        if not isinstance(properties, Options):
+            properties = Options({})
+        return (
+            properties.get(FileIOOptions.READ_COALESCE_MAX_GAP).get_bytes(),
+            properties.get(FileIOOptions.READ_COALESCE_MAX_BLOCK).get_bytes(),
+        )
+
+    def _read_ranges_coalesced(self, ranges, parallelism, max_gap, max_span,
+                               max_retained_amplification, return_views):
+        from concurrent.futures import ThreadPoolExecutor
+
+        # Threads write disjoint results[idx]; safe under the GIL (no list resize).
+        results = [None] * len(ranges)
+        coalescible, singletons = [], []
+        for index, value in enumerate(ranges):
+            # None path/offset/length => null blob, leave result None.
+            if (value is None or value[0] is None
+                    or value[1] is None or value[2] is None):
+                continue
+            path, offset, length = value
+            if length < 0:  # unknown length => read to EOF, never coalesced
+                singletons.append((index, path, offset, length))
+            else:
+                coalescible.append((index, path, offset, length))
+
+        spans = _coalesce_ranges(coalescible, max_gap, max_span)
+        tasks_by_path = {}
+        for span in spans:
+            tasks_by_path.setdefault(span[0], []).append(("span", span))
+        for singleton in singletons:
+            tasks_by_path.setdefault(singleton[1], []).append(
+                ("one", singleton))
+        task_count = sum(len(path_tasks)
+                         for path_tasks in tasks_by_path.values())
+        if task_count == 0:
+            return results
+
+        workers = max(1, min(parallelism, task_count))
+
+        def _task_weight(task):
+            kind, payload = task
+            length = payload[2] if kind == "span" else payload[3]
+            return _RANGE_REQUEST_WEIGHT + max(0, length)
+
+        lanes = [[] for _ in range(workers)]
+        lane_loads = [0] * workers
+        path_task_groups = list(tasks_by_path.values())
+        path_loads = [
+            sum(_task_weight(task) for task in path_tasks)
+            for path_tasks in path_task_groups
+        ]
+        total_load = sum(path_loads)
+        path_capacities = [
+            min(len(path_tasks), _MAX_RANGE_LANES_PER_PATH)
+            for path_tasks in path_task_groups
+        ]
+        path_lane_counts = [
+            min(
+                capacity,
+                max(
+                    1,
+                    (workers * path_load + total_load - 1) // total_load,
+                ),
+            )
+            for path_load, capacity in zip(path_loads, path_capacities)
+        ]
+        remaining_lanes = max(
+            0,
+            min(workers, sum(path_capacities)) - sum(path_lane_counts),
+        )
+        for _ in range(remaining_lanes):
+            candidates = [
+                index for index in range(len(path_task_groups))
+                if path_lane_counts[index] < path_capacities[index]
+            ]
+            if not candidates:
+                break
+            index = max(
+                candidates,
+                key=lambda value: (
+                    path_loads[value] / path_lane_counts[value]
+                ),
+            )
+            path_lane_counts[index] += 1
+
+        for path_tasks, path_lanes in zip(
+                path_task_groups, path_lane_counts):
+            selected = sorted(
+                range(workers), key=lane_loads.__getitem__)[:path_lanes]
+            for task in sorted(path_tasks, key=_task_weight, reverse=True):
+                lane = min(selected, key=lane_loads.__getitem__)
+                lanes[lane].append(task)
+                lane_loads[lane] += _task_weight(task)
+        lanes = [lane for lane in lanes if lane]
+
+        class _RangeLane:
+            def __init__(self, file_io):
+                self._file_io = file_io
+                self._path = None
+                self._stream = None
+                self._close_error = None
+
+            def _close_current(self):
+                stream = self._stream
+                self._stream = None
+                self._path = None
+                if stream is None:
+                    return None
+                try:
+                    stream.close()
+                except BaseException as error:
+                    if self._close_error is None:
+                        self._close_error = error
+                    return error
+                return None
+
+            def _stream_for(self, path):
+                if self._stream is not None and self._path == path:
+                    return self._stream
+                close_error = self._close_current()
+                if close_error is not None:
+                    raise close_error
+                self._stream = self._file_io.new_input_stream(path)
+                self._path = path
+                return self._stream
+
+            def read(self, path, offset, length):
+                try:
+                    stream = self._stream_for(path)
+                    if length >= 0 and supports_pread(stream):
+                        return pread(stream, length, offset)
+                    stream.seek(offset)
+                    return (stream.read() if length < 0
+                            else stream.read(length))
+                except Exception as read_error:
+                    self._close_current()
+                    if self._close_error is not None:
+                        raise read_error
+                    return self._file_io.read_file_range(
+                        path, offset, length)
+
+            def close(self):
+                self._close_current()
+                if self._close_error is not None:
+                    raise self._close_error
+
+        def _run_task(reader, task):
+            kind, payload = task
+            if kind == "span":
+                path, span_off, span_len, members = payload
+                buf = reader.read(path, span_off, span_len)
+                if return_views:
+                    buf = memoryview(buf)
+                    useful = sum(length for _, _, length in members)
+                    share_buffer = (
+                        max_retained_amplification <= 0
+                        or span_len <= useful * max_retained_amplification
+                    )
+                for idx, off, length in members:
+                    start = off - span_off
+                    value = buf[start:start + length]
+                    if return_views and not share_buffer:
+                        value = memoryview(bytes(value))
+                    results[idx] = value
+            else:
+                idx, path, offset, length = payload
+                result = reader.read(path, offset, length)
+                results[idx] = (
+                    memoryview(result) if return_views else result)
+
+        def _run_lane(lane):
+            reader = _RangeLane(self)
+            read_error = None
+            try:
+                for task in lane:
+                    _run_task(reader, task)
+            except BaseException as error:
+                read_error = error
+            close_error = None
+            try:
+                reader.close()
+            except BaseException as error:
+                close_error = error
+            return read_error, close_error
+
+        with ThreadPoolExecutor(len(lanes)) as pool:
+            outcomes = list(pool.map(_run_lane, lanes))
+        read_error = next(
+            (error for error, _ in outcomes if error is not None), None)
+        close_error = next(
+            (error for _, error in outcomes if error is not None), None)
+        if read_error is not None:
+            if close_error is not None:
+                _LOG.warning(
+                    "Failed to close a range input stream",
+                    exc_info=(type(close_error), close_error,
+                              close_error.__traceback__),
+                )
+            raise read_error
+        if close_error is not None:
+            raise close_error
+        return results
+
+    def read_blobs_concurrent(self, blobs, parallelism):
+        """Read a list of Blobs concurrently, coalescing same-file ranged reads.
+
+        Exact ``BlobRef`` values (not subclasses) with a file-backed UriReader
+        are coalesced through that FileIO so table-scoped credentials are
+        preserved. Subclasses may override ``new_input_stream()`` and must not
+        be bypassed. Other readers (for example HTTP) read through the Blob.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        from pypaimon.common.uri_reader import FileUriReader
+        from pypaimon.table.row.blob import BlobData, BlobRef
+
+        results: List[Optional[bytes]] = [None] * len(blobs)
+        file_groups = {}
+        other_blobs = []
+        for index, blob in enumerate(blobs):
+            if blob is None:
+                continue
+            if isinstance(blob, BlobData):
+                results[index] = blob.to_data()
+            elif type(blob) is BlobRef and isinstance(
+                    blob.uri_reader, FileUriReader):
+                descriptor = blob.to_descriptor()
+                source_file_io = blob.uri_reader.file_io
+                group = file_groups.setdefault(
+                    id(source_file_io), (source_file_io, []))[1]
+                group.append((index, (
+                    descriptor.uri, descriptor.offset, descriptor.length)))
+            else:
+                other_blobs.append((index, blob))
+
+        for source_file_io, indexed_ranges in file_groups.values():
+            ranges = [value for _, value in indexed_ranges]
+            values = source_file_io.read_ranges_coalesced(ranges, parallelism)
+            for (index, _), value in zip(indexed_ranges, values):
+                results[index] = value
+
+        if other_blobs:
+            workers = max(1, min(parallelism, len(other_blobs)))
+
+            def _read_blob(indexed_blob):
+                return indexed_blob[1].to_data()
+
+            with ThreadPoolExecutor(workers) as pool:
+                values = pool.map(_read_blob, other_blobs)
+                for (index, _), value in zip(other_blobs, values):
+                    results[index] = value
+        return results
+
     def read_file_utf8(self, path: str) -> str:
         with self.new_input_stream(path) as input_stream:
             return input_stream.read().decode('utf-8')
@@ -120,7 +481,7 @@ class FileIO(ABC):
             if self.is_dir(path):
                 return False
 
-        temp_path = path + str(uuid.uuid4()) + ".tmp"
+        temp_path = create_temp_path(path)
         success = False
         try:
             self.write_file(temp_path, content, False)
@@ -163,6 +524,17 @@ class FileIO(ABC):
                 file_name = source_file.split('/')[-1]
                 target_file = f"{target_directory.rstrip('/')}/{file_name}" if target_directory else file_name
                 self.copy_file(source_file, target_file, overwrite)
+
+    def create_blob_presigned_url(self, table_root, descriptor, validity) -> str:
+        """Create a temporary URL for a descriptor-backed BLOB.
+
+        File systems which support presigning override this method. ``table_root``
+        identifies the table which owns ``descriptor`` and ``validity`` is a
+        :class:`datetime.timedelta` containing positive whole seconds.
+        """
+        raise NotImplementedError(
+            "{} does not support creating blob presigned URLs.".format(
+                type(self).__name__))
 
     def read_overwritten_file_utf8(self, path: str) -> Optional[str]:
         retry_number = 0
@@ -257,6 +629,9 @@ class FileIO(ABC):
     def write_vortex(self, path: str, data, **kwargs):
         raise NotImplementedError("write_vortex must be implemented by FileIO subclasses")
 
+    def write_row(self, path: str, data, fields=None, zstd_level: int = 1, **kwargs):
+        raise NotImplementedError("write_row must be implemented by FileIO subclasses")
+
     def close(self):
         pass
 
@@ -265,9 +640,20 @@ class FileIO(ABC):
         """
         Returns a FileIO instance for accessing the file system identified by the given path.
         - LocalFileIO for local file system (file:// or no scheme)
-        - PyArrowFileIO for remote file systems (oss://, s3://, hdfs://, etc.)
+        - HdfsNativeFileIO for HDFS/ViewFS (default; pure protocol client, no Hadoop install)
+        - OssFileIO for OSS (oss://)
+        - PyArrowFileIO for other remote file systems (s3://, gs://, ...),
+          and for HDFS when explicitly requested via hdfs.client.impl=pyarrow
         """
+        import os as _os
         from urllib.parse import urlparse
+
+        from pypaimon.common.options.config import CatalogOptions
+
+        opts = catalog_options or Options({})
+        if opts.get(CatalogOptions.RESOLVING_FILE_IO_ENABLED):
+            from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
+            return ResolvingFileIO(opts)
 
         uri = urlparse(path)
         scheme = uri.scheme
@@ -276,5 +662,42 @@ class FileIO(ABC):
             from pypaimon.filesystem.local_file_io import LocalFileIO
             return LocalFileIO(path, catalog_options)
 
+        if scheme in ("hdfs", "viewfs"):
+            from pypaimon.common.options.config import HdfsOptions
+            impl_source = "hdfs.client.impl option"
+            # Treat an empty option value the same as "unset" so callers can
+            # blank it out (common in templated configs) without tripping
+            # the unsupported-impl branch.
+            impl_value = opts.to_map().get(HdfsOptions.HDFS_CLIENT_IMPL.key())
+            if not impl_value:
+                impl_value = _os.environ.get("PYPAIMON_HDFS_IMPL")
+                impl_source = "PYPAIMON_HDFS_IMPL env var"
+            if not impl_value:
+                impl_value = HdfsOptions.HDFS_CLIENT_IMPL.default_value()
+                impl_source = "default"
+            impl = impl_value.lower()
+            if impl == "native":
+                try:
+                    from pypaimon.filesystem.hdfs_native_file_io import \
+                        HdfsNativeFileIO
+                    return HdfsNativeFileIO(path, opts)
+                except (ImportError, RuntimeError) as e:
+                    fallback = opts.get(HdfsOptions.HDFS_CLIENT_FALLBACK_TO_PYARROW)
+                    if not fallback:
+                        raise
+                    logging.getLogger(__name__).warning(
+                        "Native HDFS backend init failed, falling back to "
+                        "pyarrow: %s", e,
+                    )
+            elif impl != "pyarrow":
+                raise ValueError(
+                    f"Unsupported hdfs.client.impl '{impl_value}' "
+                    f"(from {impl_source}). Supported: 'native', 'pyarrow'."
+                )
+
+        if scheme == "oss":
+            from pypaimon.filesystem.oss_file_io import OssFileIO
+            return OssFileIO(path, opts)
+
         from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
-        return PyArrowFileIO(path, catalog_options or Options({}))
+        return PyArrowFileIO(path, opts)

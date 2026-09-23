@@ -24,9 +24,11 @@ import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
@@ -223,6 +225,19 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public Optional<TableSchema> loadSchema(Identifier identifier, String version)
+            throws TableNotExistException {
+        return wrapped.loadSchema(identifier, version);
+    }
+
+    @Override
+    public PagedList<TableSchema> listSchemasPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        return wrapped.listSchemasPaged(identifier, maxResults, pageToken);
+    }
+
+    @Override
     public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
             throws Catalog.TableNotExistException {
         wrapped.rollbackTo(identifier, instant, fromSnapshot);
@@ -305,10 +320,12 @@ public abstract class DelegateCatalog implements Catalog {
     public boolean commitSnapshot(
             Identifier identifier,
             @Nullable String tableUuid,
+            @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
             List<PartitionStatistics> statistics)
             throws TableNotExistException {
-        return wrapped.commitSnapshot(identifier, tableUuid, snapshot, statistics);
+        return wrapped.commitSnapshot(
+                identifier, tableUuid, baseSnapshotUuid, snapshot, statistics);
     }
 
     @Override
@@ -320,6 +337,24 @@ public abstract class DelegateCatalog implements Catalog {
     public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         wrapped.createPartitions(identifier, partitions);
+    }
+
+    @Override
+    public void createPartitions(
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            boolean ignoreIfExists,
+            @Nullable List<PartitionStatistics> statistics,
+            boolean replaceStatistics,
+            @Nullable List<Map<String, String>> partitionOptions)
+            throws TableNotExistException {
+        wrapped.createPartitions(
+                identifier,
+                partitions,
+                ignoreIfExists,
+                statistics,
+                replaceStatistics,
+                partitionOptions);
     }
 
     @Override
@@ -446,6 +481,18 @@ public abstract class DelegateCatalog implements Catalog {
             String partitionNamePattern)
             throws TableNotExistException {
         return wrapped.listPartitionsPaged(identifier, maxResults, pageToken, partitionNamePattern);
+    }
+
+    @Override
+    public PagedList<Partition> listPartitionsByFilterPaged(
+            Identifier identifier,
+            Predicate predicate,
+            Integer maxResults,
+            String pageToken,
+            String partitionNamePattern)
+            throws TableNotExistException {
+        return wrapped.listPartitionsByFilterPaged(
+                identifier, predicate, maxResults, pageToken, partitionNamePattern);
     }
 
     @Override

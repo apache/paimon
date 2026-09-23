@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-flink</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>1.5-SNAPSHOT</version>
+        <version>2.2-SNAPSHOT</version>
     </parent>
 
     <packaging>jar</packaging>
@@ -236,6 +236,13 @@ under the License.
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-lumina</artifactId>
             <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>3.44.0.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

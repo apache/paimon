@@ -34,6 +34,7 @@ import java.io.Serializable;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /** Specify partitions for lookup tables. */
 public abstract class PartitionLoader implements Serializable {
@@ -91,11 +92,11 @@ public abstract class PartitionLoader implements Serializable {
 
         Preconditions.checkArgument(
                 !table.partitionKeys().isEmpty(),
-                "{} is not supported for non-partitioned table.",
+                "%s is not supported for non-partitioned table.",
                 FlinkConnectorOptions.SCAN_PARTITIONS.key());
 
         int maxPartitionNum = -1;
-        switch (scanPartitions.toLowerCase()) {
+        switch (scanPartitions.toLowerCase(Locale.ROOT)) {
             case MAX_PT:
                 maxPartitionNum = 1;
                 break;

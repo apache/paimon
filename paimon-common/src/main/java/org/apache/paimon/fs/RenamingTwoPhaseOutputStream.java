@@ -29,6 +29,7 @@ import java.util.UUID;
  */
 @Public
 public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
+
     private static final String TEMP_DIR_NAME = "_temporary";
 
     private final Path targetPath;
@@ -136,7 +137,11 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
 
         @Override
         public void clean(FileIO fileIO) {
-            fileIO.deleteDirectoryQuietly(tempPath.getParent());
+            // Only what this committer staged. '_temporary' is shared with every other writer of
+            // this directory, Paimon or not, and it is theirs to remove: seeing it empty does not
+            // mean it is unused, because a writer that has just created it has not staged its file
+            // yet, and deleting it from under that writer fails its open.
+            fileIO.deleteQuietly(tempPath);
         }
     }
 }

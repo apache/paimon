@@ -19,9 +19,11 @@
 package org.apache.paimon.fs;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.options.Options;
 
 import java.io.IOException;
+import java.time.Duration;
 
 /**
  * A {@link FileIO} for plugin jar. {@link FileIO} is serializable, so plugin FileIO should be
@@ -89,6 +91,28 @@ public abstract class PluginFileIO implements FileIO, HadoopOptionsProvider {
     @Override
     public boolean rename(Path src, Path dst) throws IOException {
         return wrap(() -> fileIO(src).rename(src, dst));
+    }
+
+    @Override
+    public boolean tryToWriteAtomic(Path path, String content) throws IOException {
+        return wrap(() -> fileIO(path).tryToWriteAtomic(path, content));
+    }
+
+    @Override
+    public RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
+            throws IOException {
+        // the interface default would hide the plugin FileIO's iterative listing override and
+        // list each directory with listStatus instead
+        return wrap(() -> fileIO(path).listFilesIterative(path, recursive));
+    }
+
+    @Override
+    public String createBlobPresignedUrl(
+            Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
+        return wrap(
+                () ->
+                        fileIO(new Path(descriptor.uri()))
+                                .createBlobPresignedUrl(tableRoot, descriptor, validity));
     }
 
     private FileIO fileIO(Path path) throws IOException {

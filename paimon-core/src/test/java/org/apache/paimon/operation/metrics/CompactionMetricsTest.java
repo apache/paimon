@@ -132,6 +132,23 @@ public class CompactionMetricsTest {
         assertThat(getMetric(metrics, CompactionMetrics.MAX_LEVEL0_FILE_COUNT)).isEqualTo(8L);
         assertThat(getMetric(metrics, CompactionMetrics.AVG_LEVEL0_FILE_COUNT)).isEqualTo(5.0);
 
+        reporters[0].reportTotalFileCount(10);
+        reporters[1].reportTotalFileCount(6);
+        reporters[2].reportTotalFileCount(8);
+        assertThat(getMetric(metrics, CompactionMetrics.MAX_TOTAL_FILE_COUNT)).isEqualTo(10L);
+        assertThat(getMetric(metrics, CompactionMetrics.AVG_TOTAL_FILE_COUNT)).isEqualTo(8.0);
+
+        reporters[0].reportTotalFileCount(15);
+        assertThat(getMetric(metrics, CompactionMetrics.MAX_TOTAL_FILE_COUNT)).isEqualTo(15L);
+        assertThat(getMetric(metrics, CompactionMetrics.AVG_TOTAL_FILE_COUNT))
+                .isEqualTo(29.0 / 3.0);
+
+        // report file sizes to test minAvgFileSize
+        reporters[0].reportTotalFileSize(150_000_000); // 150MB / 15 files = 10MB avg
+        reporters[1].reportTotalFileSize(6_000_000); // 6MB / 6 files = 1MB avg (smallest)
+        reporters[2].reportTotalFileSize(80_000_000); // 80MB / 8 files = 10MB avg
+        assertThat(getMetric(metrics, CompactionMetrics.MIN_AVG_FILE_SIZE)).isEqualTo(1_000_000L);
+
         reporters[0].reportCompactionTime(300000);
         reporters[0].reportCompactionTime(250000);
         reporters[0].reportCompactionTime(270000);
@@ -216,6 +233,12 @@ public class CompactionMetricsTest {
                         dataSplit.dataFiles().stream().mapToLong(DataFileMeta::fileSize).sum();
             }
 
+            long[] totalFileCounts = new long[bucketNum];
+            for (Split split : table.newScan().plan().splits()) {
+                DataSplit dataSplit = (DataSplit) split;
+                totalFileCounts[dataSplit.bucket()] += dataSplit.dataFiles().size();
+            }
+
             CompactionMetrics metrics =
                     ((AbstractFileStoreWrite<?>) write.getWrite()).compactionMetrics();
             assertThat(metrics.getTotalFileSizeStream()).hasSize(bucketNum);
@@ -223,6 +246,11 @@ public class CompactionMetricsTest {
                     .isEqualTo(Arrays.stream(totalFileSizes).max().orElse(0));
             assertThat(getMetric(metrics, CompactionMetrics.AVG_TOTAL_FILE_SIZE))
                     .isEqualTo(Arrays.stream(totalFileSizes).average().orElse(0));
+            assertThat(metrics.getTotalFileCountStream()).hasSize(bucketNum);
+            assertThat(getMetric(metrics, CompactionMetrics.MAX_TOTAL_FILE_COUNT))
+                    .isEqualTo(Arrays.stream(totalFileCounts).max().orElse(0));
+            assertThat(getMetric(metrics, CompactionMetrics.AVG_TOTAL_FILE_COUNT))
+                    .isEqualTo(Arrays.stream(totalFileCounts).average().orElse(0));
         }
 
         write.close();

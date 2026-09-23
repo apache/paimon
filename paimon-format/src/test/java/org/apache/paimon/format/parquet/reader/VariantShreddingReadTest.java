@@ -19,11 +19,14 @@
 package org.apache.paimon.format.parquet.reader;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.GenericVariantBuilderHelper;
 import org.apache.paimon.data.variant.VariantMetadataUtils;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReaderContext;
@@ -37,20 +40,27 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.TimeZone;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for variant shredding read. */
 public class VariantShreddingReadTest {
@@ -135,6 +145,34 @@ public class VariantShreddingReadTest {
         List<InternalRow> result4 = readRows(format, readType4);
         assertThat(result4.get(0).getRow(0, 1).isNullAt(0)).isTrue();
         assertThat(result4.get(1).getRow(0, 1).isNullAt(0)).isTrue();
+    }
+
+    @Test
+    public void testReadOldFileWithVariantAndMissingAddedColumn() throws Exception {
+        Options options = new Options();
+        options.set(
+                "parquet.variant.shreddingSchema",
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"age\",\"type\":\"INT\"}]}}]}");
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+        writeRows(
+                format.createWriterFactory(writeType),
+                GenericRow.of(GenericVariant.fromJson("{\"age\":35,\"city\":\"Chicago\"}")),
+                GenericRow.of(GenericVariant.fromJson("{\"age\":25}")));
+
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "v", DataTypes.VARIANT()),
+                        DataTypes.FIELD(1, "added", DataTypes.INT()));
+        List<InternalRow> result = readRows(format, readType);
+
+        assertThat(result.get(0).getVariant(0).toJson())
+                .isEqualTo("{\"age\":35,\"city\":\"Chicago\"}");
+        assertThat(result.get(0).isNullAt(1)).isTrue();
+        assertThat(result.get(1).getVariant(0).toJson()).isEqualTo("{\"age\":25}");
+        assertThat(result.get(1).isNullAt(1)).isTrue();
     }
 
     @ParameterizedTest
@@ -252,13 +290,380 @@ public class VariantShreddingReadTest {
         assertThat(result2.get(1).getArray(0).getRow(0, 1).getInt(0)).isEqualTo(5);
     }
 
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "null",
+                "{\"type\":\"ROW\",\"fields\":["
+                        + "  {\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":["
+                        + "     {\"name\":\"a\",\"type\":{\"type\":\"ROW\",\"fields\":["
+                        + "         {\"name\":\"a\",\"type\":\"INT\"},"
+                        + "         {\"name\":\"b\",\"type\":\"INT\"},"
+                        + "         {\"name\":\"c\",\"type\":{\"type\":\"ROW\",\"fields\":["
+                        + "             {\"name\":\"d\",\"type\":\"STRING\"},"
+                        + "             {\"name\":\"e\",\"type\":\"INT\"}"
+                        + "         ]}}"
+                        + "     ]}},"
+                        + "     {\"name\":\"b\",\"type\":{\"type\":\"ROW\",\"fields\":["
+                        + "         {\"name\":\"a\",\"type\":\"INT\"},"
+                        + "         {\"name\":\"c\",\"type\":\"INT\"}"
+                        + "     ]}},"
+                        + "     {\"name\":\"d\",\"type\":\"INT\"},"
+                        + "     {\"name\":\"arr\",\"type\":{\"type\":\"ARRAY\",\"element\":{\"type\":\"ROW\",\"fields\":["
+                        + "         {\"name\":\"x\",\"type\":\"INT\"},"
+                        + "         {\"name\":\"y\",\"type\":\"INT\"}"
+                        + "     ]}}}"
+                        + "  ]}}"
+                        + "]}"
+            })
+    public void testReadNestedVariantWithPruning(String shreddingSchema) throws Exception {
+        Options options = new Options();
+        if (!shreddingSchema.equals("null")) {
+            options.set("parquet.variant.shreddingSchema", shreddingSchema);
+        }
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+        writeRows(
+                factory,
+                GenericRow.of(
+                        GenericVariant.fromJson(
+                                " {"
+                                        + "    \"a\": {"
+                                        + "      \"a\": 0,"
+                                        + "      \"b\": 1,"
+                                        + "      \"c\": {"
+                                        + "        \"d\": \"hello\","
+                                        + "        \"e\": 2"
+                                        + "      }"
+                                        + "    },"
+                                        + "    \"b\": {"
+                                        + "      \"a\": 3,"
+                                        + "      \"c\": 4"
+                                        + "    },"
+                                        + "    \"c\": {"
+                                        + "      \"a\": 5,"
+                                        + "      \"c\": 6"
+                                        + "    },"
+                                        + "    \"d\": 7,"
+                                        + "    \"arr\": ["
+                                        + "         {\"x\":10,\"y\":11,\"z\":12},"
+                                        + "         {\"x\":12,\"y\":13,\"z\":14}"
+                                        + "     ]"
+                                        + "  }")));
+
+        // case1: multiple nested projections with a missing top-level typed key ($.c.a).
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.INT(), "$.a.b")
+                                        .field(DataTypes.STRING(), "$.a.c.d")
+                                        .field(DataTypes.INT(), "$.b.a")
+                                        .field(DataTypes.INT(), "$.c.a")
+                                        .build()));
+        List<InternalRow> result = readRows(format, readType);
+        assertThat(result).hasSize(1);
+        InternalRow projected = result.get(0).getRow(0, 4);
+        assertThat(projected.getInt(0)).isEqualTo(1);
+        assertThat(projected.getString(1).toString()).isEqualTo("hello");
+        assertThat(projected.getInt(2)).isEqualTo(3);
+        assertThat(projected.getInt(3)).isEqualTo(5);
+
+        // case2: read a whole shredded object ($.b).
+        readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(
+                                                DataTypes.ROW(
+                                                        DataTypes.FIELD(0, "a", DataTypes.INT()),
+                                                        DataTypes.FIELD(1, "c", DataTypes.INT())),
+                                                "$.b")
+                                        .build()));
+        result = readRows(format, readType);
+        assertThat(result.get(0).getRow(0, 1).getRow(0, 2).getInt(1)).isEqualTo(4);
+
+        // case3: read an object ($.c) that is not described by the shredding schema.
+        readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(
+                                                DataTypes.ROW(
+                                                        DataTypes.FIELD(0, "a", DataTypes.INT()),
+                                                        DataTypes.FIELD(1, "c", DataTypes.INT())),
+                                                "$.c")
+                                        .build()));
+        result = readRows(format, readType);
+        assertThat(result.get(0).getRow(0, 1).getRow(0, 2).getInt(1)).isEqualTo(6);
+
+        // case4: array index path: nested field inside each element can be pruned.
+        readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.INT(), "$.arr[0].x")
+                                        .build()));
+        result = readRows(format, readType);
+        assertThat(result.get(0).getRow(0, 1).getInt(0)).isEqualTo(10);
+
+        // case5: missing field inside array element falls back to binary value.
+        readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.INT(), "$.arr[1].z")
+                                        .build()));
+        result = readRows(format, readType);
+        assertThat(result.get(0).getRow(0, 1).getInt(0)).isEqualTo(14);
+
+        // case6: read the whole array element as a VARIANT.
+        readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.VARIANT(), "$.arr[1]")
+                                        .build()));
+        result = readRows(format, readType);
+        assertThat(result.get(0).getRow(0, 1).getVariant(0).toJson())
+                .isEqualTo("{\"x\":12,\"y\":13,\"z\":14}");
+    }
+
+    @Test
+    public void testReadHeterogeneousVariantObjectTypedAsArray() throws Exception {
+        // The shredding schema defines "v.a" as an object, but the JSON value is an array.
+        // Reading $.a[0].x must fall back to the binary value column.
+        Options options = new Options();
+        options.set(
+                "parquet.variant.shreddingSchema",
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"a\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"b\",\"type\":\"INT\"}]}}]}}]}");
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+        writeRows(factory, GenericRow.of(GenericVariant.fromJson("{\"a\":[{\"x\":1}]}")));
+
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.INT(), "$.a[0].x")
+                                        .build()));
+        List<InternalRow> result = readRows(format, readType);
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getRow(0, 1).getInt(0)).isEqualTo(1);
+    }
+
+    @Test
+    public void testReadHeterogeneousVariantListTypedAsObject() throws Exception {
+        // The shredding schema defines "v.a" as a list, but the JSON value is an object.
+        // Reading $.a.x must fall back to the binary value column.
+        Options options = new Options();
+        options.set(
+                "parquet.variant.shreddingSchema",
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"a\",\"type\":{\"type\":\"ARRAY\",\"element\":\"INT\"}}]}}]}");
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+        writeRows(factory, GenericRow.of(GenericVariant.fromJson("{\"a\":{\"x\":2}}")));
+
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.INT(), "$.a.x")
+                                        .build()));
+        List<InternalRow> result = readRows(format, readType);
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getRow(0, 1).getInt(0)).isEqualTo(2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "null",
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"price\",\"type\":\"DECIMAL(18, 1)\"},{\"name\":\"amount\",\"type\":\"DECIMAL(18, 2)\"}]}}]}"
+            })
+    public void testReadDecimalAsStringConsistently(String shreddingSchema) throws Exception {
+        // A shredded typed_value keeps the scale of the file schema while the unshredded value
+        // is read with trailing zeros stripped; both layouts must extract the same string.
+        Options options = new Options();
+        if (!shreddingSchema.equals("null")) {
+            options.set("parquet.variant.shreddingSchema", shreddingSchema);
+        }
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+        writeRows(
+                format.createWriterFactory(writeType),
+                GenericRow.of(GenericVariant.fromJson("{\"price\":10.0,\"amount\":1.50}")),
+                GenericRow.of(GenericVariant.fromJson("{\"price\":2.5,\"amount\":0.00}")));
+
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.STRING(), "$.price")
+                                        .field(DataTypes.STRING(), "$.amount")
+                                        .field(DataTypes.DECIMAL(10, 2), "$.price")
+                                        .field(DataTypes.DOUBLE(), "$.amount")
+                                        .build()));
+        List<InternalRow> result = readRows(format, readType);
+        assertThat(result.get(0).getRow(0, 4))
+                .isEqualTo(
+                        GenericRow.of(
+                                BinaryString.fromString("10"),
+                                BinaryString.fromString("1.5"),
+                                Decimal.fromBigDecimal(new BigDecimal("10.00"), 10, 2),
+                                1.5));
+        assertThat(result.get(1).getRow(0, 4))
+                .isEqualTo(
+                        GenericRow.of(
+                                BinaryString.fromString("2.5"),
+                                BinaryString.fromString("0"),
+                                Decimal.fromBigDecimal(new BigDecimal("2.50"), 10, 2),
+                                0.0));
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "null",
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"n\",\"type\":\"BIGINT\"},{\"name\":\"d\",\"type\":\"DOUBLE\"}]}}]}"
+            })
+    public void testReadIntegralOverflowAsInvalidCast(String shreddingSchema) throws Exception {
+        // A shredded typed_value is narrowed by the scalar reader and an unshredded value by
+        // VariantGet; both must reject an out-of-range number instead of wrapping it.
+        Options options = new Options();
+        if (!shreddingSchema.equals("null")) {
+            options.set("parquet.variant.shreddingSchema", shreddingSchema);
+        }
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+        writeRows(
+                format.createWriterFactory(writeType),
+                GenericRow.of(GenericVariant.fromJson("{\"n\":99999999999,\"d\":1e30}")),
+                GenericRow.of(GenericVariant.fromJson("{\"n\":7,\"d\":1.5}")));
+
+        RowType tryReadType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.INT(), "$.n", false, "UTC")
+                                        .field(DataTypes.BIGINT(), "$.d", false, "UTC")
+                                        .build()));
+        List<InternalRow> result = readRows(format, tryReadType);
+        assertThat(result.get(0).getRow(0, 2).isNullAt(0)).isTrue();
+        assertThat(result.get(0).getRow(0, 2).isNullAt(1)).isTrue();
+        assertThat(result.get(1).getRow(0, 2).getInt(0)).isEqualTo(7);
+        assertThat(result.get(1).getRow(0, 2).getLong(1)).isEqualTo(1L);
+
+        RowType strictReadType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.INT(), "$.n", true, "UTC")
+                                        .build()));
+        assertThatThrownBy(() -> readRows(format, strictReadType))
+                .hasMessageContaining("Invalid cast 99999999999 to INT");
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "null",
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"ts\",\"type\":\"TIMESTAMP(6) WITH LOCAL TIME ZONE\"}]}}]}"
+            })
+    public void testReadTimestampInRequestedZone(String shreddingSchema) throws Exception {
+        // The extraction carries the zone the query runs in; a shredded typed_value and an
+        // unshredded value must both convert with it rather than with the JVM default.
+        Options options = new Options();
+        if (!shreddingSchema.equals("null")) {
+            options.set("parquet.variant.shreddingSchema", shreddingSchema);
+        }
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+        Map<String, Object> values = new HashMap<>();
+        values.put("ts", 1700000000500000L); // 2023-11-14 22:13:20.5 UTC
+        writeRows(
+                format.createWriterFactory(writeType),
+                GenericRow.of(
+                        GenericVariantBuilderHelper.build(
+                                RowType.of(
+                                        new DataType[] {DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE()},
+                                        new String[] {"ts"}),
+                                values)));
+
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.STRING(), "$.ts", true, "Asia/Shanghai")
+                                        .field(DataTypes.DATE(), "$.ts", true, "Asia/Shanghai")
+                                        .field(DataTypes.TIMESTAMP(), "$.ts", true, "UTC")
+                                        .build()));
+        TimeZone original = TimeZone.getDefault();
+        try {
+            for (String jvmZone : new String[] {"UTC", "America/Los_Angeles"}) {
+                TimeZone.setDefault(TimeZone.getTimeZone(jvmZone));
+                List<InternalRow> result = readRows(format, readType);
+                assertThat(result.get(0).getRow(0, 3))
+                        .as("JVM zone %s", jvmZone)
+                        .isEqualTo(
+                                GenericRow.of(
+                                        BinaryString.fromString("2023-11-15 06:13:20.5"),
+                                        19676,
+                                        Timestamp.fromMicros(1700000000500000L)));
+            }
+        } finally {
+            TimeZone.setDefault(original);
+        }
+    }
+
     protected List<InternalRow> readRows(ParquetFileFormat format, RowType rowType)
             throws IOException {
         List<InternalRow> result = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
             InternalRowSerializer serializer = new InternalRowSerializer(rowType);
             reader.forEachRemaining(row -> result.add(serializer.copy(row)));
         }

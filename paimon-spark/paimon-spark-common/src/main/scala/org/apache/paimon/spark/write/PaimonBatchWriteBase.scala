@@ -18,18 +18,19 @@
 
 package org.apache.paimon.spark.write
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
-import org.apache.paimon.spark.catalyst.Compatibility
+import org.apache.paimon.spark.{PaimonDeletedRecordsTaskMetric, SparkTypeUtils}
 import org.apache.paimon.spark.commands.SparkDataFileMeta
 import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.spark.schema.PaimonMetadataColumn.{FILE_PATH, ROW_ID, SEQUENCE_NUMBER}
+import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl}
+import org.apache.paimon.utils.UriReaderFactory
 
-import org.apache.spark.sql.PaimonSparkSession
+import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.apache.spark.sql.connector.write.{DataWriterFactory, PhysicalWriteInfo, WriterCommitMessage}
-import org.apache.spark.sql.execution.SQLExecution
-import org.apache.spark.sql.execution.metric.SQLMetrics
 import org.apache.spark.sql.types.StructType
 
 import java.util.Collections
@@ -53,7 +54,8 @@ abstract class PaimonBatchWriteBase(
     val writeSchema: StructType,
     val dataSchema: StructType,
     val overwritePartitions: Option[Map[String, String]],
-    val copyOnWriteScan: Option[PaimonCopyOnWriteScan])
+    val copyOnWriteScan: Option[PaimonCopyOnWriteScan],
+    operationType: Option[Snapshot.Operation] = None)
   extends WriteHelper
   with Serializable {
 
@@ -67,16 +69,45 @@ abstract class PaimonBatchWriteBase(
     builder
   }
 
+  private val writeRowTracking: Boolean =
+    coreOptions.rowTrackingEnabled() && copyOnWriteScan.isDefined
+
+  private lazy val rtPaimonWriteType =
+    SpecialFields.rowTypeWithRowTracking(table.rowType(), false, true)
+
+  private lazy val rtWriteSchema =
+    SparkTypeUtils.fromPaimonRowType(rtPaimonWriteType)
+
+  private lazy val rtMetadataSchema =
+    StructType(Seq(FILE_PATH, ROW_ID, SEQUENCE_NUMBER).map(_.toStructField))
+
   protected def createPaimonDataWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
-    (_: Int, _: Long) =>
-      {
+    val uriReaderFactory = uriReaderFactoryForBlobDescriptor
+    (_: Int, _: Long) => {
+      if (writeRowTracking) {
+        createPaimonMetadataAwareDataWriter(uriReaderFactory)
+      } else {
         PaimonV2DataWriter(
           batchWriteBuilder,
           writeSchema,
           dataSchema,
           coreOptions,
-          catalogContextForBlobDescriptor)
+          uriReaderFactory)
       }
+    }
+  }
+
+  private def createPaimonMetadataAwareDataWriter(
+      uriReaderFactory: UriReaderFactory): PaimonV2DataWriter = {
+    new PaimonV2MetadataAwareDataWriter(
+      batchWriteBuilder,
+      writeSchema,
+      rtWriteSchema,
+      dataSchema,
+      rtMetadataSchema,
+      coreOptions,
+      uriReaderFactory,
+      rtPaimonWriteType)
   }
 
   protected def commitMessages(messages: Array[WriterCommitMessage]): Unit = {
@@ -84,6 +115,9 @@ abstract class PaimonBatchWriteBase(
     logInfo(s"Committing to table ${table.name()}")
     val batchTableCommit = batchWriteBuilder.newCommit()
     batchTableCommit.withMetricRegistry(metricRegistry)
+    val operation = operationType.getOrElse(
+      if (overwritePartitions.isDefined) Snapshot.Operation.OVERWRITE else Snapshot.Operation.WRITE)
+    batchTableCommit.withOperation(operation)
     val addCommitMessage = WriteTaskResult.merge(messages)
     val deletedCommitMessage = copyOnWriteScan match {
       case Some(scan) => buildDeletedCommitMessage(scan.scannedFiles)
@@ -97,8 +131,35 @@ abstract class PaimonBatchWriteBase(
     } finally {
       batchTableCommit.close()
     }
-    postDriverMetrics()
+    postDriverMetrics(
+      metricRegistry.buildSparkCommitMetrics() ++
+        deletedRecordsTaskMetric(operation, addCommitMessage, deletedCommitMessage))
     postCommit(commitMessages)
+  }
+
+  /**
+   * For copy-on-write DELETE, the number of deleted records is exactly the row count of the removed
+   * files minus the row count of the rewritten files. This does not hold for UPDATE and MERGE,
+   * whose rewritten files mix copied rows with modified rows.
+   */
+  private def deletedRecordsTaskMetric(
+      operation: Snapshot.Operation,
+      addedMessages: Seq[CommitMessage],
+      deletedMessages: Seq[CommitMessage]): Array[CustomTaskMetric] = {
+    if (copyOnWriteScan.isEmpty || operation != Snapshot.Operation.DELETE) {
+      return Array.empty
+    }
+    val addedRecords = addedMessages
+      .collect { case m: CommitMessageImpl => m }
+      .flatMap(_.newFilesIncrement().newFiles().asScala)
+      .map(_.rowCount())
+      .sum
+    val deletedRecords = deletedMessages
+      .collect { case m: CommitMessageImpl => m }
+      .flatMap(_.newFilesIncrement().deletedFiles().asScala)
+      .map(_.rowCount())
+      .sum
+    Array(PaimonDeletedRecordsTaskMetric(deletedRecords - addedRecords))
   }
 
   protected def abortMessages(messages: Array[WriterCommitMessage]): Unit = {
@@ -115,24 +176,6 @@ abstract class PaimonBatchWriteBase(
     } finally {
       batchTableCommit.close()
     }
-  }
-
-  // Spark support v2 write driver metrics since 4.0, see https://github.com/apache/spark/pull/48573
-  // To ensure compatibility with 3.x, manually post driver metrics here instead of using Spark's API.
-  protected def postDriverMetrics(): Unit = {
-    val spark = PaimonSparkSession.active
-    // todo: find a more suitable way to get metrics.
-    val commitMetrics = metricRegistry.buildSparkCommitMetrics()
-    val executionId = spark.sparkContext.getLocalProperty(SQLExecution.EXECUTION_ID_KEY)
-    val executionMetrics = Compatibility.getExecutionMetrics(spark, executionId.toLong).distinct
-    val metricUpdates = executionMetrics.flatMap {
-      m =>
-        commitMetrics.find(x => m.metricType.toLowerCase.contains(x.name.toLowerCase)) match {
-          case Some(customTaskMetric) => Some((m.accumulatorId, customTaskMetric.value()))
-          case None => None
-        }
-    }
-    SQLMetrics.postDriverMetricsUpdatedByValue(spark.sparkContext, executionId, metricUpdates)
   }
 
   private def buildDeletedCommitMessage(

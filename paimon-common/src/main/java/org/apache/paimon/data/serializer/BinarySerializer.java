@@ -22,6 +22,7 @@ import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 import static org.apache.paimon.utils.VarLengthIntUtils.decodeInt;
 import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
@@ -30,6 +31,7 @@ import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
 public final class BinarySerializer extends SerializerSingleton<byte[]> {
 
     private static final long serialVersionUID = 1L;
+    private static final int COPY_BUFFER_SIZE = 8192;
 
     /** Sharable instance of the IntSerializer. */
     public static final BinarySerializer INSTANCE = new BinarySerializer();
@@ -45,6 +47,26 @@ public final class BinarySerializer extends SerializerSingleton<byte[]> {
     public void serialize(byte[] record, DataOutputView target) throws IOException {
         encodeInt(target, record.length);
         target.write(record);
+    }
+
+    /**
+     * Serializes the bytes between the buffer's position and limit without changing its position.
+     */
+    public void serialize(ByteBuffer record, DataOutputView target) throws IOException {
+        int length = record.remaining();
+        encodeInt(target, length);
+        if (record.hasArray()) {
+            target.write(record.array(), record.arrayOffset() + record.position(), length);
+            return;
+        }
+
+        ByteBuffer duplicate = record.duplicate();
+        byte[] copyBuffer = new byte[Math.min(length, COPY_BUFFER_SIZE)];
+        while (duplicate.hasRemaining()) {
+            int bytesToCopy = Math.min(duplicate.remaining(), copyBuffer.length);
+            duplicate.get(copyBuffer, 0, bytesToCopy);
+            target.write(copyBuffer, 0, bytesToCopy);
+        }
     }
 
     @Override

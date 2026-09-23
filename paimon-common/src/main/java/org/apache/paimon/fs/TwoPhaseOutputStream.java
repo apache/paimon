@@ -46,14 +46,39 @@ public abstract class TwoPhaseOutputStream extends PositionOutputStream {
         void commit(FileIO fileIO) throws IOException;
 
         /**
-         * Discards the written data, cleaning up any temporary files or resources.
+         * Discards the written data, cleaning up any temporary files or resources. Called instead
+         * of {@link #commit} when the write is given up.
          *
          * @throws IOException if an I/O error occurs during discard
          */
         void discard(FileIO fileIO) throws IOException;
 
+        /**
+         * Discards staged resources without deleting {@link #targetPath()}.
+         *
+         * <p>This is used when a commit may have taken effect and its target must therefore be
+         * preserved. The default delegates to {@link #clean}. Override this method if a failed or
+         * uncertain commit can leave staged resources that {@code clean} does not release.
+         *
+         * @throws IOException if an I/O error occurs during cleanup
+         */
+        default void discardStaging(FileIO fileIO) throws IOException {
+            clean(fileIO);
+        }
+
         Path targetPath();
 
+        /**
+         * Releases what this committer staged and no longer needs, after {@link #commit} has
+         * succeeded. May do nothing.
+         *
+         * <p>Only resources this committer created itself. A staging directory is shared with every
+         * other writer of the same location, Paimon or not, and removing it is theirs to decide:
+         * finding it empty does not mean it is unused, because a writer that has just created it
+         * has not staged its file in it yet.
+         *
+         * @throws IOException if an I/O error occurs during cleaning
+         */
         void clean(FileIO fileIO) throws IOException;
     }
 }

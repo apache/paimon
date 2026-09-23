@@ -18,7 +18,10 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.schema.Schema
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.sql.Row
 
@@ -219,6 +222,26 @@ class DynamicBucketTableTest extends PaimonSparkTestBase {
         sql("SELECT c0, c1, c2, pt from t"),
         Row("c0", "c1", "c2", "pt")
       )
+    }
+  }
+
+  test("Paimon cross partition table: write timestamp with precision 3") {
+    withTable("t") {
+      val schema = Schema.newBuilder
+        .column("etl_dt", DataTypes.DATE.notNull)
+        .column("order_id", DataTypes.BIGINT.notNull)
+        .column("despatch_end", DataTypes.TIMESTAMP(3))
+        .partitionKeys("etl_dt")
+        .primaryKey("order_id")
+        .option("bucket", "-1")
+        .option("deletion-vectors.enabled", "true")
+        .option("dynamic-bucket.assigner-parallelism", "1")
+        .build
+      paimonCatalog.createTable(Identifier.create(dbName0, "t"), schema, false)
+
+      sql("INSERT INTO t VALUES (DATE '2026-08-14', 1L, TIMESTAMP '2026-08-14 10:00:00')")
+
+      checkAnswer(sql("SELECT order_id FROM t"), Row(1L))
     }
   }
 }

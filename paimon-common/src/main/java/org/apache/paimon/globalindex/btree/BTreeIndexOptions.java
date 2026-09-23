@@ -25,6 +25,15 @@ import org.apache.paimon.options.MemorySize;
 /** Options for BTree index. */
 public class BTreeIndexOptions {
 
+    public static final ConfigOption<Integer> BTREE_INDEX_FILE_VERSION =
+            ConfigOptions.key("btree-index.file-version")
+                    .intType()
+                    .defaultValue(BTreeFileFooter.DEFAULT_WRITE_VERSION)
+                    .withDescription(
+                            "The BTree index file version to write. Version 1 is the default for "
+                                    + "reader compatibility; version 2 enables adaptive posting "
+                                    + "list encoding and requires all readers to support it.");
+
     public static final ConfigOption<String> BTREE_INDEX_COMPRESSION =
             ConfigOptions.key("btree-index.compression")
                     .stringType()
@@ -43,6 +52,13 @@ public class BTreeIndexOptions {
                     .defaultValue(MemorySize.ofKibiBytes(64))
                     .withDescription("The block size to use for BTreeIndex");
 
+    public static final ConfigOption<Boolean> BTREE_INDEX_BLOOM_FILTER_ENABLED =
+            ConfigOptions.key("btree-index.bloom-filter.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable the Bloom filter for BTree index point lookups.");
+
     public static final ConfigOption<MemorySize> BTREE_INDEX_CACHE_SIZE =
             ConfigOptions.key("btree-index.cache-size")
                     .memoryType()
@@ -55,10 +71,19 @@ public class BTreeIndexOptions {
                     .defaultValue(0.1)
                     .withDescription("The high priority pool ratio to use for BTreeIndex");
 
+    public static final ConfigOption<MemorySize> BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE =
+            ConfigOptions.key("btree-index.fallback-scan-max-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(256))
+                    .withDescription(
+                            "The maximum total BTree global index file size to allow fallback "
+                                    + "index scans for predicates that cannot use direct lookup. "
+                                    + "Set to 0 bytes to disable fallback scans.");
+
     public static final ConfigOption<Long> BTREE_INDEX_RECORDS_PER_RANGE =
             ConfigOptions.key("btree-index.records-per-range")
                     .longType()
-                    .defaultValue(1000_000L)
+                    .defaultValue(10_000_000L)
                     .withDescription("The expected number of records per BTree Index File.");
 
     public static final ConfigOption<Integer> BTREE_INDEX_BUILD_MAX_PARALLELISM =

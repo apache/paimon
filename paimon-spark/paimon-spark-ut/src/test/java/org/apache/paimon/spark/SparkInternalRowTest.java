@@ -19,24 +19,41 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.spark.data.SparkInternalRow;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BlobDescriptorResolvingRow;
 import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.UriReader;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.spark.sql.catalyst.CatalystTypeConverters;
+import org.apache.spark.sql.catalyst.expressions.GenericInternalRow;
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils;
+import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.AbstractMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.TimeZone;
 import java.util.stream.Collectors;
@@ -48,9 +65,12 @@ import scala.collection.JavaConverters;
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.spark.SparkTypeTest.ALL_TYPES;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link SparkInternalRow}. */
 public class SparkInternalRowTest {
+
+    @TempDir java.nio.file.Path tempPath;
 
     @Test
     public void test() {
@@ -127,6 +147,127 @@ public class SparkInternalRowTest {
                                 SparkInternalRow.create(ALL_TYPES).replace(sparkRowData));
         assertThat(sparkRowToString(sparkRow)).isEqualTo(expected);
         TimeZone.setDefault(tz);
+    }
+
+    @Test
+    public void testReadBlobWithProvidedUriReaderFactory() throws Exception {
+        byte[] bytes = new byte[] {1, 2, 3};
+        java.nio.file.Path blobFile = tempPath.resolve("blob");
+        Files.write(blobFile, bytes);
+        byte[] descriptor =
+                new BlobDescriptor(blobFile.toUri().toString(), 0, bytes.length).serialize();
+        StructType schema =
+                new StructType().add("blob", org.apache.spark.sql.types.DataTypes.BinaryType);
+
+        SparkInternalRowWrapper wrapper =
+                SparkInternalRowWrapper.fromUriReaderFactory(
+                                schema,
+                                1,
+                                schema,
+                                UriReaderFactory.fromFileIO(LocalFileIO.create()))
+                        .replace(new GenericInternalRow(new Object[] {descriptor}));
+
+        assertThat(wrapper.getBlob(0).toData()).isEqualTo(bytes);
+    }
+
+    @Test
+    public void testBlobDescriptorResolvingRowReattachesReader() throws Exception {
+        byte[] bytes = new byte[] {1, 2, 3};
+        java.nio.file.Path blobFile = tempPath.resolve("resolved-blob");
+        Files.write(blobFile, bytes);
+        BlobDescriptor descriptor =
+                new BlobDescriptor(blobFile.toUri().toString(), 0, bytes.length);
+        UriReader failingReader =
+                new UriReader() {
+                    @Override
+                    public SeekableInputStream newInputStream(String uri) throws IOException {
+                        throw new IOException("Should use reattached reader.");
+                    }
+                };
+
+        InternalRow row = GenericRow.of(Blob.fromDescriptor(failingReader, descriptor));
+        BlobDescriptorResolvingRow resolvingRow =
+                new BlobDescriptorResolvingRow(
+                        row, UriReaderFactory.fromFileIO(LocalFileIO.create()));
+
+        assertThatThrownBy(() -> row.getBlob(0).toData())
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Should use reattached reader.");
+        assertThat(resolvingRow.getBlob(0).toData()).isEqualTo(bytes);
+    }
+
+    @Test
+    public void testBlobDescriptorResolvingRowScopesReattachedReader() {
+        byte[] descriptorBytes = new byte[] {1, 2, 3};
+        byte[] managedBytes = new byte[] {4, 5, 6};
+        BlobDescriptor descriptor = new BlobDescriptor("scoped://descriptor", 0, -1);
+        BlobDescriptor managedDescriptor = new BlobDescriptor("scoped://managed", 0, -1);
+        InternalRow row =
+                GenericRow.of(
+                        Blob.fromDescriptor(new ByteArrayUriReader(descriptorBytes), descriptor),
+                        Blob.fromDescriptor(
+                                new ByteArrayUriReader(managedBytes), managedDescriptor));
+        UriReaderFactory failingReaderFactory =
+                new UriReaderFactory(null) {
+                    @Override
+                    protected UriReader newReader(URI uri) {
+                        return new UriReader() {
+                            @Override
+                            public SeekableInputStream newInputStream(String uri)
+                                    throws IOException {
+                                throw new IOException("Should not reattach managed reader.");
+                            }
+                        };
+                    }
+                };
+
+        BlobDescriptorResolvingRow resolvingRow =
+                new BlobDescriptorResolvingRow(row, failingReaderFactory, new int[] {0});
+
+        assertThatThrownBy(() -> resolvingRow.getBlob(0).toData())
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Should not reattach managed reader.");
+        assertThat(resolvingRow.getBlob(1).toData()).isEqualTo(managedBytes);
+    }
+
+    private static class ByteArrayUriReader implements UriReader {
+
+        private final byte[] bytes;
+
+        private ByteArrayUriReader(byte[] bytes) {
+            this.bytes = bytes;
+        }
+
+        @Override
+        public SeekableInputStream newInputStream(String uri) {
+            return SeekableInputStream.wrap(new ByteArrayInputStream(bytes));
+        }
+    }
+
+    @Test
+    public void testMapBlobRejectsNullKey() {
+        Map<Object, Object> map = new LinkedHashMap<>();
+        map.put(null, Blob.fromData(new byte[] {1}));
+
+        assertThatThrownBy(
+                        () ->
+                                DataConverter.fromPaimon(
+                                        new GenericMap(map),
+                                        DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB()),
+                                        false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Spark MAP<X, BLOB> does not support null keys.");
+    }
+
+    @Test
+    public void testGetTimestampNtz() {
+        Timestamp timestamp =
+                Timestamp.fromLocalDateTime(LocalDateTime.parse("2026-08-31T10:15:30.123456"));
+        RowType rowType = RowType.of(DataTypes.TIMESTAMP());
+        SparkInternalRow row = SparkInternalRow.create(rowType).replace(GenericRow.of(timestamp));
+
+        assertThat(row.get(0, SparkTypeUtils.fromPaimonType(DataTypes.TIMESTAMP())))
+                .isEqualTo(timestamp.toMicros());
     }
 
     private String sparkRowToString(org.apache.spark.sql.Row row) {

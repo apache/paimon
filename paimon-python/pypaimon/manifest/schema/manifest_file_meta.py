@@ -17,7 +17,7 @@
 
 from dataclasses import dataclass
 
-from typing import Optional
+from typing import List, Optional
 from pypaimon.manifest.schema.simple_stats import (PARTITION_STATS_SCHEMA,
                                                    SimpleStats)
 
@@ -33,6 +33,14 @@ class ManifestFileMeta:
 
     min_row_id: Optional[int] = None
     max_row_id: Optional[int] = None
+    extra_files: Optional[List[str]] = None
+
+    # Append new fields to preserve existing positional constructor arguments.
+    min_bucket: Optional[int] = None
+    max_bucket: Optional[int] = None
+    min_level: Optional[int] = None
+    max_level: Optional[int] = None
+    total_buckets: Optional[int] = None
 
 MANIFEST_FILE_META_SCHEMA = {
     "type": "record",
@@ -45,7 +53,13 @@ MANIFEST_FILE_META_SCHEMA = {
         {"name": "_NUM_DELETED_FILES", "type": "long"},
         {"name": "_PARTITION_STATS", "type": PARTITION_STATS_SCHEMA},
         {"name": "_SCHEMA_ID", "type": "long"},
+        {"name": "_MIN_BUCKET", "type": ["null", "int"], "default": None},
+        {"name": "_MAX_BUCKET", "type": ["null", "int"], "default": None},
+        {"name": "_MIN_LEVEL", "type": ["null", "int"], "default": None},
+        {"name": "_MAX_LEVEL", "type": ["null", "int"], "default": None},
         {"name": "_MIN_ROW_ID", "type": ["null", "long"], "default": None},
         {"name": "_MAX_ROW_ID", "type": ["null", "long"], "default": None},
+        {"name": "_TOTAL_BUCKETS", "type": ["null", "int"], "default": None},
+        {"name": "_EXTRA_FILES", "type": ["null", {"type": "array", "items": "string"}], "default": None},
     ]
 }

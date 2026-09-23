@@ -156,6 +156,7 @@ def test_catalog_has_table(paimon_catalog):
     assert daft_catalog.has_table("test_db.test_table")
     assert not daft_catalog.has_table("test_db.nonexistent_table")
     assert not daft_catalog.has_table("nonexistent_db.test_table")
+    assert not daft_catalog.has_table("missing_table")
 
 
 def test_catalog_list_tables(paimon_catalog):
@@ -188,11 +189,27 @@ def test_catalog_get_table_not_found(paimon_catalog):
         daft_catalog.get_table("test_db.nonexistent_table")
 
 
+def test_catalog_get_table_single_part_not_found(paimon_catalog):
+    from daft.catalog import NotFoundError
+
+    daft_catalog, _, _ = paimon_catalog
+    with pytest.raises(NotFoundError):
+        daft_catalog.get_table("missing_table")
+
+
 def test_catalog_drop_table(paimon_catalog):
     daft_catalog, _, _ = paimon_catalog
     assert daft_catalog.has_table("test_db.test_table")
     daft_catalog.drop_table("test_db.test_table")
     assert not daft_catalog.has_table("test_db.test_table")
+
+
+def test_catalog_drop_table_single_part_not_found(paimon_catalog):
+    from daft.catalog import NotFoundError
+
+    daft_catalog, _, _ = paimon_catalog
+    with pytest.raises(NotFoundError):
+        daft_catalog.drop_table("missing_table")
 
 
 def test_catalog_create_table(tmp_path):

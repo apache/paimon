@@ -16,7 +16,7 @@
 # under the License.
 
 from abc import ABC, abstractmethod
-from typing import Callable, List, Optional
+from typing import List
 
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 from pypaimon.utils.range import Range
@@ -30,6 +30,10 @@ class GlobalIndexResult(ABC):
         """Returns the bitmap representing row ids."""
         pass
 
+    def is_exact(self) -> bool:
+        """Whether these row ids are matches rather than a candidate superset."""
+        return True
+
     def offset(self, start_offset: int) -> 'GlobalIndexResult':
         """Returns a new result with row IDs offset by the given amount."""
         if start_offset == 0:
@@ -38,18 +42,20 @@ class GlobalIndexResult(ABC):
         offset_bitmap = RoaringBitmap64()
         for row_id in bitmap:
             offset_bitmap.add(row_id + start_offset)
-        return LazyGlobalIndexResult(lambda: offset_bitmap)
+        return SimpleGlobalIndexResult(offset_bitmap, self.is_exact())
 
     def and_(self, other: 'GlobalIndexResult') -> 'GlobalIndexResult':
         """Returns the intersection of this result and the other result."""
         return SimpleGlobalIndexResult(
-            RoaringBitmap64.and_(self.results(), other.results())
+            RoaringBitmap64.and_(self.results(), other.results()),
+            self.is_exact() and other.is_exact(),
         )
 
     def or_(self, other: 'GlobalIndexResult') -> 'GlobalIndexResult':
         """Returns the union of this result and the other result."""
         return SimpleGlobalIndexResult(
-            RoaringBitmap64.or_(self.results(), other.results())
+            RoaringBitmap64.or_(self.results(), other.results()),
+            self.is_exact() and other.is_exact(),
         )
 
     def is_empty(self) -> bool:
@@ -59,50 +65,37 @@ class GlobalIndexResult(ABC):
     @staticmethod
     def create_empty() -> 'GlobalIndexResult':
         """Returns an empty GlobalIndexResult."""
-        return LazyGlobalIndexResult(lambda: RoaringBitmap64())
+        return SimpleGlobalIndexResult(RoaringBitmap64())
 
     @staticmethod
-    def create(supplier: Callable[[], RoaringBitmap64]) -> 'GlobalIndexResult':
-        """Returns a new GlobalIndexResult from supplier."""
-        return LazyGlobalIndexResult(supplier)
+    def create(bitmap: RoaringBitmap64, is_exact: bool = True) -> 'GlobalIndexResult':
+        """Returns a new GlobalIndexResult wrapping the given bitmap."""
+        return SimpleGlobalIndexResult(bitmap, is_exact)
 
     @staticmethod
     def from_range(range_: Range) -> 'GlobalIndexResult':
         """Returns a new GlobalIndexResult from Range."""
-        def create_bitmap():
-            result = RoaringBitmap64()
-            result.add_range(range_.from_, range_.to)
-            return result
-        return LazyGlobalIndexResult(create_bitmap)
+        result = RoaringBitmap64()
+        result.add_range(range_.from_, range_.to)
+        return SimpleGlobalIndexResult(result)
 
     @staticmethod
     def from_ranges(ranges: List[Range]) -> 'GlobalIndexResult':
         """Returns a new GlobalIndexResult from multiple Ranges."""
-        def create_bitmap():
-            result = RoaringBitmap64()
-            for r in ranges:
-                result.add_range(r.from_, r.to)
-            return result
-        return LazyGlobalIndexResult(create_bitmap)
+        result = RoaringBitmap64()
+        for r in ranges:
+            result.add_range(r.from_, r.to)
+        return SimpleGlobalIndexResult(result)
 
 
 class SimpleGlobalIndexResult(GlobalIndexResult):
 
-    def __init__(self, result: RoaringBitmap64):
+    def __init__(self, result: RoaringBitmap64, is_exact: bool = True):
         self._result = result
+        self._is_exact = is_exact
+
+    def is_exact(self) -> bool:
+        return self._is_exact or self.is_empty()
 
     def results(self) -> RoaringBitmap64:
         return self._result
-
-
-class LazyGlobalIndexResult(GlobalIndexResult):
-    """Lazy implementation of GlobalIndexResult that delays computation."""
-
-    def __init__(self, supplier: Callable[[], RoaringBitmap64]):
-        self._supplier = supplier
-        self._cached: Optional[RoaringBitmap64] = None
-
-    def results(self) -> RoaringBitmap64:
-        if self._cached is None:
-            self._cached = self._supplier()
-        return self._cached

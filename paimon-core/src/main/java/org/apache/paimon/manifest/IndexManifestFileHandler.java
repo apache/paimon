@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -28,6 +29,7 @@ import org.apache.paimon.utils.Range;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -219,7 +221,12 @@ public class IndexManifestFileHandler {
                             .filter(f -> f.kind() == FileKind.ADD)
                             .collect(Collectors.toList());
             for (IndexManifestEntry entry : removed) {
-                indexEntries.remove(entry.indexFile().fileName());
+                String fileName = entry.indexFile().fileName();
+                checkState(
+                        indexEntries.containsKey(fileName),
+                        "Trying to delete global index file %s which does not exist.",
+                        fileName);
+                indexEntries.remove(fileName);
             }
             validateRetainedIndexFiles(indexEntries.values(), added);
             for (IndexManifestEntry entry : added) {
@@ -240,12 +247,20 @@ public class IndexManifestFileHandler {
                 for (IndexManifestEntry added : addedIndexFiles) {
                     GlobalIndexMeta addedMeta = added.indexFile().globalIndexMeta();
                     if (addedMeta == null
+                            || (retainedMeta.sourceMeta() != null
+                                    && addedMeta.sourceMeta() != null
+                                    && !DataEvolutionIndexSourceMeta.isDataEvolutionMeta(
+                                            retainedMeta.sourceMeta())
+                                    && !DataEvolutionIndexSourceMeta.isDataEvolutionMeta(
+                                            addedMeta.sourceMeta()))
                             || retainedMeta.indexFieldId() != addedMeta.indexFieldId()
-                            || !Range.intersect(
-                                    retainedMeta.rowRangeStart(),
-                                    retainedMeta.rowRangeEnd(),
-                                    addedMeta.rowRangeStart(),
-                                    addedMeta.rowRangeEnd())) {
+                            || (Arrays.equals(
+                                            retainedMeta.extraFieldIds(), addedMeta.extraFieldIds())
+                                    && !Range.intersect(
+                                            retainedMeta.rowRangeStart(),
+                                            retainedMeta.rowRangeEnd(),
+                                            addedMeta.rowRangeStart(),
+                                            addedMeta.rowRangeEnd()))) {
                         continue;
                     }
 

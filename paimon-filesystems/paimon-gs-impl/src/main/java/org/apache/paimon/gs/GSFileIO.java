@@ -18,6 +18,7 @@
 
 package org.apache.paimon.gs;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.Options;
@@ -45,6 +46,8 @@ public class GSFileIO extends HadoopCompliantFileIO {
 
     private static final String[] CONFIG_PREFIXES = {"gs.", "fs.gs."};
 
+    private static final String HADOOP_CONFIG_PREFIX = "fs.gs.";
+
     /**
      * Cache GSFileSystem, at present, there is no good mechanism to ensure that the file system
      * will be shut down, so here the fs cache is used to avoid resource leakage.
@@ -60,20 +63,25 @@ public class GSFileIO extends HadoopCompliantFileIO {
 
     @Override
     public void configure(CatalogContext context) {
-        hadoopOptions = new Options();
-        // read all configuration with prefix 'CONFIG_PREFIXES'
+        this.hadoopOptions = loadHadoopConfigFromContext(context);
+    }
+
+    // add additional config entries from the IO config to the Hadoop config
+    @VisibleForTesting
+    Options loadHadoopConfigFromContext(CatalogContext context) {
+        Options hadoopConfig = new Options();
         for (String key : context.options().keySet()) {
             for (String prefix : CONFIG_PREFIXES) {
                 if (key.startsWith(prefix)) {
+                    String newKey = HADOOP_CONFIG_PREFIX + key.substring(prefix.length());
                     String value = context.options().get(key);
-                    hadoopOptions.set(key, value);
-                    LOG.warn(
-                            "Adding config entry for {} as {} to Hadoop config",
-                            key,
-                            hadoopOptions.get(key));
+                    hadoopConfig.set(newKey, value);
+
+                    LOG.debug("Adding config entry for {} as {} to Hadoop config", key, newKey);
                 }
             }
         }
+        return hadoopConfig;
     }
 
     @Override

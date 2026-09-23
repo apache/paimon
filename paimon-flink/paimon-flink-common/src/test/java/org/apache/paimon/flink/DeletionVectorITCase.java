@@ -344,6 +344,28 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
+    public void testBatchReadDVTableWithOutOfOrderSequenceFieldAndAggregation(boolean dvBitmap64) {
+        sql(
+                String.format(
+                        "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, sequence INT, v INT) "
+                                + "WITH ("
+                                + "'deletion-vectors.enabled' = 'true', "
+                                + "'deletion-vectors.bitmap64' = '%s', "
+                                + "'changelog-producer' = 'none', "
+                                + "'sequence.field' = 'sequence', "
+                                + "'merge-engine' = 'aggregation', "
+                                + "'fields.v.aggregate-function' = 'sum')",
+                        dvBitmap64));
+
+        sql("INSERT INTO T /*+ OPTIONS('write-only' = 'true') */ VALUES (1, 7, 7)");
+        sql("INSERT INTO T /*+ OPTIONS('write-only' = 'true') */ VALUES (1, 8, 8)");
+        sql("INSERT INTO T /*+ OPTIONS('write-only' = 'false') */ VALUES (1, 6, 6)");
+
+        assertThat(batchSql("SELECT * FROM T")).containsExactly(Row.of(1, 8, 21));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
     public void testReadTagWithDv(boolean dvBitmap64) {
         sql(
                 "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) WITH ("

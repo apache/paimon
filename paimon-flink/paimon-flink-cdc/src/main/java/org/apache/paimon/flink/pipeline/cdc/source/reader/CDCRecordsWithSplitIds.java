@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.pipeline.cdc.source.reader;
 
-import org.apache.paimon.flink.source.FileStoreSourceSplitState;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.utils.Reference;
 
@@ -109,7 +108,7 @@ public class CDCRecordsWithSplitIds implements RecordsWithSplitIds<RecordIterato
             SourceReaderContext context,
             RecordIterator<Event> element,
             SourceOutput<Event> output,
-            FileStoreSourceSplitState state,
+            CDCSourceSplitState state,
             FileStoreSourceReaderMetrics metrics) {
         long timestamp = TimestampAssigner.NO_TIMESTAMP;
         if (metrics.getLatestFileCreationTime() != FileStoreSourceReaderMetrics.UNDEFINED) {

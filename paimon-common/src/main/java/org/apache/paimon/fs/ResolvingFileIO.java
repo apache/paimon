@@ -18,13 +18,14 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -107,7 +108,39 @@ public class ResolvingFileIO implements FileIO {
         return wrap(() -> fileIO(src).rename(src, dst));
     }
 
-    @VisibleForTesting
+    @Override
+    public boolean tryToWriteAtomic(Path path, String content) throws IOException {
+        // the interface default (temp file + rename) would bypass the resolved FileIO's atomic
+        // override
+        return wrap(() -> fileIO(path).tryToWriteAtomic(path, content));
+    }
+
+    @Override
+    public TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
+            throws IOException {
+        // Forward to the resolved FileIO so implementations with native multipart
+        // commits (object storage) keep them; the interface default would wrap this
+        // resolver in a rename-based committer instead.
+        return wrap(() -> fileIO(path).newTwoPhaseOutputStream(path, overwrite));
+    }
+
+    @Override
+    public RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
+            throws IOException {
+        // the interface default would hide the resolved FileIO's iterative listing override and
+        // list each directory with listStatus instead
+        return wrap(() -> fileIO(path).listFilesIterative(path, recursive));
+    }
+
+    @Override
+    public String createBlobPresignedUrl(
+            Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
+        return wrap(
+                () ->
+                        fileIO(new Path(descriptor.uri()))
+                                .createBlobPresignedUrl(tableRoot, descriptor, validity));
+    }
+
     public FileIO fileIO(Path path) throws IOException {
         CacheKey cacheKey = new CacheKey(path.toUri().getScheme(), path.toUri().getAuthority());
         return fileIOMap.computeIfAbsent(

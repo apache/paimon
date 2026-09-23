@@ -23,8 +23,8 @@ import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -63,7 +63,7 @@ public class PrimaryKeyTableStatisticsTest extends FileStoreTableStatisticsTestB
         Schema.Builder builder = schemaBuilder();
         builder.options(options.toMap());
         TableSchema tableSchema =
-                new SchemaManager(LocalFileIO.create(), tablePath)
+                new FileSystemSchemaManager(LocalFileIO.create(), tablePath)
                         .createTable(builder.partitionKeys("pt").primaryKey("pt", "a").build());
         return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }

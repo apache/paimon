@@ -77,7 +77,9 @@ public class FileFormatTest {
                                 new FormatReaderContext(
                                         LocalFileIO.create(),
                                         path,
-                                        LocalFileIO.create().getFileSize(path)));
+                                        LocalFileIO.create().getFileSize(path),
+                                        null,
+                                        null));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(
                 rowData -> result.add(GenericRow.of(rowData.getInt(0), rowData.getInt(1))));
@@ -128,6 +130,16 @@ public class FileFormatTest {
         OrcFileFormat orcFileFormat = (OrcFileFormat) fileFormat;
         assertThat(orcFileFormat.orcProperties().get("orc.hello")).isEqualTo("world");
         assertThat(orcFileFormat.readBatchSize()).isEqualTo(1024);
+    }
+
+    @Test
+    public void testManifestFormatIsAlwaysAvro() {
+        Options tableOptions = new Options();
+        tableOptions.set(CoreOptions.FILE_FORMAT, "orc");
+
+        FileFormat manifestFormat = FileFormat.manifestFormat(new CoreOptions(tableOptions));
+
+        assertThat(manifestFormat.getFormatIdentifier()).isEqualTo(CoreOptions.FILE_FORMAT_AVRO);
     }
 
     public FileFormat createFileFormat(String codec) {

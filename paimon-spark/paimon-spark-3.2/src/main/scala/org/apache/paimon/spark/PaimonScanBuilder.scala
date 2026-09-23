@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.spark.read.{PaimonLocalScan, VectorSearchResultUtils}
 import org.apache.paimon.table.InnerTable
 
 import org.apache.spark.sql.connector.read.Scan
@@ -25,13 +26,39 @@ import org.apache.spark.sql.connector.read.Scan
 class PaimonScanBuilder(val table: InnerTable) extends PaimonBaseScanBuilder {
 
   override def build(): Scan = {
+    val (actualTable, vectorSearch, hybridSearch, fullTextSearch) = table match {
+      case vst: org.apache.paimon.table.VectorSearchTable =>
+        (vst.origin(), Option(vst.vectorSearch()), None, None)
+      case hst: org.apache.paimon.table.HybridSearchTable =>
+        (hst.origin(), None, Option(hst.hybridSearch()), None)
+      case ftst: org.apache.paimon.table.FullTextSearchTable =>
+        (ftst.origin(), None, None, Option(ftst.fullTextSearch()))
+      case _ => (table, pushedVectorSearch, None, pushedFullTextSearch)
+    }
+    if (
+      vectorSearch.isDefined &&
+      VectorSearchResultUtils.isVectorSearchMetaOnly(requiredSchema.fieldNames.toSeq)
+    ) {
+      val result = PaimonBaseScan.evalVectorSearch(
+        actualTable,
+        vectorSearch.get,
+        pushedPartitionFilters,
+        pushedDataFilters)
+      return PaimonLocalScan(
+        VectorSearchResultUtils.toRows(result, requiredSchema),
+        requiredSchema,
+        actualTable,
+        pushedPartitionFilters)
+    }
     PaimonScan(
-      table,
+      actualTable,
       requiredSchema,
       pushedPartitionFilters,
       pushedDataFilters,
       pushedLimit,
       pushedTopN,
-      pushedVectorSearch)
+      vectorSearch,
+      hybridSearch,
+      fullTextSearch)
   }
 }

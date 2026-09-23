@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.utils.ThrowingConsumer;
 
@@ -91,8 +92,7 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
         assertThat(snapshot.id()).isEqualTo(2);
         Map<Snapshot, List<String>> tags = table.tagManager().tags();
         assertThat(tags).containsOnlyKeys(snapshot);
-        assertThat(tags.get(snapshot))
-                .containsOnly(AutoTagForSavepointCommitterOperator.SAVEPOINT_TAG_PREFIX + 2);
+        assertThat(tags.get(snapshot)).containsOnly(SavepointTagUtils.tagNameOf(2));
     }
 
     @Test
@@ -142,9 +142,7 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
 
         Map<Snapshot, List<String>> tags = table.tagManager().tags();
         assertThat(tags).containsOnlyKeys(snapshot);
-        assertThat(tags.get(snapshot))
-                .containsOnly(
-                        AutoTagForSavepointCommitterOperator.SAVEPOINT_TAG_PREFIX + checkpointId);
+        assertThat(tags.get(snapshot)).containsOnly(SavepointTagUtils.tagNameOf(checkpointId));
     }
 
     @Test
@@ -179,6 +177,39 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
 
         assertThat(table.snapshotManager().snapshotCount()).isEqualTo(2);
         assertThat(table.tagManager().tagCount()).isEqualTo(0);
+    }
+
+    @Test
+    public void testAbortCheckpointKeepsTagFromDifferentCommitUser() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        createSavepointTag(table, initialCommitUser + "-other", 1L);
+
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createRecoverableTestHarness(table);
+        testHarness.open();
+        testHarness.getOneInputOperator().notifyCheckpointAborted(1L);
+        testHarness.close();
+
+        assertThat(table.tagManager().tagExists(SavepointTagUtils.tagNameOf(1L))).isTrue();
+    }
+
+    private void createSavepointTag(FileStoreTable table, String commitUser, long commitIdentifier)
+            throws Exception {
+        try (StreamTableWrite write =
+                        table.newStreamWriteBuilder().withCommitUser(commitUser).newWrite();
+                StreamTableCommit commit =
+                        table.newStreamWriteBuilder().withCommitUser(commitUser).newCommit()) {
+            write.write(GenericRow.of(1, 10L));
+            List<CommitMessage> messages = write.prepareCommit(false, commitIdentifier);
+            commit.commit(commitIdentifier, messages);
+        }
+        table.tagManager()
+                .createTag(
+                        table.snapshotManager().latestSnapshot(),
+                        SavepointTagUtils.tagNameOf(commitIdentifier),
+                        table.coreOptions().tagDefaultTimeRetained(),
+                        table.store().createTagCallbacks(table),
+                        false);
     }
 
     private void processCommittable(

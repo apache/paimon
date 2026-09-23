@@ -22,6 +22,7 @@ Conflict detection for commit operations.
 import bisect
 
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.file_entry import FileEntry
 from pypaimon.table.special_fields import SpecialFields
@@ -93,7 +94,18 @@ class RowIdColumnConflictChecker:
 
     def _contains_any_write_field(self, field_ids, file):
         if file.write_cols is None:
-            return True
+            schema = self._schema_manager.get_schema(file.schema_id)
+            if schema is None:
+                raise RuntimeError(f"Schema {file.schema_id} not found")
+            data_file_fields = (
+                schema.data_file_fields(None)
+                if hasattr(schema, 'data_file_fields')
+                else schema.fields
+            )
+            return any(
+                field.id in field_ids
+                for field in data_file_fields
+            )
         for col_name in file.write_cols:
             fid = self._field_id(file, col_name)
             if fid is not None and fid in field_ids:
@@ -125,7 +137,12 @@ class RowIdColumnConflictChecker:
         if file.write_cols is None:
             schema = schema_manager.get_schema(file.schema_id)
             if schema is not None:
-                for field in schema.fields:
+                data_file_fields = (
+                    schema.data_file_fields(None)
+                    if hasattr(schema, 'data_file_fields')
+                    else schema.fields
+                )
+                for field in data_file_fields:
                     if not SpecialFields.is_system_field(field.name):
                         field_ids.add(field.id)
         else:
@@ -148,6 +165,23 @@ class _WriteRange:
         self.field_ids = field_ids
 
 
+class RowIdExistenceConflict(RuntimeError):
+    """A staged row-id file no longer matches the current base-file layout."""
+
+    def __init__(self, entry):
+        self.entry = entry
+        super().__init__(
+            "Row ID existence conflict: file '{}' references "
+            "firstRowId={}, rowCount={} in bucket {}, "
+            "but no matching file exists in the current snapshot. "
+            "The referenced file may have been rewritten by a "
+            "concurrent compaction or removed by an overwrite.".format(
+                entry.file.file_name,
+                entry.file.first_row_id,
+                entry.file.row_count,
+                entry.bucket))
+
+
 class ConflictDetection:
     """Detects conflicts between base and delta files during commit."""
 
@@ -160,20 +194,74 @@ class ConflictDetection:
         self._row_id_check_from_snapshot = None
         self.commit_scanner = commit_scanner
 
-    def should_be_overwrite_commit(self):
+    def should_be_overwrite_commit(self, append_file_entries=None, append_index_files=None):
+        for entry in append_file_entries or []:
+            if entry.kind == 1:
+                return True
+        for entry in append_index_files or []:
+            if entry.index_file.index_type == IndexManifestFile.DELETION_VECTORS_INDEX:
+                return True
         return False
 
     def has_row_id_check_from_snapshot(self):
         return self._row_id_check_from_snapshot is not None
 
-    def check_conflicts(self, latest_snapshot, base_entries, delta_entries, commit_kind):
-        all_entries = list(base_entries) + list(delta_entries)
+    @staticmethod
+    def has_global_index_additions(index_entries=None):
+        return bool(ConflictDetection.global_index_file_additions(index_entries))
 
+    @staticmethod
+    def has_hash_index_changes(index_entries=None):
+        return any(
+            entry.index_file.index_type == IndexManifestFile.HASH_INDEX
+            for entry in (index_entries or [])
+        )
+
+    def check_conflicts(
+            self,
+            latest_snapshot,
+            base_entries,
+            delta_entries,
+            commit_kind,
+            delta_index_entries=None):
+        try:
+            FileEntry.merge_entries(delta_entries)
+        except Exception as e:
+            return RuntimeError(
+                "File deletion conflicts detected! Give up committing. " + str(e))
+
+        all_entries = list(base_entries) + list(delta_entries)
         try:
             merged_entries = FileEntry.merge_entries(all_entries)
         except Exception as e:
             return RuntimeError(
                 "File deletion conflicts detected! Give up committing. " + str(e))
+
+        for entry in merged_entries:
+            if entry.kind == 1:
+                return RuntimeError(
+                    "File deletion conflicts detected! Give up committing. "
+                    "Trying to delete file {} which is not previously added.".format(
+                        entry.file.file_name))
+
+        conflict = self.check_bucket_num_conflicts(merged_entries)
+        if conflict is not None:
+            return conflict
+
+        conflict = self.check_overwrite_from_snapshot(
+            latest_snapshot, delta_entries, commit_kind)
+        if conflict is not None:
+            return conflict
+
+        conflict = self.check_deletion_vector_index_conflicts(
+            latest_snapshot, delta_index_entries, base_entries, delta_entries)
+        if conflict is not None:
+            return conflict
+
+        conflict = self.check_hash_index_conflicts(
+            latest_snapshot, delta_index_entries)
+        if conflict is not None:
+            return conflict
 
         if commit_kind != "COMPACT":
             next_row_id = latest_snapshot.next_row_id if latest_snapshot else None
@@ -186,7 +274,252 @@ class ConflictDetection:
         if conflict is not None:
             return conflict
 
+        conflict = self.check_global_index_row_id_existence(
+            base_entries, delta_index_entries)
+        if conflict is not None:
+            return conflict
+
         return self.check_row_id_from_snapshot(latest_snapshot, delta_entries)
+
+    @staticmethod
+    def check_bucket_num_conflicts(entries):
+        total_buckets = {}
+        for entry in entries:
+            if entry.kind != 0 or entry.total_buckets <= 0:
+                continue
+            partition = tuple(entry.partition.values)
+            previous = total_buckets.get(partition)
+            if previous is not None and previous != entry.total_buckets:
+                return RuntimeError(
+                    "Total buckets of partition {} differ between committed "
+                    "files: {} and {}. Give up committing.".format(
+                        partition, previous, entry.total_buckets,
+                    )
+                )
+            total_buckets[partition] = entry.total_buckets
+        return None
+
+    def check_hash_index_conflicts(
+            self, latest_snapshot, delta_index_entries=None):
+        """Detect stale full-file replacements of dynamic-bucket HASH indexes."""
+        hash_entries = [
+            entry for entry in (delta_index_entries or [])
+            if entry.index_file.index_type == IndexManifestFile.HASH_INDEX
+        ]
+        if not hash_entries:
+            return None
+
+        delete_entries = [entry for entry in hash_entries if entry.kind == 1]
+        add_entries = [entry for entry in hash_entries if entry.kind == 0]
+        delete_names = {
+            entry.index_file.file_name for entry in delete_entries
+        }
+
+        current_entries = []
+        if latest_snapshot is not None and latest_snapshot.index_manifest is not None:
+            current_entries = [
+                entry for entry in IndexManifestFile(self.table).read(
+                    latest_snapshot.index_manifest)
+                if entry.kind == 0
+                and entry.index_file.index_type == IndexManifestFile.HASH_INDEX
+            ]
+
+        current_names = {
+            entry.index_file.file_name for entry in current_entries
+        }
+        for delete in delete_entries:
+            if delete.index_file.file_name not in current_names:
+                return RuntimeError(
+                    "HASH index conflict detected: index file {} is not "
+                    "present in the latest snapshot.".format(
+                        delete.index_file.file_name
+                    )
+                )
+
+        additions_by_bucket = {}
+        for add in add_entries:
+            key = (tuple(add.partition.values), add.bucket)
+            previous_add = additions_by_bucket.get(key)
+            if previous_add is not None:
+                return RuntimeError(
+                    "HASH index conflict detected: multiple index files {} "
+                    "and {} were added for partition {}, bucket {} in one "
+                    "commit.".format(
+                        previous_add.index_file.file_name,
+                        add.index_file.file_name,
+                        key[0],
+                        key[1],
+                    )
+                )
+            additions_by_bucket[key] = add
+
+            retained = [
+                entry for entry in current_entries
+                if entry.index_file.file_name not in delete_names
+                and tuple(entry.partition.values) == key[0]
+                and entry.bucket == key[1]
+            ]
+            if retained:
+                return RuntimeError(
+                    "HASH index conflict detected: partition {}, bucket {} "
+                    "already has newer index file {}.".format(
+                        key[0],
+                        key[1],
+                        retained[0].index_file.file_name,
+                    )
+                )
+
+        return None
+
+    def check_deletion_vector_index_conflicts(self,
+                                              latest_snapshot,
+                                              delta_index_entries=None,
+                                              base_entries=None,
+                                              delta_entries=None):
+        dv_entries = [
+            entry for entry in (delta_index_entries or [])
+            if entry.index_file.index_type == IndexManifestFile.DELETION_VECTORS_INDEX
+        ]
+        if not dv_entries:
+            return None
+
+        delete_entries = [entry for entry in dv_entries if entry.kind == 1]
+        add_entries = [entry for entry in dv_entries if entry.kind == 0]
+        delete_names = {entry.index_file.file_name for entry in delete_entries}
+
+        current_entries = []
+        if latest_snapshot is not None and latest_snapshot.index_manifest is not None:
+            current_entries = [
+                entry for entry in IndexManifestFile(self.table).read(
+                    latest_snapshot.index_manifest)
+                if entry.kind == 0
+                and entry.index_file.index_type == IndexManifestFile.DELETION_VECTORS_INDEX
+            ]
+
+        current_names = {entry.index_file.file_name for entry in current_entries}
+        for delete in delete_entries:
+            if delete.index_file.file_name not in current_names:
+                return RuntimeError(
+                    "Deletion vector index conflict detected: index file {} "
+                    "is not present in the latest snapshot.".format(
+                        delete.index_file.file_name))
+
+        existing_data_files = {
+            (tuple(entry.partition.values), entry.bucket, entry.file.file_name)
+            for entry in list(base_entries or []) + list(delta_entries or [])
+            if entry.kind == 0
+        }
+        affected_files = []
+        for add in add_entries:
+            for data_file_name in self._deletion_vector_data_file_names(add.index_file):
+                affected_files.append((add.partition, add.bucket, data_file_name))
+
+        for partition, bucket, data_file_name in affected_files:
+            data_file_key = (tuple(partition.values), bucket, data_file_name)
+            if data_file_key not in existing_data_files:
+                return RuntimeError(
+                    "Deletion vector index conflict detected: data file {} "
+                    "is not present in the latest snapshot.".format(
+                        data_file_name))
+
+            for current in current_entries:
+                if current.index_file.file_name in delete_names:
+                    continue
+                if current.partition != partition or current.bucket != bucket:
+                    continue
+                if data_file_name in self._deletion_vector_data_file_names(current.index_file):
+                    return RuntimeError(
+                        "Deletion vector index conflict detected: data file {} "
+                        "already has a newer deletion vector index file {}.".format(
+                            data_file_name, current.index_file.file_name))
+
+        return None
+
+    @staticmethod
+    def _deletion_vector_data_file_names(index_file):
+        return [
+            meta.data_file_name
+            for meta in (index_file.dv_ranges or {}).values()
+        ]
+
+    def check_global_index_row_id_existence(self, base_entries, delta_index_entries=None):
+        if not self.data_evolution_enabled:
+            return None
+
+        indexes_to_check = self.global_index_file_additions(delta_index_entries)
+        if not indexes_to_check:
+            return None
+
+        data_ranges = {}
+        for entry in base_entries or []:
+            row_range = entry.file.row_id_range()
+            if entry.kind == 0 and row_range is not None:
+                key = (tuple(entry.partition.values), entry.bucket)
+                data_ranges.setdefault(key, []).append(row_range)
+
+        data_ranges = {
+            key: Range.sort_and_merge_overlap(ranges, True, True)
+            for key, ranges in data_ranges.items()
+        }
+
+        for index_entry in indexes_to_check:
+            global_index = index_entry.index_file.global_index_meta
+            index_range = Range(
+                global_index.row_range_start,
+                global_index.row_range_end,
+            )
+            key = (tuple(index_entry.partition.values), index_entry.bucket)
+            if index_range.exclude(data_ranges.get(key, [])):
+                return RuntimeError(
+                    "Global index row ID existence conflict: index file '{}' "
+                    "references row range {}, but this range is not fully "
+                    "covered by current data files. The referenced row IDs "
+                    "may have been reassigned or removed by a concurrent "
+                    "commit.".format(index_entry.index_file.file_name, index_range))
+
+        return None
+
+    @staticmethod
+    def global_index_file_additions(index_entries=None):
+        return [
+            entry for entry in (index_entries or [])
+            if entry.kind == 0 and entry.index_file.global_index_meta is not None
+        ]
+
+    def check_overwrite_from_snapshot(self, latest_snapshot, delta_entries, commit_kind):
+        if commit_kind != "OVERWRITE":
+            return None
+        if self._row_id_check_from_snapshot is None:
+            return None
+        if latest_snapshot is None or latest_snapshot.id <= self._row_id_check_from_snapshot:
+            return None
+        if not any(entry.kind == 1 for entry in delta_entries):
+            return None
+
+        check_snapshot = self.snapshot_manager.get_snapshot_by_id(
+            self._row_id_check_from_snapshot)
+        if check_snapshot is None:
+            return RuntimeError(
+                "Overwrite conflict detected: base snapshot {} cannot be found.".format(
+                    self._row_id_check_from_snapshot))
+
+        for snapshot_id in range(
+                self._row_id_check_from_snapshot + 1,
+                latest_snapshot.id + 1):
+            snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
+            if snapshot is None:
+                return RuntimeError(
+                    "Overwrite conflict detected: snapshot {} cannot be found.".format(
+                        snapshot_id))
+            incremental_entries = (
+                self.commit_scanner.read_incremental_raw_entries_from_changed_partitions(
+                    snapshot, delta_entries))
+            if incremental_entries:
+                return RuntimeError(
+                    "Overwrite conflict detected: target partitions were modified "
+                    "after snapshot {}.".format(self._row_id_check_from_snapshot))
+
+        return None
 
     def check_row_id_existence(self, base_entries, delta_entries, next_row_id=None):
         if not self.data_evolution_enabled:
@@ -206,26 +539,31 @@ class ConflictDetection:
             return None
 
         existing_index = set()
+        existing_ranges = {}
         for base in base_entries:
             if base.file.first_row_id is not None:
                 existing_index.add((
                     base.partition, base.bucket,
                     base.file.first_row_id, base.file.row_count))
+                if not self._is_dedicated_file(base.file.file_name):
+                    existing_ranges.setdefault((base.partition, base.bucket), []).append(
+                        base.file.row_id_range())
+
+        existing_ranges = {
+            key: Range.sort_and_merge_overlap(ranges, True, True)
+            for key, ranges in existing_ranges.items()
+        }
 
         for entry in files_to_check:
+            if self._is_dedicated_file(entry.file.file_name):
+                base_ranges = existing_ranges.get((entry.partition, entry.bucket), [])
+                if not entry.file.row_id_range().exclude(base_ranges):
+                    continue
+
             key = (entry.partition, entry.bucket,
                    entry.file.first_row_id, entry.file.row_count)
             if key not in existing_index:
-                return RuntimeError(
-                    "Row ID existence conflict: file '{}' references "
-                    "firstRowId={}, rowCount={} in bucket {}, "
-                    "but no matching file exists in the current snapshot. "
-                    "The referenced file may have been rewritten by a "
-                    "concurrent compaction or removed by an overwrite.".format(
-                        entry.file.file_name,
-                        entry.file.first_row_id,
-                        entry.file.row_count,
-                        entry.bucket))
+                return RowIdExistenceConflict(entry)
 
         return None
 
@@ -244,30 +582,103 @@ class ConflictDetection:
             return None
 
         range_helper = RangeHelper(lambda entry: entry.file.row_id_range())
-        merged_groups = range_helper.merge_overlapping_ranges(entries_with_row_id)
+        data_files = [
+            entry for entry in entries_with_row_id
+            if not self._is_dedicated_file(entry.file.file_name)
+        ]
 
-        for group in merged_groups:
-            data_files = [
-                entry for entry in group
-                if not DataFileMeta.is_blob_file(entry.file.file_name)
-            ]
-            if not range_helper.are_all_ranges_same(data_files):
+        conflict = self._check_data_file_row_id_range_conflicts(
+            range_helper, data_files)
+        if conflict is not None:
+            return conflict
+
+        dedicated_files = [
+            entry for entry in entries_with_row_id
+            if self._is_dedicated_file(entry.file.file_name)
+        ]
+        conflict = self._check_dedicated_file_row_id_range_conflicts(
+            data_files, dedicated_files)
+        if conflict is not None:
+            return conflict
+
+        return None
+
+    def _check_data_file_row_id_range_conflicts(self, range_helper, data_files):
+        for data_file_group in range_helper.merge_overlapping_ranges(data_files):
+            if not range_helper.are_all_ranges_same(data_file_group):
                 file_descriptions = [
-                    "{name}(rowId={row_id}, count={count})".format(
-                        name=entry.file.file_name,
-                        row_id=entry.file.first_row_id,
-                        count=entry.file.row_count,
-                    )
-                    for entry in data_files
+                    self._file_description(entry) for entry in data_file_group
                 ]
                 return RuntimeError(
                     "For Data Evolution table, multiple 'MERGE INTO' and 'COMPACT' "
                     "operations have encountered conflicts, data files: "
                     + str(file_descriptions))
+        return None
+
+    def _check_dedicated_file_row_id_range_conflicts(
+            self, data_files, dedicated_files):
+        if not dedicated_files:
+            return None
+
+        data_ranges = self._data_file_row_ranges(data_files)
+
+        for dedicated_file in dedicated_files:
+            dedicated_range = dedicated_file.file.row_id_range()
+            if any(self._contains(row_range, dedicated_range) for row_range in data_ranges):
+                continue
+
+            intersecting_ranges = [
+                row_range for row_range in data_ranges
+                if row_range.overlaps(dedicated_range)
+            ]
+            intersecting_files = [
+                self._file_description(entry)
+                for entry in data_files
+                if entry.file.row_id_range().overlaps(dedicated_range)
+            ]
+            conflict_reason = (
+                "spans multiple data file ranges"
+                if len(intersecting_ranges) > 1
+                else "is not covered by one data file range"
+            )
+            return RuntimeError(
+                "For Data Evolution table, multiple 'MERGE INTO' and 'COMPACT' "
+                "operations have encountered conflicts, dedicated file "
+                "{file} {row_range} {reason}: {groups}".format(
+                    file=self._file_description(dedicated_file),
+                    row_range=dedicated_range,
+                    reason=conflict_reason,
+                    groups=intersecting_files))
 
         return None
 
-    def check_row_id_from_snapshot(self, latest_snapshot, commit_entries):
+    @staticmethod
+    def _data_file_row_ranges(data_files):
+        return Range.sort_and_merge_overlap(
+            [entry.file.row_id_range() for entry in data_files],
+            True,
+            False,
+        )
+
+    @staticmethod
+    def _contains(container, row_range):
+        return container.from_ <= row_range.from_ and container.to >= row_range.to
+
+    @staticmethod
+    def _is_dedicated_file(file_name):
+        return (DataFileMeta.is_blob_file(file_name)
+                or DataFileMeta.is_vector_file(file_name))
+
+    @staticmethod
+    def _file_description(entry):
+        return "{name}(rowId={row_id}, count={count})".format(
+            name=entry.file.file_name,
+            row_id=entry.file.first_row_id,
+            count=entry.file.row_count,
+        )
+
+    def check_row_id_from_snapshot(
+            self, latest_snapshot, commit_entries, check_compaction=True):
         if not self.data_evolution_enabled:
             return None
         if self._row_id_check_from_snapshot is None:
@@ -287,13 +698,30 @@ class ConflictDetection:
                 "{snapshot}.".format(snapshot=self._row_id_check_from_snapshot))
         check_next_row_id = check_snapshot.next_row_id
 
+        # Pair each delta with its anchor file type so a parquet-only
+        # compact does not flag a blob delta whose .blob anchor is intact.
+        delta_signatures = []
+        for f in delta_files:
+            r = f.row_id_range()
+            if r is not None:
+                delta_signatures.append(
+                    (DataFileMeta.is_blob_file(f.file_name), r.from_, r.to))
+
         for snapshot_id in range(
                 self._row_id_check_from_snapshot + 1,
                 latest_snapshot.id + 1):
             snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
             if snapshot is None:
-                continue
+                raise RuntimeError(
+                    "Row-id conflict check cannot continue because snapshot "
+                    "{} cannot be found.".format(snapshot_id))
+
             if snapshot.commit_kind == "COMPACT":
+                if check_compaction:
+                    err = self._compact_conflicts_with_delta(
+                        snapshot, delta_signatures, column_checker, commit_entries)
+                    if err is not None:
+                        return err
                 continue
 
             incremental_entries = self.commit_scanner.read_incremental_entries_from_changed_partitions(
@@ -310,4 +738,47 @@ class ConflictDetection:
                             "the same file, which can render some updates "
                             "ineffective.")
 
+        return None
+
+    def _compact_conflicts_with_delta(self, snapshot, delta_signatures,
+                                      column_checker, commit_entries):
+        """Return RuntimeError if a COMPACT snapshot deleted a same-kind
+        anchor file whose row-id range AND write columns overlap any
+        staged delta; otherwise None.
+
+        File-type match guards against `write_cols=None` ambiguity (an
+        initial full-row parquet does not actually contain blob columns);
+        column_checker guards against unrelated column-write shards
+        (compacting an f1-only parquet must not block an f2 update on
+        the same row range).
+        """
+        if not delta_signatures:
+            return None
+        raw_entries = self.commit_scanner.read_incremental_raw_entries_from_changed_partitions(
+            snapshot, commit_entries)
+        for entry in raw_entries:
+            if entry.kind != 1:
+                continue
+            file_range = entry.file.row_id_range()
+            if file_range is None:
+                continue
+            deleted_is_blob = DataFileMeta.is_blob_file(entry.file.file_name)
+            for delta_is_blob, from_, to in delta_signatures:
+                if delta_is_blob != deleted_is_blob:
+                    continue
+                if file_range.from_ > to or from_ > file_range.to:
+                    continue
+                if not column_checker.conflicts_with(entry.file):
+                    continue
+                return RuntimeError(
+                    "Blob/row-id update conflicts with concurrent COMPACT "
+                    "(snapshot {sid}): anchor file {name} [{ff}, {ft}] "
+                    "was compacted away, overlaps staged delta "
+                    "[{df}, {dt}].".format(
+                        sid=snapshot.id,
+                        name=entry.file.file_name,
+                        ff=file_range.from_,
+                        ft=file_range.to,
+                        df=from_,
+                        dt=to))
         return None

@@ -129,6 +129,13 @@ public class BlobDescriptor implements Serializable {
     }
 
     public static BlobDescriptor deserialize(byte[] bytes) {
+        if (bytes == null || bytes.length < Byte.BYTES) {
+            throw invalidPayload("too short");
+        }
+        if (VideoFrameDescriptor.isVideoFrameDescriptor(bytes)) {
+            return VideoFrameDescriptor.deserialize(bytes);
+        }
+
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
         buffer.order(ByteOrder.LITTLE_ENDIAN);
 
@@ -143,6 +150,7 @@ public class BlobDescriptor implements Serializable {
         }
 
         if (version > 1) {
+            checkRemaining(buffer, Long.BYTES, "too short");
             long magic = buffer.getLong();
             if (MAGIC != magic) {
                 throw new IllegalArgumentException(
@@ -153,7 +161,18 @@ public class BlobDescriptor implements Serializable {
             }
         }
 
+        checkRemaining(buffer, Integer.BYTES, "too short");
         int uriLength = buffer.getInt();
+        if (uriLength < 0) {
+            throw invalidPayload("negative URI length: " + uriLength);
+        }
+        if (uriLength > buffer.remaining()) {
+            throw invalidPayload("URI length exceeds data size");
+        }
+        if (buffer.remaining() - uriLength < Long.BYTES + Long.BYTES) {
+            throw invalidPayload("missing offset/length");
+        }
+
         byte[] uriBytes = new byte[uriLength];
         buffer.get(uriBytes);
         String uri = new String(uriBytes, StandardCharsets.UTF_8);
@@ -163,7 +182,20 @@ public class BlobDescriptor implements Serializable {
         return new BlobDescriptor(version, uri, offset, length);
     }
 
+    private static void checkRemaining(ByteBuffer buffer, int length, String message) {
+        if (buffer.remaining() < length) {
+            throw invalidPayload(message);
+        }
+    }
+
+    private static IllegalArgumentException invalidPayload(String message) {
+        return new IllegalArgumentException("Invalid BlobDescriptor data: " + message);
+    }
+
     public static boolean isBlobDescriptor(byte[] bytes) {
+        if (bytes == null) {
+            return false;
+        }
         if (bytes.length < 9) {
             return false;
         }
@@ -175,5 +207,10 @@ public class BlobDescriptor implements Serializable {
             return false;
         }
         return MAGIC == buffer.getLong();
+    }
+
+    /** Returns whether the bytes encode any descriptor type understood by this version. */
+    public static boolean isSerializedDescriptor(byte[] bytes) {
+        return isBlobDescriptor(bytes) || VideoFrameDescriptor.isVideoFrameDescriptor(bytes);
     }
 }

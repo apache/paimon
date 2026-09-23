@@ -37,6 +37,7 @@ import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
+import org.apache.paimon.utils.SensitiveConfigUtils;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -45,6 +46,7 @@ import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsLimitPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
 import org.apache.flink.table.expressions.ResolvedExpression;
+import org.apache.flink.table.plan.stats.TableStats;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
 import org.slf4j.Logger;
@@ -55,6 +57,8 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.PrimitiveIterator;
+import java.util.stream.LongStream;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARTITIONS;
 import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
@@ -180,7 +184,10 @@ public abstract class FlinkTableSource
             // In older versions of Flink, however, lookup sources will first be treated as normal
             // sources. So this method will also be visited by lookup tables, and the options might
             // cause IllegalArgumentException. In this case we ignore the filters.
-            LOG.info("Failed to get filter with table options {} ", table.options(), e);
+            LOG.info(
+                    "Failed to get filter with table options {} ",
+                    SensitiveConfigUtils.redactMap(table.options()),
+                    e);
             return null;
         }
     }
@@ -253,11 +260,12 @@ public abstract class FlinkTableSource
                                 .newScan()
                                 .listPartitionEntries();
                 long totalSize = 0;
-                long rowCount = 0;
                 for (PartitionEntry entry : partitionEntries) {
                     totalSize += entry.fileSizeInBytes();
-                    rowCount += entry.recordCount();
                 }
+                long rowCount =
+                        sumRowCounts(
+                                partitionEntries.stream().mapToLong(PartitionEntry::recordCount));
                 long splitTargetSize = ((DataTable) table).coreOptions().splitTargetSize();
                 splitStatistics =
                         new SplitStatistics((int) (totalSize / splitTargetSize + 1), rowCount);
@@ -273,9 +281,31 @@ public abstract class FlinkTableSource
                                 .splits();
                 splitStatistics =
                         new SplitStatistics(
-                                splits.size(), splits.stream().mapToLong(Split::rowCount).sum());
+                                splits.size(),
+                                sumRowCounts(splits.stream().mapToLong(Split::rowCount)));
             }
         }
+    }
+
+    /**
+     * Returns zero for an empty stream and Flink's unknown row-count sentinel if any value is
+     * non-positive or the sum overflows.
+     */
+    static long sumRowCounts(LongStream rowCounts) {
+        PrimitiveIterator.OfLong iterator = rowCounts.iterator();
+        long totalRowCount = 0L;
+        while (iterator.hasNext()) {
+            long rowCount = iterator.nextLong();
+            if (rowCount <= 0) {
+                return TableStats.UNKNOWN.getRowCount();
+            }
+            try {
+                totalRowCount = Math.addExact(totalRowCount, rowCount);
+            } catch (ArithmeticException e) {
+                return TableStats.UNKNOWN.getRowCount();
+            }
+        }
+        return totalRowCount;
     }
 
     /** Split statistics for inferring row count and parallelism size. */

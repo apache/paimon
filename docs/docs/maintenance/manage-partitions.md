@@ -26,6 +26,9 @@ under the License.
 Paimon provides multiple ways to manage partitions, including expire historical partitions by different strategies or 
 mark a partition done to notify the downstream application that the partition has finished writing.
 
+For how partition expiration relates to snapshot retention and file cleanup, see
+[Clean Up Stored Data](./#clean-up-stored-data).
+
 ## Expiring Partitions
 
 You can set `partition.expiration-time` when creating a partitioned table. Paimon streaming sink will periodically check
@@ -48,6 +51,11 @@ What is the scenario for this strategy:
 __Note:__ After the partition expires, it is logically deleted and the latest snapshot cannot query its data. But the
 files in the file system are not immediately physically deleted, it depends on when the corresponding snapshot expires.
 See [Expire Snapshots](./manage-snapshots#expire-snapshots).
+
+Also, even after the data files are physically deleted by snapshot expiration, the empty partition directories are
+**not** removed by default. To clean up empty directories, set
+`'snapshot.clean-empty-directories' = 'true'` on the table. Please note that on object stores (e.g. OSS, S3)
+this may cause performance issues, which is why the option defaults to `false`.
 
 :::
 

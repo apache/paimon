@@ -65,6 +65,33 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
     public static final String SEQUENCE_GROUP = "sequence-group";
+    private static final String SEQUENCE_GROUP_PK_ERROR =
+            "The sequence-group '%s' contains primary key field '%s', "
+                    + "which is not allowed. Primary key columns cannot be put in sequence-group.";
+
+    public static boolean isSequenceGroupOption(String optionKey) {
+        return optionKey.startsWith(FIELDS_PREFIX + ".")
+                && optionKey.endsWith("." + SEQUENCE_GROUP);
+    }
+
+    public static boolean isSequenceGroupOptionCandidate(String optionKey) {
+        return optionKey.startsWith(FIELDS_PREFIX) && optionKey.endsWith(SEQUENCE_GROUP);
+    }
+
+    public static List<String> sequenceGroupOrderingFields(String optionKey) {
+        checkArgument(
+                isSequenceGroupOption(optionKey), "Invalid sequence-group option: %s", optionKey);
+        return Arrays.asList(
+                optionKey
+                        .substring(
+                                FIELDS_PREFIX.length() + 1,
+                                optionKey.length() - SEQUENCE_GROUP.length() - 1)
+                        .split(FIELDS_SEPARATOR));
+    }
+
+    public static List<String> sequenceGroupProtectedFields(String optionValue) {
+        return Arrays.asList(optionValue.split(FIELDS_SEPARATOR));
+    }
 
     private final InternalRow.FieldGetter[] getters;
     private final boolean ignoreDelete;
@@ -410,24 +437,26 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
                 String k = entry.getKey();
                 String v = entry.getValue();
-                if (k.startsWith(FIELDS_PREFIX) && k.endsWith(SEQUENCE_GROUP)) {
+                if (isSequenceGroupOptionCandidate(k)) {
                     int[] sequenceFields =
-                            Arrays.stream(
-                                            k.substring(
-                                                            FIELDS_PREFIX.length() + 1,
-                                                            k.length()
-                                                                    - SEQUENCE_GROUP.length()
-                                                                    - 1)
-                                                    .split(FIELDS_SEPARATOR))
+                            sequenceGroupOrderingFields(k).stream()
                                     .mapToInt(fieldName -> requireField(fieldName, fieldNames))
                                     .toArray();
 
                     Supplier<FieldsComparator> userDefinedSeqComparator =
                             () -> UserDefinedSeqComparator.create(rowType, sequenceFields, true);
-                    Arrays.stream(v.split(FIELDS_SEPARATOR))
+                    sequenceGroupProtectedFields(v).stream()
                             .map(fieldName -> requireField(fieldName, fieldNames))
                             .forEach(
                                     field -> {
+                                        String protectedFieldName = fieldNames.get(field);
+                                        if (primaryKeys.contains(protectedFieldName)) {
+                                            throw new IllegalArgumentException(
+                                                    String.format(
+                                                            SEQUENCE_GROUP_PK_ERROR,
+                                                            k,
+                                                            protectedFieldName));
+                                        }
                                         if (fieldSeqComparators.containsKey(field)) {
                                             throw new IllegalArgumentException(
                                                     String.format(
@@ -435,13 +464,17 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                                             fieldNames.get(field), k));
                                         }
                                         fieldSeqComparators.put(field, userDefinedSeqComparator);
-                                        fieldsProtectedBySequenceGroup.add(fieldNames.get(field));
+                                        fieldsProtectedBySequenceGroup.add(protectedFieldName);
                                     });
 
                     // add self
                     for (int index : sequenceFields) {
-                        allSequenceFields.add(fieldNames.get(index));
                         String fieldName = fieldNames.get(index);
+                        if (primaryKeys.contains(fieldName)) {
+                            throw new IllegalArgumentException(
+                                    String.format(SEQUENCE_GROUP_PK_ERROR, k, fieldName));
+                        }
+                        allSequenceFields.add(fieldName);
                         fieldSeqComparators.put(index, userDefinedSeqComparator);
                         sequenceGroupMap.put(fieldName, index);
                     }

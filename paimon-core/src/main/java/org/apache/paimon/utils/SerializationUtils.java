@@ -103,4 +103,48 @@ public class SerializationUtils {
     public static BinaryRow deserializeBinaryRow(DataInputView input) throws IOException {
         return deserializeBinaryRow(deserializedBytes(input));
     }
+
+    /**
+     * Checks that the given version is within the supported range.
+     *
+     * @param version the version read from serialized bytes
+     * @param minVersion the minimum supported version (inclusive)
+     * @param maxVersion the maximum supported version (inclusive)
+     * @param context the context name included in the error message
+     * @throws IOException if the version is out of range
+     */
+    public static void checkVersion(int version, int minVersion, int maxVersion, String context)
+            throws IOException {
+        if (version < minVersion || version > maxVersion) {
+            throw new IOException(
+                    String.format(
+                            "Unsupported %s version: %d, expected between %d and %d",
+                            context, version, minVersion, maxVersion));
+        }
+    }
+
+    /**
+     * Reads the number of records that follow in a serialized collection.
+     *
+     * @param in the input view positioned at the record count
+     * @param context a non-empty context name included in the error message; note that an anonymous
+     *     class has an empty simple name
+     * @return the record count
+     * @throws IOException if the count cannot be read or is negative
+     */
+    public static int readCount(DataInputView in, String context) throws IOException {
+        int size = in.readInt();
+        if (size < 0) {
+            throw new IOException(String.format("Invalid %s record count: %d", context, size));
+        }
+        return size;
+    }
+
+    /**
+     * Bounds the initial capacity of a collection sized from a record count, so that a count read
+     * from a corrupt stream cannot drive the allocation before a single record has been read.
+     */
+    public static int presizedCapacity(int size) {
+        return Math.min(size, 1024);
+    }
 }

@@ -19,10 +19,15 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.deletionvectors.ExposeDeletionKeyValueReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
@@ -30,9 +35,11 @@ import org.apache.paimon.utils.FormatReaderMapping;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /** A specific implementation about {@link KeyValueFileReaderFactory} for chain read. */
 public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
@@ -54,7 +61,8 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
             BinaryRow partition,
             DeletionVector.Factory dvFactory,
             ChainReadContext chainReadContext,
-            CoreOptions coreOptions) {
+            CoreOptions coreOptions,
+            @Nullable ReadBatchSizer readBatchSizer) {
         super(
                 fileIO,
                 schemaManager,
@@ -65,7 +73,8 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
                 pathFactory,
                 partition,
                 dvFactory,
-                coreOptions);
+                coreOptions,
+                readBatchSizer);
         this.chainReadContext = chainReadContext;
         CoreOptions options = new CoreOptions(schema.options());
         this.currentBranch = options.branch();
@@ -88,7 +97,7 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
     protected TableSchema getDataSchema(DataFileMeta fileMeta) {
         String branch = chainReadContext.fileBranchMapping().get(fileMeta.fileName());
         if (currentBranch.equalsIgnoreCase(branch)) {
-            super.getDataSchema(fileMeta);
+            return super.getDataSchema(fileMeta);
         }
         if (!branchSchemaManagers.containsKey(branch)) {
             throw new RuntimeException("No schema manager found for branch: " + branch);
@@ -99,6 +108,28 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
     @Override
     protected BinaryRow getLogicalPartition() {
         return chainReadContext.logicalPartition();
+    }
+
+    protected FileRecordReader<KeyValue> createRecordReader(
+            DataFileMeta file,
+            FileRecordReader<InternalRow> fileRecordReader,
+            boolean overrideSequenceWithSnapshotId)
+            throws IOException {
+        Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());
+        KeyValueDataFileRecordReader reader =
+                new KeyValueDataFileRecordReader(
+                        fileRecordReader,
+                        keyType,
+                        valueType,
+                        file.level(),
+                        overrideSequenceWithSnapshotId,
+                        file.minSequenceNumber());
+
+        if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
+            return new ExposeDeletionKeyValueReader(reader, deletionVector.get());
+        }
+
+        return reader;
     }
 
     public static Builder newBuilder(KeyValueFileReaderFactory.Builder wrapped) {
@@ -133,7 +164,8 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
                     partition,
                     dvFactory,
                     chainReadContext,
-                    wrapped.options);
+                    wrapped.options,
+                    wrapped.readBatchSizer);
         }
     }
 }

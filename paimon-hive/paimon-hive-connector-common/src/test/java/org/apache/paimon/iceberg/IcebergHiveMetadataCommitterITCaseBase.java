@@ -123,7 +123,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                         .toString()
                         .contains("iceberg/test_db"));
 
-        // specify a dedicated hive database and table for paimon iceberg commiter
+        // specify a dedicated hive database and table for paimon iceberg committer
         tEnv.executeSql(
                 "CREATE TABLE my_paimon.test_db.t1 ( pt INT, id INT, data STRING, PRIMARY KEY (pt, id) NOT ENFORCED ) "
                         + "PARTITIONED BY (pt) WITH "
@@ -216,7 +216,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                         tEnv.executeSql(
                                 "SELECT data, id, pt FROM my_iceberg.test_db.t WHERE id > 1 ORDER BY pt, id")));
 
-        // specify a dedicated hive database and table for paimon iceberg commiter
+        // specify a dedicated hive database and table for paimon iceberg committer
         tEnv.executeSql(
                 "CREATE TABLE my_paimon.test_db.t1 ( pt INT, id INT, data STRING ) PARTITIONED BY (pt) WITH "
                         + "( 'metadata.iceberg.storage' = 'hive-catalog', 'metadata.iceberg.uri' = '', 'file.format' = 'avro', "

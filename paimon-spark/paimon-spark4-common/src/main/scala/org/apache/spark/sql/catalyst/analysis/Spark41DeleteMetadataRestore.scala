@@ -23,7 +23,7 @@ import org.apache.paimon.spark.catalyst.optimizer.OptimizeMetadataOnlyDeleteFrom
 import org.apache.paimon.spark.commands.DeleteFromPaimonTableCommand
 import org.apache.paimon.table.FileStoreTable
 
-import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, LogicalPlan, ReplaceData}
+import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, LogicalPlan, ReplaceData, WriteDelta}
 import org.apache.spark.sql.connector.write.RowLevelOperation.Command.DELETE
 import org.apache.spark.sql.connector.write.RowLevelOperationTable
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
@@ -42,8 +42,8 @@ import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
  * fast path that a `DeleteFromPaimonTableCommand` would enable.
  *
  * This rule pattern-matches the `ReplaceData` Spark produced (tagged with
- * `RowLevelOperation.Command.DELETE`) and, if the target is a pure append-only Paimon table (see
- * [[PureAppendOnlyScope]]) and the predicate is metadata-only, rewrites back to
+ * `RowLevelOperation.Command.DELETE`) and, if the target is a Paimon table eligible for V2
+ * copy-on-write (see [[PureAppendOnlyScope]]) and the predicate is metadata-only, rewrites back to
  * `DeleteFromPaimonTableCommand`. Non-metadata-only DELETE is left alone (Spark's `ReplaceData` is
  * correct for data deletes). This is **not** a rewrite of `DeleteFromTable` — it's a restoration
  * layered on top of Spark's existing rewrite output, hence the `…Restore` naming rather than
@@ -59,13 +59,45 @@ object Spark41DeleteMetadataRestore extends RewriteRowLevelCommand with PureAppe
           val origRelation = rd.originalTable.asInstanceOf[DataSourceV2Relation]
           val fs = origRelation.table.asInstanceOf[SparkTable].getTable.asInstanceOf[FileStoreTable]
           DeleteFromPaimonTableCommand(origRelation, fs, rd.condition)
+        // The delta-based DELETE form of unaware-bucket deletion-vector append tables: restore
+        // metadata-only DELETE to the V1 command for the same truncate fast path, instead of
+        // marking every row of the dropped partitions in deletion vectors.
+        case wd: WriteDelta if isMetadataOnlyDeleteOnDvPaimon(wd) =>
+          val origRelation = wd.originalTable.asInstanceOf[DataSourceV2Relation]
+          val fs = origRelation.table.asInstanceOf[SparkTable].getTable.asInstanceOf[FileStoreTable]
+          DeleteFromPaimonTableCommand(origRelation, fs, wd.condition)
       }
     }
   }
 
+  /** The [[WriteDelta]] counterpart of [[isMetadataOnlyDeleteOnAppendOnlyPaimon]]. */
+  private def isMetadataOnlyDeleteOnDvPaimon(wd: WriteDelta): Boolean = {
+    val writeIsDelete = wd.table match {
+      case r: DataSourceV2Relation =>
+        r.table match {
+          case op: RowLevelOperationTable => op.operation.command() == DELETE
+          case _ => false
+        }
+      case _ => false
+    }
+    writeIsDelete && (wd.originalTable match {
+      case r: DataSourceV2Relation if targetsV2DeltaTable(r) =>
+        r.table match {
+          case spk: SparkTable =>
+            spk.getTable match {
+              case fs: FileStoreTable =>
+                OptimizeMetadataOnlyDeleteFromPaimonTable.isMetadataOnlyDelete(fs, wd.condition)
+              case _ => false
+            }
+          case _ => false
+        }
+      case _ => false
+    })
+  }
+
   /**
-   * Whether a `ReplaceData` node (Spark 4.1's post-rewrite DELETE form) targets a pure append-only
-   * Paimon table with a metadata-only predicate, such that converting back to
+   * Whether a `ReplaceData` node (Spark 4.1's post-rewrite DELETE form) targets a Paimon table
+   * eligible for V2 copy-on-write with a metadata-only predicate, such that converting back to
    * `DeleteFromPaimonTableCommand` would let the optimizer fold to `TruncatePaimonTableWithFilter`.
    */
   private def isMetadataOnlyDeleteOnAppendOnlyPaimon(rd: ReplaceData): Boolean = {
@@ -78,7 +110,7 @@ object Spark41DeleteMetadataRestore extends RewriteRowLevelCommand with PureAppe
       case _ => false
     }
     writeIsDelete && (rd.originalTable match {
-      case r: DataSourceV2Relation if targetsPureAppendOnly(r) =>
+      case r: DataSourceV2Relation if targetsV2CopyOnWriteTable(r) =>
         r.table match {
           case spk: SparkTable =>
             spk.getTable match {

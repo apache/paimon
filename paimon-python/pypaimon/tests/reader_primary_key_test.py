@@ -97,6 +97,49 @@ class PkReaderTest(unittest.TestCase):
             value_kind_field_found,
             "_VALUE_KIND field should exist in the written parquet file")
 
+    def test_composite_primary_key_order(self):
+        cases = [
+            (['customer_id', 'order_id'], []),
+            (['order_id', 'customer_id'], []),
+            (['order_id', 'dt', 'customer_id'], ['dt']),
+        ]
+        for index, (primary_keys, partition_keys) in enumerate(cases):
+            with self.subTest(primary_keys=primary_keys):
+                fields = [('customer_id', pa.int64()), ('order_id', pa.int64()),
+                          ('amount', pa.int64())]
+                base = {'customer_id': [1, 2, 1, 2], 'order_id': [10, 10, 20, 20],
+                        'amount': [100, 200, 300, 400]}
+                update = {'customer_id': [1], 'order_id': [20], 'amount': [350]}
+                expected = {'customer_id': [1, 1, 2, 2], 'order_id': [10, 20, 10, 20],
+                            'amount': [100, 350, 200, 400]}
+                if partition_keys:
+                    fields.append(('dt', pa.string()))
+                    base['dt'] = expected['dt'] = ['p1'] * 4
+                    update['dt'] = ['p1']
+                arrow_schema = pa.schema(fields)
+                name = 'default.test_composite_pk_order_{}'.format(index)
+                self.catalog.create_table(name, Schema.from_pyarrow_schema(
+                    arrow_schema, primary_keys=primary_keys, partition_keys=partition_keys,
+                    options={'bucket': '1'}), False)
+                table = self.catalog.get_table(name)
+                for data in (base, update):
+                    builder = table.new_batch_write_builder()
+                    writer, committer = builder.new_write(), builder.new_commit()
+                    try:
+                        writer.write_arrow(pa.Table.from_pydict(data, schema=arrow_schema))
+                        committer.commit(writer.prepare_commit())
+                    finally:
+                        writer.close()
+                        committer.close()
+
+                actual = self._read_test_table(table.new_read_builder()).sort_by(
+                    [('customer_id', 'ascending'), ('order_id', 'ascending')])
+                self.assertEqual(actual.to_pylist(),
+                                 pa.Table.from_pydict(expected, schema=arrow_schema).to_pylist())
+                projected = self._read_test_table(
+                    table.new_read_builder().with_projection(['amount']))
+                self.assertEqual(sorted(projected['amount'].to_pylist()), [100, 200, 350, 400])
+
     def test_pk_orc_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],
@@ -224,14 +267,55 @@ class PkReaderTest(unittest.TestCase):
 
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        # TODO support pk merge feature when multiple write
+        # The in-memory merge buffer in KeyValueDataWriter folds the
+        # two writes for user_id=2 down to the latest row before flush
+        # (default merge engine is deduplicate), so the PK appears once
+        # with the second batch's value.
         expected = pa.Table.from_pydict({
-            'user_id': [1, 2, 2, 3, 4, 5, 7, 8],
-            'item_id': [1001, 1002, 1002, 1003, 1004, 1005, 1007, 1008],
-            'behavior': ['a', 'b', 'b-new', 'c', None, 'e', 'g', 'h'],
-            'dt': ['p1', 'p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
+            'user_id': [1, 2, 3, 4, 5, 7, 8],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1007, 1008],
+            'behavior': ['a', 'b-new', 'c', None, 'e', 'g', 'h'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
         }, schema=self.pa_schema)
         self.assertEqual(actual, expected)
+
+    def test_nullable_primary_key(self):
+        nullable_schema = pa.schema([
+            pa.field('id', pa.int64()),
+            pa.field('value', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            nullable_schema,
+            primary_keys=['id'],
+            options={
+                'bucket': '3',
+                CoreOptions.PRIMARY_KEY_NULLABLE.key(): 'true',
+            },
+        )
+        self.catalog.create_table('default.test_nullable_pk', schema, False)
+        table = self.catalog.get_table('default.test_nullable_pk')
+
+        for rows in [
+                [{'id': None, 'value': 'old'}],
+                [{'id': None, 'value': 'new'},
+                 {'id': 1, 'value': 'one'},
+                 {'id': 2, 'value': 'two'}]]:
+            write_builder = table.new_batch_write_builder()
+            writer = write_builder.new_write()
+            commit = write_builder.new_commit()
+            writer.write_arrow(pa.Table.from_pylist(rows, schema=nullable_schema))
+            commit.commit(writer.prepare_commit())
+            writer.close()
+            commit.close()
+
+        actual = self._read_test_table(table.new_read_builder()).to_pylist()
+        actual.sort(key=lambda row: (-1 if row['id'] is None else row['id']))
+        self.assertEqual(
+            actual,
+            [{'id': None, 'value': 'new'},
+             {'id': 1, 'value': 'one'},
+             {'id': 2, 'value': 'two'}],
+        )
 
     def test_pk_reader_with_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -375,6 +459,10 @@ class PkReaderTest(unittest.TestCase):
         timestamp = int(time.time() * 1000)
         self._write_test_table(table)
 
+        # Snapshot reads still merge the two versions of user_id=2.
+        snapshot_rows = self._read_test_table(table.new_read_builder()).sort_by('user_id')
+        self.assertEqual(self.expected, snapshot_rows)
+
         snapshot_manager = table.snapshot_manager()
         t1 = snapshot_manager.get_snapshot_by_id(1).time_millis
         t2 = snapshot_manager.get_snapshot_by_id(2).time_millis
@@ -383,11 +471,18 @@ class PkReaderTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder)
         self.assertEqual(len(actual), 0)
-        # test 2
+        # The full incremental window retains both committed versions of user_id=2.
         table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(): str(timestamp) + ',' + str(t2)})
         read_builder = table.new_read_builder()
-        actual = self._read_test_table(read_builder).sort_by('user_id')
-        self.assertEqual(self.expected, actual)
+        actual = self._read_test_table(read_builder).sort_by([
+            ('user_id', 'ascending'), ('behavior', 'ascending')])
+        expected = pa.Table.from_pydict({
+            'user_id': [1, 2, 2, 3, 4, 5, 7, 8],
+            'item_id': [1001, 1002, 1002, 1003, 1004, 1005, 1007, 1008],
+            'behavior': ['a', 'b', 'b-new', 'c', None, 'e', 'g', 'h'],
+            'dt': ['p1', 'p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
+        }, schema=self.pa_schema)
+        self.assertEqual(expected, actual)
         # test 3
         table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(): str(t1) + ',' + str(t2)})
         read_builder = table.new_read_builder()

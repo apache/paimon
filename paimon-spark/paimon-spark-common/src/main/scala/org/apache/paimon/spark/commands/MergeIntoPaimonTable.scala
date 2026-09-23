@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.{PaimonRelation, PaimonUpdateAction}
 import org.apache.paimon.spark.schema.{PaimonMetadataColumn, SparkSystemColumns}
@@ -59,8 +60,22 @@ case class MergeIntoPaimonTable(
 
   lazy val relation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(targetTable)
 
+  /**
+   * The target-only part of the merge condition, used to prune the target table before the join.
+   *
+   * Pruning is only sound when the merge has no `WHEN NOT MATCHED BY SOURCE` action. A target row
+   * that fails the target-only condition can never satisfy the whole merge condition, so it can
+   * never be matched — dropping it therefore cannot change the outcome of the `WHEN MATCHED` and
+   * `WHEN NOT MATCHED` actions. Those very rows are, however, exactly the population that
+   * `WHEN NOT MATCHED BY SOURCE` is defined over, so pruning them would silently skip the actions
+   * that should apply to them. Disable the pruning in that case.
+   */
   private lazy val (targetOnlyCondition, filteredTargetPlan): (Option[Expression], LogicalPlan) = {
-    val filtersOnlyTarget = getExpressionOnlyRelated(mergeCondition, targetTable)
+    val filtersOnlyTarget = if (notMatchedBySourceActions.isEmpty) {
+      getExpressionOnlyRelated(mergeCondition, targetTable)
+    } else {
+      None
+    }
     (
       filtersOnlyTarget,
       filtersOnlyTarget
@@ -71,12 +86,14 @@ case class MergeIntoPaimonTable(
   override def run(sparkSession: SparkSession): Seq[Row] = {
     // Avoid that more than one source rows match the same target row.
     checkMatchRationality(sparkSession)
+    // Persist the schema that the analyzer evolved in memory (commit deferred to execution).
+    SchemaEvolutionHelper.commitEvolvedSchemaAtExecution(table, relation, sparkSession)
     val commitMessages = if (withPrimaryKeys) {
       performMergeForPkTable(sparkSession)
     } else {
       performMergeForNonPkTable(sparkSession)
     }
-    writer.commit(commitMessages)
+    writer.commit(commitMessages, Snapshot.Operation.MERGE)
     Seq.empty[Row]
   }
 

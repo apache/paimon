@@ -1,6 +1,5 @@
 ---
-title: "SQL Write"
-sidebar_position: 2
+title: "SQL Writes"
 ---
 
 <!--
@@ -22,7 +21,20 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# SQL Write
+# SQL Writes
+
+Choose a write operation according to what should happen to existing rows:
+
+| Operation | Effect |
+| --- | --- |
+| `INSERT INTO` | Append rows, or merge records by key in a primary key table. |
+| `INSERT OVERWRITE` | Replace the table or selected partitions; scope depends on overwrite mode. |
+| `UPDATE` / `DELETE` | Modify or remove rows matching a predicate. |
+| `MERGE INTO` | Apply conditional updates, inserts, and deletes from a source. |
+| [`COPY INTO`](./copy-into) | Import CSV, JSON, or Parquet files, or export query results. |
+
+Configure the [catalog and SQL extensions](./quick-start#setup) before running these statements.
+For new columns arriving with a write, see [Schema Evolution on Write](./schema-evolution).
 
 ## Insert Table
 
@@ -35,7 +47,7 @@ INSERT { INTO | OVERWRITE } table_identifier [ part_spec ] [ column_list ] { val
 ```
 **Parameters**
 
-- **table_identifier**: Specifies a table name, which may be optionally qualified with a database name. 
+- **table_identifier**: Specifies a table name, which may be optionally qualified with a database name.
 
 - **part_spec**: An optional parameter that specifies a comma-separated list of key and value pairs for partitions.
 
@@ -57,7 +69,8 @@ INSERT INTO my_table SELECT ...
 
 ### Insert Overwrite
 
-Use `INSERT OVERWRITE` to overwrite the whole table.
+In static mode, `INSERT OVERWRITE` without a partition filter replaces the whole table.
+In dynamic mode, it replaces only partitions represented by the input rows.
 
 ```sql
 INSERT OVERWRITE my_table SELECT ...
@@ -73,7 +86,11 @@ INSERT OVERWRITE my_table PARTITION (key1 = value1, key2 = value2, ...) SELECT .
 
 #### Dynamic Overwrite Partition
 
-Spark's default overwrite mode is `static` partition overwrite. To enable dynamic overwritten you need to set the Spark session configuration `spark.sql.sources.partitionOverwriteMode` to `dynamic`
+Spark defaults to `static` partition overwrite. Set
+`spark.sql.sources.partitionOverwriteMode=dynamic` to replace only the partitions written by the
+input. Each case below resets the table to the same two rows before overwriting.
+
+![Static overwrite replaces the whole table; an explicit partition or dynamic overwrite preserves untouched partitions.](/img/spark-partition-overwrite.svg)
 
 For example:
 
@@ -81,9 +98,10 @@ For example:
 CREATE TABLE my_table (id INT, pt STRING) PARTITIONED BY (pt);
 INSERT INTO my_table VALUES (1, 'p1'), (2, 'p2');
 
--- Static overwrite (Overwrite the whole table)
+-- Static overwrite (overwrite the whole table)
+SET spark.sql.sources.partitionOverwriteMode=static;
 INSERT OVERWRITE my_table VALUES (3, 'p1');
--- or 
+-- or
 INSERT OVERWRITE my_table PARTITION (pt) VALUES (3, 'p1');
 
 SELECT * FROM my_table;
@@ -95,7 +113,10 @@ SELECT * FROM my_table;
 +---+---+
 */
 
--- Static overwrite with specified partitions (Only overwrite pt='p1')
+-- Restore the initial rows before the next case.
+INSERT OVERWRITE my_table VALUES (1, 'p1'), (2, 'p2');
+
+-- Static overwrite with specified partitions (only overwrite pt='p1')
 INSERT OVERWRITE my_table PARTITION (pt='p1') VALUES (3);
 
 SELECT * FROM my_table;
@@ -107,8 +128,11 @@ SELECT * FROM my_table;
 |  3| p1|
 +---+---+
 */
-  
--- Dynamic overwrite (Only overwrite pt='p1')
+
+-- Restore the initial rows while still in static mode.
+INSERT OVERWRITE my_table VALUES (1, 'p1'), (2, 'p2');
+
+-- Dynamic overwrite (only overwrite pt='p1')
 SET spark.sql.sources.partitionOverwriteMode=dynamic;
 INSERT OVERWRITE my_table VALUES (3, 'p1');
 
@@ -123,17 +147,35 @@ SELECT * FROM my_table;
 */
 ```
 
+A Format Table read through Paimon (`format-table.implementation = paimon`, the default) follows
+the same rule. An `INSERT OVERWRITE` that names no partition replaces the whole table, so a
+partition the query does not write is replaced too, and a query that returns no rows leaves the
+table empty; `dynamic` mode replaces only the partitions written, and writing nothing then replaces
+nothing. With `metastore.partitioned-table = true` the catalog is the answer to which partitions
+the table has, so overwriting the whole table empties those and leaves a directory still waiting
+for `MSCK REPAIR TABLE` alone.
+
 ## Truncate Table
 
 The `TRUNCATE TABLE` statement removes all the rows from a table or partition(s).
 
 ```sql
 TRUNCATE TABLE my_table;
+TRUNCATE TABLE my_table PARTITION (dt = '2025-01-01');
 ```
+
+On a Format Table read through Paimon (`format-table.implementation = paimon`, the default),
+`TRUNCATE TABLE` deletes the data files of the table or of the named partitions and keeps the
+partitions: their directories remain, and with `metastore.partitioned-table = true` so do their
+catalog registrations, so `SHOW PARTITIONS` returns what it returned before. That setting also
+makes the catalog the answer to which partitions the table has, so truncating empties those, leaves
+a directory still waiting for `MSCK REPAIR TABLE` alone, and replaces their statistics with zero. A
+spec that names only some of the partition keys empties the partitions it covers; a complete spec
+the table does not have is an error.
 
 ## Update Table
 
-Updates the column values for the rows that match a predicate. When no predicate is provided, update the column values for all rows. 
+Updates the column values for the rows that match a predicate. When no predicate is provided, update the column values for all rows.
 
 Note:
 
@@ -150,11 +192,11 @@ Spark supports update PrimitiveType and StructType, for example:
 UPDATE table_identifier SET column1 = value1, column2 = value2, ... WHERE condition;
 
 CREATE TABLE t (
-  id INT, 
-  s STRUCT<c1: INT, c2: STRING>, 
+  id INT,
+  s STRUCT<c1: INT, c2: STRING>,
   name STRING)
 TBLPROPERTIES (
-  'primary-key' = 'id', 
+  'primary-key' = 'id',
   'merge-engine' = 'deduplicate'
 );
 
@@ -175,294 +217,85 @@ DELETE FROM my_table WHERE id = 1;
 
 Merges a set of updates, insertions and deletions based on a source table into a target table.
 
-Note:
-
 :::info
 
-In update clause, to update primary key columns is not supported when the target table is a primary key table.
+Updating primary key columns is not supported when the target table is a primary key table.
 
 :::
 
-**Example: One**
-
-This is a simple demo that, if a row exists in the target table update it, else insert it.
+### Syntax
 
 ```sql
--- Here both source and target tables have the same schema: (a INT, b INT, c STRING), and a is a primary key.
-
 MERGE INTO target
 USING source
-ON target.a = source.a
-WHEN MATCHED THEN
-UPDATE SET *
-WHEN NOT MATCHED
-THEN INSERT *
+ON <merge condition>
+WHEN MATCHED [AND <condition>] THEN { UPDATE SET ... | DELETE }
+WHEN NOT MATCHED [AND <condition>] THEN INSERT ...
+WHEN NOT MATCHED BY SOURCE [AND <condition>] THEN { UPDATE SET ... | DELETE }
 ```
 
-**Example: Two**
+Each `WHEN` clause can be repeated; clauses are evaluated in order, and the first matching one wins for a given row.
 
-This is a demo with multiple, conditional clauses.
+`WHEN NOT MATCHED BY SOURCE` requires Spark 3.4 or later.
+
+### Examples
+
+The examples below assume both source and target have schema `(a INT, b INT, c STRING)`, with `a` as the primary key.
+
+Simple upsert — update existing rows, insert new ones:
 
 ```sql
--- Here both source and target tables have the same schema: (a INT, b INT, c STRING), and a is a primary key.
-
 MERGE INTO target
 USING source
 ON target.a = source.a
-WHEN MATCHED AND target.a = 5 THEN
-   UPDATE SET b = source.b + target.b      -- when matched and meet the condition 1, then update b;
-WHEN MATCHED AND source.c > 'c2' THEN
-   UPDATE SET *    -- when matched and meet the condition 2, then update all the columns;
-WHEN MATCHED THEN
-   DELETE      -- when matched, delete this row in target table;
-WHEN NOT MATCHED AND c > 'c9' THEN
-   INSERT (a, b, c) VALUES (a, b * 1.1, c)      -- when not matched but meet the condition 3, then transform and insert this row;
-WHEN NOT MATCHED THEN
-INSERT *      -- when not matched, insert this row without any transformation;
+WHEN MATCHED THEN UPDATE SET *
+WHEN NOT MATCHED THEN INSERT *
+```
+
+Multiple conditional clauses:
+
+```sql
+MERGE INTO target
+USING source
+ON target.a = source.a
+WHEN MATCHED AND target.a = 5 THEN UPDATE SET b = source.b + target.b
+WHEN MATCHED AND source.c > 'c2' THEN UPDATE SET *
+WHEN MATCHED THEN DELETE
+WHEN NOT MATCHED AND c > 'c9' THEN INSERT (a, b, c) VALUES (a, b * 1.1, c)
+WHEN NOT MATCHED THEN INSERT *
 ```
 
 ### Column Alignment
 
 Assignments are aligned to the target table by **column name**.
 
-For explicit clauses (`UPDATE SET col = expr` / `INSERT (col list) VALUES ...`), only the mentioned columns are written. Unmentioned target columns preserve their current value for `UPDATE`, or are filled with NULL / `CURRENT_DEFAULT` for `INSERT`.
-
-For star clauses (`UPDATE SET *` / `INSERT *`), `*` expands against the **target** columns. The behavior when source and target columns don't match exactly depends on `spark.paimon.write.merge-schema` (see [Write Merge Schema](#write-merge-schema)):
-
-| Scenario | `merge-schema=false` (default) | `merge-schema=true` |
-|----------|-------------------------------|---------------------|
-| Top-level source-extra columns | Silently dropped (`*` only covers target columns) | Evolved into the target schema |
-| Top-level target columns missing from source | Throws | `UPDATE *` preserves current value; `INSERT *` fills NULL |
-| Nested struct source-extra fields | Throws | Evolved into the target schema |
-| Nested struct target-missing fields | Throws | `UPDATE *` preserves current value; `INSERT *` fills NULL |
-
-The key difference between top-level and nested: under strict mode (`merge-schema=false`), top-level source-extras are silently dropped because `*` never references them, while nested source-extras inside a struct value throw an error to avoid silent data loss.
+- **Explicit clauses** (`UPDATE SET col = expr` / `INSERT (col list) VALUES ...`) — only the mentioned columns are written. Unmentioned target columns preserve their current value for `UPDATE`, or get NULL / `CURRENT_DEFAULT` for `INSERT`.
+- **Star clauses** (`UPDATE SET *` / `INSERT *`) — `*` expands against the **target** columns. When source and target columns don't match exactly, the behavior depends on `spark.paimon.write.merge-schema`; see [Column Alignment by Write Path](./schema-evolution#column-alignment-by-write-path) under Write Merge Schema for the full table covering both `MERGE INTO *` and byName `INSERT` paths.
 
 ## Write Merge Schema
 
-:::info
+<span id="how-it-evolves-the-schema"></span>
+<span id="examples-1"></span>
+<span id="column-alignment-by-write-path"></span>
 
-Since the table schema may be updated during writing, catalog caching needs to be disabled to use this feature. Configure `spark.sql.catalog.<catalogName>.cache-enabled` to `false`.
-
-:::
-
-Write merge schema is a feature that allows users to easily modify the current schema of a table to adapt to existing data, or new data that changes over time, while maintaining data integrity and consistency.
-
-Paimon supports automatic schema merging of source data and current table data while data is being written, and uses the merged schema as the latest schema of the table, and it only requires configuring `write.merge-schema`.
-
-```scala
-data.write
-  .format("paimon")
-  .mode("append")
-  .option("write.merge-schema", "true")
-  .save(location)
-```
-
-When enable `write.merge-schema`, Paimon can allow users to perform the following actions on table schema by default:
-- Adding columns
-- Up-casting the type of column(e.g. Int -> Long)
-
-Paimon also supports explicit type conversions between certain types (e.g. String -> Date, Long -> Int), it requires an explicit configuration `write.merge-schema.explicit-cast`.
-
-Write merge schema can be used in streaming mode at the same time.
-
-```scala
-val inputData = MemoryStream[(Int, String)]
-inputData
-  .toDS()
-  .toDF("col1", "col2")
-  .writeStream
-  .format("paimon")
-  .option("checkpointLocation", "/path/to/checkpoint")
-  .option("write.merge-schema", "true")
-  .option("write.merge-schema.explicit-cast", "true")
-  .start(location)
-```
-
-Here list the configurations.
-
-<table class="configuration table table-bordered">
-    <thead>
-        <tr>
-            <th class="text-left" style="width: 20%">Scan Mode</th>
-            <th class="text-left" style="width: 60%">Description</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td><h5>write.merge-schema</h5></td>
-            <td>If true, merge the data schema and the table schema automatically before write data.</td>
-        </tr>
-        <tr>
-            <td><h5>write.merge-schema.explicit-cast</h5></td>
-            <td>If true, allow to merge data types if the two types meet the rules for explicit casting.</td>
-        </tr>
-    </tbody>
-</table>
-
-This mode also supports Spark SQL. Here is an example:
-
-```sql
-SET `spark.paimon.write.merge-schema` = true;
-
-CREATE TABLE t (a INT, b STRING);
-INSERT INTO t VALUES (1, '1'), (2, '2');
-
--- Need using `BY NAME` statement (requires Spark 3.5+)
-INSERT INTO t BY NAME SELECT 3 AS a, '3' AS b, 3 AS c;
-```
+See [Schema Evolution on Write](./schema-evolution) for options, examples, and the
+[column alignment reference](./schema-evolution#column-alignment-by-write-path).
 
 ## COPY INTO
 
-`COPY INTO` provides a SQL command for bulk loading CSV files into Paimon tables and writing table data to CSV files.
+<span id="csv-import"></span>
+<span id="json-import"></span>
+<span id="parquet-import"></span>
+<span id="write-csv-files"></span>
+<span id="write-json-files"></span>
+<span id="write-parquet-files"></span>
+<span id="file_format-options"></span>
+<span id="import-options"></span>
+<span id="file-write-options"></span>
+<span id="column-mapping"></span>
+<span id="repeated-imports"></span>
+<span id="result-output"></span>
+<span id="limitations"></span>
 
-### CSV Import
-
-```sql
-COPY INTO table_name [(col1, col2, ...)]
-FROM 'source_path'
-FILE_FORMAT = (TYPE = CSV [, option = value, ...])
-[PATTERN = 'regex']
-[FORCE = TRUE|FALSE]
-[ON_ERROR = ABORT_STATEMENT]
-```
-
-**Basic import:**
-
-```sql
-COPY INTO my_db.my_table
-FROM '/data/csv_files/'
-FILE_FORMAT = (TYPE = CSV);
-```
-
-**Import with explicit column mapping:**
-
-```sql
--- Only load into specified columns; omitted columns use their DEFAULT value or NULL
-COPY INTO my_db.users (id, name)
-FROM '/data/new_users/'
-FILE_FORMAT = (TYPE = CSV, SKIP_HEADER = 1);
-```
-
-**Import with NULL_IF and PATTERN:**
-
-```sql
-COPY INTO my_db.events
-FROM '/data/logs/'
-FILE_FORMAT = (TYPE = CSV, FIELD_DELIMITER = '|', NULL_IF = ('NULL', '\\N', ''))
-PATTERN = '.*\.csv'
-FORCE = FALSE;
-```
-
-### Write CSV Files
-
-```sql
-COPY INTO 'target_path'
-FROM table_name
-FILE_FORMAT = (TYPE = CSV [, option = value, ...])
-[OVERWRITE = TRUE|FALSE]
-```
-
-**Write with header and overwrite:**
-
-```sql
-COPY INTO '/export/users_backup/'
-FROM my_db.users
-FILE_FORMAT = (TYPE = CSV, HEADER = TRUE, FIELD_DELIMITER = ',')
-OVERWRITE = TRUE;
-```
-
-### FILE_FORMAT Options
-
-`FILE_FORMAT` is required and must include `TYPE = CSV`.
-
-**Import options:**
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| TYPE | File format type. Must be `CSV`. | (required) |
-| FIELD_DELIMITER | Column delimiter character. | `,` |
-| SKIP_HEADER | Skip the first line as header. Only `0` or `1`. | `0` |
-| QUOTE | Quote character for enclosing fields. | `"` |
-| ESCAPE | Escape character within quoted fields. | `\` |
-| NULL_IF | List of string values to interpret as NULL, e.g. `('NULL', '\\N')`. | (none) |
-| EMPTY_FIELD_AS_NULL | Treat empty fields as NULL. `TRUE` or `FALSE`. | `FALSE` |
-| COMPRESSION | Compression codec (e.g. `GZIP`). | `NONE` |
-
-**Write options:**
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| TYPE | File format type. Must be `CSV`. | (required) |
-| FIELD_DELIMITER | Column delimiter character. | `,` |
-| HEADER | Write column names as the first line. `TRUE` or `FALSE`. | `FALSE` |
-| QUOTE | Quote character for enclosing fields. | `"` |
-| ESCAPE | Escape character within quoted fields. | `\` |
-| COMPRESSION | Compression codec (e.g. `GZIP`). | `NONE` |
-
-### Import Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| PATTERN | Regex to filter source files by base file name. Only matching files are loaded. | (all files) |
-| FORCE | `FALSE`: skip files already loaded (idempotent). `TRUE`: reload all files. | `FALSE` |
-| ON_ERROR | Error handling strategy. Only `ABORT_STATEMENT` is supported. | `ABORT_STATEMENT` |
-
-### File Write Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| OVERWRITE | `FALSE`: fail if target path exists. `TRUE`: overwrite existing files. | `FALSE` |
-
-### Column Mapping
-
-When an explicit column list is provided (e.g., `COPY INTO t (col1, col2) FROM ...`):
-
-- CSV columns are mapped **positionally** to the specified column list.
-- The number of CSV columns must match the column list length.
-- Columns not in the list are filled with their **DEFAULT value** (if defined in the table schema) or **NULL**.
-- Non-nullable columns without a default value that are not in the list will cause an error.
-
-When no column list is provided:
-
-- CSV columns are mapped positionally to all writable columns in the target table.
-- The number of CSV columns must match the number of writable columns.
-
-### Repeated Imports
-
-By default (`FORCE = FALSE`), COPY INTO tracks which files have been successfully loaded. A file is identified by its path, size, and last-modified timestamp.
-
-- Re-running the same COPY INTO command will **skip** already-loaded files and return status `SKIPPED`.
-- If a source file is modified (size or timestamp changes), it becomes eligible for re-loading.
-- `FORCE = TRUE` bypasses load history and always re-imports all matching files.
-
-### Result Output
-
-**Import** returns one row per source file:
-
-| Column | Type | Description |
-|--------|------|-------------|
-| file_name | STRING | Source file name |
-| status | STRING | `LOADED` or `SKIPPED` |
-| rows_loaded | BIGINT | Number of rows written |
-| rows_parsed | BIGINT | Number of rows parsed from the file |
-
-**File write** returns a single row:
-
-| Column | Type | Description |
-|--------|------|-------------|
-| output_path | STRING | Target output path |
-| file_count | INT | Number of files written |
-| rows_written | BIGINT | Total rows written |
-
-### Limitations
-
-- Only **CSV** format is supported.
-- Writing files only supports `FROM table_name`; `FROM (SELECT ...)` is not supported.
-- `ON_ERROR = CONTINUE` is not supported; any parse or cast error aborts the entire command.
-- `SINGLE = TRUE` (single-file output) is not supported.
-- File format options must be specified inline in `FILE_FORMAT = (...)`.
-- File listing is **non-recursive**: only direct files under the source path are processed. Subdirectories are ignored.
-- `PATTERN` matches the **base file name** only (not the full path).
-- Concurrent COPY INTO commands targeting the same table may produce duplicate data.
-- `SKIP_HEADER` only supports values `0` or `1`.
+See [COPY INTO](./copy-into) for CSV, JSON, and Parquet import/export syntax, options,
+column mapping, load history, and limitations.

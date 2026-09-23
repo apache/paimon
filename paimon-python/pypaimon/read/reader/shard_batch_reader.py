@@ -31,6 +31,7 @@ class ShardBatchReader(RecordBatchReader):
         self.start_pos = start_pos
         self.end_pos = end_pos
         self.current_pos = 0
+        self._adopt_metadata(reader)
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         # Check if reader is FormatBlobReader (blob type)

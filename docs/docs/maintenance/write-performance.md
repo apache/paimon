@@ -24,6 +24,10 @@ under the License.
 
 # Write Performance
 
+Start with [Metrics](./metrics#choose-metrics-for-a-task) to identify the operation to investigate, then use the
+relevant tuning guidance below. For running compaction separately from writers, see
+[Dedicated Compaction](./dedicated-compaction).
+
 Paimon's write performance is closely related to checkpoint, so if you need greater write throughput:
 
 1. Flink Configuration (`'flink-conf.yaml'/'config.yaml'` or `SET` in SQL): Increase the checkpoint interval
@@ -31,7 +35,7 @@ Paimon's write performance is closely related to checkpoint, so if you need grea
    (`'execution.checkpointing.max-concurrent-checkpoints'`), or just use batch mode.
 2. Increase `write-buffer-size`.
 3. Enable `write-buffer-spillable`.
-4. Rescale bucket number if you are using Fixed-Bucket mode.
+4. [Rescale bucket number](./rescale-bucket) if you are using Fixed-Bucket mode.
 
 Option `'changelog-producer' = 'lookup' or 'full-compaction'`, and option `'full-compaction.delta-commits'` have a
 large impact on write performance, if it is a snapshot / full synchronization phase you can unset these options and
@@ -126,7 +130,23 @@ execution.checkpointing.timeout = 60 min
 In the initialization of write, the writer of the bucket needs to read all historical files. If there is a bottleneck
 here (For example, writing a large number of partitions simultaneously), you can use `sink.writer-coordinator.enabled`
 to use a Flink coordinator to cache the read manifest data to accelerate initialization. The cache memory for coordinator
-is `sink.writer-coordinator.cache-memory`, default is 1GB in Job Manager.
+is `sink.writer-coordinator.cache-memory`, default is 2GB in Job Manager.
+
+The coordinator manifest cache normally holds entries with soft references, so the JVM can reclaim them when the Job
+Manager runs low on heap. On a heavily loaded Job Manager this can backfire: the JVM reclaims cached manifests, writers
+immediately re-read and decompress them, and that work drives heap back up, triggering more reclamation. The cache
+thrashes instead of helping.
+
+If you see this, set `sink.writer-coordinator.cache-soft-values` to `false`. Entries are then held with strong
+references, so GC never reclaims them and the thrash loop cannot start.
+
+With soft references off the cache no longer shrinks under GC, but it stays bounded by weight: it occupies up to
+`sink.writer-coordinator.cache-memory` and evicts the least-recently-used entries beyond that. Size the Job Manager
+total heap memory to at least twice that value so an undersized heap fails fast with an `OutOfMemoryError` instead of
+degrading silently. Optionally set `sink.writer-coordinator.cache-expire-after-access` to also release entries that
+have been idle for a while.
+
+The same `cache.manifest.soft-values` / `cache.manifest.max-memory` settings apply to the catalog manifest cache.
 
 ## Write Memory
 

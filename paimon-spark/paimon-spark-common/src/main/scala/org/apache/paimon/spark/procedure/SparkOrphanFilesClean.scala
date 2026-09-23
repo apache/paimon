@@ -127,6 +127,7 @@ case class SparkOrphanFilesClean(
         dir =>
           tryBestListingDirs(new Path(dir)).asScala
             .filter(file => !file.isDir())
+            .filter(file => !isManagedBlobPack(file.getPath))
             .filter(oldEnough)
             .map {
               file =>

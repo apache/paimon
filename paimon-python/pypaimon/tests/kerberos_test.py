@@ -235,7 +235,7 @@ class KerberosHdfsTest(unittest.TestCase):
     @patch("pypaimon.filesystem.pyarrow_file_io.subprocess.run")
     @patch("pypaimon.filesystem.pyarrow_file_io.pafs.HadoopFileSystem")
     def test_hdfs_with_fallback_keys(self, mock_hdfs_fs, mock_subprocess_run):
-        """Verify that Java-compatible fallback keys security.principal / security.keytab work."""
+        """Verify that the secondary fallback keys security.principal / security.keytab work."""
         mock_subprocess_run.return_value = MagicMock(stdout="/some/classpath")
 
         with tempfile.NamedTemporaryFile(suffix=".keytab") as keytab_file:

@@ -1,0 +1,198 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.data.columnar.heap;
+
+import org.junit.jupiter.api.Test;
+
+import java.nio.ByteBuffer;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+/**
+ * Tests for {@link HeapBytesVector#putByteArray}, focusing on reserveBytes() overflow safety and
+ * the capacity-growth calculation in {@link HeapBytesVector#calculateNewBytesCapacity}.
+ */
+class HeapBytesVectorReserveBytesTest {
+
+    @Test
+    void testPutAndAppendByteBufferRespectSlices() {
+        ByteBuffer heapSlice = ByteBuffer.wrap(new byte[] {9, 1, 2, 3, 9}, 1, 3).slice();
+        ByteBuffer directSlice = ByteBuffer.allocateDirect(5);
+        directSlice.put(new byte[] {9, 4, 5, 6, 9}).position(1).limit(4);
+
+        HeapBytesVector putVector = new HeapBytesVector(2);
+        putVector.putByteBuffer(0, heapSlice);
+        putVector.putByteBuffer(1, directSlice);
+
+        assertThat(putVector.getBytes(0).getBytes()).containsExactly(1, 2, 3);
+        assertThat(putVector.getBytes(1).getBytes()).containsExactly(4, 5, 6);
+
+        HeapBytesVector appendVector = new HeapBytesVector(2);
+        appendVector.appendByteBuffer(heapSlice);
+        appendVector.appendByteBuffer(directSlice);
+
+        assertThat(appendVector.getBytes(0).getBytes()).containsExactly(1, 2, 3);
+        assertThat(appendVector.getBytes(1).getBytes()).containsExactly(4, 5, 6);
+        assertThat(heapSlice.position()).isZero();
+        assertThat(directSlice.position()).isEqualTo(1);
+    }
+
+    @Test
+    void testNormalGrowthDoublesCapacity() {
+        HeapBytesVector vector = new HeapBytesVector(4);
+        int initialBufferSize = vector.buffer.length;
+
+        // Write enough data to trigger growth
+        byte[] data = new byte[initialBufferSize + 1];
+        vector.putByteArray(0, data, 0, data.length);
+
+        // Buffer should have doubled
+        assertThat(vector.buffer.length).isEqualTo((initialBufferSize + 1) * 2);
+    }
+
+    @Test
+    void testPutByteArrayStoresDataCorrectly() {
+        HeapBytesVector vector = new HeapBytesVector(4);
+
+        byte[] data1 = new byte[] {1, 2, 3};
+        byte[] data2 = new byte[] {4, 5, 6, 7};
+        vector.putByteArray(0, data1, 0, data1.length);
+        vector.putByteArray(1, data2, 0, data2.length);
+
+        HeapBytesVector.Bytes bytes0 = vector.getBytes(0);
+        assertThat(bytes0.len).isEqualTo(3);
+        assertThat(vector.buffer[bytes0.offset]).isEqualTo((byte) 1);
+        assertThat(vector.buffer[bytes0.offset + 2]).isEqualTo((byte) 3);
+
+        HeapBytesVector.Bytes bytes1 = vector.getBytes(1);
+        assertThat(bytes1.len).isEqualTo(4);
+        assertThat(vector.buffer[bytes1.offset]).isEqualTo((byte) 4);
+    }
+
+    @Test
+    void testLargeCapacityDoesNotOverflow() {
+        HeapBytesVector vector = new HeapBytesVector(2);
+
+        // Simulate a scenario where the required capacity is large but still within
+        // MAX_ARRAY_SIZE. We can't actually allocate Integer.MAX_VALUE bytes in a test,
+        // but we can verify the logic by checking that a moderately large allocation works.
+        int largeSize = 64 * 1024 * 1024; // 64MB
+        byte[] largeData = new byte[largeSize];
+        vector.putByteArray(0, largeData, 0, largeData.length);
+
+        assertThat(vector.buffer.length).isGreaterThanOrEqualTo(largeSize);
+        assertThat(vector.getBytes(0).len).isEqualTo(largeSize);
+    }
+
+    // ---- Tests for calculateNewBytesCapacity (no large allocation needed) ----
+
+    @Test
+    void testCalculateNewBytesCapacityDoublesSmallValues() {
+        assertThat(HeapBytesVector.calculateNewBytesCapacity(100)).isEqualTo(200);
+        assertThat(HeapBytesVector.calculateNewBytesCapacity(1)).isEqualTo(2);
+        assertThat(HeapBytesVector.calculateNewBytesCapacity(1024 * 1024))
+                .isEqualTo(2 * 1024 * 1024);
+    }
+
+    @Test
+    void testCalculateNewBytesCapacityAtHalfMaxReturnsDoubled() {
+        int halfMax = HeapBytesVector.MAX_ARRAY_SIZE >> 1;
+        // Exactly at the boundary: should still double
+        assertThat(HeapBytesVector.calculateNewBytesCapacity(halfMax)).isEqualTo(halfMax << 1);
+    }
+
+    @Test
+    void testCalculateNewBytesCapacityAboveHalfMaxReturnsExact() {
+        int halfMax = HeapBytesVector.MAX_ARRAY_SIZE >> 1;
+        int justAboveHalf = halfMax + 1;
+        // Above the doubling threshold: should return exact required capacity, not MAX_ARRAY_SIZE
+        assertThat(HeapBytesVector.calculateNewBytesCapacity(justAboveHalf))
+                .isEqualTo(justAboveHalf);
+    }
+
+    @Test
+    void testCalculateNewBytesCapacityAtMaxArraySizeReturnsExact() {
+        // Exactly at MAX_ARRAY_SIZE: should return exact value
+        assertThat(HeapBytesVector.calculateNewBytesCapacity(HeapBytesVector.MAX_ARRAY_SIZE))
+                .isEqualTo(HeapBytesVector.MAX_ARRAY_SIZE);
+    }
+
+    @Test
+    void testCalculateNewBytesCapacityAboveMaxArraySizeThrows() {
+        long aboveMax = (long) HeapBytesVector.MAX_ARRAY_SIZE + 1;
+        assertThatThrownBy(() -> HeapBytesVector.calculateNewBytesCapacity(aboveMax))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("exceeds the maximum array size");
+    }
+
+    @Test
+    void testCalculateNewBytesCapacityLongOverflowThrows() {
+        // Simulate what would happen if int arithmetic overflowed:
+        // e.g. bytesAppended=Integer.MAX_VALUE, length=1 => long sum > MAX_ARRAY_SIZE
+        long overflowedCapacity = (long) Integer.MAX_VALUE + 1;
+        assertThatThrownBy(() -> HeapBytesVector.calculateNewBytesCapacity(overflowedCapacity))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("exceeds the maximum array size");
+    }
+
+    @Test
+    void testCalculateNewBytesCapacityNegativeLongThrows() {
+        // A very large long value that would represent an int overflow scenario
+        long hugeCapacity = 3_000_000_000L;
+        assertThatThrownBy(() -> HeapBytesVector.calculateNewBytesCapacity(hugeCapacity))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("exceeds the maximum array size");
+    }
+
+    @Test
+    void testResetClearsBytesAppended() {
+        HeapBytesVector vector = new HeapBytesVector(4);
+
+        byte[] data = new byte[] {1, 2, 3};
+        vector.putByteArray(0, data, 0, data.length);
+
+        vector.reset();
+
+        // After reset, we should be able to write again from the beginning
+        byte[] data2 = new byte[] {10, 20};
+        vector.putByteArray(0, data2, 0, data2.length);
+
+        HeapBytesVector.Bytes bytes = vector.getBytes(0);
+        assertThat(bytes.offset).isEqualTo(0);
+        assertThat(bytes.len).isEqualTo(2);
+        assertThat(vector.buffer[0]).isEqualTo((byte) 10);
+    }
+
+    @Test
+    void testResetDoesNotWipeBuffer() {
+        HeapBytesVector vector = new HeapBytesVector(4);
+        byte[] data = new byte[] {1, 2, 3};
+        vector.putByteArray(0, data, 0, data.length);
+
+        vector.reset();
+
+        // reset() deliberately leaves the data buffer untouched: wiping it costs
+        // O(buffer size) per batch in the vectorized reader hot path, and reads are
+        // always bounded by the start/length offsets, which reset() does clear
+        assertThat(vector.buffer[0]).isEqualTo((byte) 1);
+        assertThat(vector.start[0]).isZero();
+        assertThat(vector.length[0]).isZero();
+    }
+}

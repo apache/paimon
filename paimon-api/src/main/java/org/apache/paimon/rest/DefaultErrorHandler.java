@@ -42,7 +42,10 @@ public class DefaultErrorHandler extends ErrorHandler {
 
     @Override
     public void accept(ErrorResponse error, String requestId) {
-        int code = error.getCode();
+        Integer errorCode = error.getCode();
+        // HttpClient always resolves the code before calling this, but the response may also be
+        // deserialized directly, and then "code" is absent whenever the server omits it.
+        int code = errorCode == null ? 0 : errorCode;
         String message;
         if (DEFAULT_REQUEST_ID.equals(requestId)) {
             message = error.getMessage();
@@ -52,7 +55,7 @@ public class DefaultErrorHandler extends ErrorHandler {
         }
         switch (code) {
             case 400:
-                throw new BadRequestException(String.format("%s", message));
+                throw new BadRequestException("%s", message);
             case 401:
                 throw new NotAuthorizedException("Not authorized: %s", message);
             case 403:
@@ -69,7 +72,7 @@ public class DefaultErrorHandler extends ErrorHandler {
             case 500:
                 throw new ServiceFailureException("Server error: %s", message);
             case 501:
-                throw new NotImplementedException(message);
+                throw new NotImplementedException("%s", message);
             case 503:
                 throw new ServiceUnavailableException("Service unavailable: %s", message);
             default:

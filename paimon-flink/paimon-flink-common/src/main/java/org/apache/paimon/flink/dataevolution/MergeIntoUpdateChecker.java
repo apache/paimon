@@ -57,12 +57,15 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
 
     private final FileStoreTable table;
     private final Set<String> updatedColumns;
+    private final long baseSnapshotId;
 
     private transient Set<BinaryRow> affectedPartitions;
 
-    public MergeIntoUpdateChecker(FileStoreTable table, Set<String> updatedColumns) {
+    public MergeIntoUpdateChecker(
+            FileStoreTable table, Set<String> updatedColumns, long baseSnapshotId) {
         this.table = table;
         this.updatedColumns = updatedColumns;
+        this.baseSnapshotId = baseSnapshotId;
     }
 
     @Override
@@ -87,6 +90,12 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
     }
 
     private void checkUpdatedColumns() {
+        CoreOptions.GlobalIndexColumnUpdateAction updateAction =
+                table.coreOptions().globalIndexColumnUpdateAction();
+        if (updateAction == CoreOptions.GlobalIndexColumnUpdateAction.IGNORE) {
+            return;
+        }
+
         Optional<Snapshot> latestSnapshot = table.latestSnapshot();
         RowType rowType = table.rowType();
         Preconditions.checkState(latestSnapshot.isPresent());
@@ -100,24 +109,24 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
                                     GlobalIndexMeta globalIndexMeta =
                                             entry.indexFile().globalIndexMeta();
                                     if (globalIndexMeta != null) {
-                                        String fieldName =
-                                                rowType.getField(globalIndexMeta.indexFieldId())
-                                                        .name();
-                                        return updatedColumns.contains(fieldName)
+                                        List<String> indexedNames =
+                                                globalIndexMeta.getIndexedFieldNames(rowType);
+                                        boolean overlaps =
+                                                indexedNames.stream()
+                                                        .anyMatch(updatedColumns::contains);
+                                        return overlaps
                                                 && affectedPartitions.contains(entry.partition());
                                     }
                                     return false;
                                 });
 
         if (!affectedEntries.isEmpty()) {
-            CoreOptions.GlobalIndexColumnUpdateAction updateAction =
-                    table.coreOptions().globalIndexColumnUpdateAction();
             switch (updateAction) {
                 case THROW_ERROR:
                     Set<String> conflictedColumns =
                             affectedEntries.stream()
-                                    .map(file -> file.indexFile().globalIndexMeta().indexFieldId())
-                                    .map(id -> rowType.getField(id).name())
+                                    .map(file -> file.indexFile().globalIndexMeta())
+                                    .flatMap(meta -> meta.getIndexedFieldNames(rowType).stream())
                                     .collect(Collectors.toSet());
 
                     throw new RuntimeException(
@@ -143,11 +152,13 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
 
                         CommitMessage commitMessage =
                                 new CommitMessageImpl(
-                                        entry.getKey(),
-                                        0,
-                                        null,
-                                        DataIncrement.deleteIndexIncrement(entry.getValue()),
-                                        CompactIncrement.emptyIncrement());
+                                                entry.getKey(),
+                                                0,
+                                                null,
+                                                DataIncrement.deleteIndexIncrement(
+                                                        entry.getValue()),
+                                                CompactIncrement.emptyIncrement())
+                                        .withCheckFromSnapshot(baseSnapshotId);
 
                         Committable committable = new Committable(Long.MAX_VALUE, commitMessage);
 

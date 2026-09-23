@@ -28,6 +28,7 @@ import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.KeyValueTableRead;
@@ -85,6 +86,12 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
+    public SplitRead<InternalRow> withReadBatchSizer(ReadBatchSizer sizer) {
+        mergeRead.withReadBatchSizer(sizer);
+        return this;
+    }
+
+    @Override
     public RecordReader<InternalRow> createReader(Split s) throws IOException {
         IncrementalSplit split = (IncrementalSplit) s;
         RecordReader<KeyValue> reader =
@@ -106,8 +113,8 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
                         mergeRead.mergeSorter(),
                         forceKeepDelete);
         if (readType != null) {
-            ProjectedRow projectedRow =
-                    ProjectedRow.from(readType, mergeRead.tableSchema().logicalRowType());
+            // project from the merge read's actual output, which may itself be projected
+            ProjectedRow projectedRow = ProjectedRow.from(readType, mergeRead.actualReadType());
             reader = reader.transform(kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
         }
         return KeyValueTableRead.unwrap(reader, mergeRead.tableSchema().options());

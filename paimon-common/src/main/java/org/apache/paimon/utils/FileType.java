@@ -34,7 +34,7 @@ import java.util.Set;
  *       _SUCCESS, consumer, service files
  *   <li>{@link #DATA}: data files and any unrecognized files (default)
  *   <li>{@link #BUCKET_INDEX}: bucket level index files (Hash, DV)
- *   <li>{@link #GLOBAL_INDEX}: table level global index files (btree, bitmap, lumina, tantivy)
+ *   <li>{@link #GLOBAL_INDEX}: table level global index files (btree, lumina, full-text)
  *   <li>{@link #FILE_INDEX}: data-file index files (bloom filter, bitmap, etc.)
  * </ul>
  */
@@ -114,8 +114,18 @@ public enum FileType {
 
     /** Returns {@code true} if the file is mutable and should not be cached. */
     public static boolean isMutable(Path filePath) {
-        String name = filePath.getName();
-        return "EARLIEST".equals(name) || "LATEST".equals(name);
+        String name = unwrapTempFileName(filePath.getName());
+        // Files rewritten in place under a stable path: caching them by path keeps serving the
+        // pre-overwrite content (and a len+mtime key still collides when a rewrite lands at the
+        // same size within the same clock second). Hint files, consumer and service progress
+        // files, replaceable tags and _SUCCESS all go through overwriteFileUtf8.
+        return "EARLIEST".equals(name)
+                || "LATEST".equals(name)
+                || "_SUCCESS".equals(name)
+                || name.endsWith("_SUCCESS")
+                || name.startsWith(CONSUMER_PREFIX)
+                || name.startsWith(SERVICE_PREFIX)
+                || name.startsWith(TAG_PREFIX);
     }
 
     /**

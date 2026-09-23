@@ -22,6 +22,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.types.RowType;
 
 import java.util.List;
@@ -55,11 +56,16 @@ public interface InnerTableRead extends TableRead {
         return this;
     }
 
-    default InnerTableRead withLimit(int limit) {
+    default InnerTableRead withLimit(long limit) {
         return this;
     }
 
     default InnerTableRead forceKeepDelete() {
+        return this;
+    }
+
+    @Override
+    default InnerTableRead withReadBatchSizer(ReadBatchSizer sizer) {
         return this;
     }
 

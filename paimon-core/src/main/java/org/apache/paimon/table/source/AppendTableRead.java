@@ -23,6 +23,7 @@ import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.splitread.SplitReadConfig;
@@ -47,7 +48,8 @@ public class AppendTableRead extends AbstractDataTableRead {
     @Nullable private RowType readType = null;
     private Predicate predicate = null;
     protected TopN topN = null;
-    protected Integer limit = null;
+    protected Long limit = null;
+    @Nullable private ReadBatchSizer readBatchSizer;
 
     public AppendTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
@@ -76,6 +78,9 @@ public class AppendTableRead extends AbstractDataTableRead {
         read.withFilter(predicate);
         read.withTopN(topN);
         read.withLimit(limit);
+        if (readBatchSizer != null) {
+            read.withReadBatchSizer(readBatchSizer);
+        }
     }
 
     @Override
@@ -99,10 +104,22 @@ public class AppendTableRead extends AbstractDataTableRead {
     }
 
     @Override
-    public InnerTableRead withLimit(int limit) {
+    public InnerTableRead withLimit(long limit) {
         initialized().forEach(r -> r.withLimit(limit));
         this.limit = limit;
         return this;
+    }
+
+    @Override
+    public InnerTableRead withReadBatchSizer(ReadBatchSizer sizer) {
+        initialized().forEach(r -> r.withReadBatchSizer(sizer));
+        this.readBatchSizer = sizer;
+        return this;
+    }
+
+    @Nullable
+    protected ReadBatchSizer readBatchSizer() {
+        return readBatchSizer;
     }
 
     @Override

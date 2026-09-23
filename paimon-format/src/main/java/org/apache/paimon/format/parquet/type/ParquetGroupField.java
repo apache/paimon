@@ -38,18 +38,7 @@ public class ParquetGroupField extends ParquetField {
             boolean required,
             List<ParquetField> children,
             String[] path) {
-        this(type, repetitionLevel, definitionLevel, required, children, path, null);
-    }
-
-    public ParquetGroupField(
-            DataType type,
-            int repetitionLevel,
-            int definitionLevel,
-            boolean required,
-            List<ParquetField> children,
-            String[] path,
-            ParquetGroupField variantFileType) {
-        super(type, repetitionLevel, definitionLevel, required, path, variantFileType);
+        super(type, repetitionLevel, definitionLevel, required, path);
         this.children = ImmutableList.copyOf(requireNonNull(children, "children is null"));
     }
 

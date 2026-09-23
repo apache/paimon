@@ -18,9 +18,14 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IncrementalSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
 
@@ -41,6 +46,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext.SplitAssignmentState;
+import static org.apache.paimon.io.DataFileTestUtils.fromMinMax;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -853,6 +859,129 @@ public class ContinuousFileSplitEnumeratorTest
         context.triggerAllActions();
         Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(1);
         Assertions.assertThat(enumerator.nextSnapshotId).isEqualTo(3);
+    }
+
+    @Test
+    public void testQueryAuthSplitAssignedLikeTheSplitItWraps() {
+        int parallelism = 3;
+        ContinuousFileSplitEnumerator enumerator = buildEnumerator(parallelism);
+
+        FileStoreSourceSplit plain = createSnapshotSplit(1, 2, Collections.emptyList());
+        FileStoreSourceSplit wrapped =
+                new FileStoreSourceSplit(
+                        plain.splitId(),
+                        new QueryAuthSplit(plain.split(), new TableQueryAuthResult(null, null)));
+
+        assertThat(enumerator.assignSuggestedTask(wrapped))
+                .isEqualTo(enumerator.assignSuggestedTask(plain));
+    }
+
+    @Test
+    public void testFallbackWrappedQueryAuthSplitAssignedLikeTheSplitItWraps() {
+        int parallelism = 3;
+        ContinuousFileSplitEnumerator enumerator = buildEnumerator(parallelism);
+
+        FileStoreSourceSplit plain = createSnapshotSplit(1, 2, Collections.emptyList());
+        FileStoreSourceSplit nested =
+                new FileStoreSourceSplit(
+                        plain.splitId(),
+                        FallbackReadFileStoreTable.toFallbackSplit(
+                                new QueryAuthSplit(
+                                        plain.split(), new TableQueryAuthResult(null, null)),
+                                true));
+
+        assertThat(nested.split()).isNotInstanceOf(DataSplit.class);
+        assertThat(enumerator.assignSuggestedTask(nested))
+                .isEqualTo(enumerator.assignSuggestedTask(plain));
+    }
+
+    @Test
+    public void testFallbackDataSplitAssignedLikeTheSplitItCopies() {
+        int parallelism = 3;
+        ContinuousFileSplitEnumerator enumerator = buildEnumerator(parallelism);
+
+        FileStoreSourceSplit plain = createSnapshotSplit(1, 2, Collections.emptyList());
+        FileStoreSourceSplit fallback =
+                new FileStoreSourceSplit(
+                        plain.splitId(),
+                        FallbackReadFileStoreTable.toFallbackSplit(plain.split(), true));
+
+        assertThat(fallback.split()).isInstanceOf(DataSplit.class);
+        assertThat(enumerator.assignSuggestedTask(fallback))
+                .isEqualTo(enumerator.assignSuggestedTask(plain));
+    }
+
+    @Test
+    public void testPostponeBucketIncrementalSplitAssignedByWriteId() {
+        int parallelism = 3;
+        ContinuousFileSplitEnumerator enumerator = buildEnumerator(parallelism);
+
+        IncrementalSplit split =
+                createPostponeIncrementalSplit(
+                        Collections.emptyList(), Collections.singletonList(postponeFile(7)));
+
+        assertThat(enumerator.assignSuggestedTask(split)).isEqualTo(7 % parallelism);
+    }
+
+    @Test
+    public void testPostponeBucketIncrementalSplitWithoutAfterFiles() {
+        int parallelism = 3;
+        ContinuousFileSplitEnumerator enumerator = buildEnumerator(parallelism);
+
+        // a diff which only deletes files has no after files, so the write id must be taken from
+        // the before files
+        IncrementalSplit split =
+                createPostponeIncrementalSplit(
+                        Collections.singletonList(postponeFile(7)), Collections.emptyList());
+
+        assertThat(enumerator.assignSuggestedTask(split)).isEqualTo(7 % parallelism);
+    }
+
+    @Test
+    public void testIncrementalSplitWithRealBucketAssignedByBucket() {
+        int parallelism = 3;
+        ContinuousFileSplitEnumerator enumerator = buildEnumerator(parallelism);
+
+        IncrementalSplit split =
+                new IncrementalSplit(
+                        1L,
+                        row(1),
+                        4,
+                        parallelism,
+                        Collections.emptyList(),
+                        null,
+                        Collections.singletonList(postponeFile(7)),
+                        null,
+                        true);
+
+        assertThat(enumerator.assignSuggestedTask(split)).isEqualTo(4 % parallelism);
+    }
+
+    private ContinuousFileSplitEnumerator buildEnumerator(int parallelism) {
+        return new Builder()
+                .setSplitEnumeratorContext(getSplitEnumeratorContext(parallelism))
+                .setScan(new MockScan(new TreeMap<>()))
+                .build();
+    }
+
+    private static IncrementalSplit createPostponeIncrementalSplit(
+            List<DataFileMeta> beforeFiles, List<DataFileMeta> afterFiles) {
+        return new IncrementalSplit(
+                1L,
+                row(1),
+                BucketMode.POSTPONE_BUCKET,
+                BucketMode.POSTPONE_BUCKET,
+                beforeFiles,
+                null,
+                afterFiles,
+                null,
+                true);
+    }
+
+    /** Builds a file name matching the prefix written by {@code PostponeBucketFileStoreWrite}. */
+    private static DataFileMeta postponeFile(int writeId) {
+        return fromMinMax(
+                String.format("data-u-%s-s-%d-w-0-0.parquet", UUID.randomUUID(), writeId), 0, 0);
     }
 
     private void triggerCheckpointAndComplete(

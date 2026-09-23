@@ -172,7 +172,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
                 catalogDdl,
                 useCatalogCmd,
                 paimonDdl,
-                createResultSink("result4", "dt VARCHAR, hr VARCHAR, total INT"));
+                createResultSink("result4", "dt VARCHAR, category VARCHAR, total INT"));
         checkResult(
                 "20211110, Drink, 200",
                 "20211110, Food, 160",

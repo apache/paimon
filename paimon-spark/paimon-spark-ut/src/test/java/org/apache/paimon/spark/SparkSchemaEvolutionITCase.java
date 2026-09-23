@@ -249,6 +249,23 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testReplaceColumnsUnsupported() {
+        createTable("testReplaceColumnsUnsupported");
+
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "ALTER TABLE testReplaceColumnsUnsupported REPLACE COLUMNS "
+                                                + "(a BIGINT, bb STRING, c STRING)"))
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "ALTER TABLE ... REPLACE COLUMNS is not supported for Paimon tables. "
+                                        + "Please use RENAME COLUMN, ALTER COLUMN TYPE, DROP COLUMN, "
+                                        + "and ADD COLUMN instead."));
+    }
+
+    @Test
     public void testDropPartitionKey() {
         spark.sql(
                 "CREATE TABLE testDropPartitionKey (\n"
@@ -1079,5 +1096,39 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder(
                         "[1,APPLE,1000000000000]", "[2,cat,200]", "[3,FLOWER,3000000000000]");
+    }
+
+    private static final String BLOB_TABLE_PROPS =
+            "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'bucket'='-1'";
+
+    @Test
+    public void testAddBlobColumnViaCommentDirective() {
+        String table = "paimon.default.blob_add_col";
+        spark.sql(
+                "CREATE TABLE "
+                        + table
+                        + " (id INT, data STRING) TBLPROPERTIES ("
+                        + BLOB_TABLE_PROPS
+                        + ")");
+
+        // bare directive — no user comment
+        spark.sql(
+                "ALTER TABLE "
+                        + table
+                        + " ADD COLUMN desc_col BINARY COMMENT '__BLOB_DESCRIPTOR_FIELD'");
+        // directive + user comment
+        spark.sql(
+                "ALTER TABLE "
+                        + table
+                        + " ADD COLUMN picture BINARY COMMENT '__BLOB_FIELD; profile picture'");
+
+        String createSql =
+                spark.sql("SHOW CREATE TABLE " + table).collectAsList().get(0).toString();
+        assertThat(createSql).doesNotContain("__BLOB");
+        assertThat(createSql).contains("desc_col");
+        assertThat(createSql).contains("picture");
+        assertThat(createSql).contains("profile picture");
+        assertThat(createSql).contains("'blob-field' = 'picture'");
+        assertThat(createSql).contains("'blob-descriptor-field' = 'desc_col'");
     }
 }

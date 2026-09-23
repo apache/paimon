@@ -41,7 +41,7 @@ import java.util.concurrent.TimeoutException;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** A {@link CommitCallback} to wait for compaction for visibility. */
+/** A {@link CommitCallback} to wait for compaction and global indexes for visibility. */
 public class VisibilityWaitCallback implements CommitCallback {
 
     private static final Logger LOG = LoggerFactory.getLogger(VisibilityWaitCallback.class);
@@ -68,6 +68,8 @@ public class VisibilityWaitCallback implements CommitCallback {
 
         Set<String> namesToTrack = new HashSet<>();
         Set<BinaryRow> partitionsToTrack = new HashSet<>();
+        GlobalIndexVisibilityChecker globalIndexVisibilityChecker =
+                GlobalIndexVisibilityChecker.create(table, context.snapshot, context.deltaFiles);
         for (ManifestEntry entry : context.deltaFiles) {
             if (shouldBeTracked(entry)) {
                 namesToTrack.add(entry.fileName());
@@ -75,12 +77,16 @@ public class VisibilityWaitCallback implements CommitCallback {
             }
         }
 
-        if (namesToTrack.isEmpty()) {
+        if (namesToTrack.isEmpty() && globalIndexVisibilityChecker.noNeedToWait()) {
             return;
         }
 
         try {
-            waitForCompaction(context.snapshot, namesToTrack, partitionsToTrack);
+            waitForVisibility(
+                    context.snapshot,
+                    namesToTrack,
+                    partitionsToTrack,
+                    globalIndexVisibilityChecker);
         } catch (InterruptedException | TimeoutException e) {
             throw new RuntimeException(e);
         }
@@ -91,25 +97,45 @@ public class VisibilityWaitCallback implements CommitCallback {
         // No-op for retry as the callback is idempotent
     }
 
-    private void waitForCompaction(
-            Snapshot fromSnapshot, Set<String> namesToTrack, Set<BinaryRow> partitionsToTrack)
+    private void waitForVisibility(
+            Snapshot fromSnapshot,
+            Set<String> namesToTrack,
+            Set<BinaryRow> partitionsToTrack,
+            GlobalIndexVisibilityChecker globalIndexVisibilityChecker)
             throws InterruptedException, TimeoutException {
         long startTime = System.currentTimeMillis();
+        boolean compactionDone = namesToTrack.isEmpty();
+        boolean globalIndexDone = globalIndexVisibilityChecker.noNeedToWait();
+        Snapshot checkedSnapshot = fromSnapshot;
         while (System.currentTimeMillis() - startTime < timeout.toMillis()) {
             Snapshot latest = table.snapshotManager().latestSnapshot();
             checkNotNull(latest, "No latest snapshot");
-            if (latest.id() > fromSnapshot.id()
+
+            if (!compactionDone
+                    && latest.id() > checkedSnapshot.id()
                     && !stillInLatest(latest, namesToTrack, partitionsToTrack)) {
+                compactionDone = true;
+            }
+            if (!globalIndexDone && globalIndexVisibilityChecker.visibleIn(latest)) {
+                globalIndexDone = true;
+            }
+            if (compactionDone && globalIndexDone) {
                 return;
             }
-            fromSnapshot = latest;
+            checkedSnapshot = latest;
 
-            LOG.info("Waiting for files of table {} to be compacted...", table.fullName());
+            LOG.info(
+                    "Waiting for visibility of table {}. Compaction done: {}, global index done: {}.",
+                    table.fullName(),
+                    compactionDone,
+                    globalIndexDone);
             //noinspection BusyWait
             Thread.sleep(checkInterval.toMillis());
         }
 
-        throw new TimeoutException("Timeout waiting for files to be compacted after " + timeout);
+        throw new TimeoutException(
+                "Timeout waiting for files to be compacted or global indexes to be built after "
+                        + timeout);
     }
 
     private boolean stillInLatest(

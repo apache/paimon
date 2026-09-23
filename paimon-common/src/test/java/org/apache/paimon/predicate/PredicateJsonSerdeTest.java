@@ -19,16 +19,23 @@
 package org.apache.paimon.predicate;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import javax.annotation.Nullable;
 
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -87,12 +94,12 @@ class PredicateJsonSerdeTest {
                 // LeafPredicate - In
                 TestSpec.forPredicate(builder.in(0, Arrays.asList(1, 2, 3)))
                         .expectJson(
-                                "{\"kind\":\"COMPOUND\",\"function\":\"OR\",\"children\":[{\"kind\":\"COMPOUND\",\"function\":\"OR\",\"children\":[{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"EQUAL\",\"literals\":[1]},{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"EQUAL\",\"literals\":[2]}]},{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"EQUAL\",\"literals\":[3]}]}"),
+                                "{\"kind\":\"COMPOUND\",\"function\":\"OR\",\"children\":[{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"EQUAL\",\"literals\":[1]},{\"kind\":\"COMPOUND\",\"function\":\"OR\",\"children\":[{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"EQUAL\",\"literals\":[2]},{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"EQUAL\",\"literals\":[3]}]}]}"),
 
                 // LeafPredicate - NotIn
                 TestSpec.forPredicate(builder.notIn(0, Arrays.asList(1, 2, 3)))
                         .expectJson(
-                                "{\"kind\":\"COMPOUND\",\"function\":\"AND\",\"children\":[{\"kind\":\"COMPOUND\",\"function\":\"AND\",\"children\":[{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"NOT_EQUAL\",\"literals\":[1]},{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"NOT_EQUAL\",\"literals\":[2]}]},{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"NOT_EQUAL\",\"literals\":[3]}]}"),
+                                "{\"kind\":\"COMPOUND\",\"function\":\"AND\",\"children\":[{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"NOT_EQUAL\",\"literals\":[1]},{\"kind\":\"COMPOUND\",\"function\":\"AND\",\"children\":[{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"NOT_EQUAL\",\"literals\":[2]},{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"NOT_EQUAL\",\"literals\":[3]}]}]}"),
 
                 // LeafPredicate - CastTransform
                 TestSpec.forPredicate(
@@ -151,10 +158,21 @@ class PredicateJsonSerdeTest {
                         .expectJson(
                                 "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"CONCAT_WS\",\"inputs\":[\"|\",{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"},\"X\",null,{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]},\"function\":\"ENDS_WITH\",\"literals\":[\"z\"]}"),
 
-                // LeafPredicate - Like (non-negatable)
+                // LeafPredicate - Like
                 TestSpec.forPredicate(builder.like(2, BinaryString.fromString("%a%b%")))
                         .expectJson(
                                 "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"LIKE\",\"literals\":[\"%a%b%\"]}"),
+
+                // LeafPredicate - NotLike
+                TestSpec.forPredicate(builder.notLike(2, BinaryString.fromString("%a%b%")))
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"NOT_LIKE\",\"literals\":[\"%a%b%\"]}"),
+
+                // LeafPredicate - NotLike (negate of Like)
+                TestSpec.forPredicate(
+                                builder.like(2, BinaryString.fromString("%a%b%")).negate().get())
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"NOT_LIKE\",\"literals\":[\"%a%b%\"]}"),
 
                 // LeafPredicate - StartsWith (field index)
                 TestSpec.forPredicate(builder.startsWith(2, BinaryString.fromString("hello")))
@@ -170,6 +188,49 @@ class PredicateJsonSerdeTest {
                 TestSpec.forPredicate(builder.contains(2, BinaryString.fromString("foo")))
                         .expectJson(
                                 "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"CONTAINS\",\"literals\":[\"foo\"]}"),
+
+                // LeafPredicate - negated string predicates
+                TestSpec.forPredicate(
+                                builder.startsWith(2, BinaryString.fromString("hello"))
+                                        .negate()
+                                        .get())
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"NOT_STARTS_WITH\",\"literals\":[\"hello\"]}"),
+                TestSpec.forPredicate(
+                                builder.endsWith(2, BinaryString.fromString("world"))
+                                        .negate()
+                                        .get())
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"NOT_ENDS_WITH\",\"literals\":[\"world\"]}"),
+                TestSpec.forPredicate(
+                                builder.contains(2, BinaryString.fromString("foo")).negate().get())
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"NOT_CONTAINS\",\"literals\":[\"foo\"]}"),
+
+                // LeafPredicate - ArrayContains uses the element type for literal serde
+                TestSpec.forPredicate(builder.arrayContains(4, BinaryString.fromString("vip")))
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":4,\"name\":\"f4\",\"type\":{\"type\":\"ARRAY\",\"element\":\"STRING\"}}},\"function\":\"ARRAY_CONTAINS\",\"literals\":[\"vip\"]}"),
+
+                // LeafPredicate - ArraysOverlap uses the element type for literal serde
+                TestSpec.forPredicate(
+                                builder.arraysOverlap(
+                                        4,
+                                        Arrays.asList(
+                                                BinaryString.fromString("vip"),
+                                                BinaryString.fromString("trial"))))
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":4,\"name\":\"f4\",\"type\":{\"type\":\"ARRAY\",\"element\":\"STRING\"}}},\"function\":\"ARRAYS_OVERLAP\",\"literals\":[\"vip\",\"trial\"]}"),
+
+                // LeafPredicate - ArrayContainsAll uses the element type for literal serde
+                TestSpec.forPredicate(
+                                builder.arrayContainsAll(
+                                        4,
+                                        Arrays.asList(
+                                                BinaryString.fromString("vip"),
+                                                BinaryString.fromString("trial"))))
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":4,\"name\":\"f4\",\"type\":{\"type\":\"ARRAY\",\"element\":\"STRING\"}}},\"function\":\"ARRAY_CONTAINS_ALL\",\"literals\":[\"vip\",\"trial\"]}"),
 
                 // LeafPredicate - Between
                 TestSpec.forPredicate(builder.between(0, 3, 7))
@@ -211,7 +272,7 @@ class PredicateJsonSerdeTest {
                                         PredicateBuilder.or(
                                                 builder.equal(0, 7), builder.isNotNull(2))))
                         .expectJson(
-                                "{\"kind\":\"COMPOUND\",\"function\":\"AND\",\"children\":[{\"kind\":\"COMPOUND\",\"function\":\"AND\",\"children\":[{\"kind\":\"COMPOUND\",\"function\":\"AND\",\"children\":[{\"kind\":\"COMPOUND\",\"function\":\"AND\",\"children\":[{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"EQUAL\",\"literals\":[1]},{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":3,\"name\":\"f3\",\"type\":\"INT\"}},\"function\":\"IN\",\"literals\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]}]},{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":3,\"name\":\"f3\",\"type\":\"INT\"}},\"function\":\"IN\",\"literals\":[]}]},{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"LIKE\",\"literals\":[\"%a%b%\"]}]},{\"kind\":\"COMPOUND\",\"function\":\"OR\",\"children\":[{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"EQUAL\",\"literals\":[7]},{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"IS_NOT_NULL\",\"literals\":[]}]}]}"),
+                                "{\"kind\":\"COMPOUND\",\"function\":\"AND\",\"children\":[{\"kind\":\"COMPOUND\",\"function\":\"AND\",\"children\":[{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"EQUAL\",\"literals\":[1]},{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":3,\"name\":\"f3\",\"type\":\"INT\"}},\"function\":\"IN\",\"literals\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]}]},{\"kind\":\"COMPOUND\",\"function\":\"AND\",\"children\":[{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":3,\"name\":\"f3\",\"type\":\"INT\"}},\"function\":\"IN\",\"literals\":[]},{\"kind\":\"COMPOUND\",\"function\":\"AND\",\"children\":[{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"LIKE\",\"literals\":[\"%a%b%\"]},{\"kind\":\"COMPOUND\",\"function\":\"OR\",\"children\":[{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"EQUAL\",\"literals\":[7]},{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"IS_NOT_NULL\",\"literals\":[]}]}]}]}]}"),
 
                 // error message testing
                 TestSpec.forJson("{\"kind\":\"invalid\"}")
@@ -247,9 +308,51 @@ class PredicateJsonSerdeTest {
         }
     }
 
+    @Test
+    void testTemporalAndDecimalLiteralsRoundTrip() {
+        Predicate predicate =
+                PredicateBuilder.and(
+                        temporalBuilder().equal(0, (int) LocalDate.of(2026, 1, 15).toEpochDay()),
+                        temporalBuilder().equal(1, 45_296_789), // 12:34:56.789
+                        temporalBuilder()
+                                .equal(
+                                        2,
+                                        Timestamp.fromLocalDateTime(
+                                                LocalDateTime.of(
+                                                        2026, 1, 15, 12, 34, 56, 789_000_000))),
+                        temporalBuilder()
+                                .equal(
+                                        3,
+                                        Timestamp.fromInstant(
+                                                Instant.parse("2026-01-15T04:34:56.789Z"))),
+                        temporalBuilder()
+                                .equal(
+                                        4,
+                                        Decimal.fromBigDecimal(
+                                                new BigDecimal("12345678901234567.891"), 20, 3)));
+
+        assertThat(parse(toJson(predicate))).isEqualTo(predicate);
+    }
+
+    private static PredicateBuilder temporalBuilder() {
+        return new PredicateBuilder(
+                RowType.of(
+                        DataTypes.DATE(),
+                        DataTypes.TIME(3),
+                        DataTypes.TIMESTAMP(6),
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9),
+                        DataTypes.DECIMAL(20, 3),
+                        DataTypes.STRING()));
+    }
+
     private static PredicateBuilder newBuilder() {
         return new PredicateBuilder(
-                RowType.of(new IntType(), DataTypes.STRING(), DataTypes.STRING(), new IntType()));
+                RowType.of(
+                        new IntType(),
+                        DataTypes.STRING(),
+                        DataTypes.STRING(),
+                        new IntType(),
+                        DataTypes.ARRAY(DataTypes.STRING())));
     }
 
     private static List<Object> manyInts() {

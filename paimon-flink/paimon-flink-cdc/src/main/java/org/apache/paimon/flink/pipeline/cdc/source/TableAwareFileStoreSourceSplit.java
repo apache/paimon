@@ -43,6 +43,8 @@ public class TableAwareFileStoreSourceSplit extends FileStoreSourceSplit {
     private final Identifier identifier;
     private final @Nullable Long lastSchemaId;
     private final long schemaId;
+    private final long schemaChangeEventsToSkip;
+    private final boolean legacySchemaProgress;
 
     public TableAwareFileStoreSourceSplit(
             String id,
@@ -51,10 +53,43 @@ public class TableAwareFileStoreSourceSplit extends FileStoreSourceSplit {
             Identifier identifier,
             @Nullable Long lastSchemaId,
             long schemaId) {
+        this(id, split, recordsToSkip, identifier, lastSchemaId, schemaId, 0L);
+    }
+
+    public TableAwareFileStoreSourceSplit(
+            String id,
+            Split split,
+            long recordsToSkip,
+            Identifier identifier,
+            @Nullable Long lastSchemaId,
+            long schemaId,
+            long schemaChangeEventsToSkip) {
+        this(
+                id,
+                split,
+                recordsToSkip,
+                identifier,
+                lastSchemaId,
+                schemaId,
+                schemaChangeEventsToSkip,
+                false);
+    }
+
+    private TableAwareFileStoreSourceSplit(
+            String id,
+            Split split,
+            long recordsToSkip,
+            Identifier identifier,
+            @Nullable Long lastSchemaId,
+            long schemaId,
+            long schemaChangeEventsToSkip,
+            boolean legacySchemaProgress) {
         super(id, split, recordsToSkip);
         this.identifier = identifier;
         this.lastSchemaId = lastSchemaId;
         this.schemaId = schemaId;
+        this.schemaChangeEventsToSkip = schemaChangeEventsToSkip;
+        this.legacySchemaProgress = legacySchemaProgress;
     }
 
     public Identifier getIdentifier() {
@@ -69,6 +104,40 @@ public class TableAwareFileStoreSourceSplit extends FileStoreSourceSplit {
         return schemaId;
     }
 
+    public long schemaChangeEventsToSkip() {
+        return schemaChangeEventsToSkip;
+    }
+
+    public TableAwareFileStoreSourceSplit updateWithProgress(
+            long recordsToSkip, long schemaChangeEventsToSkip) {
+        return new TableAwareFileStoreSourceSplit(
+                splitId(),
+                split(),
+                recordsToSkip,
+                identifier,
+                lastSchemaId,
+                schemaId,
+                schemaChangeEventsToSkip,
+                legacySchemaProgress);
+    }
+
+    public boolean isLegacySchemaProgress() {
+        return legacySchemaProgress;
+    }
+
+    @Override
+    public TableAwareFileStoreSourceSplit updateWithRecordsToSkip(long recordsToSkip) {
+        return new TableAwareFileStoreSourceSplit(
+                splitId(),
+                split(),
+                recordsToSkip,
+                identifier,
+                lastSchemaId,
+                schemaId,
+                schemaChangeEventsToSkip,
+                legacySchemaProgress);
+    }
+
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof TableAwareFileStoreSourceSplit)) {
@@ -81,13 +150,22 @@ public class TableAwareFileStoreSourceSplit extends FileStoreSourceSplit {
                 && recordsToSkip() == other.recordsToSkip()
                 && identifier.equals(other.identifier)
                 && Objects.equals(lastSchemaId, other.lastSchemaId)
-                && schemaId == other.schemaId;
+                && schemaId == other.schemaId
+                && schemaChangeEventsToSkip == other.schemaChangeEventsToSkip
+                && legacySchemaProgress == other.legacySchemaProgress;
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(
-                splitId(), split(), recordsToSkip(), identifier, lastSchemaId, schemaId);
+                splitId(),
+                split(),
+                recordsToSkip(),
+                identifier,
+                lastSchemaId,
+                schemaId,
+                schemaChangeEventsToSkip,
+                legacySchemaProgress);
     }
 
     @Override
@@ -106,17 +184,23 @@ public class TableAwareFileStoreSourceSplit extends FileStoreSourceSplit {
                 + lastSchemaId
                 + ", schemaId="
                 + schemaId
+                + ", schemaChangeEventsToSkip="
+                + schemaChangeEventsToSkip
+                + ", legacySchemaProgress="
+                + legacySchemaProgress
                 + '}';
     }
 
     /** The serializer for {@link TableAwareFileStoreSourceSplit}. */
     public static class Serializer
             implements SimpleVersionedSerializer<TableAwareFileStoreSourceSplit> {
+        private static final int VERSION_1 = 1;
+        private static final int VERSION_2 = 2;
         private static final Long NULL_SCHEMA_ID = -1L;
 
         @Override
         public int getVersion() {
-            return 1;
+            return VERSION_2;
         }
 
         @Override
@@ -130,12 +214,18 @@ public class TableAwareFileStoreSourceSplit extends FileStoreSourceSplit {
             view.writeLong(
                     split.getLastSchemaId() == null ? NULL_SCHEMA_ID : split.getLastSchemaId());
             view.writeLong(split.getSchemaId());
+            view.writeLong(split.schemaChangeEventsToSkip());
+            view.writeBoolean(split.isLegacySchemaProgress());
             return out.toByteArray();
         }
 
         @Override
         public TableAwareFileStoreSourceSplit deserialize(int version, byte[] serialized)
                 throws IOException {
+            if (version != VERSION_1 && version != VERSION_2) {
+                throw new IOException(
+                        "Unsupported TableAwareFileStoreSourceSplit version: " + version);
+            }
             ByteArrayInputStream in = new ByteArrayInputStream(serialized);
             DataInputViewStreamWrapper view = new DataInputViewStreamWrapper(in);
             String splitId = view.readUTF();
@@ -152,8 +242,18 @@ public class TableAwareFileStoreSourceSplit extends FileStoreSourceSplit {
                 lastSchemaId = null;
             }
             long schemaId = view.readLong();
+            long schemaChangeEventsToSkip = version == VERSION_2 ? view.readLong() : 0L;
+            boolean legacySchemaProgress =
+                    version == VERSION_2 ? view.readBoolean() : version == VERSION_1;
             return new TableAwareFileStoreSourceSplit(
-                    splitId, split, recordsToSkip, identifier, lastSchemaId, schemaId);
+                    splitId,
+                    split,
+                    recordsToSkip,
+                    identifier,
+                    lastSchemaId,
+                    schemaId,
+                    schemaChangeEventsToSkip,
+                    legacySchemaProgress);
         }
     }
 }

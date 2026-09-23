@@ -104,6 +104,10 @@ public enum DataTypeRoot {
 
     BLOB(DataTypeFamily.PREDEFINED),
 
+    GEOMETRY(DataTypeFamily.PREDEFINED),
+
+    GEOGRAPHY(DataTypeFamily.PREDEFINED),
+
     ARRAY(DataTypeFamily.CONSTRUCTED, DataTypeFamily.COLLECTION),
 
     VECTOR(DataTypeFamily.CONSTRUCTED, DataTypeFamily.COLLECTION),

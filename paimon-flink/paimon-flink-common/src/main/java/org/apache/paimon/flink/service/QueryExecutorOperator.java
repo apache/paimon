@@ -23,9 +23,11 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.operation.metrics.PartialLookupMetrics;
 import org.apache.paimon.service.network.NetworkUtils;
 import org.apache.paimon.service.network.stats.DisabledServiceRequestStats;
 import org.apache.paimon.service.server.KvQueryServer;
@@ -58,6 +60,8 @@ public class QueryExecutorOperator extends AbstractStreamOperator<InternalRow>
 
     private transient IOManager ioManager;
 
+    private transient KvQueryServer server;
+
     public QueryExecutorOperator(Table table) {
         this.table = table;
     }
@@ -75,8 +79,16 @@ public class QueryExecutorOperator extends AbstractStreamOperator<InternalRow>
                                 .getEnvironment()
                                 .getIOManager()
                                 .getSpillingDirectoriesPaths());
-        this.query = ((FileStoreTable) table).newLocalTableQuery().withIOManager(ioManager);
-        KvQueryServer server =
+        PartialLookupMetrics metrics =
+                new PartialLookupMetrics(
+                        new FlinkMetricRegistry(getRuntimeContext().getMetricGroup()),
+                        table.name());
+        this.query =
+                ((FileStoreTable) table)
+                        .newLocalTableQuery()
+                        .withIOManager(ioManager)
+                        .withMetrics(metrics);
+        this.server =
                 new KvQueryServer(
                         RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext()),
                         RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext()),
@@ -118,6 +130,10 @@ public class QueryExecutorOperator extends AbstractStreamOperator<InternalRow>
     @Override
     public void close() throws Exception {
         super.close();
+        // shut down the server first, so that no in-flight request can hit the closed query
+        if (server != null) {
+            server.shutdown();
+        }
         if (query != null) {
             query.close();
         }

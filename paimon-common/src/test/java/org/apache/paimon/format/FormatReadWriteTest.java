@@ -20,6 +20,8 @@ package org.apache.paimon.format;
 
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
@@ -29,6 +31,7 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.variant.BufferOnlyVariant;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -48,6 +51,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -105,7 +109,8 @@ public abstract class FormatReadWriteTest {
         RecordReader<InternalRow> reader =
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
 
@@ -113,6 +118,43 @@ public abstract class FormatReadWriteTest {
         assertThat(result.get(1)).isEqualTo(GenericRow.of(2, 2L));
         assertThat(result.get(2).getInt(0)).isEqualTo(3);
         assertThat(result.get(2).isNullAt(1)).isTrue();
+    }
+
+    protected void testArrayBlobDescriptorRoundTrip() throws IOException {
+        FileFormat format = fileFormat();
+        RowType rowType = DataTypes.ROW(DataTypes.ARRAY(DataTypes.BLOB()));
+        byte[] expected = "managed-array-blob".getBytes(StandardCharsets.UTF_8);
+        Path payload = new Path(parent, "payload.managed.blob");
+        try (PositionOutputStream out = fileIO.newOutputStream(payload, false)) {
+            out.write(expected);
+        }
+        BlobDescriptor first = new BlobDescriptor(payload.toString(), 0, expected.length);
+        BlobDescriptor second = new BlobDescriptor("file:/blob/second", 7, 11);
+
+        write(
+                format.createWriterFactory(rowType),
+                file,
+                GenericRow.of(
+                        new GenericArray(
+                                new Object[] {
+                                    Blob.fromDescriptor(uri -> null, first),
+                                    null,
+                                    Blob.fromDescriptor(uri -> null, second)
+                                })));
+
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            InternalRow row = reader.readBatch().next();
+            InternalArray blobs = row.getArray(0);
+            assertThat(blobs.size()).isEqualTo(3);
+            assertThat(blobs.getBlob(0).toDescriptor()).isEqualTo(first);
+            assertThat(blobs.getBlob(0).toData()).isEqualTo(expected);
+            assertThat(blobs.isNullAt(1)).isTrue();
+            assertThat(blobs.getBlob(2).toDescriptor()).isEqualTo(second);
+        }
     }
 
     @Test
@@ -133,7 +175,7 @@ public abstract class FormatReadWriteTest {
                     format.createReaderFactory(rowType, rowType, new ArrayList<>())
                             .createReader(
                                     new FormatReaderContext(
-                                            fileIO, file, fileIO.getFileSize(file)));
+                                            fileIO, file, fileIO.getFileSize(file), null, null));
             InternalRowSerializer internalRowSerializer = new InternalRowSerializer(rowType);
             List<InternalRow> result = new ArrayList<>();
             reader.forEachRemaining(row -> result.add(internalRowSerializer.copy(row)));
@@ -187,7 +229,8 @@ public abstract class FormatReadWriteTest {
         try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(readType, readType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
             InternalRowSerializer serializer = new InternalRowSerializer(readType);
             reader.forEachRemaining(row -> result.add(serializer.copy(row)));
         }
@@ -207,21 +250,19 @@ public abstract class FormatReadWriteTest {
         RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
 
         FormatWriterFactory factory = format.createWriterFactory(writeType);
-        write(
-                factory,
-                file,
-                GenericRow.of(GenericVariant.fromJson("{\"age\":35,\"city\":\"Chicago\"}")));
+        GenericVariant expected = GenericVariant.fromJson("{\"age\":35,\"city\":\"Chicago\"}");
+        write(factory, file, GenericRow.of(new BufferOnlyVariant(expected)));
         List<InternalRow> result = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(writeType, writeType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
             InternalRowSerializer serializer = new InternalRowSerializer(writeType);
             reader.forEachRemaining(row -> result.add(serializer.copy(row)));
         }
 
-        assertThat(result.get(0).getVariant(0).toJson())
-                .isEqualTo("{\"age\":35,\"city\":\"Chicago\"}");
+        assertThat(result.get(0).getVariant(0).toJson()).isEqualTo(expected.toJson());
     }
 
     @Test
@@ -247,7 +288,8 @@ public abstract class FormatReadWriteTest {
         try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(writeType, writeType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
             InternalRowSerializer serializer = new InternalRowSerializer(writeType);
             reader.forEachRemaining(row -> result.add(serializer.copy(row)));
         }

@@ -21,6 +21,7 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.ScoreRecordIterator;
+import org.apache.paimon.reader.ScoreRecordReader;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ProjectedRow;
@@ -35,7 +36,7 @@ import java.util.Map;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Return value with score. */
-public class IndexedSplitRecordReader implements RecordReader<InternalRow> {
+public class IndexedSplitRecordReader implements ScoreRecordReader<InternalRow> {
 
     private final RecordReader<InternalRow> reader;
     @Nullable private final Map<Long, Float> rowIdToScore;
@@ -59,6 +60,7 @@ public class IndexedSplitRecordReader implements RecordReader<InternalRow> {
         return new ScoreRecordIterator<InternalRow>() {
 
             private float score = Float.NaN;
+            private long rowId;
 
             @Override
             public float returnedScore() {
@@ -66,11 +68,18 @@ public class IndexedSplitRecordReader implements RecordReader<InternalRow> {
             }
 
             @Override
+            public long returnedRowId() {
+                return rowId;
+            }
+
+            @Override
             public InternalRow next() throws IOException {
                 InternalRow row = iterator.next();
-                if (row != null && rowIdToScore != null) {
-                    Long rowId = row.getLong(rowIdIndex);
-                    this.score = rowIdToScore.get(rowId);
+                if (row != null && rowIdIndex >= 0) {
+                    this.rowId = row.getLong(rowIdIndex);
+                    if (rowIdToScore != null) {
+                        this.score = rowIdToScore.get(rowId);
+                    }
                     if (projectedRow != null) {
                         projectedRow.replaceRow(row);
                         return projectedRow;

@@ -37,7 +37,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RoaringBitmap32;
 
-import org.apache.parquet.filter2.compat.FilterCompat;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -76,9 +75,10 @@ public class ParquetInt96RowSelectionTest {
                         fileIO,
                         file,
                         fileIO.getFileSize(file),
-                        RoaringBitmap32.bitmapOf(SELECTED_POSITIONS));
+                        RoaringBitmap32.bitmapOf(SELECTED_POSITIONS),
+                        null);
         ParquetReaderFactory readerFactory =
-                new ParquetReaderFactory(new Options(), ROW_TYPE, BATCH_SIZE, FilterCompat.NOOP);
+                new ParquetReaderFactory(new Options(), ROW_TYPE, BATCH_SIZE, null);
 
         try (RecordReader<InternalRow> reader = readerFactory.createReader(context)) {
             int expectedIndex = 0;

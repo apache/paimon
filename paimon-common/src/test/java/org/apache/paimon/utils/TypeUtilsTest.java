@@ -26,11 +26,14 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -42,6 +45,7 @@ import java.util.HashMap;
 import java.util.TimeZone;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link TypeUtils}. */
 public class TypeUtilsTest {
@@ -295,6 +299,91 @@ public class TypeUtilsTest {
                                 Collections.singletonMap(
                                         BinaryString.fromString("nested_key1"), 0)),
                         BinaryString.fromString("value"));
+        assertThat(result).isEqualTo(expected);
+    }
+
+    private static DataType twoStringFieldRow() {
+        return DataTypes.ROW(
+                new DataField(0, "key1", DataTypes.STRING()),
+                new DataField(1, "key2", DataTypes.STRING()));
+    }
+
+    @Test
+    public void testMapCastFromMalformedJsonThrows() {
+        assertThatThrownBy(
+                        () ->
+                                TypeUtils.castFromString(
+                                        "{\"a\": ",
+                                        DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING())))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to parse Json String");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"[1,2]", "123", "\"abc\"", "null", ""})
+    public void testMapCastFromNonObjectJsonThrows(String value) {
+        assertThatThrownBy(
+                        () ->
+                                TypeUtils.castFromString(
+                                        value,
+                                        DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING())))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to parse Json String");
+    }
+
+    @Test
+    public void testMapCastFromEmptyObject() {
+        Object result =
+                TypeUtils.castFromString(
+                        "{}", DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING()));
+        assertThat(result).isEqualTo(new GenericMap(Collections.emptyMap()));
+    }
+
+    @Test
+    public void testRowCastFromMalformedJsonThrows() {
+        assertThatThrownBy(() -> TypeUtils.castFromString("{\"key1\": ", twoStringFieldRow()))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to parse Json String");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"[1,2]", "123", "\"abc\"", "null", ""})
+    public void testRowCastFromNonObjectJsonThrows(String value) {
+        assertThatThrownBy(() -> TypeUtils.castFromString(value, twoStringFieldRow()))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to parse Json String");
+    }
+
+    /** A CDC record may legitimately not carry every field, so missing fields stay tolerated. */
+    @Test
+    public void testRowCastFromObjectWithMissingField() {
+        Object result = TypeUtils.castFromString("{\"key2\":\"v\"}", twoStringFieldRow());
+        assertThat(result).isEqualTo(GenericRow.of(null, BinaryString.fromString("v")));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"123", "{\"a\":1}", ""})
+    public void testArrayCastFromNonArrayJsonThrows(String value) {
+        assertThatThrownBy(() -> TypeUtils.castFromString(value, DataTypes.ARRAY(DataTypes.INT())))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to parse Json String");
+        assertThatThrownBy(
+                        () -> TypeUtils.castFromString(value, DataTypes.ARRAY(DataTypes.STRING())))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to parse Json String");
+    }
+
+    /** Values that are not JSON at all still fall back to the legacy comma-separated parsing. */
+    @Test
+    public void testArrayCastFromLegacyCommaSeparated() {
+        Object result = TypeUtils.castFromString("a,b,c", DataTypes.ARRAY(DataTypes.STRING()));
+        GenericArray expected =
+                new GenericArray(
+                        Arrays.asList(
+                                        BinaryString.fromString("a"),
+                                        BinaryString.fromString("b"),
+                                        BinaryString.fromString("c"))
+                                .toArray());
         assertThat(result).isEqualTo(expected);
     }
 

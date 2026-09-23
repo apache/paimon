@@ -28,6 +28,7 @@ import org.apache.paimon.io.DataFileMeta10LegacySerializer;
 import org.apache.paimon.io.DataFileMeta12LegacySerializer;
 import org.apache.paimon.io.DataFileMetaFirstRowIdLegacySerializer;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.io.DataFileMetaWriteColsLegacySerializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputView;
@@ -63,7 +64,7 @@ public class DataSplit implements Split {
 
     private static final long serialVersionUID = 7L;
     private static final long MAGIC = -2394839472490812314L;
-    private static final int VERSION = 8;
+    private static final int VERSION = 9;
 
     private long snapshotId = 0;
     private BinaryRow partition;
@@ -72,6 +73,11 @@ public class DataSplit implements Split {
     @Nullable private Integer totalBuckets;
 
     private List<DataFileMeta> dataFiles;
+
+    /**
+     * This list should have the same size as dataFiles. For data evolution tables, only anchor
+     * files would have corresponding deletion file.
+     */
     @Nullable private List<DeletionFile> dataDeletionFiles;
 
     private boolean isStreaming = false;
@@ -141,7 +147,7 @@ public class DataSplit implements Split {
     }
 
     private boolean rawMergedRowCountAvailable() {
-        return rawConvertible
+        return rawConvertible()
                 && (dataDeletionFiles == null
                         || dataDeletionFiles.stream()
                                 .allMatch(f -> f == null || f.cardinality() != null));
@@ -168,6 +174,14 @@ public class DataSplit implements Split {
                 return false;
             }
         }
+
+        if (dataDeletionFiles != null) {
+            for (DeletionFile deletionFile : dataDeletionFiles) {
+                if (deletionFile != null && deletionFile.cardinality() == null) {
+                    return false;
+                }
+            }
+        }
         return true;
     }
 
@@ -181,6 +195,13 @@ public class DataSplit implements Split {
                 maxCount = Math.max(maxCount, file.rowCount());
             }
             sum += maxCount;
+        }
+        if (dataDeletionFiles != null) {
+            for (DeletionFile deletionFile : dataDeletionFiles) {
+                if (deletionFile != null) {
+                    sum -= deletionFile.cardinality();
+                }
+            }
         }
         return sum;
     }
@@ -245,7 +266,7 @@ public class DataSplit implements Split {
 
     @Override
     public Optional<List<RawFile>> convertToRawFiles() {
-        if (rawConvertible) {
+        if (rawConvertible()) {
             return Optional.of(
                     dataFiles.stream()
                             .map(f -> makeRawTableFile(bucketPath, f))
@@ -442,8 +463,9 @@ public class DataSplit implements Split {
             throw new RuntimeException("Cannot deserialize data split with before deletion files.");
         }
 
-        int fileNumber = in.readInt();
-        List<DataFileMeta> dataFiles = new ArrayList<>(fileNumber);
+        int fileNumber = SerializationUtils.readCount(in, "DataSplit");
+        List<DataFileMeta> dataFiles =
+                new ArrayList<>(SerializationUtils.presizedCapacity(fileNumber));
         for (int i = 0; i < fileNumber; i++) {
             dataFiles.add(dataFileSer.apply(in));
         }
@@ -489,6 +511,10 @@ public class DataSplit implements Split {
                     new DataFileMetaFirstRowIdLegacySerializer();
             return serializer::deserialize;
         } else if (version == 8) {
+            DataFileMetaWriteColsLegacySerializer serializer =
+                    new DataFileMetaWriteColsLegacySerializer();
+            return serializer::deserialize;
+        } else if (version == 9) {
             DataFileMetaSerializer serializer = new DataFileMetaSerializer();
             return serializer::deserialize;
         } else {

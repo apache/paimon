@@ -18,12 +18,13 @@
 import logging
 import os
 import time
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.globalindex import ScoredGlobalIndexResult
+from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -32,27 +33,43 @@ from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 from pypaimon.schema.data_types import DataField
 from pypaimon.read.plan import Plan
+from pypaimon.read.scan_distribution import validate_shard, validate_slice
 from pypaimon.read.push_down_utils import (_get_all_fields,
+                                           exclude_predicate_with_fields,
                                            remove_row_id_filter,
-                                           trim_and_transform_predicate)
+                                           rewrite_predicate_indices,
+                                           trim_and_transform_predicate,
+                                           trim_predicate_by_fields)
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.scanner.append_table_split_generator import \
     AppendTableSplitGenerator
 from pypaimon.read.scanner.bucket_select_converter import \
     create_bucket_selector
+from pypaimon.read.scanner.chunk_shuffle_split_generator import (
+    AppendChunkShuffleSplitGenerator,
+    DataEvolutionChunkShuffleSplitGenerator,
+)
 from pypaimon.read.scanner.data_evolution_split_generator import \
     DataEvolutionSplitGenerator
+from pypaimon.read.scanner.data_evolution_stats import \
+    DataEvolutionGroupStatsFilter
 from pypaimon.read.scanner.primary_key_table_split_generator import \
     PrimaryKeyTableSplitGenerator
 from pypaimon.read.split import DataSplit
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.table.special_fields import SpecialFields
 from pypaimon.table.source.deletion_file import DeletionFile
+from pypaimon.utils.range import Range
+
+
+class _GlobalIndexPlanningResult(NamedTuple):
+    indexed_result: GlobalIndexResult
+    unindexed_ranges: List[Range]
 
 
 def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]:
     from pypaimon.table.special_fields import SpecialFields
-    from pypaimon.utils.range import Range
 
     if predicate is None:
         return None
@@ -97,6 +114,40 @@ def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]
     return visit(predicate)
 
 
+def _build_early_row_range_filter(row_ranges):
+    """Skip entries whose row-id range doesn't intersect ``row_ranges``.
+
+    Runs on the raw fastavro record (OrderedDict) before the expensive
+    Python object construction (BinaryRow, GenericRow, SimpleStats,
+    DataFileMeta). fastavro has already parsed the Avro bytes; this
+    filter avoids the construction cost, not I/O or parsing.
+
+    Safe for DELETE entries because ADD and DELETE for the same file
+    share the same ``_FIRST_ROW_ID``.
+    """
+    if row_ranges is None or not row_ranges:
+        return None
+
+    def _filter(record):
+        file_dict = record.get('_FILE')
+        if file_dict is None:
+            return True
+        first_row_id = file_dict.get('_FIRST_ROW_ID')
+        if first_row_id is None:
+            return True
+        row_count = file_dict.get('_ROW_COUNT')
+        if row_count is None:
+            return True
+        file_start = int(first_row_id)
+        file_end = file_start + int(row_count) - 1
+        for r in row_ranges:
+            if Range.intersect(file_start, file_end, r.from_, r.to):
+                return True
+        return False
+
+    return _filter
+
+
 def _filter_manifest_files_by_row_ranges(
         manifest_files: List[ManifestFileMeta],
         row_ranges: List) -> List[ManifestFileMeta]:
@@ -112,8 +163,6 @@ def _filter_manifest_files_by_row_ranges(
     Returns:
         Filtered list of manifest files
     """
-    from pypaimon.utils.range import Range
-
     filtered_files = []
     for manifest in manifest_files:
         min_row_id = manifest.min_row_id
@@ -173,14 +222,27 @@ class FileScanner:
         manifest_scanner: Callable[[], Tuple[List[ManifestFileMeta], Optional[Snapshot]]],
         predicate: Optional[Predicate] = None,
         limit: Optional[int] = None,
-        partition_predicate: Optional[Predicate] = None
+        partition_predicate: Optional[Predicate] = None,
+        skip_level0: bool = False,
+        is_streaming: bool = False,
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.manifest_scanner = manifest_scanner
         self.predicate = predicate
-        self.predicate_for_stats = remove_row_id_filter(predicate) if predicate else None
+        row_ranges = (
+            _row_ranges_from_predicate(predicate) if predicate else None
+        )
+        if predicate and row_ranges is not None:
+            self.predicate_for_stats = remove_row_id_filter(predicate)
+        else:
+            self.predicate_for_stats = predicate
+        self.predicate_for_stats = exclude_predicate_with_fields(
+            self.predicate_for_stats, SpecialFields.SYSTEM_FIELD_NAMES)
+        # Partition columns aren't in data files, so skip them for value-stats pruning.
+        self.predicate_for_stats = exclude_predicate_with_fields(
+            self.predicate_for_stats, set(self.table.partition_keys))
         self.limit = limit
 
         self.snapshot_manager = table.snapshot_manager()
@@ -194,7 +256,12 @@ class FileScanner:
             self.partition_key_predicate = trim_and_transform_predicate(
                 self.predicate, self.table.field_names, self.table.partition_keys)
         else:
-            self.partition_key_predicate = partition_predicate
+            # External predicate may carry full-schema indices and non-partition
+            # leaves; drop non-partition leaves and rebind the rest by name to the
+            # partition-row layout (matches derived path / Java), else IndexError.
+            self.partition_key_predicate = rewrite_predicate_indices(
+                trim_predicate_by_fields(partition_predicate, self.table.partition_keys),
+                self.table.partition_keys_fields)
         options = self.table.options
         # Get split target size and open file cost from table options
         self.target_split_size = options.source_split_target_size()
@@ -204,17 +271,23 @@ class FileScanner:
         self.number_of_para_subtasks = None
         self.start_pos_of_this_subtask = None
         self.end_pos_of_this_subtask = None
+        self.chunk_shuffle: Optional[Tuple[int, int]] = None
 
         self.only_read_real_buckets = options.bucket() == BucketMode.POSTPONE_BUCKET.value
         self.data_evolution = options.data_evolution_enabled()
         self.deletion_vectors_enabled = options.deletion_vectors_enabled()
+        self.skip_level0 = skip_level0
+        self.is_streaming = is_streaming
         self._global_index_result = None
+        self._row_ranges = None
         self._scanned_snapshot = None
         self._scanned_snapshot_id = None
         # Opt-in scan-plan tracking. Stays ``None`` for the read hot path;
         # ``scan_with_stats()`` flips it on for a single explain pass and
         # the filter callbacks below increment counters when present.
         self.scan_stats: Optional[ScanStats] = None
+        self.auth_partition_predicate = None
+        self.auth_has_non_partition_filter = False
 
         # Predicate-driven bucket pruning (HASH_FIXED only). Mirrors Java
         # BucketSelectConverter. Set on demand and reused across all
@@ -222,16 +295,27 @@ class FileScanner:
         # bucket set per ``total_buckets`` value.
         self._bucket_selector = self._init_bucket_selector()
 
-        def schema_fields_func(schema_id: int):
-            return self.table.schema_manager.get_schema(schema_id).fields
-
         self.simple_stats_evolutions = SimpleStatsEvolutions(
-            schema_fields_func,
+            self._schema_fields,
             self.table.table_schema.id
         )
 
+    def _schema_fields(self, schema_id: int):
+        """Resolve schema fields, short-circuiting current table schema id to avoid
+        filesystem access (REST catalog would get 403).
+        """
+        if schema_id == self.table.table_schema.id:
+            return self.table.table_schema.fields
+        return self.table.schema_manager.get_schema(schema_id).fields
+
+    def _schema(self, schema_id: int):
+        """Resolve the complete schema including its dedicated-file options."""
+        if schema_id == self.table.table_schema.id:
+            return self.table.table_schema
+        return self.table.schema_manager.get_schema(schema_id)
+
     def _deletion_files_map(self, entries: List[ManifestEntry]) -> Dict[tuple, Dict[str, DeletionFile]]:
-        if not self.deletion_vectors_enabled:
+        if self.is_streaming or not self.deletion_vectors_enabled:
             return {}
         # Extract unique partition-bucket pairs from file entries
         bucket_files = set()
@@ -242,14 +326,55 @@ class FileScanner:
 
     def scan(self) -> Plan:
         start_ms = time.time() * 1000
+        if self._global_index_result is not None:
+            from pypaimon.table.source.global_index_split_result import GlobalIndexSplitResult
+            if self.table.is_primary_key_table:
+                if not isinstance(self._global_index_result, GlobalIndexSplitResult):
+                    raise ValueError(
+                        "Primary-key scan requires a GlobalIndexSplitResult, but found %s."
+                        % type(self._global_index_result).__name__)
+                return Plan(
+                    list(self._global_index_result.splits),
+                    snapshot_id=self._global_index_result.snapshot_id,
+                )
         # Create appropriate split generator based on table type
-        if self.table.is_primary_key_table:
+        if self.chunk_shuffle is not None:
+            self._validate_chunk_shuffle_compat()
+            seed, chunk_size = self.chunk_shuffle
+            # Both append and DE paths use plan_files() directly: the
+            # predicate is partition-only (enforced by
+            # _validate_chunk_shuffle_compat), so manifest_entry-level
+            # partition pruning in plan_files() is the only filter we
+            # want — no row_id range pushdown, no global index lookup.
+            entries = self.plan_files()
+            if self.data_evolution:
+                split_generator = DataEvolutionChunkShuffleSplitGenerator(
+                    self.table,
+                    self.target_split_size,
+                    self.open_file_cost,
+                    self._deletion_files_map(entries),
+                    seed=seed,
+                    chunk_size=chunk_size,
+                    snapshot_id=self._scanned_snapshot_id,
+                )
+            else:
+                split_generator = AppendChunkShuffleSplitGenerator(
+                    self.table,
+                    self.target_split_size,
+                    self.open_file_cost,
+                    self._deletion_files_map(entries),
+                    seed=seed,
+                    chunk_size=chunk_size,
+                    snapshot_id=self._scanned_snapshot_id,
+                )
+        elif self.table.is_primary_key_table:
             entries = self.plan_files()
             split_generator = PrimaryKeyTableSplitGenerator(
                 self.table,
                 self.target_split_size,
                 self.open_file_cost,
-                self._deletion_files_map(entries)
+                self._deletion_files_map(entries),
+                snapshot_id=self._scanned_snapshot_id,
             )
         elif self.data_evolution:
             entries, split_generator = self._create_data_evolution_split_generator()
@@ -259,7 +384,8 @@ class FileScanner:
                 self.table,
                 self.target_split_size,
                 self.open_file_cost,
-                self._deletion_files_map(entries)
+                self._deletion_files_map(entries),
+                snapshot_id=self._scanned_snapshot_id,
             )
 
         if not entries:
@@ -273,6 +399,20 @@ class FileScanner:
 
         # Generate splits
         splits = split_generator.create_splits(entries)
+        if self.is_streaming:
+            for split in splits:
+                while callable(getattr(split, 'data_split', None)):
+                    split = split.data_split()
+                split.is_streaming = True
+
+        if self.data_evolution and self.scan_stats is not None:
+            # Data-evolution stats pruning happens on complete row-id groups
+            # inside the split generator, not in _filter_manifest_entry.
+            self.scan_stats.entries_after_stats = sum(
+                len(split.files) for split in splits)
+
+        if self.table.is_primary_key_table and not self.is_streaming:
+            splits = self._apply_primary_key_sorted_indexes(splits)
 
         splits = self._apply_push_down_limit(splits)
         duration_ms = int(time.time() * 1000 - start_ms)
@@ -282,30 +422,113 @@ class FileScanner:
         )
         return Plan(splits, snapshot_id=self._scanned_snapshot_id)
 
-    def _create_data_evolution_split_generator(self):
-        row_ranges = None
-        score_getter = None
-        global_index_result = self._global_index_result if self._global_index_result is not None \
-            else self._eval_global_index()
-        if global_index_result is not None:
-            row_ranges = global_index_result.results().to_range_list()
-            if isinstance(global_index_result, ScoredGlobalIndexResult):
-                score_getter = global_index_result.score_getter()
-        if row_ranges is None and self.predicate is not None:
-            row_ranges = _row_ranges_from_predicate(self.predicate)
+    def _apply_primary_key_sorted_indexes(self, splits, snapshot=None):
+        snapshot = snapshot if snapshot is not None else self._scanned_snapshot
+        if (not self.table.options.global_index_enabled()
+                or self.predicate is None
+                or snapshot is None
+                or not splits):
+            return splits
 
+        from pypaimon.index.index_file_handler import IndexFileHandler
+        from pypaimon.index.pk.primary_key_index_definitions import PrimaryKeyIndexDefinitions
+        from pypaimon.table.source.primary_key_sorted_index_result import (
+            PrimaryKeySortedIndexResult,
+        )
+        from pypaimon.table.source import primary_key_sorted_index_scan
+
+        definitions = PrimaryKeyIndexDefinitions.create(self.table.table_schema).definitions
+        if not definitions:
+            return splits
+        field_ids = {definition.field_id for definition in definitions}
+        entries = IndexFileHandler(self.table).scan(
+            snapshot,
+            lambda entry: (
+                entry.kind == 0
+                and entry.index_file.global_index_meta is not None
+                and entry.index_file.global_index_meta.source_meta is not None
+                and entry.index_file.global_index_meta.index_field_id in field_ids
+            ),
+        )
+        index_plan = primary_key_sorted_index_scan.plan(
+            snapshot.id, splits, definitions, entries)
+        evaluated = primary_key_sorted_index_scan.evaluate(
+            index_plan,
+            self.table.fields,
+            self.predicate,
+            definitions,
+            primary_key_sorted_index_scan.reader_factory(self.table),
+        )
+        return list(PrimaryKeySortedIndexResult(evaluated).splits)
+
+    def _create_data_evolution_split_generator(self):
+        row_ranges = getattr(self, '_row_ranges', None)
+        score_getter = None
+        # Fetch snapshot once and share with global index evaluation to avoid
+        # a duplicate /snapshot REST round-trip (#7513).
         manifest_files, snapshot = self.manifest_scanner()
         self._scanned_snapshot = snapshot
         self._scanned_snapshot_id = snapshot.id if snapshot else None
 
-        # Filter manifest files by row ranges if available
-        if row_ranges is not None:
-            manifest_files = _filter_manifest_files_by_row_ranges(manifest_files, row_ranges)
+        if row_ranges is None:
+            global_index_plan = self._global_index_result \
+                if self._global_index_result is not None \
+                else self._eval_global_index(snapshot)
+            if global_index_plan is not None:
+                if isinstance(global_index_plan, _GlobalIndexPlanningResult):
+                    global_index_result = global_index_plan.indexed_result
+                    row_ranges = Range.sort_and_merge_overlap(
+                        global_index_result.results().to_range_list()
+                        + global_index_plan.unindexed_ranges,
+                        True,
+                    )
+                else:
+                    global_index_result = global_index_plan
+                    row_ranges = global_index_result.results().to_range_list()
+                if isinstance(global_index_result, ScoredGlobalIndexResult):
+                    score_getter = global_index_result.score_getter()
+        if row_ranges is None and self.predicate is not None:
+            row_ranges = _row_ranges_from_predicate(self.predicate)
 
-        entries = self.read_manifest_entries(manifest_files)
+        if row_ranges is not None and not row_ranges:
+            return [], DataEvolutionSplitGenerator(
+                self.table,
+                self.target_split_size,
+                self.open_file_cost,
+                {},
+                row_ranges,
+                score_getter,
+                None,
+                snapshot_id=self._scanned_snapshot_id,
+            )
 
-        if row_ranges is not None:
-            entries = _filter_manifest_entries_by_row_ranges(entries, row_ranges)
+        # Position selection counts the complete candidate row-id space. Early
+        # range pruning would renumber later files; the split generator applies
+        # the range intersection after assigning slice/shard positions.
+        positional = self.idx_of_this_subtask is not None or self.start_pos_of_this_subtask is not None
+        early_row_ranges = None if positional else row_ranges
+        if early_row_ranges is not None:
+            manifest_files = _filter_manifest_files_by_row_ranges(manifest_files, early_row_ranges)
+
+        stats_predicate = getattr(self, 'predicate_for_stats', None)
+        group_stats_enabled = stats_predicate is not None and score_getter is None
+        entries = self.read_manifest_entries(
+            manifest_files,
+            row_ranges=early_row_ranges,
+            keep_stats=group_stats_enabled,
+        )
+
+        # Redundant when early_record_filter ran; kept for explain mode and as safety net.
+        if early_row_ranges is not None:
+            entries = _filter_manifest_entries_by_row_ranges(entries, early_row_ranges)
+
+        group_stats_filter = None
+        if group_stats_enabled:
+            group_stats_filter = DataEvolutionGroupStatsFilter(
+                stats_predicate,
+                self.table.fields,
+                self._schema,
+            )
 
         return entries, DataEvolutionSplitGenerator(
             self.table,
@@ -313,7 +536,9 @@ class FileScanner:
             self.open_file_cost,
             self._deletion_files_map(entries),
             row_ranges,
-            score_getter
+            score_getter,
+            group_stats_filter,
+            snapshot_id=self._scanned_snapshot_id,
         )
 
     def plan_files(self) -> List[ManifestEntry]:
@@ -324,31 +549,46 @@ class FileScanner:
             return []
         return self.read_manifest_entries(manifest_files)
 
-    def _eval_global_index(self):
-        # No filter - nothing to evaluate
-        if self.predicate is None:
+    def _eval_global_index(self, snapshot=None):
+        # Snapshot indexes describe current state, not historical change events.
+        if self.is_streaming or self.predicate is None:
             return None
 
         # Check if global index is enabled
         if not self.table.options.global_index_enabled():
             return None
 
-        from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
+        from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 
         try:
-            scanner = GlobalIndexScanner.create(
+            scanner = DataEvolutionGlobalIndexScanner.create(
                 self.table,
                 partition_filter=self.partition_key_predicate,
-                predicate=self.predicate
+                predicate=self.predicate,
+                snapshot=snapshot,
             )
             if scanner is None:
                 return None
             with scanner:
-                return scanner.scan(self.predicate)
+                evaluation = scanner.scan_with_coverage(self.predicate)
+                if evaluation is None:
+                    return None
+                scalar_mode = self.table.options.scalar_index_search_mode()
+                return _GlobalIndexPlanningResult(
+                    evaluation.result,
+                    scanner.unindexed_ranges(
+                        self.predicate,
+                        search_mode=scalar_mode,
+                        contributing_field_ids=(
+                            evaluation.contributing_field_ids),
+                    ),
+                )
         except Exception:
             return None
 
-    def read_manifest_entries(self, manifest_files: List[ManifestFileMeta]) -> List[ManifestEntry]:
+    def read_manifest_entries(self, manifest_files: List[ManifestFileMeta],
+                              row_ranges=None,
+                              keep_stats=False) -> List[ManifestEntry]:
         max_workers = self.table.options.scan_manifest_parallelism(os.cpu_count() or 8)
         if self.scan_stats is not None:
             self.scan_stats.manifest_files_total += len(manifest_files)
@@ -364,11 +604,21 @@ class FileScanner:
             self.scan_stats.manifest_files_after_partition += len(manifest_files)
             # Force single-threaded so we can mutate stats without locking.
             max_workers = 1
+        # Disable early entry filters and sidecar pruning in explain mode so all entries
+        # flow through _filter_manifest_entry for accurate funnel counting.
+        early_row_filter = None if self.scan_stats is not None \
+            else _build_early_row_range_filter(row_ranges)
+        partition_filter = None if self.scan_stats is not None \
+            else self.partition_key_predicate
         return self.manifest_file_manager.read_entries_parallel(
             manifest_files,
             self._filter_manifest_entry,
+            drop_stats=not keep_stats,
             max_workers=max_workers,
             early_entry_filter=self._build_early_bucket_filter(),
+            early_record_filter=early_row_filter,
+            partition_filter=partition_filter,
+            row_ranges=row_ranges if self.scan_stats is None else None,
         )
 
     def _build_early_bucket_filter(self):
@@ -404,25 +654,39 @@ class FileScanner:
         return _filter
 
     def with_shard(self, idx_of_this_subtask: int, number_of_para_subtasks: int) -> 'FileScanner':
-        if idx_of_this_subtask >= number_of_para_subtasks:
-            raise ValueError("idx_of_this_subtask must be less than number_of_para_subtasks")
+        validate_shard(idx_of_this_subtask, number_of_para_subtasks)
         if self.start_pos_of_this_subtask is not None:
-            raise Exception("with_shard and with_slice cannot be used simultaneously")
+            raise ValueError("with_shard and with_slice cannot be used simultaneously")
         self.idx_of_this_subtask = idx_of_this_subtask
         self.number_of_para_subtasks = number_of_para_subtasks
         return self
 
     def with_slice(self, start_pos: int, end_pos: int) -> 'FileScanner':
-        if start_pos >= end_pos:
-            raise ValueError("start_pos must be less than end_pos")
+        validate_slice(start_pos, end_pos)
+        if self.table.is_primary_key_table:
+            raise NotImplementedError("Primary key tables do not support with_slice(); use with_shard instead")
         if self.idx_of_this_subtask is not None:
-            raise Exception("with_slice and with_shard cannot be used simultaneously")
+            raise ValueError("with_slice and with_shard cannot be used simultaneously")
         self.start_pos_of_this_subtask = start_pos
         self.end_pos_of_this_subtask = end_pos
         return self
 
     def with_global_index_result(self, result) -> 'FileScanner':
+        if self._row_ranges is not None:
+            raise ValueError(
+                "with_global_index_result and with_row_ranges are mutually exclusive")
         self._global_index_result = result
+        return self
+
+    def with_row_ranges(self, row_ranges) -> 'FileScanner':
+        if not self.data_evolution:
+            raise ValueError("Row ranges are only supported for data evolution tables")
+        if row_ranges is None:
+            raise ValueError("row_ranges cannot be None")
+        if self._global_index_result is not None:
+            raise ValueError(
+                "with_row_ranges and with_global_index_result are mutually exclusive")
+        self._row_ranges = Range.sort_and_merge_overlap(list(row_ranges), True)
         return self
 
     def scan_with_stats(self) -> Tuple[Plan, ScanStats]:
@@ -438,6 +702,38 @@ class FileScanner:
         plan = self.scan()
         return plan, self.scan_stats
 
+    def with_chunk_shuffle(self, seed: int, chunk_size: int) -> 'FileScanner':
+        if not isinstance(seed, int):
+            raise ValueError("chunk_shuffle seed must be an int")
+        if not isinstance(chunk_size, int) or chunk_size <= 0:
+            raise ValueError("chunk_shuffle chunk_size must be a positive int")
+        self.chunk_shuffle = (seed, chunk_size)
+        return self
+
+    def _validate_chunk_shuffle_compat(self) -> None:
+        if self.table.is_primary_key_table:
+            raise ValueError("chunk_shuffle only supports append tables")
+        if self.start_pos_of_this_subtask is not None:
+            raise ValueError("chunk_shuffle cannot combine with with_slice")
+        if self.limit is not None:
+            raise ValueError("chunk_shuffle cannot combine with limit")
+        if self._global_index_result is not None:
+            raise ValueError("chunk_shuffle cannot combine with global index")
+        if self._row_ranges is not None:
+            raise ValueError("chunk_shuffle cannot combine with row ranges")
+        # Only partition predicates are allowed: row-level / column-level
+        # predicates would silently shrink each chunk's effective row count,
+        # breaking the chunk_size contract DataLoader callers expect.
+        if self.predicate is not None:
+            partition_keys = set(self.table.partition_keys or [])
+            non_partition_fields = _get_all_fields(self.predicate) - partition_keys
+            if non_partition_fields:
+                raise ValueError(
+                    "chunk_shuffle predicate must reference only partition keys; "
+                    "got non-partition fields: "
+                    f"{sorted(non_partition_fields)}"
+                )
+
     def _apply_push_down_limit(self, splits: List[DataSplit]) -> List[DataSplit]:
         """Mirror Java ``DataTableBatchScan.applyPushDownLimit``: sum the
         DV-aware ``merged_row_count`` (== Java ``Split.mergedRowCount()``)
@@ -446,18 +742,21 @@ class FileScanner:
         """
         if self.limit is None:
             return splits
-        if self._has_non_partition_filter():
+        if self.data_evolution and self.deletion_vectors_enabled:
+            return splits
+        if self._has_non_partition_filter() or self.auth_has_non_partition_filter:
             return splits
 
         scanned_row_count = 0
         limited_splits: List[DataSplit] = []
         for split in splits:
             merged = split.merged_row_count()
-            if merged is not None:
-                limited_splits.append(split)
-                scanned_row_count += merged
-                if scanned_row_count >= self.limit:
-                    return limited_splits
+            if merged is None:
+                return splits
+            limited_splits.append(split)
+            scanned_row_count += merged
+            if scanned_row_count >= self.limit:
+                return limited_splits
         return splits
 
     def _has_non_partition_filter(self) -> bool:
@@ -468,6 +767,18 @@ class FileScanner:
         return not _get_all_fields(self.predicate).issubset(partition_keys)
 
     def _filter_manifest_file(self, file: ManifestFileMeta) -> bool:
+        # explain() counts bucket rejections at entry level, as with the early
+        # bucket filter. Keep reading those entries when collecting scan stats.
+        if self.scan_stats is None and file.min_bucket is not None and file.max_bucket is not None:
+            if self.only_read_real_buckets and file.max_bucket < 0:
+                return False
+            if (self._bucket_selector is not None
+                    and file.min_bucket >= 0
+                    and file.total_buckets is not None
+                    and file.total_buckets > 0
+                    and not self._bucket_selector.may_contain(
+                        file.min_bucket, file.max_bucket, file.total_buckets)):
+                return False
         if not self.partition_key_predicate:
             return True
         return self.partition_key_predicate.test_by_simple_stats(
@@ -534,6 +845,8 @@ class FileScanner:
         )
 
     def _filter_manifest_entry(self, entry: ManifestEntry) -> bool:
+        if self.is_streaming and entry.kind != 0:
+            raise ValueError("Incremental delta manifests must contain only ADD entries")
         stats = self.scan_stats
         if stats is not None:
             stats.entries_total += 1
@@ -545,6 +858,8 @@ class FileScanner:
         # partition predicates, so this check is the sole partition gate
         # at the entry level — not a "redundant safety net".
         if self.partition_key_predicate and not self.partition_key_predicate.test(entry.partition):
+            return False
+        if self.auth_partition_predicate and not self.auth_partition_predicate.test(entry.partition):
             return False
         if stats is not None:
             stats.entries_after_partition += 1
@@ -573,7 +888,7 @@ class FileScanner:
 
         # Apply evolution to stats
         if self.table.is_primary_key_table:
-            if self.deletion_vectors_enabled and entry.file.level == 0:  # do not read level 0 file
+            if self.skip_level0 and entry.file.level == 0:
                 return False
             if self.primary_key_predicate:
                 if not self.primary_key_predicate.test_by_simple_stats(
@@ -581,9 +896,9 @@ class FileScanner:
                     entry.file.row_count
                 ):
                     return False
-            # In DV mode, files within a bucket don't overlap (level 0 excluded above),
-            # so we can safely filter by value stats per file.
-            if self.deletion_vectors_enabled and self.predicate_for_stats:
+            # Java enables value filtering only when batch scans exclude L0.
+            # With L0 present, pruning an update can expose an older value.
+            if self.skip_level0 and self.predicate_for_stats:
                 if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
                     stats_fields = entry.file.write_cols
                 else:
@@ -608,8 +923,6 @@ class FileScanner:
                 return True
             # Data evolution: file stats may be from another schema, skip stats filter and filter in reader.
             if self.data_evolution:
-                if stats is not None:
-                    stats.entries_after_stats += 1
                 return True
             if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
                 stats_fields = entry.file.write_cols
@@ -656,7 +969,7 @@ class FileScanner:
             # Convert to deletion files
             deletion_files = self._to_deletion_files(entry)
             if deletion_files:
-                result[partition_bucket] = deletion_files
+                result.setdefault(partition_bucket, {}).update(deletion_files)
 
         return result
 
@@ -672,10 +985,8 @@ class FileScanner:
         if not index_file.dv_ranges:
             return deletion_files
 
-        # Build deletion file path
-        # Format: manifest/index-manifest-{uuid}
-        index_path = self.table.table_path.rstrip('/') + '/index'
-        dv_file_path = f"{index_path}/{index_file.file_name}"
+        dv_file_path = self.table.path_factory().bucket_index_path(
+            tuple(index_entry.partition.values), index_entry.bucket, index_file, self.table.file_io)
 
         # Convert each DeletionVectorMeta to DeletionFile
         for data_file_name, dv_meta in index_file.dv_ranges.items():

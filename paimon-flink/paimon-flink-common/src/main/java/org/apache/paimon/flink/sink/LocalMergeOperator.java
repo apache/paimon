@@ -201,7 +201,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
     }
 
     private void flushBuffer() throws Exception {
-        if (merger.size() == 0) {
+        if (merger.isEmpty()) {
             return;
         }
 

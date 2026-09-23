@@ -30,6 +30,7 @@ class GlobalIndexMeta:
     index_field_id: int
     extra_field_ids: Optional[List[int]] = None
     index_meta: Optional[bytes] = None
+    source_meta: Optional[bytes] = None
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, GlobalIndexMeta):
@@ -39,7 +40,8 @@ class GlobalIndexMeta:
             self.row_range_end == other.row_range_end and
             self.index_field_id == other.index_field_id and
             self.extra_field_ids == other.extra_field_ids and
-            self.index_meta == other.index_meta
+            self.index_meta == other.index_meta and
+            self.source_meta == other.source_meta
         )
 
     def __hash__(self) -> int:
@@ -48,7 +50,9 @@ class GlobalIndexMeta:
             self.row_range_start,
             self.row_range_end,
             self.index_field_id,
-            extra_ids_tuple
+            extra_ids_tuple,
+            self.index_meta,
+            self.source_meta,
         ))
 
 

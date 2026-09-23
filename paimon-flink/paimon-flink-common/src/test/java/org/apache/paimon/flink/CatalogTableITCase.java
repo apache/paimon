@@ -60,6 +60,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class CatalogTableITCase extends CatalogITCaseBase {
 
     @Override
+    protected Map<String, String> catalogOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put("catalog-options-table.enabled", "true");
+        return options;
+    }
+
+    @Override
     protected boolean inferScanParallelism() {
         return true;
     }
@@ -183,7 +190,9 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     @Test
     public void testCatalogOptionsTable() {
         List<Row> result = sql("SELECT * FROM sys.catalog_options");
-        assertThat(result).containsExactly(Row.of("warehouse", path));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("catalog-options-table.enabled", "true"), Row.of("warehouse", path));
     }
 
     @Test
@@ -269,7 +278,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
         sql("ALTER TABLE T SET ('snapshot.num-retained.max' = '20')");
         sql("ALTER TABLE T SET ('snapshot.num-retained.min' = '18')");
-        sql("ALTER TABLE T SET ('manifest.format' = 'avro')");
+        sql("ALTER TABLE T SET ('manifest.compression' = 'snappy')");
 
         String actualResult = sql("SHOW CREATE TABLE T$schemas").toString();
         String expectedResult =
@@ -306,8 +315,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
                                 + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"snapshot.num-retained.min\":\"18\"}, ], "
                                 + "+I[4, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
-                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"manifest.format\":\"avro\","
-                                + "\"snapshot.num-retained.min\":\"18\"}, ]]");
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"snapshot.num-retained.min\":\"18\","
+                                + "\"manifest.compression\":\"snappy\"}, ]]");
 
         result =
                 sql(
@@ -366,17 +375,15 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
                                 + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"snapshot.num-retained.min\":\"18\"}, ], "
                                 + "+I[4, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
-                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"manifest.format\":\"avro\","
-                                + "\"snapshot.num-retained.min\":\"18\"}, ]]");
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"snapshot.num-retained.min\":\"18\","
+                                + "\"manifest.compression\":\"snappy\"}, ]]");
 
         // check with not exist schema id
-        assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "SELECT schema_id, fields, partition_keys, "
-                                                + "primary_keys, options, `comment` FROM T$schemas where schema_id = 5"))
-                .hasCauseInstanceOf(RuntimeException.class)
-                .hasRootCauseMessage("schema id: 5 should not greater than max schema id: 4");
+        assertThat(
+                        sql(
+                                "SELECT schema_id, fields, partition_keys, "
+                                        + "primary_keys, options, `comment` FROM T$schemas where schema_id = 5"))
+                .isEmpty();
 
         // check with not exist schema id
         assertThatThrownBy(
@@ -1171,7 +1178,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("CALL sys.create_branch('default.T', 'stream')");
         sql("ALTER TABLE T SET ('scan.fallback-branch' = 'stream')");
         sql(
-                "ALTER TABLE T$branch_stream SET ('primary-key' = 'k,v', 'bucket' = '2','changelog-producer' = 'lookup')");
+                "ALTER TABLE T$branch_stream SET ('primary-key' = 'k,v', 'bucket' = '2','changelog-producer' = 'full-compaction')");
         // full compaction will always be performed at the end of batch jobs, as long as
         // full-compaction.delta-commits is set, regardless of its value
         sql("show create table T$branch_stream");

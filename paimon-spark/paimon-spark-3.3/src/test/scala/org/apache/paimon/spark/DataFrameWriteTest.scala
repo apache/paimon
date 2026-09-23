@@ -40,7 +40,6 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
       .option("bucket", "-1")
       .option("target-file-size", "256MB")
       .option("write.merge-schema", "true")
-      .option("write.merge-schema.explicit-cast", "true")
       .saveAsTable("test_ctas")
 
     val paimonTable = loadTable("test_ctas")
@@ -53,7 +52,6 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
 
     // non-core options should not be here.
     Assertions.assertFalse(paimonTable.options().containsKey("write.merge-schema"))
-    Assertions.assertFalse(paimonTable.options().containsKey("write.merge-schema.explicit-cast"))
   }
 
 }

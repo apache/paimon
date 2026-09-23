@@ -32,11 +32,13 @@ class ManifestListManager:
 
     def __init__(self, table):
         from pypaimon.table.file_store_table import FileStoreTable
+        from pypaimon.manifest import avro_codec
 
         self.table: FileStoreTable = table
         manifest_path = table.table_path.rstrip('/')
         self.manifest_path = f"{manifest_path}/manifest"
         self.file_io = self.table.file_io
+        self._codec = avro_codec(table.options.manifest_compression())
 
     def read_all(self, snapshot: Optional[Snapshot]) -> List[ManifestFileMeta]:
         """Read base + delta manifest lists for full file state."""
@@ -94,8 +96,14 @@ class ManifestListManager:
                 num_deleted_files=record['_NUM_DELETED_FILES'],
                 partition_stats=partition_stats,
                 schema_id=record['_SCHEMA_ID'],
+                min_bucket=record.get('_MIN_BUCKET'),
+                max_bucket=record.get('_MAX_BUCKET'),
+                min_level=record.get('_MIN_LEVEL'),
+                max_level=record.get('_MAX_LEVEL'),
                 min_row_id=record.get('_MIN_ROW_ID'),
                 max_row_id=record.get('_MAX_ROW_ID'),
+                total_buckets=record.get('_TOTAL_BUCKETS'),
+                extra_files=record.get('_EXTRA_FILES'),
             )
             manifest_files.append(manifest_file_meta)
 
@@ -116,15 +124,23 @@ class ManifestListManager:
                     "_NULL_COUNTS": meta.partition_stats.null_counts,
                 },
                 "_SCHEMA_ID": meta.schema_id,
+                "_MIN_BUCKET": meta.min_bucket,
+                "_MAX_BUCKET": meta.max_bucket,
+                "_MIN_LEVEL": meta.min_level,
+                "_MAX_LEVEL": meta.max_level,
                 "_MIN_ROW_ID": meta.min_row_id,
                 "_MAX_ROW_ID": meta.max_row_id,
+                "_TOTAL_BUCKETS": meta.total_buckets,
+                "_EXTRA_FILES": meta.extra_files,
             }
             avro_records.append(avro_record)
 
         list_path = f"{self.manifest_path}/{file_name}"
         try:
             buffer = BytesIO()
-            fastavro.writer(buffer, MANIFEST_FILE_META_SCHEMA, avro_records)
+            fastavro.writer(
+                buffer, MANIFEST_FILE_META_SCHEMA, avro_records,
+                codec=self._codec)
             avro_bytes = buffer.getvalue()
             with self.file_io.new_output_stream(list_path) as output_stream:
                 output_stream.write(avro_bytes)

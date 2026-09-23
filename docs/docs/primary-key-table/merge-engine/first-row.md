@@ -24,23 +24,47 @@ under the License.
 
 # First Row
 
-By specifying `'merge-engine' = 'first-row'`, users can keep the first row of the same primary key. It differs from the
-`deduplicate` merge engine that in the `first-row` merge engine, it will generate insert only changelog.
+Set `merge-engine = first-row` to keep the first row for each primary key and ignore subsequent
+rows for that key. This is useful for event or log deduplication. Unlike `deduplicate`, later
+values do not replace the retained row.
 
-:::info
+## Create a Table
 
-`first-row` merge engine only supports `none` and `lookup` changelog producer. 
-For streaming queries must be used with the `lookup` [changelog producer](../changelog-producer).
+```sql
+CREATE TABLE events (
+    event_id BIGINT,
+    payload STRING,
+    PRIMARY KEY (event_id) NOT ENFORCED
+) WITH (
+    'merge-engine' = 'first-row',
+    'changelog-producer' = 'lookup'
+);
+```
 
-:::
+Inputs `(1, 'first')` and `(1, 'later')` leave `(1, 'first')` in the table.
 
-:::info
+## Streaming Reads
 
-1. You can not specify [sequence.field](../sequence-rowkind#sequence-field).
-2. Not accept `DELETE` and `UPDATE_BEFORE` message. You can config `ignore-delete` to ignore these two kinds records.
-3. Visibility guarantee: Tables with First Row engine, the files with level 0 will only be visible after compaction.
-   So by default, compaction is synchronous, and if asynchronous is turned on, there may be delays in the data.
+The engine supports `none` and `lookup` changelog producers. Use
+[`lookup`](../changelog-producer#lookup) for streaming reads that must emit a key only once:
+lookup compaction checks existing keys and produces an insert-only changelog of newly retained
+rows. `none` does not provide the same cross-commit streaming deduplication.
 
-:::
+[Managed BLOB storage](../blob-storage#first-row-with-blob-fields) requires `none`, so it cannot
+use this lookup-changelog streaming pattern.
 
-This is of great help in replacing log deduplication in streaming computation.
+## Ordering and Deletes
+
+- User-defined [sequence fields](../sequence-rowkind#sequence-field) are not supported.
+- `DELETE` and `UPDATE_BEFORE` records are rejected by default. Set `ignore-delete = true` to
+  discard them when the source may emit retractions.
+- The retained row follows ingestion ordering, not the smallest value of a business timestamp.
+
+## Compaction and Visibility
+
+By default, batch reads expose Level-0 data only after lookup compaction. Writers wait for lookup
+compaction by default; asynchronous compaction can delay visibility. See
+[Lookup Compaction](../compaction#lookup-compaction).
+
+Do not enable deletion vectors for an ordinary `first-row` table. The
+[PK Clustering Override](../pk-clustering-override) layout is a special case with its own requirements.

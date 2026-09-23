@@ -38,25 +38,26 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /** Block-level local disk cache with LRU eviction. Thread-safe. */
 public class LocalDiskCacheManager implements LocalCacheManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(LocalDiskCacheManager.class);
+    private static final String CACHE_FORMAT_VERSION = "v2";
 
     private final File cacheDir;
     private final long maxSizeBytes;
     private final int blockSize;
     private final Object lock = new Object();
-    private final ConcurrentHashMap<String, Long> fileSizeCache = new ConcurrentHashMap<>();
+    private final FileSizeMemo fileSizeMemo = new FileSizeMemo();
 
     // LRU-ordered index: key -> size. Access order so get() moves entry to tail.
     private final LinkedHashMap<String, Long> entryIndex;
     private long currentSize;
 
     public LocalDiskCacheManager(String cacheDir, long maxSizeBytes, int blockSize) {
-        this.cacheDir = new File(cacheDir);
+        this.cacheDir =
+                new File(new File(cacheDir, CACHE_FORMAT_VERSION), "block-size-" + blockSize);
         this.maxSizeBytes = maxSizeBytes;
         this.blockSize = blockSize;
         this.entryIndex = new LinkedHashMap<>(64, 0.75f, true);
@@ -71,15 +72,27 @@ public class LocalDiskCacheManager implements LocalCacheManager {
     public byte[] getBlock(String filePath, int blockIndex) {
         File path = cachePath(filePath, blockIndex);
         String cacheKey = path.getPath();
+        boolean needEvict = false;
         synchronized (lock) {
             if (!entryIndex.containsKey(cacheKey)) {
-                return null;
+                if (!path.isFile()) {
+                    return null;
+                }
+                long size = path.length();
+                entryIndex.put(cacheKey, size);
+                currentSize += size;
+                needEvict = maxSizeBytes < Long.MAX_VALUE && currentSize > maxSizeBytes;
+            } else {
+                // access to update LRU order
+                entryIndex.get(cacheKey);
             }
-            // access to update LRU order
-            entryIndex.get(cacheKey);
         }
         try {
-            return Files.readAllBytes(path.toPath());
+            byte[] data = Files.readAllBytes(path.toPath());
+            if (needEvict) {
+                evict();
+            }
+            return data;
         } catch (IOException e) {
             LOG.debug("Failed to read cache block: {}", path, e);
             synchronized (lock) {
@@ -125,8 +138,8 @@ public class LocalDiskCacheManager implements LocalCacheManager {
 
         boolean needEvict = false;
         synchronized (lock) {
-            entryIndex.put(cacheKey, (long) data.length);
-            currentSize += data.length;
+            Long previousSize = entryIndex.put(cacheKey, (long) data.length);
+            currentSize += data.length - (previousSize == null ? 0 : previousSize);
             needEvict = maxSizeBytes < Long.MAX_VALUE && currentSize > maxSizeBytes;
         }
         if (needEvict) {
@@ -187,7 +200,7 @@ public class LocalDiskCacheManager implements LocalCacheManager {
     }
 
     private File cachePath(String filePath, int blockIndex) {
-        String key = filePath + ":" + blockIndex;
+        String key = blockSize + ":" + filePath + ":" + blockIndex;
         String hex = sha256Hex(key);
         String prefix = hex.substring(0, 2);
         return new File(new File(cacheDir, prefix), hex);
@@ -226,12 +239,15 @@ public class LocalDiskCacheManager implements LocalCacheManager {
 
     @Override
     public long getFileSize(String filePath) {
-        Long size = fileSizeCache.get(filePath);
-        return size != null ? size : -1;
+        synchronized (lock) {
+            return fileSizeMemo.get(filePath);
+        }
     }
 
     @Override
     public void putFileSize(String filePath, long size) {
-        fileSizeCache.put(filePath, size);
+        synchronized (lock) {
+            fileSizeMemo.put(filePath, size);
+        }
     }
 }

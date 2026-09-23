@@ -43,7 +43,17 @@ public class FileUtils {
      */
     public static Stream<Long> listVersionedFiles(FileIO fileIO, Path dir, String prefix)
             throws IOException {
-        return listOriginalVersionedFiles(fileIO, dir, prefix).map(Long::parseLong);
+        // Python temporary files may share the versioned-file prefix, for example
+        // snapshot-1<UUID>.tmp, so ignore entries which are not valid version IDs.
+        return listOriginalVersionedFiles(fileIO, dir, prefix)
+                .flatMap(
+                        version -> {
+                            try {
+                                return Stream.of(Long.parseLong(version));
+                            } catch (NumberFormatException ignored) {
+                                return Stream.empty();
+                            }
+                        });
     }
 
     /**
@@ -131,7 +141,7 @@ public class FileUtils {
             if (fileSize == null) {
                 fileSize = fileIO.getFileSize(file);
             }
-            return format.createReader(new FormatReaderContext(fileIO, file, fileSize));
+            return format.createReader(new FormatReaderContext(fileIO, file, fileSize, null, null));
         } catch (Exception e) {
             checkExists(fileIO, file);
             throw e;

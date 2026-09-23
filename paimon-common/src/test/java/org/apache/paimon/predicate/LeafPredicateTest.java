@@ -71,6 +71,58 @@ class LeafPredicateTest {
         assertThat(clone.toString()).isEqualTo(predicate.toString());
     }
 
+    @Test
+    public void testArrayContainsSerializationUsesElementSerializer()
+            throws IOException, ClassNotFoundException {
+        PredicateBuilder builder =
+                new PredicateBuilder(RowType.of(DataTypes.ARRAY(DataTypes.STRING())));
+        LeafPredicate predicate =
+                (LeafPredicate) builder.arrayContains(0, BinaryString.fromString("vip"));
+
+        LeafPredicate clone = InstantiationUtil.clone(predicate);
+
+        assertThat(clone).isEqualTo(predicate);
+        assertThat(
+                        clone.test(
+                                GenericRow.of(
+                                        new GenericArray(
+                                                new BinaryString[] {
+                                                    BinaryString.fromString("trial"),
+                                                    BinaryString.fromString("vip")
+                                                }))))
+                .isTrue();
+    }
+
+    @Test
+    public void testArraySetPredicateSerializationUsesElementSerializer()
+            throws IOException, ClassNotFoundException {
+        PredicateBuilder builder =
+                new PredicateBuilder(RowType.of(DataTypes.ARRAY(DataTypes.STRING())));
+        LeafPredicate overlap =
+                (LeafPredicate)
+                        builder.arraysOverlap(
+                                0,
+                                java.util.Arrays.asList(
+                                        BinaryString.fromString("trial"),
+                                        BinaryString.fromString("vip")));
+        LeafPredicate containsAll =
+                (LeafPredicate)
+                        builder.arrayContainsAll(
+                                0,
+                                java.util.Arrays.asList(
+                                        BinaryString.fromString("trial"),
+                                        BinaryString.fromString("vip")));
+
+        GenericRow row =
+                GenericRow.of(
+                        new GenericArray(
+                                new BinaryString[] {
+                                    BinaryString.fromString("trial"), BinaryString.fromString("vip")
+                                }));
+        assertThat(InstantiationUtil.clone(overlap).test(row)).isTrue();
+        assertThat(InstantiationUtil.clone(containsAll).test(row)).isTrue();
+    }
+
     private LeafPredicate create() {
         List<Object> inputs = new ArrayList<>();
         inputs.add(new FieldRef(0, "f0", DataTypes.STRING()));

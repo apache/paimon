@@ -72,6 +72,8 @@ class OptionsUtils:
     @staticmethod
     def convert_to_string(value: Any) -> str:
         """Convert value to string."""
+        if isinstance(value, Enum):
+            return str(value.value)
         return str(value)
 
     @staticmethod

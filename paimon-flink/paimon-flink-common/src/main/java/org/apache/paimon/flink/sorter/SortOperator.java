@@ -107,7 +107,7 @@ public class SortOperator extends TableStreamOperator<InternalRow>
 
     @Override
     public void endInput() throws Exception {
-        if (buffer.size() > 0) {
+        if (!buffer.isEmpty()) {
             MutableObjectIterator<BinaryRow> iterator = buffer.sortedIterator();
             BinaryRow binaryRow = new BinaryRow(arity);
             while ((binaryRow = iterator.next(binaryRow)) != null) {

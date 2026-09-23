@@ -23,23 +23,167 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.ObjectStreamClass;
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.TimeZone;
 
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.assembleVariant;
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.buildVariantSchema;
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.castShredded;
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.variantShreddingSchema;
 import static org.apache.paimon.types.DataTypesTest.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test of {@link GenericVariant}. */
 public class GenericVariantTest {
+
+    @Test
+    public void testByteBufferBackedVariantSupportsHeapAndDirectSlices() {
+        GenericVariant expected =
+                GenericVariant.fromJson("{\"array\":[1,true,null],\"nested\":{\"key\":\"value\"}}");
+
+        GenericVariant heap =
+                new GenericVariant(
+                        paddedBuffer(expected.value(), false),
+                        paddedBuffer(expected.metadata(), false));
+        assertThat(heap.toJson()).isEqualTo(expected.toJson());
+        assertThat(heap.valueBuffer().arrayOffset()).isEqualTo(3);
+        assertThat(heap.metadataBuffer().arrayOffset()).isEqualTo(3);
+
+        ByteBuffer directValue = paddedBuffer(expected.value(), true);
+        ByteBuffer directMetadata = paddedBuffer(expected.metadata(), true);
+        GenericVariant direct = new GenericVariant(directValue, directMetadata);
+        assertThat(direct.toJson()).isEqualTo(expected.toJson());
+        assertThat(direct.getFieldByKey("nested").getFieldByKey("key").getString())
+                .isEqualTo("value");
+        assertThat(direct.valueBuffer().isDirect()).isEqualTo(true);
+        assertThat(direct.metadataBuffer().isDirect()).isEqualTo(true);
+        assertThat(directValue.position()).isEqualTo(0);
+        assertThat(directMetadata.position()).isEqualTo(0);
+        assertThat(direct.value()).isEqualTo(expected.value());
+        assertThat(direct.metadata()).isEqualTo(expected.metadata());
+    }
+
+    @Test
+    public void testConstructorBoundsValueBufferToLogicalValue() {
+        GenericVariant expected = GenericVariant.fromJson("null");
+        ByteBuffer valueWithTrailingBytes = ByteBuffer.allocate(expected.value().length + 2);
+        valueWithTrailingBytes.put(expected.value());
+        valueWithTrailingBytes.put((byte) 42);
+        valueWithTrailingBytes.put((byte) 43);
+        valueWithTrailingBytes.flip();
+
+        GenericVariant variant =
+                new GenericVariant(valueWithTrailingBytes, expected.metadataBuffer());
+
+        assertThat(variant.value()).isEqualTo(expected.value());
+        assertThat(variant.valueBuffer().remaining()).isEqualTo(expected.value().length);
+    }
+
+    @Test
+    public void testShreddingByteBufferBackedVariant() {
+        GenericVariant expected =
+                GenericVariant.fromJson("{\"a\":1,\"leftover\":{\"payload\":\"large-value\"}}");
+        GenericVariant direct =
+                new GenericVariant(
+                        paddedBuffer(expected.value(), true),
+                        paddedBuffer(expected.metadata(), true));
+        VariantSchema schema =
+                buildVariantSchema(variantShreddingSchema(RowType.of(DataTypes.BIGINT())));
+
+        Variant rebuilt = assembleVariant(castShredded(direct, schema), schema);
+
+        assertThat(rebuilt.toJson()).isEqualTo(expected.toJson());
+    }
+
+    @Test
+    public void testSerializeByteBufferBackedVariant() throws Exception {
+        GenericVariant expected = GenericVariant.fromJson("{\"nested\":{\"key\":\"value\"}}");
+        GenericVariant direct =
+                new GenericVariant(
+                        paddedBuffer(expected.value(), true),
+                        paddedBuffer(expected.metadata(), true));
+        GenericVariant nested = direct.getFieldByKey("nested");
+
+        GenericVariant restored = InstantiationUtil.clone(nested);
+
+        assertThat(restored.toJson()).isEqualTo("{\"key\":\"value\"}");
+        assertThat(
+                        InstantiationUtil.serializeObject(nested).length
+                                < InstantiationUtil.serializeObject(direct).length)
+                .isEqualTo(true);
+        assertThat(ObjectStreamClass.lookup(GenericVariant.class).getSerialVersionUID())
+                .isEqualTo(2L);
+    }
+
+    @Test
+    public void testEqualityForByteBufferBackedVariants() {
+        GenericVariant expected = GenericVariant.fromJson("{\"a\":1}");
+        GenericVariant first =
+                new GenericVariant(expected.valueBuffer(), expected.metadataBuffer());
+        GenericVariant second =
+                new GenericVariant(expected.valueBuffer(), expected.metadataBuffer());
+
+        assertThat(first).isEqualTo(second);
+        assertThat(first).isEqualTo(expected);
+        assertThat(expected).isEqualTo(first);
+        assertThat(first.hashCode()).isEqualTo(expected.hashCode());
+    }
+
+    @Test
+    public void testCopyDetachesBackingBuffers() {
+        GenericVariant expected = GenericVariant.fromJson("null");
+        byte[] value = expected.value().clone();
+        byte[] metadata = expected.metadata().clone();
+        GenericVariant variant =
+                new GenericVariant(ByteBuffer.wrap(value), ByteBuffer.wrap(metadata));
+
+        Variant copied = variant.copy();
+        value[0] = GenericVariant.fromJson("true").value()[0];
+
+        assertThat(variant.toJson()).isEqualTo("true");
+        assertThat(copied.toJson()).isEqualTo("null");
+    }
+
+    private static ByteBuffer paddedBuffer(byte[] bytes, boolean direct) {
+        ByteBuffer padded =
+                direct
+                        ? ByteBuffer.allocateDirect(bytes.length + 4)
+                        : ByteBuffer.allocate(bytes.length + 4);
+        padded.position(3);
+        padded.put(bytes);
+        padded.limit(3 + bytes.length);
+        padded.position(3);
+        return padded.slice().order(ByteOrder.LITTLE_ENDIAN);
+    }
+
+    @Test
+    public void testNestedValueBufferIsBoundedZeroCopyView() {
+        GenericVariant root = GenericVariant.fromJson("{\"nested\":{\"key\":\"value\"}}");
+        GenericVariant nested = root.getFieldByKey("nested");
+
+        ByteBuffer buffer = nested.valueBuffer();
+        byte[] serialized = new byte[buffer.remaining()];
+        buffer.duplicate().get(serialized);
+
+        assertThat(buffer.array()).isSameAs(root.valueBuffer().array());
+        assertThat(buffer.remaining() < root.valueBuffer().remaining()).isEqualTo(true);
+        assertThat(serialized).isEqualTo(nested.value());
+    }
 
     @Test
     public void testToJson() {
@@ -136,6 +280,185 @@ public class GenericVariantTest {
         assertThat(variant.variantGet("$.boolean2", DataTypes.BOOLEAN(), castArgs))
                 .isEqualTo(false);
         assertThat(variant.variantGet("$.nullField", DataTypes.BOOLEAN(), castArgs)).isNull();
+    }
+
+    @Test
+    public void testVariantGetDecimalWithScaleAbovePrecision() {
+        // precision() counts the digits of the unscaled value, so it is below the scale for any
+        // value under 0.1. The scale 38 case is the widest the reader admits, and it is the
+        // first one here that needs a non compact Decimal.
+        String tiny = "0.00000000000000000000000000000000000001";
+        Variant variant = GenericVariant.fromJson("{\"small\": 0.05, \"tiny\": " + tiny + "}");
+        VariantCastArgs castArgs = new VariantCastArgs(false, ZoneOffset.UTC);
+
+        assertThat(variant.variantGet("$.small", DataTypes.STRING(), castArgs))
+                .isEqualTo(BinaryString.fromString("0.05"));
+        assertThat(variant.variantGet("$.small", DataTypes.DECIMAL(5, 3), castArgs))
+                .isEqualTo(Decimal.fromBigDecimal(new BigDecimal("0.050"), 5, 3));
+        assertThat(variant.variantGet("$.tiny", DataTypes.STRING(), castArgs))
+                .isEqualTo(BinaryString.fromString(tiny));
+        assertThat(variant.variantGet("$.tiny", DataTypes.DECIMAL(38, 38), castArgs))
+                .isEqualTo(Decimal.fromBigDecimal(new BigDecimal(tiny), 38, 38));
+    }
+
+    @Test
+    public void testVariantGetDecimalWithNegativeScale() {
+        // getDecimal() strips trailing zeros, which turns 100.00 into 1E+2, a negative scale
+        Variant variant = GenericVariant.fromJson("{\"round\": 100.00}");
+        VariantCastArgs castArgs = new VariantCastArgs(false, ZoneOffset.UTC);
+
+        // rescaling rather than un-stripping keeps this in step with toJson
+        assertThat(variant.variantGet("$.round", DataTypes.STRING(), castArgs))
+                .isEqualTo(BinaryString.fromString("100"));
+        assertThat(variant.variantGet("$.round", DataTypes.DECIMAL(5, 1), castArgs))
+                .isEqualTo(Decimal.fromBigDecimal(new BigDecimal("100.0"), 5, 1));
+    }
+
+    @Test
+    public void testVariantGetIntegralOverflow() {
+        // The generic cast rules wrap or saturate a value that does not fit the target, which
+        // would turn an invalid cast into a wrong number; Spark's TRY cast rejects it instead.
+        Variant variant =
+                GenericVariant.fromJson(
+                        "{\"big\": 99999999999, \"huge\": 1e30, \"negHuge\": -1e30,"
+                                + " \"wide\": 12345678901234567890.5, \"nan\": 1.5,"
+                                + " \"fits\": 2147483647, \"neg\": -2147483648.5}");
+        VariantCastArgs tryCast = new VariantCastArgs(false, ZoneOffset.UTC);
+        VariantCastArgs strict = new VariantCastArgs(true, ZoneOffset.UTC);
+
+        assertThat(variant.variantGet("$.big", DataTypes.INT(), tryCast)).isNull();
+        assertThat(variant.variantGet("$.big", DataTypes.SMALLINT(), tryCast)).isNull();
+        assertThat(variant.variantGet("$.big", DataTypes.TINYINT(), tryCast)).isNull();
+        assertThat(variant.variantGet("$.huge", DataTypes.BIGINT(), tryCast)).isNull();
+        assertThat(variant.variantGet("$.huge", DataTypes.INT(), tryCast)).isNull();
+        assertThat(variant.variantGet("$.negHuge", DataTypes.INT(), tryCast)).isNull();
+        assertThat(variant.variantGet("$.wide", DataTypes.BIGINT(), tryCast)).isNull();
+        assertThatThrownBy(() -> variant.variantGet("$.big", DataTypes.INT(), strict))
+                .hasMessageContaining("Invalid cast 99999999999 to INT");
+        assertThatThrownBy(() -> variant.variantGet("$.huge", DataTypes.BIGINT(), strict))
+                .hasMessageContaining("Invalid cast 1.0E30 to BIGINT");
+
+        // in-range values still truncate the fractional part and widen as before
+        assertThat(variant.variantGet("$.big", DataTypes.BIGINT(), tryCast))
+                .isEqualTo(99999999999L);
+        assertThat(variant.variantGet("$.nan", DataTypes.INT(), tryCast)).isEqualTo(1);
+        assertThat(variant.variantGet("$.fits", DataTypes.INT(), tryCast))
+                .isEqualTo(Integer.MAX_VALUE);
+        assertThat(variant.variantGet("$.neg", DataTypes.INT(), tryCast))
+                .isEqualTo(Integer.MIN_VALUE);
+        assertThat(variant.variantGet("$.wide", DataTypes.DOUBLE(), tryCast))
+                .isEqualTo(1.2345678901234567E19);
+    }
+
+    @Test
+    public void testVariantGetTemporalCastsUseRequestedZone() {
+        // 2023-11-14 22:13:20.5 UTC as an instant, the same wall time as a local timestamp,
+        // and the date 2024-10-04
+        Map<String, Object> values = new HashMap<>();
+        values.put("ts", 1700000000500000L);
+        values.put("ntz", 1700000000500000L);
+        values.put("d", 20000);
+        values.put("s", "2023-11-14 22:13:20");
+        RowType valueType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(),
+                            DataTypes.TIMESTAMP(),
+                            DataTypes.DATE(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"ts", "ntz", "d", "s"});
+        Variant variant = GenericVariantBuilderHelper.build(valueType, values);
+        VariantCastArgs shanghai = new VariantCastArgs(false, ZoneId.of("Asia/Shanghai"));
+        VariantCastArgs utc = new VariantCastArgs(false, ZoneOffset.UTC);
+
+        // The generic cast rules use the JVM default zone; the requested zone must win no
+        // matter what the JVM default is, so run the same assertions under two defaults.
+        TimeZone original = TimeZone.getDefault();
+        try {
+            for (String jvmZone : new String[] {"UTC", "America/Los_Angeles"}) {
+                TimeZone.setDefault(TimeZone.getTimeZone(jvmZone));
+
+                // instant rendered in the requested zone, without trailing fraction zeros
+                assertThat(variant.variantGet("$.ts", DataTypes.STRING(), shanghai))
+                        .isEqualTo(BinaryString.fromString("2023-11-15 06:13:20.5"));
+                assertThat(variant.variantGet("$.ts", DataTypes.STRING(), utc))
+                        .isEqualTo(BinaryString.fromString("2023-11-14 22:13:20.5"));
+                assertThat(variant.variantGet("$.ts", DataTypes.TIMESTAMP(), shanghai))
+                        .isEqualTo(Timestamp.fromMicros(1700000000500000L + 8 * 3600_000_000L));
+                assertThat(variant.variantGet("$.ts", DataTypes.DATE(), shanghai)).isEqualTo(19676);
+                assertThat(variant.variantGet("$.ts", DataTypes.DATE(), utc)).isEqualTo(19675);
+
+                // a local timestamp has no zone to render, but gains one when it becomes an
+                // instant
+                assertThat(variant.variantGet("$.ntz", DataTypes.STRING(), shanghai))
+                        .isEqualTo(BinaryString.fromString("2023-11-14 22:13:20.5"));
+                assertThat(
+                                variant.variantGet(
+                                        "$.ntz",
+                                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(),
+                                        shanghai))
+                        .isEqualTo(Timestamp.fromMicros(1700000000500000L - 8 * 3600_000_000L));
+
+                // midnight of the date in the requested zone
+                assertThat(
+                                variant.variantGet(
+                                        "$.d",
+                                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(),
+                                        shanghai))
+                        .isEqualTo(
+                                Timestamp.fromMicros(20000L * 86400_000_000L - 8 * 3600_000_000L));
+
+                // a string is parsed as wall time in the requested zone
+                assertThat(
+                                variant.variantGet(
+                                        "$.s",
+                                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(),
+                                        shanghai))
+                        .isEqualTo(Timestamp.fromMicros(1700000000000000L - 8 * 3600_000_000L));
+
+                // the target precision is still honoured
+                assertThat(variant.variantGet("$.ts", DataTypes.TIMESTAMP(0), utc))
+                        .isEqualTo(Timestamp.fromMicros(1700000000000000L));
+            }
+        } finally {
+            TimeZone.setDefault(original);
+        }
+    }
+
+    @Test
+    public void testObjectFieldOrderingCompatibility() {
+        String bmpKey = "\uE000";
+        String supplementaryKey = new String(Character.toChars(0x10000));
+        StringBuilder json = new StringBuilder("{");
+        for (int i = 0; i < 30; i++) {
+            if (i > 0) {
+                json.append(',');
+            }
+            json.append("\"k").append(i < 10 ? "0" : "").append(i).append("\":null");
+        }
+        json.append(",\"").append(bmpKey).append("\":null");
+        json.append(",\"").append(supplementaryKey).append("\":null}");
+
+        GenericVariant specOrdered = GenericVariant.fromJson(json.toString());
+        byte[] specValue = specOrdered.value();
+        int idStart = 2;
+        int offsetStart = idStart + 32;
+        assertThat(specValue[idStart + 30] & 0xFF).isEqualTo(30);
+        assertThat(specValue[idStart + 31] & 0xFF).isEqualTo(31);
+        assertThat(specOrdered.getFieldByKey(bmpKey)).isNotNull();
+        assertThat(specOrdered.getFieldByKey(supplementaryKey)).isNotNull();
+
+        byte[] legacyValue = specValue.clone();
+        byte temporary = legacyValue[idStart + 30];
+        legacyValue[idStart + 30] = legacyValue[idStart + 31];
+        legacyValue[idStart + 31] = temporary;
+        temporary = legacyValue[offsetStart + 30];
+        legacyValue[offsetStart + 30] = legacyValue[offsetStart + 31];
+        legacyValue[offsetStart + 31] = temporary;
+        GenericVariant legacyOrdered = new GenericVariant(legacyValue, specOrdered.metadata());
+        assertThat(legacyOrdered.getFieldByKey(bmpKey)).isNotNull();
+        assertThat(legacyOrdered.getFieldByKey(supplementaryKey)).isNotNull();
     }
 
     @Test

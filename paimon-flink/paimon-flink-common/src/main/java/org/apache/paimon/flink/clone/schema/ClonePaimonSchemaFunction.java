@@ -34,6 +34,7 @@ import org.apache.flink.util.Collector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.HashMap;
 import java.util.Map;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
@@ -50,6 +51,7 @@ public class ClonePaimonSchemaFunction
 
     private final Map<String, String> sourceCatalogConfig;
     private final Map<String, String> targetCatalogConfig;
+    private final Map<String, String> targetTableConfig;
     private final String preferFileFormat;
     private final boolean cloneIfExists;
 
@@ -59,10 +61,12 @@ public class ClonePaimonSchemaFunction
     public ClonePaimonSchemaFunction(
             Map<String, String> sourceCatalogConfig,
             Map<String, String> targetCatalogConfig,
+            Map<String, String> targetTableConfig,
             String preferFileFormat,
             boolean cloneIfExists) {
         this.sourceCatalogConfig = sourceCatalogConfig;
         this.targetCatalogConfig = targetCatalogConfig;
+        this.targetTableConfig = targetTableConfig;
         this.preferFileFormat = preferFileFormat;
         this.cloneIfExists = cloneIfExists;
     }
@@ -101,16 +105,15 @@ public class ClonePaimonSchemaFunction
                         f -> builder.column(f.name(), f.type(), f.description(), f.defaultValue()));
         builder.partitionKeys(sourceTable.partitionKeys());
         builder.primaryKey(sourceTable.primaryKeys());
-        sourceTable
-                .options()
-                .forEach(
-                        (k, v) -> {
-                            if (k.equalsIgnoreCase(BUCKET.key())
-                                    || k.equalsIgnoreCase(PATH.key())) {
-                                return;
-                            }
-                            builder.option(k, v);
-                        });
+        Map<String, String> tableOptions = new HashMap<>(sourceTable.options());
+        tableOptions.putAll(targetTableConfig);
+        tableOptions.forEach(
+                (k, v) -> {
+                    if (k.equalsIgnoreCase(BUCKET.key()) || k.equalsIgnoreCase(PATH.key())) {
+                        return;
+                    }
+                    builder.option(k, v);
+                });
 
         if (sourceTable.primaryKeys().isEmpty()) {
             // for append table with bucket

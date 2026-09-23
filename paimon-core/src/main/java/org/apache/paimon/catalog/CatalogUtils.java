@@ -20,14 +20,19 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
+import org.apache.paimon.format.csv.CsvOptions;
+import org.apache.paimon.format.json.JsonOptions;
+import org.apache.paimon.format.text.TextOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
@@ -35,6 +40,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.format.FormatTablePartitionManager;
 import org.apache.paimon.table.iceberg.IcebergTable;
 import org.apache.paimon.table.lance.LanceTable;
 import org.apache.paimon.table.object.ObjectTable;
@@ -56,6 +62,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -154,25 +161,100 @@ public class CatalogUtils {
                 "The value of %s property should be %s.",
                 AUTO_CREATE.key(),
                 Boolean.FALSE);
+        checkArgument(
+                options.get(CoreOptions.TARGET_FILE_ROW_NUM) > 0,
+                "%s should be at least 1.",
+                CoreOptions.TARGET_FILE_ROW_NUM.key());
 
         TableType tableType = options.get(CoreOptions.TYPE);
         if (tableType.equals(TableType.FORMAT_TABLE)) {
-            checkArgument(
-                    options.get(PRIMARY_KEY) == null,
-                    "Cannot define %s for format table.",
-                    PRIMARY_KEY.key());
-            if (dataTokenEnabled && options.get(PATH) == null) {
-                checkArgument(
-                        options.get(FORMAT_TABLE_IMPLEMENTATION)
-                                != CoreOptions.FormatTableImplementation.ENGINE,
-                        "Cannot define %s is engine for format table when data token is enabled and not define %s.",
-                        FORMAT_TABLE_IMPLEMENTATION.key(),
-                        PATH.key());
-            }
+            validateFormatTableOptions(options, dataTokenEnabled);
         }
+        SchemaValidation.validateQueryAuthTableType(
+                tableType, options.get(CoreOptions.QUERY_AUTH_ENABLED));
         for (DataField field : schema.fields()) {
             validateDefaultValue(field.type(), field.defaultValue());
         }
+    }
+
+    private static void validateFormatTableOptions(Options options, boolean dataTokenEnabled) {
+        checkArgument(
+                options.get(PRIMARY_KEY) == null,
+                "Cannot define %s for format table.",
+                PRIMARY_KEY.key());
+        if (dataTokenEnabled && options.get(PATH) == null) {
+            checkArgument(
+                    options.get(FORMAT_TABLE_IMPLEMENTATION)
+                            != CoreOptions.FormatTableImplementation.ENGINE,
+                    "Cannot define %s is engine for format table when data token is enabled and not define %s.",
+                    FORMAT_TABLE_IMPLEMENTATION.key(),
+                    PATH.key());
+        }
+
+        String format = options.get(CoreOptions.FILE_FORMAT);
+        if ("csv".equalsIgnoreCase(format)) {
+            checkArgument(
+                    !options.get(CsvOptions.FIELD_DELIMITER).isEmpty(),
+                    "%s must not be empty.",
+                    CsvOptions.FIELD_DELIMITER.key());
+            checkArgument(
+                    !options.get(CsvOptions.LINE_DELIMITER).isEmpty(),
+                    "%s must not be empty.",
+                    CsvOptions.LINE_DELIMITER.key());
+            checkArgument(
+                    !options.get(CsvOptions.QUOTE_CHARACTER).isEmpty(),
+                    "%s must not be empty.",
+                    CsvOptions.QUOTE_CHARACTER.key());
+            checkArgument(
+                    !options.get(CsvOptions.ESCAPE_CHARACTER).isEmpty(),
+                    "%s must not be empty.",
+                    CsvOptions.ESCAPE_CHARACTER.key());
+        } else if ("json".equalsIgnoreCase(format)) {
+            checkArgument(
+                    !options.get(JsonOptions.LINE_DELIMITER).isEmpty(),
+                    "%s must not be empty.",
+                    JsonOptions.LINE_DELIMITER.key());
+        } else if ("text".equalsIgnoreCase(format)) {
+            checkArgument(
+                    !options.get(TextOptions.LINE_DELIMITER).isEmpty(),
+                    "%s must not be empty.",
+                    TextOptions.LINE_DELIMITER.key());
+        }
+    }
+
+    /** Validate options which are specific to a Format Table with catalog-managed partitions. */
+    public static void validateCatalogManagedPartitionOptions(Map<String, String> tableOptions) {
+        validateCatalogManagedPartitionOptions(Options.fromMap(tableOptions));
+    }
+
+    private static void validateCatalogManagedPartitionOptions(Options options) {
+        // The caller has already established that this is a format table with catalog-managed
+        // partitions; only the engine implementation is incompatible with them.
+        checkArgument(
+                options.get(FORMAT_TABLE_IMPLEMENTATION)
+                        != CoreOptions.FormatTableImplementation.ENGINE,
+                "Cannot combine catalog-managed partitions (%s=true) with %s=engine: the engine "
+                        + "implementation reads the table directory itself.",
+                CoreOptions.METASTORE_PARTITIONED_TABLE.key(),
+                FORMAT_TABLE_IMPLEMENTATION.key());
+    }
+
+    /**
+     * Validate a create or replace request that asks for catalog-managed partitions on a Format
+     * Table: the option combination must be valid and the table must be internal. Only the REST
+     * catalog calls this; other catalogs keep treating the option as inert.
+     */
+    public static void validateCatalogManagedFormatTablePartitions(
+            Identifier identifier, Map<String, String> tableOptions, boolean isExternal) {
+        CoreOptions options = CoreOptions.fromMap(tableOptions);
+        if (options.type() != TableType.FORMAT_TABLE || !options.partitionedTableInMetastore()) {
+            return;
+        }
+        validateCatalogManagedPartitionOptions(Options.fromMap(tableOptions));
+        checkArgument(
+                !isExternal,
+                "Catalog-managed partitions are only supported for internal tables, but format table %s is external.",
+                identifier.getFullName());
     }
 
     public static void validateNamePattern(Catalog catalog, String namePattern) {
@@ -266,7 +348,21 @@ public class CatalogUtils {
         Function<Path, FileIO> dataFileIO = metadata.isExternal() ? externalFileIO : internalFileIO;
 
         if (options.type() == TableType.FORMAT_TABLE) {
-            return toFormatTable(identifier, schema, dataFileIO, catalogContext);
+            FormatTablePartitionManager partitionManager = null;
+            if (options.partitionedTableInMetastore()) {
+                checkArgument(
+                        isRestCatalog,
+                        "Format table %s asks for catalog-managed partitions with %s=true, which "
+                                + "is only available in a REST catalog.",
+                        identifier.getFullName(),
+                        CoreOptions.METASTORE_PARTITIONED_TABLE.key());
+                validateCatalogManagedFormatTablePartitions(
+                        identifier, schema.options(), metadata.isExternal());
+                partitionManager =
+                        FormatTablePartitionManager.create(
+                                identifier, schema.partitionKeys(), catalog.catalogLoader());
+            }
+            return toFormatTable(identifier, schema, dataFileIO, catalogContext, partitionManager);
         }
 
         if (options.type() == TableType.OBJECT_TABLE) {
@@ -313,7 +409,7 @@ public class CatalogUtils {
 
     private static Table createGlobalSystemTable(String tableName, Catalog catalog)
             throws Catalog.TableNotExistException {
-        switch (tableName.toLowerCase()) {
+        switch (tableName.toLowerCase(Locale.ROOT)) {
             case ALL_TABLE_OPTIONS:
                 List<Table> tables = listAllTables(catalog);
                 Map<Identifier, Map<String, String>> allOptions = new HashMap<>();
@@ -328,7 +424,12 @@ public class CatalogUtils {
                 return AllPartitionsTable.fromPartitions(
                         toAllPartitions(catalog, listAllTables(catalog)));
             case CATALOG_OPTIONS:
-                return new CatalogOptionsTable(Options.fromMap(catalog.options()));
+                Options catalogOptions = Options.fromMap(catalog.options());
+                if (!catalogOptions.get(CatalogOptions.CATALOG_OPTIONS_TABLE_ENABLED)) {
+                    throw new Catalog.TableNotExistException(
+                            Identifier.create(SYSTEM_DATABASE_NAME, tableName));
+                }
+                return new CatalogOptionsTable(catalogOptions);
             default:
                 throw new Catalog.TableNotExistException(
                         Identifier.create(SYSTEM_DATABASE_NAME, tableName));
@@ -410,7 +511,8 @@ public class CatalogUtils {
             Identifier identifier,
             TableSchema schema,
             Function<Path, FileIO> fileIO,
-            CatalogContext catalogContext) {
+            CatalogContext catalogContext,
+            @Nullable FormatTablePartitionManager partitionManager) {
         Map<String, String> options = schema.options();
         FormatTable.Format format =
                 FormatTable.parseFormat(
@@ -428,6 +530,7 @@ public class CatalogUtils {
                 .options(options)
                 .comment(schema.comment())
                 .catalogContext(catalogContext)
+                .partitionManager(partitionManager)
                 .build();
     }
 

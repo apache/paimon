@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.write
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
 import org.apache.paimon.table.FileStoreTable
 
@@ -33,8 +34,15 @@ class PaimonBatchWrite(
     writeSchema: StructType,
     dataSchema: StructType,
     overwritePartitions: Option[Map[String, String]],
-    copyOnWriteScan: Option[PaimonCopyOnWriteScan])
-  extends PaimonBatchWriteBase(table, writeSchema, dataSchema, overwritePartitions, copyOnWriteScan)
+    copyOnWriteScan: Option[PaimonCopyOnWriteScan],
+    operationType: Option[Snapshot.Operation] = None)
+  extends PaimonBatchWriteBase(
+    table,
+    writeSchema,
+    dataSchema,
+    overwritePartitions,
+    copyOnWriteScan,
+    operationType)
   with BatchWrite
   with Serializable {
 
@@ -54,6 +62,13 @@ object PaimonBatchWrite {
       writeSchema: StructType,
       dataSchema: StructType,
       overwritePartitions: Option[Map[String, String]],
-      copyOnWriteScan: Option[PaimonCopyOnWriteScan]): PaimonBatchWrite =
-    new PaimonBatchWrite(table, writeSchema, dataSchema, overwritePartitions, copyOnWriteScan)
+      copyOnWriteScan: Option[PaimonCopyOnWriteScan],
+      operationType: Option[Snapshot.Operation] = None): PaimonBatchWrite =
+    new PaimonBatchWrite(
+      table,
+      writeSchema,
+      dataSchema,
+      overwritePartitions,
+      copyOnWriteScan,
+      operationType)
 }

@@ -24,7 +24,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.utils.HiveUtils;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -50,6 +50,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -116,7 +117,7 @@ public class HiveSchema {
                 properties.getProperty(
                         // serdeConstants.COLUMN_NAME_DELIMITER is not defined in earlier Hive
                         // versions, so we use a constant string instead
-                        "column.name.delimite", String.valueOf(SerDeUtils.COMMA));
+                        "column.name.delimiter", String.valueOf(SerDeUtils.COMMA));
 
         List<String> columnNames = Arrays.asList(columnProperty.split(columnNameDelimiter));
         String columnTypes =
@@ -172,10 +173,10 @@ public class HiveSchema {
                     paimonSchema.fields().stream()
                             .collect(
                                     Collectors.toMap(
-                                            dataField -> dataField.name().toLowerCase(),
+                                            dataField -> dataField.name().toLowerCase(Locale.ROOT),
                                             Function.identity()));
             for (int i = 0; i < columnNames.size(); i++) {
-                String columnName = columnNames.get(i).toLowerCase();
+                String columnName = columnNames.get(i).toLowerCase(Locale.ROOT);
                 if (Objects.equals(columnName, tagToPartField)) {
                     // ignore tagToPartField, it should just be a string type
                     continue;
@@ -202,7 +203,7 @@ public class HiveSchema {
         options.set(CoreOptions.PATH, location);
         CatalogContext context = CatalogContext.create(options, configuration);
         try {
-            return new SchemaManager(FileIO.get(path, context), path).latest();
+            return new FileSystemSchemaManager(FileIO.get(path, context), path).latest();
         } catch (IOException e) {
             LOG.warn(
                     "Failed to fetch Paimon table schema from path "

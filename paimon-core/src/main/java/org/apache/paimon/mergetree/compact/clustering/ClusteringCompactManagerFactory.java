@@ -86,7 +86,8 @@ public class ClusteringCompactManagerFactory implements KvCompactionManagerFacto
             int bucket,
             ExecutorService compactExecutor,
             List<DataFileMeta> restoreFiles,
-            @Nullable BucketedDvMaintainer dvMaintainer) {
+            @Nullable BucketedDvMaintainer dvMaintainer,
+            boolean ignorePreviousFiles) {
         if (options.writeOnly()) {
             return new NoopCompactManager();
         }
@@ -114,6 +115,7 @@ public class ClusteringCompactManagerFactory implements KvCompactionManagerFacto
                 restoreFiles,
                 options.targetFileSize(true),
                 options.sortSpillBufferSize(),
+                options.localKvDbBlockSize(),
                 options.pageSize(),
                 options.localSortMaxNumFileHandles(),
                 options.sortSpillThreshold(),

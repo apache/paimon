@@ -30,6 +30,7 @@ class V2WriteMergeSchemaTest extends PaimonSparkTestBase {
       .set("spark.sql.catalog.paimon.cache-enabled", "false")
       .set("spark.paimon.write.use-v2-write", "true")
       .set("spark.paimon.write.merge-schema", "true")
+      .set("spark.paimon.write.merge-schema.type-widening", "true")
       .set("spark.paimon.write.merge-schema.explicit-cast", "true")
   }
 

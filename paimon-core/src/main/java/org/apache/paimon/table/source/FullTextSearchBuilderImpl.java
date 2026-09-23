@@ -18,10 +18,26 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.index.pk.PrimaryKeyIndexDefinition;
+import org.apache.paimon.index.pk.PrimaryKeyIndexDefinitions;
+import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Pair;
 
+import javax.annotation.Nullable;
+
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
+
+import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -33,11 +49,47 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     private final FileStoreTable table;
 
     private int limit;
-    private DataField textColumn;
-    private String queryText;
+    private String fieldName;
+    private String query;
+    private PartitionPredicate partitionFilter;
+    @Nullable private Predicate filter;
+    @Nullable private Snapshot pinnedSnapshot;
 
     public FullTextSearchBuilderImpl(InnerTable table) {
         this.table = (FileStoreTable) table;
+    }
+
+    @Override
+    public FullTextSearchBuilder withPartitionFilter(PartitionPredicate partitionFilter) {
+        addPartitionFilter(partitionFilter);
+        return this;
+    }
+
+    @Override
+    public FullTextSearchBuilder withFilter(Predicate predicate) {
+        Pair<Optional<PartitionPredicate>, List<Predicate>> pair =
+                splitPartitionPredicatesAndDataPredicates(
+                        predicate, table.rowType(), table.partitionKeys());
+        if (pair.getLeft().isPresent()) {
+            addPartitionFilter(pair.getLeft().get());
+        }
+        if (!pair.getRight().isEmpty()) {
+            Predicate dataFilter = PredicateBuilder.and(pair.getRight());
+            this.filter =
+                    this.filter == null ? dataFilter : PredicateBuilder.and(filter, dataFilter);
+        }
+        return this;
+    }
+
+    private void addPartitionFilter(@Nullable PartitionPredicate partitionFilter) {
+        if (partitionFilter == null) {
+            return;
+        }
+        this.partitionFilter =
+                this.partitionFilter == null
+                        ? partitionFilter
+                        : PartitionPredicate.and(
+                                Arrays.asList(this.partitionFilter, partitionFilter));
     }
 
     @Override
@@ -47,28 +99,76 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     }
 
     @Override
-    public FullTextSearchBuilder withTextColumn(String name) {
-        this.textColumn = table.rowType().getField(name);
-        return this;
-    }
-
-    @Override
-    public FullTextSearchBuilder withQueryText(String queryText) {
-        this.queryText = queryText;
+    public FullTextSearchBuilder withQuery(String fieldName, String query) {
+        this.fieldName = fieldName;
+        this.query = query;
         return this;
     }
 
     @Override
     public FullTextScan newFullTextScan() {
-        checkNotNull(textColumn, "Text column must be set via withTextColumn()");
-        return new FullTextScanImpl(table, textColumn);
+        TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
+        DataField textColumn = textColumn();
+        Optional<PrimaryKeyIndexDefinition> definition = primaryKeyFullTextDefinition(textColumn);
+        return definition.isPresent()
+                ? new PrimaryKeyFullTextScan(
+                        table, definition.get(), partitionFilter, pinnedSnapshot)
+                : new DataEvolutionFullTextScan(
+                        table,
+                        partitionFilter,
+                        filter,
+                        Collections.singletonList(textColumn),
+                        pinnedSnapshot);
     }
 
     @Override
     public FullTextRead newFullTextRead() {
+        TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
         checkArgument(limit > 0, "Limit must be positive, set via withLimit()");
-        checkNotNull(textColumn, "Text column must be set via withTextColumn()");
-        checkNotNull(queryText, "Query text must be set via withQueryText()");
-        return new FullTextReadImpl(table, limit, textColumn, queryText);
+        DataField textColumn = textColumn();
+        Optional<PrimaryKeyIndexDefinition> definition = primaryKeyFullTextDefinition(textColumn);
+        return definition.isPresent()
+                ? new PrimaryKeyFullTextRead(table, definition.get(), textColumn, query, limit)
+                : new DataEvolutionFullTextRead(
+                        table,
+                        partitionFilter,
+                        filter,
+                        limit,
+                        Collections.singletonList(textColumn),
+                        query);
+    }
+
+    private DataField textColumn() {
+        checkNotNull(query, "Query must be set via withQuery()");
+        checkNotNull(fieldName, "Field name must be set via withQuery()");
+        DataField textColumn = table.rowType().getField(fieldName);
+        checkNotNull(textColumn, "Text column '%s' does not exist.", fieldName);
+        return textColumn;
+    }
+
+    private Optional<PrimaryKeyIndexDefinition> primaryKeyFullTextDefinition(DataField textColumn) {
+        if (table.coreOptions().dataEvolutionEnabled()) {
+            return Optional.empty();
+        }
+        if (table.coreOptions().primaryKeyFullTextIndexColumns().isEmpty()) {
+            return Optional.empty();
+        }
+        for (PrimaryKeyIndexDefinition definition :
+                PrimaryKeyIndexDefinitions.create(table.schema()).definitions()) {
+            if (definition.family() == PrimaryKeyIndexDefinition.Family.FULL_TEXT
+                    && definition.fieldId() == textColumn.id()) {
+                if (filter != null) {
+                    throw new UnsupportedOperationException(
+                            "Primary-key full-text search does not support non-partition filters yet.");
+                }
+                return Optional.of(definition);
+            }
+        }
+        return Optional.empty();
+    }
+
+    FullTextSearchBuilderImpl withSnapshot(Snapshot snapshot) {
+        this.pinnedSnapshot = snapshot;
+        return this;
     }
 }

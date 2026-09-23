@@ -29,11 +29,12 @@ import javax.annotation.Nullable;
 
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /** Cache for deletion vector meta. */
 public class DVMetaCache {
 
-    private final Cache<DVMetaCacheKey, Map<String, DeletionFile>> cache;
+    private final Cache<DVMetaCacheKey, DVMetaCacheValue> cache;
 
     public DVMetaCache(long maxValueNumber) {
         this.cache =
@@ -45,20 +46,95 @@ public class DVMetaCache {
                         .build();
     }
 
-    private static int weigh(DVMetaCacheKey cacheKey, Map<String, DeletionFile> cacheValue) {
-        return cacheValue.size() + 1;
+    private static int weigh(DVMetaCacheKey cacheKey, DVMetaCacheValue cacheValue) {
+        return cacheValue.weight();
     }
 
     @Nullable
     public Map<String, DeletionFile> read(Path manifestPath, BinaryRow partition, int bucket) {
         DVMetaCacheKey cacheKey = new DVMetaCacheKey(manifestPath, partition, bucket);
-        return this.cache.getIfPresent(cacheKey);
+        DVMetaCacheValue cacheValue = this.cache.getIfPresent(cacheKey);
+        return cacheValue == null ? null : cacheValue.get();
     }
 
     public void put(
             Path path, BinaryRow partition, int bucket, Map<String, DeletionFile> dvFilesMap) {
         DVMetaCacheKey key = new DVMetaCacheKey(path, partition, bucket);
-        this.cache.put(key, dvFilesMap);
+        this.cache.put(key, DVMetaCacheValue.eager(dvFilesMap));
+    }
+
+    public void putLazy(
+            Path path,
+            BinaryRow partition,
+            int bucket,
+            int valueNumber,
+            Supplier<Map<String, DeletionFile>> dvFilesSupplier) {
+        DVMetaCacheKey key = new DVMetaCacheKey(path, partition, bucket);
+        this.cache.put(key, DVMetaCacheValue.lazy(valueNumber, dvFilesSupplier));
+    }
+
+    /** Cache value for deletion vector meta at bucket level. */
+    private static final class DVMetaCacheValue {
+
+        private final int weight;
+        private final DeletionFilesField deletionFilesField;
+
+        private DVMetaCacheValue(int weight, DeletionFilesField deletionFilesField) {
+            this.weight = weight;
+            this.deletionFilesField = deletionFilesField;
+        }
+
+        private static DVMetaCacheValue eager(Map<String, DeletionFile> deletionFiles) {
+            return new DVMetaCacheValue(
+                    deletionFiles.size() + 1, new ExistingDeletionFilesField(deletionFiles));
+        }
+
+        private static DVMetaCacheValue lazy(
+                int valueNumber, Supplier<Map<String, DeletionFile>> deletionFilesSupplier) {
+            return new DVMetaCacheValue(
+                    valueNumber + 1, new LazyDeletionFilesField(deletionFilesSupplier));
+        }
+
+        private int weight() {
+            return weight;
+        }
+
+        private Map<String, DeletionFile> get() {
+            return deletionFilesField.get();
+        }
+    }
+
+    private interface DeletionFilesField {
+
+        Map<String, DeletionFile> get();
+    }
+
+    private static final class ExistingDeletionFilesField implements DeletionFilesField {
+
+        private final Map<String, DeletionFile> deletionFiles;
+
+        private ExistingDeletionFilesField(Map<String, DeletionFile> deletionFiles) {
+            this.deletionFiles = deletionFiles;
+        }
+
+        @Override
+        public Map<String, DeletionFile> get() {
+            return deletionFiles;
+        }
+    }
+
+    private static final class LazyDeletionFilesField implements DeletionFilesField {
+
+        private final LazyField<Map<String, DeletionFile>> deletionFiles;
+
+        private LazyDeletionFilesField(Supplier<Map<String, DeletionFile>> deletionFilesSupplier) {
+            this.deletionFiles = new LazyField<>(deletionFilesSupplier);
+        }
+
+        @Override
+        public synchronized Map<String, DeletionFile> get() {
+            return deletionFiles.get();
+        }
     }
 
     /** Cache key for deletion vector meta at bucket level. */

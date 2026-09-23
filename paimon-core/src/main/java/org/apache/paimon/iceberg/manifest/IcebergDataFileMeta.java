@@ -26,6 +26,7 @@ import org.apache.paimon.iceberg.metadata.IcebergDataField;
 import org.apache.paimon.iceberg.metadata.IcebergSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -86,6 +87,7 @@ public class IcebergDataFileMeta {
     private final String referencedDataFile;
     private final Long contentOffset;
     private final Long contentSizeInBytes;
+    @Nullable private final Long firstRowId;
 
     IcebergDataFileMeta(
             Content content,
@@ -109,6 +111,7 @@ public class IcebergDataFileMeta {
                 upperBounds,
                 null,
                 null,
+                null,
                 null);
     }
 
@@ -124,7 +127,8 @@ public class IcebergDataFileMeta {
             InternalMap upperBounds,
             String referencedDataFile,
             Long contentOffset,
-            Long contentSizeInBytes) {
+            Long contentSizeInBytes,
+            @Nullable Long firstRowId) {
         this.content = content;
         this.filePath = filePath;
         this.fileFormat = fileFormat;
@@ -138,6 +142,7 @@ public class IcebergDataFileMeta {
         this.referencedDataFile = referencedDataFile;
         this.contentOffset = contentOffset;
         this.contentSizeInBytes = contentSizeInBytes;
+        this.firstRowId = firstRowId;
     }
 
     public static IcebergDataFileMeta create(
@@ -173,10 +178,29 @@ public class IcebergDataFileMeta {
             }
 
             int idx = indexMap.get(field.name());
-            nullValueCounts.put(field.id(), stats.nullCounts().getLong(idx));
+            // an unknown null count must be omitted, not published as 0
+            if (!stats.nullCounts().isNullAt(idx)) {
+                nullValueCounts.put(field.id(), stats.nullCounts().getLong(idx));
+            }
 
+            // these types have no bounds; skip before reading the stats slots
+            DataTypeRoot typeRoot = field.dataType().getTypeRoot();
+            if (typeRoot == DataTypeRoot.ARRAY
+                    || typeRoot == DataTypeRoot.MAP
+                    || typeRoot == DataTypeRoot.ROW
+                    || typeRoot == DataTypeRoot.MULTISET
+                    || typeRoot == DataTypeRoot.VARIANT
+                    || typeRoot == DataTypeRoot.VECTOR
+                    || typeRoot == DataTypeRoot.BLOB
+                    || typeRoot == DataTypeRoot.GEOMETRY
+                    || typeRoot == DataTypeRoot.GEOGRAPHY) {
+                continue;
+            }
+
+            // use the nullable copy of the type, so that an unknown (null) min/max slot
+            // of a required field reads as null instead of garbage
             InternalRow.FieldGetter fieldGetter =
-                    InternalRow.createFieldGetter(field.dataType(), idx);
+                    InternalRow.createFieldGetter(field.dataType().nullable(), idx);
             Object minValue = fieldGetter.getFieldOrNull(stats.minValues());
             Object maxValue = fieldGetter.getFieldOrNull(stats.maxValues());
             if (minValue != null && maxValue != null) {
@@ -225,7 +249,8 @@ public class IcebergDataFileMeta {
                 null,
                 referencedDataFile,
                 contentOffset,
-                contentSizeInBytes);
+                contentSizeInBytes,
+                null);
     }
 
     public Content content() {
@@ -276,7 +301,33 @@ public class IcebergDataFileMeta {
         return contentSizeInBytes;
     }
 
+    @Nullable
+    public Long firstRowId() {
+        return firstRowId;
+    }
+
+    public IcebergDataFileMeta withFirstRowId(long firstRowId) {
+        return new IcebergDataFileMeta(
+                content,
+                filePath,
+                fileFormat,
+                partition,
+                recordCount,
+                fileSizeInBytes,
+                nullValueCounts,
+                lowerBounds,
+                upperBounds,
+                referencedDataFile,
+                contentOffset,
+                contentSizeInBytes,
+                firstRowId);
+    }
+
     public static RowType schema(RowType partitionType) {
+        return schema(partitionType, false);
+    }
+
+    public static RowType schema(RowType partitionType, boolean withFirstRowId) {
         List<DataField> fields = new ArrayList<>();
         fields.add(new DataField(134, "content", DataTypes.INT().notNull()));
         fields.add(new DataField(100, "file_path", DataTypes.STRING().notNull()));
@@ -302,6 +353,9 @@ public class IcebergDataFileMeta {
         fields.add(new DataField(143, "referenced_data_file", DataTypes.STRING()));
         fields.add(new DataField(144, "content_offset", DataTypes.BIGINT()));
         fields.add(new DataField(145, "content_size_in_bytes", DataTypes.BIGINT()));
+        if (withFirstRowId) {
+            fields.add(new DataField(142, "first_row_id", DataTypes.BIGINT()));
+        }
         return new RowType(false, fields);
     }
 
@@ -325,7 +379,8 @@ public class IcebergDataFileMeta {
                 && Objects.equals(upperBounds, that.upperBounds)
                 && Objects.equals(referencedDataFile, that.referencedDataFile)
                 && Objects.equals(contentOffset, that.contentOffset)
-                && Objects.equals(contentSizeInBytes, that.contentSizeInBytes);
+                && Objects.equals(contentSizeInBytes, that.contentSizeInBytes)
+                && Objects.equals(firstRowId, that.firstRowId);
     }
 
     @Override
@@ -342,6 +397,7 @@ public class IcebergDataFileMeta {
                 upperBounds,
                 referencedDataFile,
                 contentOffset,
-                contentSizeInBytes);
+                contentSizeInBytes,
+                firstRowId);
     }
 }

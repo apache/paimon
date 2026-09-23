@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.sink.state.OperatorBackendStateStore;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -67,7 +68,7 @@ public class CustomPartitionMarkDoneActionTest extends TableTestBase {
                                         getClass().getClassLoader(),
                                         false,
                                         false,
-                                        new MockOperatorStateStore(),
+                                        new OperatorBackendStateStore(new MockOperatorStateStore()),
                                         table))
                 .hasMessageContaining(
                         String.format(
@@ -91,7 +92,7 @@ public class CustomPartitionMarkDoneActionTest extends TableTestBase {
                                 getClass().getClassLoader(),
                                 false,
                                 false,
-                                new MockOperatorStateStore(),
+                                new OperatorBackendStateStore(new MockOperatorStateStore()),
                                 table2)
                         .get();
 

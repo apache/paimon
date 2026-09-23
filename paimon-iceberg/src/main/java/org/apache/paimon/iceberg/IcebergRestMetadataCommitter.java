@@ -18,7 +18,9 @@
 
 package org.apache.paimon.iceberg;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergSchema;
@@ -39,9 +41,12 @@ import org.apache.iceberg.SnapshotRef;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableMetadataParser;
+import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.exceptions.AlreadyExistsException;
+import org.apache.iceberg.rest.Endpoint;
 import org.apache.iceberg.rest.RESTCatalog;
 import org.apache.iceberg.types.Types;
 import org.apache.iceberg.types.Types.NestedField;
@@ -50,16 +55,23 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.lang.reflect.Field;
+import java.net.UnknownHostException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.iceberg.CatalogUtil.ICEBERG_CATALOG_TYPE;
 import static org.apache.iceberg.TableProperties.METADATA_DELETE_AFTER_COMMIT_ENABLED;
 import static org.apache.iceberg.TableProperties.METADATA_PREVIOUS_VERSIONS_MAX;
+import static org.apache.iceberg.TableProperties.RESERVED_PROPERTIES;
 
 /**
  * commit Iceberg metadata to Iceberg's rest catalog, so the table can be visited by Iceberg's rest
@@ -67,20 +79,39 @@ import static org.apache.iceberg.TableProperties.METADATA_PREVIOUS_VERSIONS_MAX;
  */
 public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
+    private static final String PAIMON_COMMIT_IDENTITY = "paimon-commit-identity";
+
     private static final Logger LOG = LoggerFactory.getLogger(IcebergRestMetadataCommitter.class);
 
     private static final String REST_CATALOG_NAME = "rest-catalog";
 
     private final RESTCatalog restCatalog;
+    private final FileIO fileIO;
+    private final Path metadataDirectory;
     private final String icebergDatabaseName;
     private final TableIdentifier icebergTableIdentifier;
     private final IcebergOptions icebergOptions;
+    private final int unknownHostMaxRetries;
+    private final long unknownHostInitialRetryDelayMillis;
 
     private Table icebergTable;
 
     public IcebergRestMetadataCommitter(FileStoreTable table) {
         Options options = new Options(table.options());
         icebergOptions = new IcebergOptions(options);
+        unknownHostMaxRetries = options.get(IcebergOptions.UNKNOWN_HOST_RETRY_MAX_RETRIES);
+        unknownHostInitialRetryDelayMillis =
+                options.get(IcebergOptions.UNKNOWN_HOST_RETRY_INITIAL_DELAY_MILLIS);
+        Preconditions.checkArgument(
+                unknownHostMaxRetries >= 0,
+                "%s must be non-negative",
+                IcebergOptions.UNKNOWN_HOST_RETRY_MAX_RETRIES.key());
+        Preconditions.checkArgument(
+                unknownHostInitialRetryDelayMillis >= 0,
+                "%s must be non-negative",
+                IcebergOptions.UNKNOWN_HOST_RETRY_INITIAL_DELAY_MILLIS.key());
+        this.fileIO = table.fileIO();
+        this.metadataDirectory = IcebergCommitCallback.catalogTableMetadataPath(table);
 
         Identifier identifier = Preconditions.checkNotNull(table.catalogEnvironment().identifier());
         String icebergDatabase = options.get(IcebergOptions.METASTORE_DATABASE);
@@ -104,7 +135,9 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
             this.restCatalog = initRestCatalog(restConfigs, hadoopConf);
         } catch (Exception e) {
-            throw new RuntimeException("Fail to initialize iceberg rest catalog.", e);
+            throw new RuntimeException(
+                    "Fail to initialize iceberg rest catalog for table: " + icebergTableIdentifier,
+                    e);
         }
     }
 
@@ -121,14 +154,56 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     @Override
     public void commitMetadata(
             IcebergMetadata newIcebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata) {
-        try {
-            commitMetadataImpl(newIcebergMetadata, baseIcebergMetadata);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+        long delayMillis = unknownHostInitialRetryDelayMillis;
+        for (int retry = 0; ; retry++) {
+            try {
+                commitMetadataImpl(newIcebergMetadata, baseIcebergMetadata);
+                return;
+            } catch (Exception e) {
+                if (!hasUnknownHostCause(e) || retry == unknownHostMaxRetries) {
+                    throw commitFailure(e);
+                }
+
+                LOG.warn(
+                        "Iceberg REST catalog DNS lookup failed for table {}; retrying in {} ms "
+                                + "({}/{}).",
+                        icebergTableIdentifier,
+                        delayMillis,
+                        retry + 1,
+                        unknownHostMaxRetries,
+                        e);
+                try {
+                    sleepBeforeUnknownHostRetry(delayMillis);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw commitFailure(interrupted);
+                }
+                delayMillis = delayMillis > Long.MAX_VALUE / 2 ? Long.MAX_VALUE : delayMillis * 2;
+            }
         }
     }
 
-    private void commitMetadataImpl(
+    private RuntimeException commitFailure(Exception cause) {
+        return new RuntimeException(
+                "Fail to commit iceberg metadata for table: " + icebergTableIdentifier, cause);
+    }
+
+    @VisibleForTesting
+    protected void sleepBeforeUnknownHostRetry(long delayMillis) throws InterruptedException {
+        Thread.sleep(delayMillis);
+    }
+
+    private static boolean hasUnknownHostCause(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof UnknownHostException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @VisibleForTesting
+    protected void commitMetadataImpl(
             IcebergMetadata newIcebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata) {
 
         newIcebergMetadata = adjustMetadataForRest(newIcebergMetadata);
@@ -144,6 +219,11 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
         try {
             if (!tableExists()) {
+                if (requiresRegistration(newIcebergMetadata)) {
+                    LOG.info("Table {} does not exist, register it.", icebergTableIdentifier);
+                    registerAsCurrent(newIcebergMetadata, newMetadata, false);
+                    return;
+                }
                 LOG.info("Table {} does not exist, create it.", icebergTableIdentifier);
                 icebergTable = createTable(newMetadata);
                 updateBuilder =
@@ -155,20 +235,63 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                 icebergTable = getTable();
 
                 TableMetadata metadata = ((BaseTable) icebergTable).operations().current();
-                boolean withBase = checkBase(metadata, newMetadata, baseIcebergMetadata);
-                if (withBase) {
-                    LOG.info("create updates with base metadata.");
-                    updateBuilder = updatesForCorrectBase(metadata, newMetadata, false);
-                } else {
+
+                org.apache.iceberg.Snapshot catalogCurrent = metadata.currentSnapshot();
+                org.apache.iceberg.Snapshot newCurrent = newMetadata.currentSnapshot();
+                if (catalogCurrent != null
+                        && newCurrent != null
+                        && catalogCurrent.snapshotId() == newCurrent.snapshotId()
+                        && java.util.Objects.equals(
+                                catalogCurrent.summary().get(PAIMON_COMMIT_IDENTITY),
+                                newCurrent.summary().get(PAIMON_COMMIT_IDENTITY))) {
+                    // an idempotent retry: the catalog is already at this snapshot; rebuilding
+                    // through updatesForIncorrectBase would drop and recreate the table
                     LOG.info(
-                            "create updates without base metadata. currentSnapshotId for base metadata: {}, for new metadata:{}",
-                            metadata.currentSnapshot() != null
-                                    ? metadata.currentSnapshot().snapshotId()
-                                    : "No snapshot",
-                            newMetadata.currentSnapshot() != null
-                                    ? newMetadata.currentSnapshot().snapshotId()
-                                    : "No snapshot");
-                    updateBuilder = updatesForIncorrectBase(newMetadata);
+                            "Iceberg table {} is already at snapshot {}, nothing to commit.",
+                            icebergTableIdentifier,
+                            newCurrent.snapshotId());
+                    return;
+                }
+
+                if (metadata.currentSnapshot() == null) {
+                    // Table exists in the REST catalog but has no snapshots yet. This happens
+                    // when a previous createTable() or recreateTable() succeeded but the
+                    // subsequent commit() failed (e.g. network error, REST server timeout).
+                    // Treat it as a new table — populate schemas, partition spec, and the
+                    // current snapshot from scratch WITHOUT dropping and recreating the table.
+                    // Routing through updatesForIncorrectBase would call recreateTable(), which
+                    // on a repeated commit failure would create an infinite drop+create loop.
+                    LOG.info(
+                            "Iceberg table {} exists but has no snapshots, treating as new table.",
+                            icebergTableIdentifier);
+                    if (requiresRegistration(newIcebergMetadata)) {
+                        // registration has no post-create commit step, so the drop+create
+                        // failure loop this branch guards against cannot occur
+                        registerAsCurrent(newIcebergMetadata, newMetadata, true);
+                        return;
+                    }
+                    updateBuilder = updatesForCorrectBase(metadata, newMetadata, true);
+                } else {
+                    boolean withBase = checkBase(metadata, newMetadata, baseIcebergMetadata);
+                    if (withBase) {
+                        LOG.info("create updates with base metadata.");
+                        updateBuilder = updatesForCorrectBase(metadata, newMetadata, false);
+                    } else {
+                        LOG.info(
+                                "create updates without base metadata. currentSnapshotId for base metadata: {}, for new metadata:{}",
+                                metadata.currentSnapshot().snapshotId(),
+                                newMetadata.currentSnapshot() != null
+                                        ? newMetadata.currentSnapshot().snapshotId()
+                                        : "No snapshot");
+                        if (requiresRegistration(newIcebergMetadata)) {
+                            LOG.info(
+                                    "the base metadata is incorrect, re-registering the iceberg"
+                                            + " table from local metadata.");
+                            registerAsCurrent(newIcebergMetadata, newMetadata, true);
+                            return;
+                        }
+                        updateBuilder = updatesForIncorrectBase(newMetadata);
+                    }
                 }
             }
         } catch (Exception e) {
@@ -187,13 +310,18 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                     .operations()
                     .commit(((BaseTable) icebergTable).operations().current(), updatedForCommit);
         } catch (Exception e) {
-            throw new RuntimeException("Fail to commit metadata to rest catalog.", e);
+            throw new RuntimeException(
+                    "Fail to commit metadata to rest catalog for table: " + icebergTableIdentifier,
+                    e);
         }
     }
 
     private TableMetadata.Builder updatesForCorrectBase(
             TableMetadata base, TableMetadata newMetadata, boolean isNewTable) {
         TableMetadata.Builder updateBuilder = TableMetadata.buildFrom(base);
+        if (newMetadata.formatVersion() > base.formatVersion()) {
+            updateBuilder.upgradeFormatVersion(newMetadata.formatVersion());
+        }
 
         int schemaId = icebergTable.schema().schemaId();
         if (isNewTable) {
@@ -212,19 +340,16 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
         } else {
             // add new schema if needed
-            Preconditions.checkArgument(
-                    newMetadata.currentSchemaId() >= schemaId,
-                    "the new metadata has correct base, but the schemaId(%s) in iceberg table "
-                            + "is greater than currentSchemaId(%s) in new metadata.",
-                    schemaId,
-                    newMetadata.currentSchemaId());
-            if (newMetadata.currentSchemaId() != schemaId) {
+            if (newMetadata.currentSchemaId() > schemaId) {
                 addAndSetCurrentSchema(
                         newMetadata.schemas().stream()
                                 .filter(schema -> schema.schemaId() > schemaId)
                                 .collect(Collectors.toList()),
                         newMetadata.currentSchemaId(),
                         updateBuilder);
+            } else if (newMetadata.currentSchemaId() < schemaId) {
+                // a rollback moved the current schema back; only the pointer moves
+                updateBuilder.setCurrentSchema(newMetadata.currentSchemaId());
             }
 
             // add snapshot
@@ -243,6 +368,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             removeSnapshots(snapshotIdsToRemove, updateBuilder);
         }
 
+        updateProperties(updateBuilder);
         return updateBuilder;
     }
 
@@ -271,8 +397,183 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         return restCatalog.tableExists(icebergTableIdentifier);
     }
 
-    private void createDatabase() {
-        restCatalog.createNamespace(Namespace.of(icebergDatabaseName));
+    @VisibleForTesting
+    void createDatabase() {
+        try {
+            restCatalog.createNamespace(Namespace.of(icebergDatabaseName));
+        } catch (AlreadyExistsException e) {
+            // Benign check-then-act race: another commit created the namespace concurrently.
+            LOG.info(
+                    "Namespace {} already exists, created concurrently by another commit.",
+                    icebergDatabaseName);
+        }
+    }
+
+    /**
+     * Whether publishing {@code metadata} to a new or recreated catalog table must go through
+     * {@link RESTCatalog#registerTable}. The create/update path replays only the current snapshot
+     * through {@link TableMetadata.Builder}, which derives the table's next-row-id from that
+     * snapshot's added-rows alone, so the server ends at {@code added-rows} while the local
+     * watermark is {@code first-row-id + added-rows}. Any nonzero first-row-id (rollback and
+     * self-heal rebuilds) would leave the server below ids already assigned in manifests, and a
+     * later external writer could reuse them; registration imports the metadata verbatim. Format
+     * version 2 tables and zero-based v3 metadata keep the create/update path, which every REST
+     * catalog supports.
+     */
+    private static boolean requiresRegistration(IcebergMetadata metadata) {
+        IcebergSnapshot current = metadata.currentSnapshot();
+        return metadata.formatVersion() >= IcebergMetadata.FORMAT_VERSION_V3
+                && current != null
+                && current.firstRowId() != null
+                && current.firstRowId() != 0;
+    }
+
+    /**
+     * Makes the catalog's state exactly the (REST-adjusted) local metadata by registering a
+     * metadata file, instead of rebuilding the table through {@link TableMetadata.Builder}; see
+     * {@link #requiresRegistration}. Fails before touching the catalog table when the server does
+     * not support registration.
+     */
+    private void registerAsCurrent(
+            IcebergMetadata adjustedMetadata, TableMetadata newMetadata, boolean dropFirst) {
+        if (!registerTableAdvertised()) {
+            throw registerTableUnsupported(
+                    "The Iceberg REST catalog does not advertise registerTable",
+                    adjustedMetadata,
+                    null);
+        }
+        try {
+            Path registerPath = writeRegisterFile(adjustedMetadata);
+            if (dropFirst) {
+                if (probeRegisterTable(registerPath)) {
+                    // the table disappeared concurrently and the probe registered it
+                    verifyRegistered(newMetadata);
+                    return;
+                }
+                dropTable();
+            }
+            icebergTable =
+                    restCatalog.registerTable(icebergTableIdentifier, registerPath.toString());
+            verifyRegistered(newMetadata);
+        } catch (UnsupportedOperationException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Fail to register iceberg table " + icebergTableIdentifier, e);
+        }
+    }
+
+    /**
+     * Whether the server advertises the register-table endpoint. Iceberg's REST client keeps the
+     * endpoint set from the server's {@code /v1/config} response (or its backwards-compatible
+     * defaults, register-table included, when the server advertises none) in {@code
+     * RESTSessionCatalog#endpoints}, without a public accessor.
+     */
+    private boolean registerTableAdvertised() {
+        try {
+            Field sessionField = RESTCatalog.class.getDeclaredField("sessionCatalog");
+            sessionField.setAccessible(true);
+            Object sessionCatalog = sessionField.get(restCatalog);
+            Field endpointsField = null;
+            for (Class<?> c = sessionCatalog.getClass(); c != null; c = c.getSuperclass()) {
+                try {
+                    endpointsField = c.getDeclaredField("endpoints");
+                    break;
+                } catch (NoSuchFieldException ignored) {
+                    // keep looking in the superclass
+                }
+            }
+            if (endpointsField == null) {
+                throw new NoSuchFieldException("endpoints");
+            }
+            endpointsField.setAccessible(true);
+            Set<?> endpoints = (Set<?>) endpointsField.get(sessionCatalog);
+            return endpoints.contains(Endpoint.V1_REGISTER_TABLE);
+        } catch (Exception | LinkageError e) {
+            LOG.warn(
+                    "Cannot read the endpoints advertised by the Iceberg REST catalog, "
+                            + "assuming registerTable is unsupported.",
+                    e);
+            return false;
+        }
+    }
+
+    /**
+     * A server that advertises no endpoint list gets the client's default list, register-table
+     * included, so {@link #registerTableAdvertised} alone cannot prove support. Before the existing
+     * table is dropped, the registration is attempted against it: a server that implements the
+     * endpoint rejects it with {@link AlreadyExistsException}; anything else means the endpoint is
+     * unavailable and the existing table is left untouched.
+     *
+     * @return true if the registration went through because the table no longer existed
+     */
+    private boolean probeRegisterTable(Path registerPath) {
+        try {
+            icebergTable =
+                    restCatalog.registerTable(icebergTableIdentifier, registerPath.toString());
+            return true;
+        } catch (AlreadyExistsException e) {
+            return false;
+        } catch (RuntimeException e) {
+            throw registerTableUnsupported(
+                    "registerTable against the existing Iceberg REST catalog table failed with "
+                            + "something other than AlreadyExists, so the endpoint is assumed "
+                            + "unsupported",
+                    null,
+                    e);
+        }
+    }
+
+    private UnsupportedOperationException registerTableUnsupported(
+            String reason, @Nullable IcebergMetadata metadata, @Nullable Throwable cause) {
+        return new UnsupportedOperationException(
+                String.format(
+                        "%s; registerTable is required to publish format version 3 metadata "
+                                + "whose row-id space does not start at 0%s. The catalog table "
+                                + "%s was left untouched.",
+                        reason,
+                        metadata == null
+                                ? ""
+                                : String.format(
+                                        " (current snapshot first-row-id %s, next-row-id %s)",
+                                        metadata.currentSnapshot().firstRowId(),
+                                        metadata.nextRowId()),
+                        icebergTableIdentifier),
+                cause);
+    }
+
+    /**
+     * Writes the metadata to register into a fresh, never-overwritten file. A catalog may keep
+     * referencing the registered location, and rollback and rebuild paths reuse Paimon snapshot ids
+     * for different timelines, so the name carries a UUID and an existing file is never replaced.
+     */
+    private Path writeRegisterFile(IcebergMetadata metadata) throws IOException {
+        Path registerPath =
+                new Path(
+                        metadataDirectory,
+                        String.format(
+                                "rest-register-v%d-%s.metadata.json",
+                                metadata.currentSnapshotId(), UUID.randomUUID()));
+        if (!fileIO.tryToWriteAtomic(registerPath, metadata.toJson())) {
+            throw new IOException("Metadata file to register already exists: " + registerPath);
+        }
+        return registerPath;
+    }
+
+    private void verifyRegistered(TableMetadata newMetadata) {
+        long registered =
+                ((BaseTable) icebergTable).operations().current().currentSnapshot().snapshotId();
+        if (newMetadata.currentSnapshot() == null
+                || registered != newMetadata.currentSnapshot().snapshotId()) {
+            throw new IllegalStateException(
+                    String.format(
+                            "Registered catalog table is at snapshot %s instead of %s for table %s",
+                            registered,
+                            newMetadata.currentSnapshot() == null
+                                    ? "null"
+                                    : newMetadata.currentSnapshot().snapshotId(),
+                            icebergTableIdentifier));
+        }
     }
 
     private Table createTable(TableMetadata newMetadata) {
@@ -295,11 +596,10 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                 LOG.info(
                         "Partition fieldId = 0. The Iceberg REST committer will use partition evolution to support Iceberg compatibility with the Paimon schema. If you want to avoid this, use a non-zero fieldId partition field");
             }
-            Schema emptySchema = new Schema();
-            return restCatalog.createTable(icebergTableIdentifier, emptySchema);
+            return createTable(new Schema(), null, newMetadata);
         } else {
             LOG.info(
-                    "Partition fieldId > 0. In order to avoid partition evlolution, dummy schema will be created first");
+                    "Partition fieldId > 0. In order to avoid partition evolution, dummy schema will be created first");
 
             int size =
                     spec.fields().stream().mapToInt(PartitionField::sourceId).max().orElseThrow();
@@ -316,8 +616,62 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                 columns[f.sourceId() - 1] = newMetadata.schema().findField(f.sourceId());
             }
 
-            Schema dummySchema = new Schema(columns);
-            return restCatalog.createTable(icebergTableIdentifier, dummySchema, spec);
+            return createTable(new Schema(columns), spec, newMetadata);
+        }
+    }
+
+    private Table createTable(
+            Schema schema, @Nullable PartitionSpec spec, TableMetadata newMetadata) {
+        try {
+            // Path-based catalogs (e.g. Hadoop) derive and assign the table location themselves
+            // and reject a custom one, so first try letting the catalog assign it.
+            return newTableBuilder(schema, spec, newMetadata.formatVersion()).create();
+        } catch (RuntimeException e) {
+            // Some Iceberg REST catalogs (notably AWS Glue) do not auto-assign a table location
+            // and reject creation without one. Retry with the location Paimon writes its metadata
+            // to, normalised to the s3:// scheme such catalogs require.
+            try {
+                return newTableBuilder(schema, spec, newMetadata.formatVersion())
+                        .withLocation(toRestLocation(newMetadata.location()))
+                        .create();
+            } catch (RuntimeException retryError) {
+                e.addSuppressed(retryError);
+                throw e;
+            }
+        }
+    }
+
+    private Catalog.TableBuilder newTableBuilder(
+            Schema schema, @Nullable PartitionSpec spec, int formatVersion) {
+        Catalog.TableBuilder builder =
+                restCatalog
+                        .buildTable(icebergTableIdentifier, schema)
+                        .withProperty(
+                                TableProperties.FORMAT_VERSION, String.valueOf(formatVersion));
+        return spec == null ? builder : builder.withPartitionSpec(spec);
+    }
+
+    /** Normalises a table location's URI scheme for the Iceberg REST catalog. */
+    static String toRestLocation(String location) {
+        if (location == null) {
+            return null;
+        }
+        if (location.startsWith("s3a://")) {
+            return "s3://" + location.substring("s3a://".length());
+        }
+        if (location.startsWith("s3n://")) {
+            return "s3://" + location.substring("s3n://".length());
+        }
+        return location;
+    }
+
+    private Table recreateTable(TableMetadata newMetadata) {
+        try {
+            dropTable();
+            return createTable(newMetadata);
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Fail to recreate iceberg table: " + icebergTableIdentifier, e);
         }
     }
 
@@ -328,15 +682,6 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     private void dropTable() {
         // set purge to false, because we don't need to delete the data files
         restCatalog.dropTable(icebergTableIdentifier, false);
-    }
-
-    private Table recreateTable(TableMetadata newMetadata) {
-        try {
-            dropTable();
-            return createTable(newMetadata);
-        } catch (Exception e) {
-            throw new RuntimeException("Fail to recreate iceberg table.", e);
-        }
     }
 
     // -------------------------------------------------------------------------------------
@@ -360,16 +705,62 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             update.addSchema(schema);
         }
         update.setCurrentSchema(currentSchemaId);
+    }
 
-        // update properties
-        Map<String, String> properties = new HashMap<>();
-        properties.put(
-                METADATA_PREVIOUS_VERSIONS_MAX,
-                String.valueOf(icebergOptions.previousVersionsMax()));
-        properties.put(
-                METADATA_DELETE_AFTER_COMMIT_ENABLED,
-                String.valueOf(icebergOptions.deleteAfterCommitEnabled()));
-        update.setProperties(properties);
+    // Update Iceberg REST table properties from current IcebergOptions, but only
+    // if the values differ from what the REST catalog already has. This avoids
+    // emitting a redundant SetProperties update on every commit.
+    //
+    // This also merges in user-supplied custom properties (metadata.iceberg.table-properties.*),
+    // since setProperties() merges into the existing property map rather than replacing it
+    // (see TableMetadata.Builder#setProperties), so these persist across the create, recreate,
+    // and steady-state update paths that all route through this method via
+    // updatesForCorrectBase().
+    private void updateProperties(TableMetadata.Builder update) {
+        String desiredMax = String.valueOf(icebergOptions.previousVersionsMax());
+        String desiredDeleteAfter = String.valueOf(icebergOptions.deleteAfterCommitEnabled());
+
+        Map<String, String> current = icebergTable.properties();
+        boolean changed =
+                !desiredMax.equals(current.get(METADATA_PREVIOUS_VERSIONS_MAX))
+                        || !desiredDeleteAfter.equals(
+                                current.get(METADATA_DELETE_AFTER_COMMIT_ENABLED));
+
+        Map<String, String> customProperties = customTableProperties();
+        for (Map.Entry<String, String> entry : customProperties.entrySet()) {
+            if (!entry.getValue().equals(current.get(entry.getKey()))) {
+                changed = true;
+                break;
+            }
+        }
+
+        if (changed) {
+            Map<String, String> properties = new HashMap<>();
+            properties.put(METADATA_PREVIOUS_VERSIONS_MAX, desiredMax);
+            properties.put(METADATA_DELETE_AFTER_COMMIT_ENABLED, desiredDeleteAfter);
+            properties.putAll(customProperties);
+            update.setProperties(properties);
+        }
+    }
+
+    // Custom table properties requested via metadata.iceberg.table-properties.<key>, with
+    // Iceberg-reserved keys filtered out (Iceberg's TableMetadata rejects them outright).
+    private Map<String, String> customTableProperties() {
+        Map<String, String> customProperties = icebergOptions.icebergTableProperties();
+        Map<String, String> filtered = new HashMap<>();
+        customProperties.forEach(
+                (key, value) -> {
+                    if (RESERVED_PROPERTIES.contains(key)) {
+                        LOG.warn(
+                                "Ignoring custom Iceberg table property '{}' for table {}: "
+                                        + "it collides with an Iceberg-reserved property.",
+                                key,
+                                icebergTableIdentifier);
+                    } else {
+                        filtered.put(key, value);
+                    }
+                });
+        return filtered;
     }
 
     // -------------------------------------------------------------------------------------
@@ -393,38 +784,174 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             return false;
         }
 
+        // the same numeric id can belong to a rolled-back timeline; extending from it would
+        // keep the abandoned history in the catalog
+        IcebergSnapshot baseCurrent = baseIcebergMetadata.currentSnapshot();
+        if (baseCurrent != null
+                && currentMetadata.currentSnapshot().snapshotId() == baseCurrent.snapshotId()) {
+            String catalogIdentity =
+                    currentMetadata.currentSnapshot().summary().get(PAIMON_COMMIT_IDENTITY);
+            String baseIdentity = baseCurrent.summary().get(PAIMON_COMMIT_IDENTITY);
+            if (catalogIdentity != null
+                    && baseIdentity != null
+                    && !catalogIdentity.equals(baseIdentity)) {
+                return false;
+            }
+        }
+
         // if the iceberg table is existed, check whether the current metadata of the table is the
-        // base of the new table metadata, we use current snapshot id to check
+        // base of the new table metadata, we use current snapshot id to check.
+        // Note: callers must ensure currentMetadata.currentSnapshot() is non-null before calling
+        // this method (guarded in commitMetadataImpl).
         return currentMetadata.currentSnapshot().snapshotId()
                 == newMetadata.currentSnapshot().snapshotId() - 1;
     }
 
     private IcebergMetadata adjustMetadataForRest(IcebergMetadata newIcebergMetadata) {
-        // why need this:
-        // Since we will use an empty schema to create iceberg table in rest catalog and id-0 will
-        // be occupied by the empty schema, there will be 1-unit offset between the schema-id in
-        // metadata stored in rest catalog and the schema-id in paimon.
+        // --- Why we shift schema IDs by +1 ---
+        // When we create an Iceberg table via the REST catalog, we register it with
+        // an empty schema that occupies schema ID 0. Paimon's own schema IDs start
+        // at 0 as well, so we shift every Paimon schema ID by +1 to avoid colliding
+        // with that placeholder.
+        //
+        // --- Why we deduplicate schemas ---
+        // Option-only alterTable calls in Paimon (e.g. changing table properties
+        // like metadata.iceberg.* settings) increment Paimon's internal schema
+        // version without modifying the column definitions. This means Paimon can
+        // accumulate multiple schema versions (e.g. IDs 0, 1, 2, 3) that all have
+        // identical field lists.
+        //
+        // When these schemas are forwarded to Iceberg, addAndSetCurrentSchema()
+        // calls TableMetadata.Builder.addSchema() for each one. Iceberg internally
+        // deduplicates identical schemas via its sameSchema() check — it keeps only
+        // the first occurrence and silently drops duplicates. So if schemas 1, 2, 3
+        // all have the same fields, Iceberg keeps only schema 1.
+        //
+        // By deduplicating here (using IcebergDataField.equals() which compares id,
+        // name, required, type, and doc), we keep only unique schemas and build a
+        // remap table so that currentSchemaId and snapshot schemaId references point
+        // to the surviving schema's ID. The downstream metadata is then internally
+        // consistent with what Iceberg catalog will actually store.
 
-        List<IcebergSchema> schemas =
+        // Step 1 — Shift and convert: produce Iceberg Schema objects so we can call
+        // sameSchema() in the dedup step.
+        List<IcebergSchema> shiftedIcebergSchemas =
                 newIcebergMetadata.schemas().stream()
-                        .map(schema -> new IcebergSchema(schema.schemaId() + 1, schema.fields()))
+                        .map(s -> new IcebergSchema(s.schemaId() + 1, s.fields()))
                         .collect(Collectors.toList());
-        int currentSchemaId = newIcebergMetadata.currentSchemaId() + 1;
+        int shiftedCurrentSchemaId = newIcebergMetadata.currentSchemaId() + 1;
+        // Build a temporary IcebergMetadata with shifted IDs to obtain Iceberg Schema objects.
+        IcebergMetadata shiftedForConversion =
+                new IcebergMetadata(
+                        newIcebergMetadata.formatVersion(),
+                        newIcebergMetadata.tableUuid(),
+                        newIcebergMetadata.location(),
+                        newIcebergMetadata.currentSnapshotId(),
+                        newIcebergMetadata.lastColumnId(),
+                        shiftedIcebergSchemas,
+                        shiftedCurrentSchemaId,
+                        newIcebergMetadata.partitionSpecs(),
+                        newIcebergMetadata.lastPartitionId(),
+                        newIcebergMetadata.snapshots().stream()
+                                .map(
+                                        s ->
+                                                new IcebergSnapshot(
+                                                        s.sequenceNumber(),
+                                                        s.snapshotId(),
+                                                        s.parentSnapshotId(),
+                                                        s.timestampMs(),
+                                                        s.summary(),
+                                                        s.manifestList(),
+                                                        s.schemaId() + 1,
+                                                        s.firstRowId(),
+                                                        s.addedRows()))
+                                .collect(Collectors.toList()),
+                        newIcebergMetadata.currentSnapshotId(),
+                        newIcebergMetadata.nextRowId(),
+                        newIcebergMetadata.refs());
+        TableMetadata shiftedTableMetadata =
+                TableMetadataParser.fromJson(shiftedForConversion.toJson());
+        Map<Integer, IcebergSchema> shiftedById =
+                shiftedIcebergSchemas.stream()
+                        .collect(Collectors.toMap(IcebergSchema::schemaId, s -> s));
+
+        // Step 2 — Deduplicate using sameSchema(): keeps first occurrence (insertion order
+        // preserved by LinkedHashMap), remaps duplicates to the surviving schema ID.
+        // Maps each shifted schema ID → the surviving (deduped) schema ID (before renumbering).
+        LinkedHashMap<Integer, Schema> survivingById = new LinkedHashMap<>();
+        Map<Integer, Integer> schemaIdRemap = new HashMap<>();
+
+        for (Schema schema : shiftedTableMetadata.schemas()) {
+            int shiftedId = schema.schemaId();
+            Integer survivingId =
+                    survivingById.keySet().stream()
+                            .filter(sid -> survivingById.get(sid).sameSchema(schema))
+                            .findFirst()
+                            .orElse(null);
+            if (survivingId != null) {
+                // Duplicate: remap this ID to the first schema with the same structure
+                schemaIdRemap.put(shiftedId, survivingId);
+            } else {
+                // First occurrence: keep it
+                survivingById.put(shiftedId, schema);
+                schemaIdRemap.put(shiftedId, shiftedId);
+            }
+        }
+
+        // Step 2 — Renumber: after dedup, there may be gaps in the schema ID sequence
+        // (e.g. [1, 2, 4] when schema 3 was deduped into 2). Iceberg's addSchema() assigns
+        // IDs sequentially as max(existing) + 1, so it would produce [1, 2, 3] — not [1, 2, 4].
+        // Calling setCurrentSchema(4) would then fail with "unknown schema: 4".
+        // We renumber the surviving schemas to 1, 2, 3, ... and update the remap table so
+        // that currentSchemaId and snapshot schemaId references stay consistent.
+        Map<Integer, Integer> renumberMap = new HashMap<>(); // old deduped ID → new sequential ID
+        int nextId = 1;
+        List<IcebergSchema> schemas = new ArrayList<>();
+        for (int survivingId : survivingById.keySet()) {
+            renumberMap.put(survivingId, nextId);
+            schemas.add(new IcebergSchema(nextId, shiftedById.get(survivingId).fields()));
+            nextId++;
+        }
+        // Apply renumbering on top of the dedup remap
+        schemaIdRemap.replaceAll((k, dedupedId) -> renumberMap.get(dedupedId));
+
+        // 3. Remap currentSchemaId through dedup + renumber
+        int currentSchemaId =
+                schemaIdRemap.getOrDefault(
+                        newIcebergMetadata.currentSchemaId() + 1,
+                        newIcebergMetadata.currentSchemaId() + 1);
+
+        // Remap snapshot schema references so they point to surviving schema IDs
         List<IcebergSnapshot> snapshots =
                 newIcebergMetadata.snapshots().stream()
                         .map(
-                                snapshot ->
-                                        new IcebergSnapshot(
-                                                snapshot.sequenceNumber(),
-                                                snapshot.snapshotId(),
-                                                snapshot.parentSnapshotId(),
-                                                snapshot.timestampMs(),
-                                                snapshot.summary(),
-                                                snapshot.manifestList(),
-                                                snapshot.schemaId() + 1,
-                                                snapshot.firstRowId(),
-                                                snapshot.addedRows()))
+                                snapshot -> {
+                                    int shiftedSnapshotSchemaId = snapshot.schemaId() + 1;
+                                    int remappedSchemaId =
+                                            schemaIdRemap.getOrDefault(
+                                                    shiftedSnapshotSchemaId,
+                                                    shiftedSnapshotSchemaId);
+                                    return new IcebergSnapshot(
+                                            snapshot.sequenceNumber(),
+                                            snapshot.snapshotId(),
+                                            snapshot.parentSnapshotId(),
+                                            // a slow rebuild must not trip Iceberg's
+                                            // one-minute update-timestamp window
+                                            snapshot.snapshotId()
+                                                            == newIcebergMetadata
+                                                                    .currentSnapshotId()
+                                                    ? Math.max(
+                                                            snapshot.timestampMs(),
+                                                            System.currentTimeMillis() - 59_000L)
+                                                    : snapshot.timestampMs(),
+                                            snapshot.summary(),
+                                            snapshot.manifestList(),
+                                            remappedSchemaId,
+                                            snapshot.firstRowId(),
+                                            snapshot.addedRows());
+                                })
                         .collect(Collectors.toList());
+
         return new IcebergMetadata(
                 newIcebergMetadata.formatVersion(),
                 newIcebergMetadata.tableUuid(),
@@ -437,6 +964,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                 newIcebergMetadata.lastPartitionId(),
                 snapshots,
                 newIcebergMetadata.currentSnapshotId(),
+                newIcebergMetadata.nextRowId(),
                 newIcebergMetadata.refs());
     }
 
@@ -445,9 +973,6 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             return String.format(
                     "AddSnapshot(%s)",
                     ((MetadataUpdate.AddSnapshot) update).snapshot().snapshotId());
-        } else if (update instanceof MetadataUpdate.RemoveSnapshot) {
-            return String.format(
-                    "RemoveSnapshot(%s)", ((MetadataUpdate.RemoveSnapshot) update).snapshotId());
         } else if (update instanceof MetadataUpdate.SetSnapshotRef) {
             return String.format(
                     "SetSnapshotRef(%s, %s, %s)",

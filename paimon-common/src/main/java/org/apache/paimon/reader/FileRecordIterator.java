@@ -25,7 +25,6 @@ import org.apache.paimon.utils.RoaringBitmap32;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Iterator;
 import java.util.function.Function;
 
 /**
@@ -66,6 +65,11 @@ public interface FileRecordIterator<T> extends RecordReader.RecordIterator<T> {
                     return null;
                 }
                 return function.apply(next);
+            }
+
+            @Override
+            public boolean skip() throws IOException {
+                return thisIterator.skip();
             }
 
             @Override
@@ -112,9 +116,8 @@ public interface FileRecordIterator<T> extends RecordReader.RecordIterator<T> {
 
     default FileRecordIterator<T> selection(RoaringBitmap32 selection) {
         FileRecordIterator<T> thisIterator = this;
-        final Iterator<Integer> selects = selection.iterator();
         return new FileRecordIterator<T>() {
-            private long nextExpected = selects.hasNext() ? selects.next() : -1;
+            private long nextExpected = selection.nextValue(0);
 
             @Override
             public long returnedPosition() {
@@ -137,13 +140,33 @@ public interface FileRecordIterator<T> extends RecordReader.RecordIterator<T> {
                     if (next == null) {
                         return null;
                     }
-                    while (nextExpected != -1 && nextExpected < returnedPosition()) {
-                        nextExpected = selects.hasNext() ? selects.next() : -1;
-                    }
-                    if (nextExpected == returnedPosition()) {
+                    if (isSelected()) {
                         return next;
                     }
                 }
+            }
+
+            @Override
+            public boolean skip() throws IOException {
+                while (true) {
+                    if (nextExpected == -1 || !thisIterator.skip()) {
+                        return false;
+                    }
+                    if (isSelected()) {
+                        return true;
+                    }
+                }
+            }
+
+            private boolean isSelected() {
+                long position = returnedPosition();
+                if (nextExpected < position) {
+                    // A batch may start far into the file or skip entire pages. Seek to its
+                    // position instead of walking the selection again from the file's start.
+                    nextExpected =
+                            position > 0xFFFFFFFFL ? -1 : selection.nextValue((int) position);
+                }
+                return nextExpected == position;
             }
 
             @Override

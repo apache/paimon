@@ -743,6 +743,24 @@ public class FlinkCatalogTest extends FlinkCatalogTestBase {
     }
 
     @Test
+    void testNullablePrimaryKeyExposedAsTableOption() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PRIMARY_KEY.key(), "first");
+        options.put(CoreOptions.PRIMARY_KEY_NULLABLE.key(), "true");
+
+        catalog.createTable(path1, createTable(options), false);
+        DataCatalogTable table = (DataCatalogTable) catalog.getTable(path1);
+
+        assertThat(table.table().primaryKeys()).containsExactly("first");
+        assertThat(table.table().rowType().getTypeAt(0).isNullable()).isTrue();
+        assertThat(table.getUnresolvedSchema().getPrimaryKey()).isEmpty();
+        assertThat(table.getOptions())
+                .containsEntry(CoreOptions.PRIMARY_KEY.key(), "first")
+                .containsEntry(CoreOptions.PRIMARY_KEY_NULLABLE.key(), "true");
+    }
+
+    @Test
     void testBuildPaimonTableWithCustomScheme() throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         CatalogTable table = createTable(optionProvider(false).iterator().next());
@@ -895,7 +913,9 @@ public class FlinkCatalogTest extends FlinkCatalogTestBase {
                 options.put("incremental-between", "2,5");
             }
 
-            if (isStreaming && mode == CoreOptions.StartupMode.INCREMENTAL) {
+            if (isStreaming
+                    && (mode == CoreOptions.StartupMode.INCREMENTAL
+                            || mode == CoreOptions.StartupMode.LATEST_DELTA)) {
                 continue;
             }
             allOptions.add(options);

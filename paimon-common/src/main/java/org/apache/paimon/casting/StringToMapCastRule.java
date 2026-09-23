@@ -26,19 +26,14 @@ import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.VarCharType;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Stack;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 /** {@link DataTypeFamily#CHARACTER_STRING} to {@link DataTypeRoot#MAP} cast rule. */
 class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
@@ -51,8 +46,6 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
     // Pattern for SQL function format: MAP('key1', 'value1', 'key2', 'value2')
     private static final Pattern FUNCTION_MAP_PATTERN =
             Pattern.compile("^\\s*MAP\\s*\\((.*)\\)\\s*$", Pattern.CASE_INSENSITIVE);
-
-    private static final Pattern ENTRY_PATTERN = Pattern.compile("(.+?)\\s*->\\s*(.+)");
 
     private StringToMapCastRule() {
         super(
@@ -136,20 +129,18 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
             CastExecutor<BinaryString, Object> keyCastExecutor,
             CastExecutor<BinaryString, Object> valueCastExecutor) {
 
-        List<String> elements = splitMapEntries(content.trim());
+        List<TokenSplitter.Token> elements = TokenSplitter.split(content);
         if (elements.size() % 2 != 0) {
             throw new RuntimeException("Invalid Function map format: odd number of elements");
         }
 
-        return IntStream.range(0, elements.size() / 2)
-                .boxed()
-                .collect(
-                        Collectors.toMap(
-                                i -> parseValue(elements.get(i * 2).trim(), keyCastExecutor),
-                                i ->
-                                        parseValue(
-                                                elements.get(i * 2 + 1).trim(),
-                                                valueCastExecutor)));
+        Map<Object, Object> mapContent = Maps.newHashMap();
+        for (int i = 0; i < elements.size(); i += 2) {
+            mapContent.put(
+                    parseValue(elements.get(i), keyCastExecutor),
+                    parseValue(elements.get(i + 1), valueCastExecutor));
+        }
+        return mapContent;
     }
 
     private Map<Object, Object> parseMapEntry(
@@ -158,62 +149,35 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
             CastExecutor<BinaryString, Object> valueCastExecutor) {
 
         Map<Object, Object> mapContent = Maps.newHashMap();
-        for (String entry : splitMapEntries(content)) {
-            Matcher entryMatcher = ENTRY_PATTERN.matcher(entry);
-            if (!entryMatcher.matches()) {
+        for (String entry : TokenSplitter.splitRaw(content, ",", 0)) {
+            if (entry.isEmpty()) {
+                continue;
+            }
+            List<String> keyValue = TokenSplitter.splitRaw(entry, "->", 2);
+            if (keyValue.size() != 2) {
                 throw new RuntimeException("Invalid map entry format: " + entry);
             }
             mapContent.put(
-                    parseValue(entryMatcher.group(1).trim(), keyCastExecutor),
-                    parseValue(entryMatcher.group(2).trim(), valueCastExecutor));
+                    parseToken(keyValue.get(0), keyCastExecutor),
+                    parseToken(keyValue.get(1), valueCastExecutor));
         }
         return mapContent;
     }
 
-    private Object parseValue(String valueStr, CastExecutor<BinaryString, Object> castExecutor) {
-        return "null".equals(valueStr)
+    private Object parseToken(String raw, CastExecutor<BinaryString, Object> castExecutor) {
+        List<TokenSplitter.Token> tokens = TokenSplitter.split(raw);
+        if (tokens.size() != 1) {
+            throw new RuntimeException("Invalid map entry format: " + raw);
+        }
+        return parseValue(tokens.get(0), castExecutor);
+    }
+
+    private Object parseValue(
+            TokenSplitter.Token token, CastExecutor<BinaryString, Object> castExecutor) {
+        String value = token.value();
+        // only an unquoted null is the null key or value; "null" is the four-character string
+        return !token.literal() && "null".equals(value)
                 ? null
-                : castExecutor.cast(BinaryString.fromString(valueStr));
-    }
-
-    public List<String> splitMapEntries(String content) {
-        List<String> entries = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        Stack<Character> bracketStack = new Stack<>();
-        boolean inQuotes = false;
-        boolean escaped = false;
-
-        for (char c : content.toCharArray()) {
-            if (escaped) {
-                escaped = false;
-                continue;
-            } else if (c == '\\') {
-                escaped = true;
-                continue;
-            } else if (c == '"') {
-                inQuotes = !inQuotes;
-                continue;
-            } else if (!inQuotes) {
-                if (StringUtils.isOpenBracket(c)) {
-                    bracketStack.push(c);
-                } else if (StringUtils.isCloseBracket(c) && !bracketStack.isEmpty()) {
-                    bracketStack.pop();
-                } else if (c == ',' && bracketStack.isEmpty()) {
-                    addCurrentEntry(entries, current);
-                    continue;
-                }
-            }
-            current.append(c);
-        }
-
-        addCurrentEntry(entries, current);
-        return entries;
-    }
-
-    private void addCurrentEntry(List<String> entries, StringBuilder current) {
-        if (current.length() > 0) {
-            entries.add(current.toString().trim());
-            current.setLength(0);
-        }
+                : castExecutor.cast(BinaryString.fromString(value));
     }
 }

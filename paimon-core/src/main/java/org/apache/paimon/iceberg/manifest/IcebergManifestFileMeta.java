@@ -22,6 +22,8 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -73,6 +75,7 @@ public class IcebergManifestFileMeta {
     private final long existingRowsCount;
     private final long deletedRowsCount;
     private final List<IcebergPartitionSummary> partitions;
+    @Nullable private final Long firstRowId;
 
     public IcebergManifestFileMeta(
             String manifestPath,
@@ -88,7 +91,8 @@ public class IcebergManifestFileMeta {
             long addedRowsCount,
             long existingRowsCount,
             long deletedRowsCount,
-            List<IcebergPartitionSummary> partitions) {
+            List<IcebergPartitionSummary> partitions,
+            @Nullable Long firstRowId) {
         this.manifestPath = manifestPath;
         this.manifestLength = manifestLength;
         this.partitionSpecId = partitionSpecId;
@@ -103,6 +107,7 @@ public class IcebergManifestFileMeta {
         this.existingRowsCount = existingRowsCount;
         this.deletedRowsCount = deletedRowsCount;
         this.partitions = partitions;
+        this.firstRowId = firstRowId;
     }
 
     public String manifestPath() {
@@ -165,8 +170,42 @@ public class IcebergManifestFileMeta {
         return partitions;
     }
 
+    @Nullable
+    public Long firstRowId() {
+        return firstRowId;
+    }
+
+    public IcebergManifestFileMeta withFirstRowId(long firstRowId) {
+        return new IcebergManifestFileMeta(
+                manifestPath,
+                manifestLength,
+                partitionSpecId,
+                content,
+                sequenceNumber,
+                minSequenceNumber,
+                addedSnapshotId,
+                addedFilesCount,
+                existingFilesCount,
+                deletedFilesCount,
+                addedRowsCount,
+                existingRowsCount,
+                deletedRowsCount,
+                partitions,
+                firstRowId);
+    }
+
     public static RowType schema(boolean legacyVersion) {
-        return legacyVersion ? schemaForIceberg1_4() : schemaForIcebergNew();
+        return schema(legacyVersion, false);
+    }
+
+    public static RowType schema(boolean legacyVersion, boolean withFirstRowId) {
+        RowType base = legacyVersion ? schemaForIceberg1_4() : schemaForIcebergNew();
+        if (!withFirstRowId) {
+            return base;
+        }
+        List<DataField> fields = new ArrayList<>(base.getFields());
+        fields.add(new DataField(520, "first_row_id", DataTypes.BIGINT()));
+        return new RowType(false, fields);
     }
 
     private static RowType schemaForIcebergNew() {
@@ -235,7 +274,8 @@ public class IcebergManifestFileMeta {
                 && addedRowsCount == that.addedRowsCount
                 && existingRowsCount == that.existingRowsCount
                 && deletedRowsCount == that.deletedRowsCount
-                && Objects.equals(partitions, that.partitions);
+                && Objects.equals(partitions, that.partitions)
+                && Objects.equals(firstRowId, that.firstRowId);
     }
 
     @Override
@@ -254,6 +294,7 @@ public class IcebergManifestFileMeta {
                 addedRowsCount,
                 existingRowsCount,
                 deletedRowsCount,
-                partitions);
+                partitions,
+                firstRowId);
     }
 }

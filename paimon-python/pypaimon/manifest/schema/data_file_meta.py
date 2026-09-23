@@ -54,10 +54,19 @@ class DataFileMeta:
 
     # not a schema field, just for internal usage
     file_path: str = None
+    # Current DataFileMeta v9 field. Kept after the historical constructor
+    # fields so positional callers retain their existing argument mapping.
+    write_cols_sequences: Optional[List[int]] = None
 
     def row_id_range(self) -> Optional[Range]:
         if self.first_row_id is None:
             return None
+        return Range(self.first_row_id, self.first_row_id + self.row_count - 1)
+
+    def non_null_row_id_range(self) -> Range:
+        """Row-id range, failing fast if first_row_id is null (mirrors Java nonNullRowIdRange)."""
+        if self.first_row_id is None:
+            raise ValueError(f"First row id of '{self.file_name}' should not be null.")
         return Range(self.first_row_id, self.first_row_id + self.row_count - 1)
 
     def get_creation_time(self) -> Optional[Timestamp]:
@@ -102,6 +111,7 @@ class DataFileMeta:
         first_row_id: Optional[int] = None,
         write_cols: Optional[List[str]] = None,
         file_path: Optional[str] = None,
+        write_cols_sequences: Optional[List[int]] = None,
     ) -> 'DataFileMeta':
         if creation_time is None:
             creation_time = Timestamp.now()
@@ -127,6 +137,7 @@ class DataFileMeta:
             external_path=external_path,
             first_row_id=first_row_id,
             write_cols=write_cols,
+            write_cols_sequences=write_cols_sequences,
             file_path=file_path,
         )
 
@@ -164,12 +175,13 @@ class DataFileMeta:
             external_path=self.external_path,
             first_row_id=self.first_row_id,
             write_cols=self.write_cols,
+            write_cols_sequences=self.write_cols_sequences,
             file_path=self.file_path
         )
 
     @staticmethod
     def is_blob_file(file_name: str) -> bool:
-        return file_name.endswith(".blob")
+        return file_name.endswith(".blob") or file_name.endswith(".video")
 
     @staticmethod
     def is_vector_file(file_name: str) -> bool:
@@ -198,6 +210,7 @@ class DataFileMeta:
             external_path=self.external_path,
             first_row_id=first_row_id,
             write_cols=self.write_cols,
+            write_cols_sequences=self.write_cols_sequences,
             file_path=self.file_path
         )
 
@@ -224,6 +237,7 @@ class DataFileMeta:
             external_path=self.external_path,
             first_row_id=self.first_row_id,
             write_cols=self.write_cols,
+            write_cols_sequences=self.write_cols_sequences,
             file_path=self.file_path
         )
 
@@ -259,6 +273,9 @@ DATA_FILE_META_SCHEMA = {
         {"name": "_FIRST_ROW_ID", "type": ["null", "long"], "default": None},
         {"name": "_WRITE_COLS",
          "type": ["null", {"type": "array", "items": "string"}],
+         "default": None},
+        {"name": "_WRITE_COLS_SEQUENCES",
+         "type": ["null", {"type": "array", "items": "long"}],
          "default": None},
     ]
 }

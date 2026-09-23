@@ -23,6 +23,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 
 import java.io.Serializable;
+import java.util.Map;
 
 /** Builder to build vector search. */
 public interface VectorSearchBuilder extends Serializable {
@@ -41,6 +42,18 @@ public interface VectorSearchBuilder extends Serializable {
 
     /** The vector to search. */
     VectorSearchBuilder withVector(float[] vector);
+
+    /** Option for vector indexes. */
+    default VectorSearchBuilder withOption(String key, String value) {
+        throw new UnsupportedOperationException(
+                getClass().getName() + " does not support vector options.");
+    }
+
+    /** Options for vector indexes. */
+    default VectorSearchBuilder withOptions(Map<String, String> options) {
+        throw new UnsupportedOperationException(
+                getClass().getName() + " does not support vector options.");
+    }
 
     /** Create vector scan to scan index files. */
     VectorScan newVectorScan();

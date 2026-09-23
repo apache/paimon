@@ -18,38 +18,49 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.ListUtils;
-import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Optional;
+import java.util.Collections;
 import java.util.Set;
-
-import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
 
 /** A {@link InnerTableRead} for data table. */
 public abstract class AbstractDataTableRead implements InnerTableRead {
 
     private RowType readType;
-    private boolean executeFilter = false;
+    protected boolean executeFilter = false;
     private Predicate predicate;
     private final TableSchema schema;
 
-    public AbstractDataTableRead(TableSchema schema) {
+    // reader-level filtering sees raw values, so it stays off for auth-enabled tables,
+    // as read-level TopN already does (see ReadBuilderImpl)
+    private final boolean queryAuthEnabled;
+
+    // blob-view columns that only resolve through the dedicated blob-view read path
+    private final Set<String> resolvedBlobViewFields;
+
+    public AbstractDataTableRead(@Nullable TableSchema schema) {
         this.schema = schema;
+        Set<String> blobViewFields = Collections.emptySet();
+        boolean queryAuthEnabled = false;
+        if (schema != null) {
+            CoreOptions options = CoreOptions.fromMap(schema.options());
+            if (options.blobViewResolveEnabled()) {
+                blobViewFields = options.blobViewField();
+            }
+            queryAuthEnabled = options.queryAuthEnabled();
+        }
+        this.resolvedBlobViewFields = blobViewFields;
+        this.queryAuthEnabled = queryAuthEnabled;
     }
 
     public abstract void applyReadType(RowType readType);
@@ -64,6 +75,9 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     @Override
     public final InnerTableRead withFilter(Predicate predicate) {
         this.predicate = predicate;
+        if (queryAuthEnabled) {
+            return this;
+        }
         return innerWithFilter(predicate);
     }
 
@@ -119,67 +133,26 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
 
     protected final RecordReader<InternalRow> createDataReader(
             Split split, @Nullable TableQueryAuthResult authResult) throws IOException {
-        RecordReader<InternalRow> reader;
-        if (authResult == null) {
-            reader = reader(split);
-        } else {
-            reader = authedReader(split, authResult);
-        }
-        if (executeFilter) {
-            reader = executeFilter(reader);
-        }
-
-        return reader;
-    }
-
-    private RecordReader<InternalRow> authedReader(Split split, TableQueryAuthResult authResult)
-            throws IOException {
-        RecordReader<InternalRow> reader;
-        RowType tableType = schema.logicalRowType();
-        RowType readType = this.readType == null ? tableType : this.readType;
-        Predicate authPredicate = authResult.extractPredicate();
-        ProjectedRow backRow = null;
-        if (authPredicate != null) {
-            Set<String> authFields = collectFieldNames(authPredicate);
-            List<String> readFields = readType.getFieldNames();
-            List<String> authAddNames = new ArrayList<>();
-            Set<String> readFieldSet = new HashSet<>(readFields);
-            for (String field : tableType.getFieldNames()) {
-                if (authFields.contains(field) && !readFieldSet.contains(field)) {
-                    authAddNames.add(field);
-                }
+        if (authResult == null && !(executeFilter && predicate != null)) {
+            // Restore an explicit projection after a previous split needed authorization columns.
+            // Without a projection, preserve the underlying reader's default read type.
+            if (readType != null) {
+                applyReadType(readType);
             }
-            if (!authAddNames.isEmpty()) {
-                readType = tableType.project(ListUtils.union(readFields, authAddNames));
-                withReadType(readType);
-                backRow = ProjectedRow.from(readType.projectIndexes(readFields));
-            }
+            return reader(split);
         }
-        reader = authResult.doAuth(reader(split), readType);
-        if (backRow != null) {
-            reader = reader.transform(backRow::replaceRow);
+        ReadTransform transform =
+                ReadTransform.create(
+                        schema.logicalRowType(),
+                        currentReadType(),
+                        predicate,
+                        executeFilter,
+                        authResult,
+                        resolvedBlobViewFields);
+        if (readType != null || !transform.readType().equals(currentReadType())) {
+            applyReadType(transform.readType());
         }
-        return reader;
-    }
-
-    private RecordReader<InternalRow> executeFilter(RecordReader<InternalRow> reader) {
-        if (predicate == null) {
-            return reader;
-        }
-
-        Predicate predicate = this.predicate;
-        if (readType != null) {
-            int[] projection = schema.logicalRowType().getFieldIndices(readType.getFieldNames());
-            Optional<Predicate> optional =
-                    predicate.visit(PredicateProjectionConverter.fromProjection(projection));
-            if (!optional.isPresent()) {
-                return reader;
-            }
-            predicate = optional.get();
-        }
-
-        Predicate finalFilter = predicate;
-        return reader.filter(finalFilter::test);
+        return transform.apply(reader(split));
     }
 
     /** Split with auth context. */

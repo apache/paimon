@@ -21,6 +21,7 @@ from typing import List, Optional
 
 import pyarrow
 
+from pypaimon.common.time_utils import duration_to_iso8601, local_datetime_to_millis
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
 from pypaimon.table.system.system_table import SystemTable
 
@@ -73,10 +74,12 @@ class TagsTable(SystemTable):
             record_counts.append(
                 None if tag.total_record_count is None
                 else int(tag.total_record_count))
-            # TODO: surface create_time and time_retained once the Tag
-            # dataclass carries them.
-            create_times.append(None)
-            time_retained.append(None)
+            create_times.append(
+                None if tag.tag_create_time is None
+                else local_datetime_to_millis(tag.tag_create_time))
+            time_retained.append(
+                None if tag.tag_time_retained is None
+                else duration_to_iso8601(tag.tag_time_retained))
 
         return pyarrow.table({
             "tag_name": pyarrow.array(names, type=pyarrow.string()),

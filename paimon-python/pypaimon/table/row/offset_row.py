@@ -25,7 +25,9 @@ class OffsetRow(InternalRow):
 
     def __init__(self, row_tuple: Optional[tuple], offset: int, arity: int,
                  file_io=None, blob_field_indices: Optional[Iterable[int]] = None,
-                 vector_field_indices: Optional[Iterable[int]] = None):
+                 vector_field_indices: Optional[Iterable[int]] = None,
+                 descriptor_field_indices: Optional[Iterable[int]] = None,
+                 blob_view_lookup=None):
         self.row_tuple = row_tuple
         self.offset = offset
         self.arity = arity
@@ -34,6 +36,11 @@ class OffsetRow(InternalRow):
         self._blob_field_indices: FrozenSet[int] = (
             frozenset(blob_field_indices) if blob_field_indices is not None else frozenset()
         )
+        self._descriptor_field_indices: FrozenSet[int] = (
+            frozenset(descriptor_field_indices)
+            if descriptor_field_indices is not None else frozenset()
+        )
+        self._blob_view_lookup = blob_view_lookup
         self._vector_field_indices: FrozenSet[int] = (
             frozenset(vector_field_indices) if vector_field_indices is not None else frozenset()
         )
@@ -55,12 +62,55 @@ class OffsetRow(InternalRow):
             raise IndexError(f"Position {pos} is out of bounds for row arity {self.arity}")
         return self.row_tuple[self.offset + pos]
 
-    def get_blob(self, pos: int):
+    @staticmethod
+    def _normalize_blob_bytes(value):
+        if value is None:
+            return None
+        if hasattr(value, 'as_py'):
+            value = value.as_py()
+        if isinstance(value, str):
+            value = value.encode('utf-8')
+        if isinstance(value, bytearray):
+            value = bytes(value)
+        return value
+
+    def _resolve_blob_view_struct(self, view_struct):
         from pypaimon.table.row.blob import Blob
+
+        if self._blob_view_lookup is not None:
+            if self._blob_view_lookup.resolve_to_null(view_struct):
+                return None
+            return self._blob_view_lookup.resolve_blob(view_struct)
+        return Blob.from_view(view_struct)
+
+    def _blob_from_descriptor_field_bytes(self, raw: bytes):
+        from pypaimon.table.row.blob import Blob
+
+        return Blob.from_descriptor_bytes(
+            raw, self._file_io, uri_reader_factory=self._uri_reader_factory())
+
+    def _uri_reader_factory(self):
+        if self._file_io is None:
+            return None
+        from pypaimon.common.uri_reader import UriReaderFactory
+
+        return UriReaderFactory.from_file_io(self._file_io)
+
+    def get_blob(self, pos: int):
+        from pypaimon.table.row.blob import Blob, BlobViewStruct
 
         if pos not in self._blob_field_indices:
             raise TypeError(f"Field at position {pos} is not a BLOB field")
-        return Blob.from_bytes(self.get_field(pos), self._file_io)
+        value = self.get_field(pos)
+        if value is None:
+            return None
+        raw = self._normalize_blob_bytes(value)
+        if raw is not None and BlobViewStruct.is_blob_view_struct(raw):
+            return self._resolve_blob_view_struct(BlobViewStruct.deserialize(raw))
+        if pos in self._descriptor_field_indices:
+            return self._blob_from_descriptor_field_bytes(raw)
+        return Blob.from_bytes(
+            raw, self._file_io, uri_reader_factory=self._uri_reader_factory())
 
     def get_vector(self, pos: int):
         from pypaimon.table.row.vector import Vector

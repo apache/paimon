@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.common.file_io import FileIO
@@ -60,16 +60,17 @@ class FileStoreTable(Table):
         self.is_primary_key_table = bool(self.primary_keys)
         self.total_buckets = self.options.bucket()
 
-        current_branch = self.options.branch()
-        self.schema_manager = SchemaManager(file_io, table_path, branch=current_branch)
+        self.schema_manager = SchemaManager(
+            file_io, table_path, branch=self.current_branch())
 
     @classmethod
-    def from_path(cls, table_path: str) -> 'FileStoreTable':
+    def from_path(cls, table_path: str, file_io_options: Optional[dict] = None) -> 'FileStoreTable':
         """
         Create a FileStoreTable from a table path.
         This is useful for reading tables created by Java without going through a catalog.
+        ``file_io_options`` configures storage access; use ``copy`` for table read options.
         """
-        file_io = FileIO(table_path, Options({}))
+        file_io = FileIO.get(table_path, Options(file_io_options or {}))
         schema_manager = SchemaManager(file_io, table_path)
         table_schema = schema_manager.latest()
 
@@ -80,6 +81,10 @@ class FileStoreTable(Table):
         identifier = Identifier("default", "table")
 
         return cls(file_io, identifier, table_path, table_schema)
+
+    def schema(self) -> TableSchema:
+        """Get the table schema."""
+        return self.table_schema
 
     def current_branch(self) -> str:
         """Get the current branch name from the identifier."""
@@ -113,14 +118,16 @@ class FileStoreTable(Table):
         """Get the branch manager for this table."""
         # If catalog environment has a catalog loader, use CatalogBranchManager
         catalog_loader = self.catalog_environment.catalog_loader
-        if catalog_loader is not None:
-            from pypaimon.branch.catalog_branch_manager import CatalogBranchManager
+        if catalog_loader is not None and self.catalog_environment.supports_version_management:
+            from pypaimon.branch.catalog_branch_manager import \
+                CatalogBranchManager
             return CatalogBranchManager(
                 catalog_loader,
                 self.identifier
             )
         # Otherwise, use FileSystemBranchManager
-        from pypaimon.branch.filesystem_branch_manager import FileSystemBranchManager
+        from pypaimon.branch.filesystem_branch_manager import \
+            FileSystemBranchManager
         current_branch = self.current_branch() or "main"
         return FileSystemBranchManager(
             self.file_io,
@@ -155,7 +162,8 @@ class FileStoreTable(Table):
             self,
             tag_name: str,
             snapshot_id: Optional[int] = None,
-            ignore_if_exists: bool = False
+            ignore_if_exists: bool = False,
+            time_retained: Optional[str] = None
     ) -> None:
         """
         Create a tag for a snapshot.
@@ -164,6 +172,8 @@ class FileStoreTable(Table):
             tag_name: Name for the tag
             snapshot_id: ID of the snapshot to tag. If None, uses the latest snapshot.
             ignore_if_exists: If True, don't raise error if tag already exists
+            time_retained: Optional retention (e.g. ``"1d"``); when set, the tag
+                carries a create-time and TTL.
 
         Raises:
             ValueError: If no snapshot exists or tag already exists (when ignore_if_exists=False)
@@ -181,7 +191,7 @@ class FileStoreTable(Table):
                 raise ValueError("No snapshot exists in this table.")
 
         tag_mgr = self.tag_manager()
-        tag_mgr.create_tag(snapshot, tag_name, ignore_if_exists)
+        tag_mgr.create_tag(snapshot, tag_name, ignore_if_exists, time_retained)
 
     def delete_tag(self, tag_name: str) -> bool:
         """
@@ -330,7 +340,12 @@ class FileStoreTable(Table):
         tag_mgr = self.tag_manager()
         tag_mgr.rename_tag(old_name, new_name)
 
-    def replace_tag(self, tag_name: str, snapshot_id: int = None) -> None:
+    def replace_tag(
+            self,
+            tag_name: str,
+            snapshot_id: int = None,
+            time_retained: Optional[str] = None
+    ) -> None:
         """
         Replace an existing tag with a new snapshot.
 
@@ -338,6 +353,8 @@ class FileStoreTable(Table):
             tag_name: Name of the tag to replace
             snapshot_id: The snapshot id to associate with the tag.
                         If None, uses the latest snapshot.
+            time_retained: Optional retention (e.g. ``"1d"``); when set, the
+                replaced tag carries a create-time and TTL.
 
         Raises:
             ValueError: If tag doesn't exist, or snapshot doesn't exist
@@ -350,7 +367,7 @@ class FileStoreTable(Table):
             snapshot = self.snapshot_manager().get_snapshot_by_id(snapshot_id)
             if snapshot is None:
                 raise ValueError(f"Snapshot id '{snapshot_id}' doesn't exist.")
-        self.tag_manager().replace_tag(snapshot, tag_name)
+        self.tag_manager().replace_tag(snapshot, tag_name, time_retained)
 
     def path_factory(self) -> 'FileStorePathFactory':
         from pypaimon.utils.file_store_path_factory import FileStorePathFactory
@@ -366,17 +383,21 @@ class FileStoreTable(Table):
         return FileStorePathFactory(
             root=str(self.table_path),
             partition_keys=self.partition_keys,
+            partition_types=[field.type for field in self.partition_keys_fields],
             default_part_value=self.options.options.get(
                 CoreOptions.PARTITION_DEFAULT_NAME, "__DEFAULT_PARTITION__"),
             format_identifier=format_identifier,
             data_file_prefix="data-",
             changelog_file_prefix="changelog-",
-            legacy_partition_name=True,
+            legacy_partition_name=self.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME),
             file_suffix_include_compression=False,
             file_compression=file_compression,
             data_file_path_directory=None,
             external_paths=external_paths,
-            index_file_in_data_file_dir=False,
+            external_path_strategy=self.options.data_file_external_paths_strategy(),
+            external_path_weights=self.options.data_file_external_paths_weights(),
+            index_file_in_data_file_dir=self.options.index_file_in_data_file_dir(),
+            global_index_external_path=self.options.global_index_external_path(),
         )
 
     def new_snapshot_commit(self):
@@ -409,18 +430,65 @@ class FileStoreTable(Table):
     def new_batch_write_builder(self) -> BatchWriteBuilder:
         return BatchWriteBuilder(self)
 
+    def new_postpone_fixed_bucket_write_builder(self):
+        from pypaimon.write.postpone_batch_table_write import (
+            PostponeFixedBucketWriteBuilder,
+        )
+        return PostponeFixedBucketWriteBuilder(self)
+
     def new_stream_write_builder(self) -> StreamWriteBuilder:
         return StreamWriteBuilder(self)
 
     def new_full_text_search_builder(self) -> 'FullTextSearchBuilder':
-        from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
+        from pypaimon.table.source.full_text_search_builder import \
+            FullTextSearchBuilderImpl
         return FullTextSearchBuilderImpl(self)
 
     def new_vector_search_builder(self) -> 'VectorSearchBuilder':
-        from pypaimon.table.source.vector_search_builder import VectorSearchBuilderImpl
+        from pypaimon.table.source.vector_search_builder import \
+            VectorSearchBuilderImpl
         return VectorSearchBuilderImpl(self)
 
-    def create_row_key_extractor(self) -> RowKeyExtractor:
+    def new_hybrid_search_builder(self) -> 'HybridSearchBuilder':
+        from pypaimon.table.source.hybrid_search_builder import \
+            HybridSearchBuilderImpl
+        return HybridSearchBuilderImpl(self)
+
+    def new_batch_vector_search_builder(self) -> 'BatchVectorSearchBuilder':
+        from pypaimon.table.source.batch_vector_search_builder import \
+            BatchVectorSearchBuilderImpl
+        return BatchVectorSearchBuilderImpl(self)
+
+    def create_global_index(self, index_column, index_type: str = "btree",
+                            partition_filter=None, partitions=None,
+                            options: Optional[dict] = None) -> int:
+        from pypaimon.globalindex.create_global_index import \
+            create_global_index
+        return create_global_index(
+            self,
+            index_column,
+            index_type=index_type,
+            partition_filter=partition_filter,
+            partitions=partitions,
+            options=options,
+        )
+
+    def drop_global_index(self, index_column, index_type: str = "btree",
+                          partition_filter=None, partitions=None,
+                          dry_run: bool = False) -> int:
+        from pypaimon.globalindex.drop_global_index import drop_global_index
+        return drop_global_index(
+            self,
+            index_column,
+            index_type=index_type,
+            partition_filter=partition_filter,
+            partitions=partitions,
+            dry_run=dry_run,
+        )
+
+    def create_row_key_extractor(
+        self, ignore_existing: bool = False
+    ) -> RowKeyExtractor:
         bucket_mode = self.bucket_mode()
         if bucket_mode == BucketMode.HASH_FIXED:
             return FixedBucketRowKeyExtractor(self.table_schema)
@@ -428,12 +496,44 @@ class FileStoreTable(Table):
             return UnawareBucketRowKeyExtractor(self.table_schema)
         elif bucket_mode == BucketMode.POSTPONE_MODE:
             return PostponeBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.HASH_DYNAMIC or bucket_mode == BucketMode.CROSS_PARTITION:
-            return DynamicBucketRowKeyExtractor(self.table_schema)
+        elif bucket_mode == BucketMode.HASH_DYNAMIC:
+            return DynamicBucketRowKeyExtractor(
+                self.table_schema,
+                table=self,
+                ignore_existing=ignore_existing,
+            )
+        elif bucket_mode == BucketMode.CROSS_PARTITION:
+            raise ValueError(
+                "CROSS_PARTITION primary-key writes require a persistent "
+                "global primary-key index, which PyPaimon does not yet support"
+            )
         else:
             raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
 
     def copy(self, options: dict) -> 'FileStoreTable':
+        return self._copy(options, resolve_time_travel=True)
+
+    def copy_without_time_travel(self, options: dict) -> 'FileStoreTable':
+        """Copy this table while preserving its already resolved schema."""
+        return self._copy(options, resolve_time_travel=False)
+
+    def _copy_with_snapshot(self, snapshot):
+        """Keep one resolved read view, including tag metadata and empty tables."""
+        from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+        options = {key: None for key in SCAN_KEYS if key in self.table_schema.options}
+        options[CoreOptions.SCAN_MODE.key()] = "from-snapshot" if snapshot is not None else "default"
+        if snapshot is not None:
+            options[CoreOptions.SCAN_SNAPSHOT_ID.key()] = str(snapshot.id)
+        # Native planning cannot consume retained tag metadata or a pinned empty view.
+        # scan.version can resolve to a tag as well.
+        if snapshot is None or any(option.key() in self.table_schema.options for option in (
+                CoreOptions.SCAN_TAG_NAME, CoreOptions.SCAN_VERSION)):
+            options[CoreOptions.SCAN_NATIVE_PLAN_ENABLED.key()] = "false"
+        table = self.copy_without_time_travel(options)
+        table._read_snapshot = snapshot
+        return table
+
+    def _copy(self, options: dict, resolve_time_travel: bool) -> 'FileStoreTable':
         if CoreOptions.BUCKET.key() in options and int(options.get(CoreOptions.BUCKET.key())) != self.options.bucket():
             raise ValueError("Cannot change bucket number")
         new_options = CoreOptions.copy(self.options).options.to_map()
@@ -445,9 +545,18 @@ class FileStoreTable(Table):
 
         new_table_schema = self.table_schema.copy(new_options=new_options)
 
-        time_travel_schema = self._try_time_travel(Options(new_options))
-        if time_travel_schema is not None:
-            new_table_schema = time_travel_schema
+        # Cumulative copy() overrides (removals kept as None) vs the on-disk schema.
+        applied_options = {**getattr(self, '_applied_dynamic_options', {}), **options}
+
+        from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+        preserve_snapshot = hasattr(self, "_read_snapshot") and not any(
+            key in options for key in SCAN_KEYS + [
+                CoreOptions.SCAN_MODE.key(), CoreOptions.BRANCH.key(),
+                CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key()])
+        if resolve_time_travel and not preserve_snapshot:
+            time_travel_schema = self._try_time_travel(Options(new_options), set(applied_options))
+            if time_travel_schema is not None:
+                new_table_schema = time_travel_schema
 
         # Re-encode the branch into the identifier when the option changes, so
         # current_branch() and any catalog-routed snapshot commit see the
@@ -464,10 +573,14 @@ class FileStoreTable(Table):
             )
             catalog_env = self.catalog_environment.copy(new_identifier)
 
-        return FileStoreTable(self.file_io, new_identifier, self.table_path, new_table_schema,
-                              catalog_env)
+        new_table = FileStoreTable(self.file_io, new_identifier, self.table_path,
+                                   new_table_schema, catalog_env)
+        new_table._applied_dynamic_options = applied_options
+        if preserve_snapshot:
+            new_table._read_snapshot = self._read_snapshot
+        return new_table
 
-    def _try_time_travel(self, options: Options) -> Optional[TableSchema]:
+    def _try_time_travel(self, options: Options, dynamic_option_keys: Set[str]) -> Optional[TableSchema]:
         """
         Try to resolve time travel options and return the corresponding schema.
 
@@ -486,12 +599,37 @@ class FileStoreTable(Table):
             )
             if snapshot is None:
                 return None
-            return self.schema_manager.get_schema(snapshot.schema_id).copy(new_options=options.to_map())
+            historical_schema = self.schema_manager.get_schema(snapshot.schema_id)
+            return historical_schema.copy(new_options=self._exclude_current_schema_field_options(
+                historical_schema, options, dynamic_option_keys))
         except Exception:
             return None
 
+    @staticmethod
+    def _exclude_current_schema_field_options(
+            historical_schema: TableSchema, options: Options, dynamic_option_keys: Set[str]) -> dict:
+        # Keep scan and runtime options, but restore column declarations to match historical fields.
+        historical_options = dict(options.to_map())
+        for key in (
+                CoreOptions.VECTOR_FIELD.key(),
+                CoreOptions.BLOB_FIELD.key(),
+                CoreOptions.BLOB_DESCRIPTOR_FIELD.key(),
+                CoreOptions.BLOB_VIEW_FIELD.key(),
+                # Restore the legacy key verbatim, not as a canonical descriptor option:
+                # Python intentionally ignores it when choosing the read layout.
+                'blob.stored-descriptor-fields'):
+            if key in dynamic_option_keys:
+                # Preserve explicit overrides and removals, including those from earlier copies.
+                continue
+            if key in historical_schema.options:
+                historical_options[key] = historical_schema.options[key]
+            else:
+                historical_options.pop(key, None)
+        return historical_options
+
     def _create_external_paths(self) -> List[str]:
         from urllib.parse import urlparse
+
         from pypaimon.common.options.core_options import ExternalPathStrategy
 
         external_paths_str = self.options.data_file_external_paths()

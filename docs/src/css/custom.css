@@ -50,6 +50,21 @@
   line-height: 1.5;
 }
 
+.hero-links {
+  margin: 0.6rem auto 0;
+  font-size: 0.95rem;
+}
+
+.hero-links a {
+  color: var(--ifm-color-primary);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.hero-links a:hover {
+  text-decoration: underline;
+}
+
 /* ===== Feature Columns ===== */
 .feature-columns {
   display: grid;

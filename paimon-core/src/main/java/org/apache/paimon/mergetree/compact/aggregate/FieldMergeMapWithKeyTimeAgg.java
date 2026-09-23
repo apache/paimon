@@ -18,7 +18,6 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
-import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
@@ -36,11 +35,19 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
     private final InternalArray.ElementGetter valueGetter;
     private final int timestampFieldIndex;
 
+    /** See {@link BinaryMapKeys}: a binary key has no value equality of its own. */
+    private final boolean binaryKey;
+
     public FieldMergeMapWithKeyTimeAgg(String name, MapType dataType, int timestampFieldIndex) {
         super(name, dataType);
         this.keyGetter = InternalArray.createElementGetter(dataType.getKeyType());
         this.valueGetter = InternalArray.createElementGetter(dataType.getValueType());
         this.timestampFieldIndex = timestampFieldIndex;
+        this.binaryKey = BinaryMapKeys.isBinary(dataType.getKeyType());
+    }
+
+    private Object hashKey(Object key) {
+        return BinaryMapKeys.hashKey(binaryKey, key);
     }
 
     @Override
@@ -60,14 +67,14 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
 
         mergeInputMap(resultMap, inputMap);
 
-        return new GenericMap(resultMap);
+        return BinaryMapKeys.toGenericMap(binaryKey, resultMap);
     }
 
     private void putToMap(Map<Object, Object> map, InternalMap data) {
         InternalArray keyArray = data.keyArray();
         InternalArray valueArray = data.valueArray();
         for (int i = 0; i < keyArray.size(); i++) {
-            Object key = keyGetter.getElementOrNull(keyArray, i);
+            Object key = hashKey(keyGetter.getElementOrNull(keyArray, i));
             Object value = valueGetter.getElementOrNull(valueArray, i);
             map.put(key, value);
         }
@@ -78,7 +85,7 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
         InternalArray valueArray = inputMap.valueArray();
 
         for (int i = 0; i < keyArray.size(); i++) {
-            Object key = keyGetter.getElementOrNull(keyArray, i);
+            Object key = hashKey(keyGetter.getElementOrNull(keyArray, i));
             InternalRow newRow = (InternalRow) valueGetter.getElementOrNull(valueArray, i);
 
             if (newRow == null) {

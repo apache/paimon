@@ -20,31 +20,36 @@ package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.SortedIndexFileMeta;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.sst.BlockHandle;
 import org.apache.paimon.sst.BloomFilterHandle;
 import org.apache.paimon.sst.SstFileWriter;
+import org.apache.paimon.utils.BloomFilter;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.LazyField;
+import org.apache.paimon.utils.LongArrayList;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import javax.annotation.Nullable;
 
+import java.io.Closeable;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.zip.CRC32;
 
 /**
- * The {@link GlobalIndexSingletonWriter} implementation for BTree index. Note that users must keep
- * written keys monotonically incremental. All null keys are stored in a separate bitmap, which will
- * be serialized and appended to the file end on close. The layout is as below:
+ * The {@link GlobalIndexSingleColumnWriter} implementation for BTree index. Note that users must
+ * keep written keys monotonically incremental and row ids for the same non-null key strictly
+ * increasing. All null keys are stored in a separate bitmap, which will be serialized and appended
+ * to the file end on close. The layout is as below:
  *
  * <pre>
  *    +-----------------------------------+------+
@@ -67,15 +72,17 @@ import java.util.zip.CRC32;
  * <p>For efficiency, we combine entries with the same keys and store a compact list of row ids for
  * each key.
  */
-public class BTreeIndexWriter implements GlobalIndexParallelWriter {
+public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter, Closeable {
 
     private final String fileName;
     private final PositionOutputStream out;
+    private boolean closed;
 
     private final SstFileWriter writer;
     private final KeySerializer keySerializer;
     private final Comparator<Object> comparator;
-    private final List<Long> currentRowIds = new ArrayList<>();
+    private final int fileVersion;
+    private final LongArrayList currentRowIds = new LongArrayList(32);
     private final LazyField<RoaringNavigableMap64> nullBitmap =
             new LazyField<>(RoaringNavigableMap64::new);
 
@@ -89,12 +96,48 @@ public class BTreeIndexWriter implements GlobalIndexParallelWriter {
             int blockSize,
             BlockCompressionFactory compressionFactory)
             throws IOException {
+        this(indexFileWriter, keySerializer, blockSize, null, compressionFactory);
+    }
+
+    public BTreeIndexWriter(
+            GlobalIndexFileWriter indexFileWriter,
+            KeySerializer keySerializer,
+            int blockSize,
+            @Nullable BloomFilter.Builder bloomFilterBuilder,
+            BlockCompressionFactory compressionFactory)
+            throws IOException {
+        this(
+                indexFileWriter,
+                keySerializer,
+                blockSize,
+                bloomFilterBuilder,
+                compressionFactory,
+                BTreeFileFooter.DEFAULT_WRITE_VERSION);
+    }
+
+    BTreeIndexWriter(
+            GlobalIndexFileWriter indexFileWriter,
+            KeySerializer keySerializer,
+            int blockSize,
+            @Nullable BloomFilter.Builder bloomFilterBuilder,
+            BlockCompressionFactory compressionFactory,
+            int fileVersion)
+            throws IOException {
+        if (fileVersion < BTreeFileFooter.VERSION_1
+                || fileVersion > BTreeFileFooter.MAX_SUPPORTED_VERSION) {
+            throw new IllegalArgumentException("Unsupported BTree index version: " + fileVersion);
+        }
         this.fileName = indexFileWriter.newFileName(BTreeGlobalIndexerFactory.IDENTIFIER);
         this.out = indexFileWriter.newOutputStream(this.fileName);
-        this.keySerializer = keySerializer;
-        this.comparator = keySerializer.createComparator();
-        // todo: we may enable bf to accelerate equal and in predicate in the future
-        this.writer = new SstFileWriter(out, blockSize, null, compressionFactory);
+        try {
+            this.keySerializer = keySerializer;
+            this.comparator = keySerializer.createComparator();
+            this.fileVersion = fileVersion;
+            this.writer = new SstFileWriter(out, blockSize, bloomFilterBuilder, compressionFactory);
+        } catch (RuntimeException | Error e) {
+            IOUtils.closeQuietly(out);
+            throw e;
+        }
     }
 
     @Override
@@ -126,15 +169,22 @@ public class BTreeIndexWriter implements GlobalIndexParallelWriter {
             return;
         }
 
-        // serialize row id list
-        MemorySliceOutput sliceOutput = new MemorySliceOutput(currentRowIds.size() * 9 + 5);
-        sliceOutput.writeVarLenInt(currentRowIds.size());
-        for (long currentRowId : currentRowIds) {
-            sliceOutput.writeVarLenLong(currentRowId);
-        }
+        byte[] postingList =
+                fileVersion == BTreeFileFooter.VERSION_1
+                        ? serializeVersion1RowIds(currentRowIds)
+                        : BTreePostingList.serialize(currentRowIds);
         currentRowIds.clear();
 
-        writer.put(keySerializer.serialize(lastKey), sliceOutput.toSlice().copyBytes());
+        writer.put(keySerializer.serialize(lastKey), postingList);
+    }
+
+    private static byte[] serializeVersion1RowIds(LongArrayList rowIds) {
+        MemorySliceOutput output = new MemorySliceOutput(rowIds.size() * 9 + 5);
+        output.writeVarLenInt(rowIds.size());
+        for (int i = 0; i < rowIds.size(); i++) {
+            output.writeVarLenLong(rowIds.get(i));
+        }
+        return output.toSlice().copyBytes();
     }
 
     @Override
@@ -149,8 +199,7 @@ public class BTreeIndexWriter implements GlobalIndexParallelWriter {
             // write null bitmap
             BlockHandle nullBitmapHandle = writeNullBitmap();
 
-            // write bloom filter (currently is always null, but we could add it for equal
-            // and in condition.)
+            // write bloom filter
             BloomFilterHandle bloomFilterHandle = writer.writeBloomFilter();
 
             // write index block
@@ -158,12 +207,16 @@ public class BTreeIndexWriter implements GlobalIndexParallelWriter {
 
             // write footer
             BTreeFileFooter footer =
-                    new BTreeFileFooter(bloomFilterHandle, indexBlockHandle, nullBitmapHandle);
+                    new BTreeFileFooter(
+                            fileVersion, bloomFilterHandle, indexBlockHandle, nullBitmapHandle);
             MemorySlice footerEncoding = BTreeFileFooter.writeFooter(footer);
             writer.writeSlice(footerEncoding);
 
             out.close();
+            closed = true;
         } catch (IOException e) {
+            IOUtils.closeQuietly(out);
+            closed = true;
             throw new RuntimeException("Error in closing BTree index writer", e);
         }
 
@@ -172,7 +225,7 @@ public class BTreeIndexWriter implements GlobalIndexParallelWriter {
         }
 
         byte[] metaBytes =
-                new BTreeIndexMeta(
+                new SortedIndexFileMeta(
                                 firstKey == null ? null : keySerializer.serialize(firstKey),
                                 lastKey == null ? null : keySerializer.serialize(lastKey),
                                 nullBitmap.initialized())
@@ -200,5 +253,18 @@ public class BTreeIndexWriter implements GlobalIndexParallelWriter {
         writer.writeSlice(sliceOutput.toSlice());
 
         return nullBitmapHandle;
+    }
+
+    /**
+     * Releases the output stream for a build that is abandoned without {@link #finish()}. The owner
+     * cleanup paths reach a writer only through {@code instanceof AutoCloseable}, so without this
+     * the stream opened in the constructor stays open for the life of the process.
+     */
+    @Override
+    public void close() throws IOException {
+        if (!closed) {
+            closed = true;
+            out.close();
+        }
     }
 }

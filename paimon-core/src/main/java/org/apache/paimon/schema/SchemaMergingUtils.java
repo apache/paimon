@@ -30,11 +30,11 @@ import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 /** The util class for merging the schemas. */
 public class SchemaMergingUtils {
@@ -43,7 +43,11 @@ public class SchemaMergingUtils {
     public static final String MAP_VALUE_FIELD_NAME = "value";
 
     public static TableSchema mergeSchemas(
-            TableSchema currentTableSchema, RowType targetType, boolean allowExplicitCast) {
+            TableSchema currentTableSchema,
+            RowType targetType,
+            boolean typeWidening,
+            boolean allowExplicitCast,
+            boolean caseSensitive) {
         RowType currentType = currentTableSchema.logicalRowType();
         if (currentType.equals(targetType)) {
             return currentTableSchema;
@@ -51,7 +55,13 @@ public class SchemaMergingUtils {
 
         AtomicInteger highestFieldId = new AtomicInteger(currentTableSchema.highestFieldId());
         RowType newRowType =
-                mergeSchemas(currentType, targetType, highestFieldId, allowExplicitCast);
+                mergeSchemas(
+                        currentType,
+                        targetType,
+                        highestFieldId,
+                        typeWidening,
+                        allowExplicitCast,
+                        caseSensitive);
         if (newRowType.equals(currentType)) {
             // It happens if the `targetType` only changes `nullability` but we always respect the
             // current's.
@@ -72,29 +82,40 @@ public class SchemaMergingUtils {
             RowType tableSchema,
             RowType dataSchema,
             AtomicInteger highestFieldId,
-            boolean allowExplicitCast) {
-        return (RowType) merge(tableSchema, dataSchema, highestFieldId, allowExplicitCast);
+            boolean typeWidening,
+            boolean allowExplicitCast,
+            boolean caseSensitive) {
+        return (RowType)
+                merge(
+                        tableSchema,
+                        dataSchema,
+                        highestFieldId,
+                        typeWidening,
+                        allowExplicitCast,
+                        caseSensitive);
     }
 
     /**
-     * Merge the base data type and the update data type if possible.
+     * Merge the base (target) data type with the update (incoming) data type.
      *
-     * <p>For RowType, find the fields which exists in both the base schema and the update schema,
-     * and try to merge them by calling the method iteratively; remain those fields that are only in
-     * the base schema and append those fields that are only in the update schema.
-     *
-     * <p>For other complex type, try to merge the element types.
-     *
-     * <p>For primitive data type, we treat that's compatible if the original type can be safely
-     * cast to the new type.
+     * <ul>
+     *   <li>RowType: merge existing fields recursively, keep base-only fields, append update-only
+     *       fields as new columns.
+     *   <li>Complex types (Array/Map/Multiset): recursively merge element/value types.
+     *   <li>Leaf types when {@code typeWidening=false} (default): keep the base type unchanged —
+     *       incoming data is cast to it by the alignment layer.
+     *   <li>Leaf types when {@code typeWidening=true}: widen the base type to the update type if
+     *       the cast is safe (or explicit when {@code allowExplicitCast=true}).
+     * </ul>
      */
     public static DataType merge(
             DataType base0,
             DataType update0,
             AtomicInteger highestFieldId,
-            boolean allowExplicitCast) {
-        // Here we try to merge the base0 and update0 without regard to the nullability,
-        // and set the base0's nullability to the return's.
+            boolean typeWidening,
+            boolean allowExplicitCast,
+            boolean caseSensitive) {
+        // Compare ignoring nullability; the base's nullability flows to the result.
         DataType base = base0.copy(true);
         DataType update = update0.copy(true);
 
@@ -103,45 +124,38 @@ public class SchemaMergingUtils {
         } else if (base instanceof RowType && update instanceof RowType) {
             List<DataField> baseFields = ((RowType) base).getFields();
             List<DataField> updateFields = ((RowType) update).getFields();
-            Map<String, DataField> updateFieldMap =
-                    updateFields.stream()
-                            .collect(Collectors.toMap(DataField::name, Function.identity()));
-            List<DataField> updatedFields =
-                    baseFields.stream()
-                            .map(
-                                    baseField -> {
-                                        if (updateFieldMap.containsKey(baseField.name())) {
-                                            DataField updateField =
-                                                    updateFieldMap.get(baseField.name());
-                                            DataType updatedDataType =
-                                                    merge(
-                                                            baseField.type(),
-                                                            updateField.type(),
-                                                            highestFieldId,
-                                                            allowExplicitCast);
-                                            return new DataField(
-                                                    baseField.id(),
-                                                    baseField.name(),
-                                                    updatedDataType,
-                                                    baseField.description(),
-                                                    baseField.defaultValue());
-                                        } else {
-                                            return baseField;
-                                        }
-                                    })
-                            .collect(Collectors.toList());
+            Map<String, DataField> updateFieldMap = buildFieldMap(updateFields, caseSensitive);
+            List<DataField> updatedFields = new ArrayList<>();
+            for (DataField baseField : baseFields) {
+                if (updateFieldMap.containsKey(baseField.name())) {
+                    DataField updateField = updateFieldMap.get(baseField.name());
+                    DataType updatedDataType =
+                            merge(
+                                    baseField.type(),
+                                    updateField.type(),
+                                    highestFieldId,
+                                    typeWidening,
+                                    allowExplicitCast,
+                                    caseSensitive);
+                    updatedFields.add(
+                            new DataField(
+                                    baseField.id(),
+                                    baseField.name(),
+                                    updatedDataType,
+                                    baseField.description(),
+                                    baseField.defaultValue()));
+                } else {
+                    updatedFields.add(baseField);
+                }
+            }
 
-            Map<String, DataField> baseFieldMap =
-                    baseFields.stream()
-                            .collect(Collectors.toMap(DataField::name, Function.identity()));
-            List<DataField> newFields =
-                    updateFields.stream()
-                            .filter(field -> !baseFieldMap.containsKey(field.name()))
-                            .map(field -> assignIdForNewField(field, highestFieldId))
-                            .map(field -> field.copy(true))
-                            .collect(Collectors.toList());
+            Map<String, DataField> baseFieldMap = buildFieldMap(baseFields, caseSensitive);
+            for (DataField field : updateFields) {
+                if (!baseFieldMap.containsKey(field.name())) {
+                    updatedFields.add(assignIdForNewField(field, highestFieldId).copy(true));
+                }
+            }
 
-            updatedFields.addAll(newFields);
             return new RowType(base0.isNullable(), updatedFields);
         } else if (base instanceof MapType && update instanceof MapType) {
             return new MapType(
@@ -150,12 +164,16 @@ public class SchemaMergingUtils {
                             ((MapType) base).getKeyType(),
                             ((MapType) update).getKeyType(),
                             highestFieldId,
-                            allowExplicitCast),
+                            typeWidening,
+                            allowExplicitCast,
+                            caseSensitive),
                     merge(
                             ((MapType) base).getValueType(),
                             ((MapType) update).getValueType(),
                             highestFieldId,
-                            allowExplicitCast));
+                            typeWidening,
+                            allowExplicitCast,
+                            caseSensitive));
         } else if (base instanceof ArrayType && update instanceof ArrayType) {
             return new ArrayType(
                     base0.isNullable(),
@@ -163,7 +181,9 @@ public class SchemaMergingUtils {
                             ((ArrayType) base).getElementType(),
                             ((ArrayType) update).getElementType(),
                             highestFieldId,
-                            allowExplicitCast));
+                            typeWidening,
+                            allowExplicitCast,
+                            caseSensitive));
         } else if (base instanceof MultisetType && update instanceof MultisetType) {
             return new MultisetType(
                     base0.isNullable(),
@@ -171,7 +191,13 @@ public class SchemaMergingUtils {
                             ((MultisetType) base).getElementType(),
                             ((MultisetType) update).getElementType(),
                             highestFieldId,
-                            allowExplicitCast));
+                            typeWidening,
+                            allowExplicitCast,
+                            caseSensitive));
+        } else if (!typeWidening) {
+            // Default: keep the existing leaf type — only column additions evolve the schema.
+            // Incoming values are cast to this type by the alignment layer.
+            return base0;
         } else if (base instanceof DecimalType && update instanceof DecimalType) {
             if (((DecimalType) base).getScale() == ((DecimalType) update).getScale()) {
                 return new DecimalType(
@@ -243,13 +269,14 @@ public class SchemaMergingUtils {
      * This supports detecting added columns and type changes (including nested structs).
      */
     public static List<SchemaChange> diffSchemaChanges(
-            TableSchema oldSchema, TableSchema newSchema) {
+            TableSchema oldSchema, TableSchema newSchema, boolean caseSensitive) {
         List<SchemaChange> changes = new ArrayList<>();
         diffFields(
                 oldSchema.logicalRowType().getFields(),
                 newSchema.logicalRowType().getFields(),
                 new String[0],
-                changes);
+                changes,
+                caseSensitive);
         return changes;
     }
 
@@ -257,9 +284,9 @@ public class SchemaMergingUtils {
             List<DataField> oldFields,
             List<DataField> newFields,
             String[] parentNames,
-            List<SchemaChange> changes) {
-        Map<String, DataField> oldFieldMap =
-                oldFields.stream().collect(Collectors.toMap(DataField::name, Function.identity()));
+            List<SchemaChange> changes,
+            boolean caseSensitive) {
+        Map<String, DataField> oldFieldMap = buildFieldMap(oldFields, caseSensitive);
 
         for (DataField newField : newFields) {
             String[] fieldNames = appendFieldName(parentNames, newField.name());
@@ -271,7 +298,7 @@ public class SchemaMergingUtils {
                                 fieldNames, newField.type(), newField.description(), null));
             } else if (!oldField.type().equals(newField.type())
                     && !diffNestedTypeChanges(
-                            oldField.type(), newField.type(), fieldNames, changes)) {
+                            oldField.type(), newField.type(), fieldNames, changes, caseSensitive)) {
                 changes.add(SchemaChange.updateColumnType(fieldNames, newField.type(), true));
             }
         }
@@ -282,9 +309,15 @@ public class SchemaMergingUtils {
      * changes. Returns false to let the caller fall back to {@link SchemaChange.UpdateColumnType}.
      */
     private static boolean diffNestedTypeChanges(
-            DataType oldType, DataType newType, String[] fieldNames, List<SchemaChange> changes) {
+            DataType oldType,
+            DataType newType,
+            String[] fieldNames,
+            List<SchemaChange> changes,
+            boolean caseSensitive) {
         List<SchemaChange> stagedChanges = new ArrayList<>();
-        boolean handled = diffNestedTypeChangesInner(oldType, newType, fieldNames, stagedChanges);
+        boolean handled =
+                diffNestedTypeChangesInner(
+                        oldType, newType, fieldNames, stagedChanges, caseSensitive);
         if (handled) {
             changes.addAll(stagedChanges);
         }
@@ -292,21 +325,26 @@ public class SchemaMergingUtils {
     }
 
     private static boolean diffNestedTypeChangesInner(
-            DataType oldType, DataType newType, String[] fieldNames, List<SchemaChange> changes) {
+            DataType oldType,
+            DataType newType,
+            String[] fieldNames,
+            List<SchemaChange> changes,
+            boolean caseSensitive) {
         if (oldType instanceof RowType && newType instanceof RowType) {
             List<DataField> oldFields = ((RowType) oldType).getFields();
             List<DataField> newFields = ((RowType) newType).getFields();
-            if (hasRemovedFields(oldFields, newFields)) {
+            if (hasRemovedFields(oldFields, newFields, caseSensitive)) {
                 return false;
             }
-            diffFields(oldFields, newFields, fieldNames, changes);
+            diffFields(oldFields, newFields, fieldNames, changes, caseSensitive);
             return true;
         } else if (oldType instanceof ArrayType && newType instanceof ArrayType) {
             return diffNestedTypeChanges(
                     ((ArrayType) oldType).getElementType(),
                     ((ArrayType) newType).getElementType(),
                     appendFieldName(fieldNames, ARRAY_ELEMENT_FIELD_NAME),
-                    changes);
+                    changes,
+                    caseSensitive);
         } else if (oldType instanceof MapType && newType instanceof MapType) {
             MapType oldMapType = (MapType) oldType;
             MapType newMapType = (MapType) newType;
@@ -317,20 +355,31 @@ public class SchemaMergingUtils {
                     oldMapType.getValueType(),
                     newMapType.getValueType(),
                     appendFieldName(fieldNames, MAP_VALUE_FIELD_NAME),
-                    changes);
+                    changes,
+                    caseSensitive);
         }
         return false;
     }
 
-    private static boolean hasRemovedFields(List<DataField> oldFields, List<DataField> newFields) {
-        Map<String, DataField> newFieldMap =
-                newFields.stream().collect(Collectors.toMap(DataField::name, Function.identity()));
+    private static boolean hasRemovedFields(
+            List<DataField> oldFields, List<DataField> newFields, boolean caseSensitive) {
+        Map<String, DataField> newFieldMap = buildFieldMap(newFields, caseSensitive);
         for (DataField oldField : oldFields) {
             if (!newFieldMap.containsKey(oldField.name())) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static Map<String, DataField> buildFieldMap(
+            List<DataField> fields, boolean caseSensitive) {
+        Map<String, DataField> map =
+                caseSensitive ? new HashMap<>() : new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        for (DataField field : fields) {
+            map.put(field.name(), field);
+        }
+        return map;
     }
 
     private static String[] appendFieldName(String[] parentNames, String fieldName) {

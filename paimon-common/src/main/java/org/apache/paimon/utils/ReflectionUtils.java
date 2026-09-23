@@ -81,4 +81,20 @@ public class ReflectionUtils {
         }
         throw new NoSuchFieldException(fieldName);
     }
+
+    public static void setPrivateFieldValue(Object obj, String fieldName, Object value)
+            throws NoSuchFieldException, IllegalAccessException {
+        Class<?> clazz = obj.getClass();
+        while (clazz != null) {
+            try {
+                Field field = clazz.getDeclaredField(fieldName);
+                field.setAccessible(true);
+                field.set(obj, value);
+                return;
+            } catch (NoSuchFieldException e) {
+                clazz = clazz.getSuperclass();
+            }
+        }
+        throw new NoSuchFieldException(fieldName);
+    }
 }
