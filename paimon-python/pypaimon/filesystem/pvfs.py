@@ -35,7 +35,8 @@ from pypaimon.api.api_response import GetTableResponse, GetTableTokenResponse
 from pypaimon.api.client import AlreadyExistsException, NoSuchResourceException
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.common.options import Options
-from pypaimon.common.options.config import CatalogOptions, OssOptions, PVFSOptions
+from pypaimon.common.options.config import (CatalogOptions, OssOptions, PVFSOptions,
+                                            data_token_expiration_safe_time_millis)
 from pypaimon.common.identifier import Identifier
 from pypaimon.filesystem.jindo_file_system_handler import (
     JINDO_AVAILABLE,
@@ -125,8 +126,7 @@ class PaimonRealStorage:
     token: Dict[str, str]
     expires_at_millis: Optional[int]
     file_system: AbstractFileSystem
-    expiration_safe_time_millis: int = int(
-        CatalogOptions.DATA_TOKEN_EXPIRATION_SAFE_TIME.default_value().total_seconds() * 1000)
+    expiration_safe_time_millis: int = data_token_expiration_safe_time_millis()
 
     def need_refresh(self) -> bool:
         if self.expires_at_millis is not None:
@@ -866,8 +866,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                     token=load_token_response.token,
                     expires_at_millis=load_token_response.expires_at_millis,
                     file_system=fs,
-                    expiration_safe_time_millis=int(
-                        self.options.get(CatalogOptions.DATA_TOKEN_EXPIRATION_SAFE_TIME).total_seconds() * 1000)
+                    expiration_safe_time_millis=data_token_expiration_safe_time_millis(self.options)
                 )
                 self._fs_cache[pvfs_table_identifier] = paimon_real_storage
                 if cache_value is not None:
