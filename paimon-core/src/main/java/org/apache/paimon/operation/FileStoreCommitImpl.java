@@ -1433,6 +1433,24 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Pair<String, Long> deltaManifestList,
             @Nullable String indexManifest,
             @Nullable Long nextRowId) {
+        return replaceManifestList(
+                latest,
+                totalRecordCount,
+                baseManifestList,
+                deltaManifestList,
+                indexManifest,
+                nextRowId,
+                latest.properties());
+    }
+
+    public boolean replaceManifestList(
+            Snapshot latest,
+            long totalRecordCount,
+            Pair<String, Long> baseManifestList,
+            Pair<String, Long> deltaManifestList,
+            @Nullable String indexManifest,
+            @Nullable Long nextRowId,
+            @Nullable Map<String, String> properties) {
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,
@@ -1455,7 +1473,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latest.watermark(),
                         latest.statistics(),
                         // if empty properties, just set to null
-                        latest.properties(),
+                        properties == null || properties.isEmpty() ? null : properties,
                         nextRowId,
                         null);
 
