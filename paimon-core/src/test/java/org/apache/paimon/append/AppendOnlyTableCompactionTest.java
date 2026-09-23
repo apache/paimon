@@ -44,8 +44,6 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
 
-import org.apache.parquet.hadoop.ParquetFileReader;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -61,7 +59,7 @@ import java.util.UUID;
 
 import static java.util.Collections.singletonMap;
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
-import static org.apache.paimon.format.parquet.ParquetUtil.getParquetReader;
+import static org.apache.paimon.format.parquet.ParquetUtil.getRowGroupCount;
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -344,14 +342,13 @@ public class AppendOnlyTableCompactionTest {
                         .pathFactory()
                         .createDataFilePathFactory(
                                 org.apache.paimon.data.BinaryRow.EMPTY_ROW, UNAWARE_BUCKET);
-        try (ParquetFileReader reader =
-                getParquetReader(
-                        appendOnlyFileStoreTable.fileIO(),
-                        pathFactory.toPath(compacted),
-                        compacted.fileSize(),
-                        appendOnlyFileStoreTable.coreOptions().toConfiguration())) {
-            assertThat(reader.getFooter().getBlocks()).hasSize(fileCount);
-        }
+        assertThat(
+                        getRowGroupCount(
+                                appendOnlyFileStoreTable.fileIO(),
+                                pathFactory.toPath(compacted),
+                                compacted.fileSize(),
+                                appendOnlyFileStoreTable.coreOptions().toConfiguration()))
+                .isEqualTo(fileCount);
 
         // COUNT(*)
         assertThat(readIds(appendOnlyFileStoreTable.newReadBuilder()))
@@ -412,14 +409,13 @@ public class AppendOnlyTableCompactionTest {
                         .store()
                         .pathFactory()
                         .createDataFilePathFactory(BinaryRow.EMPTY_ROW, UNAWARE_BUCKET);
-        try (ParquetFileReader reader =
-                getParquetReader(
-                        appendOnlyFileStoreTable.fileIO(),
-                        pathFactory.toPath(compacted),
-                        compacted.fileSize(),
-                        appendOnlyFileStoreTable.coreOptions().toConfiguration())) {
-            assertThat(reader.getFooter().getBlocks()).hasSize(payloads.length);
-        }
+        assertThat(
+                        getRowGroupCount(
+                                appendOnlyFileStoreTable.fileIO(),
+                                pathFactory.toPath(compacted),
+                                compacted.fileSize(),
+                                appendOnlyFileStoreTable.coreOptions().toConfiguration()))
+                .isEqualTo(payloads.length);
 
         assertThat(readIds(filteredByPayload(new byte[] {0x01}))).containsExactly(1);
         assertThat(readIds(filteredByPayload(new byte[] {0x03}))).containsExactly(2);
