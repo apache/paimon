@@ -118,6 +118,22 @@ public class SortedIndexTopoBuilder {
             PartitionPredicate partitionPredicate,
             Options userOptions)
             throws Exception {
+        Long lastSafeSnapshotId = table.snapshotManager().latestSnapshotId();
+        table =
+                table.copy(
+
+                        new HashMap<String, String>() {
+                            {
+                                put(
+                                        CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT.key(),
+                                        Long.toString(
+                                                lastSafeSnapshotId == null ? 0 : lastSafeSnapshotId));
+                                put(CoreOptions.COMMIT_STRICT_MODE_ENABLED.key(), "false");
+                            }
+
+                        });
+                        
+
         Optional<DataStream<Committable>> written =
                 buildIndexStream(
                         env,
