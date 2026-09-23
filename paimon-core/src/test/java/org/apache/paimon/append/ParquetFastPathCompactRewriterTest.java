@@ -56,9 +56,9 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataTypes;
 
-import org.apache.paimon.shade.org.apache.parquet.hadoop.ParquetFileReader;
-import org.apache.paimon.shade.org.apache.parquet.hadoop.metadata.BlockMetaData;
-import org.apache.paimon.shade.org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
+import org.apache.parquet.hadoop.ParquetFileReader;
+import org.apache.parquet.hadoop.metadata.BlockMetaData;
+import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
