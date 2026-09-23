@@ -28,6 +28,7 @@ import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.RowRange;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.LimitRecordReader;
 import org.apache.paimon.reader.ReadBatchSizer;
@@ -158,19 +159,29 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
 
     @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        return createReader(split, null);
+    }
+
+    @Override
+    public RecordReader<InternalRow> createReader(Split split, @Nullable RowRange rowRange)
+            throws IOException {
+        this.rowRange = rowRange;
         QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
         RecordReader<InternalRow> reader;
         int[] blobViewFields = blobViewFieldIndexes(currentReadType(), options);
         if (catalogContext != null && blobViewFields.length > 0) {
-            reader = createReaderWithBlobView(queryAuthContext, blobViewFields);
+            reader = createReaderWithBlobView(queryAuthContext, blobViewFields, rowRange);
         } else {
-            reader = createDataReader(queryAuthContext.split(), queryAuthContext.authResult());
+            reader =
+                    createDataReader(
+                            queryAuthContext.split(), queryAuthContext.authResult(), rowRange);
         }
         return LimitRecordReader.limit(reader, limit);
     }
 
     private RecordReader<InternalRow> createReaderWithBlobView(
-            QueryAuthContext queryAuthContext, int[] blobViewFields) throws IOException {
+            QueryAuthContext queryAuthContext, int[] blobViewFields, @Nullable RowRange rowRange)
+            throws IOException {
         RecordReader<InternalRow> reader;
         reader =
                 BlobViewTableReadSupport.createBlobViewReader(
@@ -185,7 +196,9 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
                         executeFilter,
                         () ->
                                 createDataReader(
-                                        queryAuthContext.split(), queryAuthContext.authResult()),
+                                        queryAuthContext.split(),
+                                        queryAuthContext.authResult(),
+                                        rowRange),
                         this::createBlobViewPrescanRead);
         return reader;
     }
@@ -224,10 +237,13 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     }
 
     @Override
-    public RecordReader<InternalRow> reader(Split split) throws IOException {
+    public RecordReader<InternalRow> reader(Split split, @Nullable RowRange rowRange)
+            throws IOException {
         for (SplitReadProvider readProvider : readProviders) {
             if (readProvider.match(split, new SplitReadProvider.Context(forceKeepDelete))) {
-                return readProvider.get().get().createReader(split);
+                SplitRead<InternalRow> read = readProvider.get().get();
+                read.withRowRange(rowRange);
+                return read.createReader(split);
             }
         }
 

@@ -38,6 +38,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.RowRange;
 import org.apache.paimon.reader.DataEvolutionFileReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
@@ -52,6 +53,7 @@ import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -2647,6 +2649,338 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         for (ManifestEntry entry : entries) {
             assertThat(entry.file().valueStats()).isEqualTo(EMPTY_STATS);
         }
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // RowRange (effective-row slice) read via the TableRead::createReader(Split, RowRange) entry
+    // --------------------------------------------------------------------------------------------
+
+    /**
+     * A full-scan range read pushes the local range down to the parquet readers of the column-merge
+     * group: each bunch returns its local slice and the merged output is exactly [start, end]. This
+     * exercises the full chain {@code TableRead -> AbstractDataTableRead -> DataEvolutionTableRead
+     * -> DataEvolutionSplitRead -> createReader(Split)} with parquet row-group skipping.
+     */
+    @Test
+    public void testRowRangeReadReturnsExactSlice() throws Exception {
+        checkRowRangeReadReturnsExactSlice(CoreOptions.FILE_FORMAT_PARQUET);
+    }
+
+    /** Same exact-slice behavior as the parquet case, but stored as ORC. */
+    @Test
+    public void testRowRangeOrcReadReturnsExactSlice() throws Exception {
+        checkRowRangeReadReturnsExactSlice(CoreOptions.FILE_FORMAT_ORC);
+    }
+
+    private void checkRowRangeReadReturnsExactSlice(String fileFormat) throws Exception {
+        int count = 100;
+        writeFormat(fileFormat, count);
+        // write() produces f0 = 0..count-1, so RowRange [10, 19] -> f0 = 10..19
+        List<Integer> actual = readRowRange(getTableDefault(), RowRange.of(10L, 19L));
+        assertThat(actual).isEqualTo(intRange(10, 19));
+    }
+
+    /**
+     * A range read combined with a filter: rowRange slices the *filtered* effective-row stream, so
+     * the RangeSkipReader wraps outside the executeFilter layer (AbstractDataTableRead.outerWrap).
+     * Filter f0 >= 50 keeps f0 = 50..99 (50 effective rows), RowRange [10, 19] over those selects
+     * f0 = 60..69.
+     */
+    @Test
+    public void testRowRangeWithFilterWrapsOutsideFilter() throws Exception {
+        checkRowRangeWithFilterWrapsOutsideFilter(CoreOptions.FILE_FORMAT_PARQUET);
+    }
+
+    /** Same executeFilter+range behavior as the parquet case, but stored as ORC. */
+    @Test
+    public void testRowRangeOrcWithFilterWrapsOutsideFilter() throws Exception {
+        checkRowRangeWithFilterWrapsOutsideFilter(CoreOptions.FILE_FORMAT_ORC);
+    }
+
+    private void checkRowRangeWithFilterWrapsOutsideFilter(String fileFormat) throws Exception {
+        int count = 100;
+        writeFormat(fileFormat, count);
+        PredicateBuilder builder = new PredicateBuilder(schemaDefault().rowType());
+        Predicate filter = builder.greaterOrEqual(0, 50);
+        // filtered stream: f0 = 50..99 ; RowRange [10, 19] -> f0 = 60..69
+        List<Integer> actual = readRowRange(getTableDefault(), RowRange.of(10L, 19L), filter, true);
+        assertThat(actual).isEqualTo(intRange(60, 69));
+    }
+
+    /**
+     * A range read spanning multiple files (several merge groups) is sliced in the split-global
+     * effective-row space: each file gets its own local range and files entirely outside are
+     * skipped. Writing twice creates two files of `count` rows each, so RowRange [count-5, count+5]
+     * straddles the file boundary.
+     */
+    @Test
+    public void testRowRangeAcrossMultipleFiles() throws Exception {
+        checkRowRangeAcrossMultipleFiles(CoreOptions.FILE_FORMAT_PARQUET);
+    }
+
+    /** Same multi-file range behavior as the parquet case, but stored as ORC. */
+    @Test
+    public void testRowRangeOrcAcrossMultipleFiles() throws Exception {
+        checkRowRangeAcrossMultipleFiles(CoreOptions.FILE_FORMAT_ORC);
+    }
+
+    private void checkRowRangeAcrossMultipleFiles(String fileFormat) throws Exception {
+        int count = 100;
+        writeFormat(fileFormat, count);
+        writeFormat(fileFormat, count);
+        // file0: f0 = 0..99 ; file1: f0 = 0..99 (each file-internal index 0..99).
+        // global effective rows: file0 -> [0, 99], file1 -> [100, 199].
+        // RowRange [95, 104] -> file0 last 5 (f0 95..99) + file1 first 5 (f0 0..4).
+        List<Integer> actual = readRowRange(getTableDefault(), RowRange.of(95L, 104L));
+        List<Integer> expected = new ArrayList<>();
+        for (int i = 95; i < 100; i++) {
+            expected.add(i); // file0
+        }
+        for (int i = 0; i <= 4; i++) {
+            expected.add(i); // file1
+        }
+        assertThat(actual).isEqualTo(expected);
+    }
+
+    /**
+     * A partial-column ORC read over a DataEvolution column merge. ORC has no page-level row-range
+     * filtering, but {@code supportsRowRangeSkip()} is overridden to {@code true} because the
+     * selection bitmap is applied downstream by ApplyBitmapIndexRecordReader, so the range is
+     * pushed down and the merged output is exactly [start, end] — no outer RangeSkipReader, hence
+     * no double application (which used to yield [] for RowRange.of(10, 19)).
+     *
+     * <p>The table is stored as two ORC column files (f0+f1 in one, f2 in another) so the read goes
+     * through the column-merge / DataBunch path; the existing parquet case does not cover this
+     * branch.
+     */
+    @Test
+    public void testRowRangeOrcColumnMergeDoesNotDoubleApply() throws Exception {
+        int count = 100;
+        // build an ORC data-evolution table with a column-merge layout (f0+f1 | f2)
+        Schema schema = schemaDefault();
+        Map<String, String> orcOptions = new HashMap<>(schema.options());
+        orcOptions.put(CoreOptions.FILE_FORMAT.key(), "orc");
+        Schema orcSchema =
+                new Schema(
+                        schema.rowType().getFields(),
+                        schema.partitionKeys(),
+                        schema.primaryKeys(),
+                        orcOptions,
+                        schema.comment());
+        catalog.createTable(identifier(), orcSchema, true);
+        FileStoreTable table = getTableDefault();
+        writeColumnMerge(table, count);
+
+        // f0 = 0..99 ; RowRange [10, 19] -> f0 = 10..19 (must NOT be empty)
+        List<Integer> actual = readRowRange(table, RowRange.of(10L, 19L));
+        assertThat(actual).isEqualTo(intRange(10, 19));
+    }
+
+    /**
+     * Regression for {@code scan.ignore-lost-files=true} on the DataEvolution path: two full-row
+     * parquet files hold f0 = 0..99 and 100..199; the first file is deleted after planning. The
+     * ordinary read returns the surviving file's f0 = 100..199, and a ranged read {@code
+     * RowRange.of(1, 2)} must return the matching slice (f0 = 101, 102) of that effective output,
+     * not {@code []}. The per-group range pushdown in DataEvolutionSplitRead indexes against
+     * manifest rowCount, so it must be disabled when files may be ignored, leaving the outer
+     * RangeSkipReader over the effective output in charge.
+     */
+    @Test
+    public void testRowRangeKeepsEffectiveFallbackWhenLostFileIgnored() throws Exception {
+        checkRowRangeKeepsEffectiveFallbackWhenLostFileIgnored(CoreOptions.FILE_FORMAT_PARQUET);
+    }
+
+    /**
+     * Same regression as the parquet case, but stored as ORC (range pushed down via selection
+     * bitmap, since OrcReaderFactory overrides supportsRowRangeSkip() to true).
+     */
+    @Test
+    public void testRowRangeOrcKeepsEffectiveFallbackWhenLostFileIgnored() throws Exception {
+        checkRowRangeKeepsEffectiveFallbackWhenLostFileIgnored(CoreOptions.FILE_FORMAT_ORC);
+    }
+
+    private void checkRowRangeKeepsEffectiveFallbackWhenLostFileIgnored(String fileFormat)
+            throws Exception {
+        // build a data-evolution table with scan.ignore-lost-files=true
+        Schema schema = schemaDefault();
+        Map<String, String> options = new HashMap<>(schema.options());
+        options.put(CoreOptions.SCAN_IGNORE_LOST_FILE.key(), "true");
+        options.put(CoreOptions.FILE_FORMAT.key(), fileFormat);
+        Schema lostSchema =
+                new Schema(
+                        schema.rowType().getFields(),
+                        schema.partitionKeys(),
+                        schema.primaryKeys(),
+                        options,
+                        schema.comment());
+        catalog.createTable(identifier(), lostSchema, true);
+        FileStoreTable table = getTableDefault();
+
+        // two full-row files: file0 f0 = 0..99, file1 f0 = 100..199
+        writeFullRowRange(table, 0, 100);
+        writeFullRowRange(table, 100, 200);
+
+        List<Split> splits = table.newReadBuilder().newScan().plan().splits();
+        assertThat(splits.size()).isEqualTo(1);
+        // the single split carries both files
+        DataSplit split =
+                splits.get(0) instanceof IndexedSplit
+                        ? ((IndexedSplit) splits.get(0)).dataSplit()
+                        : (DataSplit) splits.get(0);
+        assertThat(split.dataFiles().size()).isEqualTo(2);
+
+        // delete the first file (global effective rows 0..99) after planning
+        Path path = firstDataFilePath(table, split);
+        table.fileIO().deleteQuietly(path);
+
+        // ordinary read over the surviving file
+        List<Integer> ordinary = readRowRange(table, null);
+        assertThat(ordinary).isEqualTo(intRange(100, 199));
+
+        // ranged read must be the corresponding slice of the ordinary (effective) output
+        List<Integer> ranged = readRowRange(table, RowRange.of(1L, 2L));
+        assertThat(ranged).isEqualTo(intRange(101, 102));
+        assertThat(ranged).isEqualTo(ordinary.subList(1, 3));
+    }
+
+    /**
+     * Creates a data-evolution table in the given format (default parquet) and writes {@code count}
+     * rows split across two column files (f0+f1, then f2) — a column merge — mirroring {@code
+     * write(count)} but with a chosen file format.
+     */
+    private void writeFormat(String fileFormat, long count) throws Exception {
+        Schema schema = schemaDefault();
+        Map<String, String> options = new HashMap<>(schema.options());
+        options.put(CoreOptions.FILE_FORMAT.key(), fileFormat);
+        Schema formatSchema =
+                new Schema(
+                        schema.rowType().getFields(),
+                        schema.partitionKeys(),
+                        schema.primaryKeys(),
+                        options,
+                        schema.comment());
+        catalog.createTable(identifier(), formatSchema, true);
+
+        RowType writeType0 = schema.rowType().project(Arrays.asList("f0", "f1"));
+        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
+            for (int i = 0; i < count; i++) {
+                write0.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(write0.prepareCommit());
+        }
+        long rowId = getTableDefault().snapshotManager().latestSnapshot().nextRowId() - count;
+        builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+            for (int i = 0; i < count; i++) {
+                write1.write(GenericRow.of(BinaryString.fromString("b" + i)));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write1.prepareCommit();
+            setFirstRowId(commitables, rowId);
+            commit.commit(commitables);
+        }
+    }
+
+    /**
+     * Writes {@code count} rows split across two column files (f0+f1, then f2) — a column merge.
+     */
+    private void writeColumnMerge(FileStoreTable table, int count) throws Exception {
+        Schema schema = schemaDefault();
+        RowType writeType0 = schema.rowType().project(Arrays.asList("f0", "f1"));
+        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
+            for (int i = 0; i < count; i++) {
+                write0.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(write0.prepareCommit());
+        }
+        long rowId = table.snapshotManager().latestSnapshot().nextRowId() - count;
+        builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+            for (int i = 0; i < count; i++) {
+                write1.write(GenericRow.of(BinaryString.fromString("b" + i)));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write1.prepareCommit();
+            setFirstRowId(commitables, rowId);
+            commit.commit(commitables);
+        }
+    }
+
+    /**
+     * Writes {@code count} full rows {@code (f0, "a"+f0, "b"+f0)} starting at f0 = {@code from}.
+     */
+    private void writeFullRowRange(FileStoreTable table, int from, int to) throws Exception {
+        Schema schema = schemaDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(schema.rowType())) {
+            for (int i = from; i < to; i++) {
+                write.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("a" + i),
+                                BinaryString.fromString("b" + i)));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(write.prepareCommit());
+        }
+    }
+
+    /** Resolves the physical path of the first data file carried by a planned split. */
+    private Path firstDataFilePath(FileStoreTable table, DataSplit dataSplit) {
+        DataFileMeta file = dataSplit.dataFiles().get(0);
+        DataFilePathFactory dataFilePathFactory =
+                table.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(dataSplit.partition(), dataSplit.bucket());
+        return dataFilePathFactory.toPath(file);
+    }
+
+    /** Reads the f0 column of a slice via {@code TableRead::createReader(Split, RowRange)}. */
+    private List<Integer> readRowRange(FileStoreTable table, RowRange rowRange) throws Exception {
+        return readRowRange(table, rowRange, null, false);
+    }
+
+    private List<Integer> readRowRange(FileStoreTable table, RowRange rowRange, Predicate filter)
+            throws Exception {
+        return readRowRange(table, rowRange, filter, false);
+    }
+
+    private List<Integer> readRowRange(
+            FileStoreTable table, RowRange rowRange, Predicate filter, boolean filterExecute)
+            throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder();
+        if (filter != null) {
+            readBuilder = readBuilder.withFilter(filter);
+        }
+        TableRead read = readBuilder.newRead();
+        if (filterExecute) {
+            // executeFilter() makes the reader evaluate the filter itself, so the rowRange must be
+            // wrapped outside the filter (AbstractDataTableRead.outerWrap), not forwarded into the
+            // inner reader — verifying that wrapping, not pushdown, is used in this case.
+            read = read.executeFilter();
+        }
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        List<Integer> result = new ArrayList<>();
+        for (Split split : splits) {
+            try (RecordReader<InternalRow> reader = read.createReader(split, rowRange)) {
+                reader.forEachRemaining(row -> result.add(row.getInt(0)));
+            }
+        }
+        return result;
+    }
+
+    private static List<Integer> intRange(int from, int toInclusive) {
+        List<Integer> list = new ArrayList<>();
+        for (int i = from; i <= toInclusive; i++) {
+            list.add(i);
+        }
+        return list;
     }
 
     private List<DataFileMeta> writeOneFullRowAndCollectNewFiles(FileStoreTable table)

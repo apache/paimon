@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.RowRange;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
@@ -123,10 +124,13 @@ public class AppendTableRead extends AbstractDataTableRead {
     }
 
     @Override
-    public RecordReader<InternalRow> reader(Split split) throws IOException {
+    public RecordReader<InternalRow> reader(Split split, @Nullable RowRange rowRange)
+            throws IOException {
         for (SplitReadProvider readProvider : readProviders) {
             if (readProvider.match(split, new SplitReadProvider.Context(false))) {
-                return readProvider.get().get().createReader(split);
+                SplitRead<InternalRow> read = readProvider.get().get();
+                read.withRowRange(rowRange);
+                return read.createReader(split);
             }
         }
 

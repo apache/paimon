@@ -27,6 +27,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.RowRange;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.reader.RecordReader;
@@ -476,7 +477,7 @@ class AbstractDataTableReadTest {
         }
 
         @Override
-        public RecordReader<InternalRow> reader(Split split) {
+        public RecordReader<InternalRow> reader(Split split, RowRange rowRange) {
             RowType type = appliedReadType == null ? schema().logicalRowType() : appliedReadType;
             NestedProjectedRow projection =
                     NestedProjectedRow.create(schema().logicalRowType(), type);
@@ -495,7 +496,7 @@ class AbstractDataTableReadTest {
         }
 
         private void createAuthedReader(TableQueryAuthResult authResult) throws IOException {
-            createDataReader(mock(Split.class), authResult);
+            createDataReader(mock(Split.class), authResult, null);
         }
 
         private RowType appliedReadType() {
