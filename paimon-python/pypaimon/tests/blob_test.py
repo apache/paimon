@@ -3184,6 +3184,58 @@ class BlobEndToEndTest(unittest.TestCase):
                 [BlobData(value)], [field], RowKind.INSERT))
             writer.close()
 
+    def test_blob_index_cache_capacity_controls_repeated_file_reads(self):
+        from pypaimon.read.reader import format_blob_reader as module
+
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        paths = [os.path.join(self.temp_dir, "cache-{}.blob".format(i)) for i in range(17)]
+        for i, path in enumerate(paths):
+            self._write_single_blob(path, field, bytes([i]))
+        open_stream = file_io.new_input_stream
+        for capacity, expected_reads in [(16, 34), (32, 0), (0, 34)]:
+            with self.subTest(capacity=capacity), patch.dict(
+                    os.environ, {"PYPAIMON_BLOB_INDEX_CACHE_SIZE": str(capacity)}):
+                cache = module._create_blob_index_cache()
+                streams = []
+
+                def counted_open(path):
+                    stream = MagicMock(wraps=open_stream(path))
+                    streams.append(stream)
+                    return stream
+
+                with patch.object(module, "_BLOB_INDEX_CACHE", cache), patch.object(
+                        file_io, "new_input_stream", side_effect=counted_open):
+                    results = []
+                    reads = []
+                    for _ in range(2):
+                        streams.clear()
+                        descriptors = []
+                        for path in paths:
+                            reader = FormatBlobReader(
+                                file_io, path, [field.name], [field], None, True)
+                            try:
+                                descriptors.extend(reader.read_arrow_batch().column(0).to_pylist())
+                            finally:
+                                reader.close()
+                        results.append(descriptors)
+                        reads.append(sum(stream.read.call_count for stream in streams))
+                    self.assertEqual(reads, [34, expected_reads])
+                    self.assertEqual(results[0], results[1])
+                    self.assertEqual(len(cache), min(capacity, 17))
+
+    def test_blob_index_cache_configuration(self):
+        from pypaimon.read.reader.format_blob_reader import _create_blob_index_cache
+
+        with patch.dict(os.environ):
+            os.environ.pop("PYPAIMON_BLOB_INDEX_CACHE_SIZE", None)
+            self.assertEqual(_create_blob_index_cache().maxsize, 16)
+            for value in ("-1", "1.5", "invalid", ""):
+                with self.subTest(value=value):
+                    os.environ["PYPAIMON_BLOB_INDEX_CACHE_SIZE"] = value
+                    with self.assertRaisesRegex(ValueError, "non-negative integer"):
+                        _create_blob_index_cache()
+
     def test_blob_end_to_end(self):
         # Set up file I/O
         file_io = LocalFileIO(self.temp_dir, Options({}))

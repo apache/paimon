@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import os
 import struct
 from threading import Lock
 from typing import List, Optional, Any, Iterator, BinaryIO
@@ -45,7 +46,18 @@ from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
 
 
-_BLOB_INDEX_CACHE = LRUCache(maxsize=16)
+def _create_blob_index_cache():
+    value = os.environ.get("PYPAIMON_BLOB_INDEX_CACHE_SIZE", "16")
+    try:
+        capacity = int(value)
+    except ValueError:
+        raise ValueError("PYPAIMON_BLOB_INDEX_CACHE_SIZE must be a non-negative integer") from None
+    if capacity < 0:
+        raise ValueError("PYPAIMON_BLOB_INDEX_CACHE_SIZE must be a non-negative integer")
+    return LRUCache(maxsize=capacity)
+
+
+_BLOB_INDEX_CACHE = _create_blob_index_cache()
 _BLOB_INDEX_CACHE_LOCK = Lock()
 
 
@@ -408,7 +420,8 @@ class FormatBlobReader(RecordBatchReader):
 
         blob_lengths, blob_offsets = _decode_blob_index(index_bytes)
         with _BLOB_INDEX_CACHE_LOCK:
-            _BLOB_INDEX_CACHE[self.file_path] = blob_lengths, blob_offsets
+            if _BLOB_INDEX_CACHE.maxsize > 0:
+                _BLOB_INDEX_CACHE[self.file_path] = blob_lengths, blob_offsets
         self.blob_lengths = list(blob_lengths)
         self.blob_offsets = list(blob_offsets)
 

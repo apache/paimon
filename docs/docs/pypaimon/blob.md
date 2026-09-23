@@ -176,6 +176,20 @@ The factory auto-dispatches based on the bytes content (`BLOBDESC`,
 `VIDEOFRM`, or blob-view magic header). This mirrors Java's
 `Blob.fromBytes(...)`.
 
+## Python BLOB index cache
+
+The Python reader caches parsed indexes for up to 16 BLOB files per process.
+Set `PYPAIMON_BLOB_INDEX_CACHE_SIZE` before importing PyPaimon to change this
+entry limit; `0` disables caching. For example:
+
+```bash
+PYPAIMON_BLOB_INDEX_CACHE_SIZE=32 python app.py
+```
+
+This counts files, not bytes; memory use depends on their index sizes. Configure
+worker processes too when using Ray or multiprocessing. This setting does not
+configure the Rust native reader or `.video` metadata.
+
 ## See Also
 
 - [Blob Storage](../multimodal-table/blob) — concept, storage modes,
