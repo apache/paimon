@@ -37,52 +37,43 @@ import java.util.TreeMap;
 public class WriterCommittables {
 
     private static final Logger LOG = LoggerFactory.getLogger(WriterCommittables.class);
-    private static final long END_INPUT_CHECKPOINT_ID = Long.MAX_VALUE;
 
     private long maxCheckpointId;
     private final NavigableMap<Long, CheckpointCommittables> committablesPerCheckpoint;
-    private CheckpointCommittables endInputCommittables;
-    private long endInputCoveredBy = -1;
 
     @VisibleForTesting
     WriterCommittables(long maxCheckpointId, List<CheckpointCommittables> entries) {
+        if (maxCheckpointId == Long.MAX_VALUE) {
+            throw new IllegalStateException("Coordinator commit requires real checkpoints");
+        }
         this.maxCheckpointId = maxCheckpointId;
         this.committablesPerCheckpoint = new TreeMap<>();
         for (CheckpointCommittables entry : entries) {
-            if (entry.checkpointId() == END_INPUT_CHECKPOINT_ID) {
-                if (endInputCommittables != null) {
-                    throw new IllegalStateException(
-                            "Invalid input committables, duplicate end input entry");
-                }
-                endInputCommittables = entry;
-                endInputCoveredBy = maxCheckpointId;
-            } else if (entry.checkpointId() > maxCheckpointId) {
+            if (entry.checkpointId() > maxCheckpointId) {
                 throw new IllegalStateException(
                         "Invalid input committables, max checkpoint id should not be less than "
                                 + "checkpoint id of committables, max checkpoint is "
                                 + maxCheckpointId
                                 + ", entry checkpoint is "
                                 + entry.checkpointId());
-            } else if (committablesPerCheckpoint.containsKey(entry.checkpointId())) {
+            }
+            if (committablesPerCheckpoint.containsKey(entry.checkpointId())) {
                 throw new IllegalStateException(
                         "Invalid input committables, duplicate checkpoint id "
                                 + entry.checkpointId());
-            } else {
-                committablesPerCheckpoint.put(entry.checkpointId(), entry);
             }
+            committablesPerCheckpoint.put(entry.checkpointId(), entry);
         }
     }
 
     @VisibleForTesting
     WriterCommittables(CheckpointCommittables entry) {
-        this.maxCheckpointId =
-                entry.checkpointId() == END_INPUT_CHECKPOINT_ID ? -1 : entry.checkpointId();
-        this.committablesPerCheckpoint = new TreeMap<>();
-        if (entry.checkpointId() == END_INPUT_CHECKPOINT_ID) {
-            endInputCommittables = entry;
-        } else {
-            committablesPerCheckpoint.put(entry.checkpointId(), entry);
+        if (entry.checkpointId() == Long.MAX_VALUE) {
+            throw new IllegalStateException("Legacy per-writer MAX is not supported");
         }
+        this.maxCheckpointId = entry.checkpointId();
+        this.committablesPerCheckpoint = new TreeMap<>();
+        committablesPerCheckpoint.put(entry.checkpointId(), entry);
     }
 
     public NavigableMap<Long, CheckpointCommittables> getCommittablesPerCheckpoint() {
@@ -96,8 +87,7 @@ public class WriterCommittables {
 
     public void clearCommittablesBeforeCheckpoint(long checkpointId, boolean inclusive) {
         if (checkpointId > maxCheckpointId || (checkpointId == maxCheckpointId && inclusive)) {
-            maxCheckpointId = -1;
-            committablesPerCheckpoint.clear();
+            reset();
         } else {
             committablesPerCheckpoint.headMap(checkpointId, inclusive).clear();
         }
@@ -106,24 +96,17 @@ public class WriterCommittables {
     public void reset() {
         maxCheckpointId = -1;
         committablesPerCheckpoint.clear();
-        endInputCommittables = null;
-        endInputCoveredBy = -1;
     }
 
     public void mergeWith(WriterCommittables other) {
-        if (other.maxCheckpointId >= 0 && other.maxCheckpointId <= maxCheckpointId) {
+        if (other.maxCheckpointId <= maxCheckpointId) {
             throw new IllegalStateException(
                     "It must merge later checkpoint committables, however current checkpoint id is "
                             + maxCheckpointId
                             + ", to be merged checkpoint id is "
                             + other.maxCheckpointId);
         }
-        if (other.maxCheckpointId >= 0) {
-            maxCheckpointId = other.maxCheckpointId;
-            if (endInputCommittables != null && endInputCoveredBy < 0) {
-                endInputCoveredBy = other.maxCheckpointId;
-            }
-        }
+        maxCheckpointId = other.maxCheckpointId;
         for (Map.Entry<Long, CheckpointCommittables> entry :
                 other.getCommittablesPerCheckpoint().entrySet()) {
             if (committablesPerCheckpoint.containsKey(entry.getKey())) {
@@ -138,43 +121,21 @@ public class WriterCommittables {
             }
             committablesPerCheckpoint.put(entry.getKey(), entry.getValue());
         }
-        if (other.endInputCommittables != null) {
-            // End input can be replayed after restore. It is a terminal slot, not a normal
-            // checkpoint entry, so replacing it cannot duplicate file committables.
-            endInputCommittables = other.endInputCommittables;
-            endInputCoveredBy = Math.max(endInputCoveredBy, other.endInputCoveredBy);
+    }
+
+    /** A reported marker is only a candidate; the coordinator promotes it after commit. */
+    public boolean hasTerminalCandidate(long checkpointId) {
+        for (CheckpointCommittables entry :
+                committablesPerCheckpoint.headMap(checkpointId, true).values()) {
+            if (entry.terminal()) {
+                return true;
+            }
         }
+        return false;
     }
 
     public long getMaxCheckpointId() {
         return maxCheckpointId;
-    }
-
-    public boolean hasEndInput() {
-        return endInputCommittables != null;
-    }
-
-    public boolean isEndInputCoveredBy(long checkpointId) {
-        return endInputCommittables != null
-                && endInputCoveredBy >= 0
-                && endInputCoveredBy <= checkpointId;
-    }
-
-    public CheckpointCommittables getEndInputCommittables() {
-        return endInputCommittables;
-    }
-
-    public void clearEndInputCommittables() {
-        endInputCommittables = null;
-        endInputCoveredBy = -1;
-    }
-
-    /** Retains only the terminal entry from a region-failover restore. */
-    public void restoreEndInput(WriterCommittables restored) {
-        if (restored.endInputCommittables != null) {
-            endInputCommittables = restored.endInputCommittables;
-            endInputCoveredBy = restored.endInputCoveredBy;
-        }
     }
 
     /**
@@ -183,17 +144,12 @@ public class WriterCommittables {
      * watermark" sentinel is what {@link
      * org.apache.paimon.flink.sink.CoordinatorCommittingRowDataStoreWriteOperator} emits at
      * barriers before any watermark is seen, and matches {@code CommitterOperator}'s initial value.
-     * Aggregation across subtasks (per-checkpoint min, future idle handling) belongs to the
+     * Aggregation across subtasks (per-checkpoint min and idle handling) belongs to the
      * coordinator, but the per-subtask policy for missing entries lives here.
      */
     public long watermarkAt(long checkpointId) {
         CheckpointCommittables entry = committablesPerCheckpoint.get(checkpointId);
-        if (entry != null) {
-            return entry.watermark();
-        }
-        return checkpointId == END_INPUT_CHECKPOINT_ID && endInputCommittables != null
-                ? endInputCommittables.watermark()
-                : Long.MIN_VALUE;
+        return entry == null ? Long.MIN_VALUE : entry.watermark();
     }
 
     /**
@@ -203,21 +159,14 @@ public class WriterCommittables {
      */
     public boolean isIdleAt(long checkpointId) {
         CheckpointCommittables entry = committablesPerCheckpoint.get(checkpointId);
-        return entry != null
-                ? entry.idle()
-                : checkpointId == END_INPUT_CHECKPOINT_ID
-                        && endInputCommittables != null
-                        && endInputCommittables.idle();
+        return entry != null && entry.idle();
     }
 
     @Override
     public String toString() {
         return String.format(
-                "WriterCommittables{maxCheckpointId=%d, endInputCoveredBy=%d, committables=%s, endInput=%s}",
-                maxCheckpointId,
-                endInputCoveredBy,
-                committablesPerCheckpoint,
-                endInputCommittables);
+                "WriterCommittables{maxCheckpointId=%d, committables=%s}",
+                maxCheckpointId, committablesPerCheckpoint);
     }
 
     public static WriterCommittables from(

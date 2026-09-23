@@ -19,22 +19,27 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.coordinator.CheckpointCommittables;
 import org.apache.paimon.flink.sink.coordinator.CheckpointCommittablesSerializer;
 import org.apache.paimon.flink.sink.coordinator.CommittableEvent;
 import org.apache.paimon.flink.sink.coordinator.CommittingWriteOperatorCoordinator;
 import org.apache.paimon.flink.sink.coordinator.RestoredCommittableEvent;
+import org.apache.paimon.flink.sink.coordinator.TerminalWriterReleaseEvent;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.flink.api.common.operators.MailboxExecutor;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
 import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
 import org.apache.flink.runtime.checkpoint.CheckpointOptions;
+import org.apache.flink.runtime.operators.coordination.OperatorEvent;
 import org.apache.flink.runtime.operators.coordination.OperatorEventGateway;
+import org.apache.flink.runtime.operators.coordination.OperatorEventHandler;
 import org.apache.flink.runtime.state.CheckpointStreamFactory;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.api.operators.OperatorSnapshotFutures;
@@ -48,6 +53,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.NavigableMap;
 import java.util.TreeMap;
@@ -57,17 +63,16 @@ import java.util.TreeMap;
  * which performs the commit.
  *
  * <p>This operator is stateful: it keeps an independent operator state that buffers the
- * per-checkpoint committables which have not yet been acknowledged by the coordinator, so they
- * survive a global failover and can be replayed on restore.
+ * per-checkpoint committables which have not yet been covered by a completed Flink checkpoint, so
+ * they survive a global failover and can be replayed on restore.
  */
 public class CoordinatorCommittingRowDataStoreWriteOperator
-        extends StatelessRowDataStoreWriteOperator {
+        extends StatelessRowDataStoreWriteOperator implements OperatorEventHandler {
 
     private static final long serialVersionUID = 1L;
 
     private static final Logger LOG =
             LoggerFactory.getLogger(CoordinatorCommittingRowDataStoreWriteOperator.class);
-    private static final long END_INPUT_CHECKPOINT_ID = Long.MAX_VALUE;
 
     @VisibleForTesting
     static final String PENDING_COMMITTABLE_STATE_NAME = "pending_committable_state";
@@ -77,7 +82,7 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     /** Whether savepoint auto-tagging is enabled; when off the writer never flags a tag intent. */
     private final boolean autoTagForSavepoint;
 
-    /** Persisted buffer of pending checkpoints not yet acknowledged by the coordinator. */
+    /** Persisted buffer of pending checkpoints not yet covered by a completed Flink checkpoint. */
     private transient ListState<CheckpointCommittables> pendingCommittableState;
 
     /** In-memory view of {@link #pendingCommittableState}, keyed by checkpoint id. */
@@ -98,6 +103,13 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     private transient CheckpointCommittablesSerializer stateSerializer;
     private transient TypeSerializer<CheckpointCommittables> eventSerializer;
     private boolean endOfInput;
+    private boolean terminalCaptured;
+    private final transient MailboxExecutor taskMailbox;
+    private final int subtask;
+    private final int attemptNumber;
+    private long requiredReleaseCheckpoint = -1;
+    private long releasedCheckpoint = -1;
+    private boolean waitingForRelease;
 
     public CoordinatorCommittingRowDataStoreWriteOperator(
             StreamOperatorParameters<Committable> parameters,
@@ -109,6 +121,16 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
         super(parameters, table, storeSinkWriteProvider, initialCommitUser);
         this.operatorEventGateway = Preconditions.checkNotNull(operatorEventGateway);
         this.autoTagForSavepoint = autoTagForSavepoint;
+        this.taskMailbox =
+                parameters.getContainingTask().getMailboxExecutorFactory().createExecutor(-1);
+        this.subtask =
+                parameters
+                        .getContainingTask()
+                        .getEnvironment()
+                        .getTaskInfo()
+                        .getIndexOfThisSubtask();
+        this.attemptNumber =
+                parameters.getContainingTask().getEnvironment().getTaskInfo().getAttemptNumber();
     }
 
     @Override
@@ -144,12 +166,18 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
             List<CheckpointCommittables> restored = new ArrayList<>();
             for (CheckpointCommittables entry : pendingCommittableState.get()) {
                 restored.add(entry);
-                if (entry.checkpointId() == END_INPUT_CHECKPOINT_ID) {
-                    // The terminal committable can only be replayed from state after a task or
-                    // region failover. Ordinary restored checkpoint entries keep their existing
-                    // one-shot replay behavior.
-                    pendingCommittables.put(entry.checkpointId(), entry);
+                Preconditions.checkState(
+                        entry.checkpointId() != Long.MAX_VALUE,
+                        "Legacy per-writer MAX state cannot be restored by coordinator commit.");
+                if (entry.terminal()) {
+                    // Replay the original contribution once, but retain the sealed-input fact
+                    // independently of the ordinary pending-file buffer.
                     endOfInput = true;
+                    terminalCaptured = true;
+                    requiredReleaseCheckpoint =
+                            requiredReleaseCheckpoint < 0
+                                    ? entry.checkpointId()
+                                    : Math.min(requiredReleaseCheckpoint, entry.checkpointId());
                 }
             }
             pendingCommittableState.clear();
@@ -184,37 +212,29 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
         }
         // Report here, not in emitCommittables, so the savepoint-tag intent is known before
         // sending.
-        reportToCoordinator(checkpointId);
         pendingCommittableState.clear();
         pendingCommittableState.addAll(new ArrayList<>(pendingCommittables.values()));
+        reportToCoordinator(checkpointId);
         return super.snapshotState(checkpointId, timestamp, checkpointOptions, storageLocation);
     }
 
     @Override
     public void notifyCheckpointComplete(long checkpointId) throws Exception {
-        super.notifyCheckpointComplete(checkpointId);
-        // operator state already persisted these; we no longer need to replay them on the next
-        // restore
-        pendingCommittables.headMap(checkpointId, true).clear();
-    }
-
-    @Override
-    public void prepareSnapshotPreBarrier(long checkpointId) throws Exception {
-        if (endOfInput) {
-            // The marker proves this real checkpoint was snapshotted after the terminal
-            // committable. It deliberately contains no newly prepared data.
-            emitCheckpointMarker(checkpointId);
-        } else {
-            emitCommittables(false, checkpointId);
+        // Early writers receive permission at terminal reporting; only the last candidate
+        // waits for ordinary commit and global finalization before the task can finish.
+        if (terminalCaptured && checkpointId >= requiredReleaseCheckpoint && !waitingForRelease) {
+            waitingForRelease = true;
+            try {
+                while (releasedCheckpoint < requiredReleaseCheckpoint) {
+                    taskMailbox.yield();
+                }
+            } finally {
+                waitingForRelease = false;
+            }
         }
-    }
-
-    @Override
-    public void endInput() throws Exception {
-        endOfInput = true;
-        emitCommittables(true, END_INPUT_CHECKPOINT_ID);
-        // endInput is not followed by snapshotState, so report the terminal entry directly.
-        reportToCoordinator(END_INPUT_CHECKPOINT_ID);
+        super.notifyCheckpointComplete(checkpointId);
+        // Operator state already persisted these; retain the terminal capture identity for ACKs.
+        pendingCommittables.headMap(checkpointId, true).clear();
     }
 
     @Override
@@ -233,26 +253,71 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     }
 
     @Override
+    public void prepareSnapshotPreBarrier(long checkpointId) throws Exception {
+        Preconditions.checkArgument(
+                checkpointId != Long.MAX_VALUE, "A real checkpoint is required");
+        if (terminalCaptured) {
+            // Keep the terminal fact in every later snapshot, including after file retirement.
+            pendingCommittables.put(
+                    checkpointId,
+                    new CheckpointCommittables(
+                            checkpointId,
+                            Collections.emptyList(),
+                            currentWatermark,
+                            currentIdle,
+                            false,
+                            true));
+        } else {
+            emitCommittables(endOfInput, checkpointId);
+        }
+    }
+
+    @Override
+    public void endInput() {
+        endOfInput = true;
+    }
+
+    @Override
+    public void processElement(StreamRecord<InternalRow> element) throws Exception {
+        Preconditions.checkState(!endOfInput, "Cannot write records after EndInput");
+        super.processElement(element);
+    }
+
+    @Override
     protected void emitCommittables(boolean waitCompaction, long checkpointId) throws IOException {
+        // prepareCommit(true, K) waits for flush/compaction before the marker can be captured.
         List<Committable> committables = prepareCommit(waitCompaction, checkpointId);
         CheckpointCommittables entry =
                 new CheckpointCommittables(
-                        checkpointId, committables, currentWatermark, currentIdle);
-        // Always buffer the per-checkpoint entry so an empty barrier — even one that has not seen
-        // a real watermark yet — survives restore. The coordinator relies on every subtask
-        // having an entry for the checkpoint being aligned so its watermark min stays sound.
+                        checkpointId,
+                        committables,
+                        currentWatermark,
+                        currentIdle,
+                        false,
+                        endOfInput);
         pendingCommittables.put(checkpointId, entry);
-        // Still forward committables downstream even though the commit happens on the coordinator.
-        // The downstream is a DiscardingSink, but emitting keeps numRecordsOut observable and
-        // preserves the operator's IO metrics.
-        committables.forEach(committable -> output.collect(new StreamRecord<>(committable)));
+        terminalCaptured = endOfInput;
+        if (terminalCaptured) {
+            requiredReleaseCheckpoint = checkpointId;
+        }
+        // Downstream operators have already ended when the terminal checkpoint is captured.
+        // Its tail travels only through the coordinator event sent from snapshotState.
+        if (!endOfInput) {
+            committables.forEach(committable -> output.collect(new StreamRecord<>(committable)));
+        }
     }
 
-    private void emitCheckpointMarker(long checkpointId) throws IOException {
-        CheckpointCommittables marker =
-                new CheckpointCommittables(
-                        checkpointId, new ArrayList<>(), currentWatermark, currentIdle);
-        pendingCommittables.put(checkpointId, marker);
+    @Override
+    public void handleOperatorEvent(OperatorEvent event) {
+        Preconditions.checkArgument(
+                event instanceof TerminalWriterReleaseEvent, "Unexpected coordinator event");
+        TerminalWriterReleaseEvent release = (TerminalWriterReleaseEvent) event;
+        if (terminalCaptured
+                && release.getSubtask() == subtask
+                && release.getAttemptNumber() == attemptNumber
+                && release.getCheckpointId() >= requiredReleaseCheckpoint) {
+            releasedCheckpoint = Math.max(releasedCheckpoint, release.getCheckpointId());
+        }
     }
 
     /**

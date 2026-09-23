@@ -35,14 +35,19 @@ import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.sink.StreamTableWrite;
 
 import org.apache.flink.api.common.JobID;
+import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.api.common.typeutils.base.LongSerializer;
 import org.apache.flink.core.io.SimpleVersionedSerialization;
 import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
 import org.apache.flink.metrics.groups.OperatorCoordinatorMetricGroup;
 import org.apache.flink.runtime.checkpoint.CheckpointCoordinator;
+import org.apache.flink.runtime.executiongraph.ExecutionAttemptID;
 import org.apache.flink.runtime.jobgraph.OperatorID;
+import org.apache.flink.runtime.messages.Acknowledge;
 import org.apache.flink.runtime.operators.coordination.CoordinatorStore;
 import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
+import org.apache.flink.runtime.operators.coordination.OperatorEvent;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,18 +55,23 @@ import org.junit.jupiter.api.Timeout;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /** EndInput scenarios for {@link CommittingWriteOperatorCoordinator}. */
+@Timeout(30)
 public class CommittingWriteOperatorCoordinatorEndInputTest extends CommitterTestBase {
 
     private static final TypeSerializer<CheckpointCommittables> SERIALIZER =
@@ -85,380 +95,851 @@ public class CommittingWriteOperatorCoordinatorEndInputTest extends CommitterTes
         assertThat(failureCause).isNull();
     }
 
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Test
-    public void testEndInputCommitsAfterCoveredCheckpointCompletesWithEmptyEndInput()
-            throws Exception {
+    public void testRealTerminalPromotionAndLaterAlignment() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
         CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, 2);
         coordinator.start();
+        coordinator.handleEventFromOperator(0, 0, terminalEvent(table, 1, false, 10));
+        coordinator.handleEventFromOperator(
+                1, 0, eventOf(1, Collections.singletonList(committable(table, 1, 2)), 20));
         coordinator.waitProcessAllActions();
-
-        coordinator.handleEventFromOperator(0, 0, event(committable(table, Long.MAX_VALUE, 1)));
-        coordinator.handleEventFromOperator(1, 0, emptyEvent(Long.MAX_VALUE));
+        assertThat(coordinator.terminalCoveredBy(0)).isEqualTo(-1);
+        coordinator.notifyCheckpointComplete(1);
         coordinator.waitProcessAllActions();
-        assertThat(table.latestSnapshot()).isNotPresent();
-
-        coordinator.handleEventFromOperator(0, 0, emptyEvent(11L));
-        coordinator.handleEventFromOperator(1, 0, emptyEvent(11L));
-        coordinator.notifyCheckpointComplete(11L);
+        assertThat(coordinator.terminalCoveredBy(0)).isEqualTo(1);
+        assertThat(coordinator.terminalCoveredBy(1)).isEqualTo(-1);
+        assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(10);
+        coordinator.handleEventFromOperator(
+                1, 0, eventOf(2, Collections.singletonList(committable(table, 2, 3)), 200));
+        coordinator.notifyCheckpointComplete(2);
         coordinator.waitProcessAllActions();
+        assertResults(table, "1, 1", "2, 2", "3, 3");
+        assertThat(table.snapshotManager().latestSnapshot().commitIdentifier()).isEqualTo(2);
+        assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(200);
+        assertThat(coordinator.terminalCoveredBy(0)).isEqualTo(1);
+        coordinator.close();
+    }
 
+    @Test
+    public void testEmptyTerminalPromotesAfterCommit() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, 1);
+        coordinator.start();
+        coordinator.handleEventFromOperator(0, 0, terminalEvent(table, 1, true, 100));
+        coordinator.waitProcessAllActions();
+        assertThat(coordinator.terminalCoveredBy(0)).isEqualTo(-1);
+        coordinator.notifyCheckpointComplete(1);
+        coordinator.waitProcessAllActions();
+        assertThat(coordinator.terminalCoveredBy(0)).isEqualTo(1);
+        assertThat(table.snapshotManager().latestSnapshot().commitIdentifier())
+                .isEqualTo(Long.MAX_VALUE);
+        coordinator.close();
+    }
+
+    @Test
+    public void testTerminalCandidateSurvivesTwoAborts() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, 1);
+        coordinator.start();
+        coordinator.handleEventFromOperator(0, 0, terminalEvent(table, 1, false, 100));
+        coordinator.notifyCheckpointAborted(1);
+        coordinator.handleEventFromOperator(0, 0, terminalEvent(table, 2, true, 100));
+        coordinator.notifyCheckpointAborted(2);
+        coordinator.waitProcessAllActions();
+        assertThat(coordinator.terminalCoveredBy(0)).isEqualTo(-1);
+        coordinator.handleEventFromOperator(0, 0, terminalEvent(table, 3, true, 100));
+        coordinator.notifyCheckpointComplete(3);
+        coordinator.waitProcessAllActions();
+        assertThat(coordinator.terminalCoveredBy(0)).isEqualTo(3);
         assertResults(table, "1, 1");
         assertThat(table.snapshotManager().latestSnapshot().commitIdentifier())
                 .isEqualTo(Long.MAX_VALUE);
         coordinator.close();
     }
 
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Test
-    public void testPartialEndInputCommitsOnlyOrdinaryCheckpoint() throws Exception {
+    public void testFailedTerminalCommitDoesNotPromoteOrRetire() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
-        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, 2);
+        CommittingWriteOperatorCoordinator coordinator =
+                createCoordinator(
+                        table,
+                        1,
+                        c ->
+                                new StoreCommitter(table, table.newCommit(c.commitUser()), c) {
+                                    @Override
+                                    public void commit(List<ManifestCommittable> entries) {
+                                        throw new RuntimeException("terminal failure");
+                                    }
+                                });
         coordinator.start();
+        coordinator.handleEventFromOperator(0, 0, terminalEvent(table, 1, false, 100));
+        coordinator.notifyCheckpointComplete(1);
+        CompletableFuture<byte[]> next = new CompletableFuture<>();
+        coordinator.checkpointCoordinator(2, next);
         coordinator.waitProcessAllActions();
-
-        coordinator.handleEventFromOperator(0, 0, event(committable(table, Long.MAX_VALUE, 1)));
-        coordinator.handleEventFromOperator(0, 0, emptyEvent(1L));
-        coordinator.handleEventFromOperator(1, 0, event(committable(table, 1L, 2)));
-        coordinator.notifyCheckpointComplete(1L);
-        coordinator.waitProcessAllActions();
-        assertResults(table, "2, 2");
-
-        coordinator.handleEventFromOperator(1, 0, event(committable(table, Long.MAX_VALUE, 3)));
-        coordinator.handleEventFromOperator(0, 0, emptyEvent(2L));
-        coordinator.handleEventFromOperator(1, 0, emptyEvent(2L));
-        coordinator.notifyCheckpointComplete(2L);
-        coordinator.waitProcessAllActions();
-
-        assertResults(table, "1, 1", "2, 2", "3, 3");
+        assertThat(next).isCompletedExceptionally();
+        assertThat(coordinator.terminalCoveredBy(0)).isEqualTo(-1);
+        assertThat(coordinator.pendingCommittables(0)).containsKey(1L);
+        assertThat(failureCause).hasMessageContaining("terminal failure");
+        failureCause = null;
         coordinator.close();
     }
 
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Test
-    public void testCheckpointBeforeEndInputDoesNotCoverEndInput() throws Exception {
+    public void testRestoredRealMarkerPromotesAfterRecoveryCommit() throws Exception {
+        testRecovery(false);
+    }
+
+    @Test
+    public void testFailedRecoveryDoesNotPromoteOrAdvanceCheckpoint() throws Exception {
+        testRecovery(true);
+    }
+
+    @Test
+    public void testLaterCheckpointRestoresTerminalWithoutWriterEvent() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
-        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, 1);
-        coordinator.start();
-        coordinator.waitProcessAllActions();
+        CommittingWriteOperatorCoordinator original = createCoordinator(table, 2);
+        original.start();
+        CommittableEvent terminal = terminalEvent(table, 1, false, 10);
+        original.handleEventFromOperator(0, 0, terminal);
+        original.handleEventFromOperator(1, 0, emptyEvent(1));
+        original.notifyCheckpointComplete(1);
+        CompletableFuture<byte[]> snapshot = new CompletableFuture<>();
+        original.checkpointCoordinator(2, snapshot);
+        byte[] saved = snapshot.get(10, TimeUnit.SECONDS);
+        original.close();
 
-        coordinator.handleEventFromOperator(0, 0, emptyEvent(11L));
-        coordinator.handleEventFromOperator(0, 0, event(committable(table, Long.MAX_VALUE, 1)));
-        coordinator.notifyCheckpointComplete(11L);
-        coordinator.waitProcessAllActions();
-        assertThat(table.latestSnapshot()).isNotPresent();
-
-        coordinator.handleEventFromOperator(0, 0, emptyEvent(12L));
-        coordinator.notifyCheckpointComplete(12L);
-        coordinator.waitProcessAllActions();
+        CommittingWriteOperatorCoordinator restored = createCoordinator(table, 2);
+        restored.resetToCheckpoint(2, saved);
+        restored.start();
+        restored.waitProcessAllActions();
+        assertThat(restored.terminalCoveredBy(0)).isEqualTo(1);
+        assertThat(restored.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RESTORING);
+        restored.handleEventFromOperator(1, 1, restoreEventEntries(2));
+        restored.waitProcessAllActions();
+        assertThat(restored.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
+        // A late replay of already committed files cannot duplicate data or revert coverage.
+        restored.handleEventFromOperator(
+                0, 1, restoreEventEntries(2, terminal.deserialize(SERIALIZER)));
+        restored.handleEventFromOperator(1, 1, emptyEvent(3));
+        restored.notifyCheckpointComplete(3);
+        restored.waitProcessAllActions();
+        assertThat(restored.terminalCoveredBy(0)).isEqualTo(1);
         assertResults(table, "1, 1");
-        coordinator.close();
+        restored.close();
     }
 
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Test
-    public void testAbortedCheckpointDoesNotCommitEndInput() throws Exception {
+    public void testFirstTerminalBoundaryStillRequiresWriterReplay() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
-        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, 2);
-        coordinator.start();
-        coordinator.waitProcessAllActions();
-
-        coordinator.handleEventFromOperator(0, 0, event(committable(table, Long.MAX_VALUE, 1)));
-        coordinator.handleEventFromOperator(1, 0, emptyEvent(Long.MAX_VALUE));
-        coordinator.handleEventFromOperator(0, 0, emptyEvent(1L));
-        coordinator.handleEventFromOperator(1, 0, emptyEvent(1L));
-        coordinator.notifyCheckpointAborted(1L);
-        coordinator.waitProcessAllActions();
-        assertThat(table.latestSnapshot()).isNotPresent();
-
-        coordinator.handleEventFromOperator(0, 0, emptyEvent(2L));
-        coordinator.handleEventFromOperator(1, 0, emptyEvent(2L));
-        coordinator.notifyCheckpointComplete(2L);
-        coordinator.waitProcessAllActions();
-
+        CommittingWriteOperatorCoordinator restored = createCoordinator(table, 1);
+        restored.resetToCheckpoint(1, terminalState(-1));
+        restored.start();
+        restored.waitProcessAllActions();
+        assertThat(restored.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RESTORING);
+        assertThat(restored.terminalCoveredBy(0)).isEqualTo(-1);
+        restored.handleEventFromOperator(
+                0,
+                1,
+                restoreEventEntries(1, terminalEvent(table, 1, false, 10).deserialize(SERIALIZER)));
+        restored.waitProcessAllActions();
+        assertThat(restored.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
+        assertThat(restored.terminalCoveredBy(0)).isEqualTo(1);
         assertResults(table, "1, 1");
-        coordinator.close();
+        restored.close();
     }
 
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Test
-    public void testRunningWriterFailoverKeepsOtherPendingEndInput() throws Exception {
+    public void testAllTerminalRecoveryCompletesWithoutReporters() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
-        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, 2);
-        coordinator.start();
-        coordinator.waitProcessAllActions();
+        CommittingWriteOperatorCoordinator restored = createCoordinator(table, 2);
+        restored.resetToCheckpoint(2, terminalState(1, 2));
+        restored.start();
+        CompletableFuture<byte[]> next = new CompletableFuture<>();
+        restored.checkpointCoordinator(3, next);
+        CoordinatorState saved =
+                SimpleVersionedSerialization.readVersionAndDeSerialize(
+                        new CoordinatorStateSerializer(), next.get(10, TimeUnit.SECONDS));
+        assertThat(saved.getTerminalCoveredBy()).containsExactly(1, 2);
+        assertThat(restored.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
+        restored.close();
+    }
 
-        coordinator.handleEventFromOperator(0, 0, event(committable(table, Long.MAX_VALUE, 1)));
-        coordinator.handleEventFromOperator(0, 0, emptyEvent(1L));
-        coordinator.handleEventFromOperator(1, 0, event(committable(table, 1L, 2)));
-        coordinator.notifyCheckpointComplete(1L);
-        coordinator.waitProcessAllActions();
+    @Test
+    public void testAllTerminalRecoveryFailureFencesCheckpoint() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        CommittingWriteOperatorCoordinator restored =
+                createCoordinator(
+                        table,
+                        1,
+                        c ->
+                                new StoreCommitter(table, table.newCommit(c.commitUser()), c) {
+                                    @Override
+                                    public int filterAndCommit(
+                                            List<ManifestCommittable> entries,
+                                            boolean check,
+                                            boolean listeners) {
+                                        throw new RuntimeException(
+                                                "zero reporter recovery failure");
+                                    }
+                                });
+        restored.resetToCheckpoint(2, terminalState(1));
+        restored.start();
+        CompletableFuture<byte[]> next = new CompletableFuture<>();
+        restored.checkpointCoordinator(3, next);
+        restored.waitProcessAllActions();
+        assertThat(next).isCompletedExceptionally();
+        assertThat(restored.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RESTORING);
+        assertThat(failureCause).hasMessageContaining("zero reporter recovery failure");
+        failureCause = null;
+        restored.close();
+    }
+
+    @Test
+    public void testOrdinaryRecoveryRequiresEveryWriter() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        CommittingWriteOperatorCoordinator restored = createCoordinator(table, 2);
+        restored.resetToCheckpoint(2, emptyState());
+        restored.start();
+        restored.handleEventFromOperator(0, 1, restoreEventEntries(2));
+        restored.waitProcessAllActions();
+        assertThat(restored.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RESTORING);
+        restored.handleEventFromOperator(1, 1, restoreEventEntries(2));
+        restored.waitProcessAllActions();
+        assertThat(restored.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
+        assertThat(restored.terminalCoveredBy(0)).isEqualTo(-1);
+        assertThat(restored.terminalCoveredBy(1)).isEqualTo(-1);
+        restored.close();
+    }
+
+    @Test
+    public void testTerminalStateRescaleFailsRecovery() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        CommittingWriteOperatorCoordinator restored = createCoordinator(table, 1);
+        restored.resetToCheckpoint(2, terminalState(1, -1));
+        restored.start();
+        CompletableFuture<byte[]> next = new CompletableFuture<>();
+        restored.checkpointCoordinator(3, next);
+        restored.waitProcessAllActions();
+        assertThat(next).isCompletedExceptionally();
+        assertThat(failureCause).hasMessageContaining("Cannot rescale terminal coordinator state");
+        failureCause = null;
+        restored.close();
+    }
+
+    @Test
+    public void testRegionResetBeforeTerminalCoverageFails() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        CommittingWriteOperatorCoordinator restored = createCoordinator(table, 1);
+        restored.resetToCheckpoint(2, terminalState(1));
+        restored.start();
+        restored.subtaskReset(0, 0);
+        CompletableFuture<byte[]> next = new CompletableFuture<>();
+        restored.checkpointCoordinator(3, next);
+        restored.waitProcessAllActions();
+        assertThat(next).isCompletedExceptionally();
+        assertThat(failureCause).hasMessageContaining("Region reset before terminal coverage");
+        failureCause = null;
+        restored.close();
+    }
+
+    @Test
+    public void testResetDuringRecoveryRequiresFreshContribution() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        CommittingWriteOperatorCoordinator restored = createCoordinator(table, 2);
+        restored.resetToCheckpoint(2, terminalState(-1, -1));
+        restored.start();
+        restored.handleEventFromOperator(0, 1, restoreEventEntries(2));
+        restored.subtaskReset(0, 2);
+        restored.handleEventFromOperator(1, 1, restoreEventEntries(2));
+        restored.waitProcessAllActions();
+        assertThat(restored.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RESTORING);
+        restored.handleEventFromOperator(0, 2, restoreEventEntries(2));
+        restored.waitProcessAllActions();
+        assertThat(restored.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
+        restored.close();
+    }
+
+    @Test
+    public void testNoTerminalStateDoesNotRejectParallelismChange() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        CommittingWriteOperatorCoordinator restored = createCoordinator(table, 1);
+        restored.resetToCheckpoint(2, terminalState(-1, -1));
+        restored.start();
+        restored.handleEventFromOperator(0, 1, restoreEventEntries(2));
+        restored.waitProcessAllActions();
+        assertThat(restored.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
+        assertThat(restored.terminalCoveredBy(0)).isEqualTo(-1);
+        restored.close();
+    }
+
+    @Test
+    public void testRecoveryWithPendingCheckpointBeforeTerminalCoverage() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        CommittingWriteOperatorCoordinator restored = createCoordinator(table, 2);
+        restored.resetToCheckpoint(5, terminalState(3, -1));
+        restored.start();
+        restored.handleEventFromOperator(
+                1,
+                1,
+                restoreEventEntries(
+                        5,
+                        new CheckpointCommittables(
+                                2, Collections.singletonList(committable(table, 2, 2)), 10)));
+        restored.waitProcessAllActions();
+        assertThat(restored.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
+        assertThat(restored.terminalCoveredBy(0)).isEqualTo(3);
         assertResults(table, "2, 2");
-
-        coordinator.subtaskReset(1, 1L);
-        coordinator.waitProcessAllActions();
-
-        coordinator.handleEventFromOperator(1, 1, event(committable(table, Long.MAX_VALUE, 3)));
-        coordinator.handleEventFromOperator(0, 0, emptyEvent(2L));
-        coordinator.handleEventFromOperator(1, 1, emptyEvent(2L));
-        coordinator.notifyCheckpointComplete(2L);
-        coordinator.waitProcessAllActions();
-
-        assertResults(table, "1, 1", "2, 2", "3, 3");
-        coordinator.close();
+        restored.close();
     }
 
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Test
-    public void testSubtaskResetDropsEndInputAfterRestoreCheckpoint() throws Exception {
-        FileStoreTable table = createUnawareBucketTable();
-        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, 1);
-        coordinator.start();
-        coordinator.waitProcessAllActions();
-
-        coordinator.handleEventFromOperator(0, 0, emptyEvent(1L));
-        coordinator.handleEventFromOperator(0, 0, event(committable(table, Long.MAX_VALUE, 1)));
-        coordinator.notifyCheckpointComplete(1L);
-        coordinator.waitProcessAllActions();
-        assertThat(table.latestSnapshot()).isNotPresent();
-
-        coordinator.subtaskReset(0, 1L);
-        coordinator.waitProcessAllActions();
-
-        coordinator.handleEventFromOperator(0, 1, event(committable(table, Long.MAX_VALUE, 2)));
-        coordinator.handleEventFromOperator(0, 1, emptyEvent(2L));
-        coordinator.notifyCheckpointComplete(2L);
-        coordinator.waitProcessAllActions();
-
-        assertResults(table, "2, 2");
-        coordinator.close();
-    }
-
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
-    @Test
-    public void testRegionRestoreKeepsPendingEndInput() throws Exception {
+    public void testEarlyReleasePrecedesCommitAndLastWriterWaitsForFinalization() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
         CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, 2);
+        List<TerminalWriterReleaseEvent> first = new CopyOnWriteArrayList<>();
+        List<TerminalWriterReleaseEvent> last = new CopyOnWriteArrayList<>();
         coordinator.start();
+        coordinator.executionAttemptReady(0, 0, releaseGateway(0, 0, first));
+        coordinator.executionAttemptReady(1, 0, releaseGateway(1, 0, last));
+        coordinator.handleEventFromOperator(0, 0, terminalEvent(table, 1, true, 10));
+        coordinator.handleEventFromOperator(1, 0, emptyEvent(1));
         coordinator.waitProcessAllActions();
-
-        Committable firstEndInput = committable(table, Long.MAX_VALUE, 1);
-        coordinator.handleEventFromOperator(0, 0, event(firstEndInput));
-        coordinator.handleEventFromOperator(0, 0, emptyEvent(2L));
-        coordinator.handleEventFromOperator(1, 0, event(committable(table, 2L, 2)));
-        coordinator.notifyCheckpointComplete(2L);
+        assertThat(first).hasSize(1);
+        assertThat(coordinator.terminalCoveredBy(0)).isEqualTo(-1);
+        assertThat(table.snapshotManager().latestSnapshot()).isNull();
+        assertThat(last).isEmpty();
+        coordinator.notifyCheckpointComplete(1);
         coordinator.waitProcessAllActions();
-        assertResults(table, "2, 2");
-
-        coordinator.subtaskReset(0, 2L);
-        coordinator.handleEventFromOperator(
-                0,
-                1,
-                restoreEventEntries(
-                        2L,
-                        new CheckpointCommittables(
-                                Long.MAX_VALUE,
-                                Collections.singletonList(firstEndInput),
-                                Long.MIN_VALUE)));
-        coordinator.handleEventFromOperator(0, 1, emptyEvent(3L));
-        coordinator.handleEventFromOperator(1, 0, event(committable(table, Long.MAX_VALUE, 3)));
-        coordinator.handleEventFromOperator(1, 0, emptyEvent(3L));
-        coordinator.notifyCheckpointComplete(3L);
+        assertThat(first).hasSize(1);
+        assertThat(first.get(0).getCheckpointId()).isEqualTo(1);
+        assertThat(first.get(0).getSubtask()).isZero();
+        assertThat(first.get(0).getAttemptNumber()).isZero();
+        // An empty marker captured before the task finishes advances its wait boundary.
+        coordinator.handleEventFromOperator(0, 0, terminalEvent(table, 2, true, 10));
         coordinator.waitProcessAllActions();
-
-        assertResults(table, "1, 1", "2, 2", "3, 3");
+        assertThat(first).hasSize(2);
+        assertThat(first.get(1).getCheckpointId()).isEqualTo(2);
+        coordinator.handleEventFromOperator(1, 0, terminalEvent(table, 2, true, 20));
+        coordinator.notifyCheckpointComplete(2);
+        coordinator.waitProcessAllActions();
+        assertThat(last).hasSize(1);
+        assertThat(first).hasSize(2);
+        assertThat(table.snapshotManager().latestSnapshot().commitIdentifier())
+                .isEqualTo(Long.MAX_VALUE);
+        coordinator.executionAttemptReady(1, 1, releaseGateway(1, 1, last));
+        coordinator.waitProcessAllActions();
+        assertThat(last).hasSize(2);
         coordinator.close();
     }
 
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Test
-    public void testGlobalRestoreOfPartialEndInputWaitsForAllWriters() throws Exception {
+    public void testEarlyReleaseFollowsAbortsWithoutReleasingLastCandidate() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
         CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, 2);
-        coordinator.resetToCheckpoint(10L, emptyState());
-        coordinator.start();
-        coordinator.waitProcessAllActions();
-
-        coordinator.handleEventFromOperator(
-                0,
-                1,
-                restoreEventEntries(
-                        10L,
-                        new CheckpointCommittables(
-                                Long.MAX_VALUE,
-                                Collections.singletonList(committable(table, Long.MAX_VALUE, 1)),
-                                Long.MIN_VALUE)));
-        coordinator.handleEventFromOperator(
-                1,
-                1,
-                restoreEventEntries(
-                        10L,
-                        new CheckpointCommittables(10L, Collections.emptyList(), Long.MIN_VALUE)));
-        coordinator.waitProcessAllActions();
-        assertThat(table.latestSnapshot()).isNotPresent();
-
-        coordinator.handleEventFromOperator(1, 1, event(committable(table, Long.MAX_VALUE, 2)));
-        coordinator.handleEventFromOperator(0, 1, emptyEvent(11L));
-        coordinator.handleEventFromOperator(1, 1, emptyEvent(11L));
-        coordinator.notifyCheckpointComplete(11L);
-        coordinator.waitProcessAllActions();
-
-        assertResults(table, "1, 1", "2, 2");
-        coordinator.close();
+        List<TerminalWriterReleaseEvent> first = new CopyOnWriteArrayList<>();
+        List<TerminalWriterReleaseEvent> last = new CopyOnWriteArrayList<>();
+        try {
+            coordinator.start();
+            coordinator.executionAttemptReady(0, 0, releaseGateway(0, 0, first));
+            coordinator.executionAttemptReady(1, 0, releaseGateway(1, 0, last));
+            for (long checkpoint = 1; checkpoint <= 3; checkpoint++) {
+                coordinator.handleEventFromOperator(
+                        0, 0, terminalEvent(table, checkpoint, true, 10));
+                coordinator.handleEventFromOperator(
+                        1, 0, terminalEvent(table, checkpoint, true, 20));
+                if (checkpoint < 3) {
+                    coordinator.notifyCheckpointAborted(checkpoint);
+                }
+                coordinator.waitProcessAllActions();
+                assertThat(first).hasSize((int) checkpoint);
+                assertThat(first.get((int) checkpoint - 1).getCheckpointId()).isEqualTo(checkpoint);
+                assertThat(last).isEmpty();
+                assertThat(coordinator.terminalCoveredBy(0)).isEqualTo(-1);
+            }
+            coordinator.notifyCheckpointComplete(3);
+            coordinator.waitProcessAllActions();
+            assertThat(first).hasSize(3);
+            assertThat(last).hasSize(1);
+            assertThat(last.get(0).getCheckpointId()).isEqualTo(3);
+            assertThat(table.snapshotManager().latestSnapshot().commitIdentifier())
+                    .isEqualTo(Long.MAX_VALUE);
+        } finally {
+            coordinator.close();
+        }
     }
 
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Test
-    public void testGlobalRestoreOfAllEndInputCommitsThroughRecovery() throws Exception {
+    public void testEarlyReleaseDoesNotBypassNextCheckpointCommitBarrier() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
-        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, 2);
-        coordinator.resetToCheckpoint(10L, emptyState());
-        coordinator.start();
-        coordinator.waitProcessAllActions();
-
-        coordinator.handleEventFromOperator(
-                0,
-                1,
-                restoreEventEntries(
-                        10L,
-                        new CheckpointCommittables(
-                                Long.MAX_VALUE,
-                                Collections.singletonList(committable(table, Long.MAX_VALUE, 1)),
-                                Long.MIN_VALUE)));
-        coordinator.handleEventFromOperator(
-                1,
-                1,
-                restoreEventEntries(
-                        10L,
-                        new CheckpointCommittables(
-                                Long.MAX_VALUE,
-                                Collections.singletonList(committable(table, Long.MAX_VALUE, 2)),
-                                Long.MIN_VALUE)));
-        coordinator.waitProcessAllActions();
-
-        assertResults(table, "1, 1", "2, 2");
-        coordinator.close();
-    }
-
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
-    @Test
-    public void testGlobalRecoveryFiltersEndInputCommittedBeforeFailure() throws Exception {
-        FileStoreTable table = createUnawareBucketTable();
-        Committable firstEndInput = committable(table, Long.MAX_VALUE, 1);
-        Committable secondEndInput = committable(table, Long.MAX_VALUE, 2);
-        CommittingWriteOperatorCoordinator first =
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        List<TerminalWriterReleaseEvent> events = new CopyOnWriteArrayList<>();
+        CommittingWriteOperatorCoordinator coordinator =
                 createCoordinator(
                         table,
                         2,
-                        commitContext ->
-                                new FailAfterCommitCommitter(
-                                        new StoreCommitter(
-                                                table,
-                                                table.newStreamWriteBuilder()
-                                                        .withCommitUser(commitContext.commitUser())
-                                                        .newCommit(),
-                                                commitContext)));
-        first.start();
-        first.waitProcessAllActions();
-
-        first.handleEventFromOperator(0, 0, event(firstEndInput));
-        first.handleEventFromOperator(1, 0, event(secondEndInput));
-        first.handleEventFromOperator(0, 0, emptyEvent(1L));
-        first.handleEventFromOperator(1, 0, emptyEvent(1L));
-        first.notifyCheckpointComplete(1L);
-        first.waitProcessAllActions();
-
-        assertThat(failureCause).isNotNull();
-        assertResults(table, "1, 1", "2, 2");
-        long committedSnapshotId = table.snapshotManager().latestSnapshotId();
-        first.close();
-        failureCause = null;
-
-        CommittingWriteOperatorCoordinator recovered = createCoordinator(table, 2);
-        recovered.resetToCheckpoint(1L, emptyState());
-        recovered.start();
-        recovered.waitProcessAllActions();
-        recovered.handleEventFromOperator(
-                0,
-                1,
-                restoreEventEntries(
-                        1L,
-                        new CheckpointCommittables(
-                                Long.MAX_VALUE,
-                                Collections.singletonList(firstEndInput),
-                                Long.MIN_VALUE)));
-        recovered.handleEventFromOperator(
-                1,
-                1,
-                restoreEventEntries(
-                        1L,
-                        new CheckpointCommittables(
-                                Long.MAX_VALUE,
-                                Collections.singletonList(secondEndInput),
-                                Long.MIN_VALUE)));
-        recovered.waitProcessAllActions();
-
-        assertResults(table, "1, 1", "2, 2");
-        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(committedSnapshotId);
-        recovered.close();
+                        c ->
+                                new StoreCommitter(table, table.newCommit(c.commitUser()), c) {
+                                    @Override
+                                    public void commit(List<ManifestCommittable> entries)
+                                            throws java.io.IOException, InterruptedException {
+                                        entered.countDown();
+                                        assertThat(release.await(10, TimeUnit.SECONDS)).isTrue();
+                                        super.commit(entries);
+                                    }
+                                });
+        try {
+            coordinator.start();
+            coordinator.executionAttemptReady(0, 0, releaseGateway(0, 0, events));
+            coordinator.handleEventFromOperator(0, 0, terminalEvent(table, 1, false, 10));
+            coordinator.handleEventFromOperator(1, 0, emptyEvent(1));
+            coordinator.notifyCheckpointComplete(1);
+            assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();
+            assertThat(events).hasSize(1);
+            assertThat(coordinator.terminalCoveredBy(0)).isEqualTo(-1);
+            assertThat(table.snapshotManager().latestSnapshot()).isNull();
+            CompletableFuture<byte[]> next = new CompletableFuture<>();
+            coordinator.checkpointCoordinator(2, next);
+            assertThat(next).isNotDone();
+            release.countDown();
+            assertThat(next.get(10, TimeUnit.SECONDS)).isNotEmpty();
+            assertThat(coordinator.terminalCoveredBy(0)).isEqualTo(1);
+            assertResults(table, "1, 1");
+            assertThat(events).hasSize(1);
+        } finally {
+            release.countDown();
+            coordinator.close();
+        }
     }
 
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Test
-    public void testRegionRestoreDoesNotRecommitEndInputAlreadyCommitted() throws Exception {
+    public void testFailedCommitAfterEarlyReleaseFencesNextCheckpoint() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
-        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, 1);
+        List<TerminalWriterReleaseEvent> events = new CopyOnWriteArrayList<>();
+        CommittingWriteOperatorCoordinator coordinator =
+                createCoordinator(
+                        table,
+                        2,
+                        c ->
+                                new StoreCommitter(table, table.newCommit(c.commitUser()), c) {
+                                    @Override
+                                    public void commit(List<ManifestCommittable> entries) {
+                                        throw new RuntimeException("early release commit failure");
+                                    }
+                                });
         coordinator.start();
+        coordinator.executionAttemptReady(0, 0, releaseGateway(0, 0, events));
+        coordinator.handleEventFromOperator(0, 0, terminalEvent(table, 1, true, 10));
+        coordinator.handleEventFromOperator(1, 0, emptyEvent(1));
+        coordinator.notifyCheckpointComplete(1);
+        CompletableFuture<byte[]> next = new CompletableFuture<>();
+        coordinator.checkpointCoordinator(2, next);
         coordinator.waitProcessAllActions();
+        assertThat(events).hasSize(1);
+        assertThat(coordinator.terminalCoveredBy(0)).isEqualTo(-1);
+        assertThat(next).isCompletedExceptionally();
+        assertThat(failureCause).hasMessageContaining("early release commit failure");
+        failureCause = null;
+        coordinator.close();
+    }
 
-        Committable endInput = committable(table, Long.MAX_VALUE, 1);
-        coordinator.handleEventFromOperator(0, 0, event(endInput));
-        coordinator.handleEventFromOperator(0, 0, emptyEvent(1L));
-        coordinator.notifyCheckpointComplete(1L);
+    @Test
+    public void testInFlightFinalCommitUsesOnlyReplacementReleaseTarget() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        List<TerminalWriterReleaseEvent> old = new CopyOnWriteArrayList<>();
+        List<TerminalWriterReleaseEvent> replacement = new CopyOnWriteArrayList<>();
+        CommittingWriteOperatorCoordinator coordinator =
+                createCoordinator(
+                        table,
+                        1,
+                        c ->
+                                new StoreCommitter(table, table.newCommit(c.commitUser()), c) {
+                                    @Override
+                                    public void commit(List<ManifestCommittable> entries)
+                                            throws java.io.IOException, InterruptedException {
+                                        entered.countDown();
+                                        try {
+                                            assertThat(release.await(10, TimeUnit.SECONDS))
+                                                    .isTrue();
+                                        } catch (InterruptedException e) {
+                                            Thread.currentThread().interrupt();
+                                            throw new RuntimeException(e);
+                                        }
+                                        super.commit(entries);
+                                    }
+                                });
+        try {
+            coordinator.start();
+            coordinator.executionAttemptReady(0, 0, releaseGateway(0, 0, old));
+            coordinator.handleEventFromOperator(0, 0, terminalEvent(table, 1, true, 10));
+            coordinator.notifyCheckpointComplete(1);
+            assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();
+            assertThat(old).isEmpty();
+            coordinator.executionAttemptFailed(0, 0, new RuntimeException("attempt failed"));
+            coordinator.executionAttemptReady(0, 1, releaseGateway(0, 1, replacement));
+            // A late failure callback for the old attempt cannot remove its replacement.
+            coordinator.executionAttemptFailed(0, 0, new RuntimeException("late failure"));
+            release.countDown();
+            coordinator.waitProcessAllActions();
+            assertThat(old).isEmpty();
+            assertThat(replacement).isNotEmpty();
+            assertThat(replacement)
+                    .allSatisfy(
+                            event -> {
+                                assertThat(event.getAttemptNumber()).isEqualTo(1);
+                                assertThat(event.getCheckpointId()).isEqualTo(1);
+                            });
+        } finally {
+            release.countDown();
+            coordinator.close();
+        }
+    }
+
+    @Test
+    public void testDurableReleaseReplayAndAllTerminalRecoveryRelease() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        List<TerminalWriterReleaseEvent> events = new CopyOnWriteArrayList<>();
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, 2);
+        coordinator.resetToCheckpoint(5, terminalState(1, -1));
+        coordinator.start();
+        coordinator.executionAttemptReady(0, 2, releaseGateway(0, 2, events));
         coordinator.waitProcessAllActions();
+        assertThat(events).isNotEmpty();
+        assertThat(events)
+                .allSatisfy(
+                        event -> {
+                            assertThat(event.getSubtask()).isZero();
+                            assertThat(event.getCheckpointId()).isEqualTo(5);
+                            assertThat(event.getAttemptNumber()).isEqualTo(2);
+                        });
+        coordinator.close();
+        events.clear();
+        coordinator = createCoordinator(table, 2);
+        coordinator.resetToCheckpoint(5, terminalState(1, 2));
+        coordinator.start();
+        coordinator.executionAttemptReady(0, 3, releaseGateway(0, 3, events));
+        coordinator.executionAttemptReady(1, 3, releaseGateway(1, 3, events));
+        coordinator.waitProcessAllActions();
+        assertThat(events)
+                .extracting(TerminalWriterReleaseEvent::getSubtask)
+                .containsOnly(0, 1)
+                .contains(0, 1);
+        assertThat(events)
+                .allSatisfy(
+                        event -> {
+                            assertThat(event.getAttemptNumber()).isEqualTo(3);
+                            assertThat(event.getCheckpointId()).isGreaterThanOrEqualTo(5);
+                        });
+        coordinator.close();
+    }
 
-        assertResults(table, "1, 1");
-        long committedSnapshotId = table.snapshotManager().latestSnapshotId();
+    private OperatorCoordinator.SubtaskGateway releaseGateway(
+            int subtask, int attempt, List<TerminalWriterReleaseEvent> events) {
+        OperatorCoordinator.SubtaskGateway gateway = mock(OperatorCoordinator.SubtaskGateway.class);
+        ExecutionAttemptID execution = mock(ExecutionAttemptID.class);
+        when(execution.getAttemptNumber()).thenReturn(attempt);
+        when(gateway.getExecution()).thenReturn(execution);
+        when(gateway.getSubtask()).thenReturn(subtask);
+        doAnswer(
+                        invocation -> {
+                            events.add((TerminalWriterReleaseEvent) invocation.getArgument(0));
+                            return CompletableFuture.completedFuture(Acknowledge.get());
+                        })
+                .when(gateway)
+                .sendEvent(any(OperatorEvent.class));
+        return gateway;
+    }
 
-        coordinator.subtaskReset(0, 1L);
+    @Test
+    public void testFinalizationIsDataFreeAndReleasesAllAfterSuccess() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        List<ManifestCommittable> tokens = new CopyOnWriteArrayList<>();
+        List<TerminalWriterReleaseEvent> events = new CopyOnWriteArrayList<>();
+        CommittingWriteOperatorCoordinator coordinator =
+                new CommittingWriteOperatorCoordinator(
+                        new TestingContext(new OperatorID(), 2),
+                        c ->
+                                new StoreCommitter(
+                                        table,
+                                        table.newCommit(c.commitUser()).ignoreEmptyCommit(false),
+                                        c) {
+                                    @Override
+                                    public int filterAndCommit(
+                                            List<ManifestCommittable> entries,
+                                            boolean check,
+                                            boolean listeners) {
+                                        tokens.addAll(entries);
+                                        assertThat(events).isEmpty();
+                                        return super.filterAndCommit(entries, check, listeners);
+                                    }
+                                },
+                        true,
+                        commitUser,
+                        null,
+                        999L);
+        coordinator.start();
+        coordinator.handleEventFromOperator(0, 0, terminalEvent(table, 1, false, 10));
+        coordinator.handleEventFromOperator(1, 0, eventOf(1, Collections.emptyList(), 20));
+        coordinator.notifyCheckpointComplete(1);
+        coordinator.waitProcessAllActions();
+        assertThat(tokens).isEmpty();
+        assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(10);
+        // Neither gateway is registered yet; finish permission is replayed when ready.
+        coordinator.handleEventFromOperator(
+                1,
+                0,
+                CommittableEvent.create(
+                        2,
+                        new CheckpointCommittables(
+                                2,
+                                Collections.singletonList(committable(table, 2, 2)),
+                                30,
+                                false,
+                                false,
+                                true),
+                        SERIALIZER));
+        coordinator.notifyCheckpointComplete(2);
+        coordinator.waitProcessAllActions();
+        assertThat(tokens).hasSize(1);
+        assertThat(tokens.get(0).identifier()).isEqualTo(Long.MAX_VALUE);
+        assertThat(tokens.get(0).fileCommittables()).isEmpty();
+        assertThat(tokens.get(0).watermark()).isEqualTo(999);
+        assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(999);
+        assertResults(table, "1, 1", "2, 2");
+        coordinator.executionAttemptReady(0, 1, releaseGateway(0, 1, events));
+        coordinator.executionAttemptReady(1, 1, releaseGateway(1, 1, events));
+        coordinator.notifyCheckpointComplete(3);
+        coordinator.waitProcessAllActions();
+        assertThat(events).extracting(TerminalWriterReleaseEvent::getSubtask).contains(0, 1);
+        assertThat(tokens).hasSize(1);
+        coordinator.close();
+    }
+
+    @Test
+    public void testFinalReleaseWaitsForGlobalFinalization() throws Exception {
+        testFinalizationBoundary(false);
+    }
+
+    @Test
+    public void testFinalizationFailureFencesFinalReleaseAndCheckpoint() throws Exception {
+        testFinalizationBoundary(true);
+    }
+
+    private void testFinalizationBoundary(boolean fail) throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        List<TerminalWriterReleaseEvent> events = new CopyOnWriteArrayList<>();
+        CommittingWriteOperatorCoordinator coordinator =
+                createCoordinator(
+                        table,
+                        2,
+                        c ->
+                                new StoreCommitter(table, table.newCommit(c.commitUser()), c) {
+                                    @Override
+                                    public int filterAndCommit(
+                                            List<ManifestCommittable> entries,
+                                            boolean check,
+                                            boolean listeners) {
+                                        entered.countDown();
+                                        try {
+                                            assertThat(release.await(10, TimeUnit.SECONDS))
+                                                    .isTrue();
+                                        } catch (InterruptedException e) {
+                                            Thread.currentThread().interrupt();
+                                            throw new RuntimeException(e);
+                                        }
+                                        if (fail) {
+                                            throw new RuntimeException(
+                                                    "global finalization failure");
+                                        }
+                                        return super.filterAndCommit(entries, check, listeners);
+                                    }
+                                });
+        try {
+            coordinator.start();
+            coordinator.executionAttemptReady(0, 0, releaseGateway(0, 0, events));
+            coordinator.executionAttemptReady(1, 0, releaseGateway(1, 0, events));
+            coordinator.handleEventFromOperator(0, 0, terminalEvent(table, 1, true, 10));
+            coordinator.handleEventFromOperator(1, 0, terminalEvent(table, 1, true, 20));
+            coordinator.notifyCheckpointComplete(1);
+            assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();
+            assertThat(events)
+                    .extracting(TerminalWriterReleaseEvent::getSubtask)
+                    .containsExactly(0);
+            CompletableFuture<byte[]> next = new CompletableFuture<>();
+            coordinator.checkpointCoordinator(2, next);
+            release.countDown();
+            coordinator.waitProcessAllActions();
+            if (fail) {
+                assertThat(events)
+                        .extracting(TerminalWriterReleaseEvent::getSubtask)
+                        .containsExactly(0);
+                assertThat(next).isCompletedExceptionally();
+                assertThat(failureCause).hasMessageContaining("global finalization failure");
+                failureCause = null;
+            } else {
+                assertThat(events).hasSize(2);
+                assertThat(next.get(10, TimeUnit.SECONDS)).isNotEmpty();
+            }
+        } finally {
+            release.countDown();
+            coordinator.close();
+        }
+    }
+
+    @Test
+    public void testAllTerminalRecoveryPreservesWatermarkAndFiltersMax() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        CommittingWriteOperatorCoordinator first = createCoordinator(table, 1);
+        first.start();
+        first.handleEventFromOperator(0, 0, terminalEvent(table, 1, true, 200));
+        first.notifyCheckpointComplete(1);
+        CompletableFuture<byte[]> saved = new CompletableFuture<>();
+        first.checkpointCoordinator(2, saved);
+        byte[] state = saved.get(10, TimeUnit.SECONDS);
+        long snapshot = table.snapshotManager().latestSnapshotId();
+        first.close();
+        CommittingWriteOperatorCoordinator restored = createCoordinator(table, 1);
+        restored.resetToCheckpoint(2, state);
+        restored.start();
+        List<TerminalWriterReleaseEvent> events = new CopyOnWriteArrayList<>();
+        restored.executionAttemptReady(0, 1, releaseGateway(0, 1, events));
+        restored.waitProcessAllActions();
+        assertThat(events).isNotEmpty();
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshot);
+        assertThat(table.snapshotManager().latestSnapshot().commitIdentifier())
+                .isEqualTo(Long.MAX_VALUE);
+        assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(200);
+        restored.close();
+    }
+
+    @Test
+    public void testLegacyAllTerminalRequiresExplicitWatermark() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        byte[] legacy =
+                SimpleVersionedSerialization.writeVersionAndSerialize(
+                        new CoordinatorStateSerializer(),
+                        new CoordinatorState(commitUser, Collections.emptyMap(), new long[] {1}));
+        CommittingWriteOperatorCoordinator restored = createCoordinator(table, 1);
+        restored.resetToCheckpoint(2, legacy);
+        restored.start();
+        restored.waitProcessAllActions();
+        assertThat(failureCause).hasMessageContaining("configure end-input.watermark");
+        failureCause = null;
+        restored.close();
+        restored =
+                new CommittingWriteOperatorCoordinator(
+                        new TestingContext(new OperatorID(), 1),
+                        c ->
+                                new StoreCommitter(
+                                        table,
+                                        table.newCommit(c.commitUser()).ignoreEmptyCommit(false),
+                                        c),
+                        true,
+                        commitUser,
+                        null,
+                        300L);
+        restored.resetToCheckpoint(2, legacy);
+        restored.start();
+        restored.waitProcessAllActions();
+        assertThat(restored.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
+        assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(300);
+        restored.close();
+    }
+
+    private byte[] terminalState(long... coverage) throws Exception {
+        MemoryBackendStateStore store = new MemoryBackendStateStore();
+        store.getListState(
+                        new ListStateDescriptor<>(
+                                CommittingWriteOperatorCoordinator.PROCESSED_WATERMARK_STATE,
+                                LongSerializer.INSTANCE))
+                .update(Collections.singletonList(100L));
+        return SimpleVersionedSerialization.writeVersionAndSerialize(
+                new CoordinatorStateSerializer(),
+                new CoordinatorState(commitUser, store.getSerializedStates(), coverage));
+    }
+
+    private void testRecovery(boolean fail) throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        CommittingWriteOperatorCoordinator coordinator =
+                createCoordinator(
+                        table,
+                        1,
+                        c ->
+                                new StoreCommitter(table, table.newCommit(c.commitUser()), c) {
+                                    @Override
+                                    public int filterAndCommit(
+                                            List<ManifestCommittable> entries,
+                                            boolean check,
+                                            boolean listeners) {
+                                        if (fail) {
+                                            throw new RuntimeException("recovery failure");
+                                        }
+                                        return super.filterAndCommit(entries, check, listeners);
+                                    }
+                                });
+        coordinator.resetToCheckpoint(2, emptyState());
+        coordinator.start();
         coordinator.handleEventFromOperator(
                 0,
                 1,
                 restoreEventEntries(
-                        1L,
+                        2,
                         new CheckpointCommittables(
-                                Long.MAX_VALUE,
-                                Collections.singletonList(endInput),
-                                Long.MIN_VALUE)));
-        coordinator.handleEventFromOperator(0, 1, emptyEvent(2L));
-        coordinator.notifyCheckpointComplete(2L);
+                                1,
+                                Collections.singletonList(committable(table, 1, 1)),
+                                100,
+                                false,
+                                false,
+                                true)));
+        CompletableFuture<byte[]> next = new CompletableFuture<>();
+        coordinator.checkpointCoordinator(3, next);
         coordinator.waitProcessAllActions();
-
-        assertResults(table, "1, 1");
-        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(committedSnapshotId);
+        assertThat(coordinator.terminalCoveredBy(0)).isEqualTo(fail ? -1 : 2);
+        if (fail) {
+            assertThat(next).isCompletedExceptionally();
+            assertThat(coordinator.pendingCommittables(0)).containsKey(1L);
+            assertThat(failureCause).hasMessageContaining("recovery failure");
+            failureCause = null;
+        } else {
+            assertThat(next.get(10, TimeUnit.SECONDS)).isNotEmpty();
+            assertResults(table, "1, 1");
+        }
         coordinator.close();
     }
 
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
-    @Test
-    public void testDuplicateEndInputEventDoesNotDuplicateCommittables() throws Exception {
-        FileStoreTable table = createUnawareBucketTable();
-        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, 2);
-        coordinator.start();
-        coordinator.waitProcessAllActions();
-
-        Committable endInput = committable(table, Long.MAX_VALUE, 1);
-        coordinator.handleEventFromOperator(0, 0, event(endInput));
-        coordinator.handleEventFromOperator(0, 0, event(endInput));
-        coordinator.handleEventFromOperator(1, 0, emptyEvent(Long.MAX_VALUE));
-        coordinator.handleEventFromOperator(0, 0, emptyEvent(1L));
-        coordinator.handleEventFromOperator(1, 0, emptyEvent(1L));
-        coordinator.notifyCheckpointComplete(1L);
-        coordinator.waitProcessAllActions();
-
-        assertResults(table, "1, 1");
-        coordinator.close();
+    private CommittableEvent terminalEvent(
+            FileStoreTable table, long checkpoint, boolean empty, long watermark) throws Exception {
+        return CommittableEvent.create(
+                checkpoint,
+                new CheckpointCommittables(
+                        checkpoint,
+                        empty
+                                ? Collections.emptyList()
+                                : Collections.singletonList(committable(table, checkpoint, 1)),
+                        watermark,
+                        false,
+                        false,
+                        true),
+                SERIALIZER);
     }
 
     private FileStoreTable createUnawareBucketTable() throws Exception {
@@ -477,9 +958,8 @@ public class CommittingWriteOperatorCoordinatorEndInputTest extends CommitterTes
                 commitContext ->
                         new StoreCommitter(
                                 table,
-                                table.newStreamWriteBuilder()
-                                        .withCommitUser(commitContext.commitUser())
-                                        .newCommit(),
+                                table.newCommit(commitContext.commitUser())
+                                        .ignoreEmptyCommit(false),
                                 commitContext));
     }
 
@@ -492,6 +972,7 @@ public class CommittingWriteOperatorCoordinatorEndInputTest extends CommitterTes
                 committerFactory,
                 true,
                 commitUser,
+                null,
                 null);
     }
 
@@ -590,67 +1071,6 @@ public class CommittingWriteOperatorCoordinatorEndInputTest extends CommitterTes
         @Override
         public CheckpointCoordinator getCheckpointCoordinator() {
             return null;
-        }
-    }
-
-    /** {@link Committer} decorator that makes a successful commit appear to have failed. */
-    private static class FailAfterCommitCommitter
-            implements Committer<Committable, ManifestCommittable> {
-
-        private final Committer<Committable, ManifestCommittable> delegate;
-
-        private FailAfterCommitCommitter(Committer<Committable, ManifestCommittable> delegate) {
-            this.delegate = delegate;
-        }
-
-        @Override
-        public boolean forceCreatingSnapshot() {
-            return delegate.forceCreatingSnapshot();
-        }
-
-        @Override
-        public ManifestCommittable combine(
-                long checkpointId, long watermark, List<Committable> committables)
-                throws IOException {
-            return delegate.combine(checkpointId, watermark, committables);
-        }
-
-        @Override
-        public ManifestCommittable combine(
-                long checkpointId,
-                long watermark,
-                ManifestCommittable committable,
-                List<Committable> committables) {
-            return delegate.combine(checkpointId, watermark, committable, committables);
-        }
-
-        @Override
-        public void commit(List<ManifestCommittable> committables)
-                throws IOException, InterruptedException {
-            delegate.commit(committables);
-            throw new IOException("Commit succeeded before the simulated failure");
-        }
-
-        @Override
-        public int filterAndCommit(
-                List<ManifestCommittable> committables,
-                boolean checkAppendFiles,
-                boolean partitionMarkDoneRecoverFromState)
-                throws IOException {
-            delegate.filterAndCommit(
-                    committables, checkAppendFiles, partitionMarkDoneRecoverFromState);
-            throw new IOException("Commit succeeded before the simulated failure");
-        }
-
-        @Override
-        public Map<Long, List<Committable>> groupByCheckpoint(
-                Collection<Committable> committables) {
-            return delegate.groupByCheckpoint(committables);
-        }
-
-        @Override
-        public void close() throws Exception {
-            delegate.close();
         }
     }
 }

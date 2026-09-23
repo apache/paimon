@@ -72,13 +72,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
@@ -178,7 +178,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
                             return null;
                         })
                 .when(committer)
-                .filterAndCommit(anyList(), anyBoolean(), anyBoolean());
+                .commit(anyList());
         doAnswer(
                         invocation -> {
                             closeCalls.incrementAndGet();
@@ -189,7 +189,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
                 .close();
         CommittingWriteOperatorCoordinator coordinator =
                 new CommittingWriteOperatorCoordinator(
-                        context, commitContext -> committer, true, commitUser, null);
+                        context, commitContext -> committer, true, commitUser, null, null);
         coordinator.start();
         coordinator.waitProcessAllActions();
 
@@ -201,8 +201,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
                 "blocking action");
         assertThat(blockingActionStarted.await(10, TimeUnit.SECONDS)).isTrue();
 
-        coordinator.handleEventFromOperator(0, 0, event(committable(table, Long.MAX_VALUE, 1)));
-        coordinator.handleEventFromOperator(0, 0, emptyEvent(1));
+        coordinator.handleEventFromOperator(0, 0, event(committable(table, 1L, 1)));
         coordinator.notifyCheckpointComplete(1);
 
         CountDownLatch closeEntered = new CountDownLatch(1);
@@ -245,7 +244,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
         assertThat(closeFailure).hasValue(null);
         assertThat(commitCalls).hasValue(1);
         assertThat(closeCalls).hasValue(1);
-        assertThat(combinedCheckpoint.get()).isEqualTo(Long.MAX_VALUE);
+        assertThat(combinedCheckpoint.get()).isEqualTo(1L);
         assertThat(lifecycle)
                 .containsExactly(
                         "commit-started",
@@ -623,6 +622,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
                                         expected),
                         true,
                         commitUser,
+                        null,
                         null);
         coordinator.start();
         coordinator.waitProcessAllActions();
@@ -877,7 +877,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
                         table, commit, Committer.createContext("", null, true, false, null, 1, 0));
 
         NavigableMap<Long, ManifestCommittable> result =
-                CommittingWriteOperatorCoordinator.pollManifestCommittablesForCheckpoint(
+                CommittingWriteOperatorCoordinator.collectManifestCommittablesForCheckpoint(
                         checkpointId2,
                         writerCommittables,
                         CommittingWriteOperatorCoordinator.alignWatermarkPerCheckpoint(
@@ -918,28 +918,11 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
         assertThat(result.get(checkpointId3)).isNull();
 
         // Verify remaining subtask committables. The WriterCommittables buffer keeps a
-        // per-checkpoint entry even when the checkpoint had no committables (so the frozen
-        // watermark is preserved), which is why the empty-cp3 slot of subtask-1 stays in the map
-        // instead of leaving the buffer empty.
-        assertThat(writerCommittables[0].getCommittablesPerCheckpoint().size()).isEqualTo(1);
-        assertThat(writerCommittables[0].getCommittablesPerCheckpoint().get(checkpointId3))
-                .isNotNull();
-        assertThat(writerCommittables[0].getCommittablesPerCheckpoint().get(checkpointId3).size())
-                .isEqualTo(1);
-        assertThat(writerCommittables[1].getCommittablesPerCheckpoint().size()).isEqualTo(1);
-        assertThat(writerCommittables[1].getCommittablesPerCheckpoint().get(checkpointId3))
-                .isNotNull();
-        assertThat(
-                        writerCommittables[1]
-                                .getCommittablesPerCheckpoint()
-                                .get(checkpointId3)
-                                .isEmpty())
-                .isTrue();
-        assertThat(writerCommittables[2].getCommittablesPerCheckpoint().size()).isEqualTo(1);
-        assertThat(writerCommittables[2].getCommittablesPerCheckpoint().get(checkpointId3))
-                .isNotNull();
-        assertThat(writerCommittables[2].getCommittablesPerCheckpoint().get(checkpointId3).size())
-                .isEqualTo(1);
+        // Collection must not retire even empty entries before a successful commit.
+        for (WriterCommittables entries : writerCommittables) {
+            assertThat(entries.getCommittablesPerCheckpoint())
+                    .containsKeys(checkpointId1, checkpointId2, checkpointId3);
+        }
 
         committer.close();
     }
@@ -1295,6 +1278,51 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
 
     // ------------------------------------------------------------------------
 
+    @Test
+    @Timeout(30)
+    public void testFailedCommitFencesAlreadyQueuedCheckpoint() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        RuntimeException failure = new RuntimeException("commit failed");
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CommittingWriteOperatorCoordinator coordinator =
+                new CommittingWriteOperatorCoordinator(
+                        new TestingContext(new OperatorID(), 1),
+                        c ->
+                                new StoreCommitter(table, table.newCommit(c.commitUser()), c) {
+                                    @Override
+                                    public void commit(List<ManifestCommittable> entries)
+                                            throws InterruptedException {
+                                        entered.countDown();
+                                        release.await();
+                                        throw failure;
+                                    }
+                                },
+                        true,
+                        commitUser,
+                        null,
+                        null);
+        coordinator.start();
+        coordinator.handleEventFromOperator(0, 0, event(committable(table, 1L, 1)));
+        coordinator.notifyCheckpointComplete(1L);
+        try {
+            assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();
+            CompletableFuture<byte[]> later = new CompletableFuture<>();
+            coordinator.checkpointCoordinator(2L, later);
+            AtomicBoolean progressed = new AtomicBoolean();
+            coordinator.runInEventLoop(() -> progressed.set(true), "must not progress");
+            release.countDown();
+            coordinator.waitProcessAllActions();
+            assertThat(later).isCompletedExceptionally();
+            assertThat(failureCause).hasStackTraceContaining("commit failed");
+            assertThat(progressed).isFalse();
+            failureCause = null;
+        } finally {
+            release.countDown();
+            coordinator.close();
+        }
+    }
+
     private FileStoreTable createUnawareBucketTable() throws Exception {
         return createFileStoreTable(
                 options -> {
@@ -1316,6 +1344,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
                                 commitContext),
                 true,
                 commitUser,
+                null,
                 null);
     }
 
@@ -1339,7 +1368,8 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
                                 table.store().newTagDeletion(),
                                 table.store().createTagCallbacks(table),
                                 table.coreOptions().tagDefaultTimeRetained(),
-                                user));
+                                user),
+                null);
     }
 
     private CommittingWriteOperatorCoordinator createCoordinatorCapturingContext(
@@ -1359,6 +1389,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
                 },
                 true,
                 commitUser,
+                null,
                 null);
     }
 
@@ -1444,7 +1475,8 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
                         committables,
                         Long.MIN_VALUE,
                         /* idle */ false,
-                        /* shouldCreateSavepointTag */ true),
+                        /* shouldCreateSavepointTag */ true,
+                        false),
                 SERIALIZER);
     }
 
@@ -1456,7 +1488,8 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
                         committables,
                         Long.MIN_VALUE,
                         /* idle */ false,
-                        /* shouldCreateSavepointTag */ true);
+                        /* shouldCreateSavepointTag */ true,
+                        false);
         return RestoredCommittableEvent.create(
                 restoredCheckpointId,
                 Collections.singletonList(checkpointCommittables),
@@ -1615,6 +1648,12 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
 
     private static class MockSubtaskGateway implements OperatorCoordinator.SubtaskGateway {
 
+        private final ExecutionAttemptID execution = mock(ExecutionAttemptID.class);
+
+        private MockSubtaskGateway() {
+            when(execution.getAttemptNumber()).thenReturn(1);
+        }
+
         @Override
         public CompletableFuture<Acknowledge> sendEvent(OperatorEvent evt) {
             throw new UnsupportedOperationException("Unsupported to send event " + evt);
@@ -1622,12 +1661,12 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
 
         @Override
         public ExecutionAttemptID getExecution() {
-            throw new UnsupportedOperationException("Unsupported to get execution");
+            return execution;
         }
 
         @Override
         public int getSubtask() {
-            throw new UnsupportedOperationException("Unsupported to get subtask");
+            return 0;
         }
     }
 }

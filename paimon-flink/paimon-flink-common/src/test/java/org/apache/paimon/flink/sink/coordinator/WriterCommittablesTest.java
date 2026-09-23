@@ -38,6 +38,7 @@ import java.util.NavigableMap;
 import java.util.Objects;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Unit tests for {@link WriterCommittables}. */
@@ -375,32 +376,41 @@ public class WriterCommittablesTest {
     }
 
     @Test
-    public void testEndInputRequiresLaterCheckpointForCoverage() {
-        CheckpointCommittables endInput =
-                new CheckpointCommittables(Long.MAX_VALUE, Collections.emptyList(), 100L);
-        WriterCommittables committables = new WriterCommittables(endInput);
-
-        assertThat(committables.hasEndInput()).isTrue();
-        assertThat(committables.isEndInputCoveredBy(1L)).isFalse();
-
-        committables.mergeWith(
+    public void testTerminalCandidateRetainsItsRealCheckpointAcrossAbort() {
+        WriterCommittables entries =
                 new WriterCommittables(
-                        new CheckpointCommittables(2L, Collections.emptyList(), 100L)));
-
-        assertThat(committables.isEndInputCoveredBy(1L)).isFalse();
-        assertThat(committables.isEndInputCoveredBy(2L)).isTrue();
-        assertThat(committables.getCommittablesPerCheckpoint()).doesNotContainKey(Long.MAX_VALUE);
+                        new CheckpointCommittables(
+                                2L, Collections.emptyList(), 100L, false, false, true));
+        assertThat(entries.hasTerminalCandidate(1L)).isFalse();
+        assertThat(entries.hasTerminalCandidate(2L)).isTrue();
+        entries.mergeWith(
+                new WriterCommittables(
+                        new CheckpointCommittables(
+                                3L, Collections.emptyList(), 100L, false, false, true)));
+        assertThat(entries.hasTerminalCandidate(3L)).isTrue();
+        assertThat(entries.getCommittablesPerCheckpoint()).containsKeys(2L, 3L);
     }
 
     @Test
-    public void testRestoredEndInputUsesRestoredCheckpointAsCoverage() {
-        CheckpointCommittables endInput =
-                new CheckpointCommittables(Long.MAX_VALUE, Collections.emptyList(), 100L);
-        WriterCommittables committables =
-                new WriterCommittables(10L, Collections.singletonList(endInput));
+    public void testRestoredTerminalCandidateUsesOwningCheckpoint() {
+        WriterCommittables entries =
+                new WriterCommittables(
+                        10L,
+                        Collections.singletonList(
+                                new CheckpointCommittables(
+                                        9L, Collections.emptyList(), 100L, false, false, true)));
+        assertThat(entries.hasTerminalCandidate(8L)).isFalse();
+        assertThat(entries.hasTerminalCandidate(9L)).isTrue();
+    }
 
-        assertThat(committables.isEndInputCoveredBy(9L)).isFalse();
-        assertThat(committables.isEndInputCoveredBy(10L)).isTrue();
+    @Test
+    public void testLegacyMaxRejected() {
+        assertThatThrownBy(
+                        () ->
+                                new WriterCommittables(
+                                        new CheckpointCommittables(
+                                                Long.MAX_VALUE, Collections.emptyList(), 0L)))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     private static CommitMessage createEmptyCommitMessage() {
