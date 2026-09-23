@@ -288,7 +288,8 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         self._apply_commit(tc, msgs, cid)
         tc.close()
 
-        result = self._read_all(table)
+        # Table scans are unordered; compare in stable business-key order.
+        result = self._read_all(table).sort_by('id')
         self.assertEqual(
             [25, 30, 99, 99, 99],
             result['age'].to_pylist(),

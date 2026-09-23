@@ -17,6 +17,8 @@
 
 """Real bucket growth and cross-partition updates through native planning."""
 
+import json
+from contextlib import ExitStack
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -46,7 +48,10 @@ def test_native_pk_bucket_growth_and_partition_migration(tmp_path, cross_partiti
         }), False)
 
     def read(table, native, predicate=None, shard=None, limit=None):
-        builder = table.copy({'scan.native-plan.enabled': str(native).lower()}).new_read_builder()
+        builder = table.copy({
+            'scan.native-plan.enabled': str(native).lower(),
+            'read.native.enabled': str(native).lower(),
+        }).new_read_builder()
         if predicate is not None:
             builder.with_filter(predicate)
         if limit is not None:
@@ -59,7 +64,16 @@ def test_native_pk_bucket_growth_and_partition_migration(tmp_path, cross_partiti
                 plan = scan.plan()
         else:
             plan = scan.plan()
-        rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+        if native:
+            assert all(getattr(split, '_native_split', None) is not None
+                       for split in plan.splits())
+            read_guard = patch(
+                'pypaimon.read.table_read.TableRead._create_split_read',
+                side_effect=AssertionError('dynamic-bucket native read fell back'))
+        else:
+            read_guard = ExitStack()
+        with read_guard:
+            rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
         return plan, sorted(rows, key=lambda row: (row['id'], row['p']))
 
     initial = [{'id': 1, 'p': 'a', 'v': 'old'}, {'id': 2, 'p': 'a', 'v': 'two'},
@@ -75,6 +89,11 @@ def test_native_pk_bucket_growth_and_partition_migration(tmp_path, cross_partiti
         writer.write_arrow(pa.RecordBatch.from_pylist(rows, schema=schema))
         builder.new_commit().commit(writer.prepare_commit())
         table = catalog.get_table('default.t')
+        # Give incremental windows deterministic boundaries.
+        path = table.snapshot_manager().get_snapshot_path(snapshot_id)
+        snapshot = json.loads(table.file_io.read_file_utf8(path))
+        snapshot['timeMillis'] = snapshot_id * 100
+        table.file_io.write_file(path, json.dumps(snapshot), overwrite=True)
         pb = table.new_read_builder().new_predicate_builder()
         for predicate in (None, pb.equal('id', 1), pb.equal('p', 'a'), pb.equal('v', 'updated')):
             for shard in (None, (0, 2), (1, 2)):
@@ -99,3 +118,50 @@ def test_native_pk_bucket_growth_and_partition_migration(tmp_path, cross_partiti
         old_plan, old_rows = read(table.copy({'scan.snapshot-id': '1'}), native)
         assert old_plan.snapshot_id == 1
         assert old_rows == initial
+
+    # Java DeleteExistingProcessor emits DELETE in the old partition with
+    # the incoming non-partition values. Batch merging hides this distinction;
+    # incremental readers must preserve both the partition and the row kind.
+    events = [(row['id'], row['p'], row['v'], 0) for row in initial + updates]
+    if cross_partition:
+        events.append((1, 'a', 'moved', 3))
+    for native in (False, True):
+        for partition in (None, 'a', 'b'):
+            builder = table.copy({
+                'scan.native-plan.enabled': str(native).lower(),
+                'read.native.enabled': str(native).lower(),
+                'incremental-between-timestamp': '0,200',
+            }).new_read_builder()
+            if partition is not None:
+                builder.with_filter(pb.equal('p', partition))
+            scan = builder.new_scan()
+            if native:
+                with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+                    plan = scan.plan()
+            else:
+                plan = scan.plan()
+            assert all(split.is_streaming for split in plan.splits())
+            if native:
+                from pypaimon.table.row.row_kind import RowKind
+                assert all(getattr(split, '_native_split', None) is not None
+                           for split in plan.splits())
+                read = builder.new_read()
+                read.include_row_kind = True
+                with patch(
+                        'pypaimon.read.table_read.TableRead._create_split_read',
+                        side_effect=AssertionError(
+                            'dynamic incremental native read fell back')):
+                    rows = read.to_arrow(plan.splits()).to_pylist()
+                actual = [
+                    (row['id'], row['p'], row['v'],
+                     RowKind.from_string(row['_row_kind']).value)
+                    for row in rows
+                ]
+            else:
+                actual = [
+                    (row.get_field(0), row.get_field(1), row.get_field(2),
+                     row.get_row_kind().value)
+                    for row in builder.new_read().to_iterator(plan.splits())
+                ]
+            assert sorted(actual) == sorted(
+                event for event in events if partition is None or event[1] == partition)

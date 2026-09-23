@@ -62,6 +62,10 @@ _CONFIG_ARGUMENTS = (
 
 def main(argv=None):
     """Parse an ACT benchmark subcommand and write its JSON artifact."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "ingest":
+        from pypaimon.benchmark.act import robomind_agilex
+        return robomind_agilex.main(argv[1:])
     parser = _parser()
     args = parser.parse_args(argv)
     if args.command == "prepare":
@@ -129,6 +133,9 @@ def _parser():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     commands = parser.add_subparsers(dest="command", required=True)
+
+    commands.add_parser(
+        "ingest", help="Ingest RoboMIND HDF5 and publish a training table group.")
 
     prepare = commands.add_parser(
         "prepare",

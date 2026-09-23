@@ -64,12 +64,13 @@ class FileStoreTable(Table):
             file_io, table_path, branch=self.current_branch())
 
     @classmethod
-    def from_path(cls, table_path: str) -> 'FileStoreTable':
+    def from_path(cls, table_path: str, file_io_options: Optional[dict] = None) -> 'FileStoreTable':
         """
         Create a FileStoreTable from a table path.
         This is useful for reading tables created by Java without going through a catalog.
+        ``file_io_options`` configures storage access; use ``copy`` for table read options.
         """
-        file_io = FileIO(table_path, Options({}))
+        file_io = FileIO.get(table_path, Options(file_io_options or {}))
         schema_manager = SchemaManager(file_io, table_path)
         table_schema = schema_manager.latest()
 
@@ -516,6 +517,22 @@ class FileStoreTable(Table):
         """Copy this table while preserving its already resolved schema."""
         return self._copy(options, resolve_time_travel=False)
 
+    def _copy_with_snapshot(self, snapshot):
+        """Keep one resolved read view, including tag metadata and empty tables."""
+        from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+        options = {key: None for key in SCAN_KEYS if key in self.table_schema.options}
+        options[CoreOptions.SCAN_MODE.key()] = "from-snapshot" if snapshot is not None else "default"
+        if snapshot is not None:
+            options[CoreOptions.SCAN_SNAPSHOT_ID.key()] = str(snapshot.id)
+        # Native planning cannot consume retained tag metadata or a pinned empty view.
+        # scan.version can resolve to a tag as well.
+        if snapshot is None or any(option.key() in self.table_schema.options for option in (
+                CoreOptions.SCAN_TAG_NAME, CoreOptions.SCAN_VERSION)):
+            options[CoreOptions.SCAN_NATIVE_PLAN_ENABLED.key()] = "false"
+        table = self.copy_without_time_travel(options)
+        table._read_snapshot = snapshot
+        return table
+
     def _copy(self, options: dict, resolve_time_travel: bool) -> 'FileStoreTable':
         if CoreOptions.BUCKET.key() in options and int(options.get(CoreOptions.BUCKET.key())) != self.options.bucket():
             raise ValueError("Cannot change bucket number")
@@ -531,7 +548,12 @@ class FileStoreTable(Table):
         # Cumulative copy() overrides (removals kept as None) vs the on-disk schema.
         applied_options = {**getattr(self, '_applied_dynamic_options', {}), **options}
 
-        if resolve_time_travel:
+        from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+        preserve_snapshot = hasattr(self, "_read_snapshot") and not any(
+            key in options for key in SCAN_KEYS + [
+                CoreOptions.SCAN_MODE.key(), CoreOptions.BRANCH.key(),
+                CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key()])
+        if resolve_time_travel and not preserve_snapshot:
             time_travel_schema = self._try_time_travel(Options(new_options), set(applied_options))
             if time_travel_schema is not None:
                 new_table_schema = time_travel_schema
@@ -554,6 +576,8 @@ class FileStoreTable(Table):
         new_table = FileStoreTable(self.file_io, new_identifier, self.table_path,
                                    new_table_schema, catalog_env)
         new_table._applied_dynamic_options = applied_options
+        if preserve_snapshot:
+            new_table._read_snapshot = self._read_snapshot
         return new_table
 
     def _try_time_travel(self, options: Options, dynamic_option_keys: Set[str]) -> Optional[TableSchema]:

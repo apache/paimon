@@ -286,6 +286,7 @@ final class DataEvolutionRewriteExecutor {
             abortMessages.addAll(preparationArtifacts);
             try (TableCommitImpl commit = table.newCommit(commitUser)) {
                 commitConfigurer.configure(commit);
+                commitConfigurer.prepareMessages(attemptSnapshot, preparedMessages);
                 try {
                     commit.commit(preparedMessages);
                 } catch (RuntimeException conflict) {
@@ -398,6 +399,8 @@ final class DataEvolutionRewriteExecutor {
     interface CommitConfigurer {
 
         void configure(TableCommitImpl commit);
+
+        default void prepareMessages(Snapshot snapshot, List<CommitMessage> commitMessages) {}
     }
 
     @FunctionalInterface

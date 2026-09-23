@@ -177,9 +177,9 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         long minSequenceNumber = minSequenceId(compactBefore);
         long maxSequenceNumber = maxSequenceId(compactBefore);
         long nextRowId = firstRowId;
-        long[] columnMaxSequenceNumbers =
+        long[] writeColsSequences =
                 options.ignoreIndexColumnUpdate() && !writeResult.isEmpty()
-                        ? compactedColumnMaxSequenceNumbers(
+                        ? compactedWriteColsSequences(
                                 table,
                                 writeResult
                                         .get(0)
@@ -189,8 +189,8 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
             DataFileMeta dataFileMeta =
                     file.assignFirstRowId(nextRowId)
                             .assignSequenceNumber(minSequenceNumber, maxSequenceNumber);
-            if (columnMaxSequenceNumbers != null) {
-                dataFileMeta = dataFileMeta.withColumnMaxSequenceNumbers(columnMaxSequenceNumbers);
+            if (writeColsSequences != null) {
+                dataFileMeta = dataFileMeta.withWriteColsSequences(writeColsSequences);
             }
             compactAfter.add(dataFileMeta);
             nextRowId += dataFileMeta.rowCount();
@@ -230,8 +230,7 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
     }
 
     @Nullable
-    private long[] compactedColumnMaxSequenceNumbers(
-            FileStoreTable table, DataFileMeta outputFile) {
+    private long[] compactedWriteColsSequences(FileStoreTable table, DataFileMeta outputFile) {
         SchemaManager schemaManager = table.schemaManager();
         Map<Long, TableSchema> schemaCache = new HashMap<>();
         Function<Long, TableSchema> schemaLoader =
@@ -244,12 +243,12 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
                     fileFieldsCache.computeIfAbsent(
                             Pair.of(input.schemaId(), input.writeCols()),
                             key -> fileFields(schemaLoader, input));
-            long[] inputColumnSequences = input.columnMaxSequenceNumbers();
+            long[] inputWriteColsSequences = input.writeColsSequences();
             for (int inputPosition = 0; inputPosition < inputFields.size(); inputPosition++) {
                 fieldMaxSequences.merge(
                         inputFields.get(inputPosition).id(),
                         fieldMaxSequenceNumber(
-                                input, inputColumnSequences, inputPosition, inputFields.size()),
+                                input, inputWriteColsSequences, inputPosition, inputFields.size()),
                         Math::max);
             }
         }

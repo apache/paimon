@@ -26,6 +26,8 @@ import org.apache.paimon.types.DecimalType;
 
 import javax.annotation.Nullable;
 
+import java.util.Locale;
+
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 
 /** Converts from Postgres type to {@link DataType}. */
@@ -83,7 +85,7 @@ public class PostgresTypeUtils {
         }
         precision = precision == null ? 0 : precision;
         scale = scale == null ? 0 : scale;
-        switch (typeName.toLowerCase()) {
+        switch (typeName.toLowerCase(Locale.ROOT)) {
             case PG_BIT:
             case PG_VARBIT:
                 if (precision <= 1) {

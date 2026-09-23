@@ -375,6 +375,7 @@ class GlobalIndexScanPlan {
                 for (GlobalIndexIOMeta file : group.files) {
                     writeString(out, file.filePath().toString());
                     out.writeLong(file.fileSize());
+                    out.writeLong(file.rowCount());
                     serializeBytes(out, file.metadata());
                 }
             }
@@ -416,7 +417,9 @@ class GlobalIndexScanPlan {
                 for (int j = 0; j < fileCount; j++) {
                     Path path = new Path(readString(in));
                     long fileSize = in.readLong();
-                    files.add(new GlobalIndexIOMeta(path, fileSize, deserializedBytes(in)));
+                    long rowCount = in.readLong();
+                    files.add(
+                            new GlobalIndexIOMeta(path, fileSize, rowCount, deserializedBytes(in)));
                 }
                 groups.add(new IndexGroup(indexType, field, extraFields, range, files));
             }

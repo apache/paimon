@@ -45,7 +45,8 @@ public class CommittableSerializerTest {
         DataIncrement dataIncrement = randomNewFilesIncrement();
         CompactIncrement compactIncrement = randomCompactIncrement();
         CommitMessage committable =
-                new CommitMessageImpl(row(0), 1, 2, dataIncrement, compactIncrement);
+                new CommitMessageImpl(row(0), 1, 2, dataIncrement, compactIncrement)
+                        .withCheckFromSnapshot(42L);
         CommitMessage newCommittable =
                 serializer
                         .deserialize(
@@ -53,5 +54,6 @@ public class CommittableSerializerTest {
                                 serializer.serialize(new Committable(9, committable)))
                         .commitMessage();
         assertThat(newCommittable).isEqualTo(committable);
+        assertThat(newCommittable.checkFromSnapshot()).isEqualTo(42L);
     }
 }

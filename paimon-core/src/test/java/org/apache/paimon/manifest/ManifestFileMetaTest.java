@@ -2744,7 +2744,9 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                                         false,
                                         null),
                                 Long.MAX_VALUE,
-                                null)
+                                null,
+                                null,
+                                new CoreOptions(new Options()))
                         .create();
 
         List<ManifestFileMeta> input = new ArrayList<>();
@@ -3204,7 +3206,9 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                                 false,
                                 null),
                         Long.MAX_VALUE,
-                        null)
+                        null,
+                        null,
+                        new CoreOptions(new Options()))
                 .create();
     }
 

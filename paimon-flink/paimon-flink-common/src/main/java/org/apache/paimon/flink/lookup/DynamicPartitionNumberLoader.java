@@ -26,7 +26,6 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /** Dynamic partition loader which can specify the max partition number to load for lookup. */
 public class DynamicPartitionNumberLoader extends DynamicPartitionLoader {
@@ -48,15 +47,8 @@ public class DynamicPartitionNumberLoader extends DynamicPartitionLoader {
 
     @Override
     public List<BinaryRow> getMaxPartitions() {
-        List<BinaryRow> newPartitions =
-                table.newReadBuilder().newScan().listPartitions().stream()
-                        .sorted(comparator.reversed())
-                        .collect(Collectors.toList());
-
-        if (newPartitions.size() <= maxPartitionNum) {
-            return newPartitions;
-        } else {
-            return newPartitions.subList(0, maxPartitionNum);
-        }
+        return table.newReadBuilder()
+                .newScan()
+                .topNPartitions(maxPartitionNum, table.partitionKeys().size());
     }
 }

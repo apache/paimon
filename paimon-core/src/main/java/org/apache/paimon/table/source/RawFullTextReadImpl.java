@@ -37,6 +37,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
@@ -68,6 +69,7 @@ class RawFullTextReadImpl {
     private final FileStoreTable table;
     @Nullable private final Snapshot planSnapshot;
     @Nullable private final PartitionPredicate partitionFilter;
+    @Nullable private final Predicate filter;
     private final int limit;
     private final DataField textColumn;
     private final IndexSearch indexSearch;
@@ -79,9 +81,21 @@ class RawFullTextReadImpl {
             int limit,
             DataField textColumn,
             IndexSearch indexSearch) {
+        this(table, planSnapshot, partitionFilter, null, limit, textColumn, indexSearch);
+    }
+
+    RawFullTextReadImpl(
+            FileStoreTable table,
+            @Nullable Snapshot planSnapshot,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter,
+            int limit,
+            DataField textColumn,
+            IndexSearch indexSearch) {
         this.table = table;
         this.planSnapshot = planSnapshot;
         this.partitionFilter = partitionFilter;
+        this.filter = filter;
         this.limit = limit;
         this.textColumn = textColumn;
         this.indexSearch = indexSearch;
@@ -111,20 +125,31 @@ class RawFullTextReadImpl {
         int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
         Map<String, RawFullTextIndex> rawIndexes =
                 createRawFullTextIndexes(splitsByColumn, readType, rawRowRanges);
+        // Every raw row is indexed so the temporary index scores against the full raw corpus;
+        // the row filter only decides which rows the search may return.
+        RoaringNavigableMap64 matchingRows = filter == null ? null : new RoaringNavigableMap64();
 
         try {
             try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan);
                     CloseableIterator<InternalRow> iterator = reader.toCloseableIterator()) {
                 while (iterator.hasNext()) {
                     InternalRow row = iterator.next();
+                    long rowId = row.getLong(rowIdIndex);
                     for (RawFullTextIndex rawIndex : rawIndexes.values()) {
-                        long rowId = row.getLong(rowIdIndex);
                         rawIndex.write(row, rowId);
+                    }
+                    if (matchingRows != null && filter.test(row)) {
+                        matchingRows.add(rowId);
                     }
                 }
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to read raw rows for full-text search.", e);
+        }
+
+        if (matchingRows != null && matchingRows.isEmpty()) {
+            IOUtils.closeAllQuietly(rawIndexes.values());
+            return ScoredGlobalIndexResult.createEmpty();
         }
 
         try {
@@ -143,7 +168,8 @@ class RawFullTextReadImpl {
                             m ->
                                     new MemorySeekableInputStream(
                                             rawFileBytes(rawIndexes, m.filePath().getName())),
-                            executor)
+                            executor,
+                            matchingRows)
                     .topK(limit);
         } finally {
             IOUtils.closeAllQuietly(rawIndexes.values());
@@ -284,7 +310,8 @@ class RawFullTextReadImpl {
                 Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
                 IndexPathFactory indexPathFactory,
                 GlobalIndexFileReader indexFileReader,
-                ExecutorService executor);
+                ExecutorService executor,
+                @Nullable RoaringNavigableMap64 includeRowIds);
     }
 
     private static class RawFullTextIndex implements Closeable {

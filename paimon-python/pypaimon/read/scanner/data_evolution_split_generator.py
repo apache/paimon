@@ -18,7 +18,7 @@
 from collections import defaultdict
 from typing import List, Optional, Tuple
 
-from pypaimon.globalindex.indexed_split import IndexedSplit
+from pypaimon.globalindex.indexed_split import IndexedSplit, scores_for_ranges
 from pypaimon.utils.range import Range
 from pypaimon.utils.range_helper import RangeHelper
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -41,8 +41,11 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         row_ranges: Optional[List] = None,
         score_getter=None,
         group_stats_filter=None,
+        snapshot_id: Optional[int] = None,
     ):
-        super().__init__(table, target_split_size, open_file_cost, deletion_files_map)
+        super().__init__(
+            table, target_split_size, open_file_cost, deletion_files_map,
+            snapshot_id)
         self.row_ranges = row_ranges
         self.score_getter = score_getter
         self.group_stats_filter = group_stats_filter
@@ -154,7 +157,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                     partition=file_entries[0].partition,
                     bucket=file_entries[0].bucket,
                     raw_convertible=raw_convertible,
-                    data_deletion_files=data_deletion_files
+                    data_deletion_files=data_deletion_files,
+                    snapshot_id=self.snapshot_id,
                 )
                 splits.append(split)
         return splits
@@ -332,14 +336,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 # No intersection, skip this split
                 continue
 
-            # Create scores array if score_getter is provided
-            scores = None
-            if self.score_getter is not None:
-                scores = []
-                for r in expected:
-                    for row_id in range(r.from_, r.to + 1):
-                        score = self.score_getter(row_id)
-                        scores.append(score if score is not None else 0.0)
+            scores = (scores_for_ranges(self.score_getter, expected)
+                      if self.score_getter is not None else None)
 
             indexed_splits.append(IndexedSplit(split, expected, scores))
 

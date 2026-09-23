@@ -169,6 +169,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private boolean ignoreEmptyCommit;
     private CommitMetrics commitMetrics;
     private boolean appendCommitCheckConflict = false;
+    private boolean materializeDvRowIdCheck = false;
     private long lastCommittedSnapshotId = -1L;
     @Nullable private Snapshot.Operation operation;
     @Nullable private IOManager ioManager;
@@ -222,7 +223,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.statsFileHandler = statsFileHandler;
         this.bucketMode = bucketMode;
         this.strictModeChecker =
-                options.commitStrictModeLastSafeSnapshot()
+                options.commitLastSafeSnapshot()
+                        .filter(ignored -> options.commitStrictModeEnabled())
                         .map(
                                 id ->
                                         new StrictModeChecker(
@@ -262,16 +264,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public FileStoreCommit rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot) {
-        this.conflictDetection.setRowIdCheckFromSnapshot(rowIdCheckFromSnapshot);
-        return this;
-    }
-
-    @Override
-    public FileStoreCommit rowIdCheckConflictForMaterializeDvCompaction(
-            @Nullable Long rowIdCheckFromSnapshot) {
-        this.conflictDetection.setRowIdCheckFromSnapshotForMaterializeDvCompaction(
-                rowIdCheckFromSnapshot);
+    public FileStoreCommit materializeDvRowIdCheck() {
+        materializeDvRowIdCheck = true;
         return this;
     }
 
@@ -294,14 +288,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     "Committables must be sorted according to identifiers before filtering. This is unexpected.");
         }
 
-        Optional<Long> optionalStrictSnapshot = options.commitStrictModeLastSafeSnapshot();
+        Optional<Long> lastSafeSnapshot = options.commitLastSafeSnapshot();
         Optional<Snapshot> latestSnapshot;
-        if (optionalStrictSnapshot.isPresent()) {
+        if (lastSafeSnapshot.isPresent()) {
             latestSnapshot =
                     snapshotManager.latestSnapshotOfUser(
                             commitUser,
                             snapshotManager.latestSnapshotId(),
-                            optionalStrictSnapshot.get() + 1);
+                            lastSafeSnapshot.get() + 1);
         } else {
             latestSnapshot = snapshotManager.latestSnapshotOfUser(commitUser);
         }
@@ -338,6 +332,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int attempts = 0;
 
         List<CommitMessage> commitMessages = committable.fileCommittables();
+        configureRowIdCheckFromMessages(commitMessages);
         ManifestEntryChanges changes = collectChanges(commitMessages);
         Set<Pair<BinaryRow, Integer>> materializedBuckets = materializedBuckets(commitMessages);
         try {
@@ -504,6 +499,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int generatedSnapshot = 0;
         int attempts = 0;
 
+        configureRowIdCheckFromMessages(committable.fileCommittables());
         ManifestEntryChanges changes = collectChanges(committable.fileCommittables());
         if (!changes.appendChangelog.isEmpty() || !changes.compactChangelog.isEmpty()) {
             StringBuilder warnMessage =
@@ -761,6 +757,50 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         commitMessages.forEach(changes::collect);
         LOG.info("Finished collecting changes, including: {}", changes);
         return changes;
+    }
+
+    private void configureRowIdCheckFromMessages(List<CommitMessage> commitMessages) {
+        Long checkFromSnapshot = null;
+        for (CommitMessage message : commitMessages) {
+            Long snapshotId = message.checkFromSnapshot();
+            if (snapshotId == null) {
+                continue;
+            }
+            checkArgument(snapshotId >= 0, "Invalid row-id check snapshot: %s", snapshotId);
+            checkArgument(
+                    checkFromSnapshot == null || checkFromSnapshot.equals(snapshotId),
+                    "Commit messages have different row-id check snapshots: %s and %s",
+                    checkFromSnapshot,
+                    snapshotId);
+            checkFromSnapshot = snapshotId;
+        }
+        if (checkFromSnapshot != null) {
+            for (CommitMessage message : commitMessages) {
+                if (message.checkFromSnapshot() != null) {
+                    continue;
+                }
+                checkArgument(
+                        !materializeDvRowIdCheck,
+                        "A materialize-DV commit message is missing its check-from snapshot.");
+                CommitMessageImpl commitMessage = (CommitMessageImpl) message;
+                checkArgument(
+                        commitMessage.newFilesIncrement().newFiles().stream()
+                                        .noneMatch(file -> file.firstRowId() != null)
+                                && commitMessage.newFilesIncrement().deletedFiles().stream()
+                                        .noneMatch(file -> file.firstRowId() != null),
+                        "A row-id commit message is missing its check-from snapshot.");
+            }
+        }
+        if (materializeDvRowIdCheck) {
+            checkArgument(
+                    checkFromSnapshot != null || commitMessages.isEmpty(),
+                    "A materialize-DV commit is missing its check-from snapshot.");
+            conflictDetection.setRowIdCheckFromSnapshotForMaterializeDvCompaction(
+                    checkFromSnapshot);
+        } else {
+            // A committer can be reused; an untagged commit must not inherit a previous baseline.
+            conflictDetection.setRowIdCheckFromSnapshot(checkFromSnapshot);
+        }
     }
 
     private Set<Pair<BinaryRow, Integer>> materializedBuckets(List<CommitMessage> commitMessages) {
@@ -1044,7 +1084,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (!checkConflicts && shouldCheckSameFixedBucket(commitKind)) {
             checkSameFixedBucketFromSnapshot(deltaFiles, latestSnapshot);
         }
-        if (checkConflicts) {
+        if (checkConflicts
+                && !conflictDetection.canSkipDataFileConflictDetection(
+                        latestSnapshot, deltaFiles, indexFiles, commitKind)) {
             // latestSnapshotId is different from the snapshot id we've checked for conflicts,
             // so we have to check again
             if (changedPartitions == null) {
@@ -1391,6 +1433,24 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Pair<String, Long> deltaManifestList,
             @Nullable String indexManifest,
             @Nullable Long nextRowId) {
+        return replaceManifestList(
+                latest,
+                totalRecordCount,
+                baseManifestList,
+                deltaManifestList,
+                indexManifest,
+                nextRowId,
+                latest.properties());
+    }
+
+    public boolean replaceManifestList(
+            Snapshot latest,
+            long totalRecordCount,
+            Pair<String, Long> baseManifestList,
+            Pair<String, Long> deltaManifestList,
+            @Nullable String indexManifest,
+            @Nullable Long nextRowId,
+            @Nullable Map<String, String> properties) {
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,
@@ -1413,7 +1473,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latest.watermark(),
                         latest.statistics(),
                         // if empty properties, just set to null
-                        latest.properties(),
+                        properties == null || properties.isEmpty() ? null : properties,
                         nextRowId,
                         null);
 

@@ -21,6 +21,8 @@ from decimal import Decimal
 import os
 import struct
 import sys
+import threading
+import time
 import types
 import tempfile
 from unittest.mock import Mock, patch
@@ -33,6 +35,7 @@ from pypaimon.globalindex.build_plan import (
     split_one_by_contiguous_row_range as _split_one_by_contiguous_row_range,
 )
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
+from pypaimon.globalindex.btree.btree_file_footer import BTreeFileFooter
 from pypaimon.globalindex.key_serializer import create_serializer
 from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
     FULL_TEXT_IDENTIFIER,
@@ -56,6 +59,7 @@ from pypaimon.tests.data_evolution_test_helpers import (
 )
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
+from pypaimon.write.commit_message import CommitMessage
 
 
 class _FakeFile:
@@ -232,7 +236,10 @@ class GlobalIndexBuildTest(
 
         added = table.create_global_index(
             'id',
-            options={'sorted-index.records-per-range': '2'},
+            options={
+                'sorted-index.records-per-range': '2',
+                'btree-index.bloom-filter.enabled': 'true',
+            },
         )
 
         self.assertEqual(2, added)
@@ -244,6 +251,19 @@ class GlobalIndexBuildTest(
         self.assertEqual({'btree'}, {e.index_file.index_type for e in entries})
         self.assertEqual({0}, {e.index_file.global_index_meta.row_range_start for e in entries})
         self.assertEqual({3}, {e.index_file.global_index_meta.row_range_end for e in entries})
+
+        index_path_factory = table.path_factory().global_index_path_factory()
+        for entry in entries:
+            index_file = entry.index_file
+            index_path = index_file.external_path or index_path_factory.to_path(
+                index_file.file_name)
+            footer_bytes = table.file_io.read_file_range(
+                index_path,
+                index_file.file_size - BTreeFileFooter.ENCODED_LENGTH,
+                BTreeFileFooter.ENCODED_LENGTH,
+            )
+            footer = BTreeFileFooter.read_footer(footer_bytes)
+            self.assertIsNotNone(footer.bloom_filter_handle)
 
         read_builder = table.new_read_builder()
         predicate = read_builder.new_predicate_builder().equal('id', 2)
@@ -434,7 +454,7 @@ class GlobalIndexBuildTest(
                 options={'bitmap-index.compression': 'lz4'},
             )
 
-    def test_sorted_index_records_per_range_matches_java_floating_factor(self):
+    def test_sorted_index_records_per_file_matches_java_floating_factor(self):
         table = self._create_table()
         rows = list(range(12))
         self._write_arrow(table, pa.table(
@@ -449,7 +469,7 @@ class GlobalIndexBuildTest(
 
         added = table.create_global_index(
             'id',
-            options={'sorted-index.records-per-range': '10'},
+            options={'sorted-index.records-per-file': '10'},
         )
 
         self.assertEqual(1, added)
@@ -1066,20 +1086,85 @@ class GlobalIndexBuildTest(
         }
 
         rq_result = native_options(
-            data_type, options, 'ivf-rq', 'embedding')
+            data_type, options, 'ivf-rq', 'embedding', {})
         self.assertEqual('ivf_rq', rq_result['index.type'])
         self.assertEqual('5', rq_result['rq.bits'])
         self.assertEqual('96', rq_result['max-bytes-per-vector'])
         self.assertEqual('inner_product', rq_result['metric'])
 
         diskann_result = native_options(
-            data_type, options, 'diskann', 'embedding')
+            data_type, options, 'diskann', 'embedding', {})
         self.assertEqual('diskann', diskann_result['index.type'])
         self.assertEqual(
             'balanced', diskann_result['diskann.build-preset'])
         self.assertEqual('0.0625', diskann_result['pq.code-ratio'])
         self.assertEqual(
             'f16', diskann_result['diskann.raw-vector-encoding'])
+
+    def test_vindex_native_options_support_050_build_options(self):
+        data_type = ArrayType(True, AtomicType('FLOAT'))
+        native_names = {
+            'ivf.coarse-assignment': 'auto',
+            'ivf.pq-encoding': 'auto',
+            'ivf.train.max-points-per-centroid': '32',
+            'pq.train.max-points-per-centroid': '64',
+        }
+
+        result = native_options(
+            data_type, native_names, 'ivf-pq', 'embedding')
+        self.assertEqual('auto', result['ivf.coarse-assignment'])
+        self.assertEqual('auto', result['ivf.pq-encoding'])
+        self.assertEqual('32', result['ivf.train.max-points-per-centroid'])
+        self.assertEqual('64', result['pq.train.max-points-per-centroid'])
+
+        prefixed_names = {
+            'ivf-pq.ivf.coarse-assignment': 'exact',
+            'fields.embedding.ivf.pq-encoding': 'canonical',
+            'ivf-pq.ivf.train.max-points-per-centroid': '16',
+            'fields.embedding.pq.train.max-points-per-centroid': '48',
+        }
+        result = native_options(
+            data_type, prefixed_names, 'ivf-pq', 'embedding')
+        self.assertEqual('exact', result['ivf.coarse-assignment'])
+        self.assertEqual('canonical', result['ivf.pq-encoding'])
+        self.assertEqual('16', result['ivf.train.max-points-per-centroid'])
+        self.assertEqual('48', result['pq.train.max-points-per-centroid'])
+
+        result = native_options(
+            data_type,
+            {'diskann.pq.train.max-points-per-centroid': '24'},
+            'diskann',
+            'embedding',
+        )
+        self.assertEqual('24', result['pq.train.max-points-per-centroid'])
+
+        table_options = {'fields.embedding.ivf.pq-encoding': 'auto'}
+        result = native_options(
+            data_type,
+            table_options,
+            'ivf-pq',
+            'embedding',
+            {'ivf.pq-encoding': 'canonical'},
+        )
+        self.assertEqual('canonical', result['ivf.pq-encoding'])
+        result = native_options(
+            data_type, table_options, 'ivf-flat', 'embedding', {})
+        self.assertNotIn('ivf.pq-encoding', result)
+
+        with self.assertRaisesRegex(ValueError, 'ivf-flat.ivf.pq-encoding'):
+            native_options(
+                data_type,
+                {'ivf-flat.ivf.pq-encoding': 'canonical'},
+                'ivf-flat',
+                'embedding',
+            )
+        with self.assertRaisesRegex(ValueError, 'diskann.ivf.coarse-assignment'):
+            native_options(
+                data_type,
+                {'diskann.ivf.coarse-assignment': 'exact'},
+                'diskann',
+                'embedding',
+            )
 
     def test_vindex_training_sample_ratio(self):
         options = {
@@ -1090,6 +1175,15 @@ class GlobalIndexBuildTest(
             0.25, train_sample_ratio(options, 'ivf-rq', 'embedding'))
         self.assertEqual(
             0.5, train_sample_ratio(options, 'ivf-rq', 'other'))
+        self.assertEqual(
+            0.5,
+            train_sample_ratio(
+                {'fields.embedding.train.sample-ratio': '0.75'},
+                'ivf-rq',
+                'embedding',
+                {'ivf-rq.train.sample-ratio': '0.5'},
+            ),
+        )
 
         import numpy as np
         vectors = np.arange(20, dtype=np.float32).reshape(10, 2)
@@ -1262,6 +1356,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
         self.builder._table = Mock()
         self.builder._core_options = Mock()
         self.builder._core_options.global_index_row_count_per_shard.return_value = 10
+        self.builder._core_options.global_index_build_parallelism.return_value = 1
         self.builder._index_columns = ['embedding']
         self.builder._index_type = 'ivf-flat'
         self.writer = Mock()
@@ -1384,6 +1479,197 @@ class GenericIndexStreamingTest(unittest.TestCase):
                     self.writer.close.assert_called_once()
                 if failure != 'finish':
                     self.writer.finish.assert_not_called()
+
+    def test_build_parallelism_defaults_to_one_and_accepts_override(self):
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.common.options.options import Options
+
+        self.assertEqual(
+            1, CoreOptions(Options({})).global_index_build_parallelism())
+        self.assertEqual(
+            3,
+            CoreOptions(Options({
+                'global-index.build.parallelism': '3',
+            })).global_index_build_parallelism(),
+        )
+
+    def test_build_parallelism_must_be_positive(self):
+        self.builder._core_options.global_index_build_parallelism.return_value = 0
+        with self.assertRaisesRegex(
+                ValueError, "global-index.build.parallelism.*greater than 0"):
+            self._build([self._batch([[10.0]], [10])])
+
+    def test_parallel_build_is_bounded_and_keeps_shard_order(self):
+        self.builder._core_options.global_index_build_parallelism.return_value = 2
+        shards = [
+            (_FakeSplit([]), Range(start, start + 9))
+            for start in (0, 10, 20, 30)
+        ]
+        lock = threading.Lock()
+        first_workers = threading.Barrier(2)
+        active = 0
+        max_active = 0
+
+        def build_shard(_split, row_range, *_args):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                if row_range.from_ in (0, 10):
+                    first_workers.wait(timeout=2)
+                time.sleep((40 - row_range.from_) / 1000.0)
+                return CommitMessage(
+                    partition=(row_range.from_,),
+                    bucket=0,
+                    new_files=[],
+                )
+            finally:
+                with lock:
+                    active -= 1
+
+        self.builder._build_generic_shard = Mock(side_effect=build_shard)
+        module = 'pypaimon.globalindex.create_global_index'
+        with patch(module + '._split_by_global_index_shard', return_value=shards):
+            messages = self.builder._build_generic_index(
+                [], [], Mock(), self.read, '/unused')
+
+        self.assertEqual(2, max_active)
+        self.assertEqual(
+            [(0,), (10,), (20,), (30,)],
+            [message.partition for message in messages],
+        )
+
+    def test_parallel_failure_deletes_completed_uncommitted_indexes(self):
+        self.builder._core_options.global_index_build_parallelism.return_value = 2
+        shards = [
+            (_FakeSplit([]), Range(0, 9)),
+            (_FakeSplit([]), Range(10, 19)),
+        ]
+        first_started = threading.Event()
+        failure_released = threading.Event()
+        index_file = types.SimpleNamespace(
+            external_path='/index/completed.index',
+            file_name='completed.index',
+        )
+        completed = CommitMessage(
+            partition=(),
+            bucket=0,
+            new_files=[],
+            index_adds=[types.SimpleNamespace(index_file=index_file)],
+        )
+
+        def build_shard(_split, row_range, *_args):
+            if row_range.from_ == 0:
+                first_started.set()
+                self.assertTrue(failure_released.wait(timeout=2))
+                return completed
+            self.assertTrue(first_started.wait(timeout=2))
+            failure_released.set()
+            raise RuntimeError('injected shard failure')
+
+        self.builder._build_generic_shard = Mock(side_effect=build_shard)
+        module = 'pypaimon.globalindex.create_global_index'
+        with patch(module + '._split_by_global_index_shard', return_value=shards), \
+                self.assertRaisesRegex(RuntimeError, 'injected shard failure'):
+            self.builder._build_generic_index(
+                [], [], Mock(), self.read, '/unused')
+
+        self.builder._table.file_io.delete_quietly.assert_called_once_with(
+            '/index/completed.index')
+
+    def test_submit_failure_deletes_indexes_built_before_the_failure(self):
+        # ThreadPoolExecutor.submit() enqueues the work item before starting an
+        # extra worker, so a submission that raises can still have its shard run
+        # on an already running worker. Rollback must cover those outputs.
+        self.builder._core_options.global_index_build_parallelism.return_value = 2
+        shards = [
+            (_FakeSplit([]), Range(start, start + 9))
+            for start in (0, 10, 20, 30)
+        ]
+        started = threading.Semaphore(0)
+        release = threading.Event()
+
+        def build_shard(_split, row_range, *_args):
+            started.release()
+            self.assertTrue(release.wait(timeout=5))
+            index_file = types.SimpleNamespace(
+                external_path='/index/shard-%d.index' % row_range.from_,
+                file_name='shard-%d.index' % row_range.from_,
+            )
+            return CommitMessage(
+                partition=(row_range.from_,),
+                bucket=0,
+                new_files=[],
+                index_adds=[types.SimpleNamespace(index_file=index_file)],
+            )
+
+        self.builder._build_generic_shard = Mock(side_effect=build_shard)
+
+        real_start = threading.Thread.start
+        submits = []
+
+        def failing_start(thread):
+            if thread.name.startswith('paimon-global-index-build'):
+                submits.append(thread.name)
+                if len(submits) == 2:
+                    # The first worker already holds a queued shard; releasing it
+                    # here proves rollback sees work accepted before the failure.
+                    self.assertTrue(started.acquire(timeout=5))
+                    release.set()
+                    raise RuntimeError("can't start new thread")
+            return real_start(thread)
+
+        module = 'pypaimon.globalindex.create_global_index'
+        with patch(module + '._split_by_global_index_shard', return_value=shards), \
+                patch.object(threading.Thread, 'start', failing_start), \
+                self.assertRaisesRegex(RuntimeError, "can't start new thread"):
+            self.builder._build_generic_index(
+                [], [], Mock(), self.read, '/unused')
+
+        deleted = {
+            call[0][0]
+            for call in self.builder._table.file_io.delete_quietly.call_args_list
+        }
+        # Every shard that produced an index file is rolled back, and nothing
+        # that never ran is deleted.
+        built = {
+            '/index/shard-%d.index' % call[0][1].from_
+            for call in self.builder._build_generic_shard.call_args_list
+        }
+        self.assertTrue(built)
+        self.assertEqual(built, deleted)
+
+    def test_serial_failure_deletes_completed_uncommitted_indexes(self):
+        shards = [
+            (_FakeSplit([]), Range(0, 9)),
+            (_FakeSplit([]), Range(10, 19)),
+        ]
+        index_file = types.SimpleNamespace(
+            external_path='/index/completed.index',
+            file_name='completed.index',
+        )
+        completed = CommitMessage(
+            partition=(),
+            bucket=0,
+            new_files=[],
+            index_adds=[types.SimpleNamespace(index_file=index_file)],
+        )
+
+        def build_shard(_split, row_range, *_args):
+            if row_range.from_ == 0:
+                return completed
+            raise RuntimeError('injected shard failure')
+
+        self.builder._build_generic_shard = Mock(side_effect=build_shard)
+        module = 'pypaimon.globalindex.create_global_index'
+        with patch(module + '._split_by_global_index_shard', return_value=shards), \
+                self.assertRaisesRegex(RuntimeError, 'injected shard failure'):
+            self.builder._build_generic_index(
+                [], [], Mock(), self.read, '/unused')
+
+        self.builder._table.file_io.delete_quietly.assert_called_once_with(
+            '/index/completed.index')
 
 
 if __name__ == "__main__":

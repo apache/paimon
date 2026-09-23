@@ -253,7 +253,7 @@ Otherwise, Paimon infers source parallelism only when global parallelism is unse
 
 | Read path | Inference |
 | --- | --- |
-| Batch data table | Estimate planned work from partition data size and `split.target-size`; the estimate need not equal the actual split count. |
+| Batch data table | Estimate planned work from partition data size and `source.split.target-size`; the estimate need not equal the actual split count. |
 | Other batch sources | Use their planned splits. |
 | Streaming, fixed buckets | Use the bucket count. |
 | Streaming, `bucket = -1` | Fall back to Flink's configured or default parallelism. |

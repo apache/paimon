@@ -46,6 +46,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
@@ -221,7 +222,9 @@ public class HttpClient implements RESTClient {
                 .filter(
                         h ->
                                 h.getName() != null
-                                        && h.getName().toLowerCase().contains("request-id"))
+                                        && h.getName()
+                                                .toLowerCase(Locale.ROOT)
+                                                .contains("request-id"))
                 .map(Header::getValue)
                 .filter(Objects::nonNull)
                 .findFirst()

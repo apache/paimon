@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.Predicate;
 
 import java.io.Serializable;
 
@@ -30,6 +31,16 @@ public interface FullTextSearchBuilder extends Serializable {
     default FullTextSearchBuilder withPartitionFilter(PartitionPredicate partitionPredicate) {
         throw new UnsupportedOperationException(
                 "This full-text search builder does not support partition filters.");
+    }
+
+    /**
+     * Push a row filter. Rows that do not satisfy the predicate are excluded before top-k ranking,
+     * so the returned top-k is the top-k among matching rows. Partition predicates contained in the
+     * filter are extracted and applied as partition filters.
+     */
+    default FullTextSearchBuilder withFilter(Predicate predicate) {
+        throw new UnsupportedOperationException(
+                "This full-text search builder does not support row filters.");
     }
 
     /** The top k results to return. */

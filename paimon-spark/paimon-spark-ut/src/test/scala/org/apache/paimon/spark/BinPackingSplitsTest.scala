@@ -150,6 +150,46 @@ class BinPackingSplitsTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon: bucketed packing preserves independent split groups and bucket keys") {
+    withSparkSQLConf("spark.sql.files.minPartitionNum" -> "1") {
+      val splits = Seq(0, 0, 0, 1, 1).zipWithIndex.map {
+        case (bucket, i) =>
+          newDataSplitFromFiles(
+            Seq(newDataFile(s"bucket-$bucket-$i.parquet", 60L)),
+            rawConvertible = false,
+            bucket = bucket)
+      }
+      val packing = BinPackingSplits(CoreOptions.fromMap(
+        Map("source.split.target-size" -> "130 B", "source.split.open-file-cost" -> "0 B").asJava))
+      val partitions = packing.packByBucket(splits.toArray)
+      assert(partitions.map(_.bucket) == Seq(0, 0, 1))
+      assert(partitions.map(_.splits.size) == Seq(2, 1, 2))
+      partitions.foreach {
+        partition =>
+          assert(partition.splits.forall(_.asInstanceOf[DataSplit].bucket() == partition.bucket))
+      }
+      partitions.flatMap(_.splits).zip(splits).foreach {
+        case (actual, original) => Assertions.assertSame(original, actual)
+      }
+    }
+  }
+
+  test("Paimon: bucketed packing keeps oversized merge splits and deletion files intact") {
+    val split = newDataSplit("merge", Seq(100L, 100L), deletionFileLength = Some(10L))
+    val packing = BinPackingSplits(
+      CoreOptions.fromMap(
+        Map(
+          "deletion-vectors.enabled" -> "true",
+          "source.split.target-size" -> "50 B",
+          "source.split.open-file-cost" -> "0 B").asJava))
+    val partitions = packing.packByBucket(Array(split))
+    assert(partitions.size == 1)
+    Assertions.assertSame(split, partitions.head.splits.head)
+    assert(split.dataFiles().size() == 2)
+    assert(split.deletionFiles().get().size() == 2)
+    assert(packing.packByBucket(Array.empty[DataSplit]).isEmpty)
+  }
+
   test("Paimon: get read splits with column pruning") {
     withTable("t") {
       sql(
@@ -196,11 +236,12 @@ class BinPackingSplitsTest extends PaimonSparkTestBase {
       files: Seq[DataFileMeta],
       rawConvertible: Boolean,
       deletionFileLength: Option[Long] = None,
-      deletionFilePrefix: String = "delete"): DataSplit = {
+      deletionFilePrefix: String = "delete",
+      bucket: Int = 0): DataSplit = {
     val builder = DataSplit
       .builder()
       .withSnapshot(1)
-      .withBucket(0)
+      .withBucket(bucket)
       .withPartition(BinaryRow.EMPTY_ROW)
       .withDataFiles(files.asJava)
       .rawConvertible(rawConvertible)

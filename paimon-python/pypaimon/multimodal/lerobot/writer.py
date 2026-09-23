@@ -29,6 +29,7 @@ from pypaimon.catalog.catalog_exception import (
     DatabaseNotExistException,
     TableNotExistException,
 )
+from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.multimodal.arrow_utils import strict_arrow_table
 from pypaimon.multimodal.hdf5 import _SnapshotRecorder
 from pypaimon.multimodal.lerobot.metadata import (
@@ -420,8 +421,7 @@ class PaimonLeRobotWriter:
             for name, identifier in identifiers.items()
         }
         for name, table in tables.items():
-            if not _target_schema(table).equals(
-                    expected[name], check_metadata=False):
+            if not arrow_schemas_compatible(_target_schema(table), expected[name]):
                 raise ValueError(
                     "LeRobot %s companion schema does not match "
                     "PaimonLeRobotWriter." % name)

@@ -57,7 +57,7 @@ CALL sys.create_global_index(
     table => 'db.my_table',
     index_column => 'tags',
     index_type => 'multivalue',
-    options => 'sorted-index.records-per-range=10000000'
+    options => 'sorted-index.records-per-file=25000000'
 );
 ```
 
@@ -110,12 +110,12 @@ CALL sys.drop_global_index(
 
 | Option | Default | Description |
 |---|---|---|
-| `sorted-index.records-per-range` | `10000000` | Expected number of source records per generated Multivalue index file. |
+| `sorted-index.records-per-file` | `25000000` | Expected number of source records per generated Multivalue index file. |
 | `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building the index. |
 | `multivalue-index.dictionary-block-size` | `16 kb` | Target size of the block-indexed element dictionary. |
 | `multivalue-index.compression` | `none` | Compression algorithm for dictionary blocks. |
 | `multivalue-index.compression-level` | `1` | Compression level used by codecs which support levels. |
 
 The expanded entries use the engine's spillable sort, and the writer keeps only the current
-element's posting list in memory. `sorted-index.records-per-range` bounds the source-row range—and
+element's posting list in memory. `sorted-index.records-per-file` bounds the source-row range—and
 therefore the largest posting list—owned by one Data Evolution index file.

@@ -272,7 +272,7 @@ object ScalarOperatorGens {
              |      }
              |
              |      ${elementEqualsExpr.code}
-             |      if (!${elementEqualsExpr.resultTerm}) {
+             |      if (!${nullSafeEquals(leftElementNullTerm, rightElementNullTerm, elementEqualsExpr.resultTerm)}) {
              |        $resultTerm = false;
              |        break;
              |      }
@@ -396,7 +396,7 @@ object ScalarOperatorGens {
                |        }
                |
                |        ${valueEqualsExpr.code}
-               |        if (${valueEqualsExpr.resultTerm}) {
+               |        if (${nullSafeEquals(leftValueNullTerm, rightValueNullTerm, valueEqualsExpr.resultTerm)}) {
                |          $matchedTerm[$rightIndexTerm] = true;
                |          $foundTerm = true;
                |        }
@@ -432,7 +432,7 @@ object ScalarOperatorGens {
                |      boolean $rightValueNullTerm = ($rightValueTerm == null);
                |
                |      ${valueEqualsExpr.code}
-               |      if (!${valueEqualsExpr.resultTerm}) {
+               |      if (!${nullSafeEquals(leftValueNullTerm, rightValueNullTerm, valueEqualsExpr.resultTerm)}) {
                |        $resultTerm = false;
                |        break;
                |      }
@@ -463,6 +463,17 @@ object ScalarOperatorGens {
       args => expr(args.head, args(1))
     }
   }
+
+  /**
+   * Null-safe equality on a nested element or value: two nulls are equal, a single null is not,
+   * otherwise the generated equality decides. `generateEquals` leaves its result flag `false` when
+   * either operand is null, so reading that flag alone treats two null elements as unequal.
+   */
+  private def nullSafeEquals(
+      leftNullTerm: String,
+      rightNullTerm: String,
+      equalsTerm: String): String =
+    s"(($leftNullTerm && $rightNullTerm) || (!$leftNullTerm && !$rightNullTerm && $equalsTerm))"
 
   private def containsFloatingPoint(t: DataType): Boolean = t.getTypeRoot match {
     case FLOAT | DOUBLE => true

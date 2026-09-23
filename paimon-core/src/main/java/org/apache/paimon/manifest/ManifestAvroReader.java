@@ -26,7 +26,6 @@ import org.apache.paimon.format.avro.AvroRawBlock;
 import org.apache.paimon.format.avro.AvroRecordDecoder;
 import org.apache.paimon.format.avro.AvroRecordDecoder.FieldDecoder;
 import org.apache.paimon.format.avro.AvroRecordDecoder.FieldType;
-import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
@@ -35,6 +34,7 @@ import org.apache.paimon.utils.IOUtils;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -56,7 +56,7 @@ public final class ManifestAvroReader implements AutoCloseable {
 
     private long blockOrdinal = -1;
 
-    ManifestAvroReader(SeekableInputStream input) throws IOException {
+    ManifestAvroReader(InputStream input) throws IOException {
         AvroBlockReader blockReader = null;
         try {
             blockReader = new AvroBlockReader(input);
@@ -75,7 +75,10 @@ public final class ManifestAvroReader implements AutoCloseable {
         return blockReader.headerBytes();
     }
 
-    /** Returns the physical block offset; read immediately after {@link #next()}. */
+    /**
+     * Returns the block offset relative to the initial input position; read immediately after
+     * {@link #next()}.
+     */
     public long blockOffset() {
         return blockReader.blockOffset();
     }
@@ -434,6 +437,18 @@ public final class ManifestAvroReader implements AutoCloseable {
         /** Lazily decompresses this block and returns an iterator over one reusable row. */
         public RowIterator toRows(RowType projectedType) throws IOException {
             return toRows(projectedType, null, null, true);
+        }
+
+        /**
+         * Lazily decompresses this block, applies manifest filters before decoding file metadata,
+         * and returns an iterator over one reusable row.
+         */
+        public RowIterator toRows(
+                RowType projectedType,
+                @Nullable PartitionPredicate partitionFilter,
+                @Nullable BucketFilter bucketFilter)
+                throws IOException {
+            return toRows(projectedType, partitionFilter, bucketFilter, true);
         }
 
         private RowIterator toRows(

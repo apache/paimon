@@ -20,7 +20,6 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.TableQueryAuthResult;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.source.assigners.DynamicPartitionPruningAssigner;
@@ -161,14 +160,17 @@ public class LazyIndexSourceTest extends DataEvolutionTestBase {
                         new QueryAuthSplit(lazy.split(), new TableQueryAuthResult(null, null)));
         DynamicFilteringData filtering = mock(DynamicFilteringData.class);
         when(filtering.contains(any(RowData.class))).thenReturn(true);
+        DynamicPartitionFilteringInfo filteringInfo =
+                new DynamicPartitionFilteringInfo(
+                        table.schema().logicalPartitionType(), Collections.emptyList());
         for (boolean fair : new boolean[] {false, true}) {
             SplitAssigner assigner =
                     fair
                             ? new PreAssignSplitAssigner(1, 1, Collections.singletonList(wrapped))
-                                    .ofDynamicPartitionPruning(row -> (BinaryRow) row, filtering)
+                                    .ofDynamicPartitionPruning(filteringInfo, filtering)
                             : new DynamicPartitionPruningAssigner(
                                     new FIFOSplitAssigner(Collections.singletonList(wrapped)),
-                                    row -> (BinaryRow) row,
+                                    filteringInfo,
                                     filtering);
             assertThat(assigner.getNext(0, null)).containsExactly(wrapped);
         }

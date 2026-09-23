@@ -149,6 +149,27 @@ merged into the same target.
 Adding a previously excluded table with historical data is different from capturing a table
 created after the job starts. Use the savepoint workflow below when expanding the selected set.
 
+### Per-table table configuration
+
+Use repeated `--table_conf_by_table` arguments when different MySQL source tables need different
+Paimon table properties:
+
+```bash
+--table_conf bucket=4 \
+--table_conf changelog-producer=input \
+--table_conf_by_table orders:bucket=8 \
+--table_conf_by_table users:bucket=2
+```
+
+The global `--table_conf` is the default. A matching per-table option overrides the same key;
+`users` above uses `bucket=2`, while an unconfigured table uses `bucket=4`. Repeat the option for
+each property. The source name is the MySQL table name, not the generated Paimon table name.
+
+This option is supported for both `divided` and `combined` database synchronization. It applies
+only to Paimon table properties. Sink and job options such as `sink.parallelism`, writer resources,
+and committer resources are shared runtime settings and must be configured globally with
+`--table_conf`; they cannot be overridden per table.
+
 ### Example 1: synchronize entire database
 
 ```bash
@@ -278,7 +299,8 @@ Command syntax (square brackets indicate optional arguments):
     [--primary_keys <primary-keys>] \
     [--mysql_conf <mysql-cdc-source-conf> [--mysql_conf <mysql-cdc-source-conf> ...]] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
-    [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
+    [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]] \
+    [--table_conf_by_table <source-table>:<key>=<value> [--table_conf_by_table <source-table>:<key>=<value> ...]]
 ```
 
 <ConfigTable html={mysqlSyncDatabaseHtml} />

@@ -288,6 +288,14 @@ public abstract class ConflictDetection {
             CommitKind commitKind,
             String baseCommitUser);
 
+    public boolean canSkipDataFileConflictDetection(
+            Snapshot latestSnapshot,
+            List<ManifestEntry> deltaFiles,
+            List<IndexManifestEntry> indexFiles,
+            CommitKind commitKind) {
+        return false;
+    }
+
     public List<SimpleFileEntry> scanBaseDataFiles(
             Snapshot latestSnapshot,
             List<BinaryRow> changedPartitions,

@@ -220,7 +220,7 @@ public class FlinkSourceBuilder {
             readBuilder.withPartitionFilter(partitionPredicate);
         }
         if (limit != null) {
-            readBuilder.withLimit(limit.intValue());
+            readBuilder.withLimit(limit);
         }
         return readBuilder.dropStats();
     }
@@ -235,6 +235,8 @@ public class FlinkSourceBuilder {
                         options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
                         dynamicPartitionFilteringInfo,
                         outerProject(),
+                        SplitWeightUtils.splitWeightFunc(options),
+                        null,
                         options.get(CoreOptions.BLOB_AS_DESCRIPTOR),
                         skipPreloadTargetSnapshot));
     }

@@ -79,15 +79,25 @@ class DataSplit(Split):
         bucket: int,
         raw_convertible: bool = False,
         data_deletion_files: Optional[List[DeletionFile]] = None,
-        snapshot_id: Optional[int] = None
+        snapshot_id: Optional[int] = None,
+        is_streaming: bool = False,
+        bucket_path: Optional[str] = None,
+        total_buckets: Optional[int] = None,
     ):
         self._files = files
         self._partition = partition
         self._bucket = bucket
         self.raw_convertible = raw_convertible
         self.data_deletion_files = data_deletion_files
-        # Scanned snapshot; None unless populated (e.g. by the native planner).
+        # Scanned snapshot, supplied by planners so this split can be
+        # serialized independently from its enclosing Plan.
         self.snapshot_id = snapshot_id
+        self.is_streaming = is_streaming
+        # Retained when decoding SplitSerializer v1 so a cross-language
+        # decode/encode round-trip does not lose wire metadata. Python-planned
+        # splits normally leave these unset and derive paths from DataFileMeta.
+        self.bucket_path = bucket_path
+        self.total_buckets = total_buckets
 
     @property
     def files(self) -> List[DataFileMeta]:
@@ -125,7 +135,10 @@ class DataSplit(Split):
             bucket=self._bucket,
             raw_convertible=self.raw_convertible,
             data_deletion_files=filtered_data_deletion_files,
-            snapshot_id=self.snapshot_id
+            snapshot_id=self.snapshot_id,
+            is_streaming=self.is_streaming,
+            bucket_path=self.bucket_path,
+            total_buckets=self.total_buckets,
         )
 
     @property

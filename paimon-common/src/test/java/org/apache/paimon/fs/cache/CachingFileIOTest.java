@@ -25,6 +25,7 @@ import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadUtils;
 import org.apache.paimon.options.MemorySize;
@@ -188,6 +189,26 @@ class CachingFileIOTest {
         verify(delegate).tryToWriteAtomic(target, "content");
         // the interface default would have written a temp file and renamed it instead
         verify(delegate, never()).rename(any(), any());
+    }
+
+    @Test
+    void testListFilesIterativeReachesDelegateOverride() throws IOException {
+        FileIO delegate = mock(FileIO.class);
+        CachingFileIO cachingIO =
+                newCachingFileIO(
+                        delegate,
+                        new LocalMemoryCacheManager(1024, 64),
+                        EnumSet.of(FileType.DATA),
+                        64);
+        Path tableRoot = new Path("oss://bucket/table");
+        @SuppressWarnings("unchecked")
+        RemoteIterator<FileStatus> marker = mock(RemoteIterator.class);
+        when(delegate.listFilesIterative(tableRoot, true)).thenReturn(marker);
+
+        assertThat(cachingIO.listFilesIterative(tableRoot, true)).isSameAs(marker);
+        verify(delegate).listFilesIterative(tableRoot, true);
+        // the interface default would construct its own iterator backed by listStatus
+        verify(delegate, never()).listStatus(any());
     }
 
     private CachingFileIO newCachingFileIO(

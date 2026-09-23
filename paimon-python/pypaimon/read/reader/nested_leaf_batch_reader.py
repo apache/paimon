@@ -23,17 +23,21 @@ from pyarrow import RecordBatch
 
 from pypaimon.data.map_shared_shredding import \
     assemble_normal_map_selected_keys
-from pypaimon.read.reader.field_indices import blob_field_indices, vector_field_indices
+from pypaimon.read.reader.data_file_batch_reader import \
+    cast_array_for_schema_evolution
+from pypaimon.read.reader.field_indices import (
+    blob_field_indices, descriptor_field_indices, vector_field_indices)
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 
 
 def _struct_field(column, name):
+    # Resolve literal names before Arrow can interpret them as field paths.
+    field_index = [field.name for field in column.type].index(name)
     struct_field = getattr(pc, "struct_field", None)
     if struct_field is not None:
-        return struct_field(column, name)
+        return struct_field(column, field_index)
 
-    field_index = [field.name for field in column.type].index(name)
     return column.flatten()[field_index]
 
 
@@ -48,7 +52,8 @@ class NestedLeafBatchReader(RecordBatchReader):
     """
 
     def __init__(self, inner: RecordBatchReader, name_paths: List[List[str]],
-                 output_fields: List[DataField]):
+                 output_fields: List[DataField],
+                 descriptor_field_names=None):
         if len(name_paths) != len(output_fields):
             raise ValueError(
                 "name_paths length {} does not match output_fields length {}".format(
@@ -58,6 +63,8 @@ class NestedLeafBatchReader(RecordBatchReader):
         self._schema = PyarrowFieldParser.from_paimon_schema(output_fields)
         self.file_io = inner.file_io
         self.blob_field_indices = blob_field_indices(output_fields)
+        self.descriptor_field_indices = descriptor_field_indices(
+            output_fields, descriptor_field_names or ())
         self.vector_field_indices = vector_field_indices(output_fields)
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
@@ -75,7 +82,7 @@ class NestedLeafBatchReader(RecordBatchReader):
                     column = _struct_field(column, name)
             target_type = self._schema.field(i).type
             if column.type != target_type:
-                column = column.cast(target_type, safe=False)
+                column = cast_array_for_schema_evolution(column, target_type)
             arrays.append(column)
         return pa.RecordBatch.from_arrays(arrays, schema=self._schema)
 

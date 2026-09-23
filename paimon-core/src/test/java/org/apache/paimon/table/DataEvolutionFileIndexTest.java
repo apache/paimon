@@ -33,6 +33,7 @@ import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory;
 import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
 import org.apache.paimon.fileindex.bsi.BitSliceIndexBitmapFileIndexFactory;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -89,9 +90,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * down is an optimization and must never change the result. A row count alone can not say that, it
  * passes just as well when nothing is pushed down at all.
  *
- * <p>A filter on a column that is not part of the read type has no {@link #query} counterpart:
- * {@link TableRead#executeFilter()} can not project such a predicate onto the read row and silently
- * keeps every row, so only the split level assertion says anything.
+ * <p>Filters on unprojected columns are also checked through {@link TableRead#executeFilter()},
+ * which reads the filter operands before restoring the requested output projection.
  *
  * <p>Filter values are always picked inside the min/max range of the column, otherwise the group
  * level stats pruning in {@link org.apache.paimon.operation.DataEvolutionFileStoreScan} would drop
@@ -325,14 +325,37 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testExecuteFilterWithUnprojectedOverwrittenColumn() throws Exception {
+        FileStoreTable table = createTable("execute_filter_projection", Collections.emptyMap());
+        writeThenOverwriteF1(table, ROW_COUNT);
+        FileStoreTable latest = getTable(identifier(table.name()));
+        RowType outputType = rowType().project("f0");
+        ReadBuilder readBuilder =
+                latest.newReadBuilder().withReadType(outputType).withFilter(equalF1(c1(50)));
+        List<InternalRow> rows =
+                collect(
+                        readBuilder.newRead().executeFilter(),
+                        readBuilder.newScan().plan(),
+                        outputType);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getInt(0)).isEqualTo(50);
+
+        readBuilder = latest.newReadBuilder().withReadType(outputType).withFilter(equalF1(f1(50)));
+        assertThat(
+                        collect(
+                                readBuilder.newRead().executeFilter(),
+                                readBuilder.newScan().plan(),
+                                outputType))
+                .isEmpty();
+    }
+
+    @Test
     public void testFileIndexIsGivenUpForAColumnOutsideTheReadType() throws Exception {
         FileStoreTable table = createTable("projection_index", bloomOptions("f1", "1 B"));
         writeAllColumns(table, ROW_COUNT);
 
-        // the index of this file does prove that no row of it matches, but a file only owns the
-        // columns of the read type: the file that owns f1 can be pruned out of the split, see
-        // testProjectionPruningAwayTheWinnerOfTheFilterColumn, so the push down gives the column
-        // up rather than trust whichever file is left holding it
+        // The split reader only evaluates filters over its read type. Without executeFilter,
+        // f1 remains outside that type even though planning retains its files.
         assertThat(readWithFilter(table, equalF1(MISSING_F1), rowType().project("f0")))
                 .hasSize(ROW_COUNT);
 
@@ -356,14 +379,12 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     }
 
     @Test
-    public void testProjectionPruningAwayTheWinnerOfTheFilterColumn() throws Exception {
+    public void testUnprojectedOverwrittenFilterColumnWithoutExecution() throws Exception {
         FileStoreTable table = createTable("pruned_winner", Collections.emptyMap());
         writeThenOverwriteF1(table, ROW_COUNT);
 
-        // f1 was rewritten as c* by a second file, and projecting f0 prunes that file out of the
-        // split, see DataEvolutionFileStoreScan#pruneByReadType. The old file is left holding a*
-        // and a bloom index that knows nothing about c*, so nothing about it may be used to prove
-        // that a row does not match: the row does match, through the file that is not there.
+        // f1 was rewritten as c* by a second file. Without executeFilter the reader still only
+        // reads f0, so an unprojected filter must not reject the matching row.
         List<InternalRow> rows = readWithFilter(table, equalF1(c1(50)), rowType().project("f0"));
         assertThat(rows).anyMatch(row -> row.getInt(0) == 50);
     }
@@ -458,6 +479,48 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testBitmapSelectionComposesWithDeletionVectorForNonZeroRowId() throws Exception {
+        Map<String, String> options = bitmapOptions("f1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        FileStoreTable table = createTable("bitmap_dv_non_zero_row_id", options);
+        writeAllColumns(table, ROW_COUNT);
+        writeAllColumns(table, ROW_COUNT);
+
+        deleteRowsFrom(table, ROW_COUNT, 50);
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        DataSplit targetSplit =
+                latest.newReadBuilder().newScan().plan().splits().stream()
+                        .map(split -> (DataSplit) split)
+                        .filter(
+                                split ->
+                                        split.dataFiles().stream()
+                                                .anyMatch(
+                                                        file ->
+                                                                file.nonNullFirstRowId()
+                                                                        == ROW_COUNT))
+                        .findFirst()
+                        .orElseThrow(IllegalStateException::new);
+        DataFileMeta targetFile =
+                targetSplit.dataFiles().stream()
+                        .filter(file -> file.nonNullFirstRowId() == ROW_COUNT)
+                        .findFirst()
+                        .orElseThrow(IllegalStateException::new);
+        Path targetPath =
+                latest.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(targetSplit.partition(), targetSplit.bucket())
+                        .toPath(targetFile);
+        assertThat(latest.fileIO().delete(targetPath, false)).isTrue();
+
+        // The second group can only succeed now if the bitmap hit is intersected with its DV
+        // before opening the missing data file. The first group remains visible.
+        RowType readType = rowTypeWithRowId(rowType()).project(SpecialFields.ROW_ID.name(), "f1");
+        List<InternalRow> rows = readWithFilter(table, equalF1(f1(50)), readType);
+        assertThat(rowIds(rows)).containsExactly(50L);
+    }
+
+    @Test
     public void testMergedGroupKeptWhenFilterColumnOverwritten() throws Exception {
         FileStoreTable table = createTable("overwritten", Collections.emptyMap());
         writeThenOverwriteF1(table, ROW_COUNT);
@@ -483,7 +546,28 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         FileStoreTable latest = getTable(identifier(table.name()));
         List<DataFileMeta> dataFiles =
                 ((DataSplit) latest.newReadBuilder().newScan().plan().splits().get(0)).dataFiles();
-        String anchor = retrieveAnchorFile(dataFiles, file -> file).fileName();
+        deleteRows(latest, retrieveAnchorFile(dataFiles, file -> file), positions);
+    }
+
+    private void deleteRowsFrom(FileStoreTable table, long firstRowId, long... positions)
+            throws Exception {
+        FileStoreTable latest = getTable(identifier(table.name()));
+        DataFileMeta anchor =
+                latest.newReadBuilder().newScan().plan().splits().stream()
+                        .map(split -> (DataSplit) split)
+                        .flatMap(split -> split.dataFiles().stream())
+                        .filter(file -> file.nonNullFirstRowId() == firstRowId)
+                        .findFirst()
+                        .orElseThrow(
+                                () ->
+                                        new IllegalArgumentException(
+                                                "Cannot find data file with first row id "
+                                                        + firstRowId));
+        deleteRows(latest, anchor, positions);
+    }
+
+    private void deleteRows(FileStoreTable latest, DataFileMeta anchor, long... positions)
+            throws Exception {
 
         BaseAppendDeleteFileMaintainer maintainer =
                 BaseAppendDeleteFileMaintainer.forUnawareAppend(
@@ -494,7 +578,7 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         for (long position : positions) {
             deletionVector.delete(position);
         }
-        maintainer.notifyNewDeletionVector(anchor, deletionVector);
+        maintainer.notifyNewDeletionVector(anchor.fileName(), deletionVector);
 
         List<IndexFileMeta> newIndexFiles = new ArrayList<>();
         for (IndexManifestEntry entry : maintainer.persist()) {
@@ -631,6 +715,70 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
                         + CoreOptions.COLUMNS,
                 column);
         return options;
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"parquet", "orc"})
+    public void testSubMicrosecondTimestampBitmapMatchesUnindexed(String format) throws Exception {
+        // A bitmap index maps TIMESTAMP through toMicros(), so on a TIMESTAMP(9) column two values
+        // in the same microsecond share one bitmap key. visitNotIn flips the matched rows over the
+        // whole row count, so answering <> or NOT IN from that bitmap drops rows the residual
+        // filter can no longer recover. The fix makes the indexed read (executeFilter) return
+        // exactly what an unindexed full scan does.
+        FileStoreTable table = createTimestampBitmapTable("bitmap_ts9_" + format, format);
+
+        long base = 1_704_067_200_000L;
+        Timestamp tsA = Timestamp.fromEpochMillis(base, 123_000); // micro bucket base*1000+123
+        Timestamp tsB = Timestamp.fromEpochMillis(base, 123_400); // same bucket as tsA
+        Timestamp tsC = Timestamp.fromEpochMillis(base, 999_000); // a different bucket
+        write(
+                table,
+                GenericRow.of(0, tsA),
+                GenericRow.of(1, tsB),
+                GenericRow.of(2, tsC),
+                GenericRow.of(3, null));
+
+        PredicateBuilder b = new PredicateBuilder(table.rowType());
+
+        // Guard: the sub-microsecond nanos must survive the write/read round trip on this format,
+        // otherwise tsA and tsB collapse and the comparison below would pass vacuously.
+        List<Timestamp> stored = new ArrayList<>();
+        for (InternalRow row : fullScanFiltered(table, b.isNotNull(1))) {
+            stored.add(row.getTimestamp(1, 9));
+        }
+        assertThat(stored).contains(tsA, tsB);
+
+        // notEqual / NOT IN are the ones that lose rows to the micro-bucket collision;
+        // isNull/isNotNull still come from the index; equal / IN only over-select and are
+        // already corrected by the residual filter.
+        List<Predicate> predicates =
+                Arrays.asList(
+                        b.notEqual(1, tsA),
+                        b.notIn(1, Arrays.asList(tsA, tsC)),
+                        b.isNull(1),
+                        b.isNotNull(1),
+                        b.equal(1, tsA),
+                        b.in(1, Arrays.asList(tsA, tsC)),
+                        PredicateBuilder.and(b.notEqual(1, tsA), b.notEqual(1, tsC)),
+                        PredicateBuilder.or(b.equal(1, tsA), b.equal(1, tsC)));
+        for (Predicate p : predicates) {
+            assertThat(query(table, p))
+                    .containsExactlyInAnyOrderElementsOf(fullScanFiltered(table, p));
+        }
+    }
+
+    private FileStoreTable createTimestampBitmapTable(String name, String format) throws Exception {
+        Schema.Builder builder =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.TIMESTAMP(9))
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), format);
+        bitmapOptions("f1").forEach(builder::option);
+        Identifier identifier = identifier(name);
+        catalog.createTable(identifier, builder.build(), false);
+        return getTable(identifier);
     }
 
     private void writeAllColumns(FileStoreTable table, int count) throws Exception {

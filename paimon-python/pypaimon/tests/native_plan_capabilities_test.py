@@ -20,6 +20,7 @@
 import json
 import tempfile
 import unittest
+from contextlib import ExitStack
 from dataclasses import replace
 from unittest.mock import patch
 
@@ -116,7 +117,9 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
         plans = []
         for native in (False, True):
             read_table = table.copy({
-                'scan.native-plan.enabled': str(native).lower()})
+                'scan.native-plan.enabled': str(native).lower(),
+                'read.native.enabled': str(native).lower(),
+            })
             builder = read_table.new_read_builder()
             if predicate is not None:
                 builder.with_filter(predicate)
@@ -133,7 +136,18 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
                     plan = scan.plan()
             else:
                 plan = scan.plan()
-            rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+            if native:
+                self.assertTrue(all(
+                    getattr(split, '_native_split', None) is not None
+                    for split in plan.splits()))
+                read_guard = patch(
+                    'pypaimon.read.table_read.TableRead._create_split_read',
+                    side_effect=AssertionError(
+                        'native capability read fell back to Python'))
+            else:
+                read_guard = ExitStack()
+            with read_guard:
+                rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
             self.assertEqual(sorted(rows, key=lambda row: row['k']), expected_rows)
             self.assertEqual(plan.snapshot_id, snapshot_id)
             plans.append(plan)
@@ -313,6 +327,42 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
         plan = self._assert_parity(table, [rows[0], rows[2]], 2)
         self.assertEqual(plan.splits()[0].data_deletion_files[0].cardinality, 2)
         self._assert_parity(table.copy({'scan.snapshot-id': '1'}), rows, 1)
+
+    def test_first_row_compacted_runs_with_overlapping_key_ranges(self):
+        for bucket in ('1', '-1'):
+            with self.subTest(bucket=bucket):
+                table = self._create('first_row_' + bucket, {
+                    'bucket': bucket, 'merge-engine': 'first-row',
+                    'source.split.target-size': '1b',
+                    'source.split.open-file-cost': '1b',
+                }, primary_keys=['k'])
+                expected = [{'k': k, 'v': 'v%d' % k} for k in range(1, 5)]
+                for level, keys in ((1, (1, 3)), (2, (2, 4))):
+                    builder = table.new_batch_write_builder()
+                    writer, commit = builder.new_write(), builder.new_commit()
+                    try:
+                        writer.write_arrow(pa.Table.from_pylist(
+                            [expected[key - 1] for key in keys], schema=self.schema))
+                        messages = writer.prepare_commit()
+                        # Each run already contains unique first rows. Their
+                        # ranges overlap, but their actual keys are disjoint.
+                        for message in messages:
+                            message.new_files = [replace(file, level=level)
+                                                 for file in message.new_files]
+                        commit.commit(messages)
+                    finally:
+                        writer.close()
+                        commit.close()
+                self._write(table, [{'k': 1, 'v': 'later'}, {'k': 5, 'v': 'pending'}])
+                plan = self._assert_parity(table, expected, 3)
+                self.assertTrue(all(split.raw_convertible for split in plan.splits()))
+                self.assertEqual({file.level for split in plan.splits()
+                                  for file in split.files}, {1, 2})
+                pb = table.new_read_builder().new_predicate_builder()
+                self._assert_parity(table, [expected[1]], 3, predicate=pb.equal('v', 'v2'))
+                self._assert_parity(table, [], 3, predicate=pb.equal('v', 'later'))
+                self._assert_parity(table.copy({'scan.snapshot-id': '1'}),
+                                    [expected[0], expected[2]], 1)
 
     @unittest.skipUnless(native_version_at_least(0, 4, 0),
                          'pypaimon-rust>=0.4.0 required for native DV scans')

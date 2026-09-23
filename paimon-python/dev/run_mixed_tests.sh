@@ -661,14 +661,14 @@ ensure_paimon_vindex() {
     fi
 
     echo "Installing Python paimon-vindex dependency..."
-    if python -m pip install 'paimon-vindex==0.4.0'; then
+    if python -m pip install 'paimon-vindex==0.5.0'; then
         return 0
     fi
 
     echo -e "${YELLOW}Direct pip install failed; installing paimon-vindex into a temporary target directory...${NC}"
     local target_dir="${TMPDIR:-/tmp}/paimon-vindex-site"
     rm -rf "$target_dir"
-    if python -m pip install --target "$target_dir" 'paimon-vindex==0.4.0'; then
+    if python -m pip install --target "$target_dir" 'paimon-vindex==0.5.0'; then
         export PYTHONPATH="$target_dir:${PYTHONPATH:-}"
         return 0
     fi
@@ -676,7 +676,7 @@ ensure_paimon_vindex() {
     if python -c "import numpy" >/dev/null 2>&1; then
         echo -e "${YELLOW}Dependency install failed but numpy is already available; retrying paimon-vindex without dependencies...${NC}"
         rm -rf "$target_dir"
-        if python -m pip install --target "$target_dir" --no-deps 'paimon-vindex==0.4.0'; then
+        if python -m pip install --target "$target_dir" --no-deps 'paimon-vindex==0.5.0'; then
             export PYTHONPATH="$target_dir:${PYTHONPATH:-}"
             return 0
         fi
@@ -1033,6 +1033,21 @@ run_shared_shredding_map_test() {
         return 1
     fi
     echo -e "${GREEN}✓ Python shared-shredding MAP read test completed successfully${NC}"
+
+    echo "Running Python shared-shredding MAP write test..."
+    if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_write_shared_shredding_map_for_java -v; then
+        echo -e "${RED}✗ Python shared-shredding MAP write test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Python shared-shredding MAP write test completed successfully${NC}"
+
+    cd "$PROJECT_ROOT"
+    echo "Running Maven test for JavaPyE2ETest.testJavaReadSharedShreddingMapTable..."
+    if ! mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaReadSharedShreddingMapTable -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${RED}✗ Java shared-shredding MAP read test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Java shared-shredding MAP read test completed successfully${NC}"
 }
 
 # Function to run VARIANT test (Java write, Python read)

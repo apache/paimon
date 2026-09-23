@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.MemorySize;
@@ -184,6 +185,14 @@ public class CachingFileIO implements FileIO {
     public boolean tryToWriteAtomic(Path path, String content) throws IOException {
         // the interface default (temp file + rename) would bypass the delegate's atomic override
         return delegate.tryToWriteAtomic(path, content);
+    }
+
+    @Override
+    public RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
+            throws IOException {
+        // the interface default would hide the delegate's iterative listing override and list
+        // each directory with listStatus instead
+        return delegate.listFilesIterative(path, recursive);
     }
 
     @Override

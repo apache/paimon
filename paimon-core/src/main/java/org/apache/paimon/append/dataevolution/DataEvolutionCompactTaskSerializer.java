@@ -35,6 +35,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
+import static org.apache.paimon.utils.SerializationUtils.presizedCapacity;
+import static org.apache.paimon.utils.SerializationUtils.readCount;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** Serializer for {@link DataEvolutionCompactTask}. */
@@ -97,8 +99,8 @@ public class DataEvolutionCompactTaskSerializer
     public List<DataEvolutionCompactTask> deserializeList(int version, DataInputView view)
             throws IOException {
         checkVersion(version);
-        int length = view.readInt();
-        List<DataEvolutionCompactTask> list = new ArrayList<>(length);
+        int length = readCount(view, getClass().getSimpleName());
+        List<DataEvolutionCompactTask> list = new ArrayList<>(presizedCapacity(length));
         for (int i = 0; i < length; i++) {
             list.add(deserialize(version, view));
         }
@@ -125,8 +127,8 @@ public class DataEvolutionCompactTaskSerializer
                 DataEvolutionCompactTask.TaskType.fromCode(view.readInt());
         switch (type) {
             case NORMAL:
-                int rangeCount = view.readInt();
-                List<Range> ranges = new ArrayList<>(rangeCount);
+                int rangeCount = readCount(view, getClass().getSimpleName());
+                List<Range> ranges = new ArrayList<>(presizedCapacity(rangeCount));
                 for (int i = 0; i < rangeCount; i++) {
                     ranges.add(new Range(view.readLong(), view.readLong()));
                 }

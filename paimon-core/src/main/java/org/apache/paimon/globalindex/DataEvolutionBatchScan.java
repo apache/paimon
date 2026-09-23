@@ -83,7 +83,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     private Predicate filter;
     private TopN topN;
-    private Integer pushDownLimit;
+    private Long pushDownLimit;
     // set when part of the filter reaches the reader only, so limit/TopN must not prune ahead of it
     private boolean rowIdFilterDeferred;
     private RowRangeIndex pushedRowRangeIndex;
@@ -197,7 +197,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
     }
 
     @Override
-    public InnerTableScan withLimit(int limit) {
+    public InnerTableScan withLimit(long limit) {
         // forwarded in plan(), once withFilter has said whether a row-id part was deferred
         this.pushDownLimit = limit;
         return this;
@@ -285,6 +285,11 @@ public class DataEvolutionBatchScan implements DataTableScan {
     }
 
     @Override
+    public List<BinaryRow> topNPartitions(int num, int partitionFieldCount) {
+        return batchScan.topNPartitions(num, partitionFieldCount);
+    }
+
+    @Override
     public Plan plan() {
         return table.coreOptions()
                         .toConfiguration()
@@ -308,7 +313,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
             }
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
-                rowRangeIndex = RowRangeIndex.create(result.results().toRangeList());
+                rowRangeIndex = RowRangeIndex.fromBitmap(result.results());
                 if (result instanceof ScoredGlobalIndexResult) {
                     scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
                 }
@@ -636,18 +641,24 @@ public class DataEvolutionBatchScan implements DataTableScan {
     public static Plan wrapToIndexSplits(
             List<Split> splits, RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
         List<Split> indexedSplits = new ArrayList<>();
-        Function<Split, List<IndexedSplit>> process =
-                split ->
-                        Collections.singletonList(
-                                split instanceof IndexedSplit
-                                        ? (IndexedSplit) split
-                                        : wrap((DataSplit) split, rowRangeIndex, scoreGetter));
+        Function<Split, List<Split>> process =
+                split -> Collections.singletonList(wrap(split, rowRangeIndex, scoreGetter));
         randomlyExecuteSequentialReturn(process, splits, null).forEachRemaining(indexedSplits::add);
         return () -> indexedSplits;
     }
 
-    private static IndexedSplit wrap(
-            DataSplit dataSplit, final RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
+    private static Split wrap(
+            Split split, final RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
+        if (split instanceof QueryAuthSplit) {
+            QueryAuthSplit authSplit = (QueryAuthSplit) split;
+            return new QueryAuthSplit(
+                    wrap(authSplit.split(), rowRangeIndex, scoreGetter), authSplit.authResult());
+        }
+        if (split instanceof IndexedSplit) {
+            return split;
+        }
+
+        DataSplit dataSplit = (DataSplit) split;
         List<DataFileMeta> files = dataSplit.dataFiles();
 
         List<Range> expected = new ArrayList<>();

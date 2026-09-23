@@ -57,12 +57,15 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
 
     private final FileStoreTable table;
     private final Set<String> updatedColumns;
+    private final long baseSnapshotId;
 
     private transient Set<BinaryRow> affectedPartitions;
 
-    public MergeIntoUpdateChecker(FileStoreTable table, Set<String> updatedColumns) {
+    public MergeIntoUpdateChecker(
+            FileStoreTable table, Set<String> updatedColumns, long baseSnapshotId) {
         this.table = table;
         this.updatedColumns = updatedColumns;
+        this.baseSnapshotId = baseSnapshotId;
     }
 
     @Override
@@ -149,11 +152,13 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
 
                         CommitMessage commitMessage =
                                 new CommitMessageImpl(
-                                        entry.getKey(),
-                                        0,
-                                        null,
-                                        DataIncrement.deleteIndexIncrement(entry.getValue()),
-                                        CompactIncrement.emptyIncrement());
+                                                entry.getKey(),
+                                                0,
+                                                null,
+                                                DataIncrement.deleteIndexIncrement(
+                                                        entry.getValue()),
+                                                CompactIncrement.emptyIncrement())
+                                        .withCheckFromSnapshot(baseSnapshotId);
 
                         Committable committable = new Committable(Long.MAX_VALUE, commitMessage);
 

@@ -18,12 +18,8 @@
 
 package org.apache.paimon.flink.source.assigners;
 
-import org.apache.paimon.codegen.Projection;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.flink.source.DynamicPartitionFilteringInfo;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
-import org.apache.paimon.flink.utils.TableScanUtils;
-import org.apache.paimon.table.source.DataSplit;
 
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.table.connector.source.DynamicFilteringData;
@@ -42,15 +38,15 @@ import java.util.stream.Collectors;
 public class DynamicPartitionPruningAssigner implements SplitAssigner {
 
     private final SplitAssigner innerAssigner;
-    private final Projection partitionRowProjection;
+    private final DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo;
     private final DynamicFilteringData dynamicFilteringData;
 
     public DynamicPartitionPruningAssigner(
             SplitAssigner innerAssigner,
-            Projection partitionRowProjection,
+            DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo,
             DynamicFilteringData dynamicFilteringData) {
         this.innerAssigner = innerAssigner;
-        this.partitionRowProjection = partitionRowProjection;
+        this.dynamicPartitionFilteringInfo = dynamicPartitionFilteringInfo;
         this.dynamicFilteringData = dynamicFilteringData;
     }
 
@@ -91,7 +87,7 @@ public class DynamicPartitionPruningAssigner implements SplitAssigner {
     public static SplitAssigner createDynamicPartitionPruningAssignerIfNeeded(
             int subtaskId,
             SplitAssigner oriAssigner,
-            Projection partitionRowProjection,
+            DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo,
             SourceEvent sourceEvent,
             Logger logger) {
         DynamicFilteringData dynamicFilteringData = ((DynamicFilteringEvent) sourceEvent).getData();
@@ -101,7 +97,7 @@ public class DynamicPartitionPruningAssigner implements SplitAssigner {
                 dynamicFilteringData.isFiltering());
         return dynamicFilteringData.isFiltering()
                 ? new DynamicPartitionPruningAssigner(
-                        oriAssigner, partitionRowProjection, dynamicFilteringData)
+                        oriAssigner, dynamicPartitionFilteringInfo, dynamicFilteringData)
                 : oriAssigner;
     }
 
@@ -116,14 +112,6 @@ public class DynamicPartitionPruningAssigner implements SplitAssigner {
     }
 
     private boolean filter(FileStoreSourceSplit sourceSplit) {
-        DataSplit dataSplit =
-                TableScanUtils.dataSplit(sourceSplit.split())
-                        .orElseThrow(
-                                () ->
-                                        new IllegalArgumentException(
-                                                "Expected a data split: " + sourceSplit));
-        BinaryRow partition = dataSplit.partition();
-        FlinkRowData projected = new FlinkRowData(partitionRowProjection.apply(partition));
-        return dynamicFilteringData.contains(projected);
+        return dynamicPartitionFilteringInfo.mayMatch(dynamicFilteringData, sourceSplit.split());
     }
 }

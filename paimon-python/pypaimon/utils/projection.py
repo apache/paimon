@@ -226,6 +226,7 @@ class NestedProjection(Projection):
         for path in self.paths:
             field = fields[path[0]]
             name_parts = [field.name]
+            nullable = field.type.nullable
             is_map_key = False
             for idx in path[1:]:
                 child_type = field.type
@@ -250,6 +251,7 @@ class NestedProjection(Projection):
                         "for field '%s'" % (child_type, field.name))
                 child_fields = _row_fields(child_type)
                 field = child_fields[idx]
+                nullable = nullable or field.type.nullable
                 name_parts.append(field.name)
             base_name = "_".join(name_parts)
             final_name = base_name
@@ -258,15 +260,21 @@ class NestedProjection(Projection):
                 final_name = "%s__%d" % (base_name, dup_count)
                 dup_count += 1
             seen_names.add(final_name)
+            field_type = field.type
+            if nullable and not field_type.nullable:
+                field_type = copy(field_type)
+                field_type.nullable = True
             # Keep the leaf field's ID so downstream schema-evolution
             # remapping by field ID still works after rename.
-            out.append(DataField(
-                id=field.id,
-                name=final_name,
-                type=field.type,
-                description=getattr(field, 'description', None),
-                default_value=getattr(field, 'default_value', None),
-            ))
+            out.append(
+                DataField(
+                    id=field.id,
+                    name=final_name,
+                    type=field_type,
+                    description=getattr(field, "description", None),
+                    default_value=getattr(field, "default_value", None),
+                )
+            )
         return out
 
 

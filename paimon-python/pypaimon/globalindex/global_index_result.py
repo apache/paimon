@@ -30,6 +30,10 @@ class GlobalIndexResult(ABC):
         """Returns the bitmap representing row ids."""
         pass
 
+    def is_exact(self) -> bool:
+        """Whether these row ids are matches rather than a candidate superset."""
+        return True
+
     def offset(self, start_offset: int) -> 'GlobalIndexResult':
         """Returns a new result with row IDs offset by the given amount."""
         if start_offset == 0:
@@ -38,18 +42,20 @@ class GlobalIndexResult(ABC):
         offset_bitmap = RoaringBitmap64()
         for row_id in bitmap:
             offset_bitmap.add(row_id + start_offset)
-        return SimpleGlobalIndexResult(offset_bitmap)
+        return SimpleGlobalIndexResult(offset_bitmap, self.is_exact())
 
     def and_(self, other: 'GlobalIndexResult') -> 'GlobalIndexResult':
         """Returns the intersection of this result and the other result."""
         return SimpleGlobalIndexResult(
-            RoaringBitmap64.and_(self.results(), other.results())
+            RoaringBitmap64.and_(self.results(), other.results()),
+            self.is_exact() and other.is_exact(),
         )
 
     def or_(self, other: 'GlobalIndexResult') -> 'GlobalIndexResult':
         """Returns the union of this result and the other result."""
         return SimpleGlobalIndexResult(
-            RoaringBitmap64.or_(self.results(), other.results())
+            RoaringBitmap64.or_(self.results(), other.results()),
+            self.is_exact() and other.is_exact(),
         )
 
     def is_empty(self) -> bool:
@@ -62,9 +68,9 @@ class GlobalIndexResult(ABC):
         return SimpleGlobalIndexResult(RoaringBitmap64())
 
     @staticmethod
-    def create(bitmap: RoaringBitmap64) -> 'GlobalIndexResult':
+    def create(bitmap: RoaringBitmap64, is_exact: bool = True) -> 'GlobalIndexResult':
         """Returns a new GlobalIndexResult wrapping the given bitmap."""
-        return SimpleGlobalIndexResult(bitmap)
+        return SimpleGlobalIndexResult(bitmap, is_exact)
 
     @staticmethod
     def from_range(range_: Range) -> 'GlobalIndexResult':
@@ -84,8 +90,12 @@ class GlobalIndexResult(ABC):
 
 class SimpleGlobalIndexResult(GlobalIndexResult):
 
-    def __init__(self, result: RoaringBitmap64):
+    def __init__(self, result: RoaringBitmap64, is_exact: bool = True):
         self._result = result
+        self._is_exact = is_exact
+
+    def is_exact(self) -> bool:
+        return self._is_exact or self.is_empty()
 
     def results(self) -> RoaringBitmap64:
         return self._result

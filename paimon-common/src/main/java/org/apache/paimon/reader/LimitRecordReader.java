@@ -40,7 +40,7 @@ public final class LimitRecordReader<T> implements RecordReader<T> {
         this.limit = limit;
     }
 
-    public static <T> RecordReader<T> limit(RecordReader<T> reader, @Nullable Integer limit) {
+    public static <T> RecordReader<T> limit(RecordReader<T> reader, @Nullable Long limit) {
         if (limit == null || limit <= 0) {
             return reader;
         }
