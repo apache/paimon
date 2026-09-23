@@ -262,3 +262,10 @@ class FuseOptions:
             "'raw' uses URI path segments directly"
         )
     )
+
+
+def data_token_expiration_safe_time_millis(options=None) -> int:
+    """Return the refresh window for vended data tokens, in milliseconds."""
+    option = CatalogOptions.DATA_TOKEN_EXPIRATION_SAFE_TIME
+    value = option.default_value() if options is None else options.get(option)
+    return int(value.total_seconds() * 1000)

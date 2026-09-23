@@ -31,7 +31,8 @@ from pypaimon.catalog.rest.rest_token import RESTToken
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
-from pypaimon.common.options.config import CatalogOptions, OssOptions
+from pypaimon.common.options.config import (CatalogOptions, OssOptions,
+                                            data_token_expiration_safe_time_millis)
 from pypaimon.common.uri_reader import UriReaderFactory
 
 
@@ -58,8 +59,7 @@ class RESTTokenFileIO(FileIO):
             # Assume it's already an Options object
             self.catalog_options = catalog_options
         self.properties = self.catalog_options or Options({})  # For compatibility with refresh_token()
-        self.expiration_safe_time_millis = int(
-            self.properties.get(CatalogOptions.DATA_TOKEN_EXPIRATION_SAFE_TIME).total_seconds() * 1000)
+        self.expiration_safe_time_millis = data_token_expiration_safe_time_millis(self.properties)
         self.token: Optional[RESTToken] = None
         self.api_instance: Optional[RESTApi] = None
         self.log = logging.getLogger(__name__)
