@@ -2665,8 +2665,13 @@ class LeRobotValidationTest(unittest.TestCase):
                 path for path in source_file_io.opened_paths
                 if path.endswith(".mp4")
             ]
-            # PyAV-enabled writers inspect each source once before copying it.
-            self.assertEqual(6 if av is not None else 3, len(opened_videos))
+            self.assertEqual(
+                {
+                    remote + "/videos/" + relative
+                    for relative in payloads
+                },
+                set(opened_videos),
+            )
             self.assertEqual(1, source_file_io.close_count)
             _, remote_bodies = connection.get_table(
                 "remote_frames").scan().select([
