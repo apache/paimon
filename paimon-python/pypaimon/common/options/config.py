@@ -87,8 +87,8 @@ class PVFSOptions:
 
 
 class CatalogOptions:
-    BLOB_INDEX_CACHE_SIZE = (
-        ConfigOptions.key("blob.index-cache-size")
+    CACHE_BLOB_INDEX_MAX_NUM = (
+        ConfigOptions.key("cache.blob-index.max-num")
         .int_type()
         .default_value(16)
         .with_description("Python BLOB index cache entries per catalog; 0 disables caching.")

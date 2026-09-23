@@ -25,7 +25,7 @@ class BlobIndexCache:
 
     def __init__(self, capacity):
         if isinstance(capacity, bool) or not isinstance(capacity, int) or capacity < 0:
-            raise ValueError("blob.index-cache-size must be a non-negative integer")
+            raise ValueError("cache.blob-index.max-num must be a non-negative integer")
         self.cache = LRUCache(maxsize=capacity)
         self.lock = Lock()
 

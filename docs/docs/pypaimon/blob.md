@@ -178,21 +178,10 @@ The factory auto-dispatches based on the bytes content (`BLOBDESC`,
 
 ## Python BLOB index cache
 
-Set `blob.index-cache-size` in Catalog options to control how many BLOB file
-indexes the Python reader caches (default: 16; 0 disables caching):
-
-```python
-catalog = CatalogFactory.create({
-    "warehouse": "file:///tmp/warehouse",
-    "blob.index-cache-size": "32",
-})
-```
-
-Tables from the same Catalog share the cache. Separate Catalog instances are
-isolated; serialized contexts retain the capacity but start with an empty cache.
-The limit counts files, not bytes. It does not configure Rust native reads or
-`.video` metadata. Readers created without a Catalog retain the process-wide
-16-entry cache.
+Set `cache.blob-index.max-num` in Catalog options, for example `"32"`.
+It limits cached BLOB file indexes per Catalog context (default: 16; 0 disables
+caching). Tables share the context's cache; deserialized contexts start empty.
+The limit counts files, not bytes, and applies only to the Python BLOB reader.
 
 ## See Also
 

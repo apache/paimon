@@ -3196,7 +3196,7 @@ class BlobEndToEndTest(unittest.TestCase):
         for capacity, expected_reads in [(16, 34), (32, 0), (0, 34)]:
             with self.subTest(capacity=capacity):
                 cache = CatalogContext.create_from_options(
-                    Options({"blob.index-cache-size": str(capacity)})).blob_index_cache
+                    Options({"cache.blob-index.max-num": str(capacity)})).blob_index_cache
                 streams = []
 
                 def counted_open(path):
@@ -3233,9 +3233,9 @@ class BlobEndToEndTest(unittest.TestCase):
             Options({})).blob_index_cache.cache.maxsize, 16)
         for value in ("-1", "invalid"):
             with self.subTest(value=value), self.assertRaises(ValueError):
-                CatalogContext.create_from_options(Options({"blob.index-cache-size": value}))
+                CatalogContext.create_from_options(Options({"cache.blob-index.max-num": value}))
 
-        options = {"warehouse": self.temp_dir, "blob.index-cache-size": "32"}
+        options = {"warehouse": self.temp_dir, "cache.blob-index.max-num": "32"}
         catalog = CatalogFactory.create(options)
         catalog.create_database("db", True)
         for name in ("a", "b"):
@@ -3249,7 +3249,7 @@ class BlobEndToEndTest(unittest.TestCase):
                       .catalog_environment.blob_index_cache())
         cache.cache["file.blob"] = ((1,), (0,))
 
-        other = CatalogFactory.create(dict(options, **{"blob.index-cache-size": "16"}))
+        other = CatalogFactory.create(dict(options, **{"cache.blob-index.max-num": "16"}))
         other_cache = other.get_table("db.a").catalog_environment.blob_index_cache()
         self.assertIsNot(cache, other_cache)
         self.assertEqual(other_cache.cache.maxsize, 16)
