@@ -35,6 +35,8 @@ public class VideoFileMeta {
 
     private final long[] physicalVideoLengths;
     private final long[] physicalVideoOffsets;
+    private final long[] keyframeIndexLengths;
+    private final long[] keyframeIndexOffsets;
     private final long[] runEnds;
     private final long[] runReferences;
     private final long[] runFirstFrames;
@@ -54,11 +56,12 @@ public class VideoFileMeta {
         byte[] footer = new byte[VideoFormatWriter.FILE_FOOTER_LENGTH];
         IOUtils.readFully(in, footer);
         int physicalIndexLength = BytesUtils.getInt(footer, 0);
-        int runLengthIndexLength = BytesUtils.getInt(footer, Integer.BYTES);
-        int runReferenceIndexLength = BytesUtils.getInt(footer, Integer.BYTES * 2);
-        int firstFrameIndexLength = BytesUtils.getInt(footer, Integer.BYTES * 3);
-        int magic = BytesUtils.getInt(footer, Integer.BYTES * 4);
-        byte version = footer[Integer.BYTES * 5];
+        int keyframeLengthIndexLength = BytesUtils.getInt(footer, Integer.BYTES);
+        int runLengthIndexLength = BytesUtils.getInt(footer, Integer.BYTES * 2);
+        int runReferenceIndexLength = BytesUtils.getInt(footer, Integer.BYTES * 3);
+        int firstFrameIndexLength = BytesUtils.getInt(footer, Integer.BYTES * 4);
+        int magic = BytesUtils.getInt(footer, Integer.BYTES * 5);
+        byte version = footer[Integer.BYTES * 6];
         if (magic != VideoFormatWriter.MAGIC_NUMBER) {
             throw corrupt("invalid footer magic %s.", magic);
         }
@@ -68,6 +71,7 @@ public class VideoFileMeta {
 
         int[] indexLengths = {
             physicalIndexLength,
+            keyframeLengthIndexLength,
             runLengthIndexLength,
             runReferenceIndexLength,
             firstFrameIndexLength
@@ -87,26 +91,50 @@ public class VideoFileMeta {
         long offset = indexStart;
         long[] physicalVideoLengths = readIndex(in, offset, physicalIndexLength, "physical video");
         offset += physicalIndexLength;
+        long[] keyframeIndexLengths =
+                readIndex(in, offset, keyframeLengthIndexLength, "keyframe index");
+        offset += keyframeLengthIndexLength;
+        if (keyframeIndexLengths.length != physicalVideoLengths.length) {
+            throw corrupt("physical video and keyframe index indexes have different counts.");
+        }
         long[] runLengths = readIndex(in, offset, runLengthIndexLength, "run length");
         offset += runLengthIndexLength;
         long[] runReferences = readIndex(in, offset, runReferenceIndexLength, "run reference");
         offset += runReferenceIndexLength;
         long[] runFirstFrames = readIndex(in, offset, firstFrameIndexLength, "run first-frame");
 
+        long keyframeIndexSize = 0;
+        for (long length : keyframeIndexLengths) {
+            if (length < 0 || keyframeIndexSize > Long.MAX_VALUE - length) {
+                throw corrupt("invalid keyframe index length %s.", length);
+            }
+            keyframeIndexSize += length;
+        }
+        long keyframeIndexStart = indexStart - keyframeIndexSize;
+        if (keyframeIndexStart < 0) {
+            throw corrupt("keyframe indexes exceed the file size.");
+        }
+
         long[] physicalVideoOffsets = new long[physicalVideoLengths.length];
         long payloadOffset = 0;
         for (int i = 0; i < physicalVideoLengths.length; i++) {
             long length = physicalVideoLengths[i];
-            if (length <= 0 || length > indexStart - payloadOffset) {
+            if (length <= 0 || length > keyframeIndexStart - payloadOffset) {
                 throw corrupt("invalid physical video length %s at ordinal %s.", length, i);
             }
             physicalVideoOffsets[i] = payloadOffset;
             payloadOffset += length;
         }
-        if (payloadOffset != indexStart) {
+        if (payloadOffset != keyframeIndexStart) {
             throw corrupt(
                     "indexed videos use %s bytes, but payload region contains %s bytes.",
-                    payloadOffset, indexStart);
+                    payloadOffset, keyframeIndexStart);
+        }
+        long[] keyframeIndexOffsets = new long[keyframeIndexLengths.length];
+        long keyframeIndexOffset = keyframeIndexStart;
+        for (int i = 0; i < keyframeIndexLengths.length; i++) {
+            keyframeIndexOffsets[i] = keyframeIndexOffset;
+            keyframeIndexOffset += keyframeIndexLengths[i];
         }
 
         if (runLengths.length != runReferences.length
@@ -162,6 +190,8 @@ public class VideoFileMeta {
 
         this.physicalVideoLengths = physicalVideoLengths;
         this.physicalVideoOffsets = physicalVideoOffsets;
+        this.keyframeIndexLengths = keyframeIndexLengths;
+        this.keyframeIndexOffsets = keyframeIndexOffsets;
         this.runEnds = runEnds;
         this.runReferences = runReferences;
         this.runFirstFrames = runFirstFrames;
@@ -190,6 +220,14 @@ public class VideoFileMeta {
         int run = run(row);
         long runStart = run == 0 ? 0 : runEnds[run - 1];
         return runFirstFrames[run] + row - runStart;
+    }
+
+    public long keyframeIndexOffset(int returnedRow) {
+        return keyframeIndexOffsets[physicalOrdinal(returnedRow)];
+    }
+
+    public long keyframeIndexLength(int returnedRow) {
+        return keyframeIndexLengths[physicalOrdinal(returnedRow)];
     }
 
     public int returnedPosition(int currentPosition) {

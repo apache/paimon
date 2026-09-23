@@ -139,6 +139,7 @@ class JindoInputFile:
         if self.closed:
             raise ValueError("I/O operation on closed file")
         self._stream.seek(position, whence)
+        return self._stream.tell()
 
     def tell(self) -> int:
         if self.closed:

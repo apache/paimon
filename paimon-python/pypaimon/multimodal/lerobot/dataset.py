@@ -18,6 +18,7 @@
 """LeRobot-compatible map-style reads from a multimodal Paimon table."""
 
 import bisect
+import io
 import json
 import math
 import operator
@@ -29,6 +30,7 @@ from collections import OrderedDict
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from types import SimpleNamespace
 
 import pyarrow as pa
 
@@ -48,6 +50,7 @@ from pypaimon.multimodal.lerobot.schema import (
 )
 from pypaimon.multimodal.table import _target_schema, _time_travel_table
 from pypaimon.multimodal.video import VideoFrameCollator
+from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
 _TORCH_DTYPE_NAMES = {
@@ -273,6 +276,7 @@ class PaimonDatasetReader(ABC):
                 decode_batch_fn=_decode_video_frames,
                 output_column=key,
                 collate_fn=_identity,
+                range_parallelism=self.blob_parallelism,
             )
             for key in self._video_keys
         ]
@@ -1368,14 +1372,20 @@ def _decode_video_windows(plans, rows, collators, features, return_uint8):
             # Cross-file windows use the regular frame assembly path.
             if any(d.payload_descriptor != payload for d in window):
                 return key, None
-            requests.setdefault(payload, []).append((
+            keyframe_index = window[0].keyframe_index_descriptor
+            if any(d.keyframe_index_descriptor != keyframe_index
+                   for d in window):
+                raise ValueError(
+                    "One video payload references different keyframe indexes."
+                )
+            requests.setdefault((payload, keyframe_index), []).append((
                 offset, [d.frame_index for d in window]))
 
         output = [None] * len(plans)
         with torch.inference_mode(inference_enabled), \
                 torch.set_grad_enabled(grad_enabled):
-            for payload, windows in requests.items():
-                decoder = collator._decoder(payload)
+            for (payload, keyframe_index), windows in requests.items():
+                decoder = collator._decoder(payload, keyframe_index)
                 get_frames = getattr(decoder, "get_frames_at", None)
                 if not callable(get_frames):
                     return key, None
@@ -1499,7 +1509,24 @@ def _video_tensor(frame, feature, return_uint8=False):
     return frame
 
 
+def _video_decoder_fallback_errors():
+    errors = (ImportError, OSError, RuntimeError, ValueError)
+    av = sys.modules.get("av")
+    ffmpeg_error = getattr(getattr(av, "error", None), "FFmpegError", None)
+    return errors if ffmpeg_error is None else errors + (ffmpeg_error,)
+
+
 def _open_video_decoder(stream, backend=None):
+    keyframe_index = getattr(stream, "video_keyframe_index", None)
+    if not isinstance(keyframe_index, VideoKeyframeIndex):
+        keyframe_index = None
+    if backend is None and keyframe_index is not None:
+        try:
+            decoder = _PyAVVideoDecoder(stream, keyframe_index)
+        except _video_decoder_fallback_errors():
+            stream.seek(0)
+        else:
+            return _FallbackVideoDecoder(stream, decoder)
     if backend in (None, "torchcodec"):
         try:
             return _open_torchcodec_decoder(stream)
@@ -1507,7 +1534,8 @@ def _open_video_decoder(stream, backend=None):
             if backend == "torchcodec":
                 raise
             stream.seek(0)
-    return _PyAVVideoDecoder(stream)
+    return _PyAVVideoDecoder(stream) if keyframe_index is None \
+        else _PyAVVideoDecoder(stream, keyframe_index)
 
 
 def _open_torchcodec_decoder(stream):
@@ -1526,12 +1554,162 @@ def _open_torchcodec_decoder(stream):
         return VideoDecoder(stream.read(), seek_mode="exact")
 
 
+class _FallbackVideoDecoder:
+
+    def __init__(self, stream, decoder):
+        self._stream = stream
+        self._decoder = decoder
+        self._pending = True
+
+    def __getitem__(self, index):
+        return self._call("__getitem__", index)
+
+    def get_frames_at(self, *, indices):
+        return self._call("get_frames_at", indices=indices)
+
+    def _call(self, method, *args, **kwargs):
+        try:
+            result = getattr(self._decoder, method)(*args, **kwargs)
+        except _video_decoder_fallback_errors() as error:
+            if not self._pending:
+                raise
+            self._pending = False
+            close = getattr(self._decoder, "close", None)
+            if close is not None:
+                close()
+            self._stream.seek(0)
+            try:
+                self._decoder = _open_torchcodec_decoder(self._stream)
+            except _video_decoder_fallback_errors():
+                raise error
+            return getattr(self._decoder, method)(*args, **kwargs)
+        self._pending = False
+        return result
+
+    def close(self):
+        close = getattr(self._decoder, "close", None)
+        if close is not None:
+            close()
+
+
+class _RangeBackedVideo(io.RawIOBase):
+
+    def __init__(self, length, read_ranges):
+        if length < 0:
+            raise ValueError("Video length must be non-negative.")
+        self._length = length
+        self._read_ranges = read_ranges
+        self._position = 0
+        self._segments = []
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        return self._position
+
+    def seek(self, offset, whence=io.SEEK_SET):
+        offset = operator.index(offset)
+        if whence == io.SEEK_SET:
+            position = offset
+        elif whence == io.SEEK_CUR:
+            position = self._position + offset
+        elif whence == io.SEEK_END:
+            position = self._length + offset
+        else:
+            raise ValueError("Invalid whence: %s" % whence)
+        if position < 0:
+            raise ValueError("Negative seek position: %s" % position)
+        self._position = position
+        return position
+
+    def read(self, size=-1):
+        read_all = size is None or size < 0
+        if read_all:
+            end = self._length
+        else:
+            end = min(self._position + operator.index(size), self._length)
+        if self._position >= end:
+            return b''
+        start = self._position
+        self._ensure([(start, end - start)])
+        self._position = end
+        return self._cached(start, end)
+
+    def readinto(self, value):
+        data = self.read(len(value))
+        value[:len(data)] = data
+        return len(data)
+
+    def prefetch(self, ranges):
+        self._ensure(ranges)
+
+    def _ensure(self, ranges):
+        requested = []
+        for offset, length in _merge_video_ranges(ranges):
+            if offset < 0 or length < 0 or offset + length > self._length:
+                raise ValueError("Video byte range is outside the payload.")
+            requested.extend(self._missing(offset, offset + length))
+        missing = _merge_video_ranges(requested)
+        if not missing:
+            return
+        bodies = self._read_ranges(missing)
+        if len(bodies) != len(missing):
+            raise IOError("Video range reader returned an invalid result count.")
+        for (offset, length), body in zip(missing, bodies):
+            body = bytes(body)
+            if len(body) != length:
+                raise IOError(
+                    "Video byte range changed while reading: expected %d, "
+                    "read %d." % (length, len(body))
+                )
+            self._segments.append((offset, offset + length, body))
+        self._segments.sort(key=lambda value: value[0])
+
+    def _missing(self, start, end):
+        missing = []
+        position = start
+        for segment_start, segment_end, unused_body in self._segments:
+            if segment_end <= position:
+                continue
+            if segment_start >= end:
+                break
+            if segment_start > position:
+                missing.append((
+                    position, min(segment_start, end) - position))
+            position = max(position, segment_end)
+            if position >= end:
+                break
+        if position < end:
+            missing.append((position, end - position))
+        return missing
+
+    def _cached(self, start, end):
+        result = []
+        position = start
+        for segment_start, segment_end, body in self._segments:
+            if segment_end <= position:
+                continue
+            if segment_start > position:
+                break
+            limit = min(segment_end, end)
+            result.append(body[
+                position - segment_start:limit - segment_start])
+            position = limit
+            if position == end:
+                return b''.join(result)
+        raise IOError("Video range cache is incomplete.")
+
+
 class _PyAVVideoDecoder:
 
     # Reuse common overlapping delta windows without retaining a whole video.
     _FRAME_CACHE_SIZE = 8
 
-    def __init__(self, stream):
+    def __init__(self, stream, keyframe_index=None):
         try:
             import av
         except ImportError as error:
@@ -1539,13 +1717,22 @@ class _PyAVVideoDecoder:
                 "Video-backed PaimonLeRobotDataset requires PyAV from "
                 "'pypaimon[lerobot]'."
             ) from error
-        self._container = av.open(stream)
-        self._stream = self._container.streams.video[0]
+        self._source = stream
+        self._keyframe_index = keyframe_index
+        self._anchor_ordinals = (
+            [entry[0] for entry in keyframe_index.keyframes]
+            if keyframe_index is not None else [])
+        self._container = None
+        self._stream = None
         self._next_index = 0
         self._timestamps = []
         self._keyframes = []
         self._cache = OrderedDict()
-        self._frames = iter(self._container.decode(self._stream))
+        self._frames = None
+        if keyframe_index is None:
+            self._container = av.open(stream)
+            self._stream = self._container.streams.video[0]
+            self._frames = iter(self._container.decode(self._stream))
 
     def __getitem__(self, index):
         index = operator.index(index)
@@ -1554,7 +1741,11 @@ class _PyAVVideoDecoder:
         frame = self._cache.pop(index, None)
         if frame is not None:
             self._cache[index] = frame
-            return self._tensor(frame)
+            return frame if self._keyframe_index is not None \
+                else self._tensor(frame)
+
+        if self._keyframe_index is not None:
+            return self._read_indexed([index])[0]
 
         indexed = (
             index > 0 and not self._timestamps
@@ -1597,6 +1788,141 @@ class _PyAVVideoDecoder:
                 "Video frame index %d is out of range." % index
             ) from error
         raise IndexError("Video frame index %d is out of range." % index)
+
+    def get_frames_at(self, *, indices):
+        import torch
+        frames = (
+            self._read_indexed(indices)
+            if self._keyframe_index is not None
+            else [self[index] for index in indices]
+        )
+        return SimpleNamespace(data=torch.stack(frames))
+
+    def _read_indexed(self, indices):
+        requested = [operator.index(index) for index in indices]
+        if any(index < 0 for index in requested):
+            raise IndexError("Video frame index is out of range.")
+        missing = sorted(set(requested) - set(self._cache))
+        decoded = self._decode_indexed(missing) if missing else {}
+        try:
+            return [
+                self._cache[index] if index in self._cache else decoded[index]
+                for index in requested
+            ]
+        except KeyError as error:
+            raise IndexError(
+                "Video frame index %d is out of range." % error.args[0]
+            ) from error
+
+    def _decode_indexed(self, indices):
+        import av
+        groups, ranges = self._indexed_plan(indices)
+        decoded = {}
+        source = _RangeBackedVideo(
+            self._video_length(), self._read_video_ranges)
+        try:
+            source.prefetch(_merge_video_ranges(
+                list(self._keyframe_index.metadata_ranges) + ranges))
+            with av.open(source) as container:
+                stream = container.streams.video[0]
+                for anchor, targets in sorted(groups.items()):
+                    self._decode_indexed_group(
+                        container,
+                        stream,
+                        anchor,
+                        sorted(targets),
+                        decoded,
+                    )
+            return decoded
+        finally:
+            source.close()
+
+    def _indexed_plan(self, indices):
+        mapping = self._keyframe_index
+        groups = {}
+        ranges = []
+        for index in indices:
+            preceding = bisect.bisect_right(
+                self._anchor_ordinals, index) - 1
+            if preceding < 0:
+                raise IndexError(
+                    "Video frame index %d is out of range." % index)
+            groups.setdefault(preceding, []).append(index)
+            start = mapping.keyframes[max(0, preceding - 1)][2]
+            range_end = preceding + 2
+            end = (
+                mapping.keyframes[range_end][2]
+                if range_end < len(mapping.keyframes)
+                else self._video_length()
+            )
+            ranges.append((start, end - start))
+        return groups, _merge_video_ranges(ranges)
+
+    def _decode_indexed_group(
+            self,
+            container,
+            stream,
+            anchor,
+            targets,
+            decoded):
+        anchor_ordinal, anchor_pts, unused_position = (
+            self._keyframe_index.keyframes[anchor])
+        container.seek(
+            anchor_pts, backward=True, any_frame=False, stream=stream)
+        ordinal = anchor_ordinal
+        found_anchor = False
+        remaining = set(targets)
+        found = {}
+        for frame in container.decode(stream):
+            if not found_anchor:
+                if frame.pts != anchor_pts or not frame.key_frame:
+                    continue
+                found_anchor = True
+            if ordinal in remaining:
+                found[ordinal] = self._tensor(frame)
+                remaining.remove(ordinal)
+                if not remaining:
+                    decoded.update(found)
+                    for index, tensor in found.items():
+                        self._remember(index, tensor)
+                    return
+            ordinal += 1
+            if ordinal > targets[-1]:
+                break
+        missing = min(remaining) if remaining else targets[-1]
+        raise ValueError(
+            "Cannot decode indexed video frame %d from keyframe %d."
+            % (missing, anchor_ordinal)
+        )
+
+    def _video_length(self):
+        length = getattr(self._source, "video_length", None)
+        if length is not None:
+            return length
+        position = self._source.tell()
+        try:
+            return self._source.seek(0, 2)
+        finally:
+            self._source.seek(position)
+
+    def _read_video_ranges(self, ranges):
+        reader = getattr(self._source, "video_read_ranges", None)
+        if callable(reader):
+            bodies = reader(ranges)
+        else:
+            bodies = []
+            for offset, length in ranges:
+                self._source.seek(offset)
+                bodies.append(self._source.read(length))
+        if len(bodies) != len(ranges):
+            raise IOError("Video range reader returned an invalid result count.")
+        for (unused_offset, length), body in zip(ranges, bodies):
+            if len(body) != length:
+                raise IOError(
+                    "Video byte range changed while reading: expected %d, "
+                    "read %d." % (length, len(body))
+                )
+        return bodies
 
     def _index_packets(self):
         entries = []
@@ -1647,7 +1973,23 @@ class _PyAVVideoDecoder:
         return torch.from_numpy(array).permute(2, 0, 1)
 
     def close(self):
-        self._container.close()
+        if self._container is not None:
+            self._container.close()
+
+
+def _merge_video_ranges(ranges):
+    merged = []
+    for offset, length in sorted(ranges):
+        end = offset + length
+        if merged and offset <= merged[-1][0] + merged[-1][1]:
+            previous_offset, previous_length = merged[-1]
+            merged[-1] = (
+                previous_offset,
+                max(previous_offset + previous_length, end) - previous_offset,
+            )
+        else:
+            merged.append((offset, length))
+    return merged
 
 
 def _decode_video_frames(decoder, frame_indices, unused_rows):
