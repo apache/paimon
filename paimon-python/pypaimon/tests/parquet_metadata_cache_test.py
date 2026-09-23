@@ -95,6 +95,9 @@ class _CountingFileSystemHandler(pafs.FSSpecHandler):
         self.calls.append("open_input_file")
         return super().open_input_file(path)
 
+    def register_file_size(self, path, file_size):
+        self.calls.append(("register_file_size", path, file_size))
+
 
 class FileFormatMetadataCacheTest(unittest.TestCase):
     def setUp(self):
@@ -231,6 +234,37 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
                     self.assertEqual(opens, handler.calls.count("open_input_file"))
                 self.assertEqual({"value": list(range(10))}, results[0])
                 self.assertEqual(results[0], results[1])
+
+    def test_forwards_known_file_size(self):
+        parquet_format = unittest.mock.Mock()
+        fragment = unittest.mock.Mock(physical_schema=pa.schema([]))
+        parquet_format.make_fragment.return_value = fragment
+        with patch.object(
+                reader_module.ds, "ParquetFileFormat",
+                return_value=parquet_format), patch.object(
+                    reader_module.ds, "FileSystemDataset",
+                    return_value=unittest.mock.sentinel.dataset):
+            dataset = reader_module._file_format_dataset(
+                self.file_io, "parquet", self.paths[0], 0, 123)
+        self.assertIs(unittest.mock.sentinel.dataset, dataset)
+        expected_options = (
+            {} if reader_module._pyarrow_lt_7()
+            else {"file_size": 123})
+        parquet_format.make_fragment.assert_called_once_with(
+            self.paths[0], filesystem=self.file_io.filesystem,
+            **expected_options)
+
+        handler = _CountingFileSystemHandler()
+        self.file_io.filesystem = pafs.PyFileSystem(handler)
+        file_size = os.path.getsize(self.paths[0])
+
+        dataset = reader_module._file_format_dataset(
+            self.file_io, "parquet", self.paths[0], 0, file_size)
+
+        self.assertEqual({"value": list(range(10))},
+                         dataset.to_table().to_pydict())
+        self.assertIn(
+            ("register_file_size", self.paths[0], file_size), handler.calls)
 
     def test_fragment_metadata_is_reused_without_io(self):
         handler = _CountingFileSystemHandler()
