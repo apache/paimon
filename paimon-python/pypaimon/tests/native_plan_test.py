@@ -18,7 +18,6 @@
 import json
 import sys
 import unittest
-from datetime import datetime
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -679,15 +678,16 @@ class NativePlanTest(unittest.TestCase):
         })
         self.assertEqual(table.table_schema.options, options)
 
-    def test_resolved_schema_converts_timestamp_to_millis(self):
-        options = {'scan.timestamp': '2026-09-22T00:00:00'}
-        table = SimpleNamespace(
-            table_schema=TableSchema(0, [], options=options))
-        resolved = json.loads(_resolved_schema_json(table))['options']
-        self.assertEqual(resolved['scan.timestamp-millis'],
-                         str(int(datetime(2026, 9, 22).timestamp() * 1000)))
-        self.assertNotIn('scan.timestamp', resolved)
-        self.assertEqual(table.table_schema.options, options)
+    def test_resolved_schema_preserves_timestamp_selectors(self):
+        for key, value in (('scan.timestamp', '2026-09-22T00:00:00'),
+                           ('scan.timestamp-millis', 1790035200000)):
+            with self.subTest(key=key):
+                options = {key: value}
+                table = SimpleNamespace(
+                    table_schema=TableSchema(0, [], options=options))
+                resolved = json.loads(_resolved_schema_json(table))['options']
+                self.assertEqual(resolved, {key: str(value)})
+                self.assertEqual(table.table_schema.options, options)
 
     @unittest.skipIf(sys.version_info < (3, 8),
                      "importlib.metadata requires Python 3.8")

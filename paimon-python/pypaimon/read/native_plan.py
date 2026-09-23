@@ -27,7 +27,6 @@ from typing import List, Optional, Tuple
 from packaging.version import InvalidVersion, Version
 
 from pypaimon.common.options.config import CatalogOptions, OssOptions
-from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.plan import Plan
@@ -197,16 +196,10 @@ def _resolved_schema_file_io_options(table) -> Optional[dict]:
 
 
 def _resolved_schema_json(table) -> str:
-    """Preserve all effective table options, normalizing values for Rust."""
+    """Preserve all effective table options as strings for Rust."""
     from pypaimon.common.json_util import JSON
     options = {str(key): _option_value_to_string(value)
                for key, value in table.table_schema.options.items() if value is not None}
-    # Rust takes epoch millis but PyPaimon also accepts a timestamp string.
-    timestamp = options.pop(CoreOptions.SCAN_TIMESTAMP.key(), None)
-    if timestamp is not None:
-        from pypaimon.snapshot.time_travel_util import _parse_timestamp_to_millis
-        options[CoreOptions.SCAN_TIMESTAMP_MILLIS.key()] = str(
-            _parse_timestamp_to_millis(timestamp))
     return JSON.to_json(table.table_schema.copy(new_options=options))
 
 
