@@ -49,6 +49,28 @@ class RESTTokenFileIOTest(unittest.TestCase):
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
 
+    def test_default_window_keeps_a_token_with_more_than_five_minutes_left(self):
+        file_io = RESTTokenFileIO(self.identifier, "oss://bucket/table", self.catalog_options)
+        now = 1700000000
+        token = RESTToken({}, (now + 30 * 60) * 1000)
+        with patch('pypaimon.catalog.rest.rest_token_file_io.time.time', return_value=now):
+            self.assertFalse(file_io._is_token_expired(token))
+
+    def test_default_window_expires_a_token_with_less_than_five_minutes_left(self):
+        file_io = RESTTokenFileIO(self.identifier, "oss://bucket/table", self.catalog_options)
+        now = 1700000000
+        token = RESTToken({}, (now + 2 * 60) * 1000)
+        with patch('pypaimon.catalog.rest.rest_token_file_io.time.time', return_value=now):
+            self.assertTrue(file_io._is_token_expired(token))
+
+    def test_configured_window_is_used_instead_of_the_default(self):
+        options = Options({CatalogOptions.DATA_TOKEN_EXPIRATION_SAFE_TIME.key(): "1 h"})
+        file_io = RESTTokenFileIO(self.identifier, "oss://bucket/table", options)
+        now = 1700000000
+        token = RESTToken({}, (now + 30 * 60) * 1000)
+        with patch('pypaimon.catalog.rest.rest_token_file_io.time.time', return_value=now):
+            self.assertTrue(file_io._is_token_expired(token))
+
     def test_blob_presigned_url_bound_table_root(self):
         root = "oss://bucket/table-a"
         file_io = RESTTokenFileIO(self.identifier, root, self.catalog_options)

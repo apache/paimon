@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from datetime import timedelta
+
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options.config_options import ConfigOptions
 
@@ -106,6 +108,10 @@ class CatalogOptions:
     TOKEN = ConfigOptions.key("token").string_type().no_default_value().with_description("Authentication token")
     DATA_TOKEN_ENABLED = ConfigOptions.key("data-token.enabled").boolean_type().default_value(False).with_description(
         "Enable data token")
+    DATA_TOKEN_EXPIRATION_SAFE_TIME = ConfigOptions.key(
+        "data-token.expiration-safe-time").duration_type().default_value(timedelta(minutes=5)).with_description(
+        "Refresh a data token when less than this remains of its lifetime. Keep it below the lifetime "
+        "of the tokens the server vends, otherwise every file access requests a new token.")
     DLF_REGION = ConfigOptions.key("dlf.region").string_type().no_default_value().with_description("DLF region")
     DLF_ACCESS_KEY_ID = ConfigOptions.key("dlf.access-key-id").string_type().no_default_value().with_description(
         "DLF access key ID")
