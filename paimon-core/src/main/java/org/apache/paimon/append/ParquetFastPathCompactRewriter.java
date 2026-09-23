@@ -23,12 +23,11 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.SimpleColStats;
-import org.apache.paimon.format.parquet.ParquetInputFile;
 import org.apache.paimon.format.parquet.ParquetRowGroupCopier;
 import org.apache.paimon.format.parquet.ParquetRowGroupCopyChecker;
 import org.apache.paimon.format.parquet.ParquetRowGroupCopyChecker.Incompatibility;
+import org.apache.paimon.format.parquet.ParquetRowGroupCopySource;
 import org.apache.paimon.format.parquet.ParquetSimpleStatsExtractor;
-import org.apache.paimon.format.parquet.ParquetUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
@@ -43,9 +42,6 @@ import org.apache.paimon.stats.SimpleStatsMerger;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.Pair;
-
-import org.apache.paimon.shade.org.apache.parquet.hadoop.metadata.BlockMetaData;
-import org.apache.paimon.shade.org.apache.parquet.hadoop.metadata.ParquetMetadata;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -135,19 +131,14 @@ public class ParquetFastPathCompactRewriter {
                     return null;
                 }
                 Path filePath = pathFactory.toPath(file);
-                footerRequests.add(
-                        new FooterRequest(
-                                i,
-                                file,
-                                ParquetInputFile.fromPath(fileIO, filePath, file.fileSize()),
-                                filePath));
+                footerRequests.add(new FooterRequest(i, file, filePath));
             }
 
             FooterReadStats footerReadStats = readFooters(fileIO, options, footerRequests);
             List<PreparedInput> preparedInputs = new ArrayList<>(footerRequests.size());
             for (FooterRequest request : footerRequests) {
                 IndexedFooter indexedFooter = footerReadStats.orderedFooters[request.fileIndex];
-                Incompatibility incompatibility = checker.checkFooter(indexedFooter.footer);
+                Incompatibility incompatibility = indexedFooter.source.check(checker);
                 if (incompatibility != null) {
                     reportMiss(
                             metrics,
@@ -159,20 +150,17 @@ public class ParquetFastPathCompactRewriter {
                                     checker.expectedCodec()));
                     return null;
                 }
-                preparedInputs.add(
-                        new PreparedInput(request.file, request.inputFile, indexedFooter.footer));
+                preparedInputs.add(new PreparedInput(request.file, indexedFooter.source));
             }
 
             long prepareMs = elapsedMillis(startNanos);
             long footerReadWallMs = nanosToMillis(footerReadStats.footerReadWallNanos);
             long footerReadSumMs = nanosToMillis(footerReadStats.footerReadSumNanos);
             int inputRowGroups =
-                    preparedInputs.stream().mapToInt(input -> input.blocks.size()).sum();
+                    preparedInputs.stream().mapToInt(input -> input.source.blockCount()).sum();
             List<ParquetRowGroupCopier.Input> copierInputs = new ArrayList<>(preparedInputs.size());
             for (PreparedInput preparedInput : preparedInputs) {
-                copierInputs.add(
-                        new ParquetRowGroupCopier.Input(
-                                preparedInput.inputFile, preparedInput.metadata));
+                copierInputs.add(preparedInput.source.copierInput());
             }
 
             ParquetRowGroupCopier copier =
@@ -310,7 +298,6 @@ public class ParquetFastPathCompactRewriter {
             CoreOptions options)
             throws IOException {
         List<SimpleStats> statsToMerge = new ArrayList<>();
-        List<BlockMetaData> partialBlocks = new ArrayList<>();
         Map<Integer, List<Integer>> blockIndicesByFile = new LinkedHashMap<>();
         for (ParquetRowGroupCopier.BlockContribution contribution : contributions) {
             blockIndicesByFile
@@ -322,17 +309,17 @@ public class ParquetFastPathCompactRewriter {
             int fileIndex = entry.getKey();
             PreparedInput preparedInput = preparedInputs.get(fileIndex);
             List<Integer> blockIndices = entry.getValue();
-            if (isFullFile(blockIndices, preparedInput.blocks.size())) {
+            if (isFullFile(blockIndices, preparedInput.source.blockCount())) {
                 statsToMerge.add(preparedInput.file.valueStats());
             } else {
-                for (int blockIndex : blockIndices) {
-                    partialBlocks.add(preparedInput.blocks.get(blockIndex));
-                }
+                statsToMerge.add(
+                        statsFromBlocks(
+                                preparedInput.source,
+                                blockIndices,
+                                writeType,
+                                valueStatsCols,
+                                options));
             }
-        }
-
-        if (!partialBlocks.isEmpty()) {
-            statsToMerge.add(statsFromBlocks(partialBlocks, writeType, valueStatsCols, options));
         }
         return SimpleStatsMerger.merge(statsToMerge, writeType, valueStatsCols);
     }
@@ -350,7 +337,8 @@ public class ParquetFastPathCompactRewriter {
     }
 
     private static SimpleStats statsFromBlocks(
-            List<BlockMetaData> blocks,
+            ParquetRowGroupCopySource source,
+            List<Integer> blockIndexes,
             RowType writeType,
             @Nullable List<String> valueStatsCols,
             CoreOptions options)
@@ -359,7 +347,7 @@ public class ParquetFastPathCompactRewriter {
                 createStatsFactories(options.statsMode(), options, writeType.getFieldNames());
         ParquetSimpleStatsExtractor extractor =
                 new ParquetSimpleStatsExtractor(options.toConfiguration(), writeType, collectors);
-        SimpleColStats[] colStats = extractor.extractFromBlocks(blocks);
+        SimpleColStats[] colStats = source.extractBlockStats(extractor, blockIndexes);
         Pair<List<String>, SimpleStats> converted =
                 new SimpleStatsConverter(writeType, options.statsDenseStore()).toBinary(colStats);
         if (!SimpleStatsMerger.sameValueStatsCols(valueStatsCols, converted.getLeft())) {
@@ -479,7 +467,7 @@ public class ParquetFastPathCompactRewriter {
             FooterRequest request, FileIO fileIO, CoreOptions options) throws IOException {
         return new IndexedFooter(
                 request.fileIndex,
-                ParquetUtil.readFooter(
+                ParquetRowGroupCopySource.read(
                         fileIO,
                         request.filePath,
                         request.file.fileSize(),
@@ -504,41 +492,33 @@ public class ParquetFastPathCompactRewriter {
 
     private static final class PreparedInput {
         private final DataFileMeta file;
-        private final ParquetInputFile inputFile;
-        private final ParquetMetadata metadata;
-        private final List<BlockMetaData> blocks;
+        private final ParquetRowGroupCopySource source;
 
-        private PreparedInput(
-                DataFileMeta file, ParquetInputFile inputFile, ParquetMetadata metadata) {
+        private PreparedInput(DataFileMeta file, ParquetRowGroupCopySource source) {
             this.file = file;
-            this.inputFile = inputFile;
-            this.metadata = metadata;
-            this.blocks = metadata.getBlocks();
+            this.source = source;
         }
     }
 
     private static final class FooterRequest {
         private final int fileIndex;
         private final DataFileMeta file;
-        private final ParquetInputFile inputFile;
         private final Path filePath;
 
-        private FooterRequest(
-                int fileIndex, DataFileMeta file, ParquetInputFile inputFile, Path filePath) {
+        private FooterRequest(int fileIndex, DataFileMeta file, Path filePath) {
             this.fileIndex = fileIndex;
             this.file = file;
-            this.inputFile = inputFile;
             this.filePath = filePath;
         }
     }
 
     private static final class IndexedFooter {
         private final int fileIndex;
-        private final ParquetMetadata footer;
+        private final ParquetRowGroupCopySource source;
 
-        private IndexedFooter(int fileIndex, ParquetMetadata footer) {
+        private IndexedFooter(int fileIndex, ParquetRowGroupCopySource source) {
             this.fileIndex = fileIndex;
-            this.footer = footer;
+            this.source = source;
         }
     }
 
