@@ -128,12 +128,14 @@ class AoReaderTest(unittest.TestCase):
         c.close()
 
         pb = table.new_read_builder().new_predicate_builder()
+        # >= 2500 over 3000 rows fully filters the first two 1024-row batches, so the
+        # test distinguishes the loop from an implementation that only retries once.
         read_builder = table.new_read_builder().with_filter(
-            pb.greater_or_equal('user_id', 2000))
+            pb.greater_or_equal('user_id', 2500))
         result = self._read_test_table(read_builder)
 
         self.assertEqual(
-            sorted(result.column('user_id').to_pylist()), list(range(2000, n)))
+            sorted(result.column('user_id').to_pylist()), list(range(2500, n)))
 
     def test_lance_ao_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
