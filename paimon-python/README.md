@@ -219,9 +219,11 @@ interrupts native reads that are still in flight. A missing reader capability,
 unsupported route, or native-reader construction failure falls back to Python;
 I/O and data errors raised after streaming starts surface to the caller.
 
-With Rust main's `Table.from_resolved_schema()` binding, filesystem and JDBC catalog
-tables preserve the Python table's resolved schema and complete effective
-options. Stale table objects, historical schemas, and `copy()` overrides or
+Native planning and reading require Rust's resolved-schema bindings:
+`Table.from_resolved_schema()` for filesystem, JDBC and path-based tables, and
+`Table.copy_with_resolved_schema()` for REST tables. The adapter passes the Python
+table's resolved schema and complete effective options without an option whitelist.
+Stale table objects, historical schemas, and `copy()` overrides or
 option removals no longer require catalog reloading or Python planning.
 Tables opened with `FileStoreTable.from_path(path, file_io_options=None)` use
 the same path with standard local, PyArrow or resolving FileIO. Storage options
