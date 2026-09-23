@@ -50,6 +50,7 @@ import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.CommitScanner;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
+import org.apache.paimon.operation.commit.ReassignCompactChangesProvider;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.ManifestMergeResult;
@@ -875,11 +876,50 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             boolean allowRollback,
             boolean detectConflicts,
             @Nullable String statsFileName) {
+        Long lastSafeSnapshot = options.commitLastSafeSnapshot().orElse(null);
+        if (commitKind == CommitKind.COMPACT
+                && options.dataEvolutionEnabled()
+                && !conflictDetection.shouldCheckRowIdFromSnapshot(commitKind)
+                && lastSafeSnapshot != null
+                && lastSafeSnapshot >= 0) {
+            CommitChanges original = changesProvider.provide(null);
+            if (ReassignCompactChangesProvider.supports(original)) {
+                changesProvider =
+                        new ReassignCompactChangesProvider(
+                                fileIO,
+                                pathFactory,
+                                snapshotManager,
+                                indexManifestFile,
+                                lastSafeSnapshot,
+                                original);
+            }
+        }
         int retryCount = 0;
         RetryCommitResult retryResult = null;
         long startMillis = System.currentTimeMillis();
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+            if (changesProvider instanceof ReassignCompactChangesProvider
+                    && retryResult instanceof CommitFailRetryResult
+                    && latestSnapshot != null) {
+                Snapshot previous = ((CommitFailRetryResult) retryResult).latestSnapshot;
+                long first = previous == null ? Snapshot.FIRST_SNAPSHOT_ID : previous.id() + 1;
+                // Resolve an uncertain successful commit before checking inputs it already removed.
+                boolean committed = false;
+                for (long id = first; id <= latestSnapshot.id(); id++) {
+                    Snapshot candidate = snapshotManager.snapshot(id);
+                    if (candidate.commitUser().equals(commitUser)
+                            && candidate.commitIdentifier() == identifier
+                            && candidate.commitKind() == commitKind) {
+                        lastCommittedSnapshotId = candidate.id();
+                        committed = true;
+                        break;
+                    }
+                }
+                if (committed) {
+                    break;
+                }
+            }
             CommitChanges changes = changesProvider.provide(latestSnapshot);
             CommitResult result =
                     tryCommitOnce(
@@ -894,7 +934,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             allowRollback,
                             latestSnapshot,
                             detectConflicts,
-                            statsFileName);
+                            statsFileName,
+                            changesProvider.rebasedReassignments());
 
             if (result.isSuccess()) {
                 break;
@@ -1016,6 +1057,36 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Snapshot latestSnapshot,
             boolean detectConflicts,
             @Nullable String newStatsFileName) {
+        return tryCommitOnce(
+                retryResult,
+                deltaFiles,
+                changelogFiles,
+                indexFiles,
+                identifier,
+                watermark,
+                properties,
+                commitKind,
+                allowRollback,
+                latestSnapshot,
+                detectConflicts,
+                newStatsFileName,
+                Collections.emptySet());
+    }
+
+    private CommitResult tryCommitOnce(
+            @Nullable RetryCommitResult retryResult,
+            List<ManifestEntry> deltaFiles,
+            List<ManifestEntry> changelogFiles,
+            List<IndexManifestEntry> indexFiles,
+            long identifier,
+            @Nullable Long watermark,
+            Map<String, String> properties,
+            CommitKind commitKind,
+            boolean allowRollback,
+            @Nullable Snapshot latestSnapshot,
+            boolean detectConflicts,
+            @Nullable String newStatsFileName,
+            Set<Long> rebasedReassignments) {
         long startMillis = System.currentTimeMillis();
 
         // Check if the commit has been completed. At this point, there will be no more repeated
@@ -1060,7 +1131,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<BinaryRow> changedPartitions = null;
         if (strictModeChecker != null) {
             changedPartitions = changedPartitions(deltaFiles, indexFiles);
-            strictModeChecker.check(newSnapshotId, commitKind, changedPartitions);
+            strictModeChecker.check(
+                    newSnapshotId, commitKind, changedPartitions, rebasedReassignments);
             strictModeChecker.update(newSnapshotId - 1);
         }
 

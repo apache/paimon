@@ -31,6 +31,7 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -66,8 +67,19 @@ public class StrictModeChecker {
 
     public void check(
             long newSnapshotId, CommitKind newCommitKind, List<BinaryRow> newChangedPartitions) {
+        check(newSnapshotId, newCommitKind, newChangedPartitions, Collections.emptySet());
+    }
+
+    public void check(
+            long newSnapshotId,
+            CommitKind newCommitKind,
+            List<BinaryRow> newChangedPartitions,
+            Set<Long> rebasedReassignments) {
         Set<BinaryRow> newPartitions = new HashSet<>(newChangedPartitions);
         for (long id = lastSafeSnapshot + 1; id < newSnapshotId; id++) {
+            if (newCommitKind == CommitKind.COMPACT && rebasedReassignments.contains(id)) {
+                continue;
+            }
             Snapshot snapshot = snapshotManager.snapshot(id);
             if (snapshot.commitUser().equals(commitUser)) {
                 continue;
