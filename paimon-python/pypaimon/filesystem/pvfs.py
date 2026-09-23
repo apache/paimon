@@ -122,15 +122,15 @@ class PVFSTableIdentifier(PVFSIdentifier):
 
 @dataclass
 class PaimonRealStorage:
-    TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
-
     token: Dict[str, str]
     expires_at_millis: Optional[int]
     file_system: AbstractFileSystem
+    expiration_safe_time_millis: int = int(
+        CatalogOptions.DATA_TOKEN_EXPIRATION_SAFE_TIME.default_value().total_seconds() * 1000)
 
     def need_refresh(self) -> bool:
         if self.expires_at_millis is not None:
-            return self.expires_at_millis - int(time.time() * 1000) < self.TOKEN_EXPIRATION_SAFE_TIME_MILLIS
+            return self.expires_at_millis - int(time.time() * 1000) < self.expiration_safe_time_millis
         return False
 
 
@@ -865,7 +865,9 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 paimon_real_storage = PaimonRealStorage(
                     token=load_token_response.token,
                     expires_at_millis=load_token_response.expires_at_millis,
-                    file_system=fs
+                    file_system=fs,
+                    expiration_safe_time_millis=int(
+                        self.options.get(CatalogOptions.DATA_TOKEN_EXPIRATION_SAFE_TIME).total_seconds() * 1000)
                 )
                 self._fs_cache[pvfs_table_identifier] = paimon_real_storage
                 if cache_value is not None:

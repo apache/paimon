@@ -58,6 +58,8 @@ class RESTTokenFileIO(FileIO):
             # Assume it's already an Options object
             self.catalog_options = catalog_options
         self.properties = self.catalog_options or Options({})  # For compatibility with refresh_token()
+        self.expiration_safe_time_millis = int(
+            self.properties.get(CatalogOptions.DATA_TOKEN_EXPIRATION_SAFE_TIME).total_seconds() * 1000)
         self.token: Optional[RESTToken] = None
         self.api_instance: Optional[RESTApi] = None
         self.log = logging.getLogger(__name__)
@@ -283,7 +285,7 @@ class RESTTokenFileIO(FileIO):
             return True
         current_time = int(time.time() * 1000)
         return (token.expire_at_millis - current_time) < max(
-            RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS, minimum_validity_millis)
+            self.expiration_safe_time_millis, minimum_validity_millis)
 
     @staticmethod
     def _has_remaining_lifetime(
