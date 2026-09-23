@@ -178,17 +178,21 @@ The factory auto-dispatches based on the bytes content (`BLOBDESC`,
 
 ## Python BLOB index cache
 
-The Python reader caches parsed indexes for up to 16 BLOB files per process.
-Set `PYPAIMON_BLOB_INDEX_CACHE_SIZE` before importing PyPaimon to change this
-entry limit; `0` disables caching. For example:
+Set `blob.index-cache-size` in Catalog options to control how many BLOB file
+indexes the Python reader caches (default: 16; 0 disables caching):
 
-```bash
-PYPAIMON_BLOB_INDEX_CACHE_SIZE=32 python app.py
+```python
+catalog = CatalogFactory.create({
+    "warehouse": "file:///tmp/warehouse",
+    "blob.index-cache-size": "32",
+})
 ```
 
-This counts files, not bytes; memory use depends on their index sizes. Configure
-worker processes too when using Ray or multiprocessing. This setting does not
-configure the Rust native reader or `.video` metadata.
+Tables from the same Catalog share the cache. Separate Catalog instances are
+isolated; serialized contexts retain the capacity but start with an empty cache.
+The limit counts files, not bytes. It does not configure Rust native reads or
+`.video` metadata. Readers created without a Catalog retain the process-wide
+16-entry cache.
 
 ## See Also
 

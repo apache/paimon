@@ -99,6 +99,9 @@ class CatalogEnvironment:
         context = getattr(self.catalog_loader, "context", None)
         return context() if callable(context) else None
 
+    def blob_index_cache(self):
+        return getattr(self.catalog_context(), "blob_index_cache", None)
+
     def dependency_read_context(self) -> Optional[CatalogContext]:
         context = self.catalog_context()
         if self.identifier is None or context is None:

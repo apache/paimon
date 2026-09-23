@@ -3185,7 +3185,7 @@ class BlobEndToEndTest(unittest.TestCase):
             writer.close()
 
     def test_blob_index_cache_capacity_controls_repeated_file_reads(self):
-        from pypaimon.read.reader import format_blob_reader as module
+        from pypaimon.catalog.catalog_context import CatalogContext
 
         field = DataField(0, "blob_field", AtomicType("BLOB"))
         file_io = LocalFileIO(self.temp_dir, Options({}))
@@ -3194,9 +3194,9 @@ class BlobEndToEndTest(unittest.TestCase):
             self._write_single_blob(path, field, bytes([i]))
         open_stream = file_io.new_input_stream
         for capacity, expected_reads in [(16, 34), (32, 0), (0, 34)]:
-            with self.subTest(capacity=capacity), patch.dict(
-                    os.environ, {"PYPAIMON_BLOB_INDEX_CACHE_SIZE": str(capacity)}):
-                cache = module._create_blob_index_cache()
+            with self.subTest(capacity=capacity):
+                cache = CatalogContext.create_from_options(
+                    Options({"blob.index-cache-size": str(capacity)})).blob_index_cache
                 streams = []
 
                 def counted_open(path):
@@ -3204,8 +3204,7 @@ class BlobEndToEndTest(unittest.TestCase):
                     streams.append(stream)
                     return stream
 
-                with patch.object(module, "_BLOB_INDEX_CACHE", cache), patch.object(
-                        file_io, "new_input_stream", side_effect=counted_open):
+                with patch.object(file_io, "new_input_stream", side_effect=counted_open):
                     results = []
                     reads = []
                     for _ in range(2):
@@ -3213,7 +3212,8 @@ class BlobEndToEndTest(unittest.TestCase):
                         descriptors = []
                         for path in paths:
                             reader = FormatBlobReader(
-                                file_io, path, [field.name], [field], None, True)
+                                file_io, path, [field.name], [field], None, True,
+                                index_cache=cache)
                             try:
                                 descriptors.extend(reader.read_arrow_batch().column(0).to_pylist())
                             finally:
@@ -3222,19 +3222,46 @@ class BlobEndToEndTest(unittest.TestCase):
                         reads.append(sum(stream.read.call_count for stream in streams))
                     self.assertEqual(reads, [34, expected_reads])
                     self.assertEqual(results[0], results[1])
-                    self.assertEqual(len(cache), min(capacity, 17))
+                    self.assertEqual(len(cache.cache), min(capacity, 17))
 
-    def test_blob_index_cache_configuration(self):
-        from pypaimon.read.reader.format_blob_reader import _create_blob_index_cache
+    def test_blob_index_cache_catalog_scope_and_serialization(self):
+        import pickle
+        from pypaimon import CatalogFactory, Schema
+        from pypaimon.catalog.catalog_context import CatalogContext
 
-        with patch.dict(os.environ):
-            os.environ.pop("PYPAIMON_BLOB_INDEX_CACHE_SIZE", None)
-            self.assertEqual(_create_blob_index_cache().maxsize, 16)
-            for value in ("-1", "1.5", "invalid", ""):
-                with self.subTest(value=value):
-                    os.environ["PYPAIMON_BLOB_INDEX_CACHE_SIZE"] = value
-                    with self.assertRaisesRegex(ValueError, "non-negative integer"):
-                        _create_blob_index_cache()
+        self.assertEqual(CatalogContext.create_from_options(
+            Options({})).blob_index_cache.cache.maxsize, 16)
+        for value in ("-1", "invalid"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                CatalogContext.create_from_options(Options({"blob.index-cache-size": value}))
+
+        options = {"warehouse": self.temp_dir, "blob.index-cache-size": "32"}
+        catalog = CatalogFactory.create(options)
+        catalog.create_database("db", True)
+        for name in ("a", "b"):
+            catalog.create_table("db." + name, Schema.from_pyarrow_schema(
+                pa.schema([("value", pa.binary())])), False)
+        first = catalog.get_table("db.a")
+        second = catalog.get_table("db.b")
+        cache = first.catalog_environment.blob_index_cache()
+        self.assertIs(cache, second.catalog_environment.blob_index_cache())
+        self.assertIs(cache, first.copy({"blob-as-descriptor": "true"})
+                      .catalog_environment.blob_index_cache())
+        cache.cache["file.blob"] = ((1,), (0,))
+
+        other = CatalogFactory.create(dict(options, **{"blob.index-cache-size": "16"}))
+        other_cache = other.get_table("db.a").catalog_environment.blob_index_cache()
+        self.assertIsNot(cache, other_cache)
+        self.assertEqual(other_cache.cache.maxsize, 16)
+        self.assertEqual(len(other_cache.cache), 0)
+
+        restored = pickle.loads(pickle.dumps(first.catalog_environment))
+        restored_cache = restored.blob_index_cache()
+        self.assertEqual(restored_cache.cache.maxsize, 32)
+        self.assertEqual(len(restored_cache.cache), 0)
+        self.assertIsNot(restored_cache.lock, cache.lock)
+        with restored_cache.lock:
+            restored_cache.cache["worker.blob"] = ((1,), (0,))
 
     def test_blob_end_to_end(self):
         # Set up file I/O
@@ -3611,13 +3638,17 @@ class BlobEndToEndTest(unittest.TestCase):
         evolution_read = DataEvolutionSplitRead(
             table, None, [field], split, False)
 
-        with patch("pypaimon.read.split_read.FormatBlobReader") as reader_cls:
+        from pypaimon.common.blob_index_cache import BlobIndexCache
+        cache = BlobIndexCache(32)
+        with patch.object(table.catalog_environment, "blob_index_cache", return_value=cache), \
+                patch("pypaimon.read.split_read.FormatBlobReader") as reader_cls:
             def assert_file_size():
                 args, kwargs = reader_cls.call_args
                 arguments = inspect.signature(FormatBlobReader).bind_partial(
                     *args, **kwargs
                 ).arguments
                 self.assertEqual(123, arguments.get("file_size"))
+                self.assertIs(cache, arguments.get("index_cache"))
 
             raw_read.file_reader_supplier(file, False, [field.name], False)
             assert_file_size()

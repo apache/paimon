@@ -405,7 +405,8 @@ class SplitRead(ABC):
                                              batch_size=batch_size,
                                              row_indices=row_indices,
                                              blob_parallelism=blob_parallelism,
-                                             file_size=file.file_size)
+                                             file_size=file.file_size,
+                                             index_cache=self.table.catalog_environment.blob_index_cache())
         elif file_format == CoreOptions.FILE_FORMAT_LANCE:
             if has_nested:
                 raise NotImplementedError(
@@ -1763,6 +1764,7 @@ class DataEvolutionSplitRead(SplitRead):
             row_indices=row_indices,
             blob_parallelism=blob_parallelism,
             file_size=file.file_size,
+            index_cache=self.table.catalog_environment.blob_index_cache(),
         )
 
     def _split_field_bunches(self, need_merge_files: List[DataFileMeta]) -> List[FieldBunch]:

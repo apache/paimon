@@ -87,6 +87,13 @@ class PVFSOptions:
 
 
 class CatalogOptions:
+    BLOB_INDEX_CACHE_SIZE = (
+        ConfigOptions.key("blob.index-cache-size")
+        .int_type()
+        .default_value(16)
+        .with_description("Python BLOB index cache entries per catalog; 0 disables caching.")
+    )
+
     URI = ConfigOptions.key("uri").string_type().no_default_value().with_description("Catalog URI")
     METASTORE = ConfigOptions.key("metastore").string_type().default_value("filesystem").with_description(
         "Metastore type")
