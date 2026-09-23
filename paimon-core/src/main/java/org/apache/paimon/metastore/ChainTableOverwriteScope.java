@@ -46,16 +46,30 @@ final class ChainTableOverwriteScope {
 
     private ChainTableOverwriteScope() {}
 
-    static void setFreshlyWrittenDeltaPartitions(Set<BinaryRow> partitions) {
+    /**
+     * Installs {@code partitions} as the freshly-written set and returns whatever was installed
+     * before, so the caller restores it in a finally rather than clearing unconditionally.
+     * Restoring keeps the scheme correct even if the truncate ever nests another chain overwrite on
+     * the same thread.
+     */
+    static Set<BinaryRow> setFreshlyWrittenDeltaPartitions(Set<BinaryRow> partitions) {
+        Set<BinaryRow> previous = FRESHLY_WRITTEN_DELTA_PARTITIONS.get();
         FRESHLY_WRITTEN_DELTA_PARTITIONS.set(partitions);
+        return previous;
     }
 
-    static void clear() {
-        FRESHLY_WRITTEN_DELTA_PARTITIONS.remove();
+    static void restore(Set<BinaryRow> previous) {
+        if (previous == null) {
+            FRESHLY_WRITTEN_DELTA_PARTITIONS.remove();
+        } else {
+            FRESHLY_WRITTEN_DELTA_PARTITIONS.set(previous);
+        }
     }
 
     static Set<BinaryRow> freshlyWrittenDeltaPartitions() {
         Set<BinaryRow> partitions = FRESHLY_WRITTEN_DELTA_PARTITIONS.get();
-        return partitions == null ? Collections.emptySet() : partitions;
+        return partitions == null
+                ? Collections.emptySet()
+                : Collections.unmodifiableSet(partitions);
     }
 }

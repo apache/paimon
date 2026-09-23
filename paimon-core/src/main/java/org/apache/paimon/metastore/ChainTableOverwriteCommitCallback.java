@@ -104,11 +104,12 @@ public class ChainTableOverwriteCommitCallback implements CommitCallback {
             // and do not depend on a snapshot baseline. Hand that set to the pre-callback that
             // the truncate triggers so it does not reject dropping their baselines.
             Set<BinaryRow> freshlyWritten = new HashSet<>(overwritePartitions);
-            ChainTableOverwriteScope.setFreshlyWrittenDeltaPartitions(freshlyWritten);
+            Set<BinaryRow> previous =
+                    ChainTableOverwriteScope.setFreshlyWrittenDeltaPartitions(freshlyWritten);
             try {
                 commit.truncatePartitions(candidatePartitions);
             } finally {
-                ChainTableOverwriteScope.clear();
+                ChainTableOverwriteScope.restore(previous);
             }
         } catch (Exception e) {
             throw new RuntimeException(
