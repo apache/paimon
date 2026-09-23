@@ -1130,12 +1130,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
 
     @unittest.skipUnless(native_reader_available(),
                          "pypaimon-rust native reader API not installed")
-    @patch('pypaimon.read.native_plan.native_method_available',
-           side_effect=lambda type_name, method: (
-               False if method in ('from_resolved_schema', 'copy_with_resolved_schema')
-               else native_method_available(type_name, method)))
-    def test_native_read_dynamic_blob_as_descriptor(self, capabilities):
-        # Exercise the catalog path used by Rust versions without resolved schemas.
+    def test_native_read_dynamic_blob_as_descriptor(self):
         schema = pa.schema([('id', pa.int32()), ('payload', pa.large_binary())])
         self.cat.create_table(
             'default.native_dynamic_descriptor',
