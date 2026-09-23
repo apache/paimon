@@ -29,8 +29,10 @@ import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -97,7 +99,17 @@ public class ChainTableOverwriteCommitCallback implements CommitCallback {
                         .collect(Collectors.toList());
 
         try (BatchTableCommit commit = snapshotTable.newBatchWriteBuilder().newCommit()) {
-            commit.truncatePartitions(candidatePartitions);
+            // The truncated snapshot partitions are exactly the partitions this overwrite just
+            // rewrote on the delta branch, so their surviving delta followers hold fresh data
+            // and do not depend on a snapshot baseline. Hand that set to the pre-callback that
+            // the truncate triggers so it does not reject dropping their baselines.
+            Set<BinaryRow> freshlyWritten = new HashSet<>(overwritePartitions);
+            ChainTableOverwriteScope.setFreshlyWrittenDeltaPartitions(freshlyWritten);
+            try {
+                commit.truncatePartitions(candidatePartitions);
+            } finally {
+                ChainTableOverwriteScope.clear();
+            }
         } catch (Exception e) {
             throw new RuntimeException(
                     String.format(

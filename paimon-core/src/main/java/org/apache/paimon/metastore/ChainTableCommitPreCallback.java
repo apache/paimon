@@ -140,6 +140,12 @@ public class ChainTableCommitPreCallback implements CommitPreCallback {
                         .collect(Collectors.toList());
         SnapshotReader deltaSnapshotReader = deltaTable.newSnapshotReader();
         PredicateBuilder builder = new PredicateBuilder(partitionType);
+        // Delta partitions that the triggering chain-table OVERWRITE just rewrote hold fresh,
+        // complete data and do not depend on a snapshot baseline, so dropping their baseline is
+        // intended rather than an orphan. A standalone drop or a rollback leaves this empty, so a
+        // genuinely stranded follower is still rejected below.
+        Set<BinaryRow> freshlyWrittenDeltaPartitions =
+                ChainTableOverwriteScope.freshlyWrittenDeltaPartitions();
         // only fully dropped partitions can break the chain; a partially deleted partition
         // survives the commit and keeps anchoring its delta followers
         for (BinaryRow partition : droppedPartitions) {
@@ -179,6 +185,9 @@ public class ChainTableCommitPreCallback implements CommitPreCallback {
                                                     nextSnapshotPartition,
                                                     chainComparator,
                                                     projector))
+                            .filter(
+                                    deltaPartition ->
+                                            !freshlyWrittenDeltaPartitions.contains(deltaPartition))
                             .collect(Collectors.toList());
             boolean canDrop =
                     deltaFollowingPartitions.isEmpty() || preSnapshotPartition.isPresent();
