@@ -248,6 +248,25 @@ class SharedShreddingMapReaderTest(unittest.TestCase):
                         assert isinstance(expected_array, pa.StructArray)
                         self.assertTrue(selected.equals(expected_array))
 
+    def test_selected_keys_reject_out_of_range_candidates(self):
+        for rows in (1023, 1024):
+            for physical_index in (-1, 1):
+                with self.subTest(rows=rows, physical_index=physical_index):
+                    # Keep adjacent rows in the backing array so an invalid
+                    # candidate can cross a row boundary without take failing.
+                    physical = pa.StructArray.from_arrays(
+                        [
+                            pa.array([[0]] * (rows + 2), type=pa.list_(pa.int32())),
+                            pa.array(["value"] * (rows + 2)),
+                        ],
+                        names=["__field_mapping", "__col_{}".format(physical_index)],
+                    ).slice(1, rows)
+                    with self.assertRaisesRegex(ValueError, "physical column .* out of range"):
+                        assemble_shared_shredding_selected_keys(
+                            physical, ["k"], pa.string(),
+                            ({0: "k"}, {0: [physical_index]}, set(), 1),
+                        )
+
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.value_arrow_type = pa.struct([

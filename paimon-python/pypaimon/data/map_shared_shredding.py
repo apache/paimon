@@ -453,6 +453,11 @@ def assemble_shared_shredding_selected_keys(
             children.append(pc.take(value_pool, pa.nulls(len(column), type=pa.int64())))
             continue
         candidate_columns = field_to_columns.get(field_id, ())
+        for physical_index in candidate_columns:
+            if not 0 <= physical_index < num_columns:
+                raise ValueError(
+                    "Shared-shredding physical column {} is out of range for {} columns".format(
+                        physical_index, num_columns))
         selected_rows: List[Optional[int]]
         if vectorized:
             indices = _selected_key_indices_vectorized(
