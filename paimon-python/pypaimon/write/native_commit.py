@@ -19,14 +19,19 @@
 
 from pypaimon.common.json_util import JSON
 from pypaimon.read.native_plan import (
-    _option_value_to_string, _resolved_schema_file_io_options)
+    _option_value_to_string, _resolved_schema_file_io_options, native_method_available)
 from pypaimon.write.commit_message_serializer import serialize_commit_message
 
 
 def native_commit_available() -> bool:
-    """Whether the optional Rust runtime is installed."""
-    from importlib.util import find_spec
-    return find_spec('pypaimon_rust') is not None
+    """Whether the Rust runtime provides the required commit APIs."""
+    return all(native_method_available(type_name, method) for type_name, method in (
+        ('Table', 'from_resolved_schema'),
+        ('CommitMessage', 'deserialize'),
+        ('StreamWriteBuilder', 'with_commit_user'),
+        ('BatchWriteBuilder', '_with_commit_user'),
+        ('BatchWriteBuilder', 'with_overwrite'),
+    ))
 
 
 def native_messages_supported(table, messages) -> bool:

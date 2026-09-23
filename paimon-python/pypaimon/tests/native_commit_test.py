@@ -492,6 +492,23 @@ def test_incompatible_publication_environment_is_not_reconstructed(tmp_path, kin
         resolve.assert_not_called()
 
 
+@pytest.mark.parametrize('missing_type,missing_method', [
+    ('Table', 'from_resolved_schema'),
+    ('CommitMessage', 'deserialize'),
+    ('StreamWriteBuilder', 'with_commit_user'),
+    ('BatchWriteBuilder', '_with_commit_user'),
+    ('BatchWriteBuilder', 'with_overwrite'),
+])
+def test_incomplete_runtime_falls_back_without_reconstructing_table(
+        tmp_path, missing_type, missing_method):
+    table = _table(tmp_path)
+    with patch('pypaimon.write.native_commit.native_method_available',
+               side_effect=lambda cls, method: (cls, method) != (missing_type, missing_method)), \
+            patch('pypaimon.write.native_commit._resolved_schema_file_io_options') as resolve:
+        assert create_native_commit(table, 'job') is None
+        resolve.assert_not_called()
+
+
 def test_missing_runtime_falls_back_without_reconstructing_table(tmp_path):
     table = _table(tmp_path)
     with patch('pypaimon.write.native_commit.native_commit_available', return_value=False), \
