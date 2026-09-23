@@ -449,6 +449,58 @@ class GlobalIndexScanPlanTest {
                 .hasMessageContaining("different columns");
     }
 
+    @Test
+    void testUnsupportedIndexGroupDoesNotDisableIndependentAndBranch() {
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.INT());
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        byte[] key = KeySerializer.create(DataTypes.INT()).serialize(1);
+        IndexFileMeta supported =
+                new IndexFileMeta(
+                        "btree",
+                        "supported",
+                        1,
+                        100,
+                        new GlobalIndexMeta(
+                                0,
+                                99,
+                                0,
+                                null,
+                                new SortedIndexFileMeta(key, key, false).serialize()),
+                        null);
+        IndexFileMeta multiColumn = indexFile("btree", "multi", 0, 99, 1, new int[] {2});
+        IndexPathFactory paths = mock(IndexPathFactory.class);
+        when(paths.toPath(any(IndexFileMeta.class))).thenReturn(new Path("index"));
+        List<IndexFileMeta> files = Arrays.asList(supported, multiColumn);
+
+        Predicate supportedLeaf = builder.equal(0, 1);
+        Predicate unsupportedLeaf = builder.equal(1, 2);
+        GlobalIndexScanPlan andPlan =
+                GlobalIndexScanPlan.create(
+                        rowType,
+                        PredicateBuilder.and(supportedLeaf, unsupportedLeaf),
+                        files,
+                        paths,
+                        new Options());
+        assertThat(andPlan).isNotNull();
+        assertThat(andPlan.contributingFieldIds(rowType)).containsExactly(0);
+        assertThat(
+                        GlobalIndexScanPlan.create(
+                                rowType,
+                                PredicateBuilder.or(supportedLeaf, unsupportedLeaf),
+                                files,
+                                paths,
+                                new Options()))
+                .isNull();
+        assertThat(
+                        GlobalIndexScanPlan.create(
+                                rowType,
+                                supportedLeaf,
+                                Arrays.asList(supported, indexFile("fm", "fm", 0, 99, 0, null)),
+                                paths,
+                                new Options()))
+                .isNull();
+    }
+
     private IndexFileMeta indexFile(
             String type, String name, long start, long end, int fieldId, int[] extraFields) {
         return new IndexFileMeta(

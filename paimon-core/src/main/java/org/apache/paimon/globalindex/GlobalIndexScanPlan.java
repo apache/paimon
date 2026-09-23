@@ -107,17 +107,18 @@ class GlobalIndexScanPlan {
         this.groups = groups;
     }
 
-    static boolean supports(List<IndexFileMeta> files) {
+    static boolean hasSupportedIndex(List<IndexFileMeta> files) {
         return files.stream()
-                .allMatch(
+                .anyMatch(
                         file ->
-                                "es-index".equals(file.indexType())
-                                        || ("btree".equals(file.indexType())
-                                                        || "bitmap".equals(file.indexType()))
-                                                && file.globalIndexMeta()
-                                                                .getIndexedFieldIds()
-                                                                .size()
-                                                        == 1);
+                                supportsIndex(
+                                        file.indexType(),
+                                        file.globalIndexMeta().getIndexedFieldIds().size()));
+    }
+
+    private static boolean supportsIndex(String type, int fieldCount) {
+        return "es-index".equals(type)
+                || (("btree".equals(type) || "bitmap".equals(type)) && fieldCount == 1);
     }
 
     @Nullable
@@ -163,6 +164,9 @@ class GlobalIndexScanPlan {
             }
             List<IndexGroup> selectedGroups = new ArrayList<>();
             for (IndexGroup group : fieldGroups) {
+                if (!supportsIndex(group.type, group.extraFields.size() + 1)) {
+                    return null;
+                }
                 if ("es-index".equals(group.type)) {
                     if (!supportsESPredicate(leaf.function())) {
                         return null;

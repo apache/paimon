@@ -733,7 +733,7 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
     }
 
     @Test
-    public void testFMContainsRefinementKeepsEagerPathAndContributingCoverage() throws Exception {
+    public void testFMFallbackAndMixedDistributedIndex() throws Exception {
         write(100);
         FileStoreTable table = getTableDefault();
         GlobalIndexFileReadWrite io =
@@ -772,26 +772,38 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
         }
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "full");
-        // Exercise FM evaluation even though this tiny fixture exceeds its default cost budget.
         options.put(FMGlobalIndexOptions.LOCATE_COST_RATIO.key(), "1");
         table = distributedTable(table.copy(options));
         PredicateBuilder b = new PredicateBuilder(table.rowType());
-        ReadBuilder read =
-                table.newReadBuilder()
-                        .withFilter(
-                                PredicateBuilder.and(
-                                        b.contains(1, str("5")),
-                                        b.contains(1, str("1")),
-                                        b.startsWith(2, str("b"))));
-        List<Split> splits = read.newScan().plan().splits();
-        assertThat(splits).isNotEmpty().allMatch(IndexedSplit.class::isInstance);
+        Predicate predicate =
+                PredicateBuilder.and(
+                        b.contains(1, str("5")),
+                        b.contains(1, str("1")),
+                        b.startsWith(2, str("b")));
+        ReadBuilder read = table.newReadBuilder().withFilter(predicate);
+        List<Split> eagerSplits = read.newScan().plan().splits();
+        assertThat(eagerSplits).isNotEmpty().allMatch(IndexedSplit.class::isInstance);
         assertThat(
-                        splits.stream()
+                        eagerSplits.stream()
                                 .map(IndexedSplit.class::cast)
                                 .flatMap(split -> split.rowRanges().stream())
                                 .collect(Collectors.toList()))
                 .containsExactly(new Range(15, 15), new Range(51, 51));
+        assertThat(read(read, eagerSplits)).containsExactly(15, 51);
+
+        createIndex("btree", "f2");
+        List<Split> splits = read.newScan().plan().splits();
+        assertThat(splits).isNotEmpty().allMatch(LazyIndexedSplit.class::isInstance);
         assertThat(read(read, splits)).containsExactly(15, 51);
+
+        ReadBuilder orRead =
+                table.newReadBuilder()
+                        .withFilter(
+                                PredicateBuilder.or(
+                                        b.contains(1, str("5")), b.equal(2, str("b10"))));
+        List<Split> orSplits = orRead.newScan().plan().splits();
+        assertThat(orSplits).isNotEmpty().allMatch(DataSplit.class::isInstance);
+        assertThat(read(orRead, orSplits)).contains(5, 10, 15, 55, 95).hasSize(20);
     }
 
     private List<Integer> read(ReadBuilder read, List<Split> splits) throws Exception {

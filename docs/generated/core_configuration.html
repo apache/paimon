@@ -1552,7 +1552,7 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td><h5>scan.index-distributed-query.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Evaluate supported global index predicates in readers instead of during scan planning. Applies to full batch snapshots of direct data-evolution tables with BTree, bitmap or ES indexes, including predicates across multiple indexed columns. Ignored with query authorization, Flink dedicated split generation or precomputed row ranges.</td>
+            <td>Enable distributed global index queries in Flink.</td>
         </tr>
         <tr>
             <td><h5>scan.manifest.parallelism</h5></td>

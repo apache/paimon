@@ -2997,11 +2997,7 @@ public class CoreOptions implements Serializable {
             key("scan.index-distributed-query.enabled")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription(
-                            "Evaluate supported global index predicates in readers instead of during scan planning. "
-                                    + "Applies to full batch snapshots of direct data-evolution tables with "
-                                    + "BTree, bitmap or ES indexes, including predicates across multiple indexed columns. "
-                                    + "Ignored with query authorization, Flink dedicated split generation or precomputed row ranges.");
+                    .withDescription("Enable distributed global index queries in Flink.");
 
     public static final ConfigOption<Boolean> GLOBAL_INDEX_ENABLED =
             key("global-index.enabled")

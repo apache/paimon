@@ -378,9 +378,6 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (indexFiles.isEmpty()) {
             return dataPlan;
         }
-        if (!GlobalIndexScanPlan.supports(indexFiles)) {
-            return planEagerIndex(dataPlan, snapshot, partitionFilter, indexFiles, indexFilter);
-        }
         GlobalIndexScanPlan indexPlan =
                 GlobalIndexScanPlan.create(
                         table.rowType(),
@@ -389,7 +386,9 @@ public class DataEvolutionBatchScan implements DataTableScan {
                         table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions().toConfiguration());
         if (indexPlan == null) {
-            return dataPlan;
+            return GlobalIndexScanPlan.hasSupportedIndex(indexFiles)
+                    ? dataPlan
+                    : planEagerIndex(dataPlan, snapshot, partitionFilter, indexFiles, indexFilter);
         }
         List<Range> unindexed =
                 new DataEvolutionGlobalIndexCoverage(
