@@ -56,10 +56,6 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataTypes;
 
-import org.apache.parquet.hadoop.ParquetFileReader;
-import org.apache.parquet.hadoop.metadata.BlockMetaData;
-import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
-
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -358,18 +354,13 @@ public class ParquetFastPathCompactRewriterTest {
                         .createDataFilePathFactory(prepared.partition, UNAWARE_BUCKET);
         DataFileMeta file = prepared.files.get(0);
         Path path = pathFactory.toPath(file);
-        try (ParquetFileReader reader =
-                ParquetUtil.getParquetReader(
-                        prepared.table.fileIO(),
-                        path,
-                        file.fileSize(),
-                        prepared.table.coreOptions().toConfiguration())) {
-            boolean hasDictionary =
-                    reader.getFooter().getBlocks().stream()
-                            .flatMap(block -> block.getColumns().stream())
-                            .anyMatch(ColumnChunkMetaData::hasDictionaryPage);
-            assertThat(hasDictionary).isTrue();
-        }
+        assertThat(
+                        ParquetUtil.hasDictionaryPage(
+                                prepared.table.fileIO(),
+                                path,
+                                file.fileSize(),
+                                prepared.table.coreOptions().toConfiguration()))
+                .isTrue();
     }
 
     @Test
@@ -416,79 +407,32 @@ public class ParquetFastPathCompactRewriterTest {
 
         // copied output must keep the input RowGroups in order, with identical
         // row counts and per-column statistics
-        List<BlockMetaData> inputBlocks = readBlocks(prepared, prepared.files);
-        List<BlockMetaData> outputBlocks = readBlocks(prepared, fastPathResult);
-        assertThat(outputBlocks).hasSameSizeAs(inputBlocks);
-        for (int i = 0; i < inputBlocks.size(); i++) {
-            BlockMetaData inputBlock = inputBlocks.get(i);
-            BlockMetaData outputBlock = outputBlocks.get(i);
-            assertThat(outputBlock.getRowCount()).isEqualTo(inputBlock.getRowCount());
-            assertThat(outputBlock.getColumns()).hasSameSizeAs(inputBlock.getColumns());
-            for (int c = 0; c < inputBlock.getColumns().size(); c++) {
-                ColumnChunkMetaData inputColumn = inputBlock.getColumns().get(c);
-                ColumnChunkMetaData outputColumn = outputBlock.getColumns().get(c);
-                assertThat(outputColumn.getPath()).isEqualTo(inputColumn.getPath());
-                assertThat(outputColumn.getTotalSize()).isEqualTo(inputColumn.getTotalSize());
-                assertThat(outputColumn.getStatistics().toString())
-                        .isEqualTo(inputColumn.getStatistics().toString());
-            }
-        }
-
-        // column chunk offsets must stay inside the output file and blocks must be
-        // laid out in increasing order starting right after the "PAR1" magic
         DataFilePathFactory pathFactory =
                 prepared.table
                         .store()
                         .pathFactory()
                         .createDataFilePathFactory(prepared.partition, UNAWARE_BUCKET);
-        for (DataFileMeta file : fastPathResult) {
-            Path path = pathFactory.toPath(file);
-            try (ParquetFileReader reader =
-                    ParquetUtil.getParquetReader(
-                            prepared.table.fileIO(),
-                            path,
-                            file.fileSize(),
-                            prepared.table.coreOptions().toConfiguration())) {
-                long previousBlockStart = -1;
-                List<BlockMetaData> blocks = reader.getFooter().getBlocks();
-                for (int i = 0; i < blocks.size(); i++) {
-                    BlockMetaData block = blocks.get(i);
-                    long blockStart = block.getStartingPos();
-                    if (i == 0) {
-                        assertThat(blockStart).isEqualTo(4L);
-                    }
-                    assertThat(blockStart).isGreaterThan(previousBlockStart);
-                    previousBlockStart = blockStart;
-                    for (ColumnChunkMetaData column : block.getColumns()) {
-                        assertThat(column.getStartingPos()).isGreaterThanOrEqualTo(blockStart);
-                        assertThat(column.getStartingPos() + column.getTotalSize())
-                                .isLessThanOrEqualTo(file.fileSize());
-                    }
-                }
-            }
+        Path[] inputPaths = new Path[prepared.files.size()];
+        long[] inputLengths = new long[prepared.files.size()];
+        for (int i = 0; i < prepared.files.size(); i++) {
+            inputPaths[i] = pathFactory.toPath(prepared.files.get(i));
+            inputLengths[i] = prepared.files.get(i).fileSize();
         }
-    }
-
-    private List<BlockMetaData> readBlocks(PreparedTable prepared, List<DataFileMeta> files)
-            throws Exception {
-        DataFilePathFactory pathFactory =
-                prepared.table
-                        .store()
-                        .pathFactory()
-                        .createDataFilePathFactory(prepared.partition, UNAWARE_BUCKET);
-        List<BlockMetaData> blocks = new ArrayList<>();
-        for (DataFileMeta file : files) {
-            Path path = pathFactory.toPath(file);
-            try (ParquetFileReader reader =
-                    ParquetUtil.getParquetReader(
-                            prepared.table.fileIO(),
-                            path,
-                            file.fileSize(),
-                            prepared.table.coreOptions().toConfiguration())) {
-                blocks.addAll(reader.getFooter().getBlocks());
-            }
+        Path[] outputPaths = new Path[fastPathResult.size()];
+        long[] outputLengths = new long[fastPathResult.size()];
+        for (int i = 0; i < fastPathResult.size(); i++) {
+            outputPaths[i] = pathFactory.toPath(fastPathResult.get(i));
+            outputLengths[i] = fastPathResult.get(i).fileSize();
         }
-        return blocks;
+        assertThat(
+                        ParquetUtil.aggregatedRowGroupFootersMatch(
+                                prepared.table.fileIO(),
+                                inputPaths,
+                                inputLengths,
+                                outputPaths,
+                                outputLengths,
+                                prepared.table.coreOptions().toConfiguration()))
+                .isTrue();
     }
 
     @Test

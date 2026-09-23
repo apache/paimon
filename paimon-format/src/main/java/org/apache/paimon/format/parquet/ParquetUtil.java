@@ -130,6 +130,105 @@ public class ParquetUtil {
         return ParquetReadOptions.builder(parquetConfiguration);
     }
 
+    public static int getRowGroupCount(
+            FileIO fileIO, Path path, long length, Options options) throws IOException {
+        return readFooter(fileIO, path, length, options).getBlocks().size();
+    }
+
+    public static boolean hasDictionaryPage(
+            FileIO fileIO, Path path, long length, Options options) throws IOException {
+        ParquetMetadata footer = readFooter(fileIO, path, length, options);
+        for (BlockMetaData block : footer.getBlocks()) {
+            for (ColumnChunkMetaData column : block.getColumns()) {
+                if (column.hasDictionaryPage()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public static boolean aggregatedRowGroupFootersMatch(
+            FileIO fileIO,
+            Path[] inputPaths,
+            long[] inputLengths,
+            Path[] outputPaths,
+            long[] outputLengths,
+            Options options)
+            throws IOException {
+        List<BlockMetaData> inputBlocks = readAllBlocks(fileIO, inputPaths, inputLengths, options);
+        List<BlockMetaData> outputBlocks =
+                readAllBlocks(fileIO, outputPaths, outputLengths, options);
+        if (inputBlocks.size() != outputBlocks.size()) {
+            return false;
+        }
+        for (int i = 0; i < inputBlocks.size(); i++) {
+            if (!rowGroupFooterMatches(inputBlocks.get(i), outputBlocks.get(i))) {
+                return false;
+            }
+        }
+        for (int i = 0; i < outputPaths.length; i++) {
+            if (!rowGroupLayoutValid(fileIO, outputPaths[i], outputLengths[i], options)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static List<BlockMetaData> readAllBlocks(
+            FileIO fileIO, Path[] paths, long[] lengths, Options options) throws IOException {
+        List<BlockMetaData> blocks = new java.util.ArrayList<>();
+        for (int i = 0; i < paths.length; i++) {
+            blocks.addAll(readFooter(fileIO, paths[i], lengths[i], options).getBlocks());
+        }
+        return blocks;
+    }
+
+    private static boolean rowGroupFooterMatches(
+            BlockMetaData inputBlock, BlockMetaData outputBlock) {
+        if (outputBlock.getRowCount() != inputBlock.getRowCount()) {
+            return false;
+        }
+        if (outputBlock.getColumns().size() != inputBlock.getColumns().size()) {
+            return false;
+        }
+        for (int c = 0; c < inputBlock.getColumns().size(); c++) {
+            ColumnChunkMetaData inputColumn = inputBlock.getColumns().get(c);
+            ColumnChunkMetaData outputColumn = outputBlock.getColumns().get(c);
+            if (!outputColumn.getPath().equals(inputColumn.getPath())
+                    || outputColumn.getTotalSize() != inputColumn.getTotalSize()
+                    || !outputColumn.getStatistics().toString()
+                            .equals(inputColumn.getStatistics().toString())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean rowGroupLayoutValid(
+            FileIO fileIO, Path path, long fileSize, Options options) throws IOException {
+        long previousBlockStart = -1;
+        List<BlockMetaData> blocks = readFooter(fileIO, path, fileSize, options).getBlocks();
+        for (int i = 0; i < blocks.size(); i++) {
+            BlockMetaData block = blocks.get(i);
+            long blockStart = block.getStartingPos();
+            if (i == 0 && blockStart != 4L) {
+                return false;
+            }
+            if (blockStart <= previousBlockStart) {
+                return false;
+            }
+            previousBlockStart = blockStart;
+            for (ColumnChunkMetaData column : block.getColumns()) {
+                if (column.getStartingPos() < blockStart
+                        || column.getStartingPos() + column.getTotalSize() > fileSize) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     static void assertStatsClass(
             DataField field, Statistics<?> stats, Class<? extends Statistics<?>> expectedClass) {
         if (!expectedClass.isInstance(stats)) {
