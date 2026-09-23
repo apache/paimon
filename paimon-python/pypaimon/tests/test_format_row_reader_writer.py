@@ -126,6 +126,30 @@ class TestFormatRowReaderWriter:
         finally:
             os.unlink(path)
 
+    def test_high_precision_decimal_decoded_from_wire(self):
+        # Independent of the writer: decode a hand-built signed unscaled byte
+        # sequence (the row-file wire form shared with the Java implementation) and
+        # assert the exact Decimal, so a symmetric writer+reader scaling mistake
+        # cannot round-trip undetected.
+        from pypaimon.read.reader.format_row_reader import _read_field, _RowDecoder
+
+        def _varint(x):
+            out = bytearray()
+            while True:
+                b = x & 0x7F
+                x >>= 7
+                if x:
+                    out.append(b | 0x80)
+                else:
+                    out.append(b)
+                    return bytes(out)
+
+        unscaled = 12345678901234567890123456789012345678  # 38 significant digits
+        raw = unscaled.to_bytes((unscaled.bit_length() + 8) // 8, 'big', signed=True)
+        buf = _varint(len(raw)) + raw
+        got = _read_field(_RowDecoder(buf, 0), AtomicType("DECIMAL(38, 10)"))
+        assert got == Decimal("1234567890123456789012345678.9012345678")
+
     def test_all_primitive_types(self):
         fields = [
             DataField(0, "bool_col", AtomicType("BOOLEAN")),
