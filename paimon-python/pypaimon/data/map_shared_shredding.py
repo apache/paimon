@@ -240,7 +240,19 @@ def assemble_shared_shredding_map(
             pa.types.is_list(mapping_column.type)
             or pa.types.is_large_list(mapping_column.type)):
         raise TypeError("Shared-shredding field mapping must be an array")
-    mapping = mapping_column.to_pylist()
+    mapping_values = mapping_column.values
+    # Convert integer mapping buffers in bulk instead of boxing each Arrow scalar.
+    # Tiny batches do not amortize the offsets and list reconstruction overhead.
+    if len(column) >= 32 and num_columns > 0 and not mapping_values.null_count:
+        mapping_offsets, mapping_start, mapping_end = _normalized_offsets(mapping_column)
+        flat_mapping = mapping_values.slice(mapping_start, mapping_end - mapping_start).to_numpy().tolist()
+        mapping = [
+            None if is_null else flat_mapping[start:end]
+            for start, end, is_null in zip(mapping_offsets, mapping_offsets[1:], mapping_column.is_null().to_pylist())
+        ]
+        del flat_mapping
+    else:
+        mapping = mapping_column.to_pylist()
     null_rows = column.is_null().to_pylist()
     overflow_offsets = None
     overflow_keys = None
