@@ -123,6 +123,7 @@ class GlobalIndexBuilder:
         self._index_type = index_type.lower().strip()
         self._partition_filter = partition_filter
         self._partitions = partitions
+        self._user_options = dict(options or {})
         self._options = _merged_options(table, options)
         self._core_options = CoreOptions(self._options)
 
@@ -464,8 +465,9 @@ class GlobalIndexBuilder:
                 index_path,
                 index_field.type,
                 self._index_type,
-                self._options.to_map(),
+                self._table.options.options.to_map(),
                 index_field.name,
+                self._user_options,
             )
         if self._index_type == FULL_TEXT_IDENTIFIER:
             return NativeFullTextIndexWriter(
