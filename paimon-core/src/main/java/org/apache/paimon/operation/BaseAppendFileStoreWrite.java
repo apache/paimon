@@ -22,7 +22,6 @@ import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.AppendOnlyWriter;
 import org.apache.paimon.append.ParquetFastPathCompactRewriter;
-import org.apache.paimon.append.ParquetFooterReadExecutor;
 import org.apache.paimon.append.cluster.Sorter;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.data.BinaryRow;
@@ -94,7 +93,6 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     private @Nullable BlobFileContext blobContext;
     private @Nullable BlobFetchMetrics blobFetchMetrics;
     private @Nullable CompactionFastPathMetrics compactionFastPathMetrics;
-    private @Nullable ParquetFooterReadExecutor footerReadExecutor;
     private RowType writeType;
     private @Nullable List<String> writeCols;
     private boolean omitAllNonDedicatedWriteCols;
@@ -266,10 +264,6 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         if (blobFetchMetrics != null) {
             blobFetchMetrics.close();
         }
-        if (footerReadExecutor != null) {
-            footerReadExecutor.close();
-            footerReadExecutor = null;
-        }
     }
 
     protected abstract CompactManager getCompactManager(
@@ -288,19 +282,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         if (toCompact.isEmpty()) {
             return Collections.emptyList();
         }
-        long startNanos = System.nanoTime();
-        long inputBytes = toCompact.stream().mapToLong(DataFileMeta::fileSize).sum();
-        long inputRows = toCompact.stream().mapToLong(DataFileMeta::rowCount).sum();
-        boolean fastPathEnabled = options.appendCompactionRowGroupCopyEnabled();
-        LOG.info(
-                "Append compaction row-group-copy: start enabled={}, inputFiles={}, inputRows={}, "
-                        + "inputBytes={}, bucket={}",
-                fastPathEnabled,
-                toCompact.size(),
-                inputRows,
-                inputBytes,
-                bucket);
-        if (fastPathEnabled) {
+        if (options.appendCompactionRowGroupCopyEnabled()) {
             List<DataFileMeta> fastPath =
                     ParquetFastPathCompactRewriter.tryRewrite(
                             fileIO,
@@ -313,35 +295,11 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                             toCompact,
                             pathFactory.createDataFilePathFactory(partition, bucket),
                             schemaId,
-                            compactionFastPathMetrics,
-                            footerReadExecutor());
+                            compactionFastPathMetrics);
             if (fastPath != null) {
-                logCompactionSummary(
-                        "ROW_GROUP_COPY",
-                        fastPathEnabled,
-                        toCompact.size(),
-                        inputRows,
-                        inputBytes,
-                        fastPath,
-                        elapsedMillis(startNanos),
-                        null);
                 return fastPath;
             }
-            LOG.info(
-                    "Append compaction row-group-copy: fast path unavailable, fallback to rewrite. "
-                            + "inputFiles={}, inputRows={}, inputBytes={}",
-                    toCompact.size(),
-                    inputRows,
-                    inputBytes);
-        } else {
-            LOG.info(
-                    "Append compaction row-group-copy: disabled, using rewrite. "
-                            + "inputFiles={}, inputRows={}, inputBytes={}",
-                    toCompact.size(),
-                    inputRows,
-                    inputBytes);
         }
-        long rewriteStartNanos = System.nanoTime();
         Exception collectedExceptions = null;
         RowDataRollingFileWriter rewriter =
                 createRollingFileWriter(
@@ -369,64 +327,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         if (collectedExceptions != null) {
             throw collectedExceptions;
         }
-        List<DataFileMeta> result = rewriter.result();
-        logCompactionSummary(
-                "REWRITE",
-                fastPathEnabled,
-                toCompact.size(),
-                inputRows,
-                inputBytes,
-                result,
-                elapsedMillis(startNanos),
-                elapsedMillis(rewriteStartNanos));
-        return result;
-    }
-
-    private static void logCompactionSummary(
-            String path,
-            boolean fastPathEnabled,
-            int inputFiles,
-            long inputRows,
-            long inputBytes,
-            List<DataFileMeta> outputFiles,
-            long totalMs,
-            @Nullable Long rewriteMs) {
-        long outputBytes = outputFiles.stream().mapToLong(DataFileMeta::fileSize).sum();
-        long outputRows = outputFiles.stream().mapToLong(DataFileMeta::rowCount).sum();
-        if (rewriteMs == null) {
-            LOG.info(
-                    "Append compaction summary: path={}, enabled={}, inputFiles={}, inputRows={}, "
-                            + "inputBytes={}, outputFiles={}, outputRows={}, outputBytes={}, "
-                            + "totalMs={}",
-                    path,
-                    fastPathEnabled,
-                    inputFiles,
-                    inputRows,
-                    inputBytes,
-                    outputFiles.size(),
-                    outputRows,
-                    outputBytes,
-                    totalMs);
-        } else {
-            LOG.info(
-                    "Append compaction summary: path={}, enabled={}, inputFiles={}, inputRows={}, "
-                            + "inputBytes={}, outputFiles={}, outputRows={}, outputBytes={}, "
-                            + "rewriteMs={}, totalMs={}",
-                    path,
-                    fastPathEnabled,
-                    inputFiles,
-                    inputRows,
-                    inputBytes,
-                    outputFiles.size(),
-                    outputRows,
-                    outputBytes,
-                    rewriteMs,
-                    totalMs);
-        }
-    }
-
-    private static long elapsedMillis(long startNanos) {
-        return (System.nanoTime() - startNanos) / 1_000_000;
+        return rewriter.result();
     }
 
     public List<DataFileMeta> clusterRewrite(
@@ -507,15 +408,6 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             throws IOException {
         return new RecordReaderIterator<>(
                 readForCompact.createReader(partition, bucket, files, dvFactories));
-    }
-
-    private ParquetFooterReadExecutor footerReadExecutor() {
-        if (footerReadExecutor == null) {
-            footerReadExecutor =
-                    new ParquetFooterReadExecutor(
-                            options.appendCompactionRowGroupCopyFooterReadParallelism());
-        }
-        return footerReadExecutor;
     }
 
     @Override

@@ -58,17 +58,10 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
-import static org.apache.paimon.utils.ExceptionUtils.stripExecutionException;
 import static org.apache.paimon.utils.StatsCollectorFactories.createStatsFactories;
 
 /** Fast-path rewriter that concatenates Parquet RowGroups for append-only compaction. */
@@ -90,8 +83,7 @@ public class ParquetFastPathCompactRewriter {
             List<DataFileMeta> toCompact,
             DataFilePathFactory pathFactory,
             long schemaId,
-            @Nullable CompactionFastPathMetrics metrics,
-            @Nullable ParquetFooterReadExecutor footerReadExecutor) {
+            @Nullable CompactionFastPathMetrics metrics) {
         long startNanos = System.nanoTime();
         long inputBytes = toCompact.stream().mapToLong(DataFileMeta::fileSize).sum();
         long inputRows = toCompact.stream().mapToLong(DataFileMeta::rowCount).sum();
@@ -151,8 +143,7 @@ public class ParquetFastPathCompactRewriter {
                                 filePath));
             }
 
-            FooterReadStats footerReadStats =
-                    readFooters(fileIO, options, footerRequests, footerReadExecutor);
+            FooterReadStats footerReadStats = readFooters(fileIO, options, footerRequests);
             List<PreparedInput> preparedInputs = new ArrayList<>(footerRequests.size());
             for (FooterRequest request : footerRequests) {
                 IndexedFooter indexedFooter = footerReadStats.orderedFooters[request.fileIndex];
@@ -175,7 +166,6 @@ public class ParquetFastPathCompactRewriter {
             long prepareMs = elapsedMillis(startNanos);
             long footerReadWallMs = nanosToMillis(footerReadStats.footerReadWallNanos);
             long footerReadSumMs = nanosToMillis(footerReadStats.footerReadSumNanos);
-            int footerConcurrency = footerReadStats.footerConcurrency;
             int inputRowGroups =
                     preparedInputs.stream().mapToInt(input -> input.blocks.size()).sum();
             List<ParquetRowGroupCopier.Input> copierInputs = new ArrayList<>(preparedInputs.size());
@@ -190,9 +180,7 @@ public class ParquetFastPathCompactRewriter {
                             fileIO,
                             writeType,
                             options.targetFileSize(false),
-                            pathFactory::newPath,
-                            options.toConfiguration(),
-                            options.appendCompactionRowGroupCopyPreservePageIndex());
+                            pathFactory::newPath);
             long copyStartNanos = System.nanoTime();
             List<ParquetRowGroupCopier.OutputFile> copiedFiles = copier.copy(copierInputs);
             long copyMs = elapsedMillis(copyStartNanos);
@@ -218,8 +206,7 @@ public class ParquetFastPathCompactRewriter {
                         "Append compaction fast path succeeded: inputFiles={}, inputRows={}, "
                                 + "inputBytes={}, inputRowGroups={}, outputFiles={}, outputRows={}, "
                                 + "outputBytes={}, prepareMs={}, footerReadWallMs={}, "
-                                + "footerReadSumMs={}, footerConcurrency={}, copyMs={}, "
-                                + "buildResultMs={}, totalMs={}, preservePageIndex={}",
+                                + "footerReadSumMs={}, copyMs={}, buildResultMs={}, totalMs={}",
                         toCompact.size(),
                         inputRows,
                         inputBytes,
@@ -230,11 +217,9 @@ public class ParquetFastPathCompactRewriter {
                         prepareMs,
                         footerReadWallMs,
                         footerReadSumMs,
-                        footerConcurrency,
                         copyMs,
                         buildResultMs,
-                        elapsedMillis(startNanos),
-                        options.appendCompactionRowGroupCopyPreservePageIndex());
+                        elapsedMillis(startNanos));
                 return result;
             } catch (IOException | RuntimeException e) {
                 cleanupCopiedFiles(fileIO, copiedFiles);
@@ -475,23 +460,6 @@ public class ParquetFastPathCompactRewriter {
     }
 
     private static FooterReadStats readFooters(
-            FileIO fileIO,
-            CoreOptions options,
-            List<FooterRequest> requests,
-            @Nullable ParquetFooterReadExecutor footerReadExecutor)
-            throws IOException {
-        int parallelism =
-                footerReadExecutor == null
-                        ? 1
-                        : footerReadExecutor.effectiveParallelism(requests.size());
-        if (parallelism <= 1) {
-            return readFootersSerially(fileIO, options, requests);
-        }
-        return readFootersConcurrently(
-                fileIO, options, requests, footerReadExecutor.executor(), parallelism);
-    }
-
-    private static FooterReadStats readFootersSerially(
             FileIO fileIO, CoreOptions options, List<FooterRequest> requests) throws IOException {
         long wallStartNanos = System.nanoTime();
         long footerReadSumNanos = 0L;
@@ -504,67 +472,7 @@ public class ParquetFastPathCompactRewriter {
                 footerReadSumNanos += System.nanoTime() - taskStartNanos;
             }
         }
-        return new FooterReadStats(
-                ordered, System.nanoTime() - wallStartNanos, footerReadSumNanos, 1);
-    }
-
-    private static FooterReadStats readFootersConcurrently(
-            FileIO fileIO,
-            CoreOptions options,
-            List<FooterRequest> requests,
-            ExecutorService executor,
-            int parallelism)
-            throws IOException {
-        long wallStartNanos = System.nanoTime();
-        AtomicLong footerReadSumNanos = new AtomicLong();
-        AtomicInteger active = new AtomicInteger();
-        AtomicInteger maxActive = new AtomicInteger();
-        Semaphore semaphore = new Semaphore(parallelism);
-        List<Future<IndexedFooter>> futures = new ArrayList<>(requests.size());
-        for (FooterRequest request : requests) {
-            futures.add(
-                    executor.submit(
-                            () -> {
-                                try {
-                                    semaphore.acquire();
-                                } catch (InterruptedException e) {
-                                    Thread.currentThread().interrupt();
-                                    throw new IOException(
-                                            "Interrupted while reading Parquet footers", e);
-                                }
-                                int current = active.incrementAndGet();
-                                updateMax(maxActive, current);
-                                long taskStartNanos = System.nanoTime();
-                                try {
-                                    return readFooter(request, fileIO, options);
-                                } finally {
-                                    footerReadSumNanos.addAndGet(
-                                            System.nanoTime() - taskStartNanos);
-                                    active.decrementAndGet();
-                                    semaphore.release();
-                                }
-                            }));
-        }
-
-        IndexedFooter[] ordered = new IndexedFooter[requests.size()];
-        try {
-            for (Future<IndexedFooter> future : futures) {
-                IndexedFooter result = future.get();
-                ordered[result.fileIndex] = result;
-            }
-        } catch (InterruptedException e) {
-            cancelAll(futures);
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted while reading Parquet footers", e);
-        } catch (ExecutionException e) {
-            cancelAll(futures);
-            throw unwrapIOException(e);
-        }
-        return new FooterReadStats(
-                ordered,
-                System.nanoTime() - wallStartNanos,
-                footerReadSumNanos.get(),
-                Math.max(1, maxActive.get()));
+        return new FooterReadStats(ordered, System.nanoTime() - wallStartNanos, footerReadSumNanos);
     }
 
     private static IndexedFooter readFooter(
@@ -576,33 +484,6 @@ public class ParquetFastPathCompactRewriter {
                         request.filePath,
                         request.file.fileSize(),
                         options.toConfiguration()));
-    }
-
-    private static void updateMax(AtomicInteger maxActive, int current) {
-        int observed;
-        do {
-            observed = maxActive.get();
-            if (current <= observed) {
-                return;
-            }
-        } while (!maxActive.compareAndSet(observed, current));
-    }
-
-    private static void cancelAll(List<Future<IndexedFooter>> futures) {
-        for (Future<IndexedFooter> future : futures) {
-            future.cancel(true);
-        }
-    }
-
-    private static IOException unwrapIOException(ExecutionException e) {
-        Throwable cause = stripExecutionException(e);
-        if (cause instanceof IOException) {
-            return (IOException) cause;
-        }
-        if (cause instanceof RuntimeException) {
-            throw (RuntimeException) cause;
-        }
-        return new IOException("Failed to read Parquet footers", cause);
     }
 
     private static void reportMiss(
@@ -665,17 +546,14 @@ public class ParquetFastPathCompactRewriter {
         private final IndexedFooter[] orderedFooters;
         private final long footerReadWallNanos;
         private final long footerReadSumNanos;
-        private final int footerConcurrency;
 
         private FooterReadStats(
                 IndexedFooter[] orderedFooters,
                 long footerReadWallNanos,
-                long footerReadSumNanos,
-                int footerConcurrency) {
+                long footerReadSumNanos) {
             this.orderedFooters = orderedFooters;
             this.footerReadWallNanos = footerReadWallNanos;
             this.footerReadSumNanos = footerReadSumNanos;
-            this.footerConcurrency = footerConcurrency;
         }
     }
 }

@@ -22,27 +22,18 @@ import org.apache.paimon.format.parquet.writer.StreamOutputFile;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 
-import org.apache.parquet.column.ColumnDescriptor;
-import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetFileWriter;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
-import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
-import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
-import org.apache.parquet.internal.column.columnindex.ColumnIndex;
-import org.apache.parquet.internal.column.columnindex.OffsetIndex;
 import org.apache.parquet.schema.MessageType;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.function.Supplier;
 
 /**
@@ -135,22 +126,16 @@ public class ParquetRowGroupCopier {
     private final MessageType schema;
     private final long targetFileSize;
     private final Supplier<Path> outputPathSupplier;
-    private final Options options;
-    private final boolean preservePageIndex;
 
     public ParquetRowGroupCopier(
             FileIO fileIO,
             RowType writeType,
             long targetFileSize,
-            Supplier<Path> outputPathSupplier,
-            Options options,
-            boolean preservePageIndex) {
+            Supplier<Path> outputPathSupplier) {
         this.fileIO = fileIO;
         this.schema = ParquetSchemaConverter.convertToParquetMessageType(writeType);
         this.targetFileSize = targetFileSize;
         this.outputPathSupplier = outputPathSupplier;
-        this.options = options;
-        this.preservePageIndex = preservePageIndex;
     }
 
     public List<OutputFile> copy(List<Input> inputs) throws IOException {
@@ -165,48 +150,24 @@ public class ParquetRowGroupCopier {
                 Input input = inputs.get(fileIndex);
                 List<BlockMetaData> blocks = input.metadata().getBlocks();
                 try (ParquetInputStream inputStream = input.inputFile().newStream()) {
-                    ParquetFileReader indexReader = null;
-                    if (preservePageIndex) {
-                        indexReader =
-                                new ParquetFileReader(
-                                        input.inputFile(),
-                                        input.metadata(),
-                                        ParquetUtil.getParquetReadOptionsBuilder(options).build(),
-                                        inputStream,
-                                        null);
-                    }
-                    try {
-                        for (int blockIndex = 0; blockIndex < blocks.size(); blockIndex++) {
-                            BlockMetaData block = blocks.get(blockIndex);
-                            long blockCompressedSize = block.getCompressedSize();
-                            if (activeWriter != null
-                                    && activeWriter.compressedSize > 0
-                                    && activeWriter.compressedSize + blockCompressedSize
-                                            > targetFileSize) {
-                                outputs.add(activeWriter.finish());
-                                activeWriter = null;
-                            }
-                            if (activeWriter == null) {
-                                activeWriter =
-                                        ActiveWriter.start(fileIO, schema, outputPathSupplier);
-                            }
-                            if (preservePageIndex) {
-                                appendRowGroupWithPageIndexes(
-                                        activeWriter.writer, inputStream, indexReader, block);
-                            } else {
-                                activeWriter.writer.appendRowGroup(inputStream, block, true);
-                            }
-                            activeWriter.compressedSize += blockCompressedSize;
-                            activeWriter.rowCount += block.getRowCount();
-                            activeWriter.blockContributions.add(
-                                    new BlockContribution(
-                                            fileIndex, blockIndex, block.getRowCount()));
+                    for (int blockIndex = 0; blockIndex < blocks.size(); blockIndex++) {
+                        BlockMetaData block = blocks.get(blockIndex);
+                        long blockCompressedSize = block.getCompressedSize();
+                        if (activeWriter != null
+                                && activeWriter.compressedSize > 0
+                                && activeWriter.compressedSize + blockCompressedSize
+                                        > targetFileSize) {
+                            outputs.add(activeWriter.finish());
+                            activeWriter = null;
                         }
-                    } finally {
-                        if (indexReader != null) {
-                            indexReader.detachFileInputStream();
-                            indexReader.close();
+                        if (activeWriter == null) {
+                            activeWriter = ActiveWriter.start(fileIO, schema, outputPathSupplier);
                         }
+                        activeWriter.writer.appendRowGroup(inputStream, block, true);
+                        activeWriter.compressedSize += blockCompressedSize;
+                        activeWriter.rowCount += block.getRowCount();
+                        activeWriter.blockContributions.add(
+                                new BlockContribution(fileIndex, blockIndex, block.getRowCount()));
                     }
                 }
             }
@@ -223,36 +184,6 @@ public class ParquetRowGroupCopier {
             }
             throw e;
         }
-    }
-
-    private void appendRowGroupWithPageIndexes(
-            ParquetFileWriter writer,
-            ParquetInputStream inputStream,
-            ParquetFileReader indexReader,
-            BlockMetaData block)
-            throws IOException {
-        Map<ColumnPath, ColumnChunkMetaData> columns = new HashMap<>();
-        for (ColumnChunkMetaData column : block.getColumns()) {
-            columns.put(column.getPath(), column);
-        }
-
-        writer.startBlock(block.getRowCount());
-        for (ColumnDescriptor descriptor : schema.getColumns()) {
-            ColumnPath path = ColumnPath.get(descriptor.getPath());
-            ColumnChunkMetaData column = columns.remove(path);
-            if (column == null) {
-                throw new IOException(
-                        "Missing column " + path.toDotString() + " while copying RowGroup");
-            }
-            ColumnIndex columnIndex = indexReader.readColumnIndex(column);
-            OffsetIndex offsetIndex = indexReader.readOffsetIndex(column);
-            writer.appendColumnChunk(
-                    descriptor, inputStream, column, null, columnIndex, offsetIndex);
-        }
-        if (!columns.isEmpty()) {
-            throw new IOException("Unexpected columns while copying RowGroup: " + columns.keySet());
-        }
-        writer.endBlock();
     }
 
     private static final class ActiveWriter {

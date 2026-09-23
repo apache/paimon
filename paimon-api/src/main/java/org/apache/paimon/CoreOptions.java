@@ -1111,28 +1111,6 @@ public class CoreOptions implements Serializable {
                                     + "are met, compaction concatenates compressed RowGroups "
                                     + "without decoding and re-encoding rows.");
 
-    public static final ConfigOption<Boolean> APPEND_COMPACTION_ROW_GROUP_COPY_PRESERVE_PAGE_INDEX =
-            key("append.compaction.row-group-copy.preserve-page-index")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "Whether Parquet RowGroup copy compaction preserves existing "
-                                    + "ColumnIndex and OffsetIndex metadata. This keeps "
-                                    + "page-level predicate pruning at the cost of reading "
-                                    + "and rewriting the page indexes during compaction.");
-
-    public static final ConfigOption<Integer>
-            APPEND_COMPACTION_ROW_GROUP_COPY_FOOTER_READ_PARALLELISM =
-                    key("append.compaction.row-group-copy.footer-read.parallelism")
-                            .intType()
-                            .defaultValue(1)
-                            .withDescription(
-                                    "Maximum number of Parquet footer metadata reads that a single "
-                                            + "RowGroup copy compaction batch may perform in "
-                                            + "parallel. The effective parallelism is capped by "
-                                            + "the input file count and an internal hard limit of "
-                                            + "8. The default value 1 keeps footer reads serial.");
-
     public static final ConfigOption<ChangelogProducer> CHANGELOG_PRODUCER =
             key("changelog-producer")
                     .enumType(ChangelogProducer.class)
@@ -3980,15 +3958,6 @@ public class CoreOptions implements Serializable {
 
     public boolean appendCompactionRowGroupCopyEnabled() {
         return options.get(APPEND_COMPACTION_ROW_GROUP_COPY_ENABLED);
-    }
-
-    public boolean appendCompactionRowGroupCopyPreservePageIndex() {
-        return options.get(APPEND_COMPACTION_ROW_GROUP_COPY_PRESERVE_PAGE_INDEX);
-    }
-
-    public int appendCompactionRowGroupCopyFooterReadParallelism() {
-        int configured = options.get(APPEND_COMPACTION_ROW_GROUP_COPY_FOOTER_READ_PARALLELISM);
-        return Math.max(1, Math.min(configured, 8));
     }
 
     public long dynamicBucketTargetRowNum() {

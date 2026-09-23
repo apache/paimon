@@ -45,8 +45,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsMerger;
@@ -59,7 +59,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.shade.org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.paimon.shade.org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.paimon.shade.org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
-import org.apache.paimon.shade.org.apache.parquet.internal.column.columnindex.OffsetIndex;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -493,24 +492,6 @@ public class ParquetFastPathCompactRewriterTest {
     }
 
     @Test
-    public void testFastPathOptionallyPreservesPageIndexes() throws Exception {
-        Map<String, String> options = new HashMap<>();
-        options.put("parquet.page.size", "256");
-        options.put("parquet.page.row.count.limit", "10");
-        PreparedTable prepared = prepareTable(options, 3, 200);
-
-        assertPageIndexes(prepared, prepared.files, true);
-
-        List<DataFileMeta> withoutPageIndexes = compact(prepared, true, false);
-        assertPageIndexes(prepared, withoutPageIndexes, false);
-
-        List<DataFileMeta> withPageIndexes = compact(prepared, true, true);
-        assertPageIndexes(prepared, withPageIndexes, true);
-        assertThat(readRows(prepared, withPageIndexes))
-                .containsExactlyInAnyOrderElementsOf(readRows(prepared, withoutPageIndexes));
-    }
-
-    @Test
     public void testFastPathMissWhenDeletionVectorPresent() throws Exception {
         PreparedTable prepared = prepareTable(Collections.emptyMap(), 3, 10);
 
@@ -518,35 +499,6 @@ public class ParquetFastPathCompactRewriterTest {
         List<DataFileMeta> fastPathResult = compactWithDvFactory(prepared, true, fileName -> null);
 
         assertThat(sumRows(fastPathResult)).isEqualTo(sumRows(rewriteResult));
-    }
-
-    @Test
-    public void testFastPathWithFooterReadParallelism() throws Exception {
-        PreparedTable prepared = prepareTable(Collections.emptyMap(), 8, 20);
-        List<DataFileMeta> serialResult = compactWithFooterParallelism(prepared, 1);
-        List<DataFileMeta> parallelResult = compactWithFooterParallelism(prepared, 4);
-
-        assertThat(sumRows(parallelResult)).isEqualTo(sumRows(serialResult));
-        assertThat(readRows(prepared, parallelResult))
-                .containsExactlyInAnyOrderElementsOf(readRows(prepared, serialResult));
-    }
-
-    @Test
-    public void testFooterReadExecutorClampsParallelism() {
-        ParquetFooterReadExecutor executor = new ParquetFooterReadExecutor(16);
-        try {
-            assertThat(executor.configuredParallelism()).isEqualTo(8);
-            assertThat(executor.effectiveParallelism(3)).isEqualTo(3);
-        } finally {
-            executor.close();
-        }
-    }
-
-    @Test
-    public void testFooterReadExecutorCloseIsIdempotent() {
-        ParquetFooterReadExecutor executor = new ParquetFooterReadExecutor(4);
-        executor.close();
-        executor.close();
     }
 
     @Test
@@ -597,7 +549,7 @@ public class ParquetFastPathCompactRewriterTest {
         schemaBuilder.option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
         extraOptions.forEach(schemaBuilder::option);
         TableSchema tableSchema =
-                new SchemaManager(fileIO, path).createTable(schemaBuilder.build());
+                new FileSystemSchemaManager(fileIO, path).createTable(schemaBuilder.build());
         FileStoreTable table = FileStoreTableFactory.create(fileIO, path, tableSchema);
 
         String commitUser = UUID.randomUUID().toString();
@@ -622,22 +574,6 @@ public class ParquetFastPathCompactRewriterTest {
     private List<DataFileMeta> compact(PreparedTable prepared, boolean fastPathEnabled)
             throws Exception {
         return compactWithDvFactory(prepared, fastPathEnabled, null);
-    }
-
-    private List<DataFileMeta> compact(
-            PreparedTable prepared, boolean fastPathEnabled, boolean preservePageIndex)
-            throws Exception {
-        Map<String, String> options = new HashMap<>();
-        options.put(
-                CoreOptions.APPEND_COMPACTION_ROW_GROUP_COPY_ENABLED.key(),
-                String.valueOf(fastPathEnabled));
-        options.put(
-                CoreOptions.APPEND_COMPACTION_ROW_GROUP_COPY_PRESERVE_PAGE_INDEX.key(),
-                String.valueOf(preservePageIndex));
-        FileStoreTable table = prepared.table.copy(options);
-        BaseAppendFileStoreWrite write =
-                (BaseAppendFileStoreWrite) table.store().newWrite(UUID.randomUUID().toString());
-        return write.compactRewrite(prepared.partition, UNAWARE_BUCKET, null, prepared.files);
     }
 
     private List<DataFileMeta> compactWithMetrics(
@@ -686,28 +622,8 @@ public class ParquetFastPathCompactRewriterTest {
                         prepared.files,
                         pathFactory,
                         prepared.files.get(0).schemaId(),
-                        metrics,
-                        new ParquetFooterReadExecutor(
-                                table.coreOptions()
-                                        .appendCompactionRowGroupCopyFooterReadParallelism()));
+                        metrics);
         return fastPath;
-    }
-
-    private List<DataFileMeta> compactWithFooterParallelism(
-            PreparedTable prepared, int footerReadParallelism) throws Exception {
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.APPEND_COMPACTION_ROW_GROUP_COPY_ENABLED.key(), "true");
-        options.put(
-                CoreOptions.APPEND_COMPACTION_ROW_GROUP_COPY_FOOTER_READ_PARALLELISM.key(),
-                String.valueOf(footerReadParallelism));
-        FileStoreTable table = prepared.table.copy(options);
-        BaseAppendFileStoreWrite write =
-                (BaseAppendFileStoreWrite) table.store().newWrite(UUID.randomUUID().toString());
-        try {
-            return write.compactRewrite(prepared.partition, UNAWARE_BUCKET, null, prepared.files);
-        } finally {
-            write.close();
-        }
     }
 
     private long getCounter(CompactionFastPathMetrics metrics, String metricName) {
@@ -763,7 +679,7 @@ public class ParquetFastPathCompactRewriterTest {
             Path path = pathFactory.toPath(file);
             try (FileRecordReader<InternalRow> reader =
                     readerFactory.createReader(
-                            new FormatReaderContext(fileIO, path, file.fileSize()))) {
+                            new FormatReaderContext(fileIO, path, file.fileSize(), null, null))) {
                 RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
                 while (iterator != null) {
                     InternalRow row;
@@ -786,41 +702,6 @@ public class ParquetFastPathCompactRewriterTest {
                 + row.getString(2).toString()
                 + ","
                 + row.getInt(3);
-    }
-
-    private void assertPageIndexes(
-            PreparedTable prepared, List<DataFileMeta> files, boolean expected) throws Exception {
-        DataFilePathFactory pathFactory =
-                prepared.table
-                        .store()
-                        .pathFactory()
-                        .createDataFilePathFactory(prepared.partition, UNAWARE_BUCKET);
-        for (DataFileMeta file : files) {
-            Path path = pathFactory.toPath(file);
-            try (ParquetFileReader reader =
-                    ParquetUtil.getParquetReader(
-                            prepared.table.fileIO(),
-                            path,
-                            file.fileSize(),
-                            prepared.table.coreOptions().toConfiguration())) {
-                for (BlockMetaData block : reader.getFooter().getBlocks()) {
-                    for (ColumnChunkMetaData column : block.getColumns()) {
-                        assertThat(column.getColumnIndexReference() != null).isEqualTo(expected);
-                        assertThat(column.getOffsetIndexReference() != null).isEqualTo(expected);
-                        if (expected) {
-                            assertThat(reader.readColumnIndex(column)).isNotNull();
-                            OffsetIndex offsetIndex = reader.readOffsetIndex(column);
-                            assertThat(offsetIndex).isNotNull();
-                            assertThat(offsetIndex.getPageCount()).isGreaterThan(0);
-                            assertThat(offsetIndex.getOffset(0))
-                                    .isBetween(
-                                            column.getStartingPos(),
-                                            column.getStartingPos() + column.getTotalSize() - 1);
-                        }
-                    }
-                }
-            }
-        }
     }
 
     private long sumRows(List<DataFileMeta> files) {
