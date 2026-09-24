@@ -84,6 +84,13 @@ public class BucketSelector implements ManifestBucketFilter {
 
     @Override
     public boolean test(BinaryRow partition, Integer bucket, Integer numBucket) {
+        if (bucket == null || bucket < 0 || numBucket == null || numBucket <= 0) {
+            // Postpone buckets (negative, see BucketMode#POSTPONE_BUCKET) hold pending rows
+            // whose bucket is not yet assigned, so bucket keys cannot prune them; the same
+            // guard mayContain applies at the manifest level. A non-positive bucket count
+            // carries no bucket information either.
+            return true;
+        }
         return partitionSelectors
                 .computeIfAbsent(partition, this::createPartitionSelector)
                 .map(selector -> selector.test(bucket, numBucket))
