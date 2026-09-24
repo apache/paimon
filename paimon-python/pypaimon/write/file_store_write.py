@@ -219,14 +219,9 @@ class FileStoreWrite:
         partial-update with no out-of-scope options) cannot drift
         between sides.
 
-        For wholly unsupported engines (``aggregation``) the writer
-        falls back to ``DeduplicateMergeFunction`` so the flushed file
-        still maintains the LSM "PK unique within a file" invariant.
-        The read path's dispatch still raises ``NotImplementedError``,
-        so the user gets an explicit error before they observe
-        wrong-engine data; the fallback only narrows the damage to
-        "file is deduped, not aggregated" rather than the silent
-        multi-row-per-PK corruption that existed pre-PR.
+        Aggregation options are validated with the read-side guard before
+        buffering. Unsupported configurations must not be committed using
+        fallback merge semantics that discard input values.
 
         Partial-update with out-of-scope options (sequence-group,
         per-field aggregator, ignore-delete, remove-record-on-*) does
@@ -290,6 +285,11 @@ class FileStoreWrite:
         # for the engines we know are out of scope today; any other
         # NotImplementedError is a bug we want to surface, not swallow.
         if engine == MergeEngine.AGGREGATE:
+            from pypaimon.read.merge_engine_support import check_supported
+
+            # Reject unsupported table options before any data is buffered.
+            # A read-side error cannot undo an incorrectly merged write.
+            check_supported(self.table)
             # Surface the silent semantic mismatch in logs: the file
             # will be PK-unique (better than the pre-PR multi-row
             # corruption), but any reader that honours the declared
