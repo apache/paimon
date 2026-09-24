@@ -56,6 +56,7 @@ import org.apache.paimon.spark.procedure.ReassignRowIdProcedure;
 import org.apache.paimon.spark.procedure.RemoveOrphanBlobsProcedure;
 import org.apache.paimon.spark.procedure.RemoveOrphanFilesProcedure;
 import org.apache.paimon.spark.procedure.RemoveUnexistingFilesProcedure;
+import org.apache.paimon.spark.procedure.RemoveUnexistingManifestsProcedure;
 import org.apache.paimon.spark.procedure.RenameBranchProcedure;
 import org.apache.paimon.spark.procedure.RenameTagProcedure;
 import org.apache.paimon.spark.procedure.RepairEarliestSnapshotProcedure;
@@ -123,6 +124,8 @@ public class SparkProcedures {
         procedureBuilders.put("remove_orphan_files", RemoveOrphanFilesProcedure::builder);
         procedureBuilders.put("remove_orphan_blobs", RemoveOrphanBlobsProcedure::builder);
         procedureBuilders.put("remove_unexisting_files", RemoveUnexistingFilesProcedure::builder);
+        procedureBuilders.put(
+                "remove_unexisting_manifests", RemoveUnexistingManifestsProcedure::builder);
         procedureBuilders.put("expire_snapshots", ExpireSnapshotsProcedure::builder);
         procedureBuilders.put("expire_partitions", ExpirePartitionsProcedure::builder);
         procedureBuilders.put("repair", RepairProcedure::builder);

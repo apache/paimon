@@ -317,6 +317,22 @@ CALL sys.remove_unexisting_files(table => 'mydb.myt');
 CALL sys.remove_unexisting_files(table => 'mydb.myt', dry_run => true);
 ```
 
+## remove_unexisting_manifests
+
+Remove missing manifest files from the latest snapshot's manifest list and commit a replacement snapshot.
+
+This procedure may cause data loss when used outside of the documented repair cases.
+
+**Arguments**
+
+- `table` (`STRING`, required): the target table identifier. To repair a branch, backtick-quote the table name so `$` stays inside the identifier.
+
+```sql
+CALL sys.remove_unexisting_manifests(table => 'mydb.myt');
+
+CALL sys.remove_unexisting_manifests(table => 'mydb.`myt$branch_rt`');
+```
+
 ## purge_files
 
 Clear table with purge files.

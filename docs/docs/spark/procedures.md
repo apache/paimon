@@ -69,6 +69,7 @@ Choose a group, then use the page contents to jump to a procedure:
 [`remove_orphan_files`](./procedures/maintenance#remove_orphan_files),
 [`remove_orphan_blobs`](./procedures/maintenance#remove_orphan_blobs),
 [`remove_unexisting_files`](./procedures/maintenance#remove_unexisting_files),
+[`remove_unexisting_manifests`](./procedures/maintenance#remove_unexisting_manifests),
 [`purge_files`](./procedures/maintenance#purge_files),
 [`repair`](./procedures/maintenance#repair),
 [`repair_earliest_snapshot`](./procedures/maintenance#repair_earliest_snapshot)
