@@ -534,6 +534,12 @@ def test_partial_row_id_and_compact_messages_preserve_python_recovery(tmp_path):
     assert not native_messages_supported(table, [CommitMessage((), 0, [], compact_after=[Mock()])])
 
 
+def test_custom_manifest_target_uses_python_rolling(tmp_path):
+    table = _table(tmp_path).copy({'manifest.target-file-size': '16 kb'})
+    assert create_native_commit(table, 'job') is None
+    assert not native_messages_supported(table, [CommitMessage((), 0, [])])
+
+
 def test_close_releases_python_resources_even_if_native_close_fails(tmp_path):
     commit = _table(tmp_path).new_batch_write_builder().new_commit()
     commit._native_commit = Mock()

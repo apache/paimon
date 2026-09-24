@@ -51,6 +51,7 @@ def create_native_write(table, commit_user, static_partition=None, stream=False)
     """Return a native writer if the table can use the filesystem write path."""
     if (not native_write_available()
             or table.options.data_evolution_enabled()
+            or table.options.data_file_external_paths()
             or table.options.file_format() != 'parquet'
             or (table.options.data_file_prefix() != 'data-'
                 and not _custom_data_file_prefix_supported())

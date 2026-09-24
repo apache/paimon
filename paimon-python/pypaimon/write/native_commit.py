@@ -23,6 +23,9 @@ from pypaimon.read.native_plan import (
 from pypaimon.write.commit_message_serializer import serialize_commit_message
 
 
+_DEFAULT_MANIFEST_TARGET_SIZE = 8 * 1024 * 1024
+
+
 def native_commit_available() -> bool:
     """Whether the Rust runtime provides the required commit APIs."""
     return all(native_method_available(type_name, method) for type_name, method in (
@@ -34,10 +37,15 @@ def native_commit_available() -> bool:
     ))
 
 
+def _native_publication_supported(table) -> bool:
+    # Data evolution needs sidecar ranges and row-id recovery. Custom manifest
+    # targets need Java's forced size checks between manifest entry groups.
+    return (not table.options.data_evolution_enabled()
+            and table.options.manifest_target_size() == _DEFAULT_MANIFEST_TARGET_SIZE)
+
+
 def native_messages_supported(table, messages) -> bool:
-    # Data evolution includes sidecar ranges and row-id recovery that the
-    # native committer cannot publish with Python/Java semantics yet.
-    if table.options.data_evolution_enabled():
+    if not _native_publication_supported(table):
         return False
     for message in messages:
         if (message.compact_before or message.compact_after
@@ -49,7 +57,7 @@ def native_messages_supported(table, messages) -> bool:
 
 def create_native_commit(table, commit_user, overwrite_partition=None):
     """Return a native committer only when its publication protocol matches Python."""
-    if table.options.data_evolution_enabled() or not native_commit_available():
+    if not _native_publication_supported(table) or not native_commit_available():
         return None
     native_table = create_native_write_table(table)
     if native_table is None:
