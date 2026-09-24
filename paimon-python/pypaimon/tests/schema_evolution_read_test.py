@@ -61,6 +61,7 @@ class SchemaEvolutionReadTest(unittest.TestCase):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     @pytest.mark.python_plan
+    @pytest.mark.python_write
     def test_schema_evolution(self):
         # schema 0
         pa_schema = pa.schema([
@@ -132,6 +133,7 @@ class SchemaEvolutionReadTest(unittest.TestCase):
         self.assertEqual(expected, actual)
 
     @pytest.mark.python_plan
+    @pytest.mark.python_write
     def test_schema_evolution_type(self):
         # schema 0
         pa_schema = pa.schema([

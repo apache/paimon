@@ -31,13 +31,14 @@ requires_native = pytest.mark.skipif(
     not native_write_available(), reason='pypaimon-rust writer required')
 
 
-def _table(tmp_path, primary_key=False, commit_native=True):
+def _table(tmp_path, primary_key=False, commit_native=True, table_options=None):
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
     options = {'file.format': 'parquet', 'write.native.enabled': 'true',
                'commit.native.enabled': str(commit_native).lower()}
     if primary_key:
         options['bucket'] = '1'
+    options.update(table_options or {})
     catalog.create_table('default.t', Schema.from_pyarrow_schema(
         pa.schema([('id', pa.int64()), ('pt', pa.string())]),
         options=options, primary_keys=['id'] if primary_key else [],
@@ -78,6 +79,8 @@ def test_batch_native_write_commits_through_both_committers(
         messages = writer.prepare_commit()
         assert messages and sum(file.row_count for msg in messages
                                 for file in msg.new_files) == 2
+        assert all(file.file_path and table.file_io.exists(file.file_path)
+                   for msg in messages for file in msg.new_files)
         commit = builder.new_commit()
         try:
             commit.commit(messages)
@@ -217,6 +220,41 @@ def test_external_data_paths_fall_back_before_native_write(tmp_path):
         writer = table.new_batch_write_builder().new_write()
     assert not isinstance(writer, NativeTableWrite)
     writer.close()
+
+
+@pytest.mark.parametrize('options', [
+    {'bucket': '-1'},
+    {'merge-engine': 'first-row'},
+    {'merge-engine': 'partial-update'},
+    {'merge-engine': 'aggregation'},
+    {'target-file-row-num': '5'},
+    {'changelog-file.format': 'orc'},
+    {'metadata.stats-mode': 'full'},
+])
+def test_unsupported_primary_key_write_falls_back_before_native_reconstruction(
+        tmp_path, options):
+    table = (_table(tmp_path, primary_key=True, table_options=options)
+             if 'bucket' in options else
+             _table(tmp_path, primary_key=True).copy(options))
+    with patch('pypaimon.write.native_write.native_write_available', return_value=True), \
+            patch('pypaimon.write.native_write.create_native_write_table',
+                  side_effect=AssertionError('must not reconstruct')):
+        writer = table.new_batch_write_builder().new_write()
+    assert not isinstance(writer, NativeTableWrite)
+    writer.close()
+
+
+@requires_native
+def test_native_write_validates_input_schema_before_writing(tmp_path):
+    table = _table(tmp_path)
+    writer = table.new_batch_write_builder().new_write()
+    assert isinstance(writer, NativeTableWrite)
+    wrong = pa.record_batch([pa.array([1], pa.int32()), pa.array(['a'])],
+                            names=['id', 'pt'])
+    with pytest.raises(ValueError, match="Input schema isn't consistent"):
+        writer.write_arrow_batch(wrong)
+    assert not writer._written
+    writer.abort()
 
 
 @pytest.mark.parametrize('engine', ['partial-update', 'aggregation'])
