@@ -19,6 +19,7 @@
 package org.apache.paimon.fileindex;
 
 import org.apache.paimon.fs.ByteArraySeekableStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,7 @@ import javax.tools.StandardJavaFileManager;
 import javax.tools.ToolProvider;
 
 import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -48,36 +50,51 @@ public class FileIndexFormatCompatibilityTest {
     @TempDir private Path temporaryDirectory;
 
     @Test
-    public void testLegacyWriteColumnIndexes() throws Exception {
-        Method legacyWrite = compileLegacyWriterClient();
+    public void testLegacyApi() throws Exception {
+        Class<?> legacyClient = compileLegacyClient();
         Map<String, Map<String, byte[]>> indexes = new LinkedHashMap<>();
         indexes.put("f0", Collections.singletonMap("legacy", new byte[] {42}));
 
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(output, 1)) {
-            legacyWrite.invoke(null, writer, indexes);
-        }
+        byte[] factoryContainer = write(legacyClient, "writeWithFactory", indexes);
+        assertThat(read(legacyClient, "readWithFactory", factoryContainer)).isEqualTo(42);
+        assertThat(readMetadata(legacyClient, factoryContainer)).isEqualTo(1);
 
-        byte[] container = output.toByteArray();
-        try (FileIndexFormat.Reader reader =
-                FileIndexFormat.createReader(
-                        new ByteArraySeekableStream(container),
-                        RowType.builder().build(),
-                        container.length)) {
-            ByteArrayOutputStream payload = new ByteArrayOutputStream();
-            reader.copyPayload("f0", "legacy", payload);
-            assertThat(payload.toByteArray()).containsExactly(42);
-        }
+        byte[] constructorContainer = write(legacyClient, "writeWithConstructor", indexes);
+        assertThat(read(legacyClient, "readWithConstructor", constructorContainer)).isEqualTo(42);
     }
 
-    private Method compileLegacyWriterClient() throws Exception {
+    private byte[] write(
+            Class<?> legacyClient, String methodName, Map<String, Map<String, byte[]>> indexes)
+            throws Exception {
+        Method write = legacyClient.getDeclaredMethod(methodName, OutputStream.class, Map.class);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        write.invoke(null, output, indexes);
+        return output.toByteArray();
+    }
+
+    private int read(Class<?> legacyClient, String methodName, byte[] container) throws Exception {
+        Method read =
+                legacyClient.getDeclaredMethod(
+                        methodName, SeekableInputStream.class, RowType.class);
+        return (int)
+                read.invoke(
+                        null, new ByteArraySeekableStream(container), RowType.builder().build());
+    }
+
+    private int readMetadata(Class<?> legacyClient, byte[] container) throws Exception {
+        Method readMetadata =
+                legacyClient.getDeclaredMethod("readMetadata", SeekableInputStream.class);
+        return (int) readMetadata.invoke(null, new ByteArraySeekableStream(container));
+    }
+
+    private Class<?> compileLegacyClient() throws Exception {
         Path sourceDirectory = temporaryDirectory.resolve("source");
         Path classesDirectory = temporaryDirectory.resolve("classes");
         Path oldFormat =
                 sourceDirectory.resolve("org/apache/paimon/fileindex/FileIndexFormat.java");
         Path legacyClient =
                 sourceDirectory.resolve(
-                        "org/apache/paimon/fileindex/compatible/LegacyWriterClient.java");
+                        "org/apache/paimon/fileindex/compatible/LegacyFileIndexFormatClient.java");
         Files.createDirectories(oldFormat.getParent());
         Files.createDirectories(legacyClient.getParent());
         Files.createDirectories(classesDirectory);
@@ -88,12 +105,29 @@ public class FileIndexFormatCompatibilityTest {
                         "package org.apache.paimon.fileindex;",
                         "import java.io.Closeable;",
                         "import java.io.IOException;",
+                        "import java.io.OutputStream;",
+                        "import java.util.List;",
                         "import java.util.Map;",
+                        "import org.apache.paimon.fs.SeekableInputStream;",
+                        "import org.apache.paimon.types.RowType;",
                         "public final class FileIndexFormat {",
+                        "  public static Writer createWriter(OutputStream output) { return null; }",
+                        "  public static Reader createReader(SeekableInputStream input, RowType type) { return null; }",
+                        "  public static Reader createMetadataReader(SeekableInputStream input) { return null; }",
                         "  public static class Writer implements Closeable {",
+                        "    public Writer(OutputStream output) {}",
                         "    public void writeColumnIndexes(Map<String, Map<String, byte[]>> indexes)",
                         "        throws IOException {}",
                         "    public void close() throws IOException {}",
+                        "  }",
+                        "  public static class Reader implements Closeable {",
+                        "    public Reader(SeekableInputStream input, RowType type) {}",
+                        "    public Map<String, Map<String, byte[]>> readAll() { return null; }",
+                        "    public List<FileIndexMeta> indexMetas() { return null; }",
+                        "    public void close() throws IOException {}",
+                        "  }",
+                        "  public static class FileIndexMeta {",
+                        "    public int sizeInBytes() { return 0; }",
                         "  }",
                         "}"),
                 StandardCharsets.UTF_8);
@@ -102,13 +136,48 @@ public class FileIndexFormatCompatibilityTest {
                 Arrays.asList(
                         "package org.apache.paimon.fileindex.compatible;",
                         "import java.io.IOException;",
+                        "import java.io.OutputStream;",
                         "import java.util.Map;",
                         "import org.apache.paimon.fileindex.FileIndexFormat;",
-                        "public class LegacyWriterClient {",
-                        "  public static void write(",
-                        "      FileIndexFormat.Writer writer,",
-                        "      Map<String, Map<String, byte[]>> indexes) throws IOException {",
-                        "    writer.writeColumnIndexes(indexes);",
+                        "import org.apache.paimon.fs.SeekableInputStream;",
+                        "import org.apache.paimon.types.RowType;",
+                        "public class LegacyFileIndexFormatClient {",
+                        "  public static void writeWithFactory(",
+                        "      OutputStream output, Map<String, Map<String, byte[]>> indexes)",
+                        "      throws IOException {",
+                        "    try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(output)) {",
+                        "      writer.writeColumnIndexes(indexes);",
+                        "    }",
+                        "  }",
+                        "  public static void writeWithConstructor(",
+                        "      OutputStream output, Map<String, Map<String, byte[]>> indexes)",
+                        "      throws IOException {",
+                        "    try (FileIndexFormat.Writer writer = new FileIndexFormat.Writer(output)) {",
+                        "      writer.writeColumnIndexes(indexes);",
+                        "    }",
+                        "  }",
+                        "  public static int readWithFactory(SeekableInputStream input, RowType type)",
+                        "      throws IOException {",
+                        "    try (FileIndexFormat.Reader reader = FileIndexFormat.createReader(input, type)) {",
+                        "      return read(reader);",
+                        "    }",
+                        "  }",
+                        "  public static int readWithConstructor(SeekableInputStream input, RowType type)",
+                        "      throws IOException {",
+                        "    try (FileIndexFormat.Reader reader = new FileIndexFormat.Reader(input, type)) {",
+                        "      return read(reader);",
+                        "    }",
+                        "  }",
+                        "  public static int readMetadata(SeekableInputStream input) throws IOException {",
+                        "    try (FileIndexFormat.Reader reader = FileIndexFormat.createMetadataReader(input)) {",
+                        "      return reader.indexMetas().get(0).sizeInBytes();",
+                        "    }",
+                        "  }",
+                        "  private static int read(FileIndexFormat.Reader reader) {",
+                        "    if (reader.indexMetas().get(0).sizeInBytes() != 1) {",
+                        "      throw new AssertionError();",
+                        "    }",
+                        "    return reader.readAll().get(\"f0\").get(\"legacy\")[0];",
                         "  }",
                         "}"),
                 StandardCharsets.UTF_8);
@@ -140,10 +209,8 @@ public class FileIndexFormatCompatibilityTest {
         URL[] urls = {classesDirectory.toUri().toURL()};
         try (URLClassLoader classLoader =
                 new URLClassLoader(urls, FileIndexFormat.class.getClassLoader())) {
-            Class<?> client =
-                    classLoader.loadClass(
-                            "org.apache.paimon.fileindex.compatible.LegacyWriterClient");
-            return client.getDeclaredMethod("write", FileIndexFormat.Writer.class, Map.class);
+            return classLoader.loadClass(
+                    "org.apache.paimon.fileindex.compatible.LegacyFileIndexFormatClient");
         }
     }
 }

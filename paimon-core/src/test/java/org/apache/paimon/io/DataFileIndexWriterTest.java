@@ -136,7 +136,7 @@ public class DataFileIndexWriterTest {
                 FileIndexFormat.createReader(sparseFileIO.newInputStream(path), rowType, length)) {
             assertThat(reader.indexMetas())
                     .filteredOn(meta -> meta.columnName().equals("large"))
-                    .extracting(FileIndexFormat.FileIndexMeta::sizeInBytes)
+                    .extracting(FileIndexFormat.FileIndexMeta::sizeInBytesLong)
                     .containsExactly(2049L * 1024 * 1024 + 1);
             assertThat(reader.readColumnIndex("large")).hasSize(1);
             assertThat(reader.readColumnIndex("small")).hasSize(1);

@@ -175,7 +175,7 @@ public class FileIndexFormatFormatTest {
                 .extracting(
                         FileIndexFormat.FileIndexMeta::columnName,
                         FileIndexFormat.FileIndexMeta::indexType,
-                        FileIndexFormat.FileIndexMeta::sizeInBytes,
+                        FileIndexFormat.FileIndexMeta::sizeInBytesLong,
                         FileIndexFormat.FileIndexMeta::empty)
                 .containsExactlyInAnyOrder(
                         tuple("user_id", "bitmap", 3L, false),
@@ -241,7 +241,7 @@ public class FileIndexFormatFormatTest {
         try (FileIndexFormat.Reader reader =
                 FileIndexFormat.createReader(output.input(), rowType, output.position)) {
             assertThat(reader.indexMetas())
-                    .extracting(FileIndexFormat.FileIndexMeta::sizeInBytes)
+                    .extracting(FileIndexFormat.FileIndexMeta::sizeInBytesLong)
                     .contains((long) block.length * 2049);
             FileIndexReader bitmapReader = reader.readColumnIndex("f0").iterator().next();
             assertThat(

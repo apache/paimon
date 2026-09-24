@@ -420,7 +420,7 @@ public class FileIndexesTable implements ReadonlyTable {
                                 BinaryString.fromString(indexMeta.indexType()),
                                 BinaryString.fromString(storageType),
                                 indexFilePath,
-                                indexMeta.sizeInBytes(),
+                                indexMeta.sizeInBytesLong(),
                                 containerSize,
                                 indexMeta.empty()));
             }

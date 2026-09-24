@@ -81,14 +81,32 @@ public final class FileIndexFormat {
         }
     }
 
+    /** @deprecated Use {@link #createWriter(OutputStream, int)}. */
+    @Deprecated
+    public static Writer createWriter(OutputStream outputStream) {
+        return new FileIndexFormatV1.Writer(outputStream);
+    }
+
     public static Reader createReader(
             SeekableInputStream inputStream, RowType fileRowType, long length) {
         return new Reader(inputStream, fileRowType, length);
     }
 
+    /** @deprecated Use {@link #createReader(SeekableInputStream, RowType, long)}. */
+    @Deprecated
+    public static Reader createReader(SeekableInputStream inputStream, RowType fileRowType) {
+        return new Reader(inputStream, fileRowType);
+    }
+
     /** Creates a reader for accessing index metadata without reading index payloads. */
     public static Reader createMetadataReader(SeekableInputStream inputStream, long length) {
         return createReader(inputStream, RowType.builder().build(), length);
+    }
+
+    /** @deprecated Use {@link #createMetadataReader(SeekableInputStream, long)}. */
+    @Deprecated
+    public static Reader createMetadataReader(SeekableInputStream inputStream) {
+        return new Reader(inputStream, RowType.builder().build());
     }
 
     /** Metadata of one column index stored in a file index container. */
@@ -115,7 +133,13 @@ public final class FileIndexFormat {
             return indexType;
         }
 
-        public long sizeInBytes() {
+        /** @deprecated Use {@link #sizeInBytesLong()}. */
+        @Deprecated
+        public int sizeInBytes() {
+            return Math.toIntExact(sizeInBytes);
+        }
+
+        public long sizeInBytesLong() {
             return sizeInBytes;
         }
 
@@ -125,7 +149,19 @@ public final class FileIndexFormat {
     }
 
     /** Writer for file index file. */
-    public abstract static class Writer implements Closeable {
+    public static class Writer implements Closeable {
+
+        @Nullable private final Writer delegate;
+
+        protected Writer() {
+            this.delegate = null;
+        }
+
+        /** @deprecated Use {@link FileIndexFormat#createWriter(OutputStream, int)}. */
+        @Deprecated
+        public Writer(OutputStream outputStream) {
+            this.delegate = new FileIndexFormatV1.Writer(outputStream);
+        }
 
         /**
          * @deprecated Use {@link #writeIndex(String, String, Payload)} and {@link #finish()} to
@@ -147,11 +183,20 @@ public final class FileIndexFormat {
         }
 
         /** Writes one payload to the container. A null payload is empty. */
-        public abstract void writeIndex(
-                String columnName, String indexType, @Nullable Payload payload) throws IOException;
+        public void writeIndex(String columnName, String indexType, @Nullable Payload payload)
+                throws IOException {
+            delegate.writeIndex(columnName, indexType, payload);
+        }
 
         /** Completes the container after all payloads have been written. */
-        public abstract void finish() throws IOException;
+        public void finish() throws IOException {
+            delegate.finish();
+        }
+
+        @Override
+        public void close() throws IOException {
+            delegate.close();
+        }
     }
 
     /** Reader for file index file. */
@@ -161,6 +206,14 @@ public final class FileIndexFormat {
         // Cache the index entries.
         private final Map<String, Map<String, Pair<Long, Long>>> indexEntries = new HashMap<>();
         private final Map<String, DataField> fields = new HashMap<>();
+
+        /**
+         * @deprecated Use {@link FileIndexFormat#createReader(SeekableInputStream, RowType, long)}.
+         */
+        @Deprecated
+        public Reader(SeekableInputStream seekableInputStream, RowType fileRowType) {
+            this(seekableInputStream, fileRowType, -1L);
+        }
 
         private Reader(SeekableInputStream seekableInputStream, RowType fileRowType, long length) {
             this.seekableInputStream = seekableInputStream;
@@ -174,6 +227,10 @@ public final class FileIndexFormat {
 
                 int version = dataInputStream.readInt();
                 if (version == Version.V_2.version()) {
+                    if (length < 0) {
+                        throw new RuntimeException(
+                                "File index length is required to read version " + version);
+                    }
                     indexEntries.putAll(
                             FileIndexFormatV2.readIndexEntries(seekableInputStream, length));
                 } else if (version == Version.V_1.version()) {
@@ -267,6 +324,38 @@ public final class FileIndexFormat {
                 output.write(buffer, 0, count);
                 remaining -= count;
             }
+        }
+
+        /** @deprecated Read payloads through {@link #copyPayload(String, String, OutputStream)}. */
+        @Deprecated
+        public Map<String, Map<String, byte[]>> readAll() {
+            Map<String, Map<String, byte[]>> result = new HashMap<>();
+            for (Map.Entry<String, Map<String, Pair<Long, Long>>> column :
+                    indexEntries.entrySet()) {
+                for (Map.Entry<String, Pair<Long, Long>> index : column.getValue().entrySet()) {
+                    result.computeIfAbsent(column.getKey(), key -> new HashMap<>())
+                            .put(index.getKey(), readPayload(index.getValue()));
+                }
+            }
+            return result;
+        }
+
+        private byte[] readPayload(Pair<Long, Long> startAndLength) {
+            byte[] payload = new byte[Math.toIntExact(startAndLength.getRight())];
+            try {
+                seekableInputStream.seek(startAndLength.getLeft());
+                int read = 0;
+                while (read < payload.length) {
+                    int count = seekableInputStream.read(payload, read, payload.length - read);
+                    if (count < 0) {
+                        throw new EOFException();
+                    }
+                    read += count;
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            return payload;
         }
 
         @Override
