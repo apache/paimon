@@ -599,7 +599,11 @@ def _to_arrow_table(data, target_schema=None):
     elif isinstance(data, pa.RecordBatch):
         table = pa.Table.from_batches([data])
     elif isinstance(data, list):
-        table = pa.Table.from_pylist(data)
+        # Inference from the first row alone drops fields in later source rows.
+        names = dict.fromkeys(name for row in data for name in row)
+        table = pa.Table.from_pydict({
+            name: [row.get(name) for row in data] for name in names
+        })
     elif isinstance(data, dict):
         table = pa.Table.from_pydict(data)
     elif hasattr(data, "__dataframe__") or data.__class__.__module__.startswith("pandas"):
