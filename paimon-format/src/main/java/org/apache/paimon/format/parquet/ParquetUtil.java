@@ -130,13 +130,13 @@ public class ParquetUtil {
         return ParquetReadOptions.builder(parquetConfiguration);
     }
 
-    public static int getRowGroupCount(
-            FileIO fileIO, Path path, long length, Options options) throws IOException {
+    public static int getRowGroupCount(FileIO fileIO, Path path, long length, Options options)
+            throws IOException {
         return readFooter(fileIO, path, length, options).getBlocks().size();
     }
 
-    public static boolean hasDictionaryPage(
-            FileIO fileIO, Path path, long length, Options options) throws IOException {
+    public static boolean hasDictionaryPage(FileIO fileIO, Path path, long length, Options options)
+            throws IOException {
         ParquetMetadata footer = readFooter(fileIO, path, length, options);
         for (BlockMetaData block : footer.getBlocks()) {
             for (ColumnChunkMetaData column : block.getColumns()) {
@@ -197,7 +197,9 @@ public class ParquetUtil {
             ColumnChunkMetaData outputColumn = outputBlock.getColumns().get(c);
             if (!outputColumn.getPath().equals(inputColumn.getPath())
                     || outputColumn.getTotalSize() != inputColumn.getTotalSize()
-                    || !outputColumn.getStatistics().toString()
+                    || !outputColumn
+                            .getStatistics()
+                            .toString()
                             .equals(inputColumn.getStatistics().toString())) {
                 return false;
             }
