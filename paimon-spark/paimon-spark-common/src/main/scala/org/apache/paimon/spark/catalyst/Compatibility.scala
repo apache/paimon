@@ -35,13 +35,7 @@ object Compatibility {
       query: LogicalPlan,
       byName: Boolean,
       conf: SQLConf): LogicalPlan = {
-    TableOutputResolver.resolveOutputColumns(
-      tableName,
-      expected,
-      query,
-      byName,
-      conf,
-      supportColDefaultValue = false)
+    TableOutputResolver.resolveOutputColumns(tableName, expected, query, byName, conf)
   }
 
   def withNewQuery(o: V2WriteCommand, query: LogicalPlan): V2WriteCommand = {
