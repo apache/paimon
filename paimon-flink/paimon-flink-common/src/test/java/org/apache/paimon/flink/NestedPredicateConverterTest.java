@@ -23,6 +23,8 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.NestedFieldTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateRemapper;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -39,6 +41,8 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Tests that {@link PredicateConverter} converts a predicate on a field nested inside a row, which
@@ -56,14 +60,15 @@ public class NestedPredicateConverterTest {
                         DataTypes.STRING(),
                         DataTypes.DOUBLE(),
                         DataTypes.BOOLEAN(),
-                        DEEP
+                        DEEP,
+                        DataTypes.FLOAT()
                     },
-                    new String[] {"a", "b", "d", "flag", "inner"});
+                    new String[] {"a", "b", "d", "flag", "inner", "f"});
 
     private static final RowType TABLE =
             RowType.of(
-                    new DataType[] {DataTypes.INT(), NESTED, DataTypes.INT()},
-                    new String[] {"pk", "s", "t"});
+                    new DataType[] {DataTypes.INT(), NESTED, DataTypes.INT(), DataTypes.DOUBLE()},
+                    new String[] {"pk", "s", "t", "td"});
 
     /**
      * The type the converter itself works on. Round-tripping through Flink's type system is what
@@ -256,49 +261,157 @@ public class NestedPredicateConverterTest {
     }
 
     // ------------------------------------------------------------------------------------
-    // floating point: negated comparisons are not equivalent, so they must not be pushed
+    // floating point: comparisons on a nested FLOAT/DOUBLE are left to Flink
     // ------------------------------------------------------------------------------------
 
+    /**
+     * Flink compares FLOAT/DOUBLE with Java operators ({@code -0.0 = 0.0} holds), Paimon with
+     * {@code compareTo} (it does not), so no comparison on a nested floating-point field is
+     * converted: not in either operand order, not negated, not as IN or BETWEEN.
+     */
     @Test
-    public void testNegatedNestedFloatingPointIsNotConverted() {
+    public void testNestedFloatingPointComparisonsAreNotConverted() {
         NestedFieldReferenceExpression d =
                 ref(org.apache.flink.table.api.DataTypes.DOUBLE(), "s", "d");
+        NestedFieldReferenceExpression f =
+                ref(org.apache.flink.table.api.DataTypes.FLOAT(), "s", "f");
         ValueLiteralExpression one = new ValueLiteralExpression(1.0d);
+        ValueLiteralExpression two = new ValueLiteralExpression(2.0d);
 
-        assertThat(convert(not(call(BuiltInFunctionDefinitions.EQUALS, d, one)))).isNull();
-        assertThat(convert(not(call(BuiltInFunctionDefinitions.GREATER_THAN, d, one)))).isNull();
-        assertThat(
-                        convert(
-                                not(
-                                        call(
-                                                BuiltInFunctionDefinitions.IN,
-                                                d,
-                                                new ValueLiteralExpression(1.0d)))))
-                .isNull();
-        assertThat(
-                        convert(
-                                not(
-                                        call(
-                                                BuiltInFunctionDefinitions.BETWEEN,
-                                                d,
-                                                one,
-                                                new ValueLiteralExpression(2.0d)))))
-                .isNull();
+        for (BuiltInFunctionDefinition comparison :
+                Arrays.asList(
+                        BuiltInFunctionDefinitions.EQUALS,
+                        BuiltInFunctionDefinitions.NOT_EQUALS,
+                        BuiltInFunctionDefinitions.GREATER_THAN,
+                        BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL,
+                        BuiltInFunctionDefinitions.LESS_THAN,
+                        BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL)) {
+            assertThat(convert(call(comparison, d, one))).as("s.d %s", comparison).isNull();
+            assertThat(convert(call(comparison, one, d))).as("%s s.d", comparison).isNull();
+            assertThat(convert(not(call(comparison, d, one))))
+                    .as("NOT s.d %s", comparison)
+                    .isNull();
+            assertThat(convert(call(comparison, f, new ValueLiteralExpression(1.0f))))
+                    .as("s.f %s", comparison)
+                    .isNull();
+        }
+
+        ResolvedExpression in = call(BuiltInFunctionDefinitions.IN, d, one, two);
+        assertThat(convert(in)).as("IN").isNull();
+        assertThat(convert(not(in))).as("NOT IN").isNull();
+        ResolvedExpression between = call(BuiltInFunctionDefinitions.BETWEEN, d, one, two);
+        assertThat(convert(between)).as("BETWEEN").isNull();
+        assertThat(convert(not(between))).as("NOT BETWEEN").isNull();
     }
 
-    /** A plain, non-negated comparison on a nested double is still pushed down. */
+    /** A null check is not a comparison and has no signed-zero problem, so it is still pushed. */
     @Test
-    public void testNestedFloatingPointIsConvertedWhenNotNegated() {
+    public void testNestedFloatingPointNullChecksAreStillConverted() {
         NestedFieldReferenceExpression d =
                 ref(org.apache.flink.table.api.DataTypes.DOUBLE(), "s", "d");
 
-        assertThat(
-                        convert(
-                                call(
-                                        BuiltInFunctionDefinitions.GREATER_THAN,
-                                        d,
-                                        new ValueLiteralExpression(1.0d))))
-                .isEqualTo(BUILDER.greaterThan(S_D, 1.0d));
+        assertThat(convert(call(BuiltInFunctionDefinitions.IS_NULL, d)))
+                .isEqualTo(BUILDER.isNull(S_D));
+        assertThat(convert(call(BuiltInFunctionDefinitions.IS_NOT_NULL, d)))
+                .isEqualTo(BUILDER.isNotNull(S_D));
+    }
+
+    /** The guard is for nested fields only: a top-level double converts as before. */
+    @Test
+    public void testTopLevelFloatingPointComparisonIsUnchanged() {
+        ResolvedExpression equals =
+                call(
+                        BuiltInFunctionDefinitions.EQUALS,
+                        new FieldReferenceExpression(
+                                "td", org.apache.flink.table.api.DataTypes.DOUBLE(), 0, 3),
+                        new ValueLiteralExpression(1.0d));
+
+        assertThat(convert(equals)).isEqualTo(BUILDER.equal(3, 1.0d));
+    }
+
+    // ------------------------------------------------------------------------------------
+    // field ids
+    // ------------------------------------------------------------------------------------
+
+    /**
+     * On an evolved schema the table's field ids have gaps; a type round-tripped through Flink
+     * numbers them afresh. Given the table's type, the nested transform carries the table's own
+     * ids, so remapping it onto the table - as a masked read does - keeps its identity.
+     */
+    @Test
+    public void testTableTypeEntryPointKeepsTheTablesFieldIds() {
+        RowType evolved = evolvedTable();
+        ResolvedExpression onC =
+                call(
+                        BuiltInFunctionDefinitions.EQUALS,
+                        intRef("s", "c"),
+                        new ValueLiteralExpression(7));
+
+        Predicate predicate =
+                PredicateConverter.convert(evolved, onC).orElseThrow(AssertionError::new);
+        assertThatCode(() -> PredicateRemapper.remap(predicate, evolved))
+                .doesNotThrowAnyException();
+    }
+
+    /**
+     * Why callers pass the table's type: from a Flink type alone the converter cannot know the
+     * table's ids, and the transform it builds carries renumbered ones.
+     */
+    @Test
+    public void testFlinkTypeEntryPointCannotKnowTheTablesFieldIds() {
+        RowType evolved = evolvedTable();
+        ResolvedExpression onC =
+                call(
+                        BuiltInFunctionDefinitions.EQUALS,
+                        intRef("s", "c"),
+                        new ValueLiteralExpression(7));
+
+        Predicate predicate =
+                PredicateConverter.convert(LogicalTypeConversion.toLogicalType(evolved), onC)
+                        .orElseThrow(AssertionError::new);
+        assertThatThrownBy(() -> PredicateRemapper.remap(predicate, evolved))
+                .hasMessageContaining("changed identity");
+    }
+
+    /** Only nested fields use the table's type; every top-level predicate converts as before. */
+    @Test
+    public void testTableTypeEntryPointLeavesTopLevelPredicatesUnchanged() {
+        FieldReferenceExpression pk =
+                new FieldReferenceExpression(
+                        "pk", org.apache.flink.table.api.DataTypes.INT(), 0, 0);
+        for (ResolvedExpression topLevel :
+                Arrays.asList(
+                        call(BuiltInFunctionDefinitions.EQUALS, pk, new ValueLiteralExpression(1)),
+                        call(
+                                BuiltInFunctionDefinitions.GREATER_THAN,
+                                pk,
+                                new ValueLiteralExpression(1)),
+                        call(
+                                BuiltInFunctionDefinitions.IN,
+                                pk,
+                                new ValueLiteralExpression(1),
+                                new ValueLiteralExpression(2)),
+                        call(BuiltInFunctionDefinitions.IS_NULL, pk))) {
+            assertThat(PredicateConverter.convert(TABLE, topLevel))
+                    .isEqualTo(
+                            PredicateConverter.convert(
+                                    LogicalTypeConversion.toLogicalType(TABLE), topLevel));
+        }
+    }
+
+    /** {@code pk#0 s#1{a#2 b#3 c#6} t#4}: s.c was added after another column was dropped. */
+    private static RowType evolvedTable() {
+        RowType nested =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(2, "a", DataTypes.INT()),
+                                new DataField(3, "b", DataTypes.STRING()),
+                                new DataField(6, "c", DataTypes.INT())));
+        return new RowType(
+                Arrays.asList(
+                        new DataField(0, "pk", DataTypes.INT()),
+                        new DataField(1, "s", nested),
+                        new DataField(4, "t", DataTypes.INT())));
     }
 
     // ------------------------------------------------------------------------------------

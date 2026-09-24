@@ -67,12 +67,26 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
 
     private final PredicateBuilder builder;
 
+    /**
+     * The table's own type, used to address fields nested inside a row. A type round-tripped
+     * through Flink renumbers field ids, and {@link NestedFieldTransform} carries those ids as its
+     * identity, so on an evolved schema they would no longer match the table. Null when the caller
+     * only has a Flink type.
+     */
+    @Nullable private final org.apache.paimon.types.RowType tableType;
+
     public PredicateConverter(RowType type) {
         this(new PredicateBuilder(toDataType(type)));
     }
 
     public PredicateConverter(PredicateBuilder builder) {
+        this(builder, null);
+    }
+
+    private PredicateConverter(
+            PredicateBuilder builder, @Nullable org.apache.paimon.types.RowType tableType) {
         this.builder = builder;
+        this.tableType = tableType;
     }
 
     /** Accepts simple LIKE patterns like "abc%". */
@@ -149,6 +163,7 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         } else if (func == BuiltInFunctionDefinitions.IN) {
             requireAtLeastArity(children, 2);
             ResolvedField field = resolveField(children.get(0));
+            rejectNestedFloatingPoint(field);
             List<Object> literals = new ArrayList<>();
             for (int i = 1; i < children.size(); i++) {
                 literals.add(extractLiteral(field.type(), children.get(i)));
@@ -175,6 +190,7 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         } else if (func == BuiltInFunctionDefinitions.BETWEEN) {
             requireArity(children, 3);
             ResolvedField field = resolveField(children.get(0));
+            rejectNestedFloatingPoint(field);
             DataType fieldType = field.type();
             Object lower = extractLiteral(fieldType, children.get(1));
             Object upper = extractLiteral(fieldType, children.get(2));
@@ -371,6 +387,18 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                 : visitBiFunction(children, visit1, visit2);
     }
 
+    /**
+     * Flink compares FLOAT/DOUBLE with Java operators, so {@code -0.0 = 0.0} holds; Paimon's
+     * predicates use {@code compareTo}, which tells the two apart. Pruning a file on such a
+     * predicate could drop a row Flink would have kept, before Flink's own filter sees it, so
+     * comparisons, IN and BETWEEN on a nested floating-point field are left to Flink.
+     */
+    private void rejectNestedFloatingPoint(ResolvedField field) {
+        if (field.isNested() && isFloatingPointType(field.type())) {
+            throw new UnsupportedExpression();
+        }
+    }
+
     private void rejectNegatedFloatingPoint(ResolvedField field) {
         if (isFloatingPointType(field.type())) {
             throw new UnsupportedExpression();
@@ -401,10 +429,12 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         requireArity(children, 2);
         if (isFieldReference(children.get(0))) {
             ResolvedField field = resolveField(children.get(0));
+            rejectNestedFloatingPoint(field);
             return visit1.apply(field, extractLiteral(field.type(), children.get(1)));
         }
         if (isFieldReference(children.get(1))) {
             ResolvedField field = resolveField(children.get(1));
+            rejectNestedFloatingPoint(field);
             return visit2.apply(field, extractLiteral(field.type(), children.get(0)));
         }
 
@@ -456,8 +486,11 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         if (rootIndex < 0) {
             throw new UnsupportedExpression();
         }
-        FieldRef rootRef =
-                new FieldRef(rootIndex, fieldNames[0], builder.rowType().getTypeAt(rootIndex));
+        // Prefer the table's own type: its field ids are the transform's identity, and the
+        // round-tripped type behind the builder has renumbered them.
+        org.apache.paimon.types.RowType rootSource =
+                tableType != null ? tableType : builder.rowType();
+        FieldRef rootRef = new FieldRef(rootIndex, fieldNames[0], rootSource.getTypeAt(rootIndex));
         List<String> path = Arrays.asList(fieldNames).subList(1, fieldNames.length);
         try {
             return ResolvedField.nested(
@@ -641,8 +674,25 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
      * @return {@link Predicate} if no {@link UnsupportedExpression} thrown.
      */
     public static Optional<Predicate> convert(RowType rowType, ResolvedExpression filter) {
+        return convert(new PredicateConverter(rowType), filter);
+    }
+
+    /**
+     * Like {@link #convert(RowType, ResolvedExpression)}, for a table whose Paimon type is at hand.
+     * Predicates on fields nested inside a row are then bound to the table's own field ids, which
+     * is what reading the table later checks them against.
+     */
+    public static Optional<Predicate> convert(
+            org.apache.paimon.types.RowType tableType, ResolvedExpression filter) {
+        PredicateBuilder builder =
+                new PredicateBuilder(toDataType(LogicalTypeConversion.toLogicalType(tableType)));
+        return convert(new PredicateConverter(builder, tableType), filter);
+    }
+
+    private static Optional<Predicate> convert(
+            PredicateConverter converter, ResolvedExpression filter) {
         try {
-            return Optional.ofNullable(filter.accept(new PredicateConverter(rowType)));
+            return Optional.ofNullable(filter.accept(converter));
         } catch (UnsupportedExpression e) {
             return Optional.empty();
         }
