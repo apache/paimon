@@ -892,6 +892,42 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon DDL: write a timestamp from before the zone left local mean time") {
+    // Spark hands out a java.sql.Timestamp built through the hybrid calendar and the legacy
+    // time zone rules. Recovering the instant with java.time rules instead shifts any value
+    // the two disagree on: Asia/Shanghai ran on +08:05:43 until 1901 and Europe/Paris on
+    // +00:09:21 until 1911, so such a timestamp used to be stored minutes away from the value
+    // that was written, and then neither matched an equality filter nor stayed out of the
+    // rows a greater-than filter returns.
+    // Only the java.sql.Timestamp hand-off is affected, so pin the flag that selects it rather
+    // than relying on its default. The spark-sql CLI turns it on at startup (SPARK-31893), which
+    // is why the shift never shows up there.
+    withSparkSQLConf("spark.sql.datetime.java8API.enabled" -> "false") {
+      Seq("Asia/Shanghai", "Europe/Paris", "UTC").foreach {
+        zone =>
+          withTimeZone(zone) {
+            withTable("paimon_tbl") {
+              sql("CREATE TABLE paimon_tbl (id INT, ts TIMESTAMP) USING paimon")
+              sql("INSERT INTO paimon_tbl VALUES (1, timestamp'1900-01-01 00:00:00')")
+              sql("INSERT INTO paimon_tbl VALUES (2, timestamp'1970-01-01 00:00:00')")
+
+              checkAnswer(
+                sql("SELECT id, cast(ts as string) FROM paimon_tbl ORDER BY id"),
+                Row(1, "1900-01-01 00:00:00") :: Row(2, "1970-01-01 00:00:00") :: Nil)
+
+              checkAnswer(
+                sql("SELECT id FROM paimon_tbl WHERE ts = timestamp'1900-01-01 00:00:00'"),
+                Row(1) :: Nil)
+
+              checkAnswer(
+                sql("SELECT id FROM paimon_tbl WHERE ts > timestamp'1900-01-01 00:00:00'"),
+                Row(2) :: Nil)
+            }
+          }
+      }
+    }
+  }
+
   test("Paimon DDL: select table with timestamp and timestamp_ntz with filter") {
     Seq(true, false).foreach {
       datetimeJava8APIEnabled =>
