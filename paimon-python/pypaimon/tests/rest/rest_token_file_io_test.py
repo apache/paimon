@@ -71,6 +71,13 @@ class RESTTokenFileIOTest(unittest.TestCase):
         with patch('pypaimon.catalog.rest.rest_token_file_io.time.time', return_value=now):
             self.assertTrue(file_io._is_token_expired(token))
 
+    def test_negative_window_is_rejected(self):
+        # Options returns an already typed value unchanged, so the duration parser never sees it
+        options = Options({CatalogOptions.DATA_TOKEN_EXPIRATION_SAFE_TIME.key(): timedelta(minutes=-1)})
+        with self.assertRaises(ValueError) as raised:
+            RESTTokenFileIO(self.identifier, "oss://bucket/table", options)
+        self.assertIn(CatalogOptions.DATA_TOKEN_EXPIRATION_SAFE_TIME.key(), str(raised.exception))
+
     def test_blob_presigned_url_bound_table_root(self):
         root = "oss://bucket/table-a"
         file_io = RESTTokenFileIO(self.identifier, root, self.catalog_options)

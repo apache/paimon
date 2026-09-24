@@ -265,7 +265,15 @@ class FuseOptions:
 
 
 def data_token_expiration_safe_time_millis(options=None) -> int:
-    """Return the refresh window for vended data tokens, in milliseconds."""
+    """Return the refresh window for vended data tokens, in milliseconds.
+
+    A negative window is rejected here: a string value never parses to one, but an already
+    typed negative timedelta passes through Options unchanged.
+    """
     option = CatalogOptions.DATA_TOKEN_EXPIRATION_SAFE_TIME
     value = option.default_value() if options is None else options.get(option)
-    return int(value.total_seconds() * 1000)
+    millis = int(value.total_seconds() * 1000)
+    if millis < 0:
+        raise ValueError(
+            "{} must not be negative, got {}".format(option.key(), value))
+    return millis
