@@ -95,6 +95,8 @@ class AbstractSplitGenerator(ABC):
         Build splits from packed files.
         """
         splits = []
+        if not packed_files or not file_entries:
+            return splits
         partition = tuple(file_entries[0].partition.values)
         path_factory = self.table.path_factory()
         escaped_partition = (path_factory.bucket_path(

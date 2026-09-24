@@ -24,8 +24,8 @@ from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
-from pypaimon.write.commit_message_serializer import deserialize_commit_message
 from pypaimon.utils.file_store_path_factory import canonical_data_file_path
+from pypaimon.write.commit_message_serializer import deserialize_commit_message
 from pypaimon.write.native_commit import create_native_write_table
 from pypaimon.write.row_utils import row_to_named_values, row_values_to_arrow_table
 
