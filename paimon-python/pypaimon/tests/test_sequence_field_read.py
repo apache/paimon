@@ -427,16 +427,8 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
         self.catalog.create_table('default.seq_complex', schema, False)
         table = self.catalog.get_table('default.seq_complex')
         wb = table.new_batch_write_builder()
-        w = wb.new_write()
-        c = wb.new_commit()
-        try:
-            with self.assertRaises(NotImplementedError):
-                w.write_arrow(pa.Table.from_pylist(
-                    [{'id': 1, 'seq': [1, 2], 'val': 'x'}], schema=pa_schema))
-            self.assertEqual(w.prepare_commit(), [])
-        finally:
-            w.close()
-            c.close()
+        with self.assertRaises(NotImplementedError):
+            wb.new_write()
         with self.assertRaises(NotImplementedError) as ctx:
             table.new_read_builder().new_read()
         self.assertIn('seq', str(ctx.exception))

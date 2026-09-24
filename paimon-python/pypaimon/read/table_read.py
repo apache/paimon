@@ -430,6 +430,14 @@ class TableRead:
             return None
         if not splits:
             return []
+        sequence_fields = self.table.options.sequence_field()
+        if self.table.is_primary_key_table and sequence_fields:
+            sequence_schema = PyarrowFieldParser.from_paimon_schema(
+                [self.table.field_dict[name] for name in sequence_fields])
+            # Native merge cannot extract floating sequence values: they
+            # would silently become missing sequence values.
+            if any(pyarrow.types.is_floating(field.type) for field in sequence_schema):
+                return None
         if not self._native_blob_view_supported():
             return None
         if (self._deferred_blob_limit_may_prune(splits)

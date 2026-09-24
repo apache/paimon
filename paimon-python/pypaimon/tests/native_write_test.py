@@ -30,7 +30,7 @@ from pypaimon.write.native_write import NativeTableWrite
 requires_native = pytest.mark.native_plan
 
 
-def _table(tmp_path, primary_key=False, commit_native=True, table_options=None):
+def _table(tmp_path, primary_key=False, commit_native=True, table_options=None, id_type=None):
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
     options = {'file.format': 'parquet', 'write.native.enabled': 'true',
@@ -39,7 +39,7 @@ def _table(tmp_path, primary_key=False, commit_native=True, table_options=None):
         options['bucket'] = '1'
     options.update(table_options or {})
     catalog.create_table('default.t', Schema.from_pyarrow_schema(
-        pa.schema([('id', pa.int64()), ('pt', pa.string())]),
+        pa.schema([('id', id_type if id_type is not None else pa.int64()), ('pt', pa.string())]),
         options=options, primary_keys=['id'] if primary_key else [],
         partition_keys=[] if primary_key else ['pt']), False)
     return catalog.get_table('default.t')
@@ -61,6 +61,44 @@ def _rows(table):
 def test_native_write_is_opt_in():
     assert not CoreOptions(Options({})).native_write_enabled()
     assert CoreOptions(Options({'write.native.enabled': 'true'})).native_write_enabled()
+
+
+@pytest.mark.parametrize('streaming', [False, True])
+@pytest.mark.parametrize('sequence', ['missing', 'id,id', 'id,,pt'])
+def test_sequence_validation_precedes_native_selection(tmp_path, streaming, sequence):
+    table = _table(tmp_path, primary_key=True, table_options={'sequence.field': sequence})
+    builder = (table.new_stream_write_builder() if streaming
+               else table.new_batch_write_builder())
+    # A usable native backend must not bypass validation. This also runs when
+    # the optional Rust extension is absent.
+    with patch('pypaimon.write.native_write.create_native_write', return_value=object()) as native:
+        with pytest.raises(ValueError):
+            builder.new_write()
+        native.assert_not_called()
+
+
+@pytest.mark.parametrize('type_,order,supported', [
+    (pa.int64(), 'ascending', True),
+    (pa.int64(), 'descending', False),
+    (pa.float32(), 'ascending', False),
+    (pa.float64(), 'ascending', False),
+])
+def test_native_sequence_write_capabilities(tmp_path, type_, order, supported):
+    from pypaimon.write.native_write import create_native_write
+
+    table = _table(tmp_path, primary_key=True, id_type=type_, table_options={
+        'sequence.field': 'id', 'sequence.field.sort-order': order,
+    })
+    with patch('pypaimon.write.native_write.native_write_available', return_value=True), \
+            patch('pypaimon.write.native_write.create_native_write_table') as native:
+        writer = create_native_write(table, 'test')
+        if supported:
+            assert isinstance(writer, NativeTableWrite)
+            native.assert_called_once()
+            writer.close()
+        else:
+            assert writer is None
+            native.assert_not_called()
 
 
 @requires_native

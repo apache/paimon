@@ -35,6 +35,7 @@ def _table_read(limit=None):
     read = TableRead.__new__(TableRead)
     read.table = Mock()
     read.table.options.native_read_enabled.return_value = True
+    read.table.options.sequence_field.return_value = []
     read.table.options.file_format.return_value = 'parquet'
     read.table.options.blob_as_descriptor.return_value = False
     read.table.options.blob_descriptor_fields.return_value = set()
@@ -65,6 +66,19 @@ def _blob_table_read(limit=None):
 def _id_batch(values):
     return pa.record_batch(
         [pa.array(values, type=pa.int32())], names=['id'])
+
+
+@pytest.mark.parametrize('type_', ['FLOAT', 'DOUBLE'])
+def test_floating_sequence_falls_back_before_native_read(type_):
+    read = _table_read()
+    read.table.is_primary_key_table = True
+    read.table.options.sequence_field.return_value = ['seq']
+    read.table.field_dict = {'seq': DataField(1, 'seq', AtomicType(type_))}
+    split = _Split()
+    split._native_split = object()
+    with patch('pypaimon.read.native_plan.native_read') as native:
+        assert read._try_native_batches([split], pa.schema([('id', pa.int32())])) is None
+        native.assert_not_called()
 
 
 def test_native_read_consumes_retained_rust_splits_and_enforces_limit():

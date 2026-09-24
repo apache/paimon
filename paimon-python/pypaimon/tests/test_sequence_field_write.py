@@ -18,6 +18,7 @@
 
 import datetime
 from decimal import Decimal
+from unittest.mock import patch
 
 import pyarrow as pa
 import pytest
@@ -169,3 +170,80 @@ def test_typed_sequence_fields(make_table, type_, high, low):
     ])
     assert read_rows(table)[0]['seq'] == high
     assert read_rows(table, ['id', 'val']) == [{'id': 1, 'val': 'high'}]
+
+
+@pytest.mark.parametrize('type_', [pa.float32(), pa.float64()])
+@pytest.mark.parametrize('order', ['ascending', 'descending'])
+@pytest.mark.parametrize('grouping', ['batch', 'chunks', 'commits'])
+@pytest.mark.parametrize('streaming', [False, True])
+def test_floating_sequence_order(make_table, type_, order, grouping, streaming):
+    table, schema = make_table({
+        'sequence.field.sort-order': order,
+        'write.native.enabled': 'true', 'read.native.enabled': 'true',
+    }, sequence_type=type_)
+    # Pairs are in Java Float/Double.compare order, with null always first.
+    pairs = [
+        (1.0, float('nan')), (float('inf'), float('nan')),
+        (float('-inf'), 1.0), (1.0, float('inf')),
+        (-0.0, 0.0), (None, float('nan')), (None, 0.0),
+    ]
+    rows, expected = [], []
+    for low, high in pairs:
+        for reverse in (False, True):
+            key = len(expected)
+            pair = [{'id': key, 'seq': low, 'val': 'low'},
+                    {'id': key, 'seq': high, 'val': 'high'}]
+            rows.extend(reversed(pair) if reverse else pair)
+            expected.append({'id': key, 'val': 'high' if low is None or order == 'ascending'
+                             else 'low'})
+    for values in ((float('nan'), -float('nan')), (None, None), (-0.0, -0.0)):
+        key = len(expected)
+        rows.extend({'id': key, 'seq': value, 'val': label}
+                    for value, label in zip(values, ('first', 'last')))
+        expected.append({'id': key, 'val': 'last'})
+    write_rows(table, schema, rows, grouping, streaming)
+    assert read_rows(table, ['id', 'val']) == expected
+
+
+@pytest.mark.parametrize('order', ['ascending', 'descending'])
+@pytest.mark.parametrize('grouping', ['batch', 'commits'])
+def test_nan_ties_compare_next_sequence_field(make_table, order, grouping):
+    table, schema = make_table({
+        'sequence.field': 'seq,seq2', 'sequence.field.sort-order': order,
+        'write.native.enabled': 'true', 'read.native.enabled': 'true',
+    }, sequence_type=pa.float64())
+    write_rows(table, schema, [
+        {'id': 1, 'seq': float('nan'), 'seq2': 2, 'val': 'high'},
+        {'id': 1, 'seq': -float('nan'), 'seq2': 1, 'val': 'low'},
+    ], grouping)
+    assert read_rows(table, ['id', 'val']) == [
+        {'id': 1, 'val': 'high' if order == 'ascending' else 'low'}]
+
+
+@pytest.mark.parametrize('streaming', [False, True])
+@pytest.mark.parametrize('direct', [False, True])
+@pytest.mark.parametrize('sequence,type_,error', [
+    ('missing', pa.int64(), ValueError),
+    ('seq,seq', pa.int64(), ValueError),
+    ('seq,,seq2', pa.int64(), ValueError),
+    ('seq', pa.list_(pa.int64()), NotImplementedError),
+])
+def test_dynamic_bucket_sequence_rejected_before_index_creation(
+        make_table, streaming, direct, sequence, type_, error):
+    from pathlib import Path
+    from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite
+
+    table, _ = make_table({'bucket': '-1', 'sequence.field': sequence}, sequence_type=type_)
+    builder = (table.new_stream_write_builder() if streaming
+               else table.new_batch_write_builder())
+    writer_class = StreamTableWrite if streaming else BatchTableWrite
+    with patch.object(table, 'create_row_key_extractor') as extractor:
+        with pytest.raises(error):
+            if direct:
+                writer_class(table, 'test')
+            else:
+                builder.new_write()
+        extractor.assert_not_called()
+    assert table.snapshot_manager().get_latest_snapshot() is None
+    assert list(Path(table.table_path).glob('index/*')) == []
+    assert list(Path(table.table_path).rglob('*.parquet')) == []
