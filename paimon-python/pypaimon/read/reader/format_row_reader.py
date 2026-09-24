@@ -16,7 +16,7 @@
 # under the License.
 
 import struct
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from typing import Any, List, Optional, Tuple
 
 import pyarrow as pa
@@ -483,11 +483,15 @@ def _read_field(decoder: _RowDecoder, data_type) -> Any:
             precision, scale = _parse_decimal_params(type_name)
             if precision <= 18:
                 unscaled = decoder.read_long()
-                return Decimal(unscaled) / Decimal(10 ** scale)
             else:
                 raw = decoder.read_bytes()
                 unscaled = int.from_bytes(raw, byteorder='big', signed=True)
-                return Decimal(unscaled) / Decimal(10 ** scale)
+            # Rescale under a context wide enough for the column: the default 28-digit
+            # precision would round a DECIMAL(p) value with more than 28 significant
+            # digits, silently corrupting it. Mirrors pypaimon/data/decimal.py.
+            with localcontext() as ctx:
+                ctx.prec = max(precision + abs(scale), 38)
+                return Decimal(unscaled).scaleb(-scale)
         elif type_name.startswith('TIMESTAMP'):
             precision = _parse_timestamp_precision(type_name)
             millis = decoder.read_long()

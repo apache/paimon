@@ -88,6 +88,68 @@ class TestFormatRowReaderWriter:
         finally:
             os.unlink(path)
 
+    def test_high_precision_decimal(self):
+        # DECIMAL(p) with more than 28 significant digits overflows Python's default
+        # decimal context, which silently rounded the value on both write and read.
+        # Cover positive and negative (signed-byte path) high-precision values and a
+        # null, plus the 19..28 band and the compact p<=18 path.
+        fields = [
+            DataField(0, "d_int", AtomicType("DECIMAL(38, 0)")),
+            DataField(1, "d_frac", AtomicType("DECIMAL(38, 10)")),
+            DataField(2, "d_band", AtomicType("DECIMAL(28, 4)")),
+            DataField(3, "d_small", AtomicType("DECIMAL(18, 2)")),
+        ]
+        d_int = [Decimal("12345678901234567890123456789012345678"),
+                 Decimal("-12345678901234567890123456789012345678"), None]
+        d_frac = [Decimal("1234567890123456789012345678.9012345678"),
+                  Decimal("-1234567890123456789012345678.9012345678"), None]
+        d_band = [Decimal("123456789012345678901234.5678"),
+                  Decimal("-123456789012345678901234.5678"), None]
+        d_small = [Decimal("1234.56"), Decimal("-1234.56"), None]
+        data = pa.table({
+            "d_int": pa.array(d_int, type=pa.decimal128(38, 0)),
+            "d_frac": pa.array(d_frac, type=pa.decimal128(38, 10)),
+            "d_band": pa.array(d_band, type=pa.decimal128(28, 4)),
+            "d_small": pa.array(d_small, type=pa.decimal128(18, 2)),
+        })
+
+        with tempfile.NamedTemporaryFile(suffix=".row", delete=False) as tmp:
+            path = tmp.name
+
+        try:
+            _write_row_file(path, fields, data)
+            result = _read_row_file(path, fields)
+            assert result.column("d_int").to_pylist() == d_int
+            assert result.column("d_frac").to_pylist() == d_frac
+            assert result.column("d_band").to_pylist() == d_band
+            assert result.column("d_small").to_pylist() == d_small
+        finally:
+            os.unlink(path)
+
+    def test_high_precision_decimal_decoded_from_wire(self):
+        # Independent of the writer: decode a hand-built signed unscaled byte
+        # sequence (the row-file wire form shared with the Java implementation) and
+        # assert the exact Decimal, so a symmetric writer+reader scaling mistake
+        # cannot round-trip undetected.
+        from pypaimon.read.reader.format_row_reader import _read_field, _RowDecoder
+
+        def _varint(x):
+            out = bytearray()
+            while True:
+                b = x & 0x7F
+                x >>= 7
+                if x:
+                    out.append(b | 0x80)
+                else:
+                    out.append(b)
+                    return bytes(out)
+
+        unscaled = 12345678901234567890123456789012345678  # 38 significant digits
+        raw = unscaled.to_bytes((unscaled.bit_length() + 8) // 8, 'big', signed=True)
+        buf = _varint(len(raw)) + raw
+        got = _read_field(_RowDecoder(buf, 0), AtomicType("DECIMAL(38, 10)"))
+        assert got == Decimal("1234567890123456789012345678.9012345678")
+
     def test_all_primitive_types(self):
         fields = [
             DataField(0, "bool_col", AtomicType("BOOLEAN")),
