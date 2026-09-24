@@ -30,7 +30,10 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.stats.SimpleStats;
@@ -48,6 +51,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
@@ -63,11 +67,13 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.globalindex.btree.BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -79,6 +85,92 @@ import static org.mockito.Mockito.when;
 class GlobalIndexScanPlanTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "true,true"})
+    void testBoundedRangeUsesIntersectedFilesAndSingleScan(
+            boolean lowerInclusive, boolean upperInclusive) throws Exception {
+        RowType rowType = RowType.of(DataTypes.INT());
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate lower = lowerInclusive ? builder.greaterOrEqual(0, 5) : builder.greaterThan(0, 5);
+        Predicate upper = upperInclusive ? builder.lessOrEqual(0, 9) : builder.lessThan(0, 9);
+        Predicate range = new CompoundPredicate(And.INSTANCE, Arrays.asList(upper, lower));
+        KeySerializer serializer = KeySerializer.create(DataTypes.INT());
+        List<IndexFileMeta> files = new ArrayList<>();
+        for (int firstKey = 0; firstKey < 15; firstKey += 5) {
+            byte[] first = serializer.serialize(firstKey);
+            byte[] last = serializer.serialize(firstKey + 4);
+            files.add(
+                    new IndexFileMeta(
+                            "btree",
+                            "index-" + firstKey,
+                            80,
+                            100,
+                            new GlobalIndexMeta(
+                                    0,
+                                    99,
+                                    0,
+                                    null,
+                                    new SortedIndexFileMeta(first, last, false).serialize()),
+                            null));
+        }
+        IndexPathFactory paths = mock(IndexPathFactory.class);
+        when(paths.toPath(any(IndexFileMeta.class)))
+                .thenAnswer(
+                        invocation ->
+                                new Path(invocation.<IndexFileMeta>getArgument(0).fileName()));
+        Options options = new Options();
+        options.set(BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE, MemorySize.ofBytes(80));
+        GlobalIndexScanPlan plan =
+                GlobalIndexScanPlan.create(rowType, range, files, paths, options);
+        assertThat(plan).isNotNull();
+        LazyIndexedSplit split =
+                new LazyIndexedSplit(dataSplit(), plan, options.toMap(), Collections.emptyList());
+        assertThat(SplitSerializer.deserialize(SplitSerializer.serialize(split))).isEqualTo(split);
+
+        GlobalIndexReader reader = mock(GlobalIndexReader.class);
+        when(reader.visitRange(any(), eq(5), eq(9), eq(lowerInclusive), eq(upperInclusive)))
+                .thenReturn(
+                        CompletableFuture.completedFuture(
+                                Optional.of(
+                                        GlobalIndexResult.fromRange(
+                                                new Range(
+                                                        lowerInclusive ? 5 : 6,
+                                                        upperInclusive ? 9 : 8)))));
+        GlobalIndexer indexer = mock(GlobalIndexer.class);
+        when(indexer.createReader(any(), anyList(), eq(100L), anyList(), any())).thenReturn(reader);
+        GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
+        when(factory.create(any(DataField.class), anyList(), any(Options.class)))
+                .thenReturn(indexer);
+        try (MockedStatic<GlobalIndexerFactoryUtils> factories =
+                mockStatic(GlobalIndexerFactoryUtils.class)) {
+            factories.when(() -> GlobalIndexerFactoryUtils.load("btree")).thenReturn(factory);
+            List<Range> ranges = Collections.singletonList(new Range(0, 99));
+            assertThat(plan.evaluate(mock(FileIO.class), options, ranges).results().toRangeList())
+                    .containsExactly(new Range(lowerInclusive ? 5 : 6, upperInclusive ? 9 : 8));
+            verify(indexer)
+                    .createReader(
+                            any(),
+                            argThat(
+                                    selected ->
+                                            selected.size() == 1
+                                                    && selected.get(0)
+                                                            .filePath()
+                                                            .equals(new Path("index-5"))),
+                            eq(100L),
+                            anyList(),
+                            any());
+            verify(reader).visitRange(any(), eq(5), eq(9), eq(lowerInclusive), eq(upperInclusive));
+        }
+
+        options.set(BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE, MemorySize.ofBytes(79));
+        assertThat(GlobalIndexScanPlan.create(rowType, range, files, paths, options)).isNull();
+        options.set(BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE, MemorySize.ofBytes(80));
+        assertThat(
+                        GlobalIndexScanPlan.create(
+                                rowType, PredicateBuilder.or(lower, upper), files, paths, options))
+                .isNull();
+    }
 
     @ParameterizedTest
     @ValueSource(strings = {"btree", "bitmap"})

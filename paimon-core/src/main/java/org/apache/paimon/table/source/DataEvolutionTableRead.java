@@ -30,10 +30,13 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.splitread.SplitReadConfig;
 import org.apache.paimon.table.source.splitread.SplitReadProvider;
+import org.apache.paimon.utils.ExceptionUtils;
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.file.NoSuchFileException;
 import java.util.List;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -73,19 +76,42 @@ public class DataEvolutionTableRead extends AppendTableRead {
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
         QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
         final Split dataSplit;
+        boolean filterOnRead = executeFilter;
         if (queryAuthContext.split() instanceof LazyIndexedSplit) {
             if (fileIO == null) {
                 throw new IllegalStateException("FileIO is required for lazy index evaluation.");
             }
-            IndexedSplit indexedSplit =
-                    ((LazyIndexedSplit) queryAuthContext.split()).evaluate(fileIO);
-            if (indexedSplit.rowRanges().isEmpty()) {
-                return new EmptyRecordReader<>();
+            LazyIndexedSplit lazySplit = (LazyIndexedSplit) queryAuthContext.split();
+            Split selectedSplit;
+            try {
+                IndexedSplit indexedSplit = lazySplit.evaluate(fileIO);
+                if (indexedSplit.rowRanges().isEmpty()) {
+                    return new EmptyRecordReader<>();
+                }
+                selectedSplit = indexedSplit;
+            } catch (IOException e) {
+                if (!ExceptionUtils.findThrowable(
+                                        e,
+                                        cause ->
+                                                cause instanceof FileNotFoundException
+                                                        || cause instanceof NoSuchFileException)
+                                .isPresent()
+                        || options.scalarIndexSearchMode()
+                                == CoreOptions.GlobalIndexSearchMode.FAST) {
+                    throw e;
+                }
+                if (predicate() == null) {
+                    throw new IOException(
+                            "Cannot scan a split without its index and query filter", e);
+                }
+                selectedSplit = lazySplit.dataSplit();
+                filterOnRead = true;
             }
-            dataSplit = indexedSplit;
+            dataSplit = selectedSplit;
         } else {
             dataSplit = queryAuthContext.split();
         }
+        final boolean applyFilter = filterOnRead;
         int[] blobViewFields =
                 BlobViewTableReadSupport.blobViewFieldIndexes(currentReadType(), options);
         ReadBatchSizer sizer = readBatchSizer();
@@ -103,20 +129,20 @@ public class DataEvolutionTableRead extends AppendTableRead {
                     predicate(),
                     topN,
                     limit,
-                    executeFilter,
-                    () -> createDataReader(dataSplit, queryAuthContext.authResult()),
+                    applyFilter,
+                    () -> createDataReader(dataSplit, queryAuthContext.authResult(), applyFilter),
                     () -> {
                         InnerTableRead prescanRead = readFactory.get();
                         if (sizer != null) {
                             // Blob-view prescan is a separate physical read under the same budget.
                             prescanRead.withReadBatchSizer(sizer);
                         }
-                        if (executeFilter) {
+                        if (applyFilter) {
                             prescanRead.executeFilter();
                         }
                         return prescanRead;
                     });
         }
-        return createDataReader(dataSplit, queryAuthContext.authResult());
+        return createDataReader(dataSplit, queryAuthContext.authResult(), filterOnRead);
     }
 }

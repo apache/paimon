@@ -126,12 +126,7 @@ public class LazyIndexSourceTest extends DataEvolutionTestBase {
 
     @Test
     public void testReaderRestoresOriginalLazySplitAndPosition() throws Exception {
-        FileStoreTable table =
-                indexedTable()
-                        .copy(
-                                Collections.singletonMap(
-                                        CoreOptions.SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED.key(),
-                                        "true"));
+        FileStoreTable table = distributedTable(indexedTable());
         FileStoreSourceSplit split = plan(table, FlinkConnectorOptions.SplitAssignMode.FAIR).get(0);
         List<Integer> complete = readSplit(readBuilder(table).newRead().executeFilter(), split);
         assertThat(complete).hasSize(19);
@@ -147,12 +142,7 @@ public class LazyIndexSourceTest extends DataEvolutionTestBase {
 
     @Test
     public void testWrappedLazySplitSupportsPartitionFiltering() throws Exception {
-        FileStoreTable table =
-                indexedTable()
-                        .copy(
-                                Collections.singletonMap(
-                                        CoreOptions.SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED.key(),
-                                        "true"));
+        FileStoreTable table = distributedTable(indexedTable());
         FileStoreSourceSplit lazy = plan(table, FlinkConnectorOptions.SplitAssignMode.FAIR).get(0);
         FileStoreSourceSplit wrapped =
                 new FileStoreSourceSplit(
@@ -174,6 +164,12 @@ public class LazyIndexSourceTest extends DataEvolutionTestBase {
                                     filtering);
             assertThat(assigner.getNext(0, null)).containsExactly(wrapped);
         }
+    }
+
+    private FileStoreTable distributedTable(FileStoreTable table) {
+        return table.copy(
+                Collections.singletonMap(
+                        CoreOptions.SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED.key(), "true"));
     }
 
     private FileStoreTable indexedTable() throws Exception {

@@ -250,7 +250,7 @@ public class GlobalIndexEvaluator implements Closeable {
                         });
     }
 
-    private static boolean isRangeBound(Predicate predicate) {
+    static boolean isRangeBound(Predicate predicate) {
         if (!(predicate instanceof LeafPredicate)) {
             return false;
         }
@@ -262,7 +262,7 @@ public class GlobalIndexEvaluator implements Closeable {
                 && leaf.literals().get(0) != null;
     }
 
-    private static boolean isLowerBound(LeafPredicate leaf) {
+    static boolean isLowerBound(LeafPredicate leaf) {
         return leaf.function() instanceof GreaterThan || leaf.function() instanceof GreaterOrEqual;
     }
 

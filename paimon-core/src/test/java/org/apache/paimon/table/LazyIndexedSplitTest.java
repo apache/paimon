@@ -79,6 +79,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -221,6 +222,26 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
         return table.copy(
                 Collections.singletonMap(
                         CoreOptions.SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED.key(), "true"));
+    }
+
+    @Test
+    public void testDistributedIndexDefaultsReadProtectionTagToOneDay() throws Exception {
+        write(100);
+        createIndex("btree", "f1");
+        FileStoreTable table =
+                getTableDefault()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED.key(),
+                                        "true"));
+        Predicate predicate = new PredicateBuilder(table.rowType()).equal(1, str("a50"));
+        assertThat(table.coreOptions().scanPlanAutoTagTimeRetained()).isNull();
+        DataEvolutionBatchScan scan =
+                (DataEvolutionBatchScan) table.newReadBuilder().withFilter(predicate).newScan();
+        assertThat(scan.plan().splits()).isNotEmpty().allMatch(LazyIndexedSplit.class::isInstance);
+        assertThat(table.tagManager().tagExists(scan.readProtectionTagName())).isTrue();
+        assertThat(table.tagManager().getOrThrow(scan.readProtectionTagName()).getTagTimeRetained())
+                .isEqualTo(Duration.ofDays(1));
     }
 
     @Test
@@ -555,6 +576,44 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
         assertThat(splits).allMatch(split -> split instanceof DataSplit);
         assertThat(read(lazyRead, splits))
                 .containsExactlyElementsOf(read(read, read.newScan().plan().splits()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"fast", "full", "detail"})
+    public void testMissingDeferredIndexFile(String mode) throws Exception {
+        write(100);
+        createIndex("btree", "f1");
+        FileStoreTable table =
+                distributedTable(getTableDefault())
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), mode));
+        Predicate predicate = new PredicateBuilder(table.rowType()).equal(1, str("a50"));
+        ReadBuilder read =
+                table.newReadBuilder()
+                        .withFilter(predicate)
+                        .withReadType(table.rowType().project(new int[] {0}));
+        DataEvolutionBatchScan scan = (DataEvolutionBatchScan) read.newScan();
+        List<Split> splits = scan.plan().splits();
+        assertThat(splits).isNotEmpty().allMatch(LazyIndexedSplit.class::isInstance);
+        assertThat(scan.readProtectionTagName()).isNotNull();
+        assertThat(table.tagManager().tagExists(scan.readProtectionTagName())).isTrue();
+
+        for (IndexFileMeta file : indexFiles(table)) {
+            table.fileIO()
+                    .delete(
+                            table.store().pathFactory().globalIndexFileFactory().toPath(file),
+                            false);
+        }
+        if (mode.equals("fast")) {
+            assertThatThrownBy(() -> read(read, splits)).isInstanceOf(IOException.class);
+        } else {
+            List<Integer> result = new ArrayList<>();
+            try (RecordReader<InternalRow> reader = read.newRead().createReader(() -> splits)) {
+                reader.forEachRemaining(row -> result.add(row.getInt(0)));
+            }
+            assertThat(result).containsExactly(50);
+        }
     }
 
     @Test

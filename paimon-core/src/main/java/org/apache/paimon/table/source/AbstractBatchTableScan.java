@@ -285,6 +285,10 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
         if (timeRetained == null) {
             return;
         }
+        createReadProtectionTag(snapshotId, timeRetained);
+    }
+
+    public final void createReadProtectionTag(long snapshotId, Duration timeRetained) {
         SnapshotManager sm = snapshotReader.snapshotManager();
         TagManager tagMgr = new TagManager(sm.fileIO(), sm.tablePath(), sm.branch());
         BatchReadTagCreator creator = new BatchReadTagCreator(tagMgr, sm, timeRetained);

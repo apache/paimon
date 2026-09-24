@@ -47,6 +47,7 @@ import org.apache.paimon.predicate.NotEqual;
 import org.apache.paimon.predicate.NotIn;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.StartsWith;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -59,6 +60,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -67,8 +69,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 import static org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexOptions.BITMAP_INDEX_FALLBACK_SCAN_MAX_SIZE;
@@ -204,8 +208,60 @@ class GlobalIndexScanPlan {
         CompoundPredicate compound = (CompoundPredicate) predicate;
         boolean union = compound.function() instanceof Or;
         List<GlobalIndexScanPlan> children = new ArrayList<>();
-        for (Predicate child : GlobalIndexEvaluator.normalizedChildren(compound)) {
-            GlobalIndexScanPlan plan = create(child, rowType, groups, options);
+        List<Predicate> predicates = GlobalIndexEvaluator.normalizedChildren(compound);
+        for (int i = 0; i < predicates.size(); i++) {
+            Predicate child = predicates.get(i);
+            GlobalIndexScanPlan plan = null;
+            if (!union && GlobalIndexEvaluator.isRangeBound(child)) {
+                LeafPredicate first = (LeafPredicate) child;
+                for (int j = i + 1; j < predicates.size(); j++) {
+                    Predicate other = predicates.get(j);
+                    if (!GlobalIndexEvaluator.isRangeBound(other)) {
+                        continue;
+                    }
+                    LeafPredicate second = (LeafPredicate) other;
+                    if (GlobalIndexEvaluator.isLowerBound(first)
+                                    == GlobalIndexEvaluator.isLowerBound(second)
+                            || !first.fieldRefOptional().equals(second.fieldRefOptional())) {
+                        continue;
+                    }
+                    LeafPredicate lower = GlobalIndexEvaluator.isLowerBound(first) ? first : second;
+                    LeafPredicate upper = GlobalIndexEvaluator.isLowerBound(first) ? second : first;
+                    GlobalIndexScanPlan between =
+                            create(
+                                    new PredicateBuilder(rowType)
+                                            .between(
+                                                    lower.fieldRefOptional().get().index(),
+                                                    lower.literals().get(0),
+                                                    upper.literals().get(0)),
+                                    rowType,
+                                    groups,
+                                    options);
+                    if (between != null) {
+                        plan =
+                                new GlobalIndexScanPlan(
+                                        null,
+                                        false,
+                                        Arrays.asList(
+                                                new GlobalIndexScanPlan(
+                                                        lower,
+                                                        false,
+                                                        Collections.emptyList(),
+                                                        between.groups),
+                                                new GlobalIndexScanPlan(
+                                                        upper,
+                                                        false,
+                                                        Collections.emptyList(),
+                                                        between.groups)),
+                                        Collections.emptyList());
+                        predicates.remove(j);
+                        break;
+                    }
+                }
+            }
+            if (plan == null) {
+                plan = create(child, rowType, groups, options);
+            }
             if (plan == null) {
                 if (union) {
                     return null;
@@ -294,59 +350,98 @@ class GlobalIndexScanPlan {
     private GlobalIndexResult evaluate(
             FileIO fileIO, Options options, List<Range> ranges, ExecutorService executor)
             throws IOException {
-        GlobalIndexResult result = null;
-        if (predicate != null) {
-            result = GlobalIndexResult.createEmpty();
-            for (IndexGroup group : groups) {
-                GlobalIndexResult splitRows = localSplitRows(ranges, group.range);
-                if (splitRows.results().isEmpty()) {
-                    continue;
-                }
-                GlobalIndexer indexer =
-                        GlobalIndexerFactoryUtils.load(group.type)
-                                .create(group.field, group.extraFields, options);
-                try (GlobalIndexReader reader =
-                        "btree".equals(group.type)
-                                ? indexer.createReader(
-                                        meta -> fileIO.newInputStream(meta.filePath()),
-                                        group.files,
-                                        group.range.count(),
-                                        splitRows.results().toRangeList(),
-                                        executor)
-                                : indexer.createReader(
-                                        meta -> fileIO.newInputStream(meta.filePath()),
-                                        group.files,
-                                        group.range.count(),
-                                        executor)) {
-                    Optional<GlobalIndexResult> matches =
-                            predicate
-                                    .function()
-                                    .visit(
-                                            reader,
-                                            predicate.fieldRefOptional().get(),
-                                            predicate.literals())
-                                    .get();
-                    if (!matches.isPresent()) {
-                        throw new IOException(
-                                "Index predicate became unsupported after planning: " + predicate);
-                    }
-                    // Clip in index-local coordinates before offset() iterates the retained rows.
-                    result = result.or(splitRows.and(matches.get()).offset(group.range.from));
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new IOException("Interrupted while evaluating lazy index split", e);
-                } catch (ExecutionException e) {
-                    throw new IOException("Failed to evaluate lazy index split", e.getCause());
-                }
+        GlobalIndexScanPlan leaf = this;
+        Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> query = null;
+        if (predicate == null && !union && children.size() == 2) {
+            GlobalIndexScanPlan first = children.get(0);
+            GlobalIndexScanPlan second = children.get(1);
+            if (first.predicate != null
+                    && second.predicate != null
+                    && first.groups.equals(second.groups)
+                    && GlobalIndexEvaluator.isRangeBound(first.predicate)
+                    && GlobalIndexEvaluator.isRangeBound(second.predicate)
+                    && GlobalIndexEvaluator.isLowerBound(first.predicate)
+                            != GlobalIndexEvaluator.isLowerBound(second.predicate)
+                    && first.predicate
+                            .fieldRefOptional()
+                            .equals(second.predicate.fieldRefOptional())) {
+                LeafPredicate lower =
+                        GlobalIndexEvaluator.isLowerBound(first.predicate)
+                                ? first.predicate
+                                : second.predicate;
+                LeafPredicate upper =
+                        GlobalIndexEvaluator.isLowerBound(first.predicate)
+                                ? second.predicate
+                                : first.predicate;
+                FieldRef field = lower.fieldRefOptional().get();
+                leaf = first;
+                query =
+                        reader ->
+                                reader.visitRange(
+                                        field,
+                                        lower.literals().get(0),
+                                        upper.literals().get(0),
+                                        lower.function() instanceof GreaterOrEqual,
+                                        upper.function() instanceof LessOrEqual);
             }
-        } else {
+        }
+        if (predicate == null && query == null) {
+            GlobalIndexResult result = null;
             for (GlobalIndexScanPlan child : children) {
                 GlobalIndexResult matches = child.evaluate(fileIO, options, ranges, executor);
                 result =
                         result == null ? matches : union ? result.or(matches) : result.and(matches);
             }
+            return result == null ? GlobalIndexResult.createEmpty() : result;
         }
-        return result == null ? GlobalIndexResult.createEmpty() : result;
+        if (query == null) {
+            query =
+                    reader ->
+                            predicate
+                                    .function()
+                                    .visit(
+                                            reader,
+                                            predicate.fieldRefOptional().get(),
+                                            predicate.literals());
+        }
+        GlobalIndexResult result = GlobalIndexResult.createEmpty();
+        for (IndexGroup group : leaf.groups) {
+            GlobalIndexResult splitRows = localSplitRows(ranges, group.range);
+            if (splitRows.results().isEmpty()) {
+                continue;
+            }
+            GlobalIndexer indexer =
+                    GlobalIndexerFactoryUtils.load(group.type)
+                            .create(group.field, group.extraFields, options);
+            try (GlobalIndexReader reader =
+                    "btree".equals(group.type)
+                            ? indexer.createReader(
+                                    meta -> fileIO.newInputStream(meta.filePath()),
+                                    group.files,
+                                    group.range.count(),
+                                    splitRows.results().toRangeList(),
+                                    executor)
+                            : indexer.createReader(
+                                    meta -> fileIO.newInputStream(meta.filePath()),
+                                    group.files,
+                                    group.range.count(),
+                                    executor)) {
+                Optional<GlobalIndexResult> matches = query.apply(reader).get();
+                if (!matches.isPresent()) {
+                    throw new IOException(
+                            "Index predicate became unsupported after planning: "
+                                    + (predicate != null ? predicate : children));
+                }
+                // Clip in index-local coordinates before offset() iterates the retained rows.
+                result = result.or(splitRows.and(matches.get()).offset(group.range.from));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted while evaluating lazy index split", e);
+            } catch (ExecutionException e) {
+                throw new IOException("Failed to evaluate lazy index split", e.getCause());
+            }
+        }
+        return result;
     }
 
     private static GlobalIndexResult localSplitRows(List<Range> ranges, Range groupRange) {
