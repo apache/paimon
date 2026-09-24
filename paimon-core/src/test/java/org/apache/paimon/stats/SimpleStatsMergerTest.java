@@ -114,7 +114,8 @@ public class SimpleStatsMergerTest {
         SimpleStatsConverter converter = new SimpleStatsConverter(rowType);
         // metadata.stats-mode=counts: min/max bounds are null
         SimpleStats countsOnly =
-                converter.toBinaryAllMode(new SimpleColStats[] {new SimpleColStats(null, null, 1L)});
+                converter.toBinaryAllMode(
+                        new SimpleColStats[] {new SimpleColStats(null, null, 1L)});
         SimpleStats full =
                 converter.toBinaryAllMode(new SimpleColStats[] {new SimpleColStats(3, 7, 0L)});
 
