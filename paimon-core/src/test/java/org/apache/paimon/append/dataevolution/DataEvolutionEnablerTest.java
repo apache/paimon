@@ -35,6 +35,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
@@ -70,6 +71,7 @@ import org.junit.jupiter.api.Test;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -393,6 +395,54 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         Map<Integer, String> values = valuesById(loadTable());
         for (int i = 0; i < rows.length; i++) {
             assertThat(values).containsEntry(i, "new" + i);
+        }
+    }
+
+    @Test
+    public void testExpiringSnapshotsAndTagsFromBeforeTheConversionKeepsTheData() throws Exception {
+        FileStoreTable table = createTable(Collections.emptyMap());
+        writeRows(table, row(1, "a", "p1"));
+        writeRows(table, row(2, "b", "p1"));
+        table.createTag("before", 2);
+        enabler().run(false);
+        table = loadTable();
+        writeRows(table, row(3, "c", "p1"));
+        long latest = table.snapshotManager().latestSnapshotId();
+
+        // The snapshots before the conversion reference the same data files through the
+        // manifests the conversion replaced: expiring them must not delete those files.
+        table.newExpireSnapshots()
+                .config(
+                        ExpireConfig.builder()
+                                .snapshotRetainMax(1)
+                                .snapshotRetainMin(1)
+                                .snapshotTimeRetain(Duration.ZERO)
+                                .build())
+                .expire();
+        table = loadTable();
+        assertThat(table.snapshotManager().earliestSnapshotId()).isEqualTo(latest);
+        assertThat(valuesById(table)).containsOnlyKeys(1, 2, 3);
+        assertNoDuplicateOrMissingRowIds(table, 3);
+
+        // the tag still reads the table as it was, and deleting it keeps the files
+        FileStoreTable tagged =
+                table.copy(Collections.singletonMap(CoreOptions.SCAN_TAG_NAME.key(), "before"));
+        assertThat(valuesById(tagged)).containsOnlyKeys(1, 2);
+        table.deleteTag("before");
+        table = loadTable();
+        assertThat(valuesById(table)).containsOnlyKeys(1, 2, 3);
+        for (DataFileMeta file : liveFiles(table)) {
+            assertThat(
+                            table.fileIO()
+                                    .exists(
+                                            table.store()
+                                                    .pathFactory()
+                                                    .createDataFilePathFactory(
+                                                            org.apache.paimon.data.BinaryRow
+                                                                    .EMPTY_ROW,
+                                                            0)
+                                                    .toPath(file)))
+                    .isTrue();
         }
     }
 
