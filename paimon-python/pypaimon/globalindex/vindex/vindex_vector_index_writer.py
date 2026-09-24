@@ -44,6 +44,7 @@ class VindexVectorIndexWriter:
         index_type: str,
         options: Mapping[str, object],
         field_name: str,
+        user_options: Optional[Mapping[str, object]] = None,
     ):
         self.file_name = (
             "%s-%s-global-index-%s.index"
@@ -53,9 +54,9 @@ class VindexVectorIndexWriter:
         self._index_path = index_path.rstrip('/')
         self._index_type = index_type
         self._native_options = native_options(
-            data_type, options, index_type, field_name)
+            data_type, options, index_type, field_name, user_options)
         self._train_sample_ratio = train_sample_ratio(
-            options, index_type, field_name)
+            options, index_type, field_name, user_options)
         self._dimension = int(self._native_options["dimension"])
         self._row_count = 0
         self._vector_count = 0
@@ -148,22 +149,12 @@ class VindexVectorIndexWriter:
             except ImportError as e:
                 raise ImportError(
                     "paimon-vindex is required to build vindex vector indexes. "
-                    "Install paimon-vindex==0.4.0 or pypaimon[vindex].") from e
+                    "Install paimon-vindex==0.5.0 or pypaimon[vindex].") from e
 
             self._close_temp_files()
             self._file_io.check_or_mkdirs(self._index_path)
-            vectors = np.fromfile(
-                self._vector_temp_path,
-                dtype=np.float32,
-                count=self._vector_count * self._dimension,
-            ).reshape(self._vector_count, self._dimension)
-            training_vectors = _sample_training_vectors(
-                np, vectors, self._train_sample_ratio)
-            training = VectorIndexTrainer.train(
-                self._training_options(), training_vectors)
+            training = self._train(np, VectorIndexTrainer)
             try:
-                del training_vectors
-                del vectors
                 with VectorIndexWriter(training) as writer:
                     self._add_vectors_in_batches(np, writer)
                     with self._file_io.new_output_stream(file_path) as output_stream:
@@ -177,6 +168,16 @@ class VindexVectorIndexWriter:
             self._delete_temp_files()
 
         return [ResultEntry(self.file_name, self._row_count, b"{}")]
+
+    def _train(self, np, trainer_type):
+        with open(self._vector_temp_path, "rb") as vector_file:
+            with trainer_type.create(self._training_options()) as trainer:
+                for batch in _iter_training_batches(
+                    np, vector_file, self._vector_count, self._dimension,
+                    self._train_sample_ratio, batch_size=ADD_BATCH_SIZE,
+                ):
+                    trainer.add_training_vectors(batch)
+                return trainer.finish_training()
 
     def _file_path(self) -> str:
         return "%s/%s" % (self._index_path, self.file_name)
@@ -249,27 +250,19 @@ class VindexVectorIndexWriter:
 
 def native_options(
     data_type: DataType,
-    options: Mapping[str, object],
+    table_options: Mapping[str, object],
     index_type: str,
     field_name: str,
+    user_options: Optional[Mapping[str, object]] = None,
 ) -> Dict[str, str]:
+    if user_options is None:
+        user_options, table_options = table_options, {}
+
     result: Dict[str, str] = {}
-    option_prefix = "%s." % index_type
-    field_prefix = "fields.%s." % field_name
-
-    for key, value in options.items():
-        key = str(key)
-        if key.startswith(option_prefix):
-            native_key = _native_option_key(key[len(option_prefix):])
-            if native_key is not None:
-                result[native_key] = str(value)
-
-    for key, value in options.items():
-        key = str(key)
-        if key.startswith(field_prefix):
-            native_key = _native_option_key(key[len(field_prefix):])
-            if native_key is not None:
-                result[native_key] = str(value)
+    _collect_native_options(
+        result, table_options, index_type, field_name, validate=False)
+    _collect_native_options(
+        result, user_options, index_type, field_name, validate=True)
 
     result["index.type"] = index_type.replace('-', '_')
     result["dimension"] = str(_dimension(data_type, result, index_type))
@@ -278,12 +271,19 @@ def native_options(
 
 
 def train_sample_ratio(
-    options: Mapping[str, object], index_type: str, field_name: str
+    table_options: Mapping[str, object],
+    index_type: str,
+    field_name: str,
+    user_options: Optional[Mapping[str, object]] = None,
 ) -> float:
+    sources = (table_options,) if user_options is None else (user_options, table_options)
     field_key = "fields.%s.train.sample-ratio" % field_name
     index_key = "%s.train.sample-ratio" % index_type
-    key = field_key if field_key in options else index_key
-    if key not in options:
+    for options in sources:
+        key = field_key if field_key in options else index_key
+        if key in options:
+            break
+    else:
         return 1.0
 
     value = options[key]
@@ -322,6 +322,42 @@ def validate_vector_type(data_type: DataType) -> None:
         % data_type)
 
 
+def _collect_native_options(
+    result, options, index_type, field_name, validate
+):
+    option_prefix = "%s." % index_type
+    field_prefix = "fields.%s." % field_name
+
+    for key, value in options.items():
+        key = str(key)
+        native_key = _native_option_key(key)
+        if key == native_key and _is_050_build_option(native_key):
+            _put_native_option(
+                result, key, key, value, index_type, validate)
+    for key, value in options.items():
+        key = str(key)
+        if key.startswith(option_prefix):
+            _put_native_option(
+                result,
+                key,
+                key[len(option_prefix):],
+                value,
+                index_type,
+                validate,
+            )
+    for key, value in options.items():
+        key = str(key)
+        if key.startswith(field_prefix):
+            _put_native_option(
+                result,
+                key,
+                key[len(field_prefix):],
+                value,
+                index_type,
+                validate,
+            )
+
+
 def _native_option_key(option_key: str) -> Optional[str]:
     if option_key in ("index.dimension", "dimension"):
         return "dimension"
@@ -330,6 +366,10 @@ def _native_option_key(option_key: str) -> Optional[str]:
     if option_key in (
         "nlist",
         "expected-vector-count",
+        "ivf.coarse-assignment",
+        "ivf.pq-encoding",
+        "ivf.train.max-points-per-centroid",
+        "pq.train.max-points-per-centroid",
         "pq.m",
         "pq.code-ratio",
         "pq.bits",
@@ -366,6 +406,40 @@ def _native_option_key(option_key: str) -> Optional[str]:
     return None
 
 
+def _put_native_option(
+    result, option_key, option_suffix, value, index_type, validate
+):
+    native_key = _native_option_key(option_suffix)
+    if native_key is None:
+        return
+    if (_is_050_build_option(native_key)
+            and not _is_allowed_050_build_option(native_key, index_type)):
+        if validate:
+            raise ValueError(
+                "Option '%s' is not supported for index type '%s'."
+                % (option_key, index_type)
+            )
+        return
+    result[native_key] = str(value)
+
+
+def _is_050_build_option(key):
+    return key in (
+        "ivf.coarse-assignment",
+        "ivf.pq-encoding",
+        "ivf.train.max-points-per-centroid",
+        "pq.train.max-points-per-centroid",
+    )
+
+
+def _is_allowed_050_build_option(key, index_type):
+    if key == "ivf.pq-encoding":
+        return index_type == "ivf-pq"
+    if key == "pq.train.max-points-per-centroid":
+        return index_type in ("ivf-pq", "diskann")
+    return index_type != "diskann"
+
+
 def _dimension(
     data_type: DataType, native_options_map: Mapping[str, str], index_type: str
 ) -> int:
@@ -389,16 +463,31 @@ def _is_float_type(data_type: DataType) -> bool:
     )
 
 
-def _sample_training_vectors(np, vectors, sample_ratio: float):
-    vector_count = vectors.shape[0]
+def _iter_training_batches(
+    np, vector_file, vector_count: int, dimension: int, sample_ratio: float,
+    batch_size: int = ADD_BATCH_SIZE,
+):
+    """Yield the existing evenly spaced sample using bounded reads and buffers."""
     train_count = max(1, min(vector_count, int(math.ceil(
         vector_count * sample_ratio))))
-    if train_count == vector_count:
-        return vectors
-    indexes = (
-        np.arange(train_count, dtype=np.int64) * vector_count // train_count
-    )
-    return np.ascontiguousarray(vectors[indexes])
+    position = 0
+    item_size = np.dtype(np.float32).itemsize
+    while position < train_count:
+        start = position * vector_count // train_count
+        end = min(start + batch_size, vector_count)
+        # First sample position whose source row is at or beyond this block.
+        next_position = min(train_count, (end * train_count + vector_count - 1) // vector_count)
+        vector_file.seek(start * dimension * item_size)
+        vectors = np.fromfile(
+            vector_file, dtype=np.float32, count=(end - start) * dimension,
+        ).reshape(end - start, dimension)
+        if train_count == vector_count:
+            yield vectors
+        else:
+            indexes = np.arange(position, next_position, dtype=np.int64)
+            indexes = indexes * vector_count // train_count - start
+            yield np.ascontiguousarray(vectors[indexes])
+        position = next_position
 
 
 def _float32_batch_values(np, pa, vectors, dimension):

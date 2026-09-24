@@ -44,6 +44,7 @@ from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.source.vector_search_builder import VectorSearchBuilderImpl
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
@@ -106,7 +107,7 @@ class _StubTable:
         return None
 
     def snapshot_manager(self):
-        return None
+        return types.SimpleNamespace(get_latest_snapshot=lambda: None)
 
     def path_factory(self):
         class _P:
@@ -121,7 +122,10 @@ class _StubTable:
         return self
 
     def copy_without_time_travel(self, options):
-        return self
+        from copy import copy
+        return copy(self)
+
+    _copy_with_snapshot = FileStoreTable._copy_with_snapshot
 
     def new_vector_search_builder(self):
         from pypaimon.table.source.vector_search_builder import (
@@ -361,6 +365,7 @@ class GlobalIndexLiveRowFilterTest(unittest.TestCase):
                 return False
 
         class _Table:
+            _copy_with_snapshot = FileStoreTable._copy_with_snapshot
             options = _Options()
 
             def new_read_builder(self_inner):
@@ -412,6 +417,7 @@ class GlobalIndexLiveRowFilterTest(unittest.TestCase):
                 return _Scan()
 
         class _Table:
+            _copy_with_snapshot = FileStoreTable._copy_with_snapshot
             options = _Options()
             table_schema = _StubSchema()
             file_io = object()
@@ -491,6 +497,7 @@ class GlobalIndexLiveRowFilterTest(unittest.TestCase):
                 return True
 
         class _Table:
+            _copy_with_snapshot = FileStoreTable._copy_with_snapshot
             options = _Options()
             file_io = object()
 
@@ -2676,7 +2683,7 @@ class HybridSearchBuilderTest(unittest.TestCase):
         self.assertEqual(("query", "content", match_query("paimon search", "And")),
                          captured_builders[1].calls[0])
 
-    def test_hybrid_search_rejects_data_filter_with_full_text_route(self):
+    def test_hybrid_search_forwards_data_filter_to_full_text_route(self):
         from pypaimon.table.source.hybrid_search_builder import (
             HybridSearchBuilderImpl,
         )
@@ -2694,9 +2701,8 @@ class HybridSearchBuilderTest(unittest.TestCase):
             .with_limit(5)
         )
 
-        with self.assertRaises(ValueError) as ctx:
-            builder.route_builders()
-        self.assertIn("full-text routes", str(ctx.exception))
+        route = builder.route_builders()[0]
+        self.assertEqual(pb.equal("id", 1), route.search_builder._filter)
 
     def test_hybrid_search_rejects_full_text_route_options(self):
         from pypaimon.table.source.hybrid_search_builder import (
@@ -3146,7 +3152,9 @@ class VectorSearchManySplitsTest(unittest.TestCase):
             CoreOptions.SCAN_SNAPSHOT_ID.key(): "7",
             CoreOptions.SCAN_TAG_NAME.key(): None,
             CoreOptions.SCAN_TIMESTAMP.key(): None,
+            CoreOptions.SCAN_NATIVE_PLAN_ENABLED.key(): "false",
         })
+        self.assertIs(read_table._read_snapshot, snapshot)
 
     def tearDown(self):
         mock.patch.stopall()

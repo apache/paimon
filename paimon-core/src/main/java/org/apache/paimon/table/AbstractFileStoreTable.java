@@ -107,6 +107,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Nullable private Set<String> appliedDynamicOptionKeys;
 
     @Nullable protected transient SegmentsCache<Path> manifestCache;
+    @Nullable protected transient SegmentsCache<Path> manifestSidecarCache;
     @Nullable protected transient Cache<Path, Snapshot> snapshotCache;
     @Nullable protected transient Cache<String, Statistics> statsCache;
     @Nullable protected transient DVMetaCache dvmetaCache;
@@ -142,6 +143,18 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public SegmentsCache<Path> getManifestCache() {
         return manifestCache;
+    }
+
+    @Override
+    public void setManifestSidecarCache(SegmentsCache<Path> manifestSidecarCache) {
+        this.manifestSidecarCache = manifestSidecarCache;
+        store().setManifestSidecarCache(manifestSidecarCache);
+    }
+
+    @Nullable
+    @Override
+    public SegmentsCache<Path> getManifestSidecarCache() {
+        return manifestSidecarCache;
     }
 
     @Override
@@ -431,6 +444,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
         if (manifestCache != null) {
             copied.setManifestCache(manifestCache);
+        }
+        if (manifestSidecarCache != null) {
+            copied.setManifestSidecarCache(manifestSidecarCache);
         }
         if (statsCache != null) {
             copied.setStatsCache(statsCache);

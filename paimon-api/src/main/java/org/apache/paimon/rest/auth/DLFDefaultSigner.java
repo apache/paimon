@@ -34,6 +34,7 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -62,12 +63,12 @@ public class DLFDefaultSigner implements DLFRequestSigner {
     private static final String NEW_LINE = "\n";
     private static final List<String> SIGNED_HEADERS =
             Arrays.asList(
-                    DLF_CONTENT_MD5_HEADER_KEY.toLowerCase(),
-                    DLF_CONTENT_TYPE_KEY.toLowerCase(),
-                    DLF_CONTENT_SHA56_HEADER_KEY.toLowerCase(),
-                    DLF_DATE_HEADER_KEY.toLowerCase(),
-                    DLF_AUTH_VERSION_HEADER_KEY.toLowerCase(),
-                    DLF_SECURITY_TOKEN_HEADER_KEY.toLowerCase());
+                    DLF_CONTENT_MD5_HEADER_KEY.toLowerCase(Locale.ROOT),
+                    DLF_CONTENT_TYPE_KEY.toLowerCase(Locale.ROOT),
+                    DLF_CONTENT_SHA56_HEADER_KEY.toLowerCase(Locale.ROOT),
+                    DLF_DATE_HEADER_KEY.toLowerCase(Locale.ROOT),
+                    DLF_AUTH_VERSION_HEADER_KEY.toLowerCase(Locale.ROOT),
+                    DLF_SECURITY_TOKEN_HEADER_KEY.toLowerCase(Locale.ROOT));
 
     private final String region;
 
@@ -215,7 +216,7 @@ public class DLFDefaultSigner implements DLFRequestSigner {
         TreeMap<String, String> orderMap = new TreeMap<>();
         if (headers != null) {
             for (Map.Entry<String, String> header : headers.entrySet()) {
-                String key = header.getKey().toLowerCase();
+                String key = header.getKey().toLowerCase(Locale.ROOT);
                 if (SIGNED_HEADERS.contains(key)) {
                     orderMap.put(key, StringUtils.trim(header.getValue()));
                 }

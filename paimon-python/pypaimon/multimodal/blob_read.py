@@ -19,13 +19,13 @@
 
 
 def fetch_blob_bodies(
-        file_io, data, blob_cols, parallelism, map_blob_cols=()):
-    """Fetch scalar and MAP BLOB payload bytes.
+        file_io, data, blob_cols, parallelism, map_blob_cols=(), array_blob_cols=()):
+    """Fetch scalar, MAP and ARRAY BLOB payload bytes.
 
     ``data`` is a ``dict`` mapping each BLOB column name to row-aligned cells.
     A cell may be serialized ``BlobDescriptor`` bytes, inline payload bytes,
-    ``None``, or a MAP represented by key-value pairs. Returned values preserve
-    row and MAP entry order and are grouped per column.
+    ``None``, an ARRAY of such values, or a MAP represented by key-value pairs.
+    Returned values preserve row and element order and are grouped per column.
     """
     from pypaimon.table.row.blob import (
         BlobDescriptorSerde,
@@ -38,6 +38,7 @@ def fetch_blob_bodies(
     bodies = {col: [] for col in blob_cols}
     scalar_offsets = {}
     map_blob_cols = set(map_blob_cols)
+    array_blob_cols = set(array_blob_cols)
 
     def queue_blob_fetch(value):
         index = len(ranges)
@@ -60,7 +61,8 @@ def fetch_blob_bodies(
         return index
 
     for col in blob_cols:
-        if col not in map_blob_cols:
+        is_map = col in map_blob_cols
+        if not is_map and col not in array_blob_cols:
             start = len(ranges)
             for value in data[col]:
                 queue_blob_fetch(value)
@@ -72,13 +74,13 @@ def fetch_blob_bodies(
                 bodies[col].append(None)
                 continue
 
-            entries = _map_entries(value)
+            entries = _map_entries(value) if is_map else enumerate(value)
             row_index = len(bodies[col])
             row = []
             bodies[col].append(row)
             for key, item in entries:
                 entry_index = len(row)
-                row.append((key, None))
+                row.append((key, None) if is_map else None)
                 range_index = queue_blob_fetch(item)
                 targets.append((col, row_index, entry_index, range_index))
 
@@ -93,8 +95,11 @@ def fetch_blob_bodies(
     for col, (start, end) in scalar_offsets.items():
         bodies[col] = fetched[start:end]
     for col, row_index, entry_index, index in targets:
-        key = bodies[col][row_index][entry_index][0]
-        bodies[col][row_index][entry_index] = (key, fetched[index])
+        value = fetched[index]
+        if col in map_blob_cols:
+            key = bodies[col][row_index][entry_index][0]
+            value = (key, value)
+        bodies[col][row_index][entry_index] = value
     return bodies
 
 

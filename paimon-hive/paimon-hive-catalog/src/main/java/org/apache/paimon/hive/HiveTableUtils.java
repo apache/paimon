@@ -32,6 +32,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import static org.apache.hadoop.hive.serde.serdeConstants.FIELD_DELIM;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
@@ -103,7 +104,7 @@ public class HiveTableUtils {
         String serLib =
                 serdeInfo.getSerializationLib() == null
                         ? ""
-                        : serdeInfo.getSerializationLib().toLowerCase();
+                        : serdeInfo.getSerializationLib().toLowerCase(Locale.ROOT);
         String inputFormat = sd.getInputFormat() == null ? "" : sd.getInputFormat();
         if (serLib.contains("parquet")) {
             format = Format.PARQUET;
@@ -132,7 +133,7 @@ public class HiveTableUtils {
         rowType.getFields().forEach(f -> builder.column(f.name(), f.type(), f.description()));
         options.set(PATH, location);
         options.set(TYPE, FORMAT_TABLE);
-        options.set(FILE_FORMAT, format.name().toLowerCase());
+        options.set(FILE_FORMAT, format.name().toLowerCase(Locale.ROOT));
         return builder.partitionKeys(partitionKeys)
                 .options(options.toMap())
                 .comment(comment)

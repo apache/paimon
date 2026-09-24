@@ -50,6 +50,10 @@ class QueryAuthSplit(Split):
         return self._split.bucket
 
     @property
+    def is_streaming(self):
+        return getattr(self._split, 'is_streaming', False)
+
+    @property
     def raw_convertible(self) -> bool:
         return self._split.raw_convertible
 

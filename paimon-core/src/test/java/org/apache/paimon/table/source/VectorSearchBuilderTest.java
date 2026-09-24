@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -31,6 +32,7 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
+import org.apache.paimon.globalindex.bitmap.MultiValueGlobalIndexerFactory;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexer;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
@@ -585,6 +587,105 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
         assertThat(result).isInstanceOf(ScoredGlobalIndexResult.class);
         assertThat(result.results()).containsExactlyInAnyOrder(2L, 3L);
+    }
+
+    @Test
+    public void testVectorSearchFilterIndexCannotEvaluate() throws Exception {
+        catalog.createTable(
+                identifier("vector_search_unsupported_scalar_predicate"),
+                withVectorSchemaOptions(
+                                Schema.newBuilder()
+                                        .column("id", DataTypes.INT())
+                                        .column("tags", new ArrayType(DataTypes.STRING()))
+                                        .column(
+                                                VECTOR_FIELD_NAME,
+                                                new ArrayType(DataTypes.FLOAT())))
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("vector_search_unsupported_scalar_predicate"));
+
+        // row 0 has NULL tags and is the closest to the query: dropping the index
+        // pre-filter alone would pollute the top-K with it, and keeping the old empty
+        // bitmap would drop every row — only routing the search through the exact
+        // final-read filter returns the closest *matching* rows
+        float[][] vectors = {{0.0f, 0.0f}, {1.0f, 0.0f}, {2.0f, 0.0f}, {3.0f, 0.0f}};
+        writeVectorsWithTags(table, vectors, 0);
+        buildAndCommitIndex(table, vectors);
+        buildAndCommitMultiValueIndex(table, vectors.length);
+
+        // IS NOT NULL on the multivalue-indexed array column is a function the reader
+        // cannot evaluate; the scalar pre-filter must step aside and let the exact
+        // final-read filter decide instead of answering "no rows match"
+        Predicate filter =
+                new PredicateBuilder(table.rowType())
+                        .isNotNull(table.rowType().getFieldIndex("tags"));
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(filter)
+                        .executeLocal();
+
+        assertThat(result.results()).containsExactly(1L, 2L);
+        assertThat(readIds(table, result)).containsExactly(1, 2);
+    }
+
+    private void writeVectorsWithTags(FileStoreTable table, float[][] vectors, int nullTagsRow)
+            throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < vectors.length; i++) {
+                GenericArray tags =
+                        i == nullTagsRow
+                                ? null
+                                : new GenericArray(
+                                        new BinaryString[] {BinaryString.fromString("t" + i)});
+                write.write(GenericRow.of(i, tags, new GenericArray(vectors[i])));
+            }
+            commit.commit(write.prepareCommit());
+        }
+    }
+
+    private void buildAndCommitMultiValueIndex(FileStoreTable table, int rowCount)
+            throws Exception {
+        Options options = table.coreOptions().toConfiguration();
+        DataField tagsField = table.rowType().getField("tags");
+
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table,
+                                MultiValueGlobalIndexerFactory.IDENTIFIER,
+                                tagsField,
+                                options);
+        for (int row = 0; row < rowCount; row++) {
+            writer.write(BinaryString.fromString("t" + row), row);
+        }
+        List<ResultEntry> entries = writer.finish(rowCount);
+
+        List<IndexFileMeta> indexFiles =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        new Range(0, rowCount - 1),
+                        tagsField.id(),
+                        MultiValueGlobalIndexerFactory.IDENTIFIER,
+                        entries);
+
+        DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
+        CommitMessage message =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        null,
+                        dataIncrement,
+                        CompactIncrement.emptyIncrement());
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
     }
 
     @Test

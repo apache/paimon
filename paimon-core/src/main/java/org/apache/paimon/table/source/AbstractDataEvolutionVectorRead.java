@@ -28,7 +28,6 @@ import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
-import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.globalindex.OffsetGlobalIndexReader;
@@ -54,6 +53,9 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -76,6 +78,9 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 /** Base implementation for vector reads. */
 public abstract class AbstractDataEvolutionVectorRead implements Serializable {
 
+    private static final Logger LOG =
+            LoggerFactory.getLogger(AbstractDataEvolutionVectorRead.class);
+
     private static final long serialVersionUID = 1L;
 
     protected final FileStoreTable table;
@@ -87,6 +92,13 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
 
     /** Snapshot the plan was built against; pins filters and raw reads to it. */
     @Nullable protected Snapshot planSnapshot;
+
+    /**
+     * Scalar pre-filter computed while splitting index/raw splits for the current read; lets {@link
+     * #preFilters} reuse it instead of scanning the scalar index twice. Only written and read on
+     * the single thread performing the read.
+     */
+    @Nullable private transient RoaringNavigableMap64 scalarPreFilter;
 
     private static final Comparator<long[]> WEAKEST_SCORE_FIRST =
             Comparator.<long[]>comparingDouble(a -> Float.intBitsToFloat((int) a[1]))
@@ -132,6 +144,42 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         table.coreOptions().toConfiguration());
     }
 
+    /**
+     * Splits the search splits into index and raw splits, then moves the index splits aside when
+     * the scalar index cannot evaluate {@link #filter}: the index path answers with all-or-nothing
+     * bitmaps, so with an unevaluable filter it can neither honor the filter (an empty bitmap
+     * silently drops every covered row) nor ignore it (the top-K would be polluted by non-matching
+     * rows). Instead, suppress the index splits and route their ranges through the raw search,
+     * where the exact final-read filter decides; the raw read merges ranges, so overlap with an
+     * existing raw split is deduplicated. Splits routed this way reuse the vector index type so raw
+     * scoring keeps its metric. The computed scalar pre-filter is cached for {@link #preFilters} to
+     * reuse.
+     */
+    protected void prepareSplits(
+            List<? extends VectorSearchSplit> splits,
+            List<IndexVectorSearchSplit> indexSplits,
+            List<RawVectorSearchSplit> rawSplits) {
+        splitSearchSplits(splits, indexSplits, rawSplits);
+        scalarPreFilter = null;
+        if (filter == null || indexSplits.isEmpty()) {
+            return;
+        }
+        RoaringNavigableMap64 matchedRows = scalarMatchedRows(indexSplits);
+        if (matchedRows != null) {
+            scalarPreFilter = matchedRows;
+            return;
+        }
+        List<Range> ranges = new ArrayList<>();
+        List<IndexFileMeta> scalarIndexFiles = new ArrayList<>();
+        for (IndexVectorSearchSplit split : indexSplits) {
+            ranges.add(new Range(split.rowRangeStart(), split.rowRangeEnd()));
+            scalarIndexFiles.addAll(split.scalarIndexFiles());
+        }
+        rawSplits.add(
+                new RawVectorSearchSplit(ranges, scalarIndexFiles, vectorIndexType(indexSplits)));
+        indexSplits.clear();
+    }
+
     protected List<RoaringNavigableMap64> preFilters(List<IndexVectorSearchSplit> splits) {
         List<Range> indexedRowRanges = new ArrayList<>(splits.size());
         for (IndexVectorSearchSplit split : splits) {
@@ -141,7 +189,8 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         RoaringNavigableMap64 liveRows =
                 GlobalIndexLiveRowFilter.liveRows(
                         table, planSnapshot, partitionFilter, indexedRowRanges);
-        RoaringNavigableMap64 matchedRows = scalarMatchedRows(splits);
+        RoaringNavigableMap64 matchedRows =
+                scalarPreFilter != null ? scalarPreFilter : scalarMatchedRows(splits);
 
         List<RoaringNavigableMap64> includeRowIds = new ArrayList<>(splits.size());
         boolean hasFilter = false;
@@ -167,6 +216,16 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         return hasFilter ? includeRowIds : Collections.emptyList();
     }
 
+    /**
+     * Rows of the indexed splits that satisfy {@link #filter} according to the scalar global
+     * indexes, or {@code null} when no index can evaluate the predicate (no scalar index files, or
+     * a function the reader does not support); {@code null} means "cannot decide", never "no rows
+     * match". The set is exact: an index answer that may be a superset (see {@link
+     * FilteredRowIdReader#isExact}) is refined from the data when {@code
+     * global-index.filter.refine-from-data} allows it and excluded otherwise, because a superset
+     * ranked by the ANN would push matching rows out of the top-k where the engine-side filter
+     * cannot bring them back.
+     */
     @Nullable
     private RoaringNavigableMap64 scalarMatchedRows(List<IndexVectorSearchSplit> splits) {
         if (filter == null) {
@@ -175,23 +234,35 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
 
         Set<IndexFileMeta> scalarIndexFiles =
                 new TreeSet<>(Comparator.comparing(IndexFileMeta::fileName));
+        RoaringNavigableMap64 splitRows = new RoaringNavigableMap64();
         for (IndexVectorSearchSplit split : splits) {
             scalarIndexFiles.addAll(split.scalarIndexFiles());
+            splitRows.addRange(new Range(split.rowRangeStart(), split.rowRangeEnd()));
         }
 
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
                 DataEvolutionGlobalIndexScanner.create(
                         table, planSnapshot, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
-            return new RoaringNavigableMap64();
+            return null;
         }
 
         try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
-            Optional<GlobalIndexResult> result = scanner.scan(filter);
-            if (!result.isPresent()) {
+            Optional<GlobalIndexEvaluator.Evaluation> evaluation = scanner.scanWithCoverage(filter);
+            if (!evaluation.isPresent()) {
+                return null;
+            }
+            RoaringNavigableMap64 matched = evaluation.get().result().results();
+            if (FilteredRowIdReader.isExact(table.rowType(), filter, evaluation.get())) {
+                return matched;
+            }
+            if (!table.coreOptions().globalIndexFilterRefineFromData()) {
+                FilteredRowIdReader.warnCandidatesExcluded(LOG, table, filter);
                 return new RoaringNavigableMap64();
             }
-            return result.get().results();
+            RoaringNavigableMap64 candidates = RoaringNavigableMap64.and(matched, splitRows);
+            return new FilteredRowIdReader(table, planSnapshot, partitionFilter, filter)
+                    .matchingRowIds(candidates);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -632,7 +703,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         return table.copyWithoutTimeTravel(pinOptions);
     }
 
-    protected static void splitSearchSplits(
+    private static void splitSearchSplits(
             List<? extends VectorSearchSplit> splits,
             List<IndexVectorSearchSplit> indexSplits,
             List<RawVectorSearchSplit> rawSplits) {

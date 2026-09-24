@@ -16,13 +16,14 @@
 # under the License.
 
 import os
+import struct
 import tempfile
 from decimal import Decimal
 
 import pyarrow as pa
 import pytest
 
-from pypaimon.read.reader.format_row_reader import FormatRowReader
+from pypaimon.read.reader.format_row_reader import FOOTER_SIZE, FormatRowReader
 from pypaimon.schema.data_types import (
     ArrayType, AtomicType, DataField, MapType, RowType
 )
@@ -86,6 +87,68 @@ class TestFormatRowReaderWriter:
             assert result.column("name").to_pylist() == ["alice", "bob", "charlie"]
         finally:
             os.unlink(path)
+
+    def test_high_precision_decimal(self):
+        # DECIMAL(p) with more than 28 significant digits overflows Python's default
+        # decimal context, which silently rounded the value on both write and read.
+        # Cover positive and negative (signed-byte path) high-precision values and a
+        # null, plus the 19..28 band and the compact p<=18 path.
+        fields = [
+            DataField(0, "d_int", AtomicType("DECIMAL(38, 0)")),
+            DataField(1, "d_frac", AtomicType("DECIMAL(38, 10)")),
+            DataField(2, "d_band", AtomicType("DECIMAL(28, 4)")),
+            DataField(3, "d_small", AtomicType("DECIMAL(18, 2)")),
+        ]
+        d_int = [Decimal("12345678901234567890123456789012345678"),
+                 Decimal("-12345678901234567890123456789012345678"), None]
+        d_frac = [Decimal("1234567890123456789012345678.9012345678"),
+                  Decimal("-1234567890123456789012345678.9012345678"), None]
+        d_band = [Decimal("123456789012345678901234.5678"),
+                  Decimal("-123456789012345678901234.5678"), None]
+        d_small = [Decimal("1234.56"), Decimal("-1234.56"), None]
+        data = pa.table({
+            "d_int": pa.array(d_int, type=pa.decimal128(38, 0)),
+            "d_frac": pa.array(d_frac, type=pa.decimal128(38, 10)),
+            "d_band": pa.array(d_band, type=pa.decimal128(28, 4)),
+            "d_small": pa.array(d_small, type=pa.decimal128(18, 2)),
+        })
+
+        with tempfile.NamedTemporaryFile(suffix=".row", delete=False) as tmp:
+            path = tmp.name
+
+        try:
+            _write_row_file(path, fields, data)
+            result = _read_row_file(path, fields)
+            assert result.column("d_int").to_pylist() == d_int
+            assert result.column("d_frac").to_pylist() == d_frac
+            assert result.column("d_band").to_pylist() == d_band
+            assert result.column("d_small").to_pylist() == d_small
+        finally:
+            os.unlink(path)
+
+    def test_high_precision_decimal_decoded_from_wire(self):
+        # Independent of the writer: decode a hand-built signed unscaled byte
+        # sequence (the row-file wire form shared with the Java implementation) and
+        # assert the exact Decimal, so a symmetric writer+reader scaling mistake
+        # cannot round-trip undetected.
+        from pypaimon.read.reader.format_row_reader import _read_field, _RowDecoder
+
+        def _varint(x):
+            out = bytearray()
+            while True:
+                b = x & 0x7F
+                x >>= 7
+                if x:
+                    out.append(b | 0x80)
+                else:
+                    out.append(b)
+                    return bytes(out)
+
+        unscaled = 12345678901234567890123456789012345678  # 38 significant digits
+        raw = unscaled.to_bytes((unscaled.bit_length() + 8) // 8, 'big', signed=True)
+        buf = _varint(len(raw)) + raw
+        got = _read_field(_RowDecoder(buf, 0), AtomicType("DECIMAL(38, 10)"))
+        assert got == Decimal("1234567890123456789012345678.9012345678")
 
     def test_all_primitive_types(self):
         fields = [
@@ -532,3 +595,130 @@ class TestFormatRowReaderWriter:
             ]
         finally:
             shutil.rmtree(tempdir, ignore_errors=True)
+
+
+class TestRowFileIndexConsistency:
+    """The footer and the block index describe the same blocks twice.
+
+    Until they were cross-checked, this reader bounded its block loop by the footer's block_count
+    while the Java reader bounded it by the index array length, so a file the two disagreed about
+    was read differently by each. These pin the agreement the row format spec requires.
+    """
+
+    FIELDS = [DataField(0, "id", AtomicType("INT"))]
+
+    def _write(self, path, rows=1000):
+        data = pa.table({"id": pa.array(list(range(rows)), type=pa.int32())})
+        _write_row_file(path, self.FIELDS, data)
+
+    def _patch(self, path, offset_from_footer, packed):
+        size = os.path.getsize(path)
+        with open(path, 'r+b') as f:
+            f.seek(size - FOOTER_SIZE + offset_from_footer)
+            f.write(packed)
+
+    def test_footer_block_count_must_match_the_index(self):
+        with tempfile.NamedTemporaryFile(suffix=".row", delete=False) as tmp:
+            path = tmp.name
+        try:
+            self._write(path)
+            # block_count is a little-endian int at footer offset 8; zero used to make a full scan
+            # return nothing while a row-id read still returned rows
+            self._patch(path, 8, struct.pack('<i', 0))
+            with pytest.raises(IOError, match="the footer declares 0"):
+                _read_row_file(path, self.FIELDS)
+        finally:
+            os.unlink(path)
+
+    def test_index_outside_the_file_is_rejected(self):
+        with tempfile.NamedTemporaryFile(suffix=".row", delete=False) as tmp:
+            path = tmp.name
+        try:
+            self._write(path)
+            self._patch(path, 12, struct.pack('<q', 1 << 40))
+            with pytest.raises(IOError, match="Invalid row file block index location"):
+                _read_row_file(path, self.FIELDS)
+        finally:
+            os.unlink(path)
+
+    def test_file_too_short_for_a_footer_is_rejected(self):
+        with tempfile.NamedTemporaryFile(suffix=".row", delete=False) as tmp:
+            path = tmp.name
+        try:
+            with open(path, 'wb') as f:
+                f.write(b'\0' * (FOOTER_SIZE - 1))
+            with pytest.raises(IOError, match="hold no 32-byte footer"):
+                _read_row_file(path, self.FIELDS)
+        finally:
+            os.unlink(path)
+
+    def test_row_starts_must_cover_every_row_exactly_once(self):
+        reader = self._reader_with(compressed=[10, 20], row_starts=[10, 20], total_rows=30)
+        with pytest.raises(IOError, match="block 0 starts at row 10"):
+            reader._validate_block_index()
+
+        reader = self._reader_with(compressed=[10, 20], row_starts=[0, 0], total_rows=30)
+        with pytest.raises(IOError, match="not after block 0 at row 0"):
+            reader._validate_block_index()
+
+        reader = self._reader_with(compressed=[10, 20], row_starts=[0, 5], total_rows=5)
+        with pytest.raises(IOError, match="row count 5 does not reach"):
+            reader._validate_block_index()
+
+        # one block and no declared rows: the block would hold nothing
+        reader = self._reader_with(compressed=[10], row_starts=[0], total_rows=0)
+        with pytest.raises(IOError, match="row count 0 does not reach"):
+            reader._validate_block_index()
+
+    def test_negative_uncompressed_size_is_rejected(self):
+        # the footer bounds the compressed sizes through the sum, but nothing bounds these
+        reader = self._reader_with(compressed=[10, 20], row_starts=[0, 5], total_rows=30)
+        reader._block_uncompressed_sizes = [100, -1]
+        with pytest.raises(IOError, match="block 1 has a negative uncompressed size -1"):
+            reader._validate_block_index()
+
+    def test_compressed_sizes_must_sum_to_the_index_offset(self):
+        # two blocks of 10 and 20 compressed bytes occupy [0, 30), so the index starts at 30
+        reader = self._reader_with(compressed=[10, 20], row_starts=[0, 5], total_rows=30,
+                                   index_offset=30)
+        reader._validate_block_index()
+
+        reader = self._reader_with(compressed=[10, 20], row_starts=[0, 5], total_rows=30,
+                                   index_offset=31)
+        with pytest.raises(IOError, match="blocks end at 30"):
+            reader._validate_block_index()
+
+        # the sum has to be checked for an empty index too, where it is the only thing left
+        reader = self._reader_with(compressed=[], row_starts=[], total_rows=0, index_offset=7)
+        with pytest.raises(IOError, match="blocks end at 0"):
+            reader._validate_block_index()
+
+    def test_negative_compressed_size_is_rejected(self):
+        # the sizes sum to the declared index_offset only because the second cancels the first
+        reader = self._reader_with(compressed=[200, -100], row_starts=[0, 5], total_rows=30,
+                                   index_offset=100)
+        with pytest.raises(IOError, match="block 1 has a negative compressed size -100"):
+            reader._validate_block_index()
+
+    def test_arrays_must_agree_on_the_block_count(self):
+        reader = self._reader_with(compressed=[10, 20], row_starts=[0], total_rows=30)
+        with pytest.raises(IOError, match="2 compressed sizes"):
+            reader._validate_block_index()
+
+    def test_an_empty_index_needs_an_empty_file(self):
+        reader = self._reader_with(compressed=[], row_starts=[], total_rows=0)
+        reader._validate_block_index()
+
+        reader = self._reader_with(compressed=[], row_starts=[], total_rows=7)
+        with pytest.raises(IOError, match="empty, but the footer declares 7 rows"):
+            reader._validate_block_index()
+
+    def _reader_with(self, compressed, row_starts, total_rows, index_offset=None):
+        reader = FormatRowReader.__new__(FormatRowReader)
+        reader._block_compressed_sizes = compressed
+        reader._block_uncompressed_sizes = [100] * len(compressed)
+        reader._block_row_starts = row_starts
+        reader._block_count = len(compressed)
+        reader._total_row_count = total_rows
+        reader._index_offset = sum(compressed) if index_offset is None else index_offset
+        return reader

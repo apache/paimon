@@ -52,6 +52,7 @@ class TableCommit:
             raise RuntimeError("Table does not provide a SnapshotCommit instance")
 
         self._commit_callbacks: List[CommitCallback] = []
+        self._native_commit = None
         self.file_store_commit = FileStoreCommit(
             snapshot_commit, table, commit_user,
             commit_callbacks=self._commit_callbacks)
@@ -84,23 +85,70 @@ class TableCommit:
                 "Committing overwrite to table %s, %d non-empty messages",
                 self.table.identifier, len(non_empty_messages)
             )
+            if snapshot_properties is None:
+                prepared = self._prepare_native_commit(non_empty_messages)
+                if prepared is not None:
+                    native, messages = prepared
+                    # Keep publication failures outside the preparation fallback.
+                    native.commit(messages)
+                    return
             self.file_store_commit.overwrite(
                 overwrite_partition=self.overwrite_partition,
                 **commit_kwargs)
         else:
-            if not non_empty_messages:
+            if (not non_empty_messages
+                    and self.table.options.snapshot_ignore_empty_commit()):
                 return
             logger.info(
                 "Committing table %s, %d non-empty messages",
                 self.table.identifier, len(non_empty_messages)
             )
+            if snapshot_properties is None:
+                prepared = self._prepare_native_commit(non_empty_messages)
+                if prepared is not None:
+                    native, messages = prepared
+                    # Mutation is deliberately outside the fallback boundary:
+                    # an exception can mean the snapshot was already published.
+                    native.commit(commit_identifier, messages)
+                    return
             self.file_store_commit.commit(**commit_kwargs)
 
+    def _prepare_native_commit(self, messages):
+        if (not self.table.options.native_commit_enabled()
+                or self._commit_callbacks):
+            return None
+        try:
+            from pypaimon.write.native_commit import (
+                create_native_commit, native_messages_supported,
+                to_native_commit_messages)
+            if not native_messages_supported(self.table, messages):
+                return None
+            if self._native_commit is None:
+                self._native_commit = create_native_commit(
+                    self.table, self.commit_user, self.overwrite_partition)
+            if self._native_commit is None:
+                return None
+            return self._native_commit, to_native_commit_messages(self.table, messages)
+        except Exception as error:
+            # No native mutation has started. Preserve the normal Python path
+            # when the optional runtime, FileIO or wire bridge is unavailable.
+            logger.debug("Native commit preparation failed; using Python: %s", error)
+            return None
+
     def abort(self, commit_messages: List[CommitMessage]):
+        prepared = self._prepare_native_commit(commit_messages)
+        if prepared is not None:
+            native, messages = prepared
+            native.abort(messages)
+            return
         self.file_store_commit.abort(commit_messages)
 
     def close(self):
-        self.file_store_commit.close()
+        try:
+            if self._native_commit is not None:
+                self._native_commit.close()
+        finally:
+            self.file_store_commit.close()
 
 
 class BatchTableCommit(TableCommit):
@@ -143,6 +191,9 @@ class StreamTableCommit(TableCommit):
     ``commit_identifier`` — analogous to
     :meth:`StreamTableWrite.prepare_commit`.
     """
+
+    def __init__(self, table, commit_user: str):
+        super().__init__(table, commit_user, None)
 
     def commit(
             self,

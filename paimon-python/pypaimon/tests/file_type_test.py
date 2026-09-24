@@ -48,6 +48,9 @@ class FileTypeClassifyTest(unittest.TestCase):
         self.assertEqual(FileType.META, FileType.classify("manifest-abc123"))
         self.assertEqual(FileType.META, FileType.classify("manifest-list-abc"))
         self.assertEqual(FileType.META, FileType.classify("index-manifest-abc"))
+        self.assertEqual(FileType.META, FileType.classify("manifest-abc123.avro.sidecar"))
+        self.assertEqual(FileType.META, FileType.classify("custom.avro.sidecar"))
+        self.assertEqual(FileType.META, FileType.classify("index-abc123.avro.sidecar"))
 
     def test_hint_files(self):
         self.assertEqual(FileType.META, FileType.classify("EARLIEST"))

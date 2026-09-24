@@ -45,6 +45,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -200,6 +201,52 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
 
         assertThat(result).containsExactly(GenericRow.of(localTimestamp));
+    }
+
+    /**
+     * {@link org.apache.paimon.predicate.PredicateBuilder#in(int, List)} on an empty literal list
+     * is a legitimate always-false leaf, but Hive's {@code SearchArgument.Builder.in(...)} rejects
+     * a zero-length call outright ({@code IllegalArgumentException("Can't create in expression with
+     * no arguments")}). Opening a reader with such a predicate must not crash; the always-false (or
+     * always-true, for NOT IN) semantics are enforced by residual evaluation upstream, not by
+     * ORC-level pruning.
+     */
+    @Test
+    public void testEmptyInAndNotInPredicatesDoNotCrashTheReader() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.FIELD(0, "id", DataTypes.BIGINT()));
+        write(
+                fileFormat().createWriterFactory(rowType),
+                file,
+                GenericRow.of(1L),
+                GenericRow.of(2L));
+
+        org.apache.paimon.predicate.Predicate emptyIn =
+                new org.apache.paimon.predicate.PredicateBuilder(rowType)
+                        .in(0, Collections.emptyList());
+        org.apache.paimon.predicate.Predicate emptyNotIn =
+                new org.apache.paimon.predicate.PredicateBuilder(rowType)
+                        .notIn(0, Collections.emptyList());
+
+        for (org.apache.paimon.predicate.Predicate predicate : Arrays.asList(emptyIn, emptyNotIn)) {
+            List<org.apache.paimon.predicate.Predicate> filters = new ArrayList<>();
+            filters.add(predicate);
+            try (RecordReader<InternalRow> reader =
+                    fileFormat()
+                            .createReaderFactory(rowType, rowType, filters)
+                            .createReader(
+                                    new FormatReaderContext(
+                                            fileIO, file, fileIO.getFileSize(file), null, null))) {
+                int count = 0;
+                RecordReader.RecordIterator<InternalRow> batch;
+                while ((batch = reader.readBatch()) != null) {
+                    while (batch.next() != null) {
+                        count++;
+                    }
+                    batch.releaseBatch();
+                }
+                assertThat(count).as(predicate.toString()).isEqualTo(2);
+            }
+        }
     }
 
     @Test

@@ -73,6 +73,14 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
             throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
 
+      case NOT_EQUAL =>
+        sparkPredicate match {
+          case BinaryPredicate(transform, literal) =>
+            builder.notEqual(transform, literal)
+          case _ =>
+            throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
+        }
+
       case GREATER_THAN =>
         sparkPredicate match {
           case BinaryPredicate(transform, literal) =>
@@ -242,6 +250,7 @@ object SparkV2FilterConverter extends Logging {
 
   private val EQUAL_TO = "="
   private val EQUAL_NULL_SAFE = "<=>"
+  private val NOT_EQUAL = "<>"
   private val GREATER_THAN = ">"
   private val GREATER_THAN_OR_EQUAL = ">="
   private val LESS_THAN = "<"

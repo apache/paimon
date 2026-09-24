@@ -126,6 +126,9 @@ Compact manifest files.
 - `manifest_sort_enabled` (`BOOLEAN`, optional): whether to use manifest sort rewrite for this invocation.
 - `manifest_sort_partition_field` (`STRING`, optional): partition field used to sort manifest entries. Defaults to the first partition field.
 - `manifest_sort_max_rewrite_size` (`STRING`, optional): maximum manifest size rewritten by one sort pass.
+When manifest sort is enabled, `compact_manifest` performs a full sort using the layout selected
+from the table options. The existing `manifest_sort_max_rewrite_size` limit still controls the
+amount of manifest data rewritten in one invocation.
 
 ```sql
 CALL sys.compact_manifest(`table` => 'default.T');
@@ -233,6 +236,8 @@ Remove the orphan data files and metadata files.
 - `parallelism` (`INT`, optional): The maximum number of concurrent deleting files. By default is the number of processors available to the Java virtual machine.
 - `mode` (`STRING`, optional): The mode of remove orphan clean procedure (local or distributed) . By default is distributed.
 
+This procedure does not delete primary-key `.managed.blob` packs. Use [`remove_orphan_blobs`](#remove_orphan_blobs).
+
 ```sql
 CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00');
 
@@ -251,6 +256,41 @@ CALL sys.remove_orphan_files(
   table => 'default.T',
   older_than => '2023-10-31 12:00:00',
   dry_run => true,
+  parallelism => 5,
+  mode => 'local'
+);
+```
+
+## remove_orphan_blobs
+
+Remove unreferenced primary-key `.managed.blob` packs.
+
+**Arguments**
+
+- `table` (`STRING`, required): the target table identifier. Use `database_name.*` to process the whole database.
+- `older_than` (`STRING`, optional): an absolute timestamp cutoff. Only packs whose modification time is earlier than this timestamp are candidates. The default cutoff is 1 day before the procedure starts.
+- `dry_run` (`BOOLEAN`, optional): when true, calculate the candidate file count and total bytes without deleting files. The procedure returns aggregate counts, not individual pack paths. Default is false.
+- `parallelism` (`INT`, optional): per-table concurrency. In `distributed` mode this is the Spark task parallelism of each table job (default: the larger of Spark's default parallelism and `spark.sql.shuffle.partitions`). In `local` mode this is the per-table file-operation thread limit (default: the number of processors available to the Java virtual machine). For `database_name.*`, `distributed` mode runs tables one Spark job at a time, so cluster concurrency stays within this per-table value; `local` mode may run several tables at once, so total threads can exceed this value.
+- `mode` (`STRING`, optional): The mode of remove orphan blob procedure (`local` or `distributed`). By default is `distributed`.
+
+```sql
+CALL sys.remove_orphan_blobs(table => 'default.T', older_than => '2023-10-31 12:00:00');
+
+CALL sys.remove_orphan_blobs(table => 'default.*', older_than => '2023-10-31 12:00:00');
+
+CALL sys.remove_orphan_blobs(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true);
+
+CALL sys.remove_orphan_blobs(
+  table => 'default.T',
+  older_than => '2023-10-31 12:00:00',
+  dry_run => false,
+  parallelism => 5
+);
+
+CALL sys.remove_orphan_blobs(
+  table => 'default.T',
+  older_than => '2023-10-31 12:00:00',
+  dry_run => false,
   parallelism => 5,
   mode => 'local'
 );
@@ -275,6 +315,22 @@ CALL sys.remove_unexisting_files(table => 'mydb.myt');
 
 -- only check what files will be removed, but not really remove them (dry run)
 CALL sys.remove_unexisting_files(table => 'mydb.myt', dry_run => true);
+```
+
+## remove_unexisting_manifests
+
+Remove missing manifest files from the latest snapshot's manifest list and commit a replacement snapshot.
+
+This procedure may cause data loss when used outside of the documented repair cases.
+
+**Arguments**
+
+- `table` (`STRING`, required): the target table identifier. To repair a branch, backtick-quote the table name so `$` stays inside the identifier.
+
+```sql
+CALL sys.remove_unexisting_manifests(table => 'mydb.myt');
+
+CALL sys.remove_unexisting_manifests(table => 'mydb.`myt$branch_rt`');
 ```
 
 ## purge_files

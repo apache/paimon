@@ -39,7 +39,6 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     private final String commitUser;
 
     private Map<String, String> staticPartition;
-    private @Nullable Long rowIdCheckFromSnapshot = null;
 
     public BatchWriteBuilderImpl(InnerTable table) {
         this.table = table;
@@ -74,19 +73,11 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
 
     @Override
     public BatchTableCommit newCommit() {
-        InnerTableCommit commit =
-                table.newCommit(commitUser)
-                        .withOverwrite(staticPartition)
-                        .rowIdCheckConflict(rowIdCheckFromSnapshot);
+        InnerTableCommit commit = table.newCommit(commitUser).withOverwrite(staticPartition);
         commit.ignoreEmptyCommit(
                 Options.fromMap(table.options())
                         .getOptional(CoreOptions.SNAPSHOT_IGNORE_EMPTY_COMMIT)
                         .orElse(true));
         return commit;
-    }
-
-    public BatchWriteBuilderImpl rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot) {
-        this.rowIdCheckFromSnapshot = rowIdCheckFromSnapshot;
-        return this;
     }
 }

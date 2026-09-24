@@ -24,6 +24,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ExpireFileEntry;
+import org.apache.paimon.operation.FileDeletionBase.DataFileDeletionPlan;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.tag.Tag;
@@ -129,6 +130,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             return 0;
         }
 
+        Preconditions.checkArgument(
+                retainMin >= 1, String.format("retainMin (%s) must be at least 1.", retainMin));
         Preconditions.checkArgument(
                 retainMax >= retainMin,
                 String.format(
@@ -274,8 +277,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             List<Snapshot> taggedSnapshots,
             long beginInclusiveId)
             throws ExecutionException, InterruptedException {
-        Map<Long, Long> tagIdBySnapshotId = new HashMap<>();
-        Map<Long, Snapshot> tags = new HashMap<>();
+        Map<Long, Snapshot> tagBySnapshotId = new HashMap<>();
         int tagIndex = -1;
         for (Snapshot snapshot : snapshotsIncludingEnd) {
             long id = snapshot.id();
@@ -286,16 +288,11 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             tagIndex = advancePreviousSnapshot(taggedSnapshots, tagIndex, id);
             if (tagIndex >= 0) {
                 Snapshot tag = taggedSnapshots.get(tagIndex);
-                tagIdBySnapshotId.put(id, tag.id());
-                tags.put(tag.id(), tag);
+                tagBySnapshotId.put(id, tag);
             }
         }
 
-        Map<Long, Optional<Predicate<ExpireFileEntry>>> skippers =
-                collectTagSkippers(tags.values());
-        Predicate<ExpireFileEntry> deleteAll = entry -> false;
-        List<CompletableFuture<List<Path>>> futures = new ArrayList<>();
-        int plannedSnapshots = 0;
+        List<Snapshot> batch = new ArrayList<>(snapshotExpireBatchSize);
         for (Snapshot snapshot : snapshotsIncludingEnd) {
             long id = snapshot.id();
             if (id == beginInclusiveId) {
@@ -304,44 +301,76 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete merge tree files not used by snapshot #{}", id);
             }
+            batch.add(snapshot);
+            if (batch.size() >= snapshotExpireBatchSize) {
+                cleanDataFileBatch(batch, tagBySnapshotId);
+            }
+        }
+        cleanDataFileBatch(batch, tagBySnapshotId);
+    }
 
-            Long tagId = tagIdBySnapshotId.get(id);
+    private void cleanDataFileBatch(List<Snapshot> snapshots, Map<Long, Snapshot> tagBySnapshotId)
+            throws ExecutionException, InterruptedException {
+        if (snapshots.isEmpty()) {
+            return;
+        }
+
+        List<CompletableFuture<DataFileDeletionPlan>> planFutures = new ArrayList<>();
+        for (Snapshot snapshot : snapshots) {
+            planFutures.add(
+                    CompletableFuture.supplyAsync(
+                            () -> snapshotDeletion.planDeletedInDeltaManifest(snapshot),
+                            fileExecutor));
+        }
+        List<DataFileDeletionPlan> plans = getAll(planFutures);
+
+        Map<Long, Snapshot> tags = new HashMap<>();
+        Map<Long, List<DataFileDeletionPlan>> plansByTag = new HashMap<>();
+        for (int i = 0; i < snapshots.size(); i++) {
+            Snapshot tag = tagBySnapshotId.get(snapshots.get(i).id());
+            if (tag != null) {
+                tags.put(tag.id(), tag);
+                plansByTag.computeIfAbsent(tag.id(), id -> new ArrayList<>()).add(plans.get(i));
+            }
+        }
+
+        Map<Long, Optional<Predicate<ExpireFileEntry>>> skippers =
+                collectTagSkippers(tags, plansByTag);
+        Predicate<ExpireFileEntry> deleteAll = entry -> false;
+        List<Path> paths = new ArrayList<>();
+        for (int i = 0; i < snapshots.size(); i++) {
+            Snapshot snapshot = snapshots.get(i);
+            Snapshot tag = tagBySnapshotId.get(snapshot.id());
             Optional<Predicate<ExpireFileEntry>> skipper =
-                    tagId == null
+                    tag == null
                             ? Optional.of(deleteAll)
-                            : skippers.getOrDefault(tagId, Optional.empty());
+                            : skippers.getOrDefault(tag.id(), Optional.empty());
             if (!skipper.isPresent()) {
                 LOG.info(
                         "Skip cleaning data files of snapshot '{}' due to failed to build skipping set.",
-                        id);
+                        snapshot.id());
                 continue;
             }
-            futures.add(
-                    CompletableFuture.supplyAsync(
-                            () ->
-                                    snapshotDeletion.planDeletedInDeltaManifest(
-                                            snapshot, skipper.get()),
-                            fileExecutor));
-            if (++plannedSnapshots >= snapshotExpireBatchSize) {
-                cleanBatch(futures);
-                plannedSnapshots = 0;
-            }
+            paths.addAll(snapshotDeletion.dataFilesToDelete(plans.get(i), skipper.get()));
         }
-        cleanBatch(futures);
+        snapshotDeletion.cleanDataFiles(paths);
+        snapshots.clear();
     }
 
     private Map<Long, Optional<Predicate<ExpireFileEntry>>> collectTagSkippers(
-            Collection<Snapshot> tags) throws ExecutionException, InterruptedException {
+            Map<Long, Snapshot> tags, Map<Long, List<DataFileDeletionPlan>> plansByTag)
+            throws ExecutionException, InterruptedException {
         Map<Long, CompletableFuture<Optional<Predicate<ExpireFileEntry>>>> futures =
                 new HashMap<>();
-        for (Snapshot tag : tags) {
+        for (Snapshot tag : tags.values()) {
             futures.put(
                     tag.id(),
                     CompletableFuture.supplyAsync(
                             () -> {
                                 try {
                                     return Optional.of(
-                                            snapshotDeletion.createDataFileSkipperForTag(tag));
+                                            snapshotDeletion.createDataFileSkipperForTag(
+                                                    tag, plansByTag.get(tag.id())));
                                 } catch (Exception e) {
                                     LOG.info(
                                             "Failed to build data file skipping set for tag snapshot '{}'.",

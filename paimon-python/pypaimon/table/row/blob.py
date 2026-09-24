@@ -550,6 +550,11 @@ class Blob(ABC):
     def new_input_stream(self) -> BinaryIO:
         pass
 
+    def to_presigned_url(self, file_io, table_root: str, validity) -> str:
+        """Create a temporary URL for this descriptor-backed BLOB."""
+        return file_io.create_blob_presigned_url(
+            table_root, self.to_descriptor(), validity)
+
     @staticmethod
     def from_data(data: bytes) -> 'Blob':
         return BlobData(data)

@@ -33,6 +33,15 @@ class VideoFrameCollator:
     keeps Paimon independent of a particular video codec library while allowing
     PyAV, TorchCodec, or an application decoder to be plugged in.
 
+    Batch inputs are grouped by physical video and decoded in ascending frame
+    order to avoid unnecessary decoder seeks. Rows are restored to their input
+    order before ``collate_fn`` is called.
+
+    Optional ``decode_batch_fn`` replaces ``decode_fn`` for each payload group.
+    It receives the cached decoder, sorted frame indices, and corresponding row
+    dictionaries, and returns a sequence with one frame per row in that order.
+    At least one of ``decode_fn`` or ``decode_batch_fn`` must be provided.
+
     The cache is process-local and keyed by physical video payload identity.
     ``collate_fn`` defaults to PyTorch's ``default_collate`` and may be replaced
     for decoders that already return batched objects.
@@ -44,16 +53,22 @@ class VideoFrameCollator:
             *,
             video_column,
             decoder_factory,
-            decode_fn,
+            decode_fn=None,
             output_column="frame",
             max_open_videos=8,
-            collate_fn=None):
+            collate_fn=None,
+            decode_batch_fn=None):
         if not video_column:
             raise ValueError("video_column is required.")
         if not callable(decoder_factory):
             raise ValueError("decoder_factory must be callable.")
-        if not callable(decode_fn):
-            raise ValueError("decode_fn must be callable.")
+        if decode_fn is not None and not callable(decode_fn):
+            raise ValueError("decode_fn must be callable or None.")
+        if decode_batch_fn is not None and not callable(decode_batch_fn):
+            raise ValueError("decode_batch_fn must be callable or None.")
+        if decode_fn is None and decode_batch_fn is None:
+            raise ValueError(
+                "At least one of decode_fn or decode_batch_fn is required.")
         if (
             isinstance(max_open_videos, bool)
             or not isinstance(max_open_videos, int)
@@ -72,6 +87,7 @@ class VideoFrameCollator:
         self.video_column = video_column
         self.decoder_factory = decoder_factory
         self.decode_fn = decode_fn
+        self.decode_batch_fn = decode_batch_fn
         self.output_column = output_column
         self.max_open_videos = max_open_videos
         self.collate_fn = collate_fn
@@ -82,7 +98,7 @@ class VideoFrameCollator:
         self._ensure_process_local_cache()
         single_row = isinstance(rows, Mapping)
         input_rows = [rows] if single_row else list(rows)
-        decoded_rows = [self._decode_row(row) for row in input_rows]
+        decoded_rows = self._decode_rows(input_rows)
         if single_row:
             return decoded_rows[0]
         return self._collate(decoded_rows)
@@ -108,7 +124,41 @@ class VideoFrameCollator:
         state["_owner_pid"] = None
         return state
 
-    def _decode_row(self, row):
+    def _decode_rows(self, rows):
+        decoded = [None] * len(rows)
+        grouped = OrderedDict()
+        for position, row in enumerate(rows):
+            output, descriptor = self._prepare_row(row)
+            if descriptor is None:
+                decoded[position] = output
+                continue
+            grouped.setdefault(descriptor.payload_descriptor, []).append(
+                (descriptor.frame_index, position, output)
+            )
+
+        for payload, frames in grouped.items():
+            decoder = self._decoder(payload)
+            frames.sort(key=lambda frame: frame[0])
+            if self.decode_batch_fn is not None:
+                values = self.decode_batch_fn(
+                    decoder,
+                    [index for index, _, _ in frames],
+                    [output for _, _, output in frames],
+                )
+                if len(values) != len(frames):
+                    raise ValueError(
+                        "decode_batch_fn must return one frame per row.")
+            else:
+                values = (
+                    self.decode_fn(decoder, index, output)
+                    for index, _, output in frames
+                )
+            for (_, position, output), value in zip(frames, values):
+                output[self.output_column] = value
+                decoded[position] = output
+        return decoded
+
+    def _prepare_row(self, row):
         if not isinstance(row, Mapping):
             raise ValueError("VideoFrameCollator expects row dictionaries.")
         if self.video_column not in row:
@@ -120,7 +170,7 @@ class VideoFrameCollator:
         output = dict(row)
         if raw is None:
             output[self.output_column] = None
-            return output
+            return output, None
         if hasattr(raw, "as_py"):
             raw = raw.as_py()
         if not VideoFrameDescriptor.is_video_frame_descriptor(raw):
@@ -138,11 +188,7 @@ class VideoFrameCollator:
                 "VideoFrameDescriptor without trailing bytes."
                 % self.video_column
             )
-        decoder = self._decoder(descriptor.payload_descriptor)
-        output[self.output_column] = self.decode_fn(
-            decoder, descriptor.frame_index, output
-        )
-        return output
+        return output, descriptor
 
     def _decoder(self, descriptor):
         resource = self._decoders.pop(descriptor, None)

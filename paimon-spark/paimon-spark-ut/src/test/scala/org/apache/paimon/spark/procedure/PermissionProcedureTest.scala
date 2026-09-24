@@ -542,7 +542,7 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
                 |""".stripMargin)
         .collect()
     }
-    assertThat(missingColumn.getMessage).contains("column unknown")
+    assertThat(missingColumn.getMessage).contains("Cannot resolve field 'unknown'")
 
     val missingPrincipal = intercept[Exception] {
       spark
@@ -664,7 +664,7 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
         .sql("ALTER TABLE paimon.sales.renamed_orders RENAME COLUMN region TO area")
         .collect()
     }
-    assertThat(renameColumn.getMessage).contains("column region")
+    assertThat(renameColumn.getMessage).contains("Cannot resolve field 'region'")
 
     spark.sql("DROP TABLE paimon.sales.renamed_orders")
     spark.sql("""CREATE TABLE paimon.sales.renamed_orders (

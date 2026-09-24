@@ -870,6 +870,156 @@ public class TableScanTest extends ScannerTestBase {
     }
 
     @Test
+    public void testPushDownTopNNullsLastSortsAllNullSplitLast() throws Exception {
+        createAppendOnlyTable();
+
+        DataField field = table.schema().fields().get(1);
+        FieldRef ref = new FieldRef(1, field.name(), field.type());
+
+        // split whose sort column is entirely null; with NULLS LAST it is the worst TopN
+        // candidate and must not take a limit slot from a split with real values
+        DataSplit allNullSplit = newAllNullTestSplit("all-null", 5);
+        DataSplit realSplit = newTestSplit("real", 10, 19, null);
+
+        TopN ascTopN = new TopN(ref, ASCENDING, NULLS_LAST, 1);
+        List<Split> ascResult =
+                new TopNDataSplitEvaluator(table.schema(), table.schemaManager())
+                        .evaluate(
+                                ascTopN.orders().get(0),
+                                ascTopN.limit(),
+                                Arrays.asList(allNullSplit, realSplit));
+        assertThat(ascResult).containsExactly(realSplit);
+
+        DataSplit realMaxSplit = newTestSplit("real-max", 100, 109, null);
+        TopN descTopN = new TopN(ref, DESCENDING, NULLS_LAST, 1);
+        List<Split> descResult =
+                new TopNDataSplitEvaluator(table.schema(), table.schemaManager())
+                        .evaluate(
+                                descTopN.orders().get(0),
+                                descTopN.limit(),
+                                Arrays.asList(allNullSplit, realMaxSplit));
+        assertThat(descResult).containsExactly(realMaxSplit);
+
+        // sanity: NULLS FIRST keeps treating the null-containing split as the best candidate
+        TopN nullsFirstTopN = new TopN(ref, DESCENDING, NULLS_FIRST, 1);
+        List<Split> nullsFirstResult =
+                new TopNDataSplitEvaluator(table.schema(), table.schemaManager())
+                        .evaluate(
+                                nullsFirstTopN.orders().get(0),
+                                nullsFirstTopN.limit(),
+                                Arrays.asList(allNullSplit, realMaxSplit));
+        assertThat(nullsFirstResult).containsExactly(allNullSplit);
+
+        // two all-null splits tie on every key and both are kept: the comparator returns 0 for
+        // equal keys rather than a nonzero value.
+        DataSplit allNullSplit2 = newAllNullTestSplit("all-null-2", 5);
+        TopN nullsFirstTopN2 = new TopN(ref, ASCENDING, NULLS_FIRST, 2);
+        List<Split> tiedResult =
+                new TopNDataSplitEvaluator(table.schema(), table.schemaManager())
+                        .evaluate(
+                                nullsFirstTopN2.orders().get(0),
+                                nullsFirstTopN2.limit(),
+                                Arrays.asList(allNullSplit, allNullSplit2));
+        assertThat(tiedResult).containsExactlyInAnyOrder(allNullSplit, allNullSplit2);
+    }
+
+    @Test
+    public void testPushDownTopNNullsLastKeepsStatsUnknownSplitFirst() throws Exception {
+        createAppendOnlyTable();
+
+        DataField field = table.schema().fields().get(1);
+        FieldRef ref = new FieldRef(1, field.name(), field.type());
+
+        // stats-mode=counts-like split: min/max unknown (null) but only 2 of 5 rows are null,
+        // so it is NOT provably all-null. Its bound is unknown, so it can never be pruned;
+        // the best known-bound split still wins the remaining limit slot and the worst
+        // known split is dropped
+        DataSplit unknownSplit = newTestSplitWithField1Stats("unknown", null, null, 2L, 5);
+        DataSplit lowSplit = newTestSplit("low", 10, 19, null);
+        DataSplit highSplit = newTestSplit("high", 100, 109, null);
+
+        TopN ascTopN = new TopN(ref, ASCENDING, NULLS_LAST, 1);
+        List<Split> ascResult =
+                new TopNDataSplitEvaluator(table.schema(), table.schemaManager())
+                        .evaluate(
+                                ascTopN.orders().get(0),
+                                ascTopN.limit(),
+                                Arrays.asList(unknownSplit, lowSplit, highSplit));
+        assertThat(ascResult).containsExactlyInAnyOrder(unknownSplit, lowSplit);
+
+        TopN descTopN = new TopN(ref, DESCENDING, NULLS_LAST, 1);
+        List<Split> descResult =
+                new TopNDataSplitEvaluator(table.schema(), table.schemaManager())
+                        .evaluate(
+                                descTopN.orders().get(0),
+                                descTopN.limit(),
+                                Arrays.asList(unknownSplit, lowSplit, highSplit));
+        assertThat(descResult).containsExactlyInAnyOrder(unknownSplit, highSplit);
+    }
+
+    @Test
+    public void testPushDownTopNMultiFileSplitWithMixedStatsIsAlwaysRead() throws Exception {
+        createAppendOnlyTable();
+
+        DataField field = table.schema().fields().get(1);
+        FieldRef ref = new FieldRef(1, field.name(), field.type());
+
+        // one split holding two files: a full-statistics file whose min is large (50) and a
+        // counts-mode file with no min/max. DataSplit.minValue skipped the counts file and
+        // reported 50 as the split's bound, so ASC ordering ranked the split last and pruned it
+        // at LIMIT 1 — yet the counts file may hold a value below every other split's min, i.e.
+        // the true top row. Treating the split as unknown reads it instead of dropping it.
+        DataFileMeta fullStatsFile =
+                newTestSplitWithField1Stats("full", 50, 59, 2L, 10).dataFiles().get(0);
+        DataFileMeta countsFile =
+                newTestSplitWithField1Stats("counts", null, null, 1L, 3).dataFiles().get(0);
+        DataSplit mixed =
+                DataSplit.builder()
+                        .withSnapshot(1)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("dummy")
+                        .rawConvertible(true)
+                        .withDataFiles(Arrays.asList(fullStatsFile, countsFile))
+                        .build();
+        DataSplit lowSplit = newTestSplit("low", 10, 19, null);
+        DataSplit midSplit = newTestSplit("mid", 20, 29, null);
+
+        TopN topN = new TopN(ref, ASCENDING, NULLS_LAST, 1);
+        List<Split> result =
+                new TopNDataSplitEvaluator(table.schema(), table.schemaManager())
+                        .evaluate(
+                                topN.orders().get(0),
+                                topN.limit(),
+                                Arrays.asList(mixed, lowSplit, midSplit));
+        // mixed is always read (its stats are incomplete); the best true-bound split (low) still
+        // wins the remaining limit slot. Before the fix mixed's fabricated min of 50 ranked it
+        // last and LIMIT 1 kept only low, dropping the split that may hold the top row.
+        assertThat(result).containsExactlyInAnyOrder(mixed, lowSplit);
+    }
+
+    @Test
+    public void testPushDownTopNCountsModeStatsDisablesPruning() throws Exception {
+        createAppendOnlyTable();
+
+        DataField field = table.schema().fields().get(1);
+        FieldRef ref = new FieldRef(1, field.name(), field.type());
+
+        // stats.mode=counts-like table: every split knows only its null count, so no split
+        // bound is known — pruning would keep an arbitrary subset and can drop the split
+        // holding the true top row, so all splits must be read
+        DataSplit a = newTestSplitWithField1Stats("a", null, null, 1L, 3);
+        DataSplit b = newTestSplitWithField1Stats("b", null, null, 1L, 3);
+        DataSplit c = newTestSplitWithField1Stats("c", null, null, 1L, 3);
+
+        TopN topN = new TopN(ref, DESCENDING, NULLS_LAST, 1);
+        List<Split> result =
+                new TopNDataSplitEvaluator(table.schema(), table.schemaManager())
+                        .evaluate(topN.orders().get(0), topN.limit(), Arrays.asList(a, b, c));
+        assertThat(result).containsExactlyInAnyOrder(a, b, c);
+    }
+
+    @Test
     public void testPushDownTopNSchemaEvolution() throws Exception {
         createAppendOnlyTable();
 
@@ -993,6 +1143,56 @@ public class TableScanTest extends ScannerTestBase {
             builder.withDataDeletionFiles(Collections.singletonList(deletionFile));
         }
         return builder.build();
+    }
+
+    private DataSplit newAllNullTestSplit(String name, int rowCount) {
+        return newTestSplitWithField1Stats(name, null, null, (long) rowCount, rowCount);
+    }
+
+    private DataSplit newTestSplitWithField1Stats(
+            String name, Integer minValue, Integer maxValue, Long nullCount, int rowCount) {
+        DataFileMeta file =
+                DataFileMeta.forAppend(
+                        name,
+                        0,
+                        (long) rowCount,
+                        new SimpleStats(
+                                newStatsRowOptionalField1(0, minValue, 0L),
+                                newStatsRowOptionalField1(0, maxValue, 0L),
+                                fromLongArray(new Long[] {0L, nullCount, 0L})),
+                        0,
+                        0,
+                        table.schema().id(),
+                        Collections.emptyList(),
+                        null,
+                        FileSource.APPEND,
+                        null,
+                        null,
+                        null,
+                        null);
+
+        return DataSplit.builder()
+                .withSnapshot(1)
+                .withPartition(BinaryRow.EMPTY_ROW)
+                .withBucket(0)
+                .withBucketPath("dummy")
+                .rawConvertible(true)
+                .withDataFiles(Collections.singletonList(file))
+                .build();
+    }
+
+    private BinaryRow newStatsRowOptionalField1(int pt, Integer a, long c) {
+        BinaryRow row = new BinaryRow(3);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+        writer.writeInt(0, pt);
+        if (a == null) {
+            writer.setNullAt(1);
+        } else {
+            writer.writeInt(1, a);
+        }
+        writer.writeLong(2, c);
+        writer.complete();
+        return row;
     }
 
     private BinaryRow newStatsRow(int pt, int a, long b) {

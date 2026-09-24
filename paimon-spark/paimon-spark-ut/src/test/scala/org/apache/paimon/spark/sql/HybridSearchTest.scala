@@ -315,7 +315,7 @@ class HybridSearchTest extends PaimonSparkTestBase {
     }
   }
 
-  test("hybrid full-text route rejects non-partition filters") {
+  test("hybrid full-text route applies non-partition filters before ranking") {
     withTable("T") {
       spark.sql("""
                   |CREATE TABLE T (id INT, content STRING)
@@ -326,6 +326,8 @@ class HybridSearchTest extends PaimonSparkTestBase {
                   |  'data-evolution.enabled' = 'true')
                   |""".stripMargin)
 
+      // Row 0 scores higher for "paimon search"; the filter must remove it before the route's
+      // top-1 so that row 1 is returned instead of nothing.
       spark.sql("""
                   |INSERT INTO T VALUES
                   |  (0, 'paimon search'),
@@ -336,39 +338,30 @@ class HybridSearchTest extends PaimonSparkTestBase {
         .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'content', " +
           "index_type => 'test-fulltext')")
         .collect()
+      spark
+        .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'id', " +
+          "index_type => 'btree')")
+        .collect()
 
-      val error = intercept[Exception] {
-        spark
-          .sql("""
-                 |SELECT id
-                 |FROM hybrid_search(
-                 |  'T',
-                 |  array(),
-                 |  array(
-                 |    named_struct(
-                 |      'column', 'content',
-                 |      'query', '{"match":{"column":"content","terms":"paimon"}}',
-                 |      'limit', 1,
-                 |      'weight', 1.0f,
-                 |      'options', map())),
-                 |  1)
-                 |WHERE id = 1
-                 |""".stripMargin)
-          .collect()
-      }
+      val result = spark
+        .sql("""
+               |SELECT id
+               |FROM hybrid_search(
+               |  'T',
+               |  array(),
+               |  array(
+               |    named_struct(
+               |      'column', 'content',
+               |      'query', '{"match":{"column":"content","terms":"paimon search"}}',
+               |      'limit', 1,
+               |      'weight', 1.0f,
+               |      'options', map())),
+               |  1)
+               |WHERE id = 1
+               |""".stripMargin)
+        .collect()
 
-      assert(containsMessage(error, "does not support non-partition filters"))
+      assert(result.map(_.getInt(0)).toSeq == Seq(1))
     }
-  }
-
-  private def containsMessage(error: Throwable, expected: String): Boolean = {
-    var current = error
-    while (current != null) {
-      if (current.getMessage != null && current.getMessage.contains(expected)) {
-        return true
-      }
-      current = current.getCause
-    }
-    false
   }
 }

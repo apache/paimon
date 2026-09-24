@@ -315,10 +315,14 @@ def _append_scalar(builder, value, arrow_type: pa.DataType) -> None:
 # Object / array binary construction
 # ---------------------------------------------------------------------------
 
-def _build_object_value(fields: List[Tuple[int, bytes]]) -> bytes:
+def _build_object_value(
+    fields: List[Tuple[int, bytes]],
+    key_dict: Optional[Dict[str, int]] = None,
+) -> bytes:
     """Build object variant value bytes from ``(key_id, value_bytes)`` pairs.
 
-    The variant spec requires fields sorted by key_id.
+    Variant object fields are ordered by key name, not metadata key ID. The
+    metadata dictionary may assign IDs in a different order.
     """
     if not fields:
         # Empty object: header + size=0 + one zero-offset sentinel
@@ -328,7 +332,14 @@ def _build_object_value(fields: List[Tuple[int, bytes]]) -> bytes:
         buf.append(0)       # offset[0] = 0 (sentinel)
         return bytes(buf)
 
-    fields = sorted(fields, key=lambda f: f[0])
+    if key_dict is None:
+        fields = sorted(fields, key=lambda f: f[0])
+    else:
+        id_to_name = {key_id: name for name, key_id in key_dict.items()}
+        fields = sorted(
+            fields,
+            key=lambda f: id_to_name[f[0]].encode('utf-8'),
+        )
     size = len(fields)
     data = b''.join(vb for _, vb in fields)
     data_size = len(data)
@@ -520,7 +531,7 @@ def _rebuild_object(
     if overflow_bytes:
         fields.extend(_extract_overflow_fields(bytes(overflow_bytes)))
 
-    return _build_object_value(fields)
+    return _build_object_value(fields, key_dict)
 
 
 def _rebuild_array(
@@ -901,7 +912,8 @@ def _decompose_field_bytes(
             else:
                 typed_value[fname] = {'value': None, 'typed_value': None}
 
-        overflow_bytes = _build_object_value(overflow_pairs) if overflow_pairs else None
+        overflow_bytes = (_build_object_value(overflow_pairs, key_dict)
+                          if overflow_pairs else None)
         return {'value': overflow_bytes, 'typed_value': typed_value}
 
     # No shredding sub-schema: treat field bytes as overflow
@@ -959,7 +971,8 @@ def decompose_variant(
         else:
             typed_value[fname] = {'value': None, 'typed_value': None}
 
-    overflow_bytes = _build_object_value(overflow_pairs) if overflow_pairs else None
+    overflow_bytes = (_build_object_value(overflow_pairs, key_dict)
+                      if overflow_pairs else None)
     return {'metadata': metadata, 'value': overflow_bytes, 'typed_value': typed_value}
 
 

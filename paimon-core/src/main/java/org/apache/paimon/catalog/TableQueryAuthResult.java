@@ -22,10 +22,9 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateRemapper;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
@@ -43,6 +42,7 @@ import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.TypeUtils;
 
 import javax.annotation.Nullable;
 
@@ -55,6 +55,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
@@ -93,6 +94,38 @@ public class TableQueryAuthResult implements Serializable {
 
     public boolean hasRules() {
         return extractPredicate() != null || !extractColumnMasking().isEmpty();
+    }
+
+    /**
+     * A catalog builds a fresh instance per authorization call and deserialization builds another,
+     * so identity says nothing about whether two results agree.
+     *
+     * <p>Compared as the rules parse out rather than as they arrive, the filter as the set of its
+     * conjuncts, so neither the JSON text nor the order the catalog lists them in matters.
+     */
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof TableQueryAuthResult)) {
+            return false;
+        }
+        TableQueryAuthResult that = (TableQueryAuthResult) o;
+        return parsedFilterConjuncts().equals(that.parsedFilterConjuncts())
+                && extractColumnMasking().equals(that.extractColumnMasking());
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(parsedFilterConjuncts(), extractColumnMasking());
+    }
+
+    private Set<Predicate> parsedFilterConjuncts() {
+        Predicate predicate = extractPredicate();
+        return predicate == null
+                ? Collections.emptySet()
+                : new HashSet<>(PredicateBuilder.splitAnd(predicate));
     }
 
     /**
@@ -186,16 +219,8 @@ public class TableQueryAuthResult implements Serializable {
     @Nullable
     public static RowType appendMissingFields(
             RowType tableType, RowType readType, Set<String> ruleFields) {
-        List<DataField> widenedFields = null;
-        for (DataField field : tableType.getFields()) {
-            if (ruleFields.contains(field.name()) && !readType.containsField(field.name())) {
-                if (widenedFields == null) {
-                    widenedFields = new ArrayList<>(readType.getFields());
-                }
-                widenedFields.add(field);
-            }
-        }
-        return widenedFields == null ? null : readType.copy(widenedFields);
+        RowType widened = TypeUtils.withMissingFields(tableType, readType, ruleFields);
+        return widened == readType ? null : widened;
     }
 
     public TableScan.Plan convertPlan(TableScan.Plan plan) {
@@ -246,7 +271,7 @@ public class TableQueryAuthResult implements Serializable {
      */
     @Nullable
     public static Predicate remapPredicate(Predicate predicate, RowType rowType) {
-        return predicate.visit(new PredicateRemapper(rowType));
+        return PredicateRemapper.remap(predicate, rowType);
     }
 
     public Map<String, Transform> extractColumnMasking() {
@@ -415,6 +440,45 @@ public class TableQueryAuthResult implements Serializable {
                 tableType.getFieldNames());
     }
 
+    /** Validate a physical projection before adding columns required by authorization rules. */
+    public void validateReadType(
+            RowType tableType,
+            RowType readType,
+            Set<String> ruleFields,
+            Set<String> resolvedBlobViewFields) {
+        Set<String> maskTargets = extractColumnMasking().keySet();
+        for (String name : readType.getFieldNames()) {
+            if (!ruleFields.contains(name) && !maskTargets.contains(name)) {
+                continue;
+            }
+            if (!tableType.containsField(name)) {
+                continue;
+            }
+            // rules must not touch a nested-pruned column (partial value)
+            DataField tableField = tableType.getField(name);
+            if (!readType.getField(name).type().equals(tableField.type())) {
+                throw new IllegalStateException(
+                        String.format(
+                                "Query auth rules involve column '%s', which the query "
+                                        + "projects with a pruned type %s instead of its "
+                                        + "table type %s; cannot apply the rules to a "
+                                        + "partial column.",
+                                name, readType.getField(name).type(), tableField.type()));
+            }
+        }
+        for (String name : ruleFields) {
+            if (resolvedBlobViewFields.contains(name) && !readType.containsField(name)) {
+                // auth-added columns bypass blob-view resolution
+                throw new IllegalStateException(
+                        String.format(
+                                "Query auth rules read blob-view column '%s', which the query "
+                                        + "does not project; such columns cannot be resolved. "
+                                        + "Project the column or adjust the rule.",
+                                name));
+            }
+        }
+    }
+
     /**
      * Applies the row filter and column masking to {@code reader}. Rules are remapped by name;
      * masks apply only to targets in {@code activeFields}, the columns readable from the query.
@@ -481,82 +545,8 @@ public class TableQueryAuthResult implements Serializable {
                     targetColumn,
                     outputRowType);
 
-            List<Object> newInputs = new ArrayList<>();
-            for (Object input : transform.inputs()) {
-                if (input instanceof FieldRef) {
-                    FieldRef ref = (FieldRef) input;
-                    int newIndex = outputRowType.getFieldIndex(ref.name());
-                    if (newIndex < 0) {
-                        throw new IllegalArgumentException(
-                                "Column masking refers to field '"
-                                        + ref.name()
-                                        + "' which is not present in output row type "
-                                        + outputRowType);
-                    }
-                    DataType type = outputRowType.getTypeAt(newIndex);
-                    newInputs.add(new FieldRef(newIndex, ref.name(), type));
-                } else {
-                    newInputs.add(input);
-                }
-            }
-            out.put(targetIndex, transform.copyWithNewInputs(newInputs));
+            out.put(targetIndex, PredicateRemapper.remap(transform, outputRowType));
         }
         return out;
-    }
-
-    private static class PredicateRemapper implements PredicateVisitor<Predicate> {
-
-        private final RowType outputRowType;
-
-        private PredicateRemapper(RowType outputRowType) {
-            this.outputRowType = outputRowType;
-        }
-
-        @Override
-        public Predicate visit(LeafPredicate predicate) {
-            Transform transform = predicate.transform();
-            List<Object> newInputs = new ArrayList<>();
-            for (Object input : transform.inputs()) {
-                if (input instanceof FieldRef) {
-                    FieldRef ref = (FieldRef) input;
-                    String fieldName = ref.name();
-                    int newIndex = outputRowType.getFieldIndex(fieldName);
-                    if (newIndex < 0) {
-                        throw new IllegalArgumentException(
-                                String.format(
-                                        "Unable to read data without column %s when row filter enabled.",
-                                        fieldName));
-                    }
-                    DataType type = outputRowType.getTypeAt(newIndex);
-                    newInputs.add(new FieldRef(newIndex, fieldName, type));
-                } else {
-                    newInputs.add(input);
-                }
-            }
-            return predicate.copyWithNewInputs(newInputs);
-        }
-
-        @Override
-        public Predicate visit(CompoundPredicate predicate) {
-            checkArgument(
-                    predicate.function() != null, "Compound row filter function cannot be null.");
-            checkArgument(
-                    predicate.children() != null, "Compound row filter children cannot be null.");
-            List<Predicate> remappedChildren = new ArrayList<>();
-            for (Predicate child : predicate.children()) {
-                checkArgument(child != null, "Compound row filter child cannot be null.");
-                Predicate remapped = child.visit(this);
-                if (remapped != null) {
-                    remappedChildren.add(remapped);
-                }
-            }
-            if (remappedChildren.isEmpty()) {
-                throw new IllegalArgumentException("Compound row filter must contain a predicate.");
-            }
-            if (remappedChildren.size() == 1) {
-                return remappedChildren.get(0);
-            }
-            return new CompoundPredicate(predicate.function(), remappedChildren);
-        }
     }
 }

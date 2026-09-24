@@ -16,6 +16,7 @@
 # under the License.
 
 import heapq
+import math
 from dataclasses import dataclass
 from functools import cmp_to_key
 from typing import Callable, List
@@ -116,6 +117,12 @@ def default_key_comparator(key1: GenericRow, key2: GenericRow) -> int:
             return -1
         if val2 is None:
             return 1
+        # Preserve Java's ordering of signed zeros in composite key bounds.
+        if (isinstance(val1, float) and isinstance(val2, float)
+                and val1 == 0.0 and val2 == 0.0):
+            sign1, sign2 = math.copysign(1.0, val1), math.copysign(1.0, val2)
+            if sign1 != sign2:
+                return -1 if sign1 < sign2 else 1
         if val1 < val2:
             return -1
         elif val1 > val2:

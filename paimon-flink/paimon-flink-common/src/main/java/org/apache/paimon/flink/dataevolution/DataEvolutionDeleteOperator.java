@@ -256,16 +256,17 @@ public class DataEvolutionDeleteOperator
 
             CommitMessage commitMessage =
                     new CommitMessageImpl(
-                            maintainer.getPartition(),
-                            UNAWARE_BUCKET,
-                            null,
-                            new DataIncrement(
-                                    Collections.emptyList(),
-                                    Collections.emptyList(),
-                                    Collections.emptyList(),
-                                    addedIndexFiles,
-                                    deletedIndexFiles),
-                            CompactIncrement.emptyIncrement());
+                                    maintainer.getPartition(),
+                                    UNAWARE_BUCKET,
+                                    null,
+                                    new DataIncrement(
+                                            Collections.emptyList(),
+                                            Collections.emptyList(),
+                                            Collections.emptyList(),
+                                            addedIndexFiles,
+                                            deletedIndexFiles),
+                                    CompactIncrement.emptyIncrement())
+                            .withCheckFromSnapshot(baseSnapshotId);
             output.collect(
                     new StreamRecord<>(
                             new Committable(BatchWriteBuilder.COMMIT_IDENTIFIER, commitMessage)));

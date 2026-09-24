@@ -23,15 +23,21 @@ import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.index.pk.PrimaryKeyIndexDefinition;
 import org.apache.paimon.index.pk.PrimaryKeyIndexDefinitions;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 
+import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -46,6 +52,7 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     private String fieldName;
     private String query;
     private PartitionPredicate partitionFilter;
+    @Nullable private Predicate filter;
     @Nullable private Snapshot pinnedSnapshot;
 
     public FullTextSearchBuilderImpl(InnerTable table) {
@@ -54,8 +61,35 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
 
     @Override
     public FullTextSearchBuilder withPartitionFilter(PartitionPredicate partitionFilter) {
-        this.partitionFilter = partitionFilter;
+        addPartitionFilter(partitionFilter);
         return this;
+    }
+
+    @Override
+    public FullTextSearchBuilder withFilter(Predicate predicate) {
+        Pair<Optional<PartitionPredicate>, List<Predicate>> pair =
+                splitPartitionPredicatesAndDataPredicates(
+                        predicate, table.rowType(), table.partitionKeys());
+        if (pair.getLeft().isPresent()) {
+            addPartitionFilter(pair.getLeft().get());
+        }
+        if (!pair.getRight().isEmpty()) {
+            Predicate dataFilter = PredicateBuilder.and(pair.getRight());
+            this.filter =
+                    this.filter == null ? dataFilter : PredicateBuilder.and(filter, dataFilter);
+        }
+        return this;
+    }
+
+    private void addPartitionFilter(@Nullable PartitionPredicate partitionFilter) {
+        if (partitionFilter == null) {
+            return;
+        }
+        this.partitionFilter =
+                this.partitionFilter == null
+                        ? partitionFilter
+                        : PartitionPredicate.and(
+                                Arrays.asList(this.partitionFilter, partitionFilter));
     }
 
     @Override
@@ -82,6 +116,7 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
                 : new DataEvolutionFullTextScan(
                         table,
                         partitionFilter,
+                        filter,
                         Collections.singletonList(textColumn),
                         pinnedSnapshot);
     }
@@ -97,6 +132,7 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
                 : new DataEvolutionFullTextRead(
                         table,
                         partitionFilter,
+                        filter,
                         limit,
                         Collections.singletonList(textColumn),
                         query);
@@ -121,6 +157,10 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
                 PrimaryKeyIndexDefinitions.create(table.schema()).definitions()) {
             if (definition.family() == PrimaryKeyIndexDefinition.Family.FULL_TEXT
                     && definition.fieldId() == textColumn.id()) {
+                if (filter != null) {
+                    throw new UnsupportedOperationException(
+                            "Primary-key full-text search does not support non-partition filters yet.");
+                }
                 return Optional.of(definition);
             }
         }

@@ -182,6 +182,13 @@ public class UnionGlobalIndexReader implements ContainsRefiningGlobalIndexReader
     }
 
     @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitRange(
+            FieldRef fieldRef, Object from, Object to, boolean fromInclusive, boolean toInclusive) {
+        return unionAsync(
+                reader -> reader.visitRange(fieldRef, from, to, fromInclusive, toInclusive));
+    }
+
+    @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
             FieldRef fieldRef, Object from, Object to) {
         return unionAsync(reader -> reader.visitBetween(fieldRef, from, to));

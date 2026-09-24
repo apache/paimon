@@ -327,6 +327,12 @@ under the License.
             <td>In streaming job, whether to force creating snapshot when there is no data in this write-commit phase.</td>
         </tr>
         <tr>
+            <td><h5>commit.last-safe-snapshot</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>Snapshot preceding the earliest snapshot to inspect when committing. Only later snapshots are searched for this commit user's previous commits. This also provides the starting point for strict-mode checks when enabled. Keep this bound unchanged across retries and recovery.</td>
+        </tr>
+        <tr>
             <td><h5>commit.max-retries</h5></td>
             <td style="word-wrap: break-word;">10</td>
             <td>Integer</td>
@@ -345,10 +351,10 @@ under the License.
             <td>Min retry wait time when commit failed.</td>
         </tr>
         <tr>
-            <td><h5>commit.strict-mode.last-safe-snapshot</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Long</td>
-            <td>If set, committer will check if there are other commit user's snapshot starting from the snapshot after this one. If found a COMPACT / OVERWRITE snapshot, or found a APPEND snapshot which committed files to fixed bucket, commit will be aborted.If the value of this option is -1, committer will not check for its first commit.</td>
+            <td><h5>commit.strict-mode.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to check concurrent snapshot changes after commit.last-safe-snapshot, when that bound is configured. Rejects COMPACT or OVERWRITE changes in the same partition, and fixed-bucket APPEND changes when committing OVERWRITE. Disabling this does not disable regular conflict detection or the history search bound.</td>
         </tr>
         <tr>
             <td><h5>commit.timeout</h5></td>
@@ -550,7 +556,7 @@ under the License.
         </tr>
         <tr>
             <td><h5>data-evolution.reassign.skip-contiguous-row-count</h5></td>
-            <td style="word-wrap: break-word;">1000000000</td>
+            <td style="word-wrap: break-word;">20000000000</td>
             <td>Long</td>
             <td>Strictly contiguous same-partition logical row-id runs containing more than this number of rows are excluded from row-id reassignment. Set to 0 to disable this filtering.</td>
         </tr>
@@ -684,7 +690,7 @@ under the License.
             <td><h5>dynamic-bucket.max-buckets</h5></td>
             <td style="word-wrap: break-word;">-1</td>
             <td>Integer</td>
-            <td>Max buckets for a partition in dynamic bucket mode, It should either be equal to -1 (unlimited), or it must be greater than 0 (fixed upper bound).</td>
+            <td>Max buckets for a partition in dynamic bucket mode, It should either be equal to -1 (unlimited), or it must be between 1 and 32768 (fixed upper bound).</td>
         </tr>
         <tr>
             <td><h5>dynamic-bucket.target-row-num</h5></td>
@@ -738,7 +744,7 @@ under the License.
             <td><h5>file.block-size</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
-            <td>File block size of format, default value of orc stripe is 64 MB, and parquet row group is 128 MB.</td>
+            <td>File block size of format, default value of orc stripe is 64 MB, parquet row group is 128 MB, and avro block is 64 KB.</td>
         </tr>
         <tr>
             <td><h5>file.compression</h5></td>
@@ -865,6 +871,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Global index root directory, if not set, the global index files will be stored under the &lt;table-root-directory&gt;/index.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.filter.refine-from-data</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether a vector, hybrid or full-text search may read the filter columns of candidate rows to verify a row filter that the scalar global index can only answer with a superset, such as contains, ends-with or like on a BTree index or a conjunction with a member no index can evaluate. When false, such candidates are excluded from the search, which never returns a non-matching row but may return fewer than the requested top-k. When true, the read runs on the caller and may cover every candidate row.</td>
         </tr>
         <tr>
             <td><h5>global-index.row-count-per-shard</h5></td>
@@ -1063,7 +1075,7 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td><h5>manifest-sort.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether to invoke manifest sort rewrite during commit.<br />Note: enabling this changes the semantics of 'manifest.merge-min-count'. In the sort rewrite path, small manifest files within the rewrite budget are sorted and merged directly, so the minimum-count gate no longer prevents merging a small number of under-budget manifest files when full compaction is not triggered.</td>
+            <td>Whether to invoke manifest sort rewrite during commit. Non-partitioned tables can sort by bucket with fixed or postponed buckets, or by RowID for data evolution tables when all input manifests contain RowID ranges.<br />Note: enabling this changes the semantics of 'manifest.merge-min-count'. In the sort rewrite path, small manifest files within the rewrite budget are sorted and merged directly, so the minimum-count gate no longer prevents merging a small number of under-budget manifest files when full compaction is not triggered.</td>
         </tr>
         <tr>
             <td><h5>manifest-sort.max-rewrite-size</h5></td>
@@ -1075,7 +1087,7 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td><h5>manifest-sort.partition-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Partition field name to sort manifest entries by. Validated by schema validation, if not configured, defaults to the first partition field.</td>
+            <td>Partition field name to sort manifest entries by. Validated by schema validation; must be unset for non-partitioned tables. If not configured, defaults to the first partition field, or all partition fields for data evolution RowID sorting.</td>
         </tr>
         <tr>
             <td><h5>manifest.compression</h5></td>
@@ -1112,6 +1124,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to skip automatic manifest merging during commit when write-only is true. This also skips automatic manifest sort rewrite. Explicit manifest compaction is not affected.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.sidecar.enabled</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Boolean</td>
+            <td>Whether to enable manifest sidecars with independent partition, row-id and bucket coverage. Defaults to manifest-sort.enabled when unset.</td>
         </tr>
         <tr>
             <td><h5>manifest.target-file-size</h5></td>

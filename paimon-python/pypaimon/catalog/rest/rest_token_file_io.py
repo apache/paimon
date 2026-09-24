@@ -18,17 +18,17 @@
 import logging
 import threading
 import time
+from datetime import timedelta
 from typing import Optional, Union
 
 from cachetools import TTLCache
 
+from pypaimon.api.auth.bearer import BearTokenAuthProvider
+from pypaimon.api.auth.dlf_provider import DLFAuthProvider
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.rest.rest_token import RESTToken
 from pypaimon.common.file_io import FileIO
-from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
-from pypaimon.api.auth.bearer import BearTokenAuthProvider
-from pypaimon.api.auth.dlf_provider import DLFAuthProvider
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
@@ -40,26 +40,11 @@ class RESTTokenFileIO(FileIO):
     A FileIO to support getting token from REST Server.
     """
 
-    _FILE_IO_CACHE_MAXSIZE = 1000
     _FILE_IO_CACHE_TTL = 36000  # 10 hours in seconds
-
-    _FILE_IO_CACHE: TTLCache = None
-    _FILE_IO_CACHE_LOCK = threading.Lock()
 
     _TOKEN_CACHE: dict = {}
     _TOKEN_LOCKS: dict = {}
     _TOKEN_LOCKS_LOCK = threading.Lock()
-
-    @classmethod
-    def _get_file_io_cache(cls) -> TTLCache:
-        if cls._FILE_IO_CACHE is None:
-            with cls._FILE_IO_CACHE_LOCK:
-                if cls._FILE_IO_CACHE is None:
-                    cls._FILE_IO_CACHE = TTLCache(
-                        maxsize=cls._FILE_IO_CACHE_MAXSIZE,
-                        ttl=cls._FILE_IO_CACHE_TTL
-                    )
-        return cls._FILE_IO_CACHE
 
     def __init__(self, identifier: Identifier, path: str,
                  catalog_options: Optional[Union[dict, Options]] = None):
@@ -77,12 +62,20 @@ class RESTTokenFileIO(FileIO):
         self.api_instance: Optional[RESTApi] = None
         self.log = logging.getLogger(__name__)
         self._uri_reader_factory_cache: Optional[UriReaderFactory] = None
+        self._init_file_io_cache()
+
+    def _init_file_io_cache(self):
+        # FileIO is bound to this instance's path and catalog options.
+        self._file_io_cache = TTLCache(maxsize=1, ttl=self._FILE_IO_CACHE_TTL)
+        self._file_io_cache_lock = threading.Lock()
 
     def __getstate__(self):
         state = self.__dict__.copy()
         # Remove non-serializable objects
         state.pop('api_instance', None)
         state.pop('_uri_reader_factory_cache', None)
+        state.pop('_file_io_cache', None)
+        state.pop('_file_io_cache_lock', None)
         # token can be serialized, but we'll refresh it on deserialization
         return state
 
@@ -91,35 +84,36 @@ class RESTTokenFileIO(FileIO):
         self._uri_reader_factory_cache = None
         # api_instance will be recreated when needed
         self.api_instance = None
+        self._init_file_io_cache()
 
     def file_io(self) -> FileIO:
-        self.try_to_refresh_token()
+        return self._file_io_with_token()[0]
 
-        if self.token is None:
-            return FileIO.get(self.path, self.catalog_options or Options({}))
-
-        cache_key = self.token
-        cache = self._get_file_io_cache()
-
-        file_io = cache.get(cache_key)
-        if file_io is not None:
-            return file_io
-
-        with self._FILE_IO_CACHE_LOCK:
-            self.try_to_refresh_token()
+    def _file_io_with_token(self, minimum_validity_millis: int = 0):
+        with self._file_io_cache_lock:
+            if minimum_validity_millis:
+                self.try_to_refresh_token(minimum_validity_millis)
+                if not self._has_remaining_lifetime(
+                        self.token, minimum_validity_millis):
+                    raise ValueError(
+                        "Requested presigned URL validity exceeds the remaining "
+                        "REST credential lifetime after refresh.")
+            else:
+                self.try_to_refresh_token()
 
             if self.token is None:
-                return FileIO.get(self.path, self.catalog_options or Options({}))
+                return (FileIO.get(
+                    self.path, self.catalog_options or Options({})), None)
 
             cache_key = self.token
-            cache = self._get_file_io_cache()
+            cache = self._file_io_cache
             file_io = cache.get(cache_key)
             if file_io is not None:
-                return file_io
+                return file_io, cache_key
 
             merged_properties = RESTUtil.merge(
                 self.catalog_options.to_map() if self.catalog_options else {},
-                self.token.token
+                cache_key.token
             )
             if self.catalog_options:
                 dlf_oss_endpoint = self.catalog_options.get(CatalogOptions.DLF_OSS_ENDPOINT)
@@ -127,9 +121,9 @@ class RESTTokenFileIO(FileIO):
                     merged_properties[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
             merged_options = Options(merged_properties)
 
-            file_io = PyArrowFileIO(self.path, merged_options)
+            file_io = FileIO.get(self.path, merged_options)
             cache[cache_key] = file_io
-            return file_io
+            return file_io, cache_key
 
     def _merge_token_with_catalog_options(self, token: dict) -> dict:
         """Merge token with catalog options, DLF OSS endpoint should override the standard OSS endpoint."""
@@ -172,6 +166,31 @@ class RESTTokenFileIO(FileIO):
 
     def try_to_write_atomic(self, path: str, content: str) -> bool:
         return self.file_io().try_to_write_atomic(path, content)
+
+    def create_blob_presigned_url(self, table_root, descriptor, validity) -> str:
+        if table_root != self.path:
+            raise ValueError("Table root does not match RESTTokenFileIO bound table root.")
+        if not isinstance(validity, timedelta):
+            raise TypeError("Blob presigned URL validity must be datetime.timedelta.")
+        if validity <= timedelta(0) or validity.microseconds != 0:
+            raise ValueError("Blob presigned URL validity must be positive whole seconds.")
+        validity_millis = int(validity.total_seconds() * 1000)
+        file_io, signing_token = self._file_io_with_token(validity_millis)
+        url = file_io.create_blob_presigned_url(
+            table_root, descriptor, validity)
+        if self._has_remaining_lifetime(signing_token, validity_millis):
+            return url
+
+        # The first call materialized the range. Refresh and sign the cached
+        # object again so the returned URL has the requested lifetime.
+        file_io, signing_token = self._file_io_with_token(validity_millis)
+        url = file_io.create_blob_presigned_url(
+            table_root, descriptor, validity)
+        if not self._has_remaining_lifetime(signing_token, validity_millis):
+            raise ValueError(
+                "Requested presigned URL validity exceeds the remaining "
+                "REST credential lifetime after refresh.")
+        return url
 
     def write_parquet(self, path: str, data, compression: str = 'zstd',
                       zstd_level: int = 1, **kwargs):
@@ -226,14 +245,14 @@ class RESTTokenFileIO(FileIO):
             return auth_provider.token or 'anonymous'
         return 'anonymous'
 
-    def try_to_refresh_token(self):
+    def try_to_refresh_token(self, minimum_validity_millis: int = 0):
         identifier_str = self._build_cache_key()
 
-        if self.token is not None and not self._is_token_expired(self.token):
+        if self.token is not None and not self._is_token_expired(self.token, minimum_validity_millis):
             return
 
         cached_token = self._get_cached_token(identifier_str)
-        if cached_token and not self._is_token_expired(cached_token):
+        if cached_token and not self._is_token_expired(cached_token, minimum_validity_millis):
             self.token = cached_token
             return
 
@@ -241,12 +260,12 @@ class RESTTokenFileIO(FileIO):
 
         with global_lock:
             cached_token = self._get_cached_token(identifier_str)
-            if cached_token and not self._is_token_expired(cached_token):
+            if cached_token and not self._is_token_expired(cached_token, minimum_validity_millis):
                 self.token = cached_token
                 return
 
             token_to_check = cached_token if cached_token else self.token
-            if token_to_check is None or self._is_token_expired(token_to_check):
+            if token_to_check is None or self._is_token_expired(token_to_check, minimum_validity_millis):
                 self.refresh_token()
                 self._set_cached_token(identifier_str, self.token)
 
@@ -258,11 +277,20 @@ class RESTTokenFileIO(FileIO):
         with self._TOKEN_LOCKS_LOCK:
             self._TOKEN_CACHE[identifier_str] = token
 
-    def _is_token_expired(self, token: Optional[RESTToken]) -> bool:
+    def _is_token_expired(
+            self, token: Optional[RESTToken], minimum_validity_millis: int = 0) -> bool:
         if token is None:
             return True
         current_time = int(time.time() * 1000)
-        return (token.expire_at_millis - current_time) < RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS
+        return (token.expire_at_millis - current_time) < max(
+            RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS, minimum_validity_millis)
+
+    @staticmethod
+    def _has_remaining_lifetime(
+            token: Optional[RESTToken], minimum_validity_millis: int) -> bool:
+        return (token is None or
+                token.expire_at_millis - int(time.time() * 1000)
+                >= minimum_validity_millis)
 
     def _get_global_token_lock(self, identifier_str: str) -> threading.Lock:
         with self._TOKEN_LOCKS_LOCK:

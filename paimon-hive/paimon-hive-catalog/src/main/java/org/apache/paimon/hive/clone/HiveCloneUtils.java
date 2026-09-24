@@ -43,6 +43,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -205,7 +206,7 @@ public class HiveCloneUtils {
         String serLib =
                 serdeInfo.getSerializationLib() == null
                         ? ""
-                        : serdeInfo.getSerializationLib().toLowerCase();
+                        : serdeInfo.getSerializationLib().toLowerCase(Locale.ROOT);
         String inputFormat = sd.getInputFormat() == null ? "" : sd.getInputFormat();
         if (serLib.contains("avro")) {
             return "avro";

@@ -100,6 +100,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -204,6 +205,63 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                 // no exception
                 write.write(rowData(1, 10, 100L));
             }
+        }
+    }
+
+    @Test
+    public void testBucketedAppendOrderedSequenceNumbers() throws Exception {
+        innerTestBucketedAppendSequenceNumbers(true);
+    }
+
+    @Test
+    public void testBucketedAppendUnorderedSequenceNumbers() throws Exception {
+        innerTestBucketedAppendSequenceNumbers(false);
+    }
+
+    private void innerTestBucketedAppendSequenceNumbers(boolean ordered) throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(BUCKET, 2);
+                            options.set(BUCKET_KEY, "a");
+                            options.set(WRITE_ONLY, true);
+                            options.set(BUCKET_APPEND_ORDERED, ordered);
+                        });
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<DataFileMeta> batch1Files =
+                table.newReadBuilder().newScan().plan().splits().stream()
+                        .flatMap(s -> ((DataSplit) s).dataFiles().stream())
+                        .collect(Collectors.toList());
+        long batch1MaxSequenceNumber =
+                batch1Files.stream().mapToLong(DataFileMeta::maxSequenceNumber).max().getAsLong();
+        Set<String> batch1FileNames =
+                batch1Files.stream().map(DataFileMeta::fileName).collect(Collectors.toSet());
+
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(rowData(1, 20, 200L));
+            commit.commit(write.prepareCommit());
+        }
+
+        long batch2MinSequenceNumber =
+                table.newReadBuilder().newScan().plan().splits().stream()
+                        .flatMap(s -> ((DataSplit) s).dataFiles().stream())
+                        .filter(file -> !batch1FileNames.contains(file.fileName()))
+                        .mapToLong(s -> ((DataFileMeta) s).minSequenceNumber())
+                        .min()
+                        .getAsLong();
+
+        if (ordered) {
+            assertThat(batch2MinSequenceNumber).isGreaterThan(batch1MaxSequenceNumber);
+        } else {
+            assertThat(batch2MinSequenceNumber).isEqualTo(0L);
         }
     }
 
@@ -614,7 +672,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         assertThat(getResult(read, splits, binaryRow(2), 0, toString))
                 .hasSameElementsAs(Arrays.asList("201|binary", "201|binary"));
 
-        // projection contains unknown index or
+        // OR includes a field outside the output projection.
         read =
                 table.newRead()
                         .withFilter(
@@ -622,10 +680,9 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                         .withProjection(new int[] {3, 2})
                         .executeFilter();
         assertThat(getResult(read, splits, binaryRow(2), 0, toString))
-                .hasSameElementsAs(
-                        Arrays.asList("200|binary", "201|binary", "202|binary", "201|binary"));
+                .hasSameElementsAs(Arrays.asList("201|binary", "201|binary"));
 
-        // projection contains unknown index and
+        // AND must evaluate the unprojected partition field too.
         read =
                 table.newRead()
                         .withFilter(
@@ -633,8 +690,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                         .withProjection(new int[] {3, 2})
                         .executeFilter();
         assertThat(getResult(read, splits, binaryRow(1), 0, toString)).isEmpty();
-        assertThat(getResult(read, splits, binaryRow(2), 0, toString))
-                .hasSameElementsAs(Arrays.asList("201|binary", "201|binary"));
+        assertThat(getResult(read, splits, binaryRow(2), 0, toString)).isEmpty();
     }
 
     @Test
@@ -1104,6 +1160,53 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             assertThat(cnt.get()).isEqualTo(reduce.orElse(0));
             reader.close();
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testParquetFilterOnUnprojectedColumn(boolean fileIndexEnabled) throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("status", DataTypes.STRING())
+                        .build();
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        rowType,
+                        options -> {
+                            options.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                            options.set(WRITE_ONLY, true);
+                            if (fileIndexEnabled) {
+                                options.set("file-index.bitmap.columns", "status");
+                            }
+                        });
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(0, BinaryString.fromString("A")));
+            write.write(GenericRow.of(1, BinaryString.fromString("B")));
+            write.write(GenericRow.of(2, null));
+            write.write(GenericRow.of(3, BinaryString.fromString("A")));
+            commit.commit(write.prepareCommit());
+        }
+
+        ReadBuilder readBuilder =
+                table.newReadBuilder()
+                        .withFilter(
+                                new PredicateBuilder(rowType)
+                                        .equal(1, BinaryString.fromString("A")))
+                        .withReadType(rowType.project(new int[] {0}));
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan().splits())) {
+            reader.forEachRemaining(
+                    row -> {
+                        assertThat(row.getFieldCount()).isEqualTo(1);
+                        ids.add(row.getInt(0));
+                    });
+        }
+        // ReadBuilder filtering is inclusive: all matching rows must survive projection.
+        assertThat(ids).contains(0, 3);
     }
 
     @Test

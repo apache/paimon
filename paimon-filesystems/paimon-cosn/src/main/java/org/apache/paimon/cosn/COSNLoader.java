@@ -54,9 +54,7 @@ public class COSNLoader implements FileIOLoader {
     @Override
     public List<String[]> requiredOptions() {
         List<String[]> options = new ArrayList<>();
-        options.add(new String[] {"fs.cosn.bucket.region"});
-        options.add(new String[] {"fs.cosn.userinfo.secretId"});
-        options.add(new String[] {"fs.cosn.userinfo.secretKey"});
+        options.add(new String[] {"fs.cosn.bucket.region", "fs.cosn.bucket.endpoint_suffix"});
         return options;
     }
 

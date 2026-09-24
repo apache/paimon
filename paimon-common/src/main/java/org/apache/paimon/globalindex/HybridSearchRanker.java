@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.PriorityQueue;
 
@@ -63,7 +64,7 @@ public class HybridSearchRanker {
         if (ranker == null || ranker.trim().isEmpty()) {
             return RRF_RANKER;
         }
-        String normalized = ranker.trim().toLowerCase();
+        String normalized = ranker.trim().toLowerCase(Locale.ROOT);
         if (!RRF_RANKER.equals(normalized)
                 && !WEIGHTED_SCORE_RANKER.equals(normalized)
                 && !MRR_RANKER.equals(normalized)) {

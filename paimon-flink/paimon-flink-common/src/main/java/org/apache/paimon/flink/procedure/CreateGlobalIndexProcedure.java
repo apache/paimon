@@ -37,6 +37,7 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -114,7 +115,7 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
         // Parse options
         Options userOptions = createUserOptions(table, options);
 
-        indexType = indexType.toLowerCase().trim();
+        indexType = indexType.toLowerCase(Locale.ROOT).trim();
         if (indexColumns.size() > 1) {
             // Fail fast before submitting the job: index types that do not support multi-column
             // throw from GlobalIndexerFactory#create, which happens before any indexer side effect.

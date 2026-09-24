@@ -18,6 +18,7 @@
 import io
 import re
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import BinaryIO, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from pypaimon.common.options.core_options import CoreOptions
@@ -58,6 +59,7 @@ class BlobObject:
     columns: Dict[str, object]
     file_io: object
     range_header: Optional[str] = None
+    table_root: Optional[str] = None
 
     @property
     def size(self) -> int:
@@ -76,6 +78,17 @@ class BlobObject:
     def read(self) -> bytes:
         with self.open() as stream:
             return stream.read()
+
+    def to_presigned_url(self, validity: timedelta) -> str:
+        """Create a temporary URL for this object, honoring its selected byte range.
+
+        Requires a table-bound object and a FileIO that supports presigning.
+        """
+        if self.table_root is None:
+            raise ValueError("BlobObject must be bound to a table root for presigning.")
+        descriptor = _descriptor_for_range(self.descriptor, self.range_header)
+        return self.file_io.create_blob_presigned_url(
+            self.table_root, descriptor, validity)
 
 
 class BlobStore:
@@ -172,6 +185,7 @@ class BlobStore:
             columns=info.columns,
             file_io=self._raw_table.file_io,
             range_header=range,
+            table_root=self._raw_table.table_path,
         )
 
     def head_object(
@@ -201,18 +215,29 @@ class BlobStore:
                 raise ValueError("limit must be greater than or equal to 0.")
             if limit == 0:
                 return []
-        rows = self._read_rows(
-            include_blob=True,
-            columns=columns,
-        )
+        read_table = self._raw_table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"})
+        read_builder = read_table.new_read_builder().with_projection(
+            self._projection(True, columns))
+        # A prefix filters the exposed key's string representation, including
+        # non-string keys. Only push the limit when every row is a match.
+        if limit is not None and prefix is None:
+            read_builder = read_builder.with_limit(limit)
+        reader = read_builder.new_read()._to_managed_arrow_batch_reader(
+            read_builder.new_scan().plan().splits())
         objects = []
-        for row in rows:
-            key = row[self.key_column]
-            if prefix is not None and not str(key).startswith(prefix):
-                continue
-            objects.append(self._row_to_info(row))
-            if limit is not None and len(objects) >= limit:
-                break
+        try:
+            for batch in reader:
+                data = batch.to_pydict()
+                for values in zip(*data.values()):
+                    row = dict(zip(data, values))
+                    key = row[self.key_column]
+                    if prefix is not None and not str(key).startswith(prefix):
+                        continue
+                    objects.append(self._row_to_info(row))
+                    if limit is not None and len(objects) >= limit:
+                        return objects
+        finally:
+            reader.close()
         return objects
 
     def delete_object(self, key) -> None:

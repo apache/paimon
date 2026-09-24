@@ -48,6 +48,8 @@ To compact a table. Arguments:
 
 - `compact_strategy` (optional): this determines how to pick files to be merged, the default is determined by the runtime execution mode. 'full' strategy only supports batch mode. All files will be selected for merging. 'minor' strategy: Pick the set of files that need to be merged based on specified conditions.
 
+- `buckets` (optional): fixed-bucket IDs, comma-separated IDs, or inclusive ranges, for example `'0-3,7'`. Omit to include all buckets. Valid only for fixed-bucket tables without sort compaction.
+
 **Syntax**
 
 ```sql
@@ -60,7 +62,8 @@ CALL [catalog.]sys.compact(
     options => 'options',
     `where` => 'where',
     partition_idle_time => 'partition_idle_time',
-    compact_strategy => 'compact_strategy');
+    compact_strategy => 'compact_strategy',
+    buckets => 'buckets');
 
 -- Use indexed argument
 CALL [catalog.]sys.compact('table');
@@ -249,6 +252,10 @@ To compact_manifest the manifests. Arguments:
 - manifest_sort_partition_field (String, optional): partition field used to sort manifest entries. Defaults to the first partition field.
 
 - manifest_sort_max_rewrite_size (String, optional): maximum manifest size rewritten by one sort pass.
+
+When manifest sort is enabled, `compact_manifest` performs a full sort using the layout selected
+from the table options. The existing `manifest_sort_max_rewrite_size` limit still controls the
+amount of manifest data rewritten in one invocation.
 
 **Syntax**
 

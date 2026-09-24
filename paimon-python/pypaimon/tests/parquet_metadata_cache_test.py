@@ -80,6 +80,25 @@ class _CountingLocalFileSystem(FsspecLocalFileSystem):
         self.reads = []
 
 
+class _CountingFileSystemHandler(pafs.FSSpecHandler):
+    """Count Arrow calls, not backend HTTP requests."""
+
+    def __init__(self):
+        super().__init__(FsspecLocalFileSystem(skip_instance_cache=True))
+        self.calls = []
+
+    def get_file_info(self, paths):
+        self.calls.append("get_file_info")
+        return super().get_file_info(paths)
+
+    def open_input_file(self, path):
+        self.calls.append("open_input_file")
+        return super().open_input_file(path)
+
+    def register_file_size(self, path, file_size):
+        self.calls.append(("register_file_size", path, file_size))
+
+
 class FileFormatMetadataCacheTest(unittest.TestCase):
     def setUp(self):
         reader_module._reset_file_format_dataset_cache()
@@ -129,8 +148,8 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
             self.file_io.properties.get(
                 CatalogOptions.FILE_FORMAT_METADATA_CACHE_MAX_SIZE).get_bytes())
 
-        original = reader_module.ds.dataset
-        with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
+        original = reader_module.ds.FileSystemDataset
+        with patch.object(reader_module.ds, "FileSystemDataset", wraps=original) as dataset:
             self._read(self.paths[0])
             self._read(self.paths[0])
         self.assertEqual(1, dataset.call_count)
@@ -138,8 +157,8 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
     def test_zero_size_bypasses_and_removes_entry(self):
         enabled = self._file_io()
         disabled = self._file_io("0 b")
-        original = reader_module.ds.dataset
-        with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
+        original = reader_module.ds.FileSystemDataset
+        with patch.object(reader_module.ds, "FileSystemDataset", wraps=original) as dataset:
             self._read(self.paths[0], enabled)
             self._read(self.paths[0], disabled)
             self._read(self.paths[0], enabled)
@@ -148,8 +167,8 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
     def test_zero_size_clears_other_entries(self):
         enabled = self._file_io()
         disabled = self._file_io("0 b")
-        original = reader_module.ds.dataset
-        with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
+        original = reader_module.ds.FileSystemDataset
+        with patch.object(reader_module.ds, "FileSystemDataset", wraps=original) as dataset:
             self._read(self.paths[0], enabled)
             self._read(self.paths[1], enabled)
             self._read(self.paths[0], disabled)
@@ -158,8 +177,8 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
 
     def test_reuses_dataset(self):
         file_io = self._file_io()
-        original = reader_module.ds.dataset
-        with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
+        original = reader_module.ds.FileSystemDataset
+        with patch.object(reader_module.ds, "FileSystemDataset", wraps=original) as dataset:
             first = self._read(self.paths[0], file_io)
             second = self._read(self.paths[0], file_io)
 
@@ -197,6 +216,109 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
         self.assertEqual(uncached, cached)
         self.assertLess(counting.opens, uncached_opens)
         self.assertLess(len(counting.reads), uncached_reads)
+
+    def test_single_file_request_counts(self):
+        for max_size, expected_opens in [
+                (DEFAULT_CACHE_SIZE, [2, 1]), (0, [2, 2]), (1, [2, 2])]:
+            with self.subTest(cache_max_size=max_size):
+                reader_module._reset_file_format_dataset_cache()
+                handler = _CountingFileSystemHandler()
+                self.file_io.filesystem = pafs.PyFileSystem(handler)
+                results = []
+                for opens in expected_opens:
+                    handler.calls.clear()
+                    dataset = reader_module._file_format_dataset(
+                        self.file_io, "parquet", self.paths[0], max_size)
+                    results.append(dataset.to_table().to_pydict())
+                    self.assertEqual(0, handler.calls.count("get_file_info"))
+                    self.assertEqual(opens, handler.calls.count("open_input_file"))
+                self.assertEqual({"value": list(range(10))}, results[0])
+                self.assertEqual(results[0], results[1])
+
+    def test_forwards_known_file_size(self):
+        parquet_format = unittest.mock.Mock()
+        fragment = unittest.mock.Mock(physical_schema=pa.schema([]))
+        parquet_format.make_fragment.return_value = fragment
+        with patch.object(
+                reader_module.ds, "ParquetFileFormat",
+                return_value=parquet_format), patch.object(
+                    reader_module.ds, "FileSystemDataset",
+                    return_value=unittest.mock.sentinel.dataset):
+            dataset = reader_module._file_format_dataset(
+                self.file_io, "parquet", self.paths[0], 0, 123)
+        self.assertIs(unittest.mock.sentinel.dataset, dataset)
+        expected_options = (
+            {} if reader_module._pyarrow_lt_7()
+            else {"file_size": 123})
+        parquet_format.make_fragment.assert_called_once_with(
+            self.paths[0], filesystem=self.file_io.filesystem,
+            **expected_options)
+
+        handler = _CountingFileSystemHandler()
+        self.file_io.filesystem = pafs.PyFileSystem(handler)
+        file_size = os.path.getsize(self.paths[0])
+
+        dataset = reader_module._file_format_dataset(
+            self.file_io, "parquet", self.paths[0], 0, file_size)
+
+        self.assertEqual({"value": list(range(10))},
+                         dataset.to_table().to_pydict())
+        self.assertIn(
+            ("register_file_size", self.paths[0], file_size), handler.calls)
+
+    def test_fragment_metadata_is_reused_without_io(self):
+        handler = _CountingFileSystemHandler()
+        self.file_io.filesystem = pafs.PyFileSystem(handler)
+        dataset = reader_module._file_format_dataset(
+            self.file_io, "parquet", self.paths[0], 0)
+        self.assertEqual(["open_input_file"], handler.calls)
+        handler.calls.clear()
+        for _ in range(2):
+            fragment = next(dataset.get_fragments())
+            self.assertEqual(dataset.schema, fragment.physical_schema)
+            self.assertEqual(10, fragment.metadata.num_rows)
+            self.assertEqual(5, len(fragment.split_by_row_group()))
+            self.assertGreater(
+                reader_module._estimate_file_format_dataset_size(
+                    dataset, "parquet"), 0)
+        self.assertEqual([], handler.calls)
+        self.assertEqual(list(range(10)), dataset.to_table()[0].to_pylist())
+        self.assertEqual(["open_input_file"], handler.calls)
+
+    def test_concurrent_scans_load_footer_once(self):
+        handler = _CountingFileSystemHandler()
+        self.file_io.filesystem = pafs.PyFileSystem(handler)
+        barrier = threading.Barrier(8)
+
+        def read(_):
+            barrier.wait(timeout=10)
+            return self._read(self.paths[0])
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(read, range(8)))
+        self.assertTrue(all(result == list(range(10)) for result in results))
+        self.assertEqual(0, handler.calls.count("get_file_info"))
+        self.assertEqual(9, handler.calls.count("open_input_file"))
+
+    def test_missing_and_corrupt_files_fail_and_can_retry(self):
+        for max_size in [0, DEFAULT_CACHE_SIZE]:
+            for corrupt in [False, True]:
+                with self.subTest(cache_max_size=max_size, corrupt=corrupt):
+                    reader_module._reset_file_format_dataset_cache()
+                    path = os.path.join(self.temp_dir.name, "invalid.parquet")
+                    if corrupt:
+                        with open(path, "wb") as output:
+                            output.write(b"not a parquet file")
+                    elif os.path.exists(path):
+                        os.remove(path)
+                    with self.assertRaises((OSError, pa.ArrowInvalid)):
+                        reader_module._file_format_dataset(
+                            self.file_io, "parquet", path, max_size).to_table()
+                    pq.write_table(pa.table({"value": [42]}), path)
+                    self.assertEqual(
+                        [42], reader_module._file_format_dataset(
+                            self.file_io, "parquet", path, max_size
+                        ).to_table()[0].to_pylist())
 
     def test_evicts_least_recently_used_entry_by_estimated_size(self):
         cache = reader_module._FileFormatDatasetCache(10)
@@ -357,8 +479,8 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
         table_options = CoreOptions(Options({
             "file-format.metadata-cache.max-size": "0 b",
         }))
-        original = reader_module.ds.dataset
-        with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
+        original = reader_module.ds.FileSystemDataset
+        with patch.object(reader_module.ds, "FileSystemDataset", wraps=original) as dataset:
             self._read(self.paths[0], options=table_options)
             self._read(self.paths[0], options=table_options)
         self.assertEqual(1, dataset.call_count)
@@ -367,8 +489,8 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
         other_file_io = LocalFileIO(self.temp_dir.name, Options({}))
         other_file_io.filesystem = self.file_io.filesystem
 
-        original = reader_module.ds.dataset
-        with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
+        original = reader_module.ds.FileSystemDataset
+        with patch.object(reader_module.ds, "FileSystemDataset", wraps=original) as dataset:
             reader_module._file_format_dataset(
                 self.file_io, "parquet", self.paths[0], DEFAULT_CACHE_SIZE)
             reader_module._file_format_dataset(
@@ -378,8 +500,8 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
 
     def test_does_not_share_across_filesystems(self):
         other_file_io = LocalFileIO(self.temp_dir.name, Options({}))
-        original = reader_module.ds.dataset
-        with patch.object(reader_module.ds, "dataset", wraps=original) as dataset:
+        original = reader_module.ds.FileSystemDataset
+        with patch.object(reader_module.ds, "FileSystemDataset", wraps=original) as dataset:
             reader_module._file_format_dataset(
                 self.file_io, "parquet", self.paths[0], DEFAULT_CACHE_SIZE)
             reader_module._file_format_dataset(
@@ -390,8 +512,10 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
         parquet_dataset = object()
         orc_dataset = object()
         with patch.object(
-                reader_module.ds, "dataset",
-                side_effect=[parquet_dataset, orc_dataset]) as dataset:
+                reader_module.ds, "FileSystemDataset",
+                return_value=parquet_dataset) as parquet_loader, patch.object(
+                    reader_module.ds, "dataset",
+                    return_value=orc_dataset) as orc_loader:
             with patch.object(
                     reader_module, "_estimate_file_format_dataset_size",
                     return_value=1):
@@ -402,7 +526,9 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
 
         self.assertIs(parquet_dataset, first)
         self.assertIs(orc_dataset, second)
-        self.assertEqual(2, dataset.call_count)
+        self.assertEqual(1, parquet_loader.call_count)
+        orc_loader.assert_called_once_with(
+            self.paths[0], format="orc", filesystem=self.file_io.filesystem)
 
     def test_cache_key_retains_filesystem_wrapper(self):
         root = pafs.LocalFileSystem()
@@ -459,14 +585,14 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
         self.assertIsNot(parent_cache, child_cache)
 
     def test_coalesces_concurrent_loads(self):
-        original = reader_module.ds.dataset
+        original = reader_module.ds.FileSystemDataset
 
         def delayed_dataset(*args, **kwargs):
             time.sleep(0.05)
             return original(*args, **kwargs)
 
         with patch.object(
-                reader_module.ds, "dataset", side_effect=delayed_dataset) as dataset:
+                reader_module.ds, "FileSystemDataset", side_effect=delayed_dataset) as dataset:
             with ThreadPoolExecutor(max_workers=8) as executor:
                 results = list(executor.map(
                     lambda _: self._read(self.paths[0]),

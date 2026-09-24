@@ -23,6 +23,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ExceptionUtils;
 
@@ -57,16 +58,31 @@ public class ManifestFileMerger {
             RowType partitionType,
             CoreOptions options,
             @Nullable IOManager ioManager) {
+        return merge(input, manifestFile, partitionType, options, ioManager, false);
+    }
+
+    static List<ManifestFileMeta> merge(
+            List<ManifestFileMeta> input,
+            ManifestFile manifestFile,
+            RowType partitionType,
+            CoreOptions options,
+            @Nullable IOManager ioManager,
+            boolean fullCompaction) {
         // these are the newly created manifest files, clean them up if exception occurs
         List<ManifestFileMeta> newFilesForAbort = new ArrayList<>();
 
         try {
-            // If manifest-sort.enabled is enabled and there are sortable fields, use
-            // trySortRewrite. Data evolution tables sort by RowID when all manifest files contain
-            // RowID ranges, so they do not require partition fields.
+            // Bucketed tables and data evolution tables with complete RowID ranges do not require
+            // partition fields for manifest sort rewrite.
             if (canUseManifestSort(input, partitionType, options)) {
                 return ManifestFileSorter.trySortCompaction(
-                        input, newFilesForAbort, manifestFile, partitionType, options, ioManager);
+                        input,
+                        newFilesForAbort,
+                        manifestFile,
+                        partitionType,
+                        options,
+                        ioManager,
+                        fullCompaction);
             }
 
             if (options.manifestMergeOptimizeEnabled()) {
@@ -79,7 +95,7 @@ public class ManifestFileMerger {
             // exception occurs, clean up and rethrow
             for (ManifestFileMeta manifest : newFilesForAbort) {
                 try {
-                    manifestFile.delete(manifest.fileName());
+                    manifestFile.delete(manifest);
                 } catch (Throwable cleanupFailure) {
                     primaryFailure =
                             ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);
@@ -94,6 +110,8 @@ public class ManifestFileMerger {
             List<ManifestFileMeta> input, RowType partitionType, CoreOptions options) {
         return options.manifestSortEnabled()
                 && (partitionType.getFieldCount() > 0
+                        || options.bucket() > 0
+                        || options.bucket() == BucketMode.POSTPONE_BUCKET
                         || (options.dataEvolutionEnabled() && allContainsRowId(input)));
     }
 

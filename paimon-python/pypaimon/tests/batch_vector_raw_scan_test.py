@@ -20,6 +20,7 @@ import threading
 from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.source.vector_search_read import BatchVectorSearchReadImpl
@@ -117,6 +118,7 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
                 results = reader._read_raw_batch_search([Range(0, 99)], None, 'ivf-flat')
                 self.assertEqual([{}, {}], [_scores(r) for r in results])
 
+    @pytest.mark.python_read
     def test_scoring_finishes_each_batch_before_reading_the_next(self):
         table = self._create_table()
         self._write_arrow(table, self._data([[1, 0], [0, 1], [2, 0], [0, 2]]))
@@ -126,7 +128,7 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
         generators = []
         batch_sizes = []
         module = 'pypaimon.table.source.vector_search_read'
-        from pypaimon.table.source.vector_search_read import _compute_score
+        from pypaimon.table.source.vector_search_read import _compute_scores
 
         def batches(table_read, splits):
             arrow, generator = original(table_read, splits)
@@ -135,21 +137,21 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
 
         def tracked_generator(table_read, *args):
             source = original_generator(table_read, *args)
-            expected_scores = 0
+            expected_score_blocks = 0
             try:
                 for batch in source:
                     batch_sizes.append(batch.num_rows)
-                    expected_scores += batch.num_rows * 2
+                    expected_score_blocks += 2
                     yield batch
-                    self.assertEqual(expected_scores, score.call_count)
+                    self.assertEqual(expected_score_blocks, score.call_count)
             finally:
                 source.close()
 
         with patch.object(TableRead, '_new_arrow_batch_reader', batches), \
                 patch.object(TableRead, '_arrow_batch_generator', tracked_generator), \
-                patch(module + '._compute_score', wraps=_compute_score) as score:
+                patch(module + '._compute_scores', wraps=_compute_scores) as score:
             reader._read_raw_batch_search([Range(0, 3)], None, 'ivf-flat')
-        self.assertEqual(8, score.call_count)
+        self.assertEqual(4, score.call_count)
         self.assertEqual(1, len(generators))
         self.assertGreater(len(batch_sizes), 1)
         self.assertIsNone(generators[0].gi_frame)
@@ -198,6 +200,7 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
         self.assertEqual([1.0], list(_scores(current[0]).values()))
         self.assertNotEqual(list(old[0].results()), list(current[0].results()))
 
+    @pytest.mark.python_read
     def test_public_batch_search_preserves_split_parallelism(self):
         table = self._create_table(partition_keys=['pt'])
         for partition in range(4):
@@ -246,6 +249,7 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
                         self.assertEqual({'active': 0, 'peak': expected_workers,
                                           'closed': expected_workers}, state)
 
+    @pytest.mark.python_read
     def test_parallel_failure_closes_all_started_readers(self):
         table = self._create_table(
             partition_keys=['pt'], options=dict(self.table_options, **{'read.parallelism': '2'}))
