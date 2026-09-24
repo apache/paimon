@@ -537,7 +537,8 @@ class RESTCatalogServer:
 
         if len(path_parts) == 3:
             # Basic table operations (GET, DELETE, etc.)
-            return self._table_handle(method, data, lookup_identifier)
+            return self._table_handle(
+                method, data, lookup_identifier, response_identifier=identifier)
         elif len(path_parts) == 4:
             # Extended operations (e.g., commit, token, snapshot)
             operation = path_parts[3]
@@ -1028,7 +1029,8 @@ class RESTCatalogServer:
                 return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
-    def _table_handle(self, method: str, data: str, identifier: Identifier) -> Tuple[str, int]:
+    def _table_handle(self, method: str, data: str, identifier: Identifier,
+                      response_identifier: Identifier = None) -> Tuple[str, int]:
         """Handle individual table operations"""
         if method == "GET":
             if identifier.get_full_name() not in self.table_metadata_store:
@@ -1037,7 +1039,8 @@ class RESTCatalogServer:
             table_path = (f'file://{self.data_path}/{self.warehouse}/'
                           f'{identifier.get_database_name()}/{identifier.get_object_name()}')
             schema = table_metadata.schema.to_schema()
-            response = self.mock_table(identifier, table_metadata, table_path, schema)
+            response = self.mock_table(
+                response_identifier or identifier, table_metadata, table_path, schema)
             return self._mock_response(response, 200)
         elif method == "POST":
             # Alter table

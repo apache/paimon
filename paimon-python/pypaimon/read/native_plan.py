@@ -322,7 +322,8 @@ def _native_read_builder(table):
         rt = Table.from_rest_response(
             rest_response,
             database=table.identifier.get_database_name(),
-            table=table.identifier.get_table_name(), options=_catalog_options(table))
+            table=table.identifier.get_object_name(),
+            rest_options=_catalog_options(table))
         rt = rt.copy_with_resolved_schema(_resolved_schema_json(table), branch=table.current_branch())
         builder = rt.new_read_builder()
     elif file_io_options is not None:

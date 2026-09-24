@@ -811,7 +811,7 @@ class NativePlanTest(unittest.TestCase):
         loader = RESTCatalogLoader(CatalogContext.create_from_options(Options({
             'uri': 'http://localhost:1', 'warehouse': 'test', 'data-token.enabled': 'true'})))
         table = Mock()
-        table.identifier = Identifier.create('db', 't')
+        table.identifier = Identifier('db', 't', branch='dev')
         table.table_path = '/warehouse/t'
         table.current_branch.return_value = 'dev'
         table.catalog_environment = CatalogEnvironment(
@@ -834,7 +834,8 @@ class NativePlanTest(unittest.TestCase):
             self.assertIs(_native_read_builder(table), native_table.new_read_builder.return_value)
         fake_df.PaimonCatalog.assert_not_called()
         fake_df.Table.from_rest_response.assert_called_once_with(
-            response, database='db', table='t', options=_catalog_options(table))
+            response, database='db', table='t$branch_dev',
+            rest_options=_catalog_options(table))
         native_table.copy_with_resolved_schema.assert_called_once_with(resolved, branch='dev')
 
     def test_native_plan_threads_trimmed_keys_to_deserializer(self):
