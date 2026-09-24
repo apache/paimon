@@ -81,9 +81,6 @@ import java.util.Objects;
     @JsonSubTypes.Type(
             value = SchemaChange.DropPrimaryKey.class,
             name = SchemaChange.Actions.DROP_PRIMARY_KEY_ACTION),
-    @JsonSubTypes.Type(
-            value = SchemaChange.EnableDataEvolution.class,
-            name = SchemaChange.Actions.ENABLE_DATA_EVOLUTION_ACTION),
 })
 public interface SchemaChange extends Serializable {
 
@@ -178,7 +175,8 @@ public interface SchemaChange extends Serializable {
      * Enables {@code row-tracking.enabled} and {@code data-evolution.enabled} on a table that
      * already has snapshots. Both options are immutable for {@code ALTER TABLE}; this change is
      * issued by the {@code sys.enable_data_evolution} procedure, which first assigns a first row id
-     * to every existing data file.
+     * to every existing data file. A table with data files accepts it only in that state, so it is
+     * no general-purpose schema change: it is not part of the REST protocol.
      */
     static SchemaChange enableDataEvolution() {
         return new EnableDataEvolution();
@@ -883,7 +881,6 @@ public interface SchemaChange extends Serializable {
         public static final String UPDATE_COLUMN_DEFAULT_VALUE_ACTION = "updateColumnDefaultValue";
         public static final String UPDATE_COLUMN_POSITION_ACTION = "updateColumnPosition";
         public static final String DROP_PRIMARY_KEY_ACTION = "dropPrimaryKey";
-        public static final String ENABLE_DATA_EVOLUTION_ACTION = "enableDataEvolution";
 
         private Actions() {}
     }

@@ -683,6 +683,15 @@ public class RESTCatalog implements Catalog {
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         checkNotSystemTable(identifier, "alterTable");
+        for (SchemaChange change : changes) {
+            if (change instanceof SchemaChange.EnableDataEvolution) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Enabling data evolution on table %s of a REST catalog is not "
+                                        + "supported yet.",
+                                identifier.getFullName()));
+            }
+        }
         try {
             api.alterTable(identifier, changes);
         } catch (NoSuchResourceException e) {
