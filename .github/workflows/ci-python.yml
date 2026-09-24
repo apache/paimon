@@ -199,7 +199,7 @@ jobs:
       - name: Build paimon-rust with REST native commit support
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade "git+https://github.com/JingsongLi/paimon-rust.git@2acf9195cb88095bd6ede75d81bfa34a55240312#subdirectory=bindings/python"
+          python -m pip install --upgrade "git+https://github.com/apache/paimon-rust.git@aa60a6ac7cbe9299aca19effd9ba8301c1bc55da#subdirectory=bindings/python"
 
       - name: Install Python test dependencies
         run: |
