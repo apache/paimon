@@ -314,7 +314,7 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
     # supports these options; native_write_capabilities_test covers that path.
     # When a user pairs ``merge-engine: partial-update`` with any option
     # this port doesn't implement (sequence-group, per-field aggregator
-    # override, ignore-delete, partial-update.remove-record-on-*), we
+    # override, partial-update.remove-record-on-*), we
     # must raise rather than silently run the simple last-non-null merge
     # — otherwise we'd reproduce the same silent-corruption pattern this
     # PR exists to close.
@@ -360,11 +360,21 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
         )
 
     @pytest.mark.python_write
-    def test_partial_update_with_ignore_delete_raises(self):
-        self._assert_partial_update_unsupported(
+    def test_partial_update_with_ignore_delete_does_not_raise(self):
+        """ignore-delete is supported: the table is accepted on write and
+        read, and INSERT rows still merge last-non-null. (Retract-row
+        skipping is covered as a unit in test_partial_update_merge_function
+        / test_merge_engine_dispatch; the write path here cannot emit a
+        DELETE row without rowkind.field.)"""
+        table = self._create_pk_table(
             'pu_ignore_delete',
-            {'ignore-delete': 'true'},
-            ['ignore-delete'],
+            extra_options={'ignore-delete': 'true'},
+        )
+        self._write(table, [{'id': 1, 'a': 'A', 'b': None, 'c': None}])
+        self._write(table, [{'id': 1, 'a': None, 'b': 'B', 'c': None}])
+        self.assertEqual(
+            self._read(table),
+            [{'id': 1, 'a': 'A', 'b': 'B', 'c': None}],
         )
 
     @pytest.mark.python_write

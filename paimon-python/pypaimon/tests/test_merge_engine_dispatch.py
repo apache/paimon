@@ -84,10 +84,21 @@ class PartialUpdateUnsupportedOptionsTest(unittest.TestCase):
             {"partial-update.ignore-delete": "yes"})
         self.assertEqual(unsupported, set())
 
-    def test_ignore_delete_true_is_flagged(self):
+    def test_ignore_delete_true_is_not_flagged(self):
+        # ignore-delete is now supported (retract rows are skipped), so it
+        # must not force the dispatch to refuse the table.
         unsupported = partial_update_unsupported_options(
             {"partial-update.ignore-delete": "true"})
-        self.assertEqual(unsupported, {"partial-update.ignore-delete"})
+        self.assertEqual(unsupported, set())
+        self.assertEqual(
+            partial_update_unsupported_options({"ignore-delete": "true"}),
+            set())
+
+    def test_remove_record_on_delete_is_still_flagged(self):
+        unsupported = partial_update_unsupported_options(
+            {"partial-update.remove-record-on-delete": "true"})
+        self.assertEqual(
+            unsupported, {"partial-update.remove-record-on-delete"})
 
     def test_sequence_group_is_flagged(self):
         unsupported = partial_update_unsupported_options(
@@ -129,6 +140,36 @@ class BuildMergeFunctionTest(unittest.TestCase):
         )
         self.assertIsInstance(mf, PartialUpdateMergeFunction)
         self.assertIsNone(mf._value_field_names)
+
+    def test_partial_update_wires_ignore_delete(self):
+        # ignore-delete on the table flows into the merge function, which
+        # then skips retract rows instead of raising.
+        from pypaimon.table.row.key_value import KeyValue
+        from pypaimon.table.row.row_kind import RowKind
+
+        mf = build_merge_function(
+            engine=MergeEngine.PARTIAL_UPDATE,
+            raw_options={"partial-update.ignore-delete": "true"},
+            key_arity=1,
+            value_arity=1,
+            value_field_nullables=[True],
+        )
+        self.assertTrue(mf._ignore_delete)
+        mf.reset()
+        delete = KeyValue(key_arity=1, value_arity=1)
+        delete.replace((1, 100, RowKind.DELETE.value, 'x'))
+        mf.add(delete)  # must not raise
+        self.assertIsNone(mf.get_result())
+
+    def test_partial_update_ignore_delete_default_off(self):
+        mf = build_merge_function(
+            engine=MergeEngine.PARTIAL_UPDATE,
+            raw_options={},
+            key_arity=1,
+            value_arity=2,
+            value_field_nullables=[True, True],
+        )
+        self.assertFalse(mf._ignore_delete)
 
 
 if __name__ == '__main__':

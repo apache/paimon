@@ -39,9 +39,9 @@ from pypaimon.read.reader.partial_update_merge_function import \
 # behaviour the pypaimon PartialUpdateMergeFunction does not yet
 # implement. Setting any of these forces the dispatch to refuse the
 # write instead of running the simple last-non-null merge silently.
+# ``ignore-delete`` / ``partial-update.ignore-delete`` are NOT here: they
+# are supported (retract rows are skipped, see build_merge_function).
 _PARTIAL_UPDATE_UNSUPPORTED_BOOLEAN_OPTIONS = (
-    "ignore-delete",
-    "partial-update.ignore-delete",
     "first-row.ignore-delete",
     "deduplicate.ignore-delete",
     "partial-update.remove-record-on-delete",
@@ -96,9 +96,9 @@ def build_merge_function(
             raise NotImplementedError(
                 "merge-engine 'partial-update' is enabled together with "
                 "options that pypaimon does not yet implement: {}. The "
-                "supported subset is per-key last-non-null merge with "
-                "no sequence-group, no per-field aggregator override, "
-                "no ignore-delete and no partial-update.remove-record-on-* "
+                "supported subset is per-key last-non-null merge (with "
+                "ignore-delete) but no sequence-group, no per-field "
+                "aggregator override, and no partial-update.remove-record-on-* "
                 "flags. Open an issue to track Python support.".format(
                     ", ".join(sorted(unsupported))
                 )
@@ -110,6 +110,7 @@ def build_merge_function(
             value_field_names=(
                 list(value_field_names)
                 if value_field_names is not None else None),
+            ignore_delete=_ignore_delete_from_options(raw_options),
         )
     if engine == MergeEngine.FIRST_ROW:
         return FirstRowMergeFunction(
