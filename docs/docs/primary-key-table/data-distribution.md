@@ -59,6 +59,11 @@ split one bucket into independent key ranges, so bucket count is not a hard read
 To change an existing layout, use the offline [Rescale Bucket](../maintenance/rescale-bucket)
 workflow.
 
+For partitioned tables, each partition can have its own bucket count when
+`'bucket.per-partition-count-enabled' = 'true'` is set. In that case, after a rescale operation existing
+partitions retain their original bucket count while newly created partitions use the updated table-level
+default. When the option is disabled (the default), all partitions share the single table-level bucket count.
+
 ## Dynamic Bucket
 
 Dynamic buckets are the default for primary-key tables (`bucket = -1`). Paimon maintains an index
