@@ -21,7 +21,6 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.PredicateConverter;
 import org.apache.paimon.flink.lookup.DynamicPartitionLoader;
 import org.apache.paimon.flink.lookup.PartitionLoader;
@@ -48,7 +47,6 @@ import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushD
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.plan.stats.TableStats;
 import org.apache.flink.table.types.DataType;
-import org.apache.flink.table.types.logical.RowType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -112,7 +110,6 @@ public abstract class FlinkTableSource
     @Override
     public Result applyFilters(List<ResolvedExpression> filters) {
         List<String> partitionKeys = table.partitionKeys();
-        RowType rowType = LogicalTypeConversion.toLogicalType(table.rowType());
 
         // The source must ensure the consumed filters are fully evaluated, otherwise the result
         // of query will be wrong.
@@ -123,7 +120,8 @@ public abstract class FlinkTableSource
                 new PartitionPredicateVisitor(partitionKeys);
 
         for (ResolvedExpression filter : filters) {
-            Optional<Predicate> predicateOptional = PredicateConverter.convert(rowType, filter);
+            Optional<Predicate> predicateOptional =
+                    PredicateConverter.convert(table.rowType(), filter);
 
             if (!predicateOptional.isPresent()) {
                 unConsumedFilters.add(filter);
