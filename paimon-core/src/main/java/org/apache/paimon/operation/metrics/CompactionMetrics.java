@@ -25,9 +25,11 @@ import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.MetricRegistry;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.stream.DoubleStream;
@@ -66,6 +68,7 @@ public class CompactionMetrics {
     private final MetricGroup metricGroup;
     private final Map<PartitionAndBucket, ReporterImpl> reporters;
     private final Map<Long, CompactTimer> compactTimers;
+    private final Map<Long, Integer> compactTimerRefCounts;
     private final Queue<Long> compactionTimes;
     private Counter compactionsCompletedCounter;
     private Counter compactionsTotalCounter;
@@ -75,6 +78,7 @@ public class CompactionMetrics {
         this.metricGroup = registry.createTableMetricGroup(GROUP_NAME, tableName);
         this.reporters = new HashMap<>();
         this.compactTimers = new ConcurrentHashMap<>();
+        this.compactTimerRefCounts = new ConcurrentHashMap<>();
         this.compactionTimes = new ConcurrentLinkedQueue<>();
 
         registerGenericCompactionMetrics();
@@ -83,6 +87,27 @@ public class CompactionMetrics {
     @VisibleForTesting
     public MetricGroup getMetricGroup() {
         return metricGroup;
+    }
+
+    @VisibleForTesting
+    int activeCompactTimerCount() {
+        return compactTimers.size();
+    }
+
+    private void acquireCompactTimer(long threadId) {
+        compactTimerRefCounts.merge(threadId, 1, Integer::sum);
+    }
+
+    private void releaseCompactTimer(long threadId) {
+        compactTimerRefCounts.compute(
+                threadId,
+                (id, count) -> {
+                    if (count == null || count <= 1) {
+                        compactTimers.remove(id);
+                        return null;
+                    }
+                    return count - 1;
+                });
     }
 
     private void registerGenericCompactionMetrics() {
@@ -218,6 +243,7 @@ public class CompactionMetrics {
         private long totalFileCount = 0;
         private long sortBufferUsedBytes = 0;
         private double sortBufferUtilisationPercent = 0.0;
+        private final Set<Long> compactThreadIds = new HashSet<>();
 
         private ReporterImpl(PartitionAndBucket key) {
             this.key = key;
@@ -226,9 +252,14 @@ public class CompactionMetrics {
 
         @Override
         public CompactTimer getCompactTimer() {
-            return compactTimers.computeIfAbsent(
-                    Thread.currentThread().getId(),
-                    ignore -> new CompactTimer(BUSY_MEASURE_MILLIS));
+            long threadId = Thread.currentThread().getId();
+            CompactTimer timer =
+                    compactTimers.computeIfAbsent(
+                            threadId, ignore -> new CompactTimer(BUSY_MEASURE_MILLIS));
+            if (compactThreadIds.add(threadId)) {
+                acquireCompactTimer(threadId);
+            }
+            return timer;
         }
 
         @Override
@@ -295,6 +326,10 @@ public class CompactionMetrics {
 
         @Override
         public void unregister() {
+            for (Long threadId : compactThreadIds) {
+                releaseCompactTimer(threadId);
+            }
+            compactThreadIds.clear();
             reporters.remove(key);
         }
     }

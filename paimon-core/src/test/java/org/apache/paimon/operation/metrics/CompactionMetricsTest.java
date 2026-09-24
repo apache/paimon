@@ -48,7 +48,10 @@ import org.junit.jupiter.api.io.TempDir;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -255,6 +258,52 @@ public class CompactionMetricsTest {
 
         write.close();
         commit.close();
+    }
+
+    @Test
+    public void testCompactTimersRetiredAfterPerBucketWorkerChurn() throws Exception {
+        CompactionMetrics metrics = new CompactionMetrics(new TestMetricRegistry(), "myTable");
+        for (int i = 0; i < 32; i++) {
+            ExecutorService worker = Executors.newSingleThreadExecutor();
+            CompactionMetrics.Reporter reporter = metrics.createReporter(BinaryRow.EMPTY_ROW, i);
+            try {
+                worker.submit(
+                                () -> {
+                                    reporter.getCompactTimer().start();
+                                    reporter.getCompactTimer().finish();
+                                })
+                        .get(30, TimeUnit.SECONDS);
+            } finally {
+                reporter.unregister();
+                worker.shutdownNow();
+            }
+        }
+        assertThat(metrics.activeCompactTimerCount()).isZero();
+    }
+
+    @Test
+    public void testCompactTimerKeptWhileSharedCompactionThreadInUse() throws Exception {
+        CompactionMetrics metrics = new CompactionMetrics(new TestMetricRegistry(), "myTable");
+        ExecutorService sharedPool = Executors.newFixedThreadPool(1);
+        CompactionMetrics.Reporter first = metrics.createReporter(BinaryRow.EMPTY_ROW, 0);
+        CompactionMetrics.Reporter second = metrics.createReporter(BinaryRow.EMPTY_ROW, 1);
+        try {
+            sharedPool
+                    .submit(
+                            () -> {
+                                first.getCompactTimer().start();
+                                first.getCompactTimer().finish();
+                                second.getCompactTimer().start();
+                                second.getCompactTimer().finish();
+                            })
+                    .get(30, TimeUnit.SECONDS);
+            first.unregister();
+            assertThat(metrics.activeCompactTimerCount()).isEqualTo(1);
+            second.unregister();
+            assertThat(metrics.activeCompactTimerCount()).isZero();
+        } finally {
+            sharedPool.shutdownNow();
+        }
     }
 
     private Object getMetric(CompactionMetrics metrics, String metricName) {
