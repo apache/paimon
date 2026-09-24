@@ -97,6 +97,35 @@ public class LookupChangelogEventMetadataITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testNestedValueCanBeReadWithFlinkMetadataAlias() throws Exception {
+        sql(
+                "CREATE TABLE nested_source ("
+                        + "id INT PRIMARY KEY NOT ENFORCED, "
+                        + "event_ts BIGINT, "
+                        + "payload ROW<nested INT>, "
+                        + "writetime BIGINT METADATA FROM '__internal__event_ts' VIRTUAL"
+                        + ") WITH ("
+                        + "'bucket'='1', "
+                        + "'changelog-producer'='lookup', "
+                        + "'sequence.field'='event_ts', "
+                        + "'changelog-producer.expose-field-as-metadata'='event_ts')");
+
+        BlockingIterator<Row, Row> iterator =
+                streamSqlBlockIter("SELECT id, event_ts, payload, writetime FROM nested_source");
+
+        sql("INSERT INTO nested_source VALUES " + "(1, 50, CAST(ROW(10) AS ROW<nested INT>))");
+        assertThat(iterator.collect(1)).containsExactly(Row.of(1, 50L, Row.of(10), 50L));
+
+        sql("INSERT INTO nested_source VALUES " + "(1, 100, CAST(ROW(20) AS ROW<nested INT>))");
+        assertThat(iterator.collect(2))
+                .containsExactly(
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, 50L, Row.of(10), 100L),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, 100L, Row.of(20), 100L));
+
+        iterator.close();
+    }
+
+    @Test
     public void testPhysicalTableCanBeReadWithFlinkMetadataAlias() throws Exception {
         String tableName = "physical_table";
         sql(

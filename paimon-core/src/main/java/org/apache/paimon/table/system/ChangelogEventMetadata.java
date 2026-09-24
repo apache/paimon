@@ -114,7 +114,7 @@ public final class ChangelogEventMetadata {
             return Collections.emptyList();
         }
 
-        int nextId = valueType.getFields().stream().mapToInt(DataField::id).max().orElse(0) + 1;
+        int nextId = RowType.currentHighestFieldId(valueType.getFields()) + 1;
         List<DataField> extraFields = new ArrayList<>(preserveColumns.size());
         for (String preserveColumn : preserveColumns) {
             DataField physicalField = valueType.getField(preserveColumn);
