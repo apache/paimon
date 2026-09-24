@@ -30,6 +30,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.NamedRelation
+import org.apache.spark.sql.catalyst.analysis.TableOutputResolver
 import org.apache.spark.sql.catalyst.catalog.CatalogStorageFormat
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
@@ -57,6 +58,21 @@ import java.util.{Map => JMap}
 trait SparkShim {
 
   def classicApi: ClassicApi
+
+  /**
+   * Resolves query output columns against the expected schema. Spark 4.2 changed the trailing
+   * default-fill argument of `resolveOutputColumns` from a `Boolean` to an enum, so the call is
+   * compiled per Spark version here rather than once in the shared module. Spark 4.0/4.1 override
+   * this so the omitted-argument bytecode targets their own runtime.
+   */
+  def resolveTableOutputColumns(
+      tableName: String,
+      expected: Seq[Attribute],
+      query: LogicalPlan,
+      byName: Boolean,
+      conf: org.apache.spark.sql.internal.SQLConf): LogicalPlan = {
+    TableOutputResolver.resolveOutputColumns(tableName, expected, query, byName, conf)
+  }
 
   def createSparkParser(delegate: ParserInterface): ParserInterface
 

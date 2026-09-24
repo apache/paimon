@@ -35,6 +35,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.CTESubstitution
 import org.apache.spark.sql.catalyst.analysis.NamedRelation
+import org.apache.spark.sql.catalyst.analysis.TableOutputResolver
 import org.apache.spark.sql.catalyst.catalog.CatalogStorageFormat
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
@@ -64,6 +65,16 @@ import java.util.{Map => JMap}
 class Spark4Shim extends SparkShim {
 
   override def classicApi: ClassicApi = new Classic4Api
+
+  // Compiled against Spark 4.1, where resolveOutputColumns' trailing argument is still a Boolean.
+  override def resolveTableOutputColumns(
+      tableName: String,
+      expected: Seq[Attribute],
+      query: LogicalPlan,
+      byName: Boolean,
+      conf: SQLConf): LogicalPlan = {
+    TableOutputResolver.resolveOutputColumns(tableName, expected, query, byName, conf)
+  }
 
   override def createSparkParser(delegate: ParserInterface): ParserInterface = {
     new PaimonSpark4SqlExtensionsParser(delegate)
