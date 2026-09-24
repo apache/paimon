@@ -19,6 +19,7 @@
 
 from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -60,7 +61,10 @@ def test_signed_zero_key_ranges_keep_versions_in_one_split(type_name):
     assert len(sections) == 1
     assert sorted([f.file_name for f in run.files] for run in sections[0]) == [['broad'], ['point']]
 
-    table = SimpleNamespace(table_path='/tmp/interval-test', options=CoreOptions(Options({})))
+    path_factory = Mock()
+    path_factory.bucket_path.return_value = '/tmp/interval-test/bucket-0'
+    table = SimpleNamespace(table_path='/tmp/interval-test', options=CoreOptions(Options({})),
+                            path_factory=lambda: path_factory)
     entries = [ManifestEntry(0, GenericRow([], []), 0, 1, file) for file in files]
     splits = PrimaryKeyTableSplitGenerator(
         table, 1, 1, snapshot_id=7).create_splits(entries)
