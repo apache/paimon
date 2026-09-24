@@ -134,6 +134,35 @@ For `ARRAY<FLOAT>` columns, specify the dimension with `<index-type>.dimension`.
 For `VECTOR<FLOAT, n>` columns, Paimon uses the dimension from the column type.
 Every query vector must have that same dimension.
 
+### Python Tables with Deletion Vectors
+
+Python can build the native vector indexes listed above on data-evolution tables
+with deletion vectors enabled, including tables created with the multimodal API's
+default options:
+
+```python
+import pyarrow as pa
+import pypaimon.multimodal as pm
+
+connection = pm.connect(options={"warehouse": "/tmp/paimon-warehouse"})
+table = connection.create_table(
+    "vectors",
+    schema=pa.schema([("id", pa.int64()), ("embedding", pa.list_(pa.float32(), 2))]),
+    options={"file.format": "parquet"},
+)
+table.add([{"id": 1, "embedding": [0.0, 1.0]}, {"id": 2, "embedding": [1.0, 1.0]}])
+table.create_index("embedding", "ivf-flat", options={
+    "ivf-flat.nlist": "1", "ivf-flat.distance.metric": "l2",
+})
+table.delete("id = 1")
+print(table.search([0.0, 1.0]).select(["id"]).limit(1).to_list())  # [{"id": 2}]
+```
+
+Index builds preserve physical row IDs, including rows already marked as deleted.
+Search applies the deletion vectors from its query snapshot before selecting
+top-K results, so logical deletes do not require rebuilding the index. Logical
+deletion does not physically remove vectors from existing index files.
+
 ## Vector Search
 
 Python indexed vector searches use the `global-index.thread-num` table option,
