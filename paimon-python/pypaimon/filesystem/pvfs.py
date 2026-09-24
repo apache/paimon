@@ -151,6 +151,8 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             options = Options(options)
         options.set(CatalogOptions.HTTP_USER_AGENT_HEADER, 'PythonPVFS')
         self.options = options
+        # read once, so an invalid window fails here and not on the first storage access
+        self._expiration_safe_time_millis = data_token_expiration_safe_time_millis(options)
         self.warehouse = options.get(CatalogOptions.WAREHOUSE)
         cache_expired_time = (
             PVFSOptions.DEFAULT_TABLE_CACHE_TTL
@@ -866,7 +868,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                     token=load_token_response.token,
                     expires_at_millis=load_token_response.expires_at_millis,
                     file_system=fs,
-                    expiration_safe_time_millis=data_token_expiration_safe_time_millis(self.options)
+                    expiration_safe_time_millis=self._expiration_safe_time_millis
                 )
                 self._fs_cache[pvfs_table_identifier] = paimon_real_storage
                 if cache_value is not None:
