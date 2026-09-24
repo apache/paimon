@@ -112,6 +112,29 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
 
     # -- aggregation happy path -----------------------------------------
 
+    def test_sum_aggregates_same_key_rows_in_one_batch(self):
+        # Duplicate keys within a SINGLE write_arrow must be aggregated in
+        # the write buffer, not deduped (latest-row-wins). Pre-fix the
+        # writer degraded aggregation to DeduplicateMergeFunction, so this
+        # returned total=30 (the last row) instead of 60.
+        table = self._create_pk_table(
+            'agg_sum_one_batch',
+            field_aggs={'total': 'sum', 'max_score': 'max'},
+        )
+        self._write(table, [
+            {'id': 1, 'total': 10, 'max_score': 5, 'label': 'a'},
+            {'id': 1, 'total': 20, 'max_score': 3, 'label': 'b'},
+            {'id': 1, 'total': 30, 'max_score': 8, 'label': 'c'},
+            {'id': 2, 'total': 100, 'max_score': 1, 'label': 'z'},
+        ])
+        rows = self._read(table)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]['id'], 1)
+        self.assertEqual(rows[0]['total'], 60)      # 10 + 20 + 30
+        self.assertEqual(rows[0]['max_score'], 8)   # max(5, 3, 8)
+        self.assertEqual(rows[0]['label'], 'c')     # default last_non_null
+        self.assertEqual(rows[1]['total'], 100)     # disjoint key untouched
+
     def test_sum_aggregator_across_commits(self):
         table = self._create_pk_table(
             'agg_sum',

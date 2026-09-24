@@ -214,14 +214,14 @@ class FileStoreWrite:
         partial-update with no out-of-scope options) cannot drift
         between sides.
 
-        For wholly unsupported engines (``aggregation``) the writer
-        falls back to ``DeduplicateMergeFunction`` so the flushed file
-        still maintains the LSM "PK unique within a file" invariant.
-        The read path's dispatch still raises ``NotImplementedError``,
-        so the user gets an explicit error before they observe
-        wrong-engine data; the fallback only narrows the damage to
-        "file is deduped, not aggregated" rather than the silent
-        multi-row-per-PK corruption that existed pre-PR.
+        For ``aggregation`` the writer builds the same
+        ``AggregateMergeFunction`` the read path uses, so same-key rows
+        within one write buffer are partially aggregated (read and
+        compaction re-aggregate across files, matching Java). Aggregation
+        with options pypaimon does not implement (retract opt-ins,
+        sequence groups, out-of-scope aggregators) still falls back to
+        dedupe here — the read-side ``check_supported`` guard raises for
+        those, so the user gets the explicit error at read.
 
         Partial-update with out-of-scope options (sequence-group,
         per-field aggregator, ignore-delete, remove-record-on-*) does
@@ -285,21 +285,38 @@ class FileStoreWrite:
         # for the engines we know are out of scope today; any other
         # NotImplementedError is a bug we want to surface, not swallow.
         if engine == MergeEngine.AGGREGATE:
-            # Surface the silent semantic mismatch in logs: the file
-            # will be PK-unique (better than the pre-PR multi-row
-            # corruption), but any reader that honours the declared
-            # engine will see wrong values. Users sharing tables
-            # across writers especially need to see this.
-            logger.warning(
-                "merge-engine '%s' is not implemented on the pypaimon "
-                "write path; falling back to deduplicate so the flushed "
-                "file stays PK-unique. The file contents reflect "
-                "deduplicate semantics (latest writer wins), not %s "
-                "semantics. Any reader that interprets the file under "
-                "the declared engine will return incorrect results. "
-                "Avoid the pypaimon writer for tables on this engine.",
-                engine.value, engine.value)
-            return DeduplicateMergeFunction()
+            from pypaimon.read.merge_engine_support import \
+                aggregation_unsupported_options
+            unsupported = aggregation_unsupported_options(self.table)
+            if unsupported:
+                # Out-of-scope aggregation options (retract opt-ins,
+                # sequence groups, aggregators like rbm64): the read-side
+                # ``check_supported`` guard raises for these, so don't
+                # build an aggregator the write buffer can't honor. Fall
+                # back to dedupe (PK-unique) as before; the user still gets
+                # the explicit error when a reader is built.
+                logger.warning(
+                    "merge-engine 'aggregation' is configured with options "
+                    "pypaimon does not implement (%s); the write buffer "
+                    "falls back to deduplicate. Reading this table raises "
+                    "until the options are removed.",
+                    ", ".join(sorted(unsupported)))
+                return DeduplicateMergeFunction()
+            # Supported aggregation: aggregate same-key rows in the write
+            # buffer with the same AggregateMergeFunction the read path
+            # uses, so a single write_arrow carrying duplicate keys is
+            # partially aggregated instead of silently deduped
+            # (latest-row-wins). Read and compaction re-aggregate across
+            # files, so this mirrors Java's per-buffer partial aggregation.
+            from pypaimon.read.reader.aggregation_merge_function import (
+                AggregateMergeFunction, build_field_aggregators)
+            agg_value_fields = self.table.table_schema.fields
+            return AggregateMergeFunction(
+                key_arity=len(self.table.trimmed_primary_keys),
+                value_arity=len(agg_value_fields),
+                field_aggregators=build_field_aggregators(
+                    agg_value_fields, self.table.primary_keys, self.options),
+            )
 
         all_value_fields = self.table.table_schema.fields
         return build_merge_function(
