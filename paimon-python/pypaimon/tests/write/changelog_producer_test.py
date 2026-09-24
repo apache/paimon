@@ -17,14 +17,14 @@
 ################################################################################
 
 import glob
+import json
 import os
 import shutil
 import tempfile
 import unittest
 
 import pyarrow as pa
-
-import json
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -337,6 +337,7 @@ class ChangelogProducerTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
+    @pytest.mark.python_write
     def test_failed_changelog_write_leaves_nothing_to_commit(self):
         """A data file and its changelog are committed together or not at all.
 

@@ -266,6 +266,25 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
         self.assertIn(
             ("register_file_size", self.paths[0], file_size), handler.calls)
 
+    def test_old_pyarrow_retries_fragment_without_file_size(self):
+        parquet_format = unittest.mock.Mock()
+        fragment = unittest.mock.Mock(physical_schema=pa.schema([]))
+        parquet_format.make_fragment.side_effect = [
+            TypeError("make_fragment() got an unexpected keyword argument 'file_size'"),
+            fragment,
+        ]
+        with patch.object(reader_module, "_pyarrow_lt_7", return_value=False), \
+                patch.object(reader_module.ds, "ParquetFileFormat", return_value=parquet_format), \
+                patch.object(reader_module.ds, "FileSystemDataset",
+                             return_value=unittest.mock.sentinel.dataset):
+            dataset = reader_module._file_format_dataset(
+                self.file_io, "parquet", self.paths[0], 0, 123)
+        self.assertIs(unittest.mock.sentinel.dataset, dataset)
+        self.assertEqual([
+            unittest.mock.call(self.paths[0], filesystem=self.file_io.filesystem, file_size=123),
+            unittest.mock.call(self.paths[0], filesystem=self.file_io.filesystem),
+        ], parquet_format.make_fragment.call_args_list)
+
     def test_fragment_metadata_is_reused_without_io(self):
         handler = _CountingFileSystemHandler()
         self.file_io.filesystem = pafs.PyFileSystem(handler)

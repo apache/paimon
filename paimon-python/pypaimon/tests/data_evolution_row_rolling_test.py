@@ -23,6 +23,7 @@ import uuid
 from unittest.mock import Mock
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.uri_reader import FileUriReader
@@ -193,6 +194,7 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
         self.assertEqual([1, 1, 1, 1], [f.row_count for f in files])
         self.assertEqual(list(range(4)), self._read_ids(table))
 
+    @pytest.mark.python_write
     def test_non_de_table_still_fails_fast(self):
         table = self._create({'target-file-row-num': '3'})
         wb = table.new_batch_write_builder()
