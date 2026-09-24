@@ -45,6 +45,15 @@ class KeyValueDataWriter(DataWriter):
                  changelog_producer=ChangelogProducer.NONE):
         super().__init__(table, partition, bucket, max_seq_number,
                          options, write_cols, changelog_producer)
+        if self.options.sequence_field():
+            from pypaimon.read.merge_engine_support import check_sequence_field_valid
+            from pypaimon.read.reader.sort_merge_reader import builtin_seq_comparator
+
+            check_sequence_field_valid(table)
+            # Apply the read-side type validation before buffering any rows.
+            builtin_seq_comparator(
+                table.fields, self.options.sequence_field(),
+                self.options.sequence_field_sort_order_is_ascending())
         # Defaults to deduplicate so direct callers (tests / future code
         # paths that don't go through FileStoreWrite) don't accidentally
         # skip the merge step entirely.
@@ -157,7 +166,7 @@ class KeyValueDataWriter(DataWriter):
         """Fold same-PK runs in ``data`` using ``self._merge_function``.
 
         ``data`` is required to already be sorted by
-        ``(primary_key, _SEQUENCE_NUMBER)``. ``_flush_all`` is the
+        ``(primary_key, sequence.field, _SEQUENCE_NUMBER)``. ``_flush_all`` is the
         only caller and runs ``_sort_by_primary_key`` immediately
         before this method, so the precondition holds.
 
@@ -286,6 +295,11 @@ class KeyValueDataWriter(DataWriter):
         # Table, so this serves both the per-batch entry path (legacy)
         # and the buffer-wide sort path (used by ``_flush_all``).
         sort_keys = [(key, 'ascending') for key in self.trimmed_primary_keys]
+        sequence_fields = self.options.sequence_field()
+        if sequence_fields:
+            sequence_order = ('ascending' if self.options.sequence_field_sort_order_is_ascending()
+                              else 'descending')
+            sort_keys.extend((field, sequence_order) for field in sequence_fields)
         if '_SEQUENCE_NUMBER' in data.schema.names:
             sort_keys.append(('_SEQUENCE_NUMBER', 'ascending'))
 
