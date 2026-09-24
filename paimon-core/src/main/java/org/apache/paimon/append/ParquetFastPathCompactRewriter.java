@@ -165,10 +165,7 @@ public class ParquetFastPathCompactRewriter {
 
             ParquetRowGroupCopier copier =
                     new ParquetRowGroupCopier(
-                            fileIO,
-                            writeType,
-                            options.targetFileSize(false),
-                            pathFactory::newPath);
+                            fileIO, writeType, options.targetFileSize(false), pathFactory::newPath);
             long copyStartNanos = System.nanoTime();
             List<ParquetRowGroupCopier.OutputFile> copiedFiles = copier.copy(copierInputs);
             long copyMs = elapsedMillis(copyStartNanos);
@@ -528,9 +525,7 @@ public class ParquetFastPathCompactRewriter {
         private final long footerReadSumNanos;
 
         private FooterReadStats(
-                IndexedFooter[] orderedFooters,
-                long footerReadWallNanos,
-                long footerReadSumNanos) {
+                IndexedFooter[] orderedFooters, long footerReadWallNanos, long footerReadSumNanos) {
             this.orderedFooters = orderedFooters;
             this.footerReadWallNanos = footerReadWallNanos;
             this.footerReadSumNanos = footerReadSumNanos;
