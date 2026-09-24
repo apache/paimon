@@ -623,6 +623,108 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
             self._read_projected_sorted(target, ["id", "name", "payload"]),
         )
 
+    def test_table_merge_into_nested_payloads(self):
+        cases = [
+            (pa.list_(pa.float32(), 2), [1., 2.], [3., 4.], [5., 6.]),
+            (pa.list_(pa.int64()), [1, None], [], None),
+            (pa.map_(pa.string(), pa.string()), [("old", "value")], [], [("new", None)]),
+            (pa.struct([("label", pa.string()), ("count", pa.int64())]),
+             {"label": "old", "count": None}, None, {"label": None, "count": 2}),
+        ]
+        for payload_type, before, updated, inserted in cases:
+            with self.subTest(payload_type=payload_type):
+                schema = pa.schema([("id", pa.int32()), ("payload", payload_type)])
+                target = self._create_table(pa_schema=schema, options=dict(
+                    self.table_options, **{
+                        "file.format": "parquet", "vector.file.format": "parquet",
+                        "deletion-vectors.enabled": "true",
+                    }))
+                self._write_arrow(target, pa.Table.from_pylist([
+                    {"id": 1, "payload": before}, {"id": 2, "payload": before},
+                ], schema=schema))
+                # Keep the source chunked, with a nonzero slice offset.
+                source = pa.concat_tables([
+                    pa.Table.from_pylist([
+                        {"id": 0, "payload": before}, {"id": 2, "payload": updated},
+                    ], schema=schema).slice(1),
+                    pa.Table.from_pylist([{"id": 3, "payload": inserted}], schema=schema),
+                ])
+
+                self._merge_and_commit(
+                    target, source, on=["id"],
+                    when_matched=[WhenMatched.update("*")],
+                    when_not_matched=[WhenNotMatched(insert="*")])
+
+                self.assertEqual({"id": [1, 2, 3], "payload": [before, updated, inserted]},
+                                 self._read_sorted(target))
+                # A delete must also accept unused nested source columns.
+                self._merge_and_commit(
+                    target, source.slice(0, 1), on=["id"],
+                    when_matched=[WhenMatched.delete()])
+                self.assertEqual({"id": [1, 3], "payload": [before, inserted]},
+                                 self._read_sorted(target))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_nested_merge_keeps_mapped_composite_keys_and_null_semantics(self):
+        schema = pa.schema([
+            ("id", pa.int32()), ("group", pa.string()),
+            ("payload", pa.list_(pa.int32())), ("previous", pa.list_(pa.int32())),
+        ])
+        target = self._create_table(pa_schema=schema, options=dict(
+            self.table_options, **{"file.format": "parquet"}))
+        self._write_arrow(target, pa.Table.from_pylist([
+            {"id": 1, "group": "a", "payload": [10], "previous": []},
+            {"id": 1, "group": "b", "payload": [20], "previous": []},
+            {"id": None, "group": "a", "payload": [30], "previous": []},
+        ], schema=schema))
+        source_schema = pa.schema([
+            ("source_id", pa.int32()), ("source_group", pa.string()),
+            ("payload", pa.list_(pa.int32())),
+        ])
+        source = pa.Table.from_pylist([
+            {"source_id": 1, "source_group": "a", "payload": [11]},
+            {"source_id": 1, "source_group": "b", "payload": [21]},
+            {"source_id": None, "source_group": "a", "payload": [31]},
+            {"source_id": 2, "source_group": "a", "payload": [40]},
+        ], schema=source_schema)
+
+        self._merge_and_commit(
+            target, source, on={"id": "source_id", "group": "source_group"},
+            when_matched=[WhenMatched.update({
+                "payload": source_col("payload"), "previous": target_col("payload"),
+            }, condition="s.source_id = 1 AND t.group = 'a'")],
+            when_not_matched=[WhenNotMatched(insert={"payload": source_col("payload")})])
+
+        self.assertCountEqual([
+            {"id": 1, "group": "a", "payload": [11], "previous": [10]},
+            {"id": 1, "group": "b", "payload": [20], "previous": []},
+            {"id": None, "group": "a", "payload": [30], "previous": []},
+            {"id": None, "group": "a", "payload": [31], "previous": None},
+            {"id": 2, "group": "a", "payload": [40], "previous": None},
+        ], self._read_all(target).to_pylist())
+
+    def test_nested_merge_rejects_duplicate_matches_before_commit(self):
+        schema = pa.schema([("id", pa.int32()), ("payload", pa.list_(pa.int32()))])
+        target = self._create_table(pa_schema=schema, options=dict(
+            self.table_options, **{"file.format": "parquet"}))
+        self._write_arrow(target, pa.Table.from_pylist([
+            {"id": 1, "payload": [10]},
+        ], schema=schema))
+        snapshot_id = target.snapshot_manager().get_latest_snapshot().id
+        source = pa.Table.from_pylist([
+            {"id": 1, "payload": [11]}, {"id": 1, "payload": [12]},
+            {"id": 2, "payload": [20]},
+        ], schema=schema)
+
+        with self.assertRaisesRegex(ValueError, "multiple source rows"):
+            self._merge_and_commit(
+                target, source, on=["id"],
+                when_matched=[WhenMatched.update("*")],
+                when_not_matched=[WhenNotMatched(insert="*")])
+
+        self.assertEqual(snapshot_id, target.snapshot_manager().get_latest_snapshot().id)
+        self.assertEqual({"id": [1], "payload": [[10]]}, self._read_sorted(target))
+
     def test_table_merge_into_inserts_null_for_unspecified_blob_column(self):
         blob_schema = pa.schema([
             ("id", pa.int32()),

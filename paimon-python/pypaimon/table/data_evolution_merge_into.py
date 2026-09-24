@@ -486,7 +486,8 @@ def _build_matched_update_table(
 
     target_renamed = _rename_with_prefix(target, "t.")
     source_renamed = _rename_with_prefix(source_table, "s.")
-    joined = target_renamed.join(
+    joined = _join_with_row_indices(
+        target_renamed,
         source_renamed,
         keys=["t.{}".format(c) for c in ctx.target_on_cols],
         right_keys=["s.{}".format(c) for c in ctx.source_on_cols],
@@ -525,7 +526,8 @@ def _build_matched_delete_table(
 
     target_renamed = _rename_with_prefix(target, "t.")
     source_renamed = _rename_with_prefix(source_table, "s.")
-    joined = target_renamed.join(
+    joined = _join_with_row_indices(
+        target_renamed,
         source_renamed,
         keys=["t.{}".format(c) for c in ctx.target_on_cols],
         right_keys=["s.{}".format(c) for c in ctx.source_on_cols],
@@ -564,7 +566,8 @@ def _build_not_matched_insert_table(
             unmatched = source_renamed
         else:
             target_renamed = _rename_with_prefix(target, "t.")
-            unmatched = source_renamed.join(
+            unmatched = _join_with_row_indices(
+                source_renamed,
                 target_renamed,
                 keys=["s.{}".format(c) for c in ctx.source_on_cols],
                 right_keys=["t.{}".format(c) for c in ctx.target_on_cols],
@@ -575,6 +578,27 @@ def _build_not_matched_insert_table(
         clauses, ctx.full_target_field_names, ctx.full_pa_schema
     )
     return transform(unmatched)
+
+
+def _join_with_row_indices(left, right, keys, right_keys, join_type):
+    """Keep nested payloads out of Arrow's join, then gather matched rows."""
+    key_names = ["key_%d" % index for index in range(len(keys))]
+    left_keys = left.select(keys).rename_columns(key_names).append_column(
+        "left_index", pa.array(range(left.num_rows), type=pa.int64()))
+    right_keys_table = right.select(right_keys).rename_columns(key_names)
+    if join_type == "inner":
+        right_keys_table = right_keys_table.append_column(
+            "right_index", pa.array(range(right.num_rows), type=pa.int64()))
+    indices = left_keys.join(right_keys_table, keys=key_names, join_type=join_type)
+    result = left.take(indices["left_index"])
+    if join_type == "inner":
+        # Match Table.join's coalesced-key schema: keep only the left keys.
+        payload = right.select([
+            name for name in right.column_names if name not in right_keys
+        ]).take(indices["right_index"])
+        for field, column in zip(payload.schema, payload.columns):
+            result = result.append_column(field, column)
+    return result
 
 
 def _prepare_commit_messages(
