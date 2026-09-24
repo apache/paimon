@@ -285,7 +285,6 @@ def _native_read_builder(table):
             table=table.identifier.get_object_name(),
             rest_options=_catalog_options(table))
         rt = rt.copy_with_resolved_schema(_resolved_schema_json(table), branch=table.current_branch())
-        builder = rt.new_read_builder()
     elif file_io_options is not None:
         from pypaimon_rust.datafusion import Table
         rt = Table.from_resolved_schema(

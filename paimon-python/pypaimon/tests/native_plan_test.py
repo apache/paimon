@@ -859,6 +859,7 @@ class NativePlanTest(unittest.TestCase):
             response, database='db', table='t$branch_dev',
             rest_options=_catalog_options(table))
         native_table.copy_with_resolved_schema.assert_called_once_with(resolved, branch='dev')
+        native_table.new_read_builder.assert_called_once_with()
 
     def test_native_plan_threads_trimmed_keys_to_deserializer(self):
         # PK tables route through: the trimmed primary keys must reach the
