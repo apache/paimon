@@ -370,7 +370,12 @@ private[spark] object DataEvolutionRowIdConflictCommitter {
 
     while (true) {
       try {
-        writer.commit(currentUpdateMessages ++ otherMessages, operation)
+        val messages = currentUpdateMessages ++ otherMessages
+        writer.commit(
+          if (readSnapshotId < 0) messages
+          else
+            messages.map(_.asInstanceOf[CommitMessageImpl].withCheckFromSnapshot(readSnapshotId)),
+          operation)
         return
       } catch {
         case conflict: RuntimeException if isRowIdExistenceConflict(conflict) =>

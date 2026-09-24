@@ -178,21 +178,40 @@ class VectorMetricResolutionTest(unittest.TestCase):
     def test_reader_closes_on_metadata_and_metric_errors(self):
         entry = _entry(None, field_id=1, index_type='ivf-flat', file_name='vectors.index',
                        row_range_start=0, row_range_end=1)
-        for failure in ('metadata', 'query', 'shard'):
+        for failure in ('metadata', 'query', 'shard', 'interrupt'):
             with self.subTest(failure=failure):
                 native = Mock(spec=['vector_metric', 'close'])
                 native.vector_metric.return_value = 'inner_product'
                 reader = self._reader({'metric': 'l2'} if failure == 'query' else {})
                 if failure == 'metadata':
                     native.vector_metric.side_effect = RuntimeError('invalid index metadata')
+                if failure == 'interrupt':
+                    native.vector_metric.side_effect = KeyboardInterrupt()
                 if failure == 'shard':
                     previous = Mock(spec=['vector_metric'])
                     previous.vector_metric.return_value = 'cosine'
                     reader._record_index_metric(previous, 'ivf-flat')
                 with patch('pypaimon.table.source.vector_search_read._create_vector_reader', return_value=native):
-                    with self.assertRaises((RuntimeError, ValueError)):
+                    with self.assertRaises((RuntimeError, ValueError, KeyboardInterrupt)):
                         reader._open_offset_reader([entry.index_file], 0, 1)
                 native.close.assert_called_once_with()
+
+    def test_lumina_open_closes_stream_on_interrupt(self):
+        from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
+        from pypaimon.globalindex.lumina.lumina_vector_global_index_reader import LuminaVectorGlobalIndexReader
+
+        stream, native, file_io = Mock(), Mock(), Mock()
+        file_io.new_input_stream.return_value = stream
+        native.open_stream.side_effect = KeyboardInterrupt()
+        meta = GlobalIndexIOMeta(
+            file_name='vectors.index', file_size=1,
+            metadata=b'{"index.dimension":"1","distance.metric":"l2"}')
+        with patch.dict('sys.modules', {'lumina_data': Mock(LuminaSearcher=Mock(return_value=native))}):
+            with self.assertRaises(KeyboardInterrupt):
+                with LuminaVectorGlobalIndexReader(file_io, '/index', [meta]) as reader:
+                    reader._ensure_loaded()
+        stream.close.assert_called_once_with()
+        native.close.assert_called_once_with()
 
     def test_metric_does_not_leak_between_read_calls(self):
         _install_raw_vector_read_builder(self.table, 'embedding', {0: [2.0], 1: [3.0]})

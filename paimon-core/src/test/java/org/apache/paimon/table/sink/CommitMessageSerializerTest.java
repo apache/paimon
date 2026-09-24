@@ -23,7 +23,11 @@ import org.apache.paimon.io.DataIncrement;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.Arrays;
 
 import static org.apache.paimon.index.IndexFileMetaSerializerTest.randomIndexFile;
@@ -47,7 +51,7 @@ public class CommitMessageSerializerTest {
                         dataIncrement
                                 .newFiles()
                                 .get(0)
-                                .withColumnMaxSequenceNumbers(new long[] {3L, 42L}));
+                                .withWriteColsSequences(new long[] {3L, 42L}));
         dataIncrement.newIndexFiles().addAll(Arrays.asList(randomIndexFile(), randomIndexFile()));
         dataIncrement
                 .deletedIndexFiles()
@@ -74,5 +78,48 @@ public class CommitMessageSerializerTest {
         assertThat(newCommittable.totalBuckets()).isEqualTo(committable.totalBuckets());
         assertThat(newCommittable.compactIncrement()).isEqualTo(committable.compactIncrement());
         assertThat(newCommittable.newFilesIncrement()).isEqualTo(committable.newFilesIncrement());
+        assertThat(newCommittable.checkFromSnapshot()).isNull();
+
+        CommitMessageImpl checked = committable.withCheckFromSnapshot(42L);
+        CommitMessageImpl checkedRoundTrip =
+                (CommitMessageImpl)
+                        serializer.deserialize(
+                                serializer.getVersion(), serializer.serialize(checked));
+        assertThat(checkedRoundTrip).isEqualTo(checked);
+        assertThat(checkedRoundTrip.checkFromSnapshot()).isEqualTo(42L);
+
+        byte[] serializedWithoutSnapshot = serializer.serialize(committable);
+        CommitMessageImpl oldVersion =
+                (CommitMessageImpl)
+                        serializer.deserialize(
+                                13,
+                                Arrays.copyOf(
+                                        serializedWithoutSnapshot,
+                                        serializedWithoutSnapshot.length - 1));
+        assertThat(oldVersion.checkFromSnapshot()).isNull();
+        assertThat(oldVersion.newFilesIncrement()).isEqualTo(committable.newFilesIncrement());
+    }
+
+    @Test
+    public void testJavaSerializationPreservesCheckFromSnapshot() throws Exception {
+        CommitMessageImpl message =
+                new CommitMessageImpl(
+                                row(0),
+                                1,
+                                null,
+                                randomNewFilesIncrement(),
+                                CompactIncrement.emptyIncrement())
+                        .withCheckFromSnapshot(42L);
+
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ObjectOutputStream output = new ObjectOutputStream(bytes)) {
+            output.writeObject(message);
+        }
+        try (ObjectInputStream input =
+                new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+            CommitMessageImpl restored = (CommitMessageImpl) input.readObject();
+            assertThat(restored).isEqualTo(message);
+            assertThat(restored.checkFromSnapshot()).isEqualTo(42L);
+        }
     }
 }

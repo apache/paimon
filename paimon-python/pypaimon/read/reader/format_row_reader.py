@@ -16,7 +16,7 @@
 # under the License.
 
 import struct
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from typing import Any, List, Optional, Tuple
 
 import pyarrow as pa
@@ -158,6 +158,9 @@ class FormatRowReader(RecordBatchReader):
         pass
 
     def _read_metadata(self):
+        if self._file_size < FOOTER_SIZE:
+            raise IOError(f"Invalid row file: {self._file_size} bytes hold no {FOOTER_SIZE}-byte footer")
+
         with self._file_io.new_input_stream(self._file_path) as f:
             f.seek(self._file_size - FOOTER_SIZE)
             footer_bytes = f.read(FOOTER_SIZE)
@@ -175,8 +178,20 @@ class FormatRowReader(RecordBatchReader):
 
         self._total_row_count = struct.unpack_from('<q', footer_bytes, 0)[0]
         self._block_count = struct.unpack_from('<i', footer_bytes, 8)[0]
-        index_offset = struct.unpack_from('<q', footer_bytes, 12)[0]
+        self._index_offset = struct.unpack_from('<q', footer_bytes, 12)[0]
+        index_offset = self._index_offset
         index_length = struct.unpack_from('<i', footer_bytes, 20)[0]
+
+        # the block index has to lie inside the file and ahead of the footer, and these are the
+        # numbers the seek and the read below are given
+        if (index_offset < 0 or index_length < 0
+                or index_offset > self._file_size - FOOTER_SIZE - index_length):
+            raise IOError(f"Invalid row file block index location: offset {index_offset}, "
+                          f"length {index_length}, in a file of {self._file_size} bytes")
+        if self._block_count < 0:
+            raise IOError(f"Invalid row file block count: {self._block_count}")
+        if self._total_row_count < 0:
+            raise IOError(f"Invalid row file row count: {self._total_row_count}")
 
         with self._file_io.new_input_stream(self._file_path) as f:
             f.seek(index_offset)
@@ -192,23 +207,89 @@ class FormatRowReader(RecordBatchReader):
 
         len1, consumed = _decode_var_int(index_data, pos)
         pos += consumed
-        self._block_compressed_sizes = DeltaVarintCompressor.decompress(index_data[pos:pos + len1])
+        self._block_compressed_sizes = DeltaVarintCompressor.decompress(
+            self._chunk(index_data, pos, len1))
         pos += len1
 
         len2, consumed = _decode_var_int(index_data, pos)
         pos += consumed
-        self._block_uncompressed_sizes = DeltaVarintCompressor.decompress(index_data[pos:pos + len2])
+        self._block_uncompressed_sizes = DeltaVarintCompressor.decompress(
+            self._chunk(index_data, pos, len2))
         pos += len2
 
         len3, consumed = _decode_var_int(index_data, pos)
         pos += consumed
-        self._block_row_starts = DeltaVarintCompressor.decompress(index_data[pos:pos + len3])
+        self._block_row_starts = DeltaVarintCompressor.decompress(
+            self._chunk(index_data, pos, len3))
+
+        self._validate_block_index()
 
         offset = 0
         self._block_offsets = []
         for size in self._block_compressed_sizes:
             self._block_offsets.append(offset)
             offset += size
+
+    @staticmethod
+    def _chunk(index_data: bytes, pos: int, length: int) -> bytes:
+        # slicing clamps, and DeltaVarintCompressor.decompress stops at a truncated varint without
+        # raising, so an out-of-range length would silently shorten one array
+        if length < 0 or pos + length > len(index_data):
+            raise IOError(f"Invalid row file block index: a {length}-byte array at offset {pos} "
+                          f"does not fit in {len(index_data)} bytes")
+        return index_data[pos:pos + length]
+
+    def _validate_block_index(self):
+        """Cross-check the index against the footer, as the row format spec requires.
+
+        Blocks are written contiguously from position 0 and the index follows the last one, so the
+        compressed sizes sum to exactly index_offset. Row starts have to start at 0 and increase
+        strictly because _compute_blocks_for_indices bisects them: a first start past 0 makes
+        bisect_right return 0 for the rows before it, so block_idx is -1, row_starts[-1] is the last
+        start, and the local row goes negative — this reader would decode a row from the wrong place
+        in the block rather than skip it.
+        """
+        counts = (len(self._block_compressed_sizes), len(self._block_uncompressed_sizes),
+                  len(self._block_row_starts))
+        if len(set(counts)) != 1:
+            raise IOError(f"Row file block index arrays disagree on the block count: "
+                          f"{counts[0]} compressed sizes, {counts[1]} uncompressed sizes, "
+                          f"{counts[2]} row starts")
+        if counts[0] != self._block_count:
+            raise IOError(f"Row file block index holds {counts[0]} blocks, but the footer "
+                          f"declares {self._block_count}")
+
+        blocks_end = 0
+        for i, size in enumerate(self._block_compressed_sizes):
+            if size < 0:
+                raise IOError(f"Row file block {i} has a negative compressed size {size}")
+            blocks_end += size
+        if blocks_end != self._index_offset:
+            raise IOError(f"Row file blocks end at {blocks_end}, but the footer puts the "
+                          f"block index at {self._index_offset}")
+
+        for i, size in enumerate(self._block_uncompressed_sizes):
+            # nothing in the footer bounds this one, and it sizes the decompression buffer
+            if size < 0:
+                raise IOError(f"Row file block {i} has a negative uncompressed size {size}")
+
+        if self._block_count == 0:
+            if self._total_row_count != 0:
+                raise IOError(f"Row file block index is empty, but the footer declares "
+                              f"{self._total_row_count} rows")
+            return
+
+        if self._block_row_starts[0] != 0:
+            raise IOError(f"Row file block 0 starts at row {self._block_row_starts[0]}, "
+                          f"so rows before it are unreachable")
+        for i in range(1, self._block_count):
+            if self._block_row_starts[i] <= self._block_row_starts[i - 1]:
+                raise IOError(f"Row file block {i} starts at row {self._block_row_starts[i]}, "
+                              f"not after block {i - 1} at row {self._block_row_starts[i - 1]}")
+        if self._block_row_starts[-1] >= self._total_row_count:
+            raise IOError(f"Row file block {self._block_count - 1} starts at row "
+                          f"{self._block_row_starts[-1]}, which the declared row count "
+                          f"{self._total_row_count} does not reach")
 
     def _read_and_decompress_block(self, block_idx: int) -> bytes:
         import zstandard as zstd
@@ -402,11 +483,15 @@ def _read_field(decoder: _RowDecoder, data_type) -> Any:
             precision, scale = _parse_decimal_params(type_name)
             if precision <= 18:
                 unscaled = decoder.read_long()
-                return Decimal(unscaled) / Decimal(10 ** scale)
             else:
                 raw = decoder.read_bytes()
                 unscaled = int.from_bytes(raw, byteorder='big', signed=True)
-                return Decimal(unscaled) / Decimal(10 ** scale)
+            # Rescale under a context wide enough for the column: the default 28-digit
+            # precision would round a DECIMAL(p) value with more than 28 significant
+            # digits, silently corrupting it. Mirrors pypaimon/data/decimal.py.
+            with localcontext() as ctx:
+                ctx.prec = max(precision + abs(scale), 38)
+                return Decimal(unscaled).scaleb(-scale)
         elif type_name.startswith('TIMESTAMP'):
             precision = _parse_timestamp_precision(type_name)
             millis = decoder.read_long()

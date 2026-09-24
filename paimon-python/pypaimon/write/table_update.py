@@ -126,6 +126,7 @@ class TableUpdate:
         self.projection = None
 
     def with_update_type(self, update_cols: List[str]):
+        update_cols = list(dict.fromkeys(update_cols))
         for col in update_cols:
             if col not in self.table.field_names:
                 raise ValueError(f"Column {col} is not in table schema.")

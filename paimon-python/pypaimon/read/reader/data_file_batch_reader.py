@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from decimal import Decimal, localcontext, ROUND_HALF_UP
 from typing import List, Optional, Tuple
 
 import pyarrow as pa
@@ -22,6 +23,11 @@ import pyarrow.compute as pc
 from pyarrow import RecordBatch
 
 from pypaimon.common.file_io import FileIO
+from pypaimon.data.map_shared_shredding import (
+    assemble_normal_map_selected_keys,
+    is_map_selected_keys_field,
+    map_selected_keys,
+)
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
@@ -35,6 +41,32 @@ def _is_character_string_type(data_type) -> bool:
         return False
     t = data_type.type.upper()
     return t == 'STRING' or t.startswith('VARCHAR') or t.startswith('CHAR')
+
+
+def cast_array_for_schema_evolution(array, target_type):
+    """Cast old-file values using Java's DECIMAL rounding and overflow rules.
+
+    PyArrow's unsafe DECIMAL scale reduction truncates and can retain values
+    outside the target precision. Java rounds HALF_UP and returns NULL for
+    values that do not fit after rounding. Other conversions retain the
+    existing unsafe-cast behavior (such as DOUBLE -> INT truncation).
+    """
+    if (pa.types.is_decimal(array.type) and pa.types.is_decimal(target_type)
+            and array.type.scale > target_type.scale):
+        values = []
+        with localcontext() as context:
+            # Rounding a maximal value can carry into one extra digit.
+            context.prec = max(array.type.precision, target_type.precision) + 1
+            quantum = Decimal(1).scaleb(-target_type.scale)
+            for value in array.to_pylist():
+                if value is None:
+                    values.append(None)
+                    continue
+                rounded = value.quantize(quantum, rounding=ROUND_HALF_UP)
+                values.append(rounded if len(rounded.as_tuple().digits)
+                              <= target_type.precision else None)
+        return pa.array(values, type=target_type)
+    return array.cast(target_type, safe=False)
 
 
 def _unslice(array):
@@ -160,6 +192,11 @@ class DataFileBatchReader(RecordBatchReader):
         self.index_mapping = index_mapping
         self.partition_info = partition_info
         self.system_primary_key = system_primary_key
+        source_fields = (
+            file_data_fields if file_data_fields is not None else fields)
+        self._file_data_field_map = {
+            field.name: field for field in source_fields
+        }
         self.schema_map = {field.name: field for field in PyarrowFieldParser.from_paimon_schema(fields)}
         self.row_tracking_enabled = row_tracking_enabled
         self.first_row_id = first_row_id
@@ -222,6 +259,30 @@ class DataFileBatchReader(RecordBatchReader):
             names.append(target_field.name)
         return pa.RecordBatch.from_arrays(arrays, names=names)
 
+    def _assemble_selected_map_keys(
+            self, record_batch: RecordBatch) -> RecordBatch:
+        columns = list(record_batch.columns)
+        fields = list(record_batch.schema)
+        changed = False
+        for index, field in enumerate(fields):
+            data_field = self._file_data_field_map.get(field.name)
+            if (data_field is None
+                    or not is_map_selected_keys_field(data_field)
+                    or not pa.types.is_map(columns[index].type)):
+                continue
+            value_type = PyarrowFieldParser.from_paimon_type(
+                data_field.type.fields[0].type)
+            columns[index] = assemble_normal_map_selected_keys(
+                columns[index],
+                map_selected_keys(data_field.description),
+                value_type)
+            fields[index] = pa.field(
+                field.name, columns[index].type, nullable=field.nullable)
+            changed = True
+        if not changed:
+            return record_batch
+        return pa.RecordBatch.from_arrays(columns, schema=pa.schema(fields))
+
     def _align_array_by_id(self, array, file_type, target_type):
         """Return *array* converted to *target_type*, matching ROW sub-fields by
         field id (reorder, pad missing with NULL, follow renames, cast changed
@@ -272,7 +333,7 @@ class DataFileBatchReader(RecordBatchReader):
         # Leaf / non-nested: cast to the target type when it differs.
         target_pa_type = PyarrowFieldParser.from_paimon_type(target_type)
         if array.type != target_pa_type:
-            return array.cast(target_pa_type, safe=False)
+            return cast_array_for_schema_evolution(array, target_pa_type)
         return array
 
     def read_arrow_batch(self, start_idx=None, end_idx=None) -> Optional[RecordBatch]:
@@ -282,6 +343,7 @@ class DataFileBatchReader(RecordBatchReader):
             record_batch = self.format_reader.read_arrow_batch()
         if record_batch is None:
             return None
+        record_batch = self._assemble_selected_map_keys(record_batch)
         record_batch = self._normalize_batch(record_batch)
 
         if self.partition_info is None and self.index_mapping is None:
@@ -357,11 +419,9 @@ class DataFileBatchReader(RecordBatchReader):
         type. Columns whose type already matches are reused as-is, keeping the
         common (non-evolution) path zero-copy.
 
-        Casts use ``safe=False`` to match Java ``CastExecutors`` semantics for
-        the read-time conversions a user-approved schema evolution implies
-        (e.g. DECIMAL scale-down or DOUBLE -> INT truncate rather than raise).
-        Evolution legality is the writer's concern (``DataTypeCasts``); the read
-        path only materializes the result.
+        DECIMAL scale reductions use Java's HALF_UP and overflow-to-NULL
+        semantics; other conversions retain the existing unsafe Arrow cast.
+        Evolution legality is the writer's concern (``DataTypeCasts``).
         """
         out_arrays = []
         out_fields = []
@@ -370,7 +430,7 @@ class DataFileBatchReader(RecordBatchReader):
             if target_field is None:
                 target_field = pa.field(name, array.type)
             elif array.type != target_field.type:
-                array = array.cast(target_field.type, safe=False)
+                array = cast_array_for_schema_evolution(array, target_field.type)
             out_arrays.append(array)
             out_fields.append(target_field)
         return pa.RecordBatch.from_arrays(out_arrays, schema=pa.schema(out_fields))

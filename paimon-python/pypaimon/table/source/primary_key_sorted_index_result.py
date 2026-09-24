@@ -96,4 +96,6 @@ def _single_file_split(file_plan):
         bucket=source.bucket,
         raw_convertible=False,
         data_deletion_files=deletion_files,
+        snapshot_id=getattr(source, "snapshot_id", None),
+        is_streaming=getattr(source, "is_streaming", False),
     )

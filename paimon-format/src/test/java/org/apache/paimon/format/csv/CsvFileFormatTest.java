@@ -34,6 +34,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataTypes;
@@ -48,12 +49,14 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link CsvFileFormat}. */
@@ -894,6 +897,52 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
         }
     }
 
+    @Test
+    public void testValueContainingRowSeparatorIsRejected() throws IOException {
+        // Quoting cannot rescue an embedded row separator: the line readers split on it without
+        // tracking quotes, and a split boundary may fall inside the value, so the row used to come
+        // back as two rows with NULLs and COUNT(*) changed.
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING());
+        for (String value : Arrays.asList("hello\nworld", "hello\rworld")) {
+            List<InternalRow> row =
+                    Collections.singletonList(GenericRow.of(1, BinaryString.fromString(value)));
+            assertThatThrownBy(
+                            () ->
+                                    writeThenRead(
+                                            new Options(), rowType, rowType, row, "row_separator"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("f1");
+        }
+
+        // The configured line delimiter is a separator too, even when it is not CR or LF.
+        Options customLine = new Options();
+        customLine.set(CsvOptions.LINE_DELIMITER, "|||");
+        List<InternalRow> pipes =
+                Collections.singletonList(GenericRow.of(1, BinaryString.fromString("a|||b")));
+        assertThatThrownBy(
+                        () -> writeThenRead(customLine, rowType, rowType, pipes, "row_separator"))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        // A value that merely begins a delimiter match must still round-trip: CustomLineReader is
+        // leftmost-match, so the delimiter appended after the row would otherwise complete a match
+        // started by the value's own trailing bytes.
+        List<InternalRow> onePipe =
+                Collections.singletonList(GenericRow.of(1, BinaryString.fromString("x|")));
+        List<InternalRow> readBack =
+                writeThenRead(customLine, rowType, rowType, onePipe, "row_separator");
+        assertThat(readBack).hasSize(1);
+        assertThat(readBack.get(0).getString(1).toString()).isEqualTo("x|");
+
+        // Under a custom delimiter a line break is an ordinary byte, which is the documented way
+        // to carry one inside a value; it must not be rejected.
+        List<InternalRow> withBreak =
+                Collections.singletonList(GenericRow.of(1, BinaryString.fromString("a\nb")));
+        List<InternalRow> breakReadBack =
+                writeThenRead(customLine, rowType, rowType, withBreak, "row_separator");
+        assertThat(breakReadBack).hasSize(1);
+        assertThat(breakReadBack.get(0).getString(1).toString()).isEqualTo("a\nb");
+    }
+
     private List<InternalRow> writeThenRead(
             Options options,
             RowType fullRowType,
@@ -905,6 +954,30 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                 new CsvFileFormatFactory().create(new FormatContext(options, 1024, 1024));
         Path testFile = write(format, fullRowType, testData, testPrefix);
         return read(format, fullRowType, rowType, testFile);
+    }
+
+    @Test
+    public void testSingleCharacterOptionsAreEnforced() {
+        // The writer emits the whole option string while CsvParser keeps only charAt(0), so a
+        // multi-character value silently wrote one delimiter and read back another.
+        for (ConfigOption<String> option :
+                Arrays.asList(
+                        CsvOptions.FIELD_DELIMITER,
+                        CsvOptions.QUOTE_CHARACTER,
+                        CsvOptions.ESCAPE_CHARACTER)) {
+            for (String bad : Arrays.asList("ab", "")) {
+                Options options = new Options();
+                options.set(option, bad);
+                assertThatThrownBy(() -> new CsvOptions(options))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining(option.key());
+            }
+        }
+
+        // A multi-character line delimiter stays supported; CustomLineReader matches all of it.
+        Options multiCharLine = new Options();
+        multiCharLine.set(CsvOptions.LINE_DELIMITER, "|||");
+        assertThatCode(() -> new CsvOptions(multiCharLine)).doesNotThrowAnyException();
     }
 
     /** Writes the given data to a new CSV file and returns its path. */

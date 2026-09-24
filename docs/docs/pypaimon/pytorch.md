@@ -133,11 +133,57 @@ for batch in dataloader:
 converter supports non-null numeric, boolean, and numeric fixed-size-list
 columns. Use `to_tensor_fn` for other types or custom conversion.
 
-Omit `batch_size` to preserve native reader batches. Otherwise, batches are
-combined or sliced to the requested size. Use `DataLoader(batch_size=None)` to
-disable a second batching step. Batch streaming does not support `shuffle=True`.
+Without shuffle, omit `batch_size` to preserve native reader batches. Otherwise,
+batches are combined or sliced to the requested size. Use
+`DataLoader(batch_size=None)` to disable a second batching step.
 Numeric tensors may share read-only Arrow buffers; clone them before in-place
 mutation. Batch formats currently require `prefetch_concurrency=1`.
+
+### Shuffled Batch Streaming
+
+Set `shuffle=True` to mix rows across input batches while keeping values in
+Arrow until the final Tensor conversion. The same options work with
+`batch_format="pyarrow"` and custom `to_tensor_fn` converters:
+
+```python
+dataset = table_read.to_torch(
+    splits,
+    streaming=True,
+    batch_format="torch",
+    batch_size=256,
+    shuffle=True,
+    seed=42,
+    buffer_size=4096,
+    max_buffer_input_splits=4,
+)
+loader = DataLoader(dataset, batch_size=None, num_workers=2)
+
+for epoch in range(10):
+    dataset.set_epoch(epoch)
+    for batch in loader:
+        train(batch["features"], batch["label"])
+```
+
+Each worker retains at most `buffer_size` rows in a rolling shuffle buffer and
+replaces randomly selected slots with rows from incoming Arrow blocks. Input
+blocks contain at most `buffer_size` rows; gathering replacements, output
+batching, and each open format reader use additional memory. This is a row
+bound, not a byte bound. The buffer drains early if combining Arrow blocks
+would overflow a 32-bit offset. Without `batch_size`, output blocks contain at
+most `buffer_size` rows.
+
+`max_buffer_input_splits` bounds the number of interleaved split readers per
+worker; `1` reads splits in order. A binding limit keeps the existing ordered
+read path so it selects the same rows before shuffling. Filters and distributed
+worker/rank sharding also precede shuffle. Each selected row is emitted once.
+
+The shuffle is local to each worker's buffer, not a uniform permutation of the
+whole dataset. The same seed, epoch, input batches and worker/rank configuration
+reproduce the same order; `set_epoch()` also reaches persistent workers. Changing
+reader batching or worker configuration can change the order. Arrow and Tensor
+formats share the same shuffle path, while row-format split interleaving can
+produce a different order. The existing `prefetch_concurrency=1` requirement
+also applies to shuffled batches.
 
 ## Video frame descriptors
 
@@ -159,42 +205,55 @@ physical video ranges and cache decoder sessions per worker. See
 for the write path and a complete decoder example.
 ## Contiguous Windows
 
-Use a map-style `ContiguousWindowDataset` when training samples are fixed-size
-windows which must not cross a sequence boundary. The dataset builds an index
+Use a map-style `ContiguousWindowDataset` to construct training samples from
+one materialized frame table. Each field can have its own history or future
+window, and windows never cross a sequence boundary. The dataset builds an index
 from only the group column, order column, and Paimon row IDs. Projected values,
 including BLOB payloads, are read from the pinned snapshot when a sample is
 requested; they are not retained in the index.
 
 ```python
+from functools import partial
+
+import torch
 from torch.utils.data import DataLoader
+from pypaimon.multimodal.window_transforms import images_to_tensor, to_tensor
 
 dataset = (
     frames.scan()
     .to_contiguous_window_dataset(
-        window_size=16,
-        columns=["state", "image"],
-        anchor_columns=["image"],
+        columns=["state", "image", "action"],
+        frame_offsets={"state": [-2, -1, 0], "action": list(range(16))},
         group_key="episode_index",
         order_key="frame_index",
-        tail="pad",
+        boundary="pad",
+        column_transforms={
+            "state": partial(to_tensor, dtype=torch.float32),
+            "action": partial(to_tensor, dtype=torch.float32),
+            "image": images_to_tensor,
+        },
     )
 )
 
 loader = DataLoader(dataset, batch_size=32, num_workers=4, shuffle=True)
 ```
 
-Each item contains the group and order keys, one list for each requested
-column, and a boolean `is_pad` tensor where `True` marks padding. Padding
-repeats the final real value by default; `pad_values` can override individual
-columns. Columns named in `anchor_columns` contain only the first row's value,
-which is useful when an observation applies to a full action window. Use
-`column_transforms` to convert column lists to tensors and
-`adapter` to produce a model-specific sample mapping. Keep these callbacks
-picklable when using multiple DataLoader workers.
+Each raw item contains scalar group/order keys, a list for every selected column,
+and a Boolean `<column>_is_pad` tensor where `True` marks padding. Unspecified
+field offsets default to `[0]`. The example produces state/action tensors with
+time lengths 3/16 and an image tensor of shape `(1, C, H, W)`; DataLoader adds the
+batch dimension. `pad_values` can replace endpoint repetition for individual
+columns, before any transforms. `adapter` can normalize or rename fields and
+produce a model-specific mapping. Keep callbacks picklable for multiple workers.
 
-Scheduled anchors start at row zero and advance by `stride` (default `1`).
-`tail="drop"` omits incomplete windows, `tail="pad"` includes and pads them,
-and `tail="error"` rejects a sequence with any scheduled incomplete window.
+Scheduled anchors start at each group's first row and advance by `stride`
+(default `1`). `boundary="drop"` (default) omits anchors incomplete for any
+field, `boundary="pad"` pads either end, and `boundary="error"` rejects any
+scheduled incomplete window. `delta_timestamps` with an explicit `fps` is an
+alternative to integer offsets, with frame-grid alignment checked against
+`tolerance_s`. Existing `window_size`/`anchor_columns`/`tail` calls retain their
+single `is_pad` output. See [multimodal reading](multimodal-reading#contiguous-windows-for-pytorch)
+for the full sample and conversion contract.
 Rows are sorted by `order_key` inside each `group_key` value. Order values must
 be integers which increase by exactly one; duplicates and missing steps are
 rejected, and windows never cross groups. The resolved Paimon
@@ -202,6 +261,12 @@ snapshot is pinned for the lifetime of the dataset, so later commits cannot
 change its index or sample contents. A dataset pinned through `tag_name` fails
 its reads if the tag is moved to another snapshot, rather than mixing rows from
 the two snapshots.
+
+Use normal PyTorch samplers for shuffling and distributed training. For DDP,
+pass `DistributedSampler(dataset)` to DataLoader, omit `shuffle=True`, and call
+the sampler's `set_epoch(epoch)` each epoch. Its padding or drop behavior still
+applies when the sample count is not divisible by the number of ranks. Dataset
+version pinning does not save sampler progress or random augmentation state.
 
 Columns configured by `video-frame-field` are rejected: a window read would drop
 the `frame_index` and other metadata carried by their `VideoFrameDescriptor`

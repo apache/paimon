@@ -68,6 +68,8 @@ import org.apache.paimon.rest.requests.ResetConsumerRequest;
 import org.apache.paimon.rest.requests.RevokePermissionRequest;
 import org.apache.paimon.rest.requests.RollbackSchemaRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
+import org.apache.paimon.rest.requests.UpsertLabelRequest;
+import org.apache.paimon.rest.requests.UpsertSemanticViewRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
@@ -77,7 +79,9 @@ import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
+import org.apache.paimon.rest.responses.GetLabelResponse;
 import org.apache.paimon.rest.responses.GetSchemaResponse;
+import org.apache.paimon.rest.responses.GetSemanticViewResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
@@ -90,10 +94,12 @@ import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
+import org.apache.paimon.rest.responses.ListLabelsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListPermissionsResponse;
 import org.apache.paimon.rest.responses.ListPoliciesResponse;
 import org.apache.paimon.rest.responses.ListSchemasResponse;
+import org.apache.paimon.rest.responses.ListSemanticViewsResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
@@ -111,6 +117,7 @@ import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.view.SemanticViewDefinition;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewSchema;
 
@@ -875,6 +882,148 @@ public class RESTApi {
                 resourcePaths.authTable(identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
                 AuthTableQueryResponse.class,
+                restAuthFunction);
+    }
+
+    /**
+     * Creates or replaces one label on an existing entity in the configured catalog prefix.
+     *
+     * <p>The server atomically upserts the binding identified by entity type, canonical entity
+     * name, and key. Only its value is replaced; other labels are unchanged. Repeating the same
+     * request leaves the same label value. Entity types and name resolution are server-defined;
+     * this client does not split, normalize, or resolve entity names. The path carries the binding
+     * identity; the request body contains only its value.
+     *
+     * @param value label value; an empty string is allowed, null is not
+     * @throws NoSuchResourceException if the entity does not exist
+     * @throws ForbiddenException if the caller cannot label the entity
+     */
+    @Experimental
+    public void upsertLabel(String entityType, String entityName, String key, String value) {
+        client.post(
+                resourcePaths.label(entityType, entityName, key),
+                new UpsertLabelRequest(value),
+                restAuthFunction);
+    }
+
+    /**
+     * Gets one label attached directly to an entity.
+     *
+     * @throws NoSuchResourceException if the entity or label does not exist
+     * @throws ForbiddenException if the caller cannot read labels on the entity
+     */
+    @Experimental
+    public GetLabelResponse getLabel(String entityType, String entityName, String key) {
+        return client.get(
+                resourcePaths.label(entityType, entityName, key),
+                GetLabelResponse.class,
+                restAuthFunction);
+    }
+
+    /** Lists all labels attached directly to an entity, following catalog pagination. */
+    @Experimental
+    public List<GetLabelResponse> listLabels(String entityType, String entityName) {
+        String path = resourcePaths.labels(entityType, entityName);
+        return listDataFromPageApi(
+                queryParams ->
+                        client.get(path, queryParams, ListLabelsResponse.class, restAuthFunction));
+    }
+
+    /**
+     * Lists one page of labels attached directly to an entity.
+     *
+     * @param maxResults maximum page size, from 1 to 1000; null uses the server default
+     * @param pageToken opaque continuation token from the preceding response
+     * @throws NoSuchResourceException if the entity does not exist
+     * @throws ForbiddenException if the caller cannot read labels on the entity
+     */
+    @Experimental
+    public PagedList<GetLabelResponse> listLabelsPaged(
+            String entityType,
+            String entityName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        checkArgument(
+                maxResults == null || (maxResults >= 1 && maxResults <= 1000),
+                "maxResults must be between 1 and 1000");
+        ListLabelsResponse response =
+                client.get(
+                        resourcePaths.labels(entityType, entityName),
+                        buildPagedQueryParams(maxResults, pageToken),
+                        ListLabelsResponse.class,
+                        restAuthFunction);
+        return new PagedList<>(response.getLabels(), response.getNextPageToken());
+    }
+
+    /**
+     * Deletes a label binding. Deleting an already absent binding succeeds.
+     *
+     * @throws NoSuchResourceException if the entity does not exist
+     * @throws ForbiddenException if the caller cannot label the entity
+     */
+    @Experimental
+    public void deleteLabel(String entityType, String entityName, String key) {
+        client.delete(resourcePaths.label(entityType, entityName, key), restAuthFunction);
+    }
+
+    /**
+     * Creates or atomically replaces the complete semantic model definition. The last successful
+     * write takes effect. SQL view name conflicts return HTTP 409, mapped to
+     * AlreadyExistsException.
+     */
+    @Experimental
+    public GetSemanticViewResponse upsertSemanticView(
+            Identifier identifier, SemanticViewDefinition definition) {
+        checkArgument(identifier != null, "identifier must not be null");
+        return client.post(
+                resourcePaths.semanticView(
+                        identifier.getDatabaseName(), identifier.getObjectName()),
+                new UpsertSemanticViewRequest(definition),
+                GetSemanticViewResponse.class,
+                restAuthFunction);
+    }
+
+    /** Gets the complete model definition. Missing objects return HTTP 404. */
+    @Experimental
+    public GetSemanticViewResponse getSemanticView(Identifier identifier) {
+        checkArgument(identifier != null, "identifier must not be null");
+        return client.get(
+                resourcePaths.semanticView(
+                        identifier.getDatabaseName(), identifier.getObjectName()),
+                GetSemanticViewResponse.class,
+                restAuthFunction);
+    }
+
+    /** Lists semantic view names only, following catalog pagination. */
+    @Experimental
+    public List<String> listSemanticViews(String database) {
+        return PagedList.listAllFromPagedApi(
+                token -> listSemanticViewsPaged(database, null, token));
+    }
+
+    /** Lists names with a page size of 1 to 1000, or the server default when null. */
+    @Experimental
+    public PagedList<String> listSemanticViewsPaged(
+            String database, @Nullable Integer maxResults, @Nullable String pageToken) {
+        checkArgument(
+                maxResults == null || (maxResults >= 1 && maxResults <= 1000),
+                "maxResults must be between 1 and 1000");
+        ListSemanticViewsResponse response =
+                client.get(
+                        resourcePaths.semanticViews(database),
+                        buildPagedQueryParams(maxResults, pageToken),
+                        ListSemanticViewsResponse.class,
+                        restAuthFunction);
+        return new PagedList<>(response.getSemanticViews(), response.getNextPageToken());
+    }
+
+    /** Deletes a semantic view; an absent object returns HTTP 404. */
+    @Experimental
+    public void deleteSemanticView(Identifier identifier) {
+        checkArgument(identifier != null, "identifier must not be null");
+        client.delete(
+                resourcePaths.semanticView(
+                        identifier.getDatabaseName(), identifier.getObjectName()),
                 restAuthFunction);
     }
 

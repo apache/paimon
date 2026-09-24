@@ -236,12 +236,19 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
             FieldRef fieldRef, Object from, Object to) {
+        return visitRange(fieldRef, from, to, reader -> visitBetween(reader, from, to));
+    }
+
+    /** Prune files using enclosing inclusive bounds, then apply the exact range in the reader. */
+    protected CompletableFuture<Optional<GlobalIndexResult>> visitRange(
+            FieldRef fieldRef,
+            Object from,
+            Object to,
+            Function<R, Optional<GlobalIndexResult>> visitor) {
         if (!canFallbackScan(from) || to == null) {
             return unsupported();
         }
-        return visitFallbackParallel(
-                () -> fileSelector.visitBetween(fieldRef, from, to),
-                reader -> visitBetween(reader, from, to));
+        return visitFallbackParallel(() -> fileSelector.visitBetween(fieldRef, from, to), visitor);
     }
 
     @Override

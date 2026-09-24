@@ -25,8 +25,8 @@ import java.util.List;
 import java.util.Stack;
 
 /**
- * Splits the comma-separated body of an array or row literal into its tokens, honouring quotes,
- * escapes and nesting.
+ * Splits the comma-separated body of an array, map or row literal into its tokens, honouring
+ * quotes, escapes and nesting.
  *
  * <p>A separator only separates outside quotes and at bracket depth zero, so {@code "a,b"} and
  * {@code [a, b]} each stay one token.
@@ -63,6 +63,64 @@ class TokenSplitter {
     }
 
     private TokenSplitter() {}
+
+    /**
+     * Splits {@code content} on {@code delimiter} at bracket depth zero and outside quotes, leaving
+     * quotes and escapes in place so the caller can split the result again before parsing it.
+     *
+     * <p>This is the two-level counterpart of {@link #split(String)}: a map first separates its
+     * entries on {@code ,} and then each entry on {@code ->}, and the quoting that groups a key or
+     * value must survive the first split to be understood by the second.
+     *
+     * <p>A positive {@code limit} performs at most {@code limit - 1} splits, so {@code 2} cuts at
+     * the first delimiter and keeps the rest together; a non-positive limit splits everywhere.
+     */
+    static List<String> splitRaw(String content, String delimiter, int limit) {
+        List<String> tokens = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        Stack<Character> bracketStack = new Stack<>();
+        boolean inQuotes = false;
+        boolean escaped = false;
+        int splits = 0;
+
+        for (int i = 0; i < content.length(); i++) {
+            char c = content.charAt(i);
+            if (escaped) {
+                escaped = false;
+                current.append(c);
+                continue;
+            }
+            if (c == '\\') {
+                escaped = true;
+                current.append(c);
+                continue;
+            }
+            if (c == '"') {
+                inQuotes = !inQuotes;
+                current.append(c);
+                continue;
+            }
+            if (!inQuotes) {
+                if (StringUtils.isOpenBracket(c)) {
+                    bracketStack.push(c);
+                } else if (StringUtils.isCloseBracket(c) && !bracketStack.isEmpty()) {
+                    bracketStack.pop();
+                } else if (bracketStack.isEmpty()
+                        && (limit <= 0 || splits < limit - 1)
+                        && content.startsWith(delimiter, i)) {
+                    tokens.add(current.toString().trim());
+                    current.setLength(0);
+                    splits++;
+                    i += delimiter.length() - 1;
+                    continue;
+                }
+            }
+            current.append(c);
+        }
+
+        tokens.add(current.toString().trim());
+        return tokens;
+    }
 
     static List<Token> split(String content) {
         List<Token> tokens = new ArrayList<>();

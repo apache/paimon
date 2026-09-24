@@ -94,7 +94,6 @@ class FormatBlobReader(RecordBatchReader):
                 if file_size is not None and file_size > 0
                 else file_io.get_file_size(file_path)
             )
-            self._input_stream = file_io.new_input_stream(file_path)
             self._read_index()
             self._apply_row_indices(row_indices)
 
@@ -128,8 +127,12 @@ class FormatBlobReader(RecordBatchReader):
                     or self._blob_parallelism > 1
                 )
             ):
-                self._input_stream.close()
-                self._input_stream = None
+                if self._input_stream is not None:
+                    self._input_stream.close()
+                    self._input_stream = None
+            elif self._input_stream is None:
+                # A cached index does not provide bytes for payloads or nested layouts.
+                self._input_stream = file_io.new_input_stream(file_path)
         except Exception:
             self.close()
             raise
@@ -365,6 +368,7 @@ class FormatBlobReader(RecordBatchReader):
 
     def _read_index(self) -> None:
         if self._is_video:
+            self._input_stream = self._file_io.new_input_stream(self.file_path)
             self._video_meta = VideoFileMeta(
                 self._input_stream, self._file_size
             )
@@ -378,6 +382,7 @@ class FormatBlobReader(RecordBatchReader):
             self.blob_offsets = list(blob_offsets)
             return
 
+        self._input_stream = self._file_io.new_input_stream(self.file_path)
         f = self._input_stream
 
         # Seek to header: last 5 bytes
@@ -671,11 +676,13 @@ class BlobRecordIterator:
             value_index_start = index_lengths_position - value_index_length
             key_index_start = value_index_start - key_index_length
             stream.seek(key_index_start)
-            key_index_bytes = self._read_fully_from(stream, key_index_length)
+            # The two indexes are adjacent; read both without touching BLOB values.
+            index_bytes = self._read_fully_from(
+                stream, key_index_length + value_index_length)
+            key_index_bytes = index_bytes[:key_index_length]
             if len(key_index_bytes) != key_index_length:
                 raise IOError("Invalid MAP<X, BLOB> payload: cannot read key index")
-            stream.seek(value_index_start)
-            value_index_bytes = self._read_fully_from(stream, value_index_length)
+            value_index_bytes = index_bytes[key_index_length:]
             if len(value_index_bytes) != value_index_length:
                 raise IOError("Invalid MAP<X, BLOB> payload: cannot read value index")
 

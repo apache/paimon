@@ -286,8 +286,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                     row -> row.isNullAt(0) ? null : row.getInt(0)
                                                 },
                                                 new FieldAggregator[] {
-                                                    new FieldSumAggFactory()
-                                                            .create(DataTypes.INT(), null, null)
+                                                    new FieldSumAggFactory().create(DataTypes.INT())
                                                 },
                                                 false,
                                                 null),

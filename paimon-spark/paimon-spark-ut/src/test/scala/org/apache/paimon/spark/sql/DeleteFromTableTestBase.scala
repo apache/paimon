@@ -20,8 +20,10 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.CoreOptions.MergeEngine
+import org.apache.paimon.data.GenericRow
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.catalyst.analysis.Delete
+import org.apache.paimon.types.RowKind
 
 import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
@@ -613,5 +615,50 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
         )
       }
     }
+  }
+
+  test("Paimon Delete: sequence-group delete records with projected reads") {
+    spark.sql("""
+                |CREATE TABLE T (id INT, v1 INT, seq1 INT, v2 INT, seq2 INT)
+                |TBLPROPERTIES (
+                |  'primary-key' = 'id',
+                |  'bucket' = '1',
+                |  'merge-engine' = 'partial-update',
+                |  'fields.seq1.sequence-group' = 'v1',
+                |  'fields.seq2.sequence-group' = 'v2',
+                |  'partial-update.remove-record-on-sequence-group' = 'seq2',
+                |  'write-only' = 'true')
+                |""".stripMargin)
+
+    // mock two streams updating independent field groups for the same primary keys.
+    spark.sql("INSERT INTO T VALUES (1, 10, 1, NULL, NULL), (2, 20, 1, NULL, NULL)")
+    spark.sql("INSERT INTO T VALUES (1, NULL, NULL, 100, 1), (2, NULL, NULL, 200, 1)")
+    checkAnswer(spark.sql("SELECT * FROM T"), Seq(Row(1, 10, 1, 100, 1), Row(2, 20, 1, 200, 1)))
+
+    // A newer seq2 triggers whole-row deletion; seq1=NULL skips the first group.
+    // Use the Paimon write API because SQL DELETE rewrites files for this configuration.
+    val builder = loadTable("T").newBatchWriteBuilder()
+    val write = builder.newWrite()
+    val commit = builder.newCommit()
+    try {
+      val delete = GenericRow.of(1, null, null, null, 2)
+      delete.setRowKind(RowKind.DELETE)
+      write.write(delete)
+      commit.commit(write.prepareCommit())
+    } finally {
+      write.close()
+      commit.close()
+    }
+
+    // Keep both streams' insert files and the delete file separate for merging during reads.
+    checkAnswer(spark.sql("SELECT COUNT(*) FROM `T$files`"), Row(3L))
+
+    // Reading all columns retains seq2, so merging removes id=1 and combines both groups for id=2.
+    checkAnswer(spark.sql("SELECT * FROM T"), Row(2, 20, 1, 200, 1))
+
+    // seq2 controls row existence even when only the key, another group, or no columns are read.
+    checkAnswer(spark.sql("SELECT COUNT(*) FROM T"), Row(1L))
+    checkAnswer(spark.sql("SELECT id FROM T"), Row(2))
+    checkAnswer(spark.sql("SELECT v1 FROM T"), Row(20))
   }
 }

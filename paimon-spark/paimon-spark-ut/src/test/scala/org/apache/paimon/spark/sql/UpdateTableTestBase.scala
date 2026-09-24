@@ -363,6 +363,58 @@ abstract class UpdateTableTestBase extends PaimonSparkTestBase {
     checkAnswer(sql("SELECT * FROM T"), Seq(Row(1, "s", "b")))
   }
 
+  test("Paimon update: CHAR column that is read or left untouched") {
+    Seq(
+      "",
+      "TBLPROPERTIES ('deletion-vectors.enabled' = 'true')",
+      "TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')"
+    ).foreach {
+      props =>
+        withTable("t", "s") {
+          sql(s"CREATE TABLE t (id INT, c CHAR(3), b INT) $props")
+          sql("INSERT INTO t VALUES (1, 'a', 10), (2, 'b', 20)")
+
+          // The CHAR column is neither assigned nor read.
+          sql("UPDATE t SET b = 0 WHERE id = 1")
+          checkAnswer(
+            sql("SELECT id, c, b FROM t ORDER BY id"),
+            Seq(Row(1, "a  ", 0), Row(2, "b  ", 20)))
+
+          // The condition reads it: the literal is padded the same way as the column.
+          sql("UPDATE t SET b = 1 WHERE c = 'a'")
+          checkAnswer(
+            sql("SELECT id, c, b FROM t ORDER BY id"),
+            Seq(Row(1, "a  ", 1), Row(2, "b  ", 20)))
+
+          // An assignment value reads it and sees the padded value, like a SELECT does.
+          sql("UPDATE t SET b = length(c) WHERE id = 2")
+          checkAnswer(
+            sql("SELECT id, c, b FROM t ORDER BY id"),
+            Seq(Row(1, "a  ", 1), Row(2, "b  ", 3)))
+
+          // A correlated subquery reads it through an outer reference. Only on the primary-key
+          // table, whose UPDATE keeps the condition in a Filter: the non-pk UPDATE moves it into a
+          // Project, and correlated subqueries there depend on the Spark version.
+          if (props.contains("primary-key")) {
+            sql("CREATE TABLE s (k CHAR(3))")
+            sql("INSERT INTO s VALUES ('b')")
+            sql("UPDATE t SET b = 7 WHERE EXISTS (SELECT 1 FROM s WHERE s.k = t.c)")
+          } else {
+            sql("UPDATE t SET b = 7 WHERE id = 2")
+          }
+          checkAnswer(
+            sql("SELECT id, c, b FROM t ORDER BY id"),
+            Seq(Row(1, "a  ", 1), Row(2, "b  ", 7)))
+
+          // No condition at all.
+          sql("UPDATE t SET b = 5")
+          checkAnswer(
+            sql("SELECT id, c, b FROM t ORDER BY id"),
+            Seq(Row(1, "a  ", 5), Row(2, "b  ", 5)))
+        }
+    }
+  }
+
   test("Paimon update: overlong CHAR value throws (same as INSERT)") {
     withTable("t_char") {
       sql("CREATE TABLE t_char (id INT, c CHAR(2))")

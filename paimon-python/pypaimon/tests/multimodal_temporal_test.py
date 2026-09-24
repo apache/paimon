@@ -19,17 +19,19 @@ import os
 import shutil
 import sys
 import tempfile
+import tracemalloc
 import unittest
 from datetime import datetime, timedelta
 from unittest import mock
 
 import numpy as np
 import pyarrow as pa
+import pytest
 import pypaimon.multimodal as pmm
 from pypaimon.multimodal import temporal
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
-from pypaimon.read.scanner.file_scanner import FileScanner
+from pypaimon.read.table_scan import TableScan
 
 
 class MultimodalTemporalTest(unittest.TestCase):
@@ -119,6 +121,134 @@ class MultimodalTemporalTest(unittest.TestCase):
                     direction=direction, tolerance=0,
                 ).to_list()[0]
                 self.assertEqual(expected, row["value"])
+
+    def test_asof_excludes_exact_matches_within_group(self):
+        anchors = self._table("strict_anchors", {
+            "episode_id": pa.int32(), "event_time": pa.int64(),
+        })
+        samples = self._table("strict_samples", {
+            "episode_id": pa.int32(), "event_time": pa.int64(),
+            "value": pa.int32(),
+        })
+        groups = [
+            [9, 9, 10, 10, 11, 11],
+            [10, 10],
+            [10, 10, 11],
+            [9, 10, 10],
+            [],
+            [8, 11],
+        ]
+        anchors.add([
+            {"episode_id": group, "event_time": 10}
+            for group in range(len(groups))
+        ])
+        samples.add([
+            {"episode_id": group, "event_time": time, "value": index}
+            for group, times in enumerate(groups)
+            for index, time in enumerate(times)
+        ])
+
+        for direction, expected in (
+                ("backward", [1, None, None, 0, None, 0]),
+                ("forward", [4, None, 2, None, None, 1]),
+                ("nearest", [1, None, 2, 0, None, 1])):
+            with self.subTest(direction=direction):
+                rows = pmm.join_asof(
+                    anchors.scan(), samples.scan().select("value"),
+                    on="event_time", by="episode_id", direction=direction,
+                    allow_exact_matches=False,
+                ).to_list()
+                self.assertEqual(dict(enumerate(expected)), {
+                    row["episode_id"]: row["value"] for row in rows
+                })
+
+    def test_asof_exact_match_options_are_independent_in_chain(self):
+        anchors = self._table("strict_chain_anchors", {
+            "episode_id": pa.int32(), "event_time": pa.int64(),
+        })
+        samples = self._table("strict_chain_samples", {
+            "episode_id": pa.int32(), "sample_time": pa.int64(),
+            "value": pa.int32(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 10}])
+        samples.add([
+            {"episode_id": 1, "sample_time": time, "value": time}
+            for time in [9, 10, 10, 11]
+        ])
+        for direction, expected in (
+                ("backward", 9), ("forward", 11), ("nearest", 9)):
+            for tolerance in (0, 0.5, 1, None):
+                with self.subTest(direction=direction, tolerance=tolerance):
+                    aligned = pmm.join_asof(
+                        anchors.scan(), samples.scan().select("value"),
+                        on="event_time", by="episode_id",
+                        right_on="sample_time", direction=direction,
+                        tolerance=tolerance, allow_exact_matches=False,
+                    )
+                    row = aligned.join_asof(
+                        samples.scan().select("value"),
+                        right_on="sample_time", allow_exact_matches=True,
+                    ).join_asof(
+                        samples.scan().select("value"),
+                        right_on="sample_time", allow_exact_matches=False,
+                        suffix="_strict",
+                    ).to_list()[0]
+                    self.assertEqual(
+                        expected if tolerance in (1, None) else None,
+                        row["value"],
+                    )
+                    self.assertEqual(10, row["value_right"])
+                    self.assertEqual(9, row["value_strict"])
+
+    def test_asof_excludes_exact_nanosecond_timestamps(self):
+        anchors = self._table("strict_ns_anchors", {
+            "episode_id": pa.int32(), "event_time": pa.timestamp("ns"),
+        })
+        samples = self._table("strict_ns_samples", {
+            "episode_id": pa.int32(), "event_time": pa.timestamp("ns"),
+            "value": pa.int32(),
+        })
+        anchors.add(pa.table({
+            "episode_id": pa.array([1], type=pa.int32()),
+            "event_time": pa.array(
+                [1_000_000_001], type=pa.int64()).cast(pa.timestamp("ns")),
+        }))
+        samples.add(pa.table({
+            "episode_id": pa.array([1, 1, 1], type=pa.int32()),
+            "event_time": pa.array(
+                [1_000_000_000, 1_000_000_001, 1_000_000_002],
+                type=pa.int64()).cast(pa.timestamp("ns")),
+            "value": pa.array([9, 10, 11], type=pa.int32()),
+        }))
+        for direction, expected in (
+                ("backward", 9), ("forward", 11), ("nearest", 9)):
+            for tolerance in (timedelta(0), timedelta(microseconds=1)):
+                with self.subTest(direction=direction, tolerance=tolerance):
+                    row = pmm.join_asof(
+                        anchors.scan(), samples.scan().select("value"),
+                        on="event_time", by="episode_id",
+                        direction=direction, tolerance=tolerance,
+                        allow_exact_matches=False,
+                    ).to_list()[0]
+                    self.assertEqual(
+                        expected if tolerance else None, row["value"])
+
+    def test_asof_validates_allow_exact_matches(self):
+        table = self._table("strict_options", {
+            "episode_id": pa.int32(), "event_time": pa.int64(),
+        })
+        aligned = pmm.join_asof(
+            table.scan(), table.scan(), on="event_time", by="episode_id")
+        for value in (None, 0, 1, "false"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(TypeError, "allow_exact_matches"):
+                    pmm.join_asof(
+                        table.scan(), table.scan(),
+                        on="event_time", by="episode_id",
+                        allow_exact_matches=value,
+                    )
+                with self.assertRaisesRegex(TypeError, "allow_exact_matches"):
+                    aligned.join_asof(table.scan(), allow_exact_matches=value)
 
     def test_nearest_uses_candidate_side_for_duplicate_timestamps(self):
         anchors = self._table("duplicate_nearest_anchors", {
@@ -247,6 +377,185 @@ class MultimodalTemporalTest(unittest.TestCase):
         self.assertEqual(100.0, rows[1]["average"])
         self.assertIsNone(rows[2]["average"])
         self.assertEqual(0, rows[2]["valid_count"])
+
+    def test_window_join_reuses_arrow_slices(self):
+        source = temporal._WindowJoinRight.__new__(temporal._WindowJoinRight)
+        source.by = ("group",)
+        source._index = {(1,): (0, 3), (2,): (3, 4)}
+        source._time_keys = np.array([5, 10, 15, 10], dtype=np.int64)
+        source._row_ids = pa.array([11, 12, 13, 14], type=pa.int64())
+        source.time_type = pa.int64()
+        source._preceding_key = 5
+        source._following_key = 0
+        source.closed = "both"
+        specifications = (
+            ("average", "value", "mean"),
+            ("first_label", "label", "first"),
+            ("minimum", "value", "min"),
+            ("last_label", "label", "last"),
+            ("maximum", "value", "max"),
+            ("valid_count", "label", "count"),
+        )
+        values = pa.table({
+            "value": pa.array([1, None, 5, None], type=pa.int32()),
+            "label": pa.array(["a", None, "c", None], type=pa.string()),
+        })
+        anchors = [
+            {"group": group, temporal._TIME_KEY: time}
+            for group, time in [(1, 10), (1, 15), (2, 10), (3, 10)]
+        ]
+        expected = {
+            "mean": pa.array([1.0, 5.0, None, None], type=pa.float64()),
+            "min": pa.array([1, 5, None, None], type=pa.int32()),
+            "max": pa.array([1, 5, None, None], type=pa.int32()),
+            "first": pa.array(["a", "c", None, None], type=pa.string()),
+            "last": pa.array(["a", "c", None, None], type=pa.string()),
+            "count": pa.array([1, 1, 0, 0], type=pa.int64()),
+        }
+        for aggregations in (specifications[:1], specifications[::2],
+                             specifications):
+            with self.subTest(aggregations=aggregations):
+                source.aggregations = aggregations
+                fetcher = mock.Mock(schema=values.schema)
+                fetcher.fetch.return_value = values
+                with mock.patch.object(
+                        temporal.pc, "take", wraps=temporal.pc.take) as take:
+                    arrays = source.build_arrays(anchors, fetcher)
+
+                fetcher.fetch.assert_called_once_with([11, 12, 13, 14])
+                self.assertEqual(len(aggregations), len(arrays))
+                for (_, _, operation), array in zip(aggregations, arrays):
+                    self.assertEqual(expected[operation].type, array.type)
+                    self.assertEqual(expected[operation], array)
+                take.assert_not_called()
+
+    def test_window_join_preserves_order_across_disjoint_ranges(self):
+        anchors = self._table("range_anchors", {
+            "episode_id": pa.int32(), "event_time": pa.int64(),
+        })
+        samples = self._table("range_samples", {
+            "episode_id": pa.int32(), "event_time": pa.int64(),
+            "label": pa.string(),
+        })
+        # Physical row IDs are neither contiguous nor ordered within a window.
+        samples.add([
+            {"episode_id": 1, "event_time": 12, "label": "late"},
+            {"episode_id": 2, "event_time": 2, "label": "other"},
+            {"episode_id": 1, "event_time": 2, "label": "first"},
+            {"episode_id": 1, "event_time": 6, "label": "excluded"},
+            {"episode_id": 1, "event_time": 2, "label": None},
+            {"episode_id": 1, "event_time": 2, "label": "last"},
+            {"episode_id": 1, "event_time": 1, "label": "early"},
+        ])
+        anchors.add([
+            {"episode_id": group, "event_time": time}
+            for group, time in [(1, 12), (1, 3), (2, 2), (1, 2),
+                                (1, 2), (3, 2), (1, 20)]
+        ])
+        query = pmm.join_window(
+            anchors.scan(), samples.scan().select("label"),
+            on="event_time", by="episode_id", preceding=1,
+            aggregations={
+                "first": ("label", "first"),
+                "last": ("label", "last"),
+                "count": ("label", "count"),
+            })
+        rows = query.to_list()
+        self.assertEqual([
+            ("late", "late", 1), ("first", "last", 2),
+            ("other", "other", 1), ("early", "last", 3),
+            ("early", "last", 3), (None, None, 0), (None, None, 0),
+        ], [(row["first"], row["last"], row["count"]) for row in rows])
+
+    def test_window_join_bounds_overlapping_window_memory(self):
+        size = 1024
+        source = temporal._WindowJoinRight.__new__(temporal._WindowJoinRight)
+        source.by = ("group",)
+        source._index = {(1,): (0, size)}
+        source._time_keys = np.arange(size, dtype=np.int64)
+        source._row_ids = pa.array(range(10000, 10000 + size), type=pa.int64())
+        source.time_type = pa.int64()
+        source._preceding_key = size - 1
+        source._following_key = 0
+        source.closed = "both"
+        source.aggregations = (("count", "value", "count"),)
+        values = pa.table({"value": pa.array(range(size), type=pa.int64())})
+        fetcher = mock.Mock(schema=values.schema)
+        fetcher.fetch.return_value = values
+        anchors = [{"group": 1, temporal._TIME_KEY: size - 1}] * 256
+
+        tracemalloc.start()
+        try:
+            arrays = source.build_arrays(anchors, fetcher)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+
+        self.assertEqual([size] * len(anchors), arrays[0].to_pylist())
+        fetcher.fetch.assert_called_once_with(list(range(10000, 10000 + size)))
+        # Per-window row-ID and position lists alone exceed this budget.
+        self.assertLess(peak, 4 * 1024 * 1024)
+
+    def test_window_endpoints_preserve_values_across_chunks(self):
+        cases = [
+            (pa.string(), [None, "", "last", None], "", "last"),
+            (pa.binary(), [None, b"", b"last", None], b"", b"last"),
+            (pa.bool_(), [None, False, True, None], False, True),
+            (pa.int64(), [None, 0, -1, None], 0, -1),
+            (pa.float64(), [None, float("nan"), 1.0, None], float("nan"), 1.0),
+            (pa.list_(pa.int64()), [None, [], [1, None], None], [], [1, None]),
+            (pa.struct([pa.field("a", pa.int64())]),
+             [None, {"a": None}, {"a": 0}, None], {"a": None}, {"a": 0}),
+            (pa.string(), [None, None], None, None),
+            (pa.string(), [], None, None),
+        ]
+        for data_type, values, first, last in cases:
+            array = pa.array(values, type=data_type)
+            empty = pa.array([], type=data_type)
+            padded = pa.concat_arrays([
+                pa.nulls(1, type=data_type), array,
+                pa.nulls(1, type=data_type)])
+            chunks = pa.chunked_array([
+                empty, array.slice(0, 1), empty, array.slice(1), empty])
+            sliced_chunks = pa.chunked_array([
+                padded.slice(0, 2), empty, padded.slice(2), empty,
+            ]).slice(1, len(array))
+            for selected in (array, padded.slice(1, len(array)),
+                             chunks, sliced_chunks):
+                for operation, expected in (("first", first), ("last", last)):
+                    with self.subTest(data_type=data_type, operation=operation,
+                                      selected=selected):
+                        result = temporal._aggregate_values(selected, operation)
+                        if isinstance(expected, float) and np.isnan(expected):
+                            self.assertTrue(np.isnan(result))
+                        else:
+                            self.assertEqual(expected, result)
+
+    def test_window_endpoints_skip_null_dictionary_values(self):
+        array = pa.DictionaryArray.from_arrays(
+            pa.array([0, 1, 0], type=pa.int8()),
+            pa.array([None, "value"], type=pa.string()))
+        for selected in (array, pa.chunked_array([array.slice(0, 1), array.slice(1)])):
+            for operation in ("first", "last"):
+                with self.subTest(operation=operation, selected=selected):
+                    self.assertEqual(
+                        "value", temporal._aggregate_values(selected, operation))
+
+    def test_window_endpoints_do_not_materialize_full_payload(self):
+        payload = b"x" * 1024
+        selected = pa.chunked_array([
+            pa.array([payload] * 8192, type=pa.binary())])
+        for operation in ("first", "last"):
+            with self.subTest(operation=operation):
+                tracemalloc.start()
+                try:
+                    result = temporal._aggregate_values(selected, operation)
+                    _, peak = tracemalloc.get_traced_memory()
+                finally:
+                    tracemalloc.stop()
+                self.assertEqual(payload, result)
+                # Converting the entire window creates over 8 MiB of Python bytes.
+                self.assertLess(peak, 256 * 1024)
 
     def test_window_join_supports_asymmetric_timestamp_bounds(self):
         anchors = self._table("window_timestamp_anchors", {
@@ -433,6 +742,7 @@ class MultimodalTemporalTest(unittest.TestCase):
                         )
                         self.assertEqual(expected, row["matches"])
 
+    @pytest.mark.python_read
     def test_window_join_prunes_unaggregated_right_columns(self):
         anchors = self._table("window_projection_anchors", {
             "episode_id": pa.int32(),
@@ -1723,7 +2033,7 @@ class MultimodalTemporalTest(unittest.TestCase):
             for select in selected
         ))
 
-    def test_alignment_does_not_mask_internal_key_dependencies(self):
+    def test_alignment_rejects_a_mask_reading_a_masked_dependency(self):
         anchors = self._table("dependency_mask_anchors", {
             "episode_id": pa.int32(),
             "event_time": pa.int64(),
@@ -1767,19 +2077,14 @@ class MultimodalTemporalTest(unittest.TestCase):
         anchors.raw_table.catalog_environment.table_query_auth = (
             lambda options, identifier: lambda select: auth)
 
-        result = pmm.join_asof(
-            anchors.scan(), source.scan().select("value"),
-            on="event_time", by="episode_id",
-            direction="nearest", tolerance=0,
-        ).to_arrow()
+        with self.assertRaisesRegex(ValueError, "which is masked too"):
+            pmm.join_asof(
+                anchors.scan(), source.scan().select("value"),
+                on="event_time", by="episode_id",
+                direction="nearest", tolerance=0,
+            ).to_arrow()
 
-        self.assertEqual(7, result["value"][0].as_py())
-        self.assertEqual(1, result["episode_id"][0].as_py())
-        self.assertEqual("1", result["allowed_episode_id"][0].as_py())
-        self.assertEqual(
-            pa.string(), result.schema.field("allowed_episode_id").type)
-
-    def test_alignment_matches_masking_reader_rule_semantics(self):
+    def test_alignment_rejects_cross_column_and_json_null_masks(self):
         anchors = self._table("mask_semantics_anchors", {
             "episode_id": pa.int32(),
             "event_time": pa.int64(),
@@ -1817,21 +2122,21 @@ class MultimodalTemporalTest(unittest.TestCase):
         source.raw_table.catalog_environment.table_query_auth = (
             lambda options, identifier: lambda select: auth[0])
 
-        row = pmm.join_asof(
-            anchors.scan(), source.scan().select(["first", "second"]),
-            on="event_time", by="episode_id",
-            direction="nearest", tolerance=0,
-        ).to_list()[0]
-        self.assertEqual(("b", "a"), (row["first"], row["second"]))
+        with self.assertRaisesRegex(ValueError, "which is masked too"):
+            pmm.join_asof(
+                anchors.scan(), source.scan().select(["first", "second"]),
+                on="event_time", by="episode_id",
+                direction="nearest", tolerance=0,
+            ).to_list()
 
         auth[0] = TableQueryAuthResult(
             filter=None, column_masking={"first": "null"})
-        row = pmm.join_asof(
-            anchors.scan(), source.scan().select("first"),
-            on="event_time", by="episode_id",
-            direction="nearest", tolerance=0,
-        ).to_list()[0]
-        self.assertEqual("a", row["first"])
+        with self.assertRaisesRegex(ValueError, "JSON null"):
+            pmm.join_asof(
+                anchors.scan(), source.scan().select("first"),
+                on="event_time", by="episode_id",
+                direction="nearest", tolerance=0,
+            ).to_list()
 
     def test_alignment_rejects_incremental_scans(self):
         anchors = self.conn.create_table(
@@ -2035,7 +2340,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         source.raw_table.catalog_environment.table_query_auth = (
             lambda options, identifier: lambda select: auth)
 
-        with self.assertRaisesRegex(ValueError, "nested projection"):
+        with self.assertRaisesRegex(ValueError, "does not exist in table schema"):
             pmm.join_asof(
                 anchors.scan(), source.scan().select("payload.value"),
                 on="event_time", by="episode_id",
@@ -2065,15 +2370,15 @@ class MultimodalTemporalTest(unittest.TestCase):
             on="event_time", by="episode_id",
             direction="nearest", tolerance=0,
         )
-        original_scan = FileScanner.scan
+        original_plan = TableScan.plan
 
         with mock.patch.object(
-                FileScanner, "scan", autospec=True,
-                side_effect=original_scan) as scan:
+                TableScan, "plan", autospec=True,
+                side_effect=original_plan) as plan:
             reader = aligned.to_arrow_batch_reader(batch_size=1)
             self.assertEqual(8, sum(batch.num_rows for batch in reader))
 
-        self.assertEqual(4, scan.call_count)
+        self.assertEqual(4, plan.call_count)
 
     def test_empty_source_stays_pinned_after_first_append(self):
         anchors = self._table("pinned_empty_anchors", {
@@ -2099,6 +2404,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         self.assertIsNone(aligned.resolved_snapshots["right_1"]["snapshot_id"])
         self.assertIsNone(aligned.to_list()[0]["value"])
 
+    @pytest.mark.python_read
     def test_alignment_reuses_decoded_parquet_row_groups_across_batches(self):
         anchors = self._table("cached_anchors", {
             "episode_id": pa.int32(),

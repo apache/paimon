@@ -52,14 +52,14 @@ public class CommitCleaner {
             String newIndexManifest) {
         if (deltaManifestList != null) {
             for (ManifestFileMeta manifest : manifestList.read(deltaManifestList.getKey())) {
-                manifestFile.delete(manifest.fileName());
+                manifestFile.delete(manifest);
             }
             manifestList.delete(deltaManifestList.getKey());
         }
 
         if (changelogManifestList != null) {
             for (ManifestFileMeta manifest : manifestList.read(changelogManifestList.getKey())) {
-                manifestFile.delete(manifest.fileName());
+                manifestFile.delete(manifest);
             }
             manifestList.delete(changelogManifestList.getKey());
         }
@@ -80,7 +80,7 @@ public class CommitCleaner {
                         .collect(Collectors.toSet());
         for (ManifestFileMeta suspect : mergeAfterManifests) {
             if (!oldMetaSet.contains(suspect.fileName())) {
-                manifestFile.delete(suspect.fileName());
+                manifestFile.delete(suspect);
             }
         }
     }

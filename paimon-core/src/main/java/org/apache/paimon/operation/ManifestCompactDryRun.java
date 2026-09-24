@@ -84,9 +84,7 @@ public class ManifestCompactDryRun {
         }
 
         RowType partitionType = table.schema().logicalPartitionType();
-        if (partitionType.getFieldCount() == 0
-                && !(options.dataEvolutionEnabled()
-                        && ManifestFileMeta.allContainsRowId(manifests))) {
+        if (!ManifestFileMerger.canUseManifestSort(manifests, partitionType, options)) {
             return summary + " Manifest sort level files: unavailable (no sortable field).";
         }
 

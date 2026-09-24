@@ -1,0 +1,168 @@
+---
+title: "Semantic Views"
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one or more
+contributor license agreements.  See the NOTICE file distributed with
+this work for additional information regarding copyright ownership.
+The ASF licenses this file to You under the Apache License, Version 2.0
+(the "License"); you may not use this file except in compliance with
+the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
+# Semantic Views
+
+A semantic view is a named catalog object that stores a complete semantic model definition.
+The model describes datasets, relationships, dimensions, measures, and related business semantics.
+This experimental REST Catalog extension manages the object and its definition. The Java client
+preserves the original document text. Servers validate the model formats, syntax versions,
+and features they support; consumers provide query execution.
+
+Registration does not imply Spark/Flink execution support or grant access to source data.
+This implementation supplies Java clients, wire models, and the
+[Catalog OpenAPI contract](/rest-catalog-open-api.yaml). REST server providers must implement
+persistence, validation, authorization, and the atomic operations described below.
+
+## REST operations
+
+```text
+GET    /v1/{prefix}/databases/{database}/semantic-views
+GET    /v1/{prefix}/databases/{database}/semantic-views/{semanticView}
+POST   /v1/{prefix}/databases/{database}/semantic-views/{semanticView}
+DELETE /v1/{prefix}/databases/{database}/semantic-views/{semanticView}
+```
+
+Use the opaque prefix returned by config. Database and object names are independent UTF-8 encoded
+path segments, including slashes, percent signs, spaces, Unicode, and dot-only names. Names are
+never split on dots, and a catalog name inside model content does not determine the REST prefix.
+
+### Upsert and read
+
+POST creates or atomically replaces one complete definition in an existing database:
+
+```json
+{
+  "definition": {
+    "format": "databricks-yaml",
+    "content": "version: '1.1'\nsource: main.sales.orders\nmeasures:\n  - name: revenue\n    expr: SUM(paid_amount)\n"
+  }
+}
+```
+
+`format` and `content` are required nonblank strings. `format` identifies both the model syntax
+and document encoding, for example `databricks-yaml`, `snowflake-yaml`, or `ossie-yaml`. These are
+Paimon format identifiers, not a closed enumeration; each server decides which formats it supports.
+The example requires server support for `databricks-yaml`. Model syntax versions and expression
+SQL dialects belong inside the content, following the chosen format's specification.
+Clients do not parse, normalize, or discard fields in the content.
+Content is limited to **1 MiB of UTF-8 bytes**, checked before sending by the Java client.
+
+POST and GET return HTTP 200 with the full object:
+
+```json
+{
+  "name": "order_metrics",
+  "definition": {
+    "format": "databricks-yaml",
+    "content": "version: '1.1'\nsource: main.sales.orders\nmeasures:\n  - name: revenue\n    expr: SUM(paid_amount)\n"
+  }
+}
+```
+
+`name` is the local object name within the database addressed by the path. POST returns the
+committed object, and subsequent reads must expose the complete committed definition.
+
+Upserts are unconditional: the last successful write takes effect. Each update replaces the
+whole definition, so concurrent edits can overwrite one another. Replacement preserves identity,
+creation metadata, owner, permissions, and labels. Definition-level comments and synonyms are
+part of the complete replacement.
+
+### List and delete
+
+List accepts optional `maxResults` (1–1000; omitted uses the server default) and opaque `pageToken`:
+
+```json
+{"semanticViews":["order_metrics"],"nextPageToken":"opaque-token"}
+```
+
+Lists return visible names only; GET retrieves a full definition. The last page omits the token.
+An empty page terminates pagination and must not carry a continuation token. A missing database
+returns 404; an existing database with no visible models returns an empty array.
+
+DELETE uses the object path with no query parameters or request body. It returns 200 without a
+body; an absent object returns 404, and a blocking dependency returns 409.
+
+## Java catalog access
+
+```java
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.management.SemanticViewManagement;
+import org.apache.paimon.view.SemanticView;
+import org.apache.paimon.view.SemanticViewDefinition;
+
+SemanticViewManagement models = restCatalog.semanticViewManagement();
+Identifier id = Identifier.create("sales", "order_metrics");
+SemanticViewDefinition definition = new SemanticViewDefinition("databricks-yaml", yamlText);
+SemanticView saved = models.upsertSemanticView(id, definition);
+SemanticView current = models.getSemanticView(id);
+models.upsertSemanticView(id, replacementDefinition);
+models.listSemanticViews("sales"); // Follows all pages.
+models.listSemanticViewsPaged("sales", 100, null);
+models.deleteSemanticView(id);
+```
+
+The accessor reuses the catalog's REST client, prefix, authentication, and configured headers.
+It is specific to `RESTCatalog`, not the generic `Catalog` interface. `RESTApi` also exposes the same
+upsert/get/list/paged-list/delete operations; its read and upsert methods return `GetSemanticViewResponse`.
+`SemanticView` does not implement ordinary `View.query()` or `View.rowType()`.
+
+## Server integration contract
+
+- Ordinary SQL views and semantic views share the database's view namespace. Both creation paths
+  must reject a cross-type name collision with 409. They cannot implicitly convert each other.
+- Existing `/views`, `/view-details`, and global view lists return ordinary SQL views only.
+  Existing get/alter/drop SQL view routes treat a semantic view name as a missing ordinary view (404).
+  Existing table/function naming rules continue to apply.
+- Reuse permission `ResourceType.VIEW` and structured database/view identities. Creation checks
+  the parent database's `CREATEVIEW`; replacement checks `ALTER`; deletion checks `DROP`; reads
+  check `SELECT`. Discovery follows database `LIST` and object visibility rules. Server resource
+  resolution must understand the semantic subtype. Source access is checked separately at execution.
+- Labels use `entityType=VIEW` and a canonical `entityName` supplied according to the provider's
+  naming and escaping rules; the semantic view response does not supply that label identity.
+  Clients must not assume that concatenating database and view names with a dot produces it.
+  The label resolver must support semantic views. Definition replacement preserves bindings;
+  deletion cleans up direct labels and permissions without deleting referenced sources.
+- Semantic views count when determining whether a database is empty. Database cascade deletion
+  follows existing catalog rules and cleans up semantic metadata and its direct bindings.
+- Unsupported model semantics must be rejected without side effects or dropping fields. SQL
+  analysis, source validation, dependencies, and execution authorization belong to the server's
+  model format adapter. The client exposes no generic executable-validation status.
+
+The HTTP client tests verify wire behavior and error propagation. They do not prove a provider's
+storage atomicity, permission enforcement, namespace isolation, or database lifecycle behavior.
+
+## Errors and scope
+
+Errors use `ErrorResponse`; semantic view errors use `resourceType=SEMANTIC_VIEW`.
+
+| HTTP | Meaning | Java client exception |
+| --- | --- | --- |
+| 400 | Invalid input or unsupported model format, syntax version, or feature | `BadRequestException` |
+| 401 / 403 | Authentication or permission failure | `NotAuthorizedException` / `ForbiddenException` |
+| 404 | Missing database or model | `NoSuchResourceException` |
+| 409 | Name conflict or dependency blocks deletion | `AlreadyExistsException` (existing REST mapping) |
+| 413 | Content exceeds the size limit | `RESTException` |
+| 501 | Server does not implement semantic views | `NotImplementedException` |
+
+Client-side invalid input throws `IllegalArgumentException` before HTTP. An unsupported endpoint
+never falls back to SQL views, labels, or table options. Query compilation, measure rewriting,
+materialization, rename, and per-measure or per-field REST resources are outside this version.

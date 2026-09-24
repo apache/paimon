@@ -34,6 +34,7 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.buildPaimo
 public class NewTableSchemaBuilder implements Serializable {
 
     private final Map<String, String> tableConfig;
+    private final Map<String, Map<String, String>> tableConfigByTable;
     private final boolean caseSensitive;
     private final List<String> partitionKeys;
     private final List<String> primaryKeys;
@@ -44,6 +45,7 @@ public class NewTableSchemaBuilder implements Serializable {
 
     public NewTableSchemaBuilder(
             Map<String, String> tableConfig,
+            Map<String, Map<String, String>> tableConfigByTable,
             boolean caseSensitive,
             List<String> partitionKeys,
             List<String> primaryKeys,
@@ -52,6 +54,7 @@ public class NewTableSchemaBuilder implements Serializable {
             Map<String, List<String>> partitionKeyMultiple,
             CdcMetadataConverter[] metadataConverters) {
         this.tableConfig = tableConfig;
+        this.tableConfigByTable = tableConfigByTable;
         this.caseSensitive = caseSensitive;
         this.metadataConverters = metadataConverters;
         this.partitionKeys = partitionKeys;
@@ -78,12 +81,21 @@ public class NewTableSchemaBuilder implements Serializable {
                         specifiedPartitionKeys,
                         primaryKeys,
                         Collections.emptyList(),
-                        tableConfig,
+                        tableConfigFor(record.tableName()),
                         sourceSchema,
                         metadataConverters,
                         caseSensitive,
                         false,
                         requirePrimaryKeys,
                         syncPKeysFromSourceSchema));
+    }
+
+    private Map<String, String> tableConfigFor(String sourceTable) {
+        Map<String, String> config = new java.util.HashMap<>(tableConfig);
+        Map<String, String> override = tableConfigByTable.get(sourceTable);
+        if (override != null) {
+            config.putAll(override);
+        }
+        return config;
     }
 }

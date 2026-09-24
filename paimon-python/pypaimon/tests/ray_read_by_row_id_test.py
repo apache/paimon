@@ -255,6 +255,78 @@ class RayReadByRowIdTest(unittest.TestCase):
             read_by_row_id(target, src, self.catalog_options, projection=["age"],
                            dynamic_options={"scan.snapshot-id": "1", "scan.tag-name": "x"})
 
+    def test_retained_tag_after_snapshot_expiry(self):
+        from pypaimon.schema.schema_change import SchemaChange
+
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1, 2], "name": ["a", "b"], "age": [10, 20]}, schema=self.pa_schema))
+        table = self.catalog.get_table(target)
+        table.create_tag("training", 1)
+        rid = self._rowid_by_id(target)
+        self._write(target, pa.Table.from_pydict(
+            {"id": [3], "name": ["c"], "age": [30]}, schema=self.pa_schema))
+        self.catalog.alter_table(target, [SchemaChange.rename_column("age", "years")])
+        table.file_io.delete(table.snapshot_manager().get_snapshot_path(1))
+
+        for selector in ("scan.tag-name", "scan.version"):
+            with self.subTest(selector=selector):
+                ds = read_by_row_id(
+                    target, pa.table({"_ROW_ID": [rid[2], rid[1], rid[1]]}),
+                    self.catalog_options, projection=["id", "age"],
+                    dynamic_options={selector: "training", "scan.native-plan.enabled": "true"})
+                self.assertEqual(self._rows_by_id(ds), {
+                    1: {"id": 1, "age": 10, "_ROW_ID": rid[1]},
+                    2: {"id": 2, "age": 20, "_ROW_ID": rid[2]},
+                })
+
+    def test_rejects_tag_schema_change_during_snapshot_resolution(self):
+        import importlib
+        from pypaimon.schema.schema_change import SchemaChange
+
+        module = importlib.import_module("pypaimon.ray.read_by_row_id")
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["a"], "age": [10]}, schema=self.pa_schema))
+        table = self.catalog.get_table(target)
+        table.create_tag("training", 1)
+        self.catalog.alter_table(target, [SchemaChange.rename_column("age", "years")])
+        schema = pa.schema([("id", pa.int32()), ("name", pa.string()), ("years", pa.int32())])
+        self._write(target, pa.table({"id": [2], "name": ["b"], "years": [20]}, schema=schema))
+        resolve = module._read_snapshot
+
+        def resolve_after_tag_moves(read_table):
+            table.replace_tag("training")
+            return resolve(read_table)
+
+        with mock.patch.object(module, "_read_snapshot", resolve_after_tag_moves):
+            with self.assertRaisesRegex(ValueError, "schema changed.*retry"):
+                read_by_row_id(
+                    target, pa.table({"_ROW_ID": [0]}), self.catalog_options,
+                    projection=["age"], dynamic_options={"scan.tag-name": "training"})
+
+    def test_lazy_tag_read_keeps_resolved_snapshot(self):
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["a"], "age": [10]}, schema=self.pa_schema))
+        table = self.catalog.get_table(target)
+        table.create_tag("training", 1)
+        rid = self._rowid_by_id(target)[1]
+        ds = read_by_row_id(
+            target, pa.table({"_ROW_ID": [rid]}), self.catalog_options,
+            projection=["id", "age"], dynamic_options={"scan.tag-name": "training"})
+
+        from pypaimon.multimodal.table import MultimodalTable
+        MultimodalTable(self.catalog, target, table).update("id = 1", {"age": 99})
+        table.replace_tag("training")
+        table.file_io.delete(table.snapshot_manager().get_snapshot_path(1))
+
+        self.assertEqual(ds.take_all(), [{"id": 1, "age": 10, "_ROW_ID": rid}])
+        latest = read_by_row_id(
+            target, pa.table({"_ROW_ID": [rid]}), self.catalog_options,
+            projection=["age"], dynamic_options={"scan.tag-name": "training"})
+        self.assertEqual(latest.take_all(), [{"age": 99, "_ROW_ID": rid}])
+
     def test_row_tracking_cannot_be_enabled_after_data(self):
         # row-tracking.enabled / data-evolution.enabled are immutable once the
         # table has snapshots (Java parity), so a "snapshot predates
@@ -283,10 +355,10 @@ class RayReadByRowIdTest(unittest.TestCase):
         captured = {}
 
         def fake_read(rid_ds, table, projection, *, num_partitions,
-                      ray_remote_args=None, base_snapshot_id=None,
+                      ray_remote_args=None,
                       estimated_size_bytes=None, estimated_num_rows=None,
                       data_context=None):
-            captured["base_snapshot_id"] = base_snapshot_id
+            captured["base_snapshot_id"] = table._read_snapshot.id
             captured["num_partitions"] = num_partitions
             captured["estimated_size_bytes"] = estimated_size_bytes
             captured["estimated_num_rows"] = estimated_num_rows

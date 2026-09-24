@@ -426,7 +426,8 @@ public class CoreOptions implements Serializable {
                     .memoryType()
                     .noDefaultValue()
                     .withDescription(
-                            "File block size of format, default value of orc stripe is 64 MB, and parquet row group is 128 MB.");
+                            "File block size of format, default value of orc stripe is 64 MB, parquet row group is 128 MB, "
+                                    + "and avro block is 64 KB.");
 
     public static final ConfigOption<MemorySize> FILE_INDEX_IN_MANIFEST_THRESHOLD =
             key("file-index.in-manifest-threshold")
@@ -522,6 +523,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.ofMebiBytes(8))
                     .withDescription("Suggested file size of a manifest file.");
 
+    public static final ConfigOption<Boolean> MANIFEST_SIDECAR_ENABLED =
+            key("manifest.sidecar.enabled")
+                    .booleanType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Whether to enable manifest sidecars with independent partition, row-id and bucket coverage. Defaults to manifest-sort.enabled when unset.");
+
     public static final ConfigOption<MemorySize> MANIFEST_FULL_COMPACTION_FILE_SIZE =
             key("manifest.full-compaction-threshold-size")
                     .memoryType()
@@ -568,7 +576,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             Description.builder()
-                                    .text("Whether to invoke manifest sort rewrite during commit.")
+                                    .text(
+                                            "Whether to invoke manifest sort rewrite during commit."
+                                                    + " Non-partitioned tables can sort by bucket"
+                                                    + " with fixed or postponed buckets, or by RowID"
+                                                    + " for data evolution tables when all input"
+                                                    + " manifests contain RowID ranges.")
                                     .linebreak()
                                     .text(
                                             "Note: enabling this changes the semantics of '"
@@ -587,7 +600,9 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "Partition field name to sort manifest entries by. Validated by"
-                                    + " schema validation, if not configured, defaults to the first partition field.");
+                                    + " schema validation; must be unset for non-partitioned tables."
+                                    + " If not configured, defaults to the first partition field,"
+                                    + " or all partition fields for data evolution RowID sorting.");
 
     public static final ConfigOption<MemorySize> MANIFEST_SORT_MAX_REWRITE_SIZE =
             key("manifest-sort.max-rewrite-size")
@@ -1726,6 +1741,8 @@ public class CoreOptions implements Serializable {
                             "If the bucket is -1, for primary key table, is dynamic bucket mode, "
                                     + "this option controls the target row number for one bucket.");
 
+    public static final int MAX_DYNAMIC_BUCKETS = Short.MAX_VALUE + 1;
+
     @Immutable
     public static final ConfigOption<Integer> DYNAMIC_BUCKET_INITIAL_BUCKETS =
             key("dynamic-bucket.initial-buckets")
@@ -1740,7 +1757,9 @@ public class CoreOptions implements Serializable {
                     .defaultValue(-1)
                     .withDescription(
                             "Max buckets for a partition in dynamic bucket mode, It should "
-                                    + "either be equal to -1 (unlimited), or it must be greater than 0 (fixed upper bound).");
+                                    + "either be equal to -1 (unlimited), or it must be between 1 and "
+                                    + MAX_DYNAMIC_BUCKETS
+                                    + " (fixed upper bound).");
 
     public static final ConfigOption<Integer> DYNAMIC_BUCKET_ASSIGNER_PARALLELISM =
             key("dynamic-bucket.assigner-parallelism")
@@ -2446,15 +2465,34 @@ public class CoreOptions implements Serializable {
                                     + "instead of at the end of the schema. "
                                     + "This only takes effect for partitioned tables.");
 
+    public static final ConfigOption<Long> COMMIT_LAST_SAFE_SNAPSHOT =
+            ConfigOptions.key("commit.last-safe-snapshot")
+                    .longType()
+                    .noDefaultValue()
+                    .withFallbackKeys("commit.strict-mode.last-safe-snapshot")
+                    .withDescription(
+                            "Snapshot preceding the earliest snapshot to inspect when committing. "
+                                    + "Only later snapshots are searched for this commit user's previous commits. "
+                                    + "This also provides the starting point for strict-mode checks when enabled. "
+                                    + "Keep this bound unchanged across retries and recovery.");
+
+    public static final ConfigOption<Boolean> COMMIT_STRICT_MODE_ENABLED =
+            ConfigOptions.key("commit.strict-mode.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to check concurrent snapshot changes after commit.last-safe-snapshot, "
+                                    + "when that bound is configured. Rejects COMPACT or OVERWRITE changes "
+                                    + "in the same partition, and fixed-bucket APPEND changes when committing OVERWRITE. "
+                                    + "Disabling this does not disable regular conflict detection or the history search bound.");
+
+    /** @deprecated Use {@link #COMMIT_LAST_SAFE_SNAPSHOT}. */
+    @Deprecated
     public static final ConfigOption<Long> COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT =
             ConfigOptions.key("commit.strict-mode.last-safe-snapshot")
                     .longType()
                     .noDefaultValue()
-                    .withDescription(
-                            "If set, committer will check if there are other commit user's snapshot starting from the "
-                                    + "snapshot after this one. If found a COMPACT / OVERWRITE snapshot, or found a "
-                                    + "APPEND snapshot which committed files to fixed bucket, commit will be aborted."
-                                    + "If the value of this option is -1, committer will not check for its first commit.");
+                    .withDescription("Deprecated alias for commit.last-safe-snapshot.");
 
     public static final ConfigOption<String> CLUSTERING_COLUMNS =
             key("clustering.columns")
@@ -2580,7 +2618,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Long> DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT =
             key("data-evolution.reassign.skip-contiguous-row-count")
                     .longType()
-                    .defaultValue(1_000_000_000L)
+                    .defaultValue(20_000_000_000L)
                     .withDescription(
                             "Strictly contiguous same-partition logical row-id runs containing "
                                     + "more than this number of rows are excluded from row-id "
@@ -2985,6 +3023,21 @@ public class CoreOptions implements Serializable {
                     .defaultValue(GlobalIndexSearchMode.FAST)
                     .withDescription("Search mode for full-text index queries.");
 
+    public static final ConfigOption<Boolean> GLOBAL_INDEX_FILTER_REFINE_FROM_DATA =
+            key("global-index.filter.refine-from-data")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether a vector, hybrid or full-text search may read the filter "
+                                    + "columns of candidate rows to verify a row filter that the "
+                                    + "scalar global index can only answer with a superset, such "
+                                    + "as contains, ends-with or like on a BTree index or a "
+                                    + "conjunction with a member no index can evaluate. When "
+                                    + "false, such candidates are excluded from the search, which "
+                                    + "never returns a non-matching row but may return fewer than "
+                                    + "the requested top-k. When true, the read runs on the caller "
+                                    + "and may cover every candidate row.");
+
     public static final ConfigOption<Integer> GLOBAL_INDEX_THREAD_NUM =
             key("global-index.thread-num")
                     .intType()
@@ -3210,6 +3263,10 @@ public class CoreOptions implements Serializable {
         return options.get(MANIFEST_TARGET_FILE_SIZE);
     }
 
+    public boolean manifestSidecarEnabled() {
+        return options.getOptional(MANIFEST_SIDECAR_ENABLED).orElseGet(this::manifestSortEnabled);
+    }
+
     public MemorySize manifestFullCompactionThresholdSize() {
         return options.get(MANIFEST_FULL_COMPACTION_FILE_SIZE);
     }
@@ -3273,7 +3330,7 @@ public class CoreOptions implements Serializable {
     }
 
     public static String normalizeFileFormat(String fileFormat) {
-        return StringUtils.isEmpty(fileFormat) ? fileFormat : fileFormat.toLowerCase();
+        return StringUtils.isEmpty(fileFormat) ? fileFormat : fileFormat.toLowerCase(Locale.ROOT);
     }
 
     public String dataFilePrefix() {
@@ -3355,6 +3412,20 @@ public class CoreOptions implements Serializable {
     public boolean fieldAggIgnoreRetract(String fieldName) {
         return options.get(
                 key(FIELDS_PREFIX + "." + fieldName + "." + IGNORE_RETRACT)
+                        .booleanType()
+                        .defaultValue(false));
+    }
+
+    public boolean fieldSumAggFailOnOverflow(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + ".sum.fail-on-overflow")
+                        .booleanType()
+                        .defaultValue(false));
+    }
+
+    public boolean fieldProductAggFailOnOverflow(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + ".product.fail-on-overflow")
                         .booleanType()
                         .defaultValue(false));
     }
@@ -4238,7 +4309,10 @@ public class CoreOptions implements Serializable {
 
     public Set<PartitionMarkDoneAction> partitionMarkDoneActions() {
         return Arrays.stream(options.get(PARTITION_MARK_DONE_ACTION).split(","))
-                .map(x -> PartitionMarkDoneAction.valueOf(x.replace('-', '_').toUpperCase()))
+                .map(
+                        x ->
+                                PartitionMarkDoneAction.valueOf(
+                                        x.replace('-', '_').toUpperCase(Locale.ROOT)))
                 .collect(Collectors.toCollection(HashSet::new));
     }
 
@@ -4579,8 +4653,18 @@ public class CoreOptions implements Serializable {
         return options.get(AGGREGATION_REMOVE_RECORD_ON_DELETE);
     }
 
+    public Optional<Long> commitLastSafeSnapshot() {
+        return options.getOptional(COMMIT_LAST_SAFE_SNAPSHOT);
+    }
+
+    public boolean commitStrictModeEnabled() {
+        return options.get(COMMIT_STRICT_MODE_ENABLED);
+    }
+
+    /** @deprecated Use {@link #commitLastSafeSnapshot()}. */
+    @Deprecated
     public Optional<Long> commitStrictModeLastSafeSnapshot() {
-        return options.getOptional(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT);
+        return commitLastSafeSnapshot();
     }
 
     public List<String> clusteringColumns() {
@@ -4746,6 +4830,10 @@ public class CoreOptions implements Serializable {
 
     public GlobalIndexSearchMode scalarIndexSearchMode() {
         return indexSearchMode(SCALAR_INDEX_SEARCH_MODE);
+    }
+
+    public boolean globalIndexFilterRefineFromData() {
+        return options.get(GLOBAL_INDEX_FILTER_REFINE_FROM_DATA);
     }
 
     public GlobalIndexSearchMode vectorIndexSearchMode() {
@@ -4927,6 +5015,7 @@ public class CoreOptions implements Serializable {
     private Options primaryKeySortedIndexOptions(
             String column, String optionFamily, String algorithmPrefix) {
         Options resolved = new Options(toConfiguration().toMap());
+        resolved.remove("sorted-index.records-per-file");
         resolved.remove("sorted-index.records-per-range");
         String optionKey = "fields." + column + "." + optionFamily + ".index.options";
         String serialized = options.get(optionKey);

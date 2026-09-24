@@ -31,6 +31,7 @@ from pypaimon.table.format.format_table import (
     Format,
     FormatTable,
 )
+from pypaimon.write.writer.parquet_writer_options import create_parquet_writer_options
 
 
 def _partition_path(
@@ -100,9 +101,12 @@ class FormatTableWrite:
         )
         self._partition_only_value = opt.lower() == "true"
         self._file_format = table.format()
-        self._target_file_row_num = CoreOptions.from_dict(
-            table.options()
-        ).target_file_row_num()
+        options = CoreOptions.from_dict(table.options())
+        self._parquet_writer_options = (
+            create_parquet_writer_options(options)
+            if self._file_format == Format.PARQUET else {}
+        )
+        self._target_file_row_num = options.target_file_row_num()
         max_target_file_row_num = (
             CoreOptions.TARGET_FILE_ROW_NUM.default_value()
         )
@@ -215,7 +219,7 @@ class FormatTableWrite:
         if fmt == Format.PARQUET:
             import pyarrow.parquet as pq
             buf = io.BytesIO()
-            pq.write_table(tbl, buf, compression="zstd")
+            pq.write_table(tbl, buf, compression="zstd", **self._parquet_writer_options)
             raw = buf.getvalue()
         elif fmt == Format.CSV:
             import pyarrow.csv as csv

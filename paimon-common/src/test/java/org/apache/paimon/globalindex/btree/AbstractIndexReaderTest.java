@@ -334,7 +334,12 @@ public abstract class AbstractIndexReaderTest {
     protected abstract GlobalIndexReader prepareDataAndCreateReader() throws Exception;
 
     protected GlobalIndexIOMeta writeData(List<Pair<Object, Long>> data) throws IOException {
-        GlobalIndexSingleColumnWriter indexWriter = globalIndexer.createWriter(fileWriter);
+        return writeData(data, globalIndexer.createWriter(fileWriter));
+    }
+
+    protected GlobalIndexIOMeta writeData(
+            List<Pair<Object, Long>> data, GlobalIndexSingleColumnWriter indexWriter)
+            throws IOException {
         for (Pair<Object, Long> pair : data) {
             indexWriter.write(pair.getKey(), pair.getValue());
         }
@@ -346,6 +351,7 @@ public abstract class AbstractIndexReaderTest {
         return new GlobalIndexIOMeta(
                 new Path(new Path(tempPath.toUri()), fileName),
                 fileIO.getFileSize(new Path(new Path(tempPath.toUri()), fileName)),
+                resultEntry.rowCount(),
                 resultEntry.meta());
     }
 

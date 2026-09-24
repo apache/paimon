@@ -28,6 +28,27 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RowRangeIndexTest {
 
     @Test
+    void testFromBitmap() {
+        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(2, 3, 4, 8, 9, 10);
+        RowRangeIndex index = RowRangeIndex.fromBitmap(bitmap);
+
+        assertThat(index.ranges()).containsExactly(new Range(2, 4), new Range(8, 10));
+        assertThat(index.intersectedRanges(3, 9)).containsExactly(new Range(3, 4), new Range(8, 9));
+
+        bitmap.add(20);
+        assertThat(index.intersects(20, 20)).isFalse();
+
+        assertThat(
+                        RowRangeIndex.fromBitmap(
+                                        RoaringNavigableMap64.bitmapOf(
+                                                Long.MAX_VALUE, Long.MIN_VALUE))
+                                .ranges())
+                .containsExactly(
+                        new Range(Long.MIN_VALUE, Long.MIN_VALUE),
+                        new Range(Long.MAX_VALUE, Long.MAX_VALUE));
+    }
+
+    @Test
     void testContains() {
         RowRangeIndex index =
                 RowRangeIndex.create(

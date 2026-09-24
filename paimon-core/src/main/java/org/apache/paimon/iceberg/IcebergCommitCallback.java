@@ -632,7 +632,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
         if (!written && !metadataMatchesSnapshot(snapshotId, paimonSnapshot)) {
             // no twin published this snapshot's metadata; fail so the commit retries
-            throw new IllegalStateException("Failed to replace Iceberg metadata " + metadataPath);
+            throw new IllegalStateException(
+                    "Failed to replace Iceberg metadata "
+                            + metadataPath
+                            + " for table "
+                            + table.name());
         }
         // a delayed callback may still write its metadata (a newer commit extends it), but
         // only the current head may move the hint and the external catalog
@@ -1253,7 +1257,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
         if (!written && !metadataMatchesSnapshot(snapshotId, snapshot)) {
             // no twin published this snapshot's metadata; fail so the commit retries
-            throw new IllegalStateException("Failed to replace Iceberg metadata " + metadataPath);
+            throw new IllegalStateException(
+                    "Failed to replace Iceberg metadata "
+                            + metadataPath
+                            + " for table "
+                            + table.name());
         }
         // a delayed callback may still write its metadata (a newer commit extends it), but
         // only the current head may move the hint and the external catalog
@@ -1739,7 +1747,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     snapshotId);
 
         } catch (IOException e) {
-            throw new UncheckedIOException("Failed to create tag " + tagName, e);
+            throw new UncheckedIOException(
+                    "Failed to create tag " + tagName + " for table " + table.name(), e);
         }
     }
 
@@ -1797,7 +1806,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     tagName);
 
         } catch (IOException e) {
-            throw new UncheckedIOException("Failed to create tag " + tagName, e);
+            throw new UncheckedIOException(
+                    "Failed to create tag " + tagName + " for table " + table.name(), e);
         }
     }
 

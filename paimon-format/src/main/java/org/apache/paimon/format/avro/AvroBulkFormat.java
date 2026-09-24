@@ -68,8 +68,8 @@ public class AvroBulkFormat implements FormatReaderFactory {
         private AvroReader(FileIO fileIO, Path path, long fileSize) throws IOException {
             this.fileIO = fileIO;
             this.end = fileSize;
+            // openReader has already read the header and positioned at the first block.
             this.reader = createReaderFromPath(path, end);
-            this.reader.sync(0);
             this.pool = new Pool<>(1);
             this.pool.add(new Object());
             this.filePath = path;

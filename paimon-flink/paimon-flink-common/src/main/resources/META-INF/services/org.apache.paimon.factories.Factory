@@ -33,6 +33,7 @@ org.apache.paimon.flink.action.ResetConsumerActionFactory
 org.apache.paimon.flink.action.MigrateTableActionFactory
 org.apache.paimon.flink.action.MigrateDatabaseActionFactory
 org.apache.paimon.flink.action.RemoveOrphanFilesActionFactory
+org.apache.paimon.flink.action.RemoveOrphanBlobsActionFactory
 org.apache.paimon.flink.action.QueryServiceActionFactory
 org.apache.paimon.flink.action.ExpirePartitionsActionFactory
 org.apache.paimon.flink.action.MarkPartitionDoneActionFactory
@@ -78,6 +79,7 @@ org.apache.paimon.flink.procedure.RollbackToWatermarkProcedure
 org.apache.paimon.flink.procedure.MigrateTableProcedure
 org.apache.paimon.flink.procedure.MigrateDatabaseProcedure
 org.apache.paimon.flink.procedure.RemoveOrphanFilesProcedure
+org.apache.paimon.flink.procedure.RemoveOrphanBlobsProcedure
 org.apache.paimon.flink.procedure.QueryServiceProcedure
 org.apache.paimon.flink.procedure.ExpireSnapshotsProcedure
 org.apache.paimon.flink.procedure.ExpireChangelogsProcedure

@@ -164,7 +164,7 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
                         key);
                 confElements.put(key, conf.get(key));
             } else {
-                KeyElementType type = KeyElementType.valueOf(trimmed.toUpperCase());
+                KeyElementType type = KeyElementType.valueOf(trimmed.toUpperCase(Locale.ROOT));
                 switch (type) {
                     case UGI:
                     case USER_NAME:

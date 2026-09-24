@@ -94,6 +94,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -1170,8 +1171,8 @@ public class HiveCatalog extends AbstractCatalog {
 
         String externalPropValue =
                 tableOptions.getOrDefault(
-                        HIVE_EXTERNAL_TABLE_PROP.toLowerCase(),
-                        tableOptions.get(HIVE_EXTERNAL_TABLE_PROP.toUpperCase()));
+                        HIVE_EXTERNAL_TABLE_PROP.toLowerCase(Locale.ROOT),
+                        tableOptions.get(HIVE_EXTERNAL_TABLE_PROP.toUpperCase(Locale.ROOT)));
         return CatalogTableType.EXTERNAL.equals(tableType)
                 || "TRUE".equalsIgnoreCase(externalPropValue);
     }
@@ -1705,7 +1706,7 @@ public class HiveCatalog extends AbstractCatalog {
         } else {
             // format table
             table.getParameters().put(TABLE_TYPE_PROP, provider.name());
-            table.getParameters().put(FILE_FORMAT.key(), provider.name().toLowerCase());
+            table.getParameters().put(FILE_FORMAT.key(), provider.name().toLowerCase(Locale.ROOT));
             table.getParameters().put(TYPE.key(), FORMAT_TABLE.toString());
         }
 

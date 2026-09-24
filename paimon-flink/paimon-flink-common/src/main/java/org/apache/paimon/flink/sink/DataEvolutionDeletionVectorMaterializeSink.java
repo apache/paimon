@@ -58,7 +58,8 @@ public class DataEvolutionDeletionVectorMaterializeSink
                                 "Data Evolution Deletion Vector Materialize Commit Preparation : "
                                         + table.name(),
                                 new CommittableTypeInfo(),
-                                new DataEvolutionCommitPreparationOperator.Factory(table, snapshot))
+                                new DataEvolutionCommitPreparationOperator.Factory(
+                                        table, snapshot, true))
                         .forceNonParallel();
         return doCommit(written, initialCommitUser);
     }
@@ -73,7 +74,7 @@ public class DataEvolutionDeletionVectorMaterializeSink
     protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory() {
         return context -> {
             TableCommitImpl commit = table.newCommit(context.commitUser());
-            commit.rowIdCheckConflictForMaterializeDvCompaction(snapshot.id());
+            commit.materializeDvRowIdCheck();
             return new StoreCommitter(table, commit, context);
         };
     }

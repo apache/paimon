@@ -367,6 +367,45 @@ public class FileStoreCommitTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"commit.last-safe-snapshot", "commit.strict-mode.last-safe-snapshot"})
+    public void testFilterCommittedWithStrictModeDisabled(String lastSafeKey) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(lastSafeKey, "2");
+        options.put(CoreOptions.COMMIT_STRICT_MODE_ENABLED.key(), "false");
+        TestFileStore store = createStore(false, options);
+        try (FileStoreCommit commit = store.newCommit("older-user", null)) {
+            commit.ignoreEmptyCommit(false);
+            commit.commit(new ManifestCommittable(1), false);
+            commit.commit(new ManifestCommittable(2), false);
+        }
+
+        // A disabled strict checker must still honor the search bound. Fail if the lookup
+        // reaches old history, rather than relying on timing to detect a full history scan.
+        Path oldSnapshot = store.snapshotManager().snapshotPath(1);
+        store.fileIO().deleteQuietly(oldSnapshot);
+        store.fileIO().writeFile(oldSnapshot, "not a snapshot", false);
+        store.snapshotManager().invalidateCache();
+        ManifestCommittable pending = new ManifestCommittable(10);
+        try (FileStoreCommit commit = store.newCommit("new-user", null)) {
+            assertThat(commit.filterCommitted(Collections.singletonList(pending)))
+                    .containsExactly(pending);
+            commit.ignoreEmptyCommit(false);
+            commit.commit(pending, false);
+        }
+        try (FileStoreCommit commit = store.newCommit("other-user", null)) {
+            commit.ignoreEmptyCommit(false);
+            commit.commit(new ManifestCommittable(1), false);
+        }
+
+        // Recovery after a successful commit with a lost response still deduplicates it.
+        try (FileStoreCommit recovered = store.newCommit("new-user", null)) {
+            ManifestCommittable next = new ManifestCommittable(11);
+            assertThat(recovered.filterCommitted(Arrays.asList(pending, next)))
+                    .containsExactly(next);
+        }
+    }
+
     protected void testRandomConcurrentNoConflict(
             int numThreads, boolean failing, CoreOptions.ChangelogProducer changelogProducer)
             throws Exception {
@@ -1430,21 +1469,17 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testManifestSortCompactManifestRespectsCompactionThresholds() {
+    public void testManifestSortCompactManifestUsesFullCompactionThresholds() {
         Options options = new Options();
         options.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
         options.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 100);
         options.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), Long.MAX_VALUE + "B");
 
         CoreOptions compactOptions =
-                FileStoreCommitImpl.manifestCompactionOptions(
-                        new CoreOptions(options),
-                        Collections.emptyList(),
-                        TestKeyValueGenerator.DEFAULT_PART_TYPE);
+                FileStoreCommitImpl.manifestCompactionOptions(new CoreOptions(options));
 
-        assertThat(compactOptions.manifestMergeMinCount()).isEqualTo(100);
-        assertThat(compactOptions.manifestFullCompactionThresholdSize().getBytes())
-                .isEqualTo(Long.MAX_VALUE);
+        assertThat(compactOptions.manifestMergeMinCount()).isEqualTo(1);
+        assertThat(compactOptions.manifestFullCompactionThresholdSize().getBytes()).isEqualTo(1);
     }
 
     @Test

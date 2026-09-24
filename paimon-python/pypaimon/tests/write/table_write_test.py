@@ -37,6 +37,72 @@ from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
 
 class TableWriteTest(unittest.TestCase):
+    def test_large_string_compatibility_rejects_other_type_changes(self):
+        writer = object.__new__(TableWrite)
+        writer.file_store_write = Mock(write_cols=None)
+        writer.table_pyarrow_schema = pa.schema([
+            ('id', pa.int32()),
+            ('nested', pa.struct([pa.field('text', pa.string(), nullable=False)])),
+        ])
+        valid = pa.schema([
+            ('id', pa.int32()),
+            ('nested', pa.struct([pa.field('text', pa.large_string(), nullable=False)])),
+        ])
+        writer._validate_pyarrow_schema(valid)
+        invalid = [
+            valid.set(0, pa.field('id', pa.int64())),
+            pa.schema(list(reversed(list(valid)))),
+            valid.set(1, pa.field('nested', pa.struct([
+                pa.field('text', pa.large_string(), nullable=True)]))),
+            valid.set(1, pa.field('nested', pa.struct([
+                pa.field('renamed', pa.large_string(), nullable=False)]))),
+        ]
+        for schema in invalid:
+            with self.subTest(schema=schema):
+                with self.assertRaisesRegex(ValueError, 'consistent'):
+                    writer._validate_pyarrow_schema(schema)
+
+    @parameterized.expand([('append', False, '-1'), ('primary', True, '1'), ('postpone', True, '-2')])
+    def test_large_string_input_roundtrip(self, mode, primary_key, bucket):
+        name = 'default.large_strings_' + mode
+
+        def arrow_schema(string_type):
+            return pa.schema([
+                pa.field('id', pa.int64(), nullable=False),
+                pa.field('text', string_type),
+                pa.field('nested', pa.struct([
+                    pa.field('labels', pa.list_(string_type)),
+                    pa.field('mapping', pa.map_(string_type, string_type)),
+                ])),
+            ])
+
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(
+            arrow_schema(pa.large_string()),
+            primary_keys=['id'] if primary_key else [],
+            options={'bucket': bucket},
+        ), False)
+        table = self.catalog.get_table(name)
+        builder = (table.new_postpone_fixed_bucket_write_builder()
+                   if mode == 'postpone' else table.new_batch_write_builder())
+        write, commit = builder.new_write(), builder.new_commit()
+        expected = []
+        try:
+            for index, (dtype, text) in enumerate([
+                    (pa.string(), '抓笔'), (pa.large_string(), ''),
+                    (pa.string(), None), (pa.large_string(), 'x' * 100)]):
+                row = {'id': index, 'text': text, 'nested': {
+                    'labels': [text, None], 'mapping': [('任务', text)],
+                }}
+                expected.append(row)
+                write.write_arrow(pa.Table.from_pylist([row], schema=arrow_schema(dtype)))
+            commit.commit(write.prepare_commit())
+        finally:
+            write.close()
+            commit.close()
+        actual = self._read_sorted(table, [('id', 'ascending')])
+        self.assertEqual(actual.to_pylist(), expected)
+        self.assertEqual(actual.schema.remove_metadata(), arrow_schema(pa.string()))
+
     @classmethod
     def setUpClass(cls):
         cls.tempdir = tempfile.mkdtemp()
@@ -576,17 +642,18 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(self.expected, actual)
 
     @parameterized.expand([
-        ('default', None, None, True),
-        ('not_write_only_default', 'false', None, True),
-        ('write_only_default', 'true', None, True),
-        ('skip_enabled', None, 'true', True),
-        ('not_write_only_skip_enabled', 'false', 'true', True),
-        ('write_only_skip_enabled', 'true', 'true', False),
-        ('skip_disabled', None, 'false', True),
-        ('not_write_only_skip_disabled', 'false', 'false', True),
-        ('write_only_skip_disabled', 'true', 'false', True),
+        ('default', None, None),
+        ('not_write_only_default', 'false', None),
+        ('write_only_default', 'true', None),
+        ('skip_enabled', None, 'true'),
+        ('not_write_only_skip_enabled', 'false', 'true'),
+        ('write_only_skip_enabled', 'true', 'true'),
+        ('skip_disabled', None, 'false'),
+        ('not_write_only_skip_disabled', 'false', 'false'),
+        ('write_only_skip_disabled', 'true', 'false'),
     ])
-    def test_commit_manifest_merge(self, name, write_only, skip_on_write_only, merge_enabled):
+    def test_commit_preserves_existing_manifests(self, name, write_only, skip_on_write_only):
+        # Shared tables may still carry Java manifest maintenance options.
         options = {'manifest.merge-min-count': '2'}
         if write_only is not None:
             options['write-only'] = write_only
@@ -634,16 +701,11 @@ class TableWriteTest(unittest.TestCase):
         base_manifests = manifest_list_manager.read(snapshot.base_manifest_list)
         delta_manifests = manifest_list_manager.read(snapshot.delta_manifest_list)
 
-        if merge_enabled:
-            self.assertEqual(len(base_manifests), 1)
-            self.assertEqual(base_manifests[0].num_added_files, 2)
-            self.assertEqual(base_manifests[0].num_deleted_files, 0)
-        else:
-            self.assertEqual(len(base_manifests), 2)
-            self.assertEqual(
-                [manifest.file_name for manifest in previous_manifests],
-                [manifest.file_name for manifest in base_manifests],
-            )
+        self.assertEqual(len(base_manifests), 2)
+        self.assertEqual(
+            [manifest.file_name for manifest in previous_manifests],
+            [manifest.file_name for manifest in base_manifests],
+        )
         self.assertEqual(len(delta_manifests), 1)
 
         expected = pa.Table.from_pydict(expected_data, schema=self.pa_schema)

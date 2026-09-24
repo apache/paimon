@@ -126,6 +126,47 @@ public class BloomFilterFileIndexTest {
         Assertions.assertThat((double) errorCount / num).isLessThan(0.03);
     }
 
+    @Test
+    public void testRejectsInvalidOptions() {
+        // fpp must be a probability in (0, 1): a percentage-shaped value, zero, or >= 1 is rejected
+        // at write time with a message naming the option, instead of a bare
+        // NegativeArraySizeException
+        // or a silently useless one-byte filter.
+        Assertions.assertThatThrownBy(() -> createWriter("10000", "10"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("'fpp'");
+        Assertions.assertThatThrownBy(() -> createWriter("10000", "0"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("'fpp'");
+        Assertions.assertThatThrownBy(() -> createWriter("10000", "1.0"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("'fpp'");
+        Assertions.assertThatThrownBy(() -> createWriter("10000", "-0.1"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("'fpp'");
+
+        // items must be positive.
+        Assertions.assertThatThrownBy(() -> createWriter("0", "0.1"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("'items'");
+
+        // a huge items count would overflow the bit-set size; reject instead of allocating a
+        // negative-length array.
+        Assertions.assertThatThrownBy(() -> createWriter(String.valueOf(Integer.MAX_VALUE), "0.1"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("bits");
+
+        // a valid configuration still builds.
+        createWriter("10000", "0.02");
+    }
+
+    private static FileIndexWriter createWriter(String items, String fpp) {
+        Options options = new Options();
+        options.set("items", items);
+        options.set("fpp", fpp);
+        return new BloomFilterFileIndex(DataTypes.BYTES(), options).createWriter();
+    }
+
     private byte[] random() {
         byte[] b = new byte[Math.abs(RANDOM.nextInt(400) + 1)];
         RANDOM.nextBytes(b);

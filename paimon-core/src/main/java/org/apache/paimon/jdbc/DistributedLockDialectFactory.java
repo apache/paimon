@@ -18,9 +18,11 @@
 
 package org.apache.paimon.jdbc;
 
+import java.util.Locale;
+
 class DistributedLockDialectFactory {
     static JdbcDistributedLockDialect create(String protocol) {
-        JdbcProtocol type = JdbcProtocol.valueOf(protocol.toUpperCase());
+        JdbcProtocol type = JdbcProtocol.valueOf(protocol.toUpperCase(Locale.ROOT));
         switch (type) {
             case SQLITE:
                 return new SqlLiteDistributedLockDialect();

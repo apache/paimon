@@ -27,6 +27,7 @@ from pypaimon.deletionvectors.apply_deletion_vector_reader import (
 from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.read.reader.concat_batch_reader import (
     BlobFallbackBatchReader,
     DataEvolutionMergeReader,
@@ -35,7 +36,11 @@ from pypaimon.read.reader.concat_batch_reader import (
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.sliced_split import SlicedSplit
 from pypaimon.read.split import DataSplit
-from pypaimon.read.split_read import RawFileSplitRead
+from pypaimon.read.split_read import (
+    RawFileSplitRead,
+    _row_ranges_by_file,
+    _split_local_row_ranges_by_file,
+)
 from pypaimon.table.row.blob import Blob, BlobData
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.source.deletion_file import DeletionFile
@@ -195,6 +200,77 @@ class DataEvolutionDeletionVectorTest(unittest.TestCase):
             reader.read_arrow_batch().column(0).to_pylist(),
         )
         self.assertIsNone(reader.read_arrow_batch())
+
+    def test_append_indexed_ranges_cross_file_boundary_and_map_dv_positions(self):
+        first = _file("first.parquet", None, 5, 1)
+        second = _file("second.parquet", None, 4, 1)
+        self.assertEqual(
+            _split_local_row_ranges_by_file(
+                [first, second],
+                [Range(3, 4), Range(5, 7)],
+            ),
+            {
+                "first.parquet": [Range(3, 4)],
+                "second.parquet": [Range(0, 2)],
+            },
+        )
+
+        data_split = DataSplit(
+            files=[first, second],
+            partition=GenericRow([], []),
+            bucket=0,
+            raw_convertible=True,
+            data_deletion_files=None,
+        )
+        indexed = IndexedSplit(data_split, [Range(3, 4), Range(5, 7)])
+        split_read = RawFileSplitRead.__new__(RawFileSplitRead)
+        split_read.split = indexed.data_split()
+        split_read._physical_row_ranges = _split_local_row_ranges_by_file(
+            indexed.files, indexed.row_ranges())
+        split_read._get_final_read_data_fields = Mock(return_value=[])
+        split_read.file_reader_supplier = Mock(
+            return_value=_OneBatchReader([0, 1, 2])
+        )
+        deletion_vector = BitmapDeletionVector()
+        deletion_vector.delete(1)
+
+        reader = split_read.raw_reader_supplier(
+            second,
+            dv_factory=lambda: deletion_vector,
+        )
+
+        self.assertEqual([0, 2], reader.read_arrow_batch().column(0).to_pylist())
+        split_read.file_reader_supplier.assert_called_once_with(
+            file=second,
+            for_merge_read=False,
+            read_fields=[],
+            row_tracking_enabled=True,
+            physical_row_ranges=[Range(0, 2)],
+        )
+
+    def test_row_tracked_append_ranges_map_global_row_ids(self):
+        first = _file("first.parquet", 100, 5, 1)
+        second = _file("second.parquet", 200, 4, 1)
+
+        self.assertEqual(
+            _row_ranges_by_file(
+                [first, second],
+                [Range(103, 104), Range(200, 202)],
+                ranges_use_row_ids=True,
+            ),
+            {
+                "first.parquet": [Range(3, 4)],
+                "second.parquet": [Range(0, 2)],
+            },
+        )
+
+        second.first_row_id = None
+        with self.assertRaisesRegex(ValueError, "missing first_row_id"):
+            _row_ranges_by_file(
+                [first, second],
+                [Range(103, 104)],
+                ranges_use_row_ids=True,
+            )
 
     def test_data_evolution_merge_reader_handles_fully_deleted_file(self):
         deletion_vector = BitmapDeletionVector()

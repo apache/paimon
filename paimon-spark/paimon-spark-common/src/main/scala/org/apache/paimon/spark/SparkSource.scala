@@ -40,6 +40,7 @@ import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util.{Map => JMap}
+import java.util.Locale
 
 import scala.collection.JavaConverters._
 
@@ -133,7 +134,7 @@ object SparkSource {
 
   val NAME = "paimon"
 
-  val FORMAT_NAMES: Seq[String] = Format.values.map(_.toString.toLowerCase).toSeq
+  val FORMAT_NAMES: Seq[String] = Format.values.map(_.toString.toLowerCase(Locale.ROOT)).toSeq
 
   // Spark dataframe read options
   private val CATALOG = "catalog"

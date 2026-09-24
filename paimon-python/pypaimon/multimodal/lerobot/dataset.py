@@ -18,14 +18,16 @@
 """LeRobot-compatible map-style reads from a multimodal Paimon table."""
 
 import bisect
-import io
 import json
 import math
 import operator
+import pickle
 import sys
+import zlib
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
 import pyarrow as pa
@@ -64,6 +66,7 @@ _TORCH_DTYPE_NAMES = {
 }
 
 _IMAGE_READ_ATTEMPTS = 3
+_MAX_VISUAL_WORKERS = 8
 
 _CONTROL_FEATURES = frozenset({
     "index",
@@ -267,7 +270,7 @@ class PaimonDatasetReader(ABC):
                 video_column=key,
                 decoder_factory=partial(
                     _open_video_decoder, backend=self.video_backend),
-                decode_fn=_decode_video_frame,
+                decode_batch_fn=_decode_video_frames,
                 output_column=key,
                 collate_fn=_identity,
             )
@@ -422,6 +425,14 @@ class PaimonDatasetReader(ABC):
                 self.return_uint8,
             )
 
+        # Transforms may shrink frames; assemble those windows one sample at a time.
+        video_windows = {} if self.image_transforms is not None else _decode_video_windows(
+            plans, rows, getattr(self, "_video_collators", ()),
+            self._features, self.return_uint8)
+        for group in row_groups:
+            for row in group.values():
+                for key in video_windows:
+                    row.pop(key, None)
         _decode_video_rows(
             row_groups, getattr(self, "_video_collators", ()))
         converted = {
@@ -436,9 +447,14 @@ class PaimonDatasetReader(ABC):
         })
 
         import torch
+        visual_windows = _stack_visual_windows(
+            plans, converted, [key for key in self._visual_keys
+                               if key not in video_windows]
+        ) if self.image_transforms is None and plans[0]["windows"] else {}
+        visual_windows.update(video_windows)
         duplicates = _duplicate_indices(plans)
         result = []
-        for plan in plans:
+        for offset, plan in enumerate(plans):
             item = dict(converted[plan["index"]])
             if plan["index"] in duplicates:
                 item = {
@@ -446,9 +462,12 @@ class PaimonDatasetReader(ABC):
                     for key, value in item.items()
                 }
             for key, positions in plan["windows"].items():
-                item[key] = torch.stack([
-                    converted[position][key] for position in positions
-                ])
+                if key in visual_windows:
+                    item[key] = visual_windows[key][offset]
+                else:
+                    item[key] = torch.stack([
+                        converted[position][key] for position in positions
+                    ])
             item.update(plan["padding"])
             if self.image_transforms is not None:
                 for key in self._visual_keys:
@@ -692,6 +711,22 @@ class _PaimonLeRobotMetadata:
         self.episodes = episodes
         self.tasks = tasks
         self.subtasks = subtasks
+        self._compress_episodes = False
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        if state.get("_compress_episodes", False):
+            # Keep worker-startup payloads small without changing Dataset state.
+            state["episodes"] = zlib.compress(
+                pickle.dumps(self.episodes, protocol=pickle.HIGHEST_PROTOCOL),
+                level=1)
+            state["_episodes_zlib"] = True
+        return state
+
+    def __setstate__(self, state):
+        if state.pop("_episodes_zlib", False):
+            state["episodes"] = pickle.loads(zlib.decompress(state["episodes"]))
+        self.__dict__.update(state)
 
     def __getattr__(self, name):
         info = self.__dict__.get("info", {})
@@ -805,6 +840,7 @@ def _load_dataset(table, tag_name):
     metadata = _PaimonLeRobotMetadata(
         str(table.identifier), tag_name, info, stats, episodes, tasks,
         subtasks)
+    metadata._compress_episodes = True
     return frames, metadata
 
 
@@ -1307,6 +1343,96 @@ def _attach_task_labels(rows, task_names, subtask_names):
             row["subtask"] = subtask_names[subtask_index]
 
 
+def _decode_video_windows(plans, rows, collators, features, return_uint8):
+    import torch
+
+    tasks = [c for c in collators if c.video_column in plans[0]["windows"]]
+    if not tasks or torch.get_num_threads() > 1:
+        return {}
+    grad_enabled = torch.is_grad_enabled()
+    inference_enabled = torch.is_inference_mode_enabled()
+
+    def decode(collator):
+        collator._ensure_process_local_cache()
+        key = collator.video_column
+        descriptors = {
+            position: collator._prepare_row(row)[1]
+            for position, row in rows.items() if key in row
+        }
+        requests = {}
+        for offset, plan in enumerate(plans):
+            window = [descriptors[p] for p in plan["windows"][key]]
+            if not window or any(d is None for d in window):
+                return key, None
+            payload = window[0].payload_descriptor
+            # Cross-file windows use the regular frame assembly path.
+            if any(d.payload_descriptor != payload for d in window):
+                return key, None
+            requests.setdefault(payload, []).append((
+                offset, [d.frame_index for d in window]))
+
+        output = [None] * len(plans)
+        with torch.inference_mode(inference_enabled), \
+                torch.set_grad_enabled(grad_enabled):
+            for payload, windows in requests.items():
+                decoder = collator._decoder(payload)
+                get_frames = getattr(decoder, "get_frames_at", None)
+                if not callable(get_frames):
+                    return key, None
+                indices = sorted({i for _, window in windows for i in window})
+                frames = get_frames(indices=indices).data
+                if (not torch.is_tensor(frames) or frames.ndim != 4
+                        or len(frames) != len(indices)):
+                    raise ValueError("Video decoder must return one frame per index.")
+                _video_tensor(frames[0], features[key], return_uint8=True)
+                # Reorder reused frames once instead of once per window.
+                if sum(len(window) for _, window in windows) >= 2 * len(indices):
+                    frames = frames.contiguous()
+                positions = {index: pos for pos, index in enumerate(indices)}
+                for offset, window in windows:
+                    selection = [positions[index] for index in window]
+                    start = selection[0]
+                    if selection == list(range(start, start + len(selection))):
+                        output[offset] = frames[start:start + len(selection)].clone(
+                            memory_format=torch.contiguous_format)
+                    else:
+                        output[offset] = frames.index_select(0, torch.tensor(
+                            selection, dtype=torch.long, device=frames.device))
+                    if frames.dtype == torch.uint8 and not return_uint8:
+                        output[offset] = output[offset].float().div_(255)
+        return key, output
+
+    if len(tasks) == 1:
+        decoded = [decode(tasks[0])]
+    else:
+        with ThreadPoolExecutor(
+                max_workers=min(len(tasks), _MAX_VISUAL_WORKERS)) as executor:
+            decoded = list(executor.map(decode, tasks))
+    return {key: windows for key, windows in decoded if windows is not None}
+
+
+def _stack_visual_windows(plans, rows, visual_keys):
+    import torch
+
+    keys = [key for key in plans[0]["windows"] if key in visual_keys]
+    # Let PyTorch handle parallelism when its own thread pool is enabled.
+    if len(keys) < 2 or torch.get_num_threads() > 1:
+        return {}
+    grad_enabled = torch.is_grad_enabled()
+    inference_enabled = torch.is_inference_mode_enabled()
+
+    def stack(key):
+        with torch.inference_mode(inference_enabled), \
+                torch.set_grad_enabled(grad_enabled):
+            return [torch.stack([
+                rows[position][key] for position in plan["windows"][key]
+            ]) for plan in plans]
+
+    with ThreadPoolExecutor(
+            max_workers=min(len(keys), _MAX_VISUAL_WORKERS)) as executor:
+        return dict(zip(keys, executor.map(stack, keys)))
+
+
 def _torch_row(row, features, return_uint8=False):
     import torch
 
@@ -1330,14 +1456,10 @@ def _torch_row(row, features, return_uint8=False):
 def _image_tensor(payload, feature, return_uint8=False):
     if payload is None:
         raise ValueError("LeRobot image feature contains a null frame.")
-    import numpy as np
-    import torch
-    try:
-        from PIL import Image, ImageOps
-    except ImportError as error:
-        raise ImportError(
-            "PaimonLeRobotDataset requires Pillow from "
-            "'pypaimon[lerobot]'.") from error
+    from pypaimon.multimodal.window_transforms import (
+        _decode_image,
+        _image_array_to_tensor,
+    )
 
     expected_shape = _feature_shape(feature, "image")
     if len(expected_shape) != 3:
@@ -1347,21 +1469,12 @@ def _image_tensor(payload, feature, return_uint8=False):
     payload_shape = expected_shape[1:] + expected_shape[:1] \
         if names and names[0] in ("channel", "channels") \
         else expected_shape
-    with Image.open(io.BytesIO(payload)) as image:
-        array = np.array(ImageOps.exif_transpose(image), copy=True)
-    if array.ndim == 2:
-        array = array[:, :, None]
+    array = _decode_image(payload)
     if array.shape != payload_shape:
         raise ValueError(
             "LeRobot image payload has shape %s, expected %s."
             % (array.shape, payload_shape))
-    normalize = array.dtype == np.uint8
-    tensor = torch.from_numpy(array).permute(2, 0, 1)
-    if normalize and return_uint8:
-        return tensor
-    # Preserve high-bit-depth and floating-point images in native units.
-    tensor = tensor.float()
-    return tensor.div_(255) if normalize else tensor
+    return _image_array_to_tensor(array, return_uint8)
 
 
 def _video_tensor(frame, feature, return_uint8=False):
@@ -1537,8 +1650,11 @@ class _PyAVVideoDecoder:
         self._container.close()
 
 
-def _decode_video_frame(decoder, frame_index, unused_row):
-    return decoder[frame_index]
+def _decode_video_frames(decoder, frame_indices, unused_rows):
+    get_frames_at = getattr(decoder, "get_frames_at", None)
+    if get_frames_at is not None:
+        return get_frames_at(indices=frame_indices).data
+    return [decoder[index] for index in frame_indices]
 
 
 def _identity(values):
@@ -1546,17 +1662,33 @@ def _identity(values):
 
 
 def _decode_video_rows(row_groups, collators):
+    tasks = []
     for collator in collators:
+        targets = []
+        input_rows = []
         for rows in row_groups:
-            indices = [
-                index for index, row in rows.items()
-                if collator.video_column in row
-            ]
-            if not indices:
-                continue
-            decoded = collator([rows[index] for index in indices])
-            for index, row in zip(indices, decoded):
-                rows[index] = row
+            for index, row in rows.items():
+                if collator.video_column in row:
+                    targets.append((rows, index))
+                    input_rows.append(row)
+        if not input_rows:
+            continue
+        tasks.append((collator, targets, input_rows))
+
+    if not tasks:
+        return
+    if len(tasks) == 1:
+        decoded_groups = [tasks[0][0](tasks[0][2])]
+    else:
+        with ThreadPoolExecutor(
+                max_workers=min(
+                    len(tasks), _MAX_VISUAL_WORKERS)) as executor:
+            decoded_groups = list(executor.map(
+                lambda task: task[0](task[2]), tasks))
+
+    for (collator, targets, _), decoded in zip(tasks, decoded_groups):
+        for (rows, index), row in zip(targets, decoded):
+            rows[index][collator.output_column] = row[collator.output_column]
 
 
 def _normalize_index(index, size):

@@ -21,6 +21,7 @@ package org.apache.paimon.data.variant;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
@@ -518,11 +519,15 @@ public class BaseVariantReader {
             } else if (scalaType.equals(DataTypes.BYTES())) {
                 i = row.getBinary(typedValueIdx);
             } else if (scalaType instanceof DecimalType) {
-                i =
+                Decimal decimal =
                         row.getDecimal(
                                 typedValueIdx,
                                 ((DecimalType) scalaType).getPrecision(),
                                 ((DecimalType) scalaType).getScale());
+                // The typed_value carries the scale of the file schema, e.g. 10.0 as
+                // DECIMAL(18, 1), while the unshredded leg casts from the stripped value; cast
+                // from the same normalized decimal so both legs read "10" rather than "10.0".
+                i = noNeedCast ? decimal : VariantGet.normalizedDecimal(decimal.toBigDecimal());
             } else if (scalaType instanceof DateType) {
                 i = row.getInt(typedValueIdx);
             } else if (scalaType instanceof TimestampType) {
@@ -538,11 +543,9 @@ public class BaseVariantReader {
             if (noNeedCast) {
                 return i;
             }
-            try {
-                return resolve.cast(i);
-            } catch (Exception e) {
-                return invalidCast(row, topLevelMetadata);
-            }
+            Object result =
+                    VariantGet.castScalar(i, scalaType, targetType, resolve, castArgs.zoneId());
+            return result == null ? invalidCast(row, topLevelMetadata) : result;
         }
     }
 }
