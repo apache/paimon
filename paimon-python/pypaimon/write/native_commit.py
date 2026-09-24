@@ -35,24 +35,21 @@ def native_commit_available() -> bool:
 
 
 def native_messages_supported(table, messages) -> bool:
+    # Data evolution includes sidecar ranges and row-id recovery that the
+    # native committer cannot publish with Python/Java semantics yet.
+    if table.options.data_evolution_enabled():
+        return False
     for message in messages:
         if (message.compact_before or message.compact_after
                 or message.compact_changelog_files
                 or message.compact_index_adds or message.compact_index_deletes):
-            return False
-        # Python can rewrite stale row-id files before retrying. The native
-        # committer does not yet implement that recovery path.
-        if table.options.data_evolution_enabled() and (
-                message.check_from_snapshot is not None
-                or any(file.first_row_id is not None
-                       for file in message.new_files + message.deleted_files)):
             return False
     return True
 
 
 def create_native_commit(table, commit_user, overwrite_partition=None):
     """Return a native committer only when its publication protocol matches Python."""
-    if not native_commit_available():
+    if table.options.data_evolution_enabled() or not native_commit_available():
         return None
     native_table = create_native_write_table(table)
     if native_table is None:

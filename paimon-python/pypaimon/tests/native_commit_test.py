@@ -118,7 +118,7 @@ def test_overwrite_builder_api_is_batch_only(tmp_path):
 
 @requires_native
 @pytest.mark.parametrize('backend', ['filesystem', 'path', 'jdbc'])
-@pytest.mark.parametrize('mode', ['append', 'pk', 'de'])
+@pytest.mark.parametrize('mode', ['append', 'pk'])
 def test_native_batch_roundtrip_preserves_identity(tmp_path, backend, mode):
     table = _table(tmp_path, mode, backend)
     builder = table.new_batch_write_builder()
@@ -159,7 +159,6 @@ def test_native_stream_reuses_commit_user_and_identifiers(tmp_path):
 @pytest.mark.parametrize('mode,dynamic,spec', [
     ('append', True, {'pt': 'ignored'}),
     ('append', False, {'pt': 'a'}),
-    ('de', True, {}),
     ('pk', True, {}),
     ('unpartitioned', True, {}),
 ])
@@ -528,6 +527,8 @@ def test_missing_runtime_falls_back_without_reconstructing_table(tmp_path):
 
 def test_partial_row_id_and_compact_messages_preserve_python_recovery(tmp_path):
     table = _table(tmp_path, 'de')
+    assert create_native_commit(table, 'job') is None
+    assert not native_messages_supported(table, [CommitMessage((), 0, [])])
     assert not native_messages_supported(table, [CommitMessage((), 0, [], check_from_snapshot=7)])
     assert not native_messages_supported(table, [CommitMessage((), 0, [Mock(first_row_id=1)])])
     assert not native_messages_supported(table, [CommitMessage((), 0, [], compact_after=[Mock()])])
