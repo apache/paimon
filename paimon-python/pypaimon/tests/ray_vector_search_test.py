@@ -66,9 +66,7 @@ def add_rows(table, vectors, start=0):
 
 def build_index(table, metric="l2"):
     pytest.importorskip("paimon_vindex")
-    # Build before any deletes. The index builder currently requires DVs off;
-    # subsequent reads/updates use the table's original DV-enabled options.
-    table.raw_table.copy({"deletion-vectors.enabled": "false"}).create_global_index(
+    table.raw_table.create_global_index(
         "embedding", "ivf-flat", options={
             "global-index.row-count-per-shard": "3",
             "ivf-flat.nlist": "1", "ivf-flat.distance.metric": metric})
