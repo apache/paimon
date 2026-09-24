@@ -79,13 +79,24 @@ def create_native_commit(table, commit_user, overwrite_partition=None):
 
 def _rest_catalog_supported(table):
     from pypaimon.catalog.catalog_environment import CatalogEnvironment
+    from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+    from pypaimon.filesystem.caching_file_io import CachingFileIO
+    from pypaimon.filesystem.local_file_io import LocalFileIO
+    from pypaimon.filesystem.oss_file_io import OssFileIO
+    from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+    from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
     from pypaimon.table.file_store_table import FileStoreTable
 
     environment = table.catalog_environment
     loader = getattr(environment, 'catalog_loader', None)
     context = loader.context() if _catalog_metastore(loader) == 'rest' else None
+    file_io = table.file_io
+    if type(file_io) is CachingFileIO:
+        file_io = file_io._delegate
     return (type(table) is FileStoreTable
             and type(environment) is CatalogEnvironment
+            and type(file_io) in (LocalFileIO, PyArrowFileIO, OssFileIO,
+                                  ResolvingFileIO, RESTTokenFileIO)
             and environment.supports_version_management
             and environment.uuid is not None
             and context is not None

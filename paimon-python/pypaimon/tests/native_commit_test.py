@@ -509,12 +509,11 @@ def test_disabled_option_never_initializes_native(tmp_path):
     commit.close()
 
 
-@pytest.mark.parametrize('kind', ['version-managed', 'custom-env', 'branch', 'custom-io'])
-def test_incompatible_publication_environment_is_not_reconstructed(tmp_path, kind):
-    table = _table(tmp_path)
-    if kind == 'version-managed':
-        table.catalog_environment.supports_version_management = True
-    elif kind == 'custom-env':
+@pytest.mark.parametrize('kind', ['custom-env', 'branch', 'custom-io'])
+def test_incompatible_publication_environment_is_not_reconstructed(
+        tmp_path, native_rest_catalog, kind):
+    table = _table(tmp_path, catalog=native_rest_catalog)
+    if kind == 'custom-env':
         class CustomEnvironment(CatalogEnvironment):
             pass
         table.catalog_environment = CustomEnvironment()
@@ -523,38 +522,43 @@ def test_incompatible_publication_environment_is_not_reconstructed(tmp_path, kin
     else:
         table.file_io = Mock()
     with patch('pypaimon.write.native_commit.native_commit_available', return_value=True), \
-            patch('pypaimon.write.native_commit._resolved_schema_file_io_options') as resolve:
+            patch('pypaimon.write.native_commit._native_rest_table') as resolve:
         assert create_native_commit(table, 'job') is None
         resolve.assert_not_called()
 
 
 @pytest.mark.parametrize('missing_type,missing_method', [
     ('Table', 'from_resolved_schema'),
+    ('Table', 'rest_table_uuid'),
+    ('Table', 'copy_with_resolved_schema'),
+    ('PaimonCatalog', 'get_table'),
     ('CommitMessage', 'deserialize'),
     ('StreamWriteBuilder', 'with_commit_user'),
     ('BatchWriteBuilder', '_with_commit_user'),
     ('BatchWriteBuilder', 'with_overwrite'),
 ])
 def test_incomplete_runtime_falls_back_without_reconstructing_table(
-        tmp_path, missing_type, missing_method):
-    table = _table(tmp_path)
+        tmp_path, native_rest_catalog, missing_type, missing_method):
+    table = _table(tmp_path, catalog=native_rest_catalog)
     with patch('pypaimon.write.native_commit.native_method_available',
                side_effect=lambda cls, method: (cls, method) != (missing_type, missing_method)), \
-            patch('pypaimon.write.native_commit._resolved_schema_file_io_options') as resolve:
+            patch('pypaimon.write.native_commit._native_rest_table') as resolve:
         assert create_native_commit(table, 'job') is None
         resolve.assert_not_called()
 
 
-def test_missing_runtime_falls_back_without_reconstructing_table(tmp_path):
-    table = _table(tmp_path)
+def test_missing_runtime_falls_back_without_reconstructing_table(
+        tmp_path, native_rest_catalog):
+    table = _table(tmp_path, catalog=native_rest_catalog)
     with patch('pypaimon.write.native_commit.native_commit_available', return_value=False), \
-            patch('pypaimon.write.native_commit._resolved_schema_file_io_options') as resolve:
+            patch('pypaimon.write.native_commit._native_rest_table') as resolve:
         assert create_native_commit(table, 'job') is None
         resolve.assert_not_called()
 
 
-def test_partial_row_id_and_compact_messages_preserve_python_recovery(tmp_path):
-    table = _table(tmp_path, 'de')
+def test_partial_row_id_and_compact_messages_preserve_python_recovery(
+        tmp_path, native_rest_catalog):
+    table = _table(tmp_path, 'de', catalog=native_rest_catalog)
     assert create_native_commit(table, 'job') is None
     assert not native_messages_supported(table, [CommitMessage((), 0, [])])
     assert not native_messages_supported(table, [CommitMessage((), 0, [], check_from_snapshot=7)])
@@ -562,8 +566,9 @@ def test_partial_row_id_and_compact_messages_preserve_python_recovery(tmp_path):
     assert not native_messages_supported(table, [CommitMessage((), 0, [], compact_after=[Mock()])])
 
 
-def test_custom_manifest_target_uses_python_rolling(tmp_path):
-    table = _table(tmp_path).copy({'manifest.target-file-size': '16 kb'})
+def test_custom_manifest_target_uses_python_rolling(tmp_path, native_rest_catalog):
+    table = _table(tmp_path, catalog=native_rest_catalog).copy({
+        'manifest.target-file-size': '16 kb'})
     assert create_native_commit(table, 'job') is None
     assert not native_messages_supported(table, [CommitMessage((), 0, [])])
 
