@@ -24,6 +24,7 @@ import pyarrow
 
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         RowType)
 from pypaimon.table.system.system_table import SystemTable
@@ -79,13 +80,6 @@ def _stringify_path(value: Any) -> str:
     return str(value)
 
 
-def _stats_columns(file_meta, table_field_names: List[str]) -> List[str]:
-    cols = getattr(file_meta, "value_stats_cols", None)
-    if cols:
-        return list(cols)
-    return list(table_field_names)
-
-
 def _to_python(value: Any) -> Any:
     """Render an internal-row cell value into a JSON-safe primitive."""
     if value is None:
@@ -126,21 +120,13 @@ def _render_partition(partition_row) -> Optional[str]:
 
 
 def _row_values(row) -> List[Any]:
-    # ``GenericRow`` exposes ``values`` directly, but a row read back from a
-    # manifest is a ``BinaryRow`` that only offers ``get_field``/``__len__``.
-    # Fall back to those so value stats are not silently rendered as ``{}``.
-    if row is None:
-        return []
-    values = getattr(row, "values", None)
-    if values is not None:
-        return values
-    try:
-        return [row.get_field(i) for i in range(len(row))]
-    except Exception:
-        # A row whose stored arity disagrees with the resolved fields (schema
-        # evolution) or whose bytes are malformed must degrade to {} rather than
-        # abort the whole $files listing, which is what the old code did.
-        return []
+    return [row.get_field(i) for i in range(len(row))]
+
+
+def _stats_fields(stats_row) -> List[str]:
+    # The manifest decodes a stats row with the fields its file stored,
+    # resolved against the file's own schema, so they name the row's positions.
+    return [field.name for field in stats_row.fields]
 
 
 def _render_stats_map(values: List[Any], columns: List[str]) -> str:
@@ -186,7 +172,9 @@ class FilesTable(SystemTable):
             manifest_files, drop_stats=False)
 
         file_format = self.base_table.options.file_format()
-        table_field_names = list(self.base_table.field_names)
+        stats_evolutions = SimpleStatsEvolutions(
+            self._schema_fields, self.base_table.table_schema.id)
+        stats_columns = [field.name for field in stats_evolutions.table_fields]
 
         rows = {
             "partition": [],
@@ -225,16 +213,19 @@ class FilesTable(SystemTable):
             rows["min_key"].append(_render_key(meta.min_key))
             rows["max_key"].append(_render_key(meta.max_key))
 
-            stats_cols = _stats_columns(meta, table_field_names)
-            value_stats = meta.value_stats
+            # Evolve stats to the current schema by field id, so a dropped or
+            # re-added column never inherits another column's stats.
+            value_stats = stats_evolutions.get_or_create(meta.schema_id).evolution(
+                meta.value_stats, meta.row_count,
+                _stats_fields(meta.value_stats.min_values))
             rows["null_value_counts"].append(
-                _render_null_counts(value_stats.null_counts, stats_cols))
+                _render_null_counts(value_stats.null_counts, stats_columns))
             rows["min_value_stats"].append(_render_stats_map(
                 _row_values(value_stats.min_values),
-                stats_cols))
+                stats_columns))
             rows["max_value_stats"].append(_render_stats_map(
                 _row_values(value_stats.max_values),
-                stats_cols))
+                stats_columns))
 
             rows["min_sequence_number"].append(int(meta.min_sequence_number))
             rows["max_sequence_number"].append(int(meta.max_sequence_number))
@@ -288,6 +279,12 @@ class FilesTable(SystemTable):
             "write_cols": pyarrow.array(
                 rows["write_cols"], type=_WRITE_COLS_TYPE),
         })
+
+    def _schema_fields(self, schema_id: int) -> List[DataField]:
+        table_schema = self.base_table.table_schema
+        if schema_id == table_schema.id:
+            return table_schema.fields
+        return self.base_table.schema_manager.get_schema(schema_id).fields
 
     @staticmethod
     def _empty_table() -> pyarrow.Table:

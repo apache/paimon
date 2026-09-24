@@ -26,8 +26,9 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.schema.data_types import DataField
-from pypaimon.table.system.files_table import FilesTable
+from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.schema_change import SchemaChange
+from pypaimon.table.system.files_table import FilesTable, _row_values
 
 
 def _read(table):
@@ -188,6 +189,66 @@ class FilesTableTest(unittest.TestCase):
         self.assertEqual(3, max(m["id"] for m in maxs if "id" in m))
         # The partition column also lands in the stats map.
         self.assertTrue(any("dt" in m for m in mins))
+
+    def _write(self, identifier, data):
+        write_builder = self.catalog.get_table(identifier).new_batch_write_builder()
+        writer = write_builder.new_write()
+        commit = write_builder.new_commit()
+        writer.write_arrow(data)
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+    def test_value_stats_follow_field_ids_after_drop_and_re_add(self):
+        fields = [
+            DataField.from_dict({"id": 0, "name": "id", "type": "INT"}),
+            DataField.from_dict({"id": 1, "name": "v", "type": "STRING"}),
+        ]
+        self.catalog.create_table(
+            "db.evolved",
+            Schema(fields=fields, options={"metadata.stats-mode": "full"}),
+            False,
+        )
+        self._write("db.evolved", pa.table({
+            "id": pa.array([1], type=pa.int32()), "v": ["old"]}))
+        self.catalog.alter_table(
+            "db.evolved", [SchemaChange.drop_column("v")], False)
+        self.catalog.alter_table(
+            "db.evolved", [SchemaChange.add_column("v", AtomicType("INT"))],
+            False)
+        self._write("db.evolved", pa.table({
+            "id": pa.array([2], type=pa.int32()),
+            "v": pa.array([20], type=pa.int32())}))
+
+        rows = sorted(_read(self.catalog.get_table("db.evolved$files"))
+                      .to_pylist(), key=lambda row: row["schema_id"])
+        self.assertEqual(2, len(rows))
+        old_file, new_file = rows
+        # The re-added ``v`` is a different column: the old file has no stats
+        # for it and all of its rows are null there.
+        self.assertEqual({"id": 1, "v": None},
+                         json.loads(old_file["min_value_stats"]))
+        self.assertEqual({"id": 1, "v": None},
+                         json.loads(old_file["max_value_stats"]))
+        self.assertEqual({"id": 0, "v": 1},
+                         json.loads(old_file["null_value_counts"]))
+        self.assertEqual({"id": 2, "v": 20},
+                         json.loads(new_file["min_value_stats"]))
+        self.assertEqual({"id": 2, "v": 20},
+                         json.loads(new_file["max_value_stats"]))
+        self.assertEqual({"id": 0, "v": 0},
+                         json.loads(new_file["null_value_counts"]))
+
+    def test_stats_decode_errors_are_not_swallowed(self):
+        class CorruptRow:
+            def __len__(self):
+                return 1
+
+            def get_field(self, pos):
+                raise ValueError("corrupt stats row")
+
+        with self.assertRaises(ValueError):
+            _row_values(CorruptRow())
 
 
 if __name__ == "__main__":
