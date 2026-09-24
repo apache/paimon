@@ -25,6 +25,7 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
+import org.apache.paimon.utils.Int2ShortHashMap;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -83,6 +84,40 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                 assignId,
                 5,
                 maxBucketsNum);
+    }
+
+    @Test
+    public void testAssignFailsDescriptivelyWhenAssignerOwnsNoBucket() {
+        // a bucket filter rejecting every id below the cap leaves the random pick with an
+        // empty bucket list; the error must name the cause instead of "list is empty"
+        PartitionIndex index = new PartitionIndex(new Int2ShortHashMap(), new HashMap<>(), 100);
+        assertThatThrownBy(() -> index.assign(42, bucket -> false, 2))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("dynamic-bucket.max-buckets");
+    }
+
+    @Test
+    public void testFreshPartitionFailsDescriptivelyWhenAssignerOwnsNoBucket() {
+        // with a cap smaller than the assigner number, the assigner whose id reaches the cap
+        // owns no bucket on a fresh partition: it used to die with an unrelated "list is
+        // empty" from the random pick over its empty bucket list
+        HashBucketAssigner assigner2 = createAssigner(3, 3, 2, 1);
+        assertThatThrownBy(() -> assigner2.assign(row(9), 123))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("dynamic-bucket.max-buckets");
+    }
+
+    @Test
+    public void testAssignReusesLoadedBucketBeyondCap() {
+        // an assigner that already owns a loaded bucket beyond the cap (the table's
+        // max-buckets was lowered after the bucket was created) must keep serving that
+        // bucket, not throw: only the genuinely bucketless case is rejected
+        Map<Integer, Long> loaded = new HashMap<>();
+        loaded.put(5, 1L); // bucket 5 is owned by assigner 2 of 3 and already at the row cap
+        PartitionIndex index = new PartitionIndex(new Int2ShortHashMap(), loaded, 1);
+        // cap 2 admits only buckets 0 and 1; bucket 5 is beyond it but already loaded, so the
+        // assign falls through to the random pick over the loaded bucket rather than failing
+        assertThat(index.assign(42, bucket -> bucket % 3 == 2, 2)).isEqualTo(5);
     }
 
     @Test

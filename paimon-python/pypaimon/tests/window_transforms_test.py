@@ -58,6 +58,47 @@ class WindowTransformsTest(unittest.TestCase):
         gray = _png(np.array([[0, 255]], dtype=np.uint8))
         self.assertEqual([[[[0., 1.]]]], images_to_tensor([gray]).tolist())
 
+    def test_palette_colors_and_transparency_are_expanded(self):
+        from pypaimon.multimodal.lerobot.dataset import _image_tensor
+
+        for transparency, alpha in (
+                (None, None), (0, [0, 255]), (bytes([255, 128]), [255, 128])):
+            with self.subTest(transparency=transparency):
+                image = Image.new("P", (2, 1))
+                image.putpalette([255, 0, 0, 0, 255, 0] + [0] * 762)
+                image.putdata([0, 1])
+                buffer = io.BytesIO()
+                options = {} if transparency is None else {"transparency": transparency}
+                image.save(buffer, format="PNG", **options)
+                payload = buffer.getvalue()
+                channels = [[[255, 0]], [[0, 255]], [[0, 0]]]
+                if alpha is not None:
+                    channels.append([alpha])
+                expected = torch.tensor([channels], dtype=torch.uint8)
+
+                torch.testing.assert_close(
+                    images_to_tensor([payload], return_uint8=True), expected)
+                torch.testing.assert_close(
+                    images_to_tensor([payload]), expected.float() / 255)
+                feature = {"dtype": "image", "shape": [1, 2, len(channels)]}
+                torch.testing.assert_close(
+                    _image_tensor(payload, feature, return_uint8=True), expected[0])
+
+    def test_palette_frames_stack_with_rgb_frames_after_exif_orientation(self):
+        image = Image.new("P", (2, 1))
+        image.putpalette([255, 0, 0, 0, 255, 0] + [0] * 762)
+        image.putdata([0, 1])
+        buffer = io.BytesIO()
+        exif = Image.Exif()
+        exif[274] = 6
+        image.save(buffer, format="PNG", exif=exif)
+        rgb = _png(np.array([[[255, 0, 0]], [[0, 255, 0]]], dtype=np.uint8))
+
+        result = images_to_tensor([buffer.getvalue(), rgb], return_uint8=True)
+
+        self.assertEqual((2, 3, 2, 1), tuple(result.shape))
+        torch.testing.assert_close(result[0], result[1])
+
     def test_high_bit_depth_keeps_native_units(self):
         payload = _png(np.array([[0, 1024, 65535]], dtype=np.uint16))
         for return_uint8 in (False, True):

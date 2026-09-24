@@ -119,6 +119,36 @@ table = table.copy({"parquet.filter.columnindex.enabled": "false"})
 Unsupported reads use the normal path. Reading fewer bytes may require more
 object-store requests.
 
+# Native write and commit
+
+PyPaimon can write Arrow batches through the optional `pypaimon-rust` runtime.
+Enable it on a table independently of native commit:
+
+```python
+native_table = table.copy({"write.native.enabled": "true",
+                           "commit.native.enabled": "true"})
+builder = native_table.new_batch_write_builder()
+writer, commit = builder.new_write(), builder.new_commit()
+try:
+    writer.write_arrow(data)
+    commit.commit(writer.prepare_commit())
+finally:
+    writer.close()
+    commit.close()
+```
+
+The native writer returns ordinary PyPaimon commit messages, so the Python
+committer also works when `commit.native.enabled` is false. Batch overwrite and
+reusable stream writers retain the builder's commit user and identifier. Native
+write is currently limited to Parquet tables without BLOB fields or
+data-evolution mode, on the same filesystem/JDBC publication route as native
+commit. Writer methods requiring Python's specialized path select the Python
+writer before native data is written. If the runtime or table route is
+unavailable, write uses Python. Once Rust starts writing a batch, errors
+propagate without retrying that batch through Python.
+
+Both native options are disabled by default.
+
 # Native commit
 
 PyPaimon can submit append and batch overwrite commits through the optional
@@ -136,11 +166,11 @@ finally:
     commit.close()
 ```
 
-The Python writer still produces files. Its commit messages cross the Java v14
-wire format into `CommitMessage.deserialize()` and are committed by Rust. Batch
-and stream append commits retain the Python builder's commit user, identifier,
-empty-commit option, and batch one-shot lifecycle. Explicit abort also supports
-native cleanup of uncommitted files.
+When only native commit is enabled, the Python writer produces files. Its commit
+messages cross the Java v14 wire format into `CommitMessage.deserialize()` and
+are committed by Rust. Batch and stream append commits retain the Python
+builder's commit user, identifier, empty-commit option, and batch one-shot
+lifecycle. Explicit abort also supports native cleanup of uncommitted files.
 
 For batch overwrite, configure the Python builder as usual:
 
@@ -219,9 +249,11 @@ interrupts native reads that are still in flight. A missing reader capability,
 unsupported route, or native-reader construction failure falls back to Python;
 I/O and data errors raised after streaming starts surface to the caller.
 
-With Rust main's `Table.from_resolved_schema()` binding, filesystem and JDBC catalog
-tables preserve the Python table's resolved schema and complete effective
-options. Stale table objects, historical schemas, and `copy()` overrides or
+Native planning and reading require Rust's resolved-schema bindings:
+`Table.from_resolved_schema()` for filesystem, JDBC and path-based tables, and
+`Table.copy_with_resolved_schema()` for REST tables. The adapter passes the Python
+table's resolved schema and complete effective options without an option whitelist.
+Stale table objects, historical schemas, and `copy()` overrides or
 option removals no longer require catalog reloading or Python planning.
 Tables opened with `FileStoreTable.from_path(path, file_io_options=None)` use
 the same path with standard local, PyArrow or resolving FileIO. Storage options

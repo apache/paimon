@@ -1856,10 +1856,12 @@ class MultimodalTableTest(unittest.TestCase):
                 collect_batch,
                 parallelism=2,
                 batch_size=1,
+                blob_uri_affinity=True,
+                prefetch_bytes=32,
                 fn_kwargs={"prefix": b"got-"},
                 ray_remote_args={"num_cpus": 1},
             )
-            rows = sorted(result.to_pandas().to_dict("records"), key=lambda row: row["idx"])
+            rows = sorted(result.take_all(), key=lambda row: row["idx"])
 
             self.assertEqual(
                 [
@@ -2084,6 +2086,23 @@ class MultimodalTableTest(unittest.TestCase):
                     ["image"],
                     lambda scalar, blobs: pa.table({"rows": [scalar.num_rows]}),
                     file_io=obs.raw_table.file_io,
+                )
+
+            with self.assertRaisesRegex(ValueError, "requires batch_size"):
+                obs.map_with_blobs(
+                    ds,
+                    ["image"],
+                    return_none,
+                    batch_size=None,
+                    blob_uri_affinity=True,
+                )
+
+            with self.assertRaisesRegex(ValueError, "prefetch_bytes"):
+                obs.map_with_blobs(
+                    ds,
+                    ["image"],
+                    return_none,
+                    prefetch_bytes=0,
                 )
 
             with self.assertRaisesRegex(Exception, "must return"):
@@ -2375,6 +2394,52 @@ class MultimodalTableTest(unittest.TestCase):
             ],
             rows,
         )
+
+    def test_merge_preserves_fields_first_present_in_later_source_rows(self):
+        users = self.conn.create_table(
+            "sparse_merge",
+            data=[
+                {"id": 1, "name": "Alice", "age": 30},
+                {"id": 2, "name": "Bob", "age": 25},
+            ],
+            schema=_schema({
+                "id": pa.int32(), "name": pa.string(), "age": pa.int32(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        source = [{"id": 1}, {"id": 2, "name": "Bobby"},
+                  {"id": 3, "name": "Carol"}]
+
+        users.merge("id").when_matched_update() \
+            .when_not_matched_insert().execute(source)
+
+        self.assertEqual([
+            {"id": 1, "name": None, "age": 30},
+            {"id": 2, "name": "Bobby", "age": 25},
+            {"id": 3, "name": "Carol", "age": None},
+        ], sorted(users.scan().to_list(), key=lambda row: row["id"]))
+        self.assertEqual({"id": 1}, source[0])
+
+    def test_merge_preserves_later_source_only_fields_with_mapped_keys(self):
+        users = self.conn.create_table(
+            "sparse_mapped_merge",
+            data=[{"id": 1, "name": "Alice"}],
+            schema=_schema({"id": pa.int32(), "name": pa.string()}),
+            options=_PARQUET_OPTIONS,
+        )
+        values = {"name": source_col("new_name")}
+
+        users.merge({"id": "source_id"}).when_matched_update(values) \
+            .when_not_matched_insert({
+                "id": source_col("source_id"), **values,
+            }).execute([
+                {"source_id": 1},
+                {"source_id": 2, "new_name": "Bob"},
+            ])
+
+        self.assertEqual([
+            {"id": 1, "name": None}, {"id": 2, "name": "Bob"},
+        ], sorted(users.scan().to_list(), key=lambda row: row["id"]))
 
     def test_merge_supports_source_key_mapping(self):
         users = self.conn.create_table(

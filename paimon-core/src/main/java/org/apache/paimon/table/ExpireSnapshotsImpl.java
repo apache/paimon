@@ -131,6 +131,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         }
 
         Preconditions.checkArgument(
+                retainMin >= 1, String.format("retainMin (%s) must be at least 1.", retainMin));
+        Preconditions.checkArgument(
                 retainMax >= retainMin,
                 String.format(
                         "retainMax (%s) must not be less than retainMin (%s).",

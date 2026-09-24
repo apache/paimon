@@ -42,6 +42,22 @@ def _escape_partition_component(value: str) -> str:
                    for char in value)
 
 
+def canonical_data_file_path(table, partition, bucket, file_name):
+    """Locate a file in Java's escaped partition directory."""
+    bucket_path = table.path_factory().bucket_path(
+        tuple(partition), bucket, canonical_partition=True)
+    path = f"{bucket_path.rstrip('/')}/{file_name}"
+    root = table.table_path.rstrip('/')
+    if (root.startswith('file:') and path.startswith(root + '/')
+            and '%' in path[len(root) + 1:]):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+
+        # File I/O wrappers eventually decode %2F in file URIs. Rust stores
+        # the literal escaped component, so use its physical local path.
+        return str(LocalFileIO()._to_file(root) / path[len(root) + 1:])
+    return path
+
+
 def _floating_partition_string(value, single_precision: bool) -> str:
     # Use a shortest round-tripping form for the initial lookup. Older JVMs
     # can use different digits; the read fallback matches their stored values.

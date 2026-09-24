@@ -1048,11 +1048,13 @@ class GlobalIndexBuildTest(
         dv_options['deletion-vectors.enabled'] = 'true'
         dv_table = self._create_table(pa_schema=schema, options=dv_options)
         with self.assertRaisesRegex(ValueError, 'deletion vectors'):
-            dv_table.create_global_index(
+            dv_table.copy({'data-evolution.enabled': 'false'}).create_global_index(
                 'embedding',
                 index_type='ivf-flat',
                 options={'ivf-flat.dimension': '2'},
             )
+        with self.assertRaisesRegex(ValueError, 'deletion vectors'):
+            dv_table.create_global_index('embedding', index_type=FULL_TEXT_IDENTIFIER)
 
     def test_vindex_native_options_follow_java_mapping(self):
         data_type = ArrayType(True, AtomicType('FLOAT'))
@@ -1086,20 +1088,85 @@ class GlobalIndexBuildTest(
         }
 
         rq_result = native_options(
-            data_type, options, 'ivf-rq', 'embedding')
+            data_type, options, 'ivf-rq', 'embedding', {})
         self.assertEqual('ivf_rq', rq_result['index.type'])
         self.assertEqual('5', rq_result['rq.bits'])
         self.assertEqual('96', rq_result['max-bytes-per-vector'])
         self.assertEqual('inner_product', rq_result['metric'])
 
         diskann_result = native_options(
-            data_type, options, 'diskann', 'embedding')
+            data_type, options, 'diskann', 'embedding', {})
         self.assertEqual('diskann', diskann_result['index.type'])
         self.assertEqual(
             'balanced', diskann_result['diskann.build-preset'])
         self.assertEqual('0.0625', diskann_result['pq.code-ratio'])
         self.assertEqual(
             'f16', diskann_result['diskann.raw-vector-encoding'])
+
+    def test_vindex_native_options_support_050_build_options(self):
+        data_type = ArrayType(True, AtomicType('FLOAT'))
+        native_names = {
+            'ivf.coarse-assignment': 'auto',
+            'ivf.pq-encoding': 'auto',
+            'ivf.train.max-points-per-centroid': '32',
+            'pq.train.max-points-per-centroid': '64',
+        }
+
+        result = native_options(
+            data_type, native_names, 'ivf-pq', 'embedding')
+        self.assertEqual('auto', result['ivf.coarse-assignment'])
+        self.assertEqual('auto', result['ivf.pq-encoding'])
+        self.assertEqual('32', result['ivf.train.max-points-per-centroid'])
+        self.assertEqual('64', result['pq.train.max-points-per-centroid'])
+
+        prefixed_names = {
+            'ivf-pq.ivf.coarse-assignment': 'exact',
+            'fields.embedding.ivf.pq-encoding': 'canonical',
+            'ivf-pq.ivf.train.max-points-per-centroid': '16',
+            'fields.embedding.pq.train.max-points-per-centroid': '48',
+        }
+        result = native_options(
+            data_type, prefixed_names, 'ivf-pq', 'embedding')
+        self.assertEqual('exact', result['ivf.coarse-assignment'])
+        self.assertEqual('canonical', result['ivf.pq-encoding'])
+        self.assertEqual('16', result['ivf.train.max-points-per-centroid'])
+        self.assertEqual('48', result['pq.train.max-points-per-centroid'])
+
+        result = native_options(
+            data_type,
+            {'diskann.pq.train.max-points-per-centroid': '24'},
+            'diskann',
+            'embedding',
+        )
+        self.assertEqual('24', result['pq.train.max-points-per-centroid'])
+
+        table_options = {'fields.embedding.ivf.pq-encoding': 'auto'}
+        result = native_options(
+            data_type,
+            table_options,
+            'ivf-pq',
+            'embedding',
+            {'ivf.pq-encoding': 'canonical'},
+        )
+        self.assertEqual('canonical', result['ivf.pq-encoding'])
+        result = native_options(
+            data_type, table_options, 'ivf-flat', 'embedding', {})
+        self.assertNotIn('ivf.pq-encoding', result)
+
+        with self.assertRaisesRegex(ValueError, 'ivf-flat.ivf.pq-encoding'):
+            native_options(
+                data_type,
+                {'ivf-flat.ivf.pq-encoding': 'canonical'},
+                'ivf-flat',
+                'embedding',
+            )
+        with self.assertRaisesRegex(ValueError, 'diskann.ivf.coarse-assignment'):
+            native_options(
+                data_type,
+                {'diskann.ivf.coarse-assignment': 'exact'},
+                'diskann',
+                'embedding',
+            )
 
     def test_vindex_training_sample_ratio(self):
         options = {
@@ -1110,6 +1177,15 @@ class GlobalIndexBuildTest(
             0.25, train_sample_ratio(options, 'ivf-rq', 'embedding'))
         self.assertEqual(
             0.5, train_sample_ratio(options, 'ivf-rq', 'other'))
+        self.assertEqual(
+            0.5,
+            train_sample_ratio(
+                {'fields.embedding.train.sample-ratio': '0.75'},
+                'ivf-rq',
+                'embedding',
+                {'ivf-rq.train.sample-ratio': '0.5'},
+            ),
+        )
 
         import numpy as np
         vectors = np.arange(20, dtype=np.float32).reshape(10, 2)

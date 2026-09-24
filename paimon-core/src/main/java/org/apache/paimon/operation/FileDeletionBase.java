@@ -69,6 +69,8 @@ import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
+import static org.apache.paimon.append.dataevolution.SerializationAssignment.planFile;
+
 /**
  * Base class for file deletion including methods for clean data files, manifest files and empty
  * data directories.
@@ -381,6 +383,11 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         collectUnusedIndexManifests(snapshot, skippingSet, indexFiles, indexManifests);
         collectUnusedStatisticsManifests(snapshot, skippingSet, statistics);
 
+        String reassignPlan = planFile(snapshot);
+        if (reassignPlan != null && skippingSet.add(reassignPlan)) {
+            manifests.add(reassignPlan);
+        }
+
         List<Runnable> tasks = new ArrayList<>();
         for (String manifest : manifests) {
             tasks.add(() -> manifestFile.delete(manifest));
@@ -615,6 +622,11 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                     .map(IndexManifestEntry::indexFile)
                     .map(IndexFileMeta::fileName)
                     .forEach(skippingSet::add);
+        }
+
+        String reassignPlan = planFile(skippingSnapshot);
+        if (reassignPlan != null) {
+            skippingSet.add(reassignPlan);
         }
 
         // statistics

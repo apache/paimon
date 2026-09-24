@@ -676,11 +676,13 @@ class BlobRecordIterator:
             value_index_start = index_lengths_position - value_index_length
             key_index_start = value_index_start - key_index_length
             stream.seek(key_index_start)
-            key_index_bytes = self._read_fully_from(stream, key_index_length)
+            # The two indexes are adjacent; read both without touching BLOB values.
+            index_bytes = self._read_fully_from(
+                stream, key_index_length + value_index_length)
+            key_index_bytes = index_bytes[:key_index_length]
             if len(key_index_bytes) != key_index_length:
                 raise IOError("Invalid MAP<X, BLOB> payload: cannot read key index")
-            stream.seek(value_index_start)
-            value_index_bytes = self._read_fully_from(stream, value_index_length)
+            value_index_bytes = index_bytes[key_index_length:]
             if len(value_index_bytes) != value_index_length:
                 raise IOError("Invalid MAP<X, BLOB> payload: cannot read value index")
 

@@ -5029,6 +5029,49 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertEqual(calls[0][1], 4)
         parallel_reader.close()
 
+    def test_map_blob_descriptor_coalesces_indexes_without_reading_values(self):
+        field = DataField(
+            0, "blob_map", MapType(True, AtomicType("STRING"), AtomicType("BLOB")))
+        value_data = b"payload" * 1024
+        key_lengths = [1, 1, 1]
+        value_lengths = [len(value_data), -1, 0]
+        payload = self._map_blob_payload(
+            b"abc", value_data, key_lengths, value_lengths)
+        prefix = b"preceding row"
+        value_start = len(prefix) + BlobRecordIterator.MAP_HEADER_SIZE + 3
+        index_start = value_start + len(value_data)
+        index_length = (len(DeltaVarintCompressor.compress(key_lengths))
+                        + len(DeltaVarintCompressor.compress(value_lengths)))
+        reads = []
+
+        class TrackingStream(io.BytesIO):
+            def read(self, size=-1):
+                start = self.tell()
+                reads.append((start, size))
+                if start < index_start and start + size > value_start:
+                    raise AssertionError("Descriptor read touched BLOB value data")
+                return super().read(size)
+
+        with TrackingStream(prefix + payload) as stream:
+            iterator = BlobRecordIterator(
+                None, "test.blob", [], [], field,
+                input_stream=stream, blob_as_descriptor=True)
+            result = iterator._read_blob_map(len(prefix), len(payload))
+            self.assertEqual(list(result), ['a', 'b', 'c'])
+            descriptor = result['a'].to_descriptor()
+            self.assertEqual((descriptor.offset, descriptor.length),
+                             (value_start, len(value_data)))
+            self.assertIsNone(result['b'])
+            self.assertEqual(result['c'].to_descriptor().length, 0)
+
+        self.assertEqual(reads, [
+            (len(prefix), BlobRecordIterator.MAP_HEADER_SIZE),
+            (len(prefix) + len(payload) - BlobRecordIterator.MAP_INDEX_LENGTHS_SIZE,
+             BlobRecordIterator.MAP_INDEX_LENGTHS_SIZE),
+            (index_start, index_length),
+            (len(prefix) + BlobRecordIterator.MAP_HEADER_SIZE, 3),
+        ])
+
     def test_map_blob_consumer_descriptors_and_flush(self):
         from pypaimon.write.blob_format_writer import BlobFormatWriter
 
