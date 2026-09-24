@@ -392,7 +392,7 @@ class FileStoreTable(Table):
             legacy_partition_name=self.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME),
             file_suffix_include_compression=False,
             file_compression=file_compression,
-            data_file_path_directory=None,
+            data_file_path_directory=self.options.data_file_path_directory(),
             external_paths=external_paths,
             external_path_strategy=self.options.data_file_external_paths_strategy(),
             external_path_weights=self.options.data_file_external_paths_weights(),

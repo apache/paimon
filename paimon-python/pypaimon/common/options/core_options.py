@@ -520,6 +520,13 @@ class CoreOptions:
         .default_value("data-")
         .with_description("Specify the file name prefix of data files.")
     )
+
+    DATA_FILE_PATH_DIRECTORY: ConfigOption[str] = (
+        ConfigOptions.key("data-file.path-directory")
+        .string_type()
+        .no_default_value()
+        .with_description("Specify the path directory of data files.")
+    )
     # Scan options
     SCAN_MODE: ConfigOption[StartupMode] = (
         ConfigOptions.key("scan.mode")
@@ -1478,6 +1485,9 @@ class CoreOptions:
 
     def data_file_prefix(self, default=None):
         return self.options.get(CoreOptions.DATA_FILE_PREFIX, default)
+
+    def data_file_path_directory(self, default=None):
+        return self.options.get(CoreOptions.DATA_FILE_PATH_DIRECTORY, default)
 
     def scan_mode(self, default=None):
         return self.options.get(CoreOptions.SCAN_MODE, default)
