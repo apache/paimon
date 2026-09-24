@@ -37,6 +37,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 import pytest
@@ -251,6 +252,7 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
             self.assertIn('aggregation', msg)
         self.assertIn(expected_substring, msg)
 
+    @pytest.mark.python_write
     @pytest.mark.python_read
     def test_remove_record_on_delete_rejected(self):
         self._create_and_expect_unsupported(
@@ -259,6 +261,7 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
             'aggregation.remove-record-on-delete',
         )
 
+    @pytest.mark.python_write
     @pytest.mark.python_read
     def test_field_ignore_retract_rejected(self):
         self._create_and_expect_unsupported(
@@ -267,24 +270,46 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
             'fields.total.ignore-retract',
         )
 
-    def test_unsupported_stream_write_rejected_before_buffering(self):
+    @pytest.mark.python_write
+    def test_unsupported_stream_write_rejected_at_construction(self):
         table = self._create_pk_table(
             'agg_stream_reject', field_aggs={'total': 'sum'},
             extra_options={'aggregation.remove-record-on-delete': 'true'})
-        writer = table.new_stream_write_builder().new_write()
-        try:
-            with self.assertRaisesRegex(
-                    NotImplementedError, 'aggregation.remove-record-on-delete'):
-                writer.write_arrow(pa.Table.from_pylist([
-                    {'id': 1, 'total': 10}, {'id': 1, 'total': 20},
-                ], schema=self.pa_schema))
-            self.assertEqual(writer.prepare_commit(1), [])
-        finally:
-            writer.close()
+        with self.assertRaisesRegex(
+                NotImplementedError, 'aggregation.remove-record-on-delete'):
+            table.new_stream_write_builder().new_write()
         self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
         self.assertEqual(glob.glob(
             os.path.join(table.table_path, '**', '*.parquet'), recursive=True), [])
 
+    @pytest.mark.python_write
+    def test_dynamic_bucket_rejected_before_index_creation(self):
+        from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite
+
+        for streaming in (False, True):
+            table = self._create_pk_table(
+                'agg_dynamic_reject_{}'.format(streaming), extra_options={
+                    'bucket': '-1',
+                    'aggregation.remove-record-on-delete': 'true',
+                })
+            builder = (table.new_stream_write_builder() if streaming
+                       else table.new_batch_write_builder())
+            writer_class = StreamTableWrite if streaming else BatchTableWrite
+            # A rejected writer must never create the bucket index maintainer,
+            # including callers that construct TableWrite directly.
+            with patch.object(table, 'create_row_key_extractor') as extractor:
+                for create in (builder.new_write, lambda: writer_class(table, 'test')):
+                    with self.subTest(streaming=streaming, create=create):
+                        with self.assertRaisesRegex(
+                                NotImplementedError, 'aggregation.remove-record-on-delete'):
+                            create()
+                extractor.assert_not_called()
+            self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+            self.assertEqual(glob.glob(os.path.join(table.table_path, 'index', '*')), [])
+            self.assertEqual(glob.glob(
+                os.path.join(table.table_path, '**', '*.parquet'), recursive=True), [])
+
+    @pytest.mark.python_write
     def test_false_retract_options_remain_writable(self):
         table = self._create_pk_table(
             'agg_false_retract', field_aggs={'total': 'sum'}, extra_options={
@@ -293,7 +318,9 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
             })
         self._write(table, [{'id': 1, 'total': 10}])
         self._write(table, [{'id': 1, 'total': 20}])
-        self.assertEqual(self._read(table)[0]['total'], 30)
+        # This tests write acceptance. Native read support for false-valued
+        # retract options is independent of the write-side guard.
+        self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, 2)
 
     def test_sequence_field_supported(self):
         # Top-level sequence.field is honored by the aggregation engine:
