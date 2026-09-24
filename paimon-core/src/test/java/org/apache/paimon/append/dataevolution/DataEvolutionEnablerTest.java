@@ -262,11 +262,16 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         table = loadTable();
         List<DataFileMeta> after = liveFiles(table);
         assertThat(after).hasSize(2);
+        long rowIdSnapshot = table.snapshotManager().latestSnapshotId() - 1;
         for (DataFileMeta file : after) {
             assertThat(file.firstRowId()).isNotNull();
-            // the first row id is the only difference
+            // the first row id and the sequence numbers of the row id commit are the only
+            // differences
             assertThat(file)
-                    .isEqualTo(before.get(file.fileName()).assignFirstRowId(file.firstRowId()));
+                    .isEqualTo(
+                            before.get(file.fileName())
+                                    .assignFirstRowId(file.firstRowId())
+                                    .assignSequenceNumber(rowIdSnapshot, rowIdSnapshot));
         }
 
         // the files are still read from their external path, statistics still prune
@@ -344,6 +349,51 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         latest.newBatchWriteBuilder().newCommit().commit(compactMessages);
         assertThat(valuesById(loadTable())).containsEntry(1, "A").containsEntry(2, "B");
         assertThat(rowIdsById(loadTable())).containsEntry(1, 0L).containsEntry(2, 1L);
+    }
+
+    @Test
+    public void testColumnWriteAfterConversionWinsOverRowsWrittenBefore() throws Exception {
+        FileStoreTable table = createTable(Collections.emptyMap());
+        // A plain append writer numbers its rows: one commit of 20 rows gives the file a max
+        // sequence number of 19, more than the snapshot ids that the table reaches below. A
+        // row-tracking commit stamps new files with the snapshot id instead.
+        GenericRow[] rows = new GenericRow[20];
+        for (int i = 0; i < rows.length; i++) {
+            rows[i] = row(i, "v" + i, "p1");
+        }
+        writeRows(table, rows);
+        assertThat(liveFiles(table).get(0).maxSequenceNumber()).isEqualTo(19L);
+
+        enabler().run(false);
+        table = loadTable();
+        long snapshotBeforeWrite = table.snapshotManager().latestSnapshotId();
+        assertThat(snapshotBeforeWrite).isLessThan(19L);
+        // stamped with the id of the row id commit
+        assertThat(liveFiles(table).get(0).maxSequenceNumber()).isEqualTo(snapshotBeforeWrite - 1);
+        assertThat(liveFiles(table).get(0).minSequenceNumber()).isEqualTo(snapshotBeforeWrite - 1);
+
+        // rewrite column v over the converted file's row id range
+        RowType writeType = table.rowType().project(Collections.singletonList("v"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < rows.length; i++) {
+                write.write(GenericRow.of(BinaryString.fromString("new" + i)));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            for (CommitMessage message : messages) {
+                CommitMessageImpl impl = (CommitMessageImpl) message;
+                List<DataFileMeta> files = new ArrayList<>(impl.newFilesIncrement().newFiles());
+                impl.newFilesIncrement().newFiles().clear();
+                files.forEach(f -> impl.newFilesIncrement().newFiles().add(f.assignFirstRowId(0)));
+            }
+            commit.commit(messages);
+        }
+
+        Map<Integer, String> values = valuesById(loadTable());
+        for (int i = 0; i < rows.length; i++) {
+            assertThat(values).containsEntry(i, "new" + i);
+        }
     }
 
     @Test
@@ -1063,6 +1113,9 @@ public class DataEvolutionEnablerTest extends TableTestBase {
                                 .boxed()
                                 .collect(Collectors.toList()));
         assertThat(liveFiles(table)).allMatch(file -> file.firstRowId() != null);
+        // like files of a row-tracking commit, so that later column writes take precedence
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        assertThat(liveFiles(table)).allMatch(file -> file.maxSequenceNumber() <= latestSnapshotId);
     }
 
     private List<InternalRow> read(FileStoreTable table, @Nullable RowType readType)

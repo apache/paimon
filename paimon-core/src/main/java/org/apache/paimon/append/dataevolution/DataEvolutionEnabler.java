@@ -424,6 +424,11 @@ public class DataEvolutionEnabler {
         ManifestFile manifestFile = table.store().manifestFileFactory().create();
         ManifestList manifestList = table.store().manifestListFactory().create();
 
+        // A plain append writer numbers its rows, so a file's sequence numbers can exceed the
+        // snapshot ids of later commits, while a row-tracking commit stamps its files with its
+        // snapshot id and a data-evolution read takes the column of the file with the highest one.
+        // Stamp the converted files like the commit that gives them their row ids.
+        long sequenceNumber = assignment.snapshot.id() + 1;
         List<ManifestFileMeta> baseManifests = new ArrayList<>();
         for (ManifestFileMeta manifest : assignment.manifests) {
             List<ManifestEntry> entries =
@@ -433,7 +438,9 @@ public class DataEvolutionEnabler {
             for (ManifestEntry entry : entries) {
                 Long firstRowId = assignment.firstRowIds.get(entry.identifier());
                 if (firstRowId != null && entry.file().firstRowId() == null) {
-                    rewritten.add(entry.assignFirstRowId(firstRowId));
+                    rewritten.add(
+                            entry.assignFirstRowId(firstRowId)
+                                    .assignSequenceNumber(sequenceNumber, sequenceNumber));
                     changed = true;
                 } else {
                     rewritten.add(entry);

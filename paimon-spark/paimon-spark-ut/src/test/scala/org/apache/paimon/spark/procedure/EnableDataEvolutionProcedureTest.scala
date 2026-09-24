@@ -96,6 +96,29 @@ class EnableDataEvolutionProcedureTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Procedure: updates after the conversion win over rows of one large commit") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, v INT)")
+      // a plain append writer numbers the 100 rows of this commit: its file had sequence numbers
+      // up to 99, far above the snapshot ids of the updates below
+      sql(
+        "INSERT INTO t SELECT /*+ REPARTITION(1) */ CAST(id AS INT), CAST(id AS INT) * 10 " +
+          "FROM range(0, 100)")
+
+      sql("CALL sys.enable_data_evolution(table => 't')")
+
+      sql("UPDATE t SET v = -5 WHERE id = 5")
+      sql("""
+            |MERGE INTO t USING (SELECT _ROW_ID AS rid FROM t WHERE id = 7) s
+            |ON t._ROW_ID = s.rid
+            |WHEN MATCHED THEN UPDATE SET v = -7
+            |""".stripMargin)
+      checkAnswer(sql("SELECT id, v FROM t WHERE v < 0 ORDER BY id"), Seq(Row(5, -5), Row(7, -7)))
+      // every other row keeps its value: 49500 - 50 - 70 - 5 - 7
+      checkAnswer(sql("SELECT count(*), sum(v) FROM t"), Seq(Row(100L, 49368L)))
+    }
+  }
+
   test("Paimon Procedure: enable data evolution assigns partition-contiguous row ids") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, pt STRING) PARTITIONED BY (pt)")
