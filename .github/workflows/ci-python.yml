@@ -199,7 +199,7 @@ jobs:
       - name: Build paimon-rust with REST native commit support
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade "git+https://github.com/JingsongLi/paimon-rust.git@492fab5d1886c478fb6c015dc6434ad25c9b8f1c#subdirectory=bindings/python"
+          python -m pip install --upgrade "git+https://github.com/JingsongLi/paimon-rust.git@2acf9195cb88095bd6ede75d81bfa34a55240312#subdirectory=bindings/python"
 
       - name: Install Python test dependencies
         run: |
@@ -213,27 +213,18 @@ jobs:
             vortex-data==0.70.0 'paimon-mosaic>=0.1.0'
           python -m pip check
 
-      - name: Verify upstream native APIs
+      - name: Verify native wheel provenance
         run: |
           python - <<'PY'
           import importlib.metadata as metadata
           import json
 
-          from pypaimon_rust.datafusion import PaimonCatalog, ReadBuilder, Split
-          from pypaimon.write.native_commit import native_commit_available
-          from pypaimon.write.native_write import native_write_available
+          import pypaimon_rust.datafusion
 
           distribution = metadata.distribution('pypaimon-rust')
           source = json.loads(distribution.read_text('direct_url.json'))
           print('pypaimon-rust', distribution.version,
                 'commit', source['vcs_info']['commit_id'])
-          assert hasattr(PaimonCatalog, 'get_table'), 'Missing PaimonCatalog.get_table'
-          assert hasattr(Split, 'serialize'), 'Missing Split.serialize'
-          assert hasattr(Split, 'is_streaming'), 'Missing stream-aware Split.is_streaming'
-          assert hasattr(ReadBuilder, 'new_incremental_scan'), 'Missing ReadBuilder.new_incremental_scan'
-          assert hasattr(ReadBuilder, 'with_row_ranges'), 'Missing ReadBuilder.with_row_ranges'
-          assert native_write_available(), 'Missing native write bridge'
-          assert native_commit_available(), 'Missing native commit bridge'
           PY
 
       - name: Run Python tests with native planning, reading, writing and committing

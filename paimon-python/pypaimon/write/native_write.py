@@ -16,10 +16,11 @@
 
 """Optional Rust data writer behind PyPaimon's batch and stream builders."""
 
+from importlib import import_module
+
 import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions, MergeEngine
-from pypaimon.read.native_plan import native_method_available
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
@@ -29,24 +30,12 @@ from pypaimon.write.row_utils import row_to_named_values, row_values_to_arrow_ta
 
 
 def native_write_available() -> bool:
-    """Check every binding entry point used by the writer bridge."""
-    return all(native_method_available(type_name, method) for type_name, method in (
-        ('Table', 'from_resolved_schema'),
-        ('BatchWriteBuilder', '_with_commit_user'),
-        ('BatchWriteBuilder', 'with_overwrite'),
-        ('BatchTableWrite', 'write_arrow'),
-        ('BatchTableWrite', 'prepare_commit'),
-        ('StreamWriteBuilder', 'with_commit_user'),
-        ('StreamTableWrite', 'write_arrow'),
-        ('StreamTableWrite', 'prepare_commit'),
-        ('CommitMessage', 'serialize'),
-    ))
-
-
-def _custom_data_file_prefix_supported() -> bool:
-    from pypaimon_rust import datafusion
-
-    return getattr(datafusion, 'SUPPORTS_CUSTOM_DATA_FILE_PREFIX', False)
+    """Whether the optional Rust bindings are installed."""
+    try:
+        import_module('pypaimon_rust.datafusion')
+    except ImportError:
+        return False
+    return True
 
 
 def create_native_write(table, commit_user, static_partition=None, stream=False):
@@ -67,8 +56,6 @@ def create_native_write(table, commit_user, static_partition=None, stream=False)
             != CoreOptions.TARGET_FILE_ROW_NUM.default_value()
             or table.options.changelog_file_format() not in (None, 'parquet')
             or table.options.file_format() != 'parquet'
-            or (table.options.data_file_prefix() != 'data-'
-                and not _custom_data_file_prefix_supported())
             # Rust validates nested Arrow child names strictly; PyPaimon accepts
             # equivalent layouts such as list<item> and list<element>.
             or any(pa.types.is_nested(field.type)

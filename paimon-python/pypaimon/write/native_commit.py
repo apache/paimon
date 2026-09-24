@@ -17,10 +17,12 @@
 
 """Optional native commits using the Java CommitMessage v14 bridge."""
 
+from importlib import import_module
+
 from pypaimon.common.json_util import JSON
 from pypaimon.read.native_plan import (
     _catalog_context_options, _catalog_metastore, _option_value_to_string,
-    _resolved_schema_file_io_options, native_method_available)
+    _resolved_schema_file_io_options)
 from pypaimon.write.commit_message_serializer import serialize_commit_message
 
 
@@ -28,17 +30,12 @@ _DEFAULT_MANIFEST_TARGET_SIZE = 8 * 1024 * 1024
 
 
 def native_commit_available() -> bool:
-    """Whether the Rust runtime provides the required commit APIs."""
-    return all(native_method_available(type_name, method) for type_name, method in (
-        ('Table', 'from_resolved_schema'),
-        ('Table', 'rest_table_uuid'),
-        ('PaimonCatalog', 'get_table'),
-        ('Table', 'copy_with_resolved_schema'),
-        ('CommitMessage', 'deserialize'),
-        ('StreamWriteBuilder', 'with_commit_user'),
-        ('BatchWriteBuilder', '_with_commit_user'),
-        ('BatchWriteBuilder', 'with_overwrite'),
-    ))
+    """Whether the optional Rust bindings are installed."""
+    try:
+        import_module('pypaimon_rust.datafusion')
+    except ImportError:
+        return False
+    return True
 
 
 def _native_publication_supported(table) -> bool:
