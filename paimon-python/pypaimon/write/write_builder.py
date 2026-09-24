@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import logging
 import uuid
 from abc import ABC
 from typing import Optional
@@ -25,6 +26,8 @@ from pypaimon.write.table_update import (BatchTableUpdate, StreamTableUpdate,
                                          TableUpdate)
 from pypaimon.write.table_write import (BatchTableWrite, StreamTableWrite,
                                         TableWrite)
+
+logger = logging.getLogger(__name__)
 
 
 class WriteBuilder(ABC):
@@ -50,6 +53,18 @@ class WriteBuilder(ABC):
         else:
             return str(uuid.uuid4())
 
+    def _native_write(self, static_partition=None, stream=False):
+        if not self.table.options.native_write_enabled():
+            return None
+        try:
+            from pypaimon.write.native_write import create_native_write
+            return create_native_write(self.table, self.commit_user,
+                                       static_partition, stream)
+        except Exception as error:
+            # Construction has not written any data; the normal writer is safe.
+            logger.debug('Native writer preparation failed; using Python: %s', error)
+            return None
+
 
 class BatchWriteBuilder(WriteBuilder):
 
@@ -62,7 +77,8 @@ class BatchWriteBuilder(WriteBuilder):
         return self
 
     def new_write(self) -> BatchTableWrite:
-        return BatchTableWrite(self.table, self.commit_user, self.static_partition)
+        return (self._native_write(self.static_partition)
+                or BatchTableWrite(self.table, self.commit_user, self.static_partition))
 
     def new_update(self) -> BatchTableUpdate:
         return BatchTableUpdate(self.table, self.commit_user)
@@ -75,7 +91,8 @@ class BatchWriteBuilder(WriteBuilder):
 class StreamWriteBuilder(WriteBuilder):
 
     def new_write(self) -> StreamTableWrite:
-        return StreamTableWrite(self.table, self.commit_user)
+        return (self._native_write(stream=True)
+                or StreamTableWrite(self.table, self.commit_user))
 
     def new_update(self) -> StreamTableUpdate:
         return StreamTableUpdate(self.table, self.commit_user)

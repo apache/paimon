@@ -52,14 +52,28 @@ def native_messages_supported(table, messages) -> bool:
 
 def create_native_commit(table, commit_user, overwrite_partition=None):
     """Return a native committer only when its publication protocol matches Python."""
+    if not native_commit_available():
+        return None
+    native_table = create_native_write_table(table)
+    if native_table is None:
+        return None
+    if overwrite_partition is not None:
+        return (native_table.new_batch_write_builder()
+                ._with_commit_user(commit_user)
+                .with_overwrite(overwrite_partition).new_commit())
+    # Append commits use the stream committer with the Python writer's identity;
+    # Python enforces each mode's lifecycle and empty-commit rules.
+    return native_table.new_stream_write_builder().with_commit_user(commit_user).new_commit()
+
+
+def create_native_write_table(table):
+    """Reconstruct a resolved table only for the filesystem publication route."""
     from pypaimon.catalog.catalog_environment import CatalogEnvironment
     from pypaimon.filesystem.local_file_io import LocalFileIO
     from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
     from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
     from pypaimon.table.file_store_table import FileStoreTable
 
-    if not native_commit_available():
-        return None
     # Native branch writes are not supported. Catalog-backed publication (REST
     # or custom version management) must continue through Python's environment.
     environment = table.catalog_environment
@@ -84,18 +98,11 @@ def create_native_commit(table, commit_user, overwrite_partition=None):
         table.options.dynamic_partition_overwrite())
     options['snapshot.ignore-empty-commit'] = _option_value_to_string(
         table.options.snapshot_ignore_empty_commit())
-    native_table = NativeTable.from_resolved_schema(
+    return NativeTable.from_resolved_schema(
         table.table_path, JSON.to_json(table.table_schema.copy(new_options=options)),
         database=table.identifier.get_database_name(),
         table=table.identifier.get_table_name(),
         options=file_io_options)
-    if overwrite_partition is not None:
-        return (native_table.new_batch_write_builder()
-                ._with_commit_user(commit_user)
-                .with_overwrite(overwrite_partition).new_commit())
-    # Append commits use the stream committer with the Python writer's identity;
-    # Python enforces each mode's lifecycle and empty-commit rules.
-    return native_table.new_stream_write_builder().with_commit_user(commit_user).new_commit()
 
 
 def to_native_commit_messages(table, messages):
