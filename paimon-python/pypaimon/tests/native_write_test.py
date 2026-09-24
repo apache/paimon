@@ -90,6 +90,37 @@ def test_batch_native_write_commits_through_both_committers(
 
 
 @requires_native
+@pytest.mark.native_plan
+def test_rest_native_write_and_commit(tmp_path, native_rest_catalog):
+    catalog = native_rest_catalog
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(
+        pa.schema([('id', pa.int64()), ('pt', pa.string())]),
+        options={'file.format': 'parquet', 'write.native.enabled': 'true',
+                 'commit.native.enabled': 'true'}, partition_keys=['pt']), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_batch_write_builder()
+    writer = builder.new_write()
+    assert isinstance(writer, NativeTableWrite)
+    commit = builder.new_commit()
+    try:
+        writer.write_arrow_batch(_batch([1, 2], ['a', 'b']))
+        with patch.object(commit.file_store_commit, 'commit',
+                          side_effect=AssertionError('Python commit fallback')):
+            commit.commit(writer.prepare_commit())
+        assert _rows(table) == [{'id': 1, 'pt': 'a'}, {'id': 2, 'pt': 'b'}]
+        shard_rows = []
+        for shard in range(3):
+            read_builder = table.new_read_builder()
+            splits = read_builder.new_scan().with_shard(shard, 3).plan().splits()
+            shard_rows.extend(read_builder.new_read().to_arrow(splits).to_pylist())
+        assert sorted(shard_rows, key=lambda row: row['id']) == _rows(table)
+        assert table.snapshot_manager().get_latest_snapshot().commit_user == builder.commit_user
+    finally:
+        writer.close()
+        commit.close()
+
+
+@requires_native
 def test_stream_native_write_reuses_writer_across_checkpoints(tmp_path):
     table = _table(tmp_path)
     builder = table.new_stream_write_builder()
@@ -180,6 +211,18 @@ def test_custom_prefix_falls_back_without_native_capability(tmp_path):
 def test_external_data_paths_fall_back_before_native_write(tmp_path):
     table = _table(tmp_path).copy({
         'data-file.external-paths': 'file://' + str(tmp_path / 'external')})
+    with patch('pypaimon.write.native_write.native_write_available', return_value=True), \
+            patch('pypaimon.write.native_write.create_native_write_table',
+                  side_effect=AssertionError('must not reconstruct')):
+        writer = table.new_batch_write_builder().new_write()
+    assert not isinstance(writer, NativeTableWrite)
+    writer.close()
+
+
+@pytest.mark.parametrize('engine', ['partial-update', 'aggregation'])
+def test_deletion_vectors_with_merge_engine_fall_back(tmp_path, engine):
+    table = _table(tmp_path).copy({
+        'deletion-vectors.enabled': 'true', 'merge-engine': engine})
     with patch('pypaimon.write.native_write.native_write_available', return_value=True), \
             patch('pypaimon.write.native_write.create_native_write_table',
                   side_effect=AssertionError('must not reconstruct')):

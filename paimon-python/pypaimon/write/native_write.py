@@ -18,6 +18,7 @@
 
 import pyarrow as pa
 
+from pypaimon.common.options.core_options import MergeEngine
 from pypaimon.read.native_plan import native_method_available
 from pypaimon.schema.arrow_schema import normalize_arrow_strings
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
@@ -52,6 +53,9 @@ def create_native_write(table, commit_user, static_partition=None, stream=False)
     if (not native_write_available()
             or table.options.data_evolution_enabled()
             or table.options.data_file_external_paths()
+            or (table.options.deletion_vectors_enabled()
+                and table.options.merge_engine() in
+                (MergeEngine.PARTIAL_UPDATE, MergeEngine.AGGREGATE))
             or table.options.file_format() != 'parquet'
             or (table.options.data_file_prefix() != 'data-'
                 and not _custom_data_file_prefix_supported())

@@ -19,7 +19,8 @@
 
 from pypaimon.common.json_util import JSON
 from pypaimon.read.native_plan import (
-    _option_value_to_string, _resolved_schema_file_io_options, native_method_available)
+    _catalog_context_options, _catalog_metastore, _option_value_to_string,
+    _resolved_schema_file_io_options, native_method_available)
 from pypaimon.write.commit_message_serializer import serialize_commit_message
 
 
@@ -30,6 +31,9 @@ def native_commit_available() -> bool:
     """Whether the Rust runtime provides the required commit APIs."""
     return all(native_method_available(type_name, method) for type_name, method in (
         ('Table', 'from_resolved_schema'),
+        ('Table', 'rest_table_uuid'),
+        ('PaimonCatalog', 'get_table'),
+        ('Table', 'copy_with_resolved_schema'),
         ('CommitMessage', 'deserialize'),
         ('StreamWriteBuilder', 'with_commit_user'),
         ('BatchWriteBuilder', '_with_commit_user'),
@@ -57,7 +61,9 @@ def native_messages_supported(table, messages) -> bool:
 
 def create_native_commit(table, commit_user, overwrite_partition=None):
     """Return a native committer only when its publication protocol matches Python."""
-    if not _native_publication_supported(table) or not native_commit_available():
+    if (not _native_publication_supported(table)
+            or not _rest_catalog_supported(table)
+            or not native_commit_available()):
         return None
     native_table = create_native_write_table(table)
     if native_table is None:
@@ -71,8 +77,38 @@ def create_native_commit(table, commit_user, overwrite_partition=None):
     return native_table.new_stream_write_builder().with_commit_user(commit_user).new_commit()
 
 
+def _rest_catalog_supported(table):
+    from pypaimon.catalog.catalog_environment import CatalogEnvironment
+    from pypaimon.table.file_store_table import FileStoreTable
+
+    environment = table.catalog_environment
+    loader = getattr(environment, 'catalog_loader', None)
+    context = loader.context() if _catalog_metastore(loader) == 'rest' else None
+    return (type(table) is FileStoreTable
+            and type(environment) is CatalogEnvironment
+            and environment.supports_version_management
+            and environment.uuid is not None
+            and context is not None
+            and context.options is not None
+            and all(getattr(context, attr, None) is None for attr in (
+                'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader')))
+
+
+def _native_rest_table(table, schema_json):
+    from pypaimon_rust.datafusion import PaimonCatalog as NativeCatalog
+
+    catalog_options = _catalog_context_options(table)
+    catalog_options['metastore'] = 'rest'
+    native_table = NativeCatalog(catalog_options).get_table((
+        table.identifier.get_database_name(), table.identifier.get_table_name()))
+    if (native_table.location() != table.table_path
+            or native_table.rest_table_uuid() != table.catalog_environment.uuid):
+        return None
+    return native_table.copy_with_resolved_schema(schema_json)
+
+
 def create_native_write_table(table):
-    """Reconstruct a resolved table only for the filesystem publication route."""
+    """Preserve the resolved schema and the catalog's publication route."""
     from pypaimon.catalog.catalog_environment import CatalogEnvironment
     from pypaimon.filesystem.local_file_io import LocalFileIO
     from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
@@ -80,19 +116,13 @@ def create_native_write_table(table):
     from pypaimon.table.bucket_mode import BucketMode
     from pypaimon.table.file_store_table import FileStoreTable
 
-    # Native branch and postpone writes are not supported. Catalog-backed
-    # publication (REST or custom version management) uses Python's environment.
+    # Native branch and postpone writes are not supported.
     environment = table.catalog_environment
     if (type(table) is not FileStoreTable
             or type(environment) is not CatalogEnvironment
-            or environment.supports_version_management
             or table.current_branch() != 'main'
             or table.bucket_mode() == BucketMode.POSTPONE_MODE
-            or table.options.query_auth_enabled
-            or type(table.file_io) not in (LocalFileIO, PyArrowFileIO, ResolvingFileIO)):
-        return None
-    file_io_options = _resolved_schema_file_io_options(table)
-    if file_io_options is None:
+            or table.options.query_auth_enabled):
         return None
 
     from pypaimon_rust.datafusion import Table as NativeTable
@@ -105,8 +135,18 @@ def create_native_write_table(table):
         table.options.dynamic_partition_overwrite())
     options['snapshot.ignore-empty-commit'] = _option_value_to_string(
         table.options.snapshot_ignore_empty_commit())
+    schema_json = JSON.to_json(table.table_schema.copy(new_options=options))
+    if environment.supports_version_management:
+        if not _rest_catalog_supported(table):
+            return None
+        return _native_rest_table(table, schema_json)
+    if type(table.file_io) not in (LocalFileIO, PyArrowFileIO, ResolvingFileIO):
+        return None
+    file_io_options = _resolved_schema_file_io_options(table)
+    if file_io_options is None:
+        return None
     return NativeTable.from_resolved_schema(
-        table.table_path, JSON.to_json(table.table_schema.copy(new_options=options)),
+        table.table_path, schema_json,
         database=table.identifier.get_database_name(),
         table=table.identifier.get_table_name(),
         options=file_io_options)

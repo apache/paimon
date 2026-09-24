@@ -40,6 +40,31 @@ def pytest_addoption(parser):
     )
 
 
+@pytest.fixture
+def native_rest_catalog(tmp_path):
+    """A local REST catalog for native writer and committer integration tests."""
+    import uuid
+
+    from pypaimon import CatalogFactory
+    from pypaimon.api.api_response import ConfigResponse
+    from pypaimon.api.auth import BearTokenAuthProvider
+    from pypaimon.tests.rest.rest_server import RESTCatalogServer
+
+    token = str(uuid.uuid4())
+    server = RESTCatalogServer(
+        data_path=str(tmp_path), auth_provider=BearTokenAuthProvider(token),
+        config=ConfigResponse(defaults={'prefix': 'native-test'}), warehouse='warehouse')
+    server.start()
+    try:
+        catalog = CatalogFactory.create({
+            'metastore': 'rest', 'uri': server.get_url(), 'warehouse': 'warehouse',
+            'token.provider': 'bear', 'token': token, 'data-token.enabled': 'false'})
+        catalog.create_database('default', True)
+        yield catalog
+    finally:
+        server.shutdown()
+
+
 def _native_plan_enabled():
     return os.environ.get(_NATIVE_PLAN_ENV) == "1"
 

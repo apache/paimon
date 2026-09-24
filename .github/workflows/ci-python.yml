@@ -35,7 +35,7 @@ jobs:
   test:
     name: Tests / Python ${{ matrix.python-version }}
     env:
-      # Real native planning is covered by the Rust main job below.
+      # Native planning, reading, writing and REST commits run in Native CI.
       PYTEST_ADDOPTS: "-m 'not native_plan'"
     timeout-minutes: 90
     runs-on: ubuntu-latest
@@ -177,7 +177,7 @@ jobs:
           ./paimon-python/dev/lint-python.sh -e pytest_torch
 
   rust-plan:
-    name: Rust Plan
+    name: Native CI
     timeout-minutes: 90
     runs-on: ubuntu-latest
     container: "python:3.11-slim"
@@ -196,10 +196,10 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build paimon-rust main
+      - name: Build paimon-rust with REST native commit support
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade "git+https://github.com/apache/paimon-rust.git@main#subdirectory=bindings/python"
+          python -m pip install --upgrade "git+https://github.com/JingsongLi/paimon-rust.git@codex/native-writer-python-ci#subdirectory=bindings/python"
 
       - name: Install Python test dependencies
         run: |
