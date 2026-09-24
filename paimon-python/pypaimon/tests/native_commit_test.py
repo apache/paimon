@@ -33,8 +33,13 @@ from pypaimon.write.native_commit import (
 from pypaimon.write.table_write import StreamTableWrite
 
 
-requires_native = pytest.mark.skipif(
-    not native_commit_available(), reason='pypaimon-rust runtime required')
+def requires_native(test):
+    # Native commit needs the from-source paimon-rust runtime built in the Rust
+    # Plan CI job; the PyPI pypaimon-rust wheel used by the standard test job
+    # predates the commit bridge. Route these like the other native_plan tests.
+    test = pytest.mark.native_plan(test)
+    return pytest.mark.skipif(
+        not native_commit_available(), reason='pypaimon-rust runtime required')(test)
 
 
 def _table(tmp_path, mode='append', backend='filesystem'):
@@ -223,7 +228,7 @@ def test_native_overwrite_normalizes_python_boolean_option(tmp_path, value):
         commit.close()
 
 
-@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('native', [False, pytest.param(True, marks=pytest.mark.native_plan)])
 @pytest.mark.parametrize('case', ['unpartitioned', 'static-empty', 'static-missing', 'dynamic-empty'])
 def test_empty_overwrite_records_java_snapshot(tmp_path, native, case):
     if native and not native_commit_available():
@@ -393,7 +398,7 @@ def test_snapshot_properties_select_python_before_native(tmp_path, properties, o
     commit.close()
 
 
-@pytest.mark.parametrize('warmup', [False, True])
+@pytest.mark.parametrize('warmup', [False, pytest.param(True, marks=pytest.mark.native_plan)])
 def test_callbacks_added_after_construction_select_python(tmp_path, warmup):
     if warmup and not native_commit_available():
         pytest.skip('native warmup requires the commit bindings')
