@@ -268,7 +268,11 @@ def _resolved_rest_table_response(table):
     if any(getattr(context, attr, None) is not None for attr in (
             'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader')):
         return None
-    if json.loads(response).get('path') != table.table_path:
+    metadata = json.loads(response)
+    if (metadata.get('path') != table.table_path
+            or metadata.get('name') != table.identifier.get_object_name()
+            or ('database' in metadata
+                and metadata['database'] != table.identifier.get_database_name())):
         return None
     return response
 

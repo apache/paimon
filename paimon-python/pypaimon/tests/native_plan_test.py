@@ -824,12 +824,33 @@ class NativePlanTest(unittest.TestCase):
             table.catalog_environment.rest_table_response = None
             self.assertIsNone(_resolved_rest_table_response(table))
 
+    def test_rest_response_requires_matching_identity(self):
+        from pypaimon.catalog.catalog_environment import CatalogEnvironment
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.read.native_plan import _resolved_rest_table_response
+
+        table = Mock(table_path='/warehouse/t', identifier=Identifier('db', 't', branch='dev'))
+        loader = RESTCatalogLoader(CatalogContext.create_from_options(Options({})))
+        table.catalog_environment = CatalogEnvironment(catalog_loader=loader)
+        for identity, matches in [
+                ({'name': 't'}, False),
+                ({}, False),
+                ({'name': 't$branch_dev'}, True),
+                ({'name': 't$branch_dev', 'database': 'db'}, True),
+                ({'name': 't$branch_dev', 'database': 'other'}, False)]:
+            with self.subTest(identity=identity), patch(
+                    'pypaimon.read.native_plan.native_method_available', return_value=True):
+                response = json.dumps(dict(identity, path=table.table_path))
+                table.catalog_environment.rest_table_response = response
+                self.assertEqual(_resolved_rest_table_response(table), response if matches else None)
+
     def test_rest_native_builder_reuses_loaded_metadata(self):
         from pypaimon.catalog.catalog_environment import CatalogEnvironment
         from pypaimon.common.identifier import Identifier
         from pypaimon.read.native_plan import _native_read_builder
 
-        response = json.dumps({'path': '/warehouse/t', 'id': 'uuid', 'isExternal': False})
+        response = json.dumps({'name': 't$branch_dev', 'path': '/warehouse/t',
+                               'id': 'uuid', 'isExternal': False})
         loader = RESTCatalogLoader(CatalogContext.create_from_options(Options({
             'uri': 'http://localhost:1', 'warehouse': 'test', 'data-token.enabled': 'true'})))
         table = Mock()

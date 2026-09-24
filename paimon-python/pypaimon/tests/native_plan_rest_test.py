@@ -110,6 +110,25 @@ def test_rest_branch_keeps_catalog_snapshot_and_schema(rest_source, rest_catalog
         assert all(call.args[2] == 'dev' for call in load.call_args_list)
 
 
+@pytest.mark.parametrize('from_tag', [False, True], ids=['empty-branch', 'tagged-branch'])
+def test_dynamic_branch_uses_native_catalog(rest_source, rest_catalog, from_tag):
+    from pypaimon.read.native_plan import _resolved_rest_table_response, native_plan
+    table, _, _ = rest_source
+    catalog, _ = rest_catalog
+    if from_tag:
+        catalog.create_tag(table.identifier, 'first', 1)
+    catalog.create_branch(table.identifier, 'dev', tag_name='first' if from_tag else None)
+    branch = table.copy({'branch': 'dev', 'read.native.enabled': 'true'})
+    assert branch.catalog_environment.rest_table_response == table.catalog_environment.rest_table_response
+    assert _resolved_rest_table_response(branch) is None
+    plan = native_plan(branch)
+    assert plan.snapshot_id == (1 if from_tag else None)
+    with patch('pypaimon.read.table_read.TableRead._create_split_read',
+               side_effect=AssertionError('native read fell back')):
+        rows = branch.new_read_builder().new_read().to_arrow(plan.splits()).to_pylist()
+    assert rows == ([{'id': 1, 'value': 'old'}] if from_tag else [])
+
+
 def test_resolved_rest_table_keeps_refreshable_file_io(rest_source, rest_catalog):
     from pypaimon.api.api_response import GetTableTokenResponse
     from pypaimon.read.native_plan import _resolved_schema_json
