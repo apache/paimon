@@ -46,6 +46,7 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommitImpl;
@@ -71,6 +72,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.apache.paimon.io.DataFileTestUtils.newFile;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -492,6 +494,61 @@ public class SortCompactCommitterTest {
     }
 
     @Test
+    public void testFilterAndCommitRecoveryRetriesCommitCallback() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                CoreOptions.COMMIT_CALLBACKS.key(),
+                RetryCountingCommitCallback.class.getName());
+        TestAppendFileStore store = createAppendStore(options);
+        CommitMessageImpl initial =
+                store.writeDataFiles(
+                        BinaryRow.EMPTY_ROW, 0, Arrays.asList("data-0.orc", "data-1.orc"));
+        store.commit(initial);
+
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        store.fileIO(), store.options().path(), store.schema());
+        SnapshotReader.Plan plan = table.newSnapshotReader().read();
+        Long baseSnapshotId = plan.snapshotId();
+        List<DataSplit> dataSplits = plan.dataSplits();
+
+        CommitMessageImpl written =
+                store.writeDataFiles(
+                        BinaryRow.EMPTY_ROW, 0, Collections.singletonList("sorted-0.orc"));
+        ManifestCommittable manifestCommittable = new ManifestCommittable(1L, 10L);
+        manifestCommittable.addFileCommittable(written);
+
+        RetryCountingCommitCallback.CALL_COUNT.set(0);
+        RetryCountingCommitCallback.RETRY_COUNT.set(0);
+        String commitUser = UUID.randomUUID().toString();
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            SortCompactCommitter committer =
+                    new SortCompactCommitter(
+                            table,
+                            commit,
+                            Committer.createContext(commitUser, null, true, false, null, 1, 1),
+                            new SortCompactCommitMessageRewriter(
+                                    table,
+                                    baseSnapshotId == null ? 0L : baseSnapshotId,
+                                    dataSplits));
+            assertThat(
+                            committer.filterAndCommit(
+                                    Collections.singletonList(manifestCommittable), false, true))
+                    .isEqualTo(1);
+            assertThat(RetryCountingCommitCallback.CALL_COUNT).hasValue(1);
+            assertThat(RetryCountingCommitCallback.RETRY_COUNT).hasValue(0);
+
+            assertThat(
+                            committer.filterAndCommit(
+                                    Collections.singletonList(manifestCommittable), false, true))
+                    .isZero();
+            assertThat(RetryCountingCommitCallback.CALL_COUNT).hasValue(1);
+            assertThat(RetryCountingCommitCallback.RETRY_COUNT).hasValue(1);
+            assertThat(RetryCountingCommitCallback.RETRIED_IDENTIFIER).hasValue(1L);
+        }
+    }
+
+    @Test
     public void testCommitFailureAbortsOnlyNewIndexFiles() throws Exception {
         TestAppendFileStore store = createAppendStore(new HashMap<>());
         CommitMessageImpl initial =
@@ -819,6 +876,28 @@ public class SortCompactCommitterTest {
         assertThat(aborted).isFalse();
         assertThat(table.snapshotManager().latestSnapshot().commitKind())
                 .isEqualTo(Snapshot.CommitKind.COMPACT);
+    }
+
+    /** Counts commit callback invocations. Recovery must call {@link CommitCallback#retry}. */
+    public static class RetryCountingCommitCallback implements CommitCallback {
+
+        static final AtomicInteger CALL_COUNT = new AtomicInteger();
+        static final AtomicInteger RETRY_COUNT = new AtomicInteger();
+        static final AtomicLong RETRIED_IDENTIFIER = new AtomicLong();
+
+        @Override
+        public void call(Context context) {
+            CALL_COUNT.incrementAndGet();
+        }
+
+        @Override
+        public void retry(ManifestCommittable committable) {
+            RETRY_COUNT.incrementAndGet();
+            RETRIED_IDENTIFIER.set(committable.identifier());
+        }
+
+        @Override
+        public void close() {}
     }
 
     /** A test {@link CommitListener} that counts notifications. */

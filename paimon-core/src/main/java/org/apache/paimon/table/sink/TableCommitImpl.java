@@ -323,14 +323,6 @@ public class TableCommitImpl implements InnerTableCommit {
         return filterAndCommitMultiple(committables, true);
     }
 
-    public List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committables) {
-        List<ManifestCommittable> sortedCommittables =
-                committables.stream()
-                        .sorted(Comparator.comparingLong(ManifestCommittable::identifier))
-                        .collect(Collectors.toList());
-        return commit.filterCommitted(sortedCommittables);
-    }
-
     public int filterAndCommitMultiple(
             List<ManifestCommittable> committables, boolean checkAppendFiles) {
         List<ManifestCommittable> sortedCommittables =
