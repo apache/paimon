@@ -41,11 +41,16 @@ class FileStoreWrite:
 
     def __init__(self, table, commit_user):
         from pypaimon.table.file_store_table import FileStoreTable
+        from pypaimon.common.options.core_options import MergeEngine
         from pypaimon.read.merge_engine_support import check_sequence_field_supported
 
         # TableWrite constructs this before the row-key extractor, whose
         # dynamic bucket index must not retain hashes for rejected writes.
         check_sequence_field_supported(table)
+        if table.is_primary_key_table and table.options.merge_engine() == MergeEngine.AGGREGATE:
+            from pypaimon.read.merge_engine_support import check_supported
+
+            check_supported(table)
 
         self.table: FileStoreTable = table
         self.data_writers: Dict[Tuple, DataWriter] = {}
@@ -219,8 +224,8 @@ class FileStoreWrite:
         partial-update with no out-of-scope options) cannot drift
         between sides.
 
-        Aggregation options are validated with the read-side guard before
-        buffering. Unsupported configurations must not be committed using
+        Aggregation options are validated with the read-side guard at writer
+        construction. Unsupported configurations must not be committed using
         fallback merge semantics that discard input values.
 
         Partial-update with out-of-scope options (sequence-group,
@@ -285,11 +290,6 @@ class FileStoreWrite:
         # for the engines we know are out of scope today; any other
         # NotImplementedError is a bug we want to surface, not swallow.
         if engine == MergeEngine.AGGREGATE:
-            from pypaimon.read.merge_engine_support import check_supported
-
-            # Reject unsupported table options before any data is buffered.
-            # A read-side error cannot undo an incorrectly merged write.
-            check_supported(self.table)
             # Surface the silent semantic mismatch in logs: the file
             # will be PK-unique (better than the pre-PR multi-row
             # corruption), but any reader that honours the declared
