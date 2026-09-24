@@ -38,6 +38,12 @@ abstract class BucketedScanPlanningTestBase
   private val partialClustering =
     "spark.sql.sources.v2.bucketing.partiallyClusteredDistribution.enabled"
 
+  /**
+   * RDD partitions for a fully-clustered key-grouped scan of the 8-split event table. Spark <= 4.1
+   * coalesces same-key splits into one read unit; Spark 4.2 keeps one read unit per split.
+   */
+  protected def fullyGroupedReadUnits: Int = 1
+
   private def createEvents(
       primaryKey: Boolean = false,
       partitions: Int = 8,
@@ -130,7 +136,7 @@ abstract class BucketedScanPlanningTestBase
         val tableDefault = sql("SELECT id, seq FROM t_events")
         tableDefault.collect()
         checkLayout(eventScan(tableDefault).scan.asInstanceOf[PaimonScan], grouped = true)
-        assert(eventScan(tableDefault).inputRDD.getNumPartitions == 1)
+        assert(eventScan(tableDefault).inputRDD.getNumPartitions == fullyGroupedReadUnits)
 
         spark.conf.set(preserveGrouping, "false")
         val sessionOverride = sql("SELECT id, seq FROM t_events")
@@ -144,7 +150,7 @@ abstract class BucketedScanPlanningTestBase
           .select("id", "seq")
         readOverride.collect()
         checkLayout(eventScan(readOverride).scan.asInstanceOf[PaimonScan], grouped = true)
-        assert(eventScan(readOverride).inputRDD.getNumPartitions == 1)
+        assert(eventScan(readOverride).inputRDD.getNumPartitions == fullyGroupedReadUnits)
       }
     }
   }
@@ -278,7 +284,7 @@ abstract class BucketedScanPlanningTestBase
           checkAnswer(df, (0L until 80L).map(seq => Row(42L, seq)))
           val batch = eventScan(df)
           assert(batch.scan.asInstanceOf[PaimonScan].inputPartitions.size == 8)
-          assert(batch.inputRDD.getNumPartitions == (if (partial) 8 else 1))
+          assert(batch.inputRDD.getNumPartitions == (if (partial) 8 else fullyGroupedReadUnits))
           assert(numShuffles(df) == 0)
         }
       }
