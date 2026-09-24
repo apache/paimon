@@ -26,7 +26,17 @@ public final class BloomFilter64 {
     private final int numHashFunctions;
 
     public BloomFilter64(long items, double fpp) {
-        int nb = (int) (-items * Math.log(fpp) / (Math.log(2) * Math.log(2)));
+        Preconditions.checkArgument(
+                items > 0, "Bloom filter items must be positive, but was %s.", items);
+        long numBitsEstimate = (long) (-items * Math.log(fpp) / (Math.log(2) * Math.log(2)));
+        Preconditions.checkArgument(
+                numBitsEstimate >= 0 && numBitsEstimate <= Integer.MAX_VALUE - Byte.SIZE,
+                "Bloom filter needs %s bits for items=%s and fpp=%s, which is out of the "
+                        + "supported range; reduce items or increase fpp.",
+                numBitsEstimate,
+                items,
+                fpp);
+        int nb = (int) numBitsEstimate;
         this.numBits = nb + (Byte.SIZE - (nb % Byte.SIZE));
         this.numHashFunctions =
                 Math.max(1, (int) Math.round((double) numBits / items * Math.log(2)));
