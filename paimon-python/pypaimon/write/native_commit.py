@@ -72,15 +72,17 @@ def create_native_write_table(table):
     from pypaimon.filesystem.local_file_io import LocalFileIO
     from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
     from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
+    from pypaimon.table.bucket_mode import BucketMode
     from pypaimon.table.file_store_table import FileStoreTable
 
-    # Native branch writes are not supported. Catalog-backed publication (REST
-    # or custom version management) must continue through Python's environment.
+    # Native branch and postpone writes are not supported. Catalog-backed
+    # publication (REST or custom version management) uses Python's environment.
     environment = table.catalog_environment
     if (type(table) is not FileStoreTable
             or type(environment) is not CatalogEnvironment
             or environment.supports_version_management
             or table.current_branch() != 'main'
+            or table.bucket_mode() == BucketMode.POSTPONE_MODE
             or table.options.query_auth_enabled
             or type(table.file_io) not in (LocalFileIO, PyArrowFileIO, ResolvingFileIO)):
         return None

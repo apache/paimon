@@ -41,11 +41,23 @@ def native_write_available() -> bool:
     ))
 
 
+def _custom_data_file_prefix_supported() -> bool:
+    from pypaimon_rust import datafusion
+
+    return getattr(datafusion, 'SUPPORTS_CUSTOM_DATA_FILE_PREFIX', False)
+
+
 def create_native_write(table, commit_user, static_partition=None, stream=False):
     """Return a native writer if the table can use the filesystem write path."""
     if (not native_write_available()
             or table.options.data_evolution_enabled()
             or table.options.file_format() != 'parquet'
+            or (table.options.data_file_prefix() != 'data-'
+                and not _custom_data_file_prefix_supported())
+            # Rust validates nested Arrow child names strictly; PyPaimon accepts
+            # equivalent layouts such as list<item> and list<element>.
+            or any(pa.types.is_nested(field.type) for field in
+                   PyarrowFieldParser.from_paimon_schema(table.table_schema.fields))
             or any(is_blob_file_field(field) for field in table.table_schema.fields)):
         return None
     native_table = create_native_write_table(table)

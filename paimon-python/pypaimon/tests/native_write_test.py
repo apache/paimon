@@ -163,3 +163,15 @@ def test_unavailable_native_writer_falls_back_before_table_reconstruction(tmp_pa
         writer = table.new_batch_write_builder().new_write()
     assert not isinstance(writer, NativeTableWrite)
     writer.close()
+
+
+def test_custom_prefix_falls_back_without_native_capability(tmp_path):
+    table = _table(tmp_path).copy({'data-file.prefix': 'custom-'})
+    with patch('pypaimon.write.native_write.native_write_available', return_value=True), \
+            patch('pypaimon.write.native_write._custom_data_file_prefix_supported',
+                  return_value=False), \
+            patch('pypaimon.write.native_write.create_native_write_table',
+                  side_effect=AssertionError('must not reconstruct')):
+        writer = table.new_batch_write_builder().new_write()
+    assert not isinstance(writer, NativeTableWrite)
+    writer.close()
