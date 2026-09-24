@@ -153,6 +153,27 @@ class PartialUpdateMergeFunctionTest(unittest.TestCase):
             mf.add(_kv((1,), 100, RowKind.UPDATE_BEFORE, (None, None)))
         self.assertIn('UPDATE_BEFORE', str(cm.exception))
 
+    def test_delete_row_ignored_when_ignore_delete(self):
+        # ignore-delete: the DELETE is skipped, the surrounding INSERTs still
+        # merge (Java PartialUpdateMergeFunction semantics).
+        mf = PartialUpdateMergeFunction(
+            key_arity=1, value_arity=2, ignore_delete=True)
+        mf.reset()
+        mf.add(_kv((1,), 100, RowKind.INSERT, ('a', None)))
+        mf.add(_kv((1,), 101, RowKind.DELETE, ('zzz', 'zzz')))
+        mf.add(_kv((1,), 102, RowKind.INSERT, (None, 'x')))
+        result = mf.get_result()
+        self.assertEqual(_result_value(result), ('a', 'x'))
+
+    def test_delete_only_group_returns_none_when_ignore_delete(self):
+        # A group of only retract rows contributes nothing.
+        mf = PartialUpdateMergeFunction(
+            key_arity=1, value_arity=2, ignore_delete=True)
+        mf.reset()
+        mf.add(_kv((1,), 100, RowKind.DELETE, ('a', 'x')))
+        mf.add(_kv((1,), 101, RowKind.UPDATE_BEFORE, ('b', 'y')))
+        self.assertIsNone(mf.get_result())
+
     def test_result_is_decoupled_from_input_kv(self):
         """The merge function must build a fresh result tuple — upstream
         readers reuse a single KeyValue instance and call ``replace`` on

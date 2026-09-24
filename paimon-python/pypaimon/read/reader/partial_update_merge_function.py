@@ -25,13 +25,14 @@ writes "fill in" fields the earlier writes left null, so users can
 write the same logical record across multiple commits with different
 sets of non-null columns.
 
-This is the **core merge semantics only**. The upstream engine also
-supports per-field aggregator overrides (``fields.<name>.aggregate-
-function``), sequence groups (``fields.<name>.sequence-group``),
-``ignore-delete``, and ``partial-update.remove-record-on-*`` options.
-None of those are implemented in pypaimon yet; non-INSERT row kinds
-raise ``NotImplementedError`` at ``add`` time so we never silently
-corrupt data with a half-implemented contract.
+This is the **core merge semantics plus ``ignore-delete``**. The upstream
+engine also supports per-field aggregator overrides (``fields.<name>.aggregate-
+function``), sequence groups (``fields.<name>.sequence-group``), and
+``partial-update.remove-record-on-*`` options. Those are not implemented in
+pypaimon yet; when they are set the dispatch refuses the table, and a
+DELETE / UPDATE_BEFORE row without ``ignore-delete`` raises
+``NotImplementedError`` at ``add`` time so we never silently corrupt data with
+a half-implemented contract.
 """
 
 from typing import Any, List, Optional
@@ -53,9 +54,16 @@ class PartialUpdateMergeFunction:
 
     def __init__(self, key_arity: int, value_arity: int,
                  nullables: Optional[List[bool]] = None,
-                 value_field_names: Optional[List[str]] = None):
+                 value_field_names: Optional[List[str]] = None,
+                 ignore_delete: bool = False):
         self._key_arity = key_arity
         self._value_arity = value_arity
+        # When ``ignore-delete`` is set on the table, DELETE / UPDATE_BEFORE
+        # rows are skipped rather than merged, matching Java
+        # ``PartialUpdateMergeFunction`` and ``FirstRowMergeFunction``. When
+        # False (the default), such a row still raises, because plain
+        # partial-update has no defined retract semantics.
+        self._ignore_delete = ignore_delete
         # Per-value-field nullable flags, parallel to value indices. When
         # ``None``, no nullability check runs (preserves the contract for
         # direct callers that don't have schema info handy). When given,
@@ -92,16 +100,19 @@ class PartialUpdateMergeFunction:
     def add(self, kv: KeyValue) -> None:
         row_kind_byte = kv.value_row_kind_byte
         if not RowKind.is_add_byte(row_kind_byte):
-            # DELETE / UPDATE_BEFORE require ignore-delete or
-            # partial-update.remove-record-on-delete to be enabled,
-            # and neither option is implemented in pypaimon yet, so
-            # refuse the row rather than silently swallow it.
+            if self._ignore_delete:
+                # ignore-delete: drop the retract row and keep merging the
+                # rest of the group, as Java PartialUpdateMergeFunction does.
+                return
+            # DELETE / UPDATE_BEFORE without ignore-delete has no defined
+            # partial-update semantics (remove-record-on-delete, which would
+            # give it one, is not implemented in pypaimon yet), so refuse the
+            # row rather than silently swallow it.
             raise NotImplementedError(
-                "PartialUpdateMergeFunction received a {} row; the "
-                "ignore-delete / partial-update.remove-record-on-delete "
-                "options needed to handle it are not yet implemented in "
-                "pypaimon. Tables that produce DELETE / UPDATE_BEFORE "
-                "rows are not supported here.".format(
+                "PartialUpdateMergeFunction received a {} row. Set "
+                "'ignore-delete' to skip DELETE / UPDATE_BEFORE rows; "
+                "'partial-update.remove-record-on-delete' is not yet "
+                "implemented in pypaimon.".format(
                     RowKind(row_kind_byte).to_string())
             )
 
