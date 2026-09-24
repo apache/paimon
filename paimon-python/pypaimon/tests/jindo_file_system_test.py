@@ -27,7 +27,11 @@ from pyarrow.fs import PyFileSystem
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem import jindo_file_system_handler as jindo_module
-from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
+from pypaimon.filesystem.jindo_file_system_handler import (
+    JindoFileSystemHandler,
+    JindoInputFile,
+    JINDO_AVAILABLE,
+)
 
 
 class _RecordingConfig:
@@ -36,6 +40,47 @@ class _RecordingConfig:
 
     def set(self, key, value):
         self.values[key] = value
+
+
+class _RecordingInputStream:
+    def __init__(self, position=0):
+        self.position = position
+        self.seeks = []
+        self.reads = []
+        self.closed = False
+
+    def seek(self, position, whence=0):
+        self.seeks.append((position, whence))
+        self.position = position
+        return position
+
+    def tell(self):
+        return self.position
+
+    def read(self, size=None):
+        self.reads.append(size)
+        self.position += size or 0
+        return b"x" * (size or 0)
+
+    def close(self):
+        self.closed = True
+
+
+class JindoInputFileTest(unittest.TestCase):
+
+    def test_known_size_avoids_backend_seek_from_end(self):
+        stream = _RecordingInputStream()
+        input_file = JindoInputFile(stream, file_size=100)
+
+        self.assertEqual(95, input_file.seek(-5, os.SEEK_END))
+        self.assertEqual([(95, os.SEEK_SET)], stream.seeks)
+
+    def test_known_size_bounds_unlimited_read(self):
+        stream = _RecordingInputStream(position=40)
+        input_file = JindoInputFile(stream, file_size=100)
+
+        self.assertEqual(b"x" * 60, input_file.read())
+        self.assertEqual([60], stream.reads)
 
 
 class JindoConfigTest(unittest.TestCase):
