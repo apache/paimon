@@ -1499,6 +1499,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(native.split_count, len(normal.splits()))
         self.assertEqual(native.split_count, 1)
 
+    @pytest.mark.python_write
     def test_partitioned_table_matches_normal_plan(self):
         # Native decoding restores PyPaimon's legacy unescaped partition path.
         schema = pa.schema([('k', pa.int64()), ('p', pa.string())])

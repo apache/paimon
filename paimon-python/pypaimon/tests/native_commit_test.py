@@ -33,6 +33,9 @@ from pypaimon.write.native_commit import (
 from pypaimon.write.table_write import StreamTableWrite
 
 
+pytestmark = pytest.mark.python_write
+
+
 def requires_native(test):
     # Native commit needs the from-source paimon-rust runtime built in the Rust
     # Plan CI job; the PyPI pypaimon-rust wheel used by the standard test job
@@ -42,12 +45,13 @@ def requires_native(test):
         not native_commit_available(), reason='pypaimon-rust runtime required')(test)
 
 
-def _table(tmp_path, mode='append', backend='filesystem'):
+def _table(tmp_path, mode='append', backend='filesystem', catalog=None):
     options = {'warehouse': str(tmp_path / 'warehouse')}
     if backend == 'jdbc':
         options.update({'metastore': 'jdbc', 'uri': 'jdbc:sqlite:' + str(tmp_path / 'catalog.db')})
-    catalog = CatalogFactory.create(options)
-    catalog.create_database('default', True)
+    if catalog is None:
+        catalog = CatalogFactory.create(options)
+        catalog.create_database('default', True)
     options = {'file.format': 'parquet', 'commit.native.enabled': 'true'}
     if mode == 'pk':
         options['bucket'] = '1'
@@ -95,9 +99,23 @@ def _seed(table):
         commit.close()
 
 
+@pytest.mark.python_commit
 def test_native_commit_is_opt_in():
     assert not CoreOptions(Options({})).native_commit_enabled()
     assert CoreOptions(Options({'commit.native.enabled': 'true'})).native_commit_enabled()
+
+
+@pytest.mark.parametrize('backend', ['filesystem', 'path', 'jdbc'])
+def test_non_rest_catalog_keeps_python_commit(tmp_path, backend):
+    table = _table(tmp_path, backend=backend)
+    assert create_native_commit(table, 'job') is None
+    builder = table.new_batch_write_builder()
+    commit = builder.new_commit()
+    try:
+        commit.commit(_prepare(builder, [{'id': 1, 'pt': 'a'}]))
+        assert _rows(table) == [{'id': 1, 'pt': 'a'}]
+    finally:
+        commit.close()
 
 
 def test_overwrite_builder_api_is_batch_only(tmp_path):
@@ -113,10 +131,9 @@ def test_overwrite_builder_api_is_batch_only(tmp_path):
 
 
 @requires_native
-@pytest.mark.parametrize('backend', ['filesystem', 'path', 'jdbc'])
-@pytest.mark.parametrize('mode', ['append', 'pk', 'de'])
-def test_native_batch_roundtrip_preserves_identity(tmp_path, backend, mode):
-    table = _table(tmp_path, mode, backend)
+@pytest.mark.parametrize('mode', ['append', 'pk'])
+def test_native_batch_roundtrip_preserves_identity(tmp_path, native_rest_catalog, mode):
+    table = _table(tmp_path, mode, catalog=native_rest_catalog)
     builder = table.new_batch_write_builder()
     rows = [{'id': 1, 'pt': 'a'}, {'id': 2, 'pt': None}]
     messages = _prepare(builder, rows)
@@ -135,8 +152,15 @@ def test_native_batch_roundtrip_preserves_identity(tmp_path, backend, mode):
 
 
 @requires_native
-def test_native_stream_reuses_commit_user_and_identifiers(tmp_path):
-    table = _table(tmp_path)
+def test_replaced_rest_table_rejects_stale_commit(tmp_path, native_rest_catalog):
+    table = _table(tmp_path, catalog=native_rest_catalog)
+    table.catalog_environment.uuid = 'stale-table-id'
+    assert create_native_commit(table, 'job') is None
+
+
+@requires_native
+def test_native_stream_reuses_commit_user_and_identifiers(tmp_path, native_rest_catalog):
+    table = _table(tmp_path, catalog=native_rest_catalog)
     builder = table.new_stream_write_builder()
     commit = builder.new_commit()
     try:
@@ -155,12 +179,12 @@ def test_native_stream_reuses_commit_user_and_identifiers(tmp_path):
 @pytest.mark.parametrize('mode,dynamic,spec', [
     ('append', True, {'pt': 'ignored'}),
     ('append', False, {'pt': 'a'}),
-    ('de', True, {}),
     ('pk', True, {}),
     ('unpartitioned', True, {}),
 ])
-def test_native_overwrite_replaces_only_target_rows(tmp_path, mode, dynamic, spec):
-    table = _table(tmp_path, mode).copy({
+def test_native_overwrite_replaces_only_target_rows(
+        tmp_path, native_rest_catalog, mode, dynamic, spec):
+    table = _table(tmp_path, mode, catalog=native_rest_catalog).copy({
         'dynamic-partition-overwrite': str(dynamic).lower(), 'commit.user-prefix': 'python'})
     _seed(table)
     builder = table.new_batch_write_builder().overwrite(spec)
@@ -193,8 +217,10 @@ def test_native_overwrite_replaces_only_target_rows(tmp_path, mode, dynamic, spe
     ('unpartitioned', True, {}, []),
     ('pk', True, {}, []),
 ])
-def test_native_empty_overwrite_semantics(tmp_path, mode, dynamic, spec, remaining):
-    table = _table(tmp_path, mode).copy({'dynamic-partition-overwrite': str(dynamic).lower()})
+def test_native_empty_overwrite_semantics(
+        tmp_path, native_rest_catalog, mode, dynamic, spec, remaining):
+    table = _table(tmp_path, mode, catalog=native_rest_catalog).copy({
+        'dynamic-partition-overwrite': str(dynamic).lower()})
     _seed(table)
     builder = table.new_batch_write_builder().overwrite(spec)
     commit = builder.new_commit()
@@ -215,8 +241,8 @@ def test_native_empty_overwrite_semantics(tmp_path, mode, dynamic, spec, remaini
 
 @requires_native
 @pytest.mark.parametrize('value', ['off', '0', ' false '])
-def test_native_overwrite_normalizes_python_boolean_option(tmp_path, value):
-    table = _table(tmp_path).copy({
+def test_native_overwrite_normalizes_python_boolean_option(tmp_path, native_rest_catalog, value):
+    table = _table(tmp_path, catalog=native_rest_catalog).copy({
         'dynamic-partition-overwrite': value, 'snapshot.ignore-empty-commit': value})
     _seed(table)
     commit = table.new_batch_write_builder().overwrite({'pt': 'a'}).new_commit()
@@ -230,13 +256,14 @@ def test_native_overwrite_normalizes_python_boolean_option(tmp_path, value):
 
 @pytest.mark.parametrize('native', [False, pytest.param(True, marks=pytest.mark.native_plan)])
 @pytest.mark.parametrize('case', ['unpartitioned', 'static-empty', 'static-missing', 'dynamic-empty'])
-def test_empty_overwrite_records_java_snapshot(tmp_path, native, case):
+def test_empty_overwrite_records_java_snapshot(tmp_path, native_rest_catalog, native, case):
     if native and not native_commit_available():
         pytest.skip('pypaimon-rust runtime required')
-    table = _table(tmp_path, 'unpartitioned' if case == 'unpartitioned' else 'append').copy({
-        'commit.native.enabled': str(native).lower(),
-        'dynamic-partition-overwrite': str(case == 'dynamic-empty').lower(),
-    })
+    table = _table(tmp_path, 'unpartitioned' if case == 'unpartitioned' else 'append',
+                   catalog=native_rest_catalog).copy({
+                       'commit.native.enabled': str(native).lower(),
+                       'dynamic-partition-overwrite': str(case == 'dynamic-empty').lower(),
+                   })
     if case == 'static-missing':
         _seed(table)
     builder = table.new_batch_write_builder().overwrite(
@@ -264,8 +291,10 @@ def test_empty_overwrite_records_java_snapshot(tmp_path, native, case):
 @requires_native
 @pytest.mark.parametrize('mode', ['batch', 'stream'])
 @pytest.mark.parametrize('ignore', [True, False])
-def test_native_empty_commit_preserves_python_option(tmp_path, mode, ignore):
-    table = _table(tmp_path).copy({'snapshot.ignore-empty-commit': str(ignore).lower()})
+def test_native_empty_commit_preserves_python_option(
+        tmp_path, native_rest_catalog, mode, ignore):
+    table = _table(tmp_path, catalog=native_rest_catalog).copy({
+        'snapshot.ignore-empty-commit': str(ignore).lower()})
     commit = getattr(table, 'new_' + mode + '_write_builder')().new_commit()
     try:
         with _must_not_fallback(commit):
@@ -285,8 +314,8 @@ def test_native_empty_commit_preserves_python_option(tmp_path, mode, ignore):
 
 @requires_native
 @pytest.mark.parametrize('overwrite', [False, True])
-def test_native_abort_removes_uncommitted_files(tmp_path, overwrite):
-    table = _table(tmp_path)
+def test_native_abort_removes_uncommitted_files(tmp_path, native_rest_catalog, overwrite):
+    table = _table(tmp_path, catalog=native_rest_catalog)
     builder = table.new_batch_write_builder()
     if overwrite:
         builder.overwrite()
@@ -299,6 +328,27 @@ def test_native_abort_removes_uncommitted_files(tmp_path, overwrite):
             commit.abort(messages)
         assert not any(path.exists() for path in files)
         assert table.snapshot_manager().get_latest_snapshot() is None
+    finally:
+        commit.close()
+
+
+@requires_native
+def test_python_file_in_legacy_partition_uses_python_abort(
+        tmp_path, native_rest_catalog):
+    table = _table(tmp_path, catalog=native_rest_catalog)
+    builder = table.new_batch_write_builder()
+    messages = _prepare(builder, [{'id': 1, 'pt': 'a/b'}])
+    file = messages[0].new_files[0]
+    assert table.file_io.exists(file.file_path)
+    assert not native_messages_supported(table, messages)
+
+    commit = builder.new_commit()
+    try:
+        with patch.object(commit.file_store_commit, 'abort',
+                          wraps=commit.file_store_commit.abort) as python_abort:
+            commit.abort(messages)
+        python_abort.assert_called_once_with(messages)
+        assert not table.file_io.exists(file.file_path)
     finally:
         commit.close()
 
@@ -354,8 +404,9 @@ def test_native_mutation_failure_never_falls_back_or_aborts(tmp_path, method, ov
 
 @requires_native
 @pytest.mark.parametrize('overwrite', [False, True])
-def test_publication_response_loss_does_not_duplicate_or_delete_files(tmp_path, overwrite):
-    table = _table(tmp_path)
+def test_publication_response_loss_does_not_duplicate_or_delete_files(
+        tmp_path, native_rest_catalog, overwrite):
+    table = _table(tmp_path, catalog=native_rest_catalog)
     builder = table.new_batch_write_builder()
     if overwrite:
         builder.overwrite()
@@ -399,10 +450,11 @@ def test_snapshot_properties_select_python_before_native(tmp_path, properties, o
 
 
 @pytest.mark.parametrize('warmup', [False, pytest.param(True, marks=pytest.mark.native_plan)])
-def test_callbacks_added_after_construction_select_python(tmp_path, warmup):
+def test_callbacks_added_after_construction_select_python(
+        tmp_path, native_rest_catalog, warmup):
     if warmup and not native_commit_available():
         pytest.skip('native warmup requires the commit bindings')
-    table = _table(tmp_path)
+    table = _table(tmp_path, catalog=native_rest_catalog)
     builder = table.new_stream_write_builder()
     commit = builder.new_commit()
     if warmup:
@@ -478,12 +530,11 @@ def test_disabled_option_never_initializes_native(tmp_path):
     commit.close()
 
 
-@pytest.mark.parametrize('kind', ['version-managed', 'custom-env', 'branch', 'custom-io'])
-def test_incompatible_publication_environment_is_not_reconstructed(tmp_path, kind):
-    table = _table(tmp_path)
-    if kind == 'version-managed':
-        table.catalog_environment.supports_version_management = True
-    elif kind == 'custom-env':
+@pytest.mark.parametrize('kind', ['custom-env', 'branch', 'custom-io'])
+def test_incompatible_publication_environment_is_not_reconstructed(
+        tmp_path, native_rest_catalog, kind):
+    table = _table(tmp_path, catalog=native_rest_catalog)
+    if kind == 'custom-env':
         class CustomEnvironment(CatalogEnvironment):
             pass
         table.catalog_environment = CustomEnvironment()
@@ -492,41 +543,35 @@ def test_incompatible_publication_environment_is_not_reconstructed(tmp_path, kin
     else:
         table.file_io = Mock()
     with patch('pypaimon.write.native_commit.native_commit_available', return_value=True), \
-            patch('pypaimon.write.native_commit._resolved_schema_file_io_options') as resolve:
+            patch('pypaimon.write.native_commit._native_rest_table') as resolve:
         assert create_native_commit(table, 'job') is None
         resolve.assert_not_called()
 
 
-@pytest.mark.parametrize('missing_type,missing_method', [
-    ('Table', 'from_resolved_schema'),
-    ('CommitMessage', 'deserialize'),
-    ('StreamWriteBuilder', 'with_commit_user'),
-    ('BatchWriteBuilder', '_with_commit_user'),
-    ('BatchWriteBuilder', 'with_overwrite'),
-])
-def test_incomplete_runtime_falls_back_without_reconstructing_table(
-        tmp_path, missing_type, missing_method):
-    table = _table(tmp_path)
-    with patch('pypaimon.write.native_commit.native_method_available',
-               side_effect=lambda cls, method: (cls, method) != (missing_type, missing_method)), \
-            patch('pypaimon.write.native_commit._resolved_schema_file_io_options') as resolve:
-        assert create_native_commit(table, 'job') is None
-        resolve.assert_not_called()
-
-
-def test_missing_runtime_falls_back_without_reconstructing_table(tmp_path):
-    table = _table(tmp_path)
+def test_missing_runtime_falls_back_without_reconstructing_table(
+        tmp_path, native_rest_catalog):
+    table = _table(tmp_path, catalog=native_rest_catalog)
     with patch('pypaimon.write.native_commit.native_commit_available', return_value=False), \
-            patch('pypaimon.write.native_commit._resolved_schema_file_io_options') as resolve:
+            patch('pypaimon.write.native_commit._native_rest_table') as resolve:
         assert create_native_commit(table, 'job') is None
         resolve.assert_not_called()
 
 
-def test_partial_row_id_and_compact_messages_preserve_python_recovery(tmp_path):
-    table = _table(tmp_path, 'de')
+def test_partial_row_id_and_compact_messages_preserve_python_recovery(
+        tmp_path, native_rest_catalog):
+    table = _table(tmp_path, 'de', catalog=native_rest_catalog)
+    assert create_native_commit(table, 'job') is None
+    assert not native_messages_supported(table, [CommitMessage((), 0, [])])
     assert not native_messages_supported(table, [CommitMessage((), 0, [], check_from_snapshot=7)])
     assert not native_messages_supported(table, [CommitMessage((), 0, [Mock(first_row_id=1)])])
     assert not native_messages_supported(table, [CommitMessage((), 0, [], compact_after=[Mock()])])
+
+
+def test_custom_manifest_target_uses_python_rolling(tmp_path, native_rest_catalog):
+    table = _table(tmp_path, catalog=native_rest_catalog).copy({
+        'manifest.target-file-size': '16 kb'})
+    assert create_native_commit(table, 'job') is None
+    assert not native_messages_supported(table, [CommitMessage((), 0, [])])
 
 
 def test_close_releases_python_resources_even_if_native_close_fails(tmp_path):
