@@ -1578,6 +1578,93 @@ class CliTableTest(unittest.TestCase):
                 self.assertEqual(ctx.exception.code, 1)
                 self.assertIn("Invalid WHERE clause", mock_stderr.getvalue())
 
+    def test_parse_query_vector_comma_separated(self):
+        """A bare comma-separated string parses into a list of floats."""
+        from pypaimon.cli.cli_table import _parse_query_vector
+        self.assertEqual(_parse_query_vector('0.1,0.2,0.3'), [0.1, 0.2, 0.3])
+
+    def test_parse_query_vector_json_array(self):
+        """A JSON-style array (with brackets and spaces) parses too."""
+        from pypaimon.cli.cli_table import _parse_query_vector
+        self.assertEqual(_parse_query_vector('[1, 2, 3]'), [1.0, 2.0, 3.0])
+
+    def test_parse_query_vector_strips_whitespace(self):
+        """Surrounding whitespace and negative values are handled."""
+        from pypaimon.cli.cli_table import _parse_query_vector
+        self.assertEqual(_parse_query_vector(' 0.5 , -0.5 '), [0.5, -0.5])
+
+    def test_parse_query_vector_empty_raises(self):
+        """An empty vector is rejected."""
+        from pypaimon.cli.cli_table import _parse_query_vector
+        with self.assertRaises(ValueError):
+            _parse_query_vector('')
+        with self.assertRaises(ValueError):
+            _parse_query_vector('[]')
+
+    def test_parse_query_vector_non_numeric_raises(self):
+        """A non-numeric element is rejected."""
+        from pypaimon.cli.cli_table import _parse_query_vector
+        with self.assertRaises(ValueError):
+            _parse_query_vector('0.1,foo,0.3')
+
+    def test_records_for_json_serializes_embedding_column(self):
+        """The searched embedding column (numpy.ndarray cells) is normalized
+        to native lists so the default --format json path does not raise
+        'Object of type ndarray is not JSON serializable'."""
+        import json
+        import numpy as np
+        import pandas as pd
+        from pypaimon.cli.cli_table import _records_for_json
+
+        df = pd.DataFrame({
+            "id": [1, 2],
+            "embedding": [np.array([0.1, 0.2], dtype=np.float32),
+                          np.array([0.3, 0.4], dtype=np.float32)],
+        })
+        payload = json.loads(json.dumps(_records_for_json(df)))
+        self.assertEqual(len(payload), 2)
+        self.assertEqual(payload[0]["id"], 1)
+        self.assertIsInstance(payload[0]["embedding"], list)
+        self.assertEqual(len(payload[0]["embedding"]), 2)
+        self.assertAlmostEqual(payload[0]["embedding"][0], 0.1, places=5)
+
+    def test_cli_table_vector_search_invalid_vector(self):
+        """A non-numeric query vector produces a clean error on stderr."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'vector-search', 'test_db.users',
+                    '--column', 'age', '-q', 'a,b,c']):
+            with patch('sys.stderr', new_callable=StringIO) as mock_stderr:
+                with self.assertRaises(SystemExit) as ctx:
+                    main()
+                self.assertEqual(ctx.exception.code, 1)
+                self.assertIn("Query vector must contain only numbers",
+                              mock_stderr.getvalue())
+
+    def test_cli_table_vector_search_missing_column(self):
+        """An unknown vector column produces a clean error on stderr."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'vector-search', 'test_db.users',
+                    '--column', 'embedding', '-q', '0.1,0.2,0.3']):
+            with patch('sys.stderr', new_callable=StringIO) as mock_stderr:
+                with self.assertRaises(SystemExit) as ctx:
+                    main()
+                self.assertEqual(ctx.exception.code, 1)
+                self.assertIn("Vector search failed", mock_stderr.getvalue())
+
+    def test_cli_table_vector_search_invalid_table(self):
+        """Unknown table identifier produces a clean error on stderr."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'vector-search', 'test_db.does_not_exist',
+                    '--column', 'embedding', '-q', '0.1,0.2,0.3']):
+            with patch('sys.stderr', new_callable=StringIO) as mock_stderr:
+                with self.assertRaises(SystemExit) as ctx:
+                    main()
+                self.assertEqual(ctx.exception.code, 1)
+                self.assertIn("Failed to get table", mock_stderr.getvalue())
+
 
 if __name__ == '__main__':
     unittest.main()

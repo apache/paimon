@@ -314,6 +314,140 @@ def cmd_table_full_text_search(args):
         print(df.to_string(index=False))
 
 
+def _parse_query_vector(raw):
+    """
+    Parse a query vector supplied on the command line.
+
+    Accepts either a JSON-style array (e.g. ``[0.1, 0.2, 0.3]``) or a bare
+    comma-separated list (e.g. ``0.1,0.2,0.3``) and returns a list of floats.
+
+    Args:
+        raw: The raw ``--query`` argument value.
+
+    Raises:
+        ValueError: If the value is empty or contains a non-numeric element.
+    """
+    text = raw.strip()
+    if text.startswith('[') and text.endswith(']'):
+        text = text[1:-1]
+    parts = [p.strip() for p in text.split(',') if p.strip() != '']
+    if not parts:
+        raise ValueError(
+            'Query vector is empty; provide comma-separated floats, '
+            'e.g. --query "0.1,0.2,0.3"')
+    try:
+        return [float(p) for p in parts]
+    except ValueError:
+        raise ValueError(
+            'Query vector must contain only numbers; got: %r' % raw) from None
+
+
+def _records_for_json(df):
+    """Convert a DataFrame into JSON-serializable records.
+
+    Arrow list / vector columns (such as the searched embedding column, which
+    is projected by default) surface as ``numpy.ndarray`` cells, and
+    ``json.dumps`` raises ``TypeError: Object of type ndarray is not JSON
+    serializable``. Convert NumPy arrays and scalars to native Python values
+    first so the normal ``--format json`` path works for vector results.
+    """
+    import numpy as np
+
+    def _native(value):
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        if isinstance(value, np.generic):
+            return value.item()
+        if isinstance(value, dict):
+            return {k: _native(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [_native(v) for v in value]
+        return value
+
+    return [_native(record) for record in df.to_dict(orient='records')]
+
+
+def cmd_table_vector_search(args):
+    """
+    Execute the 'table vector-search' command.
+
+    Performs nearest-neighbor vector search on a Paimon table and displays the
+    matching rows.
+
+    Args:
+        args: Parsed command line arguments.
+    """
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+
+    config_path = args.config
+    config = load_catalog_config(config_path)
+    catalog = create_catalog(config)
+
+    table_identifier = args.table
+    parts = table_identifier.split('.')
+    if len(parts) != 2:
+        print(f"Error: Invalid table identifier '{table_identifier}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+
+    database_name, table_name = parts
+
+    try:
+        table = catalog.get_table(f"{database_name}.{table_name}")
+    except Exception as e:
+        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        query_vector = _parse_query_vector(args.query)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    limit = args.limit
+
+    try:
+        builder = table.new_vector_search_builder()
+        builder.with_vector_column(args.column)
+        builder.with_query_vector(query_vector)
+        builder.with_limit(limit)
+        result = builder.execute_local()
+    except Exception as e:
+        print(f"Error: Vector search failed: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if result.is_empty():
+        print("No matching rows found.")
+        return
+
+    # Read matching rows using global index result
+    read_builder = table.new_read_builder()
+
+    select_columns = args.select
+    if select_columns:
+        projection = [col.strip() for col in select_columns.split(',')]
+        available_fields = set(field.name for field in table.table_schema.fields)
+        invalid_columns = [col for col in projection if col not in available_fields]
+        if invalid_columns:
+            print(f"Error: Column(s) {invalid_columns} do not exist in table '{table_identifier}'.",
+                  file=sys.stderr)
+            sys.exit(1)
+        read_builder = read_builder.with_projection(projection)
+
+    scan = read_builder.new_scan().with_global_index_result(result)
+    plan = scan.plan()
+    splits = plan.splits()
+    read = read_builder.new_read()
+    df = read.to_pandas(splits)
+
+    output_format = getattr(args, 'format', 'table')
+    if output_format == 'json':
+        import json
+        print(json.dumps(_records_for_json(df), ensure_ascii=False))
+    else:
+        print(df.to_string(index=False))
+
+
 def cmd_table_get(args):
     """
     Execute the 'table get' command.
@@ -1097,6 +1231,46 @@ def add_table_subcommands(table_parser):
         help='Output format: table (default) or json'
     )
     fts_parser.set_defaults(func=cmd_table_full_text_search)
+
+    # table vector-search command
+    vs_parser = table_subparsers.add_parser(
+        'vector-search', help='Nearest-neighbor vector search on a table')
+    vs_parser.add_argument(
+        'table',
+        help='Table identifier in format: database.table'
+    )
+    vs_parser.add_argument(
+        '--column',
+        required=True,
+        help='Vector column to search'
+    )
+    vs_parser.add_argument(
+        '--query', '-q',
+        required=True,
+        help='Query vector as comma-separated floats or a JSON-style array, '
+             'e.g. "0.1,0.2,0.3" or "[0.1, 0.2, 0.3]"'
+    )
+    vs_parser.add_argument(
+        '--limit', '-l',
+        type=int,
+        default=10,
+        help='Maximum number of results to return (default: 10)'
+    )
+    vs_parser.add_argument(
+        '--select', '-s',
+        type=str,
+        default=None,
+        help='Select specific columns to display (comma-separated, e.g., "id,name,embedding")'
+    )
+    vs_parser.add_argument(
+        '--format', '-f',
+        type=str,
+        choices=['table', 'json'],
+        default='table',
+        help='Output format: table (default) or json'
+    )
+    vs_parser.set_defaults(func=cmd_table_vector_search)
+
     rename_parser.add_argument(
         'table',
         help='Source table identifier in format: database.table'
