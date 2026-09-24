@@ -37,6 +37,7 @@ import org.apache.paimon.spark.procedure.DeleteTagProcedure;
 import org.apache.paimon.spark.procedure.DropFunctionProcedure;
 import org.apache.paimon.spark.procedure.DropGlobalIndexProcedure;
 import org.apache.paimon.spark.procedure.DropPolicyProcedure;
+import org.apache.paimon.spark.procedure.ExpireChangelogsProcedure;
 import org.apache.paimon.spark.procedure.ExpirePartitionsProcedure;
 import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
 import org.apache.paimon.spark.procedure.ExpireTagsProcedure;
@@ -127,6 +128,7 @@ public class SparkProcedures {
         procedureBuilders.put(
                 "remove_unexisting_manifests", RemoveUnexistingManifestsProcedure::builder);
         procedureBuilders.put("expire_snapshots", ExpireSnapshotsProcedure::builder);
+        procedureBuilders.put("expire_changelogs", ExpireChangelogsProcedure::builder);
         procedureBuilders.put("expire_partitions", ExpirePartitionsProcedure::builder);
         procedureBuilders.put("repair", RepairProcedure::builder);
         procedureBuilders.put("repair_earliest_snapshot", RepairEarliestSnapshotProcedure::builder);
