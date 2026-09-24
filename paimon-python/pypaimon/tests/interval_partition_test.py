@@ -49,6 +49,22 @@ def _file(name, minimum, maximum, fields):
         min_sequence_number=0, max_sequence_number=0, schema_id=0, level=0, extra_files=[])
 
 
+class _StubPathFactory:
+    """Minimal path factory for the split-generator mock table.
+
+    ``_build_split_from_pack`` calls ``table.path_factory().bucket_path`` to
+    detect partitions whose values need filesystem escaping. Returning a value
+    independent of ``canonical_partition`` keeps ``escaped_partition`` False, so
+    the split generator does not probe the (absent) file system.
+    """
+
+    def __init__(self, table_path):
+        self._table_path = table_path
+
+    def bucket_path(self, partition, bucket, canonical_partition=False):
+        return f"{self._table_path}/bucket-{bucket}"
+
+
 @pytest.mark.parametrize('type_name', ['FLOAT', 'DOUBLE'])
 def test_signed_zero_key_ranges_keep_versions_in_one_split(type_name):
     fields = _key_fields(type_name)
@@ -60,7 +76,9 @@ def test_signed_zero_key_ranges_keep_versions_in_one_split(type_name):
     assert len(sections) == 1
     assert sorted([f.file_name for f in run.files] for run in sections[0]) == [['broad'], ['point']]
 
-    table = SimpleNamespace(table_path='/tmp/interval-test', options=CoreOptions(Options({})))
+    table = SimpleNamespace(
+        table_path='/tmp/interval-test', options=CoreOptions(Options({})),
+        path_factory=lambda: _StubPathFactory('/tmp/interval-test'))
     entries = [ManifestEntry(0, GenericRow([], []), 0, 1, file) for file in files]
     splits = PrimaryKeyTableSplitGenerator(
         table, 1, 1, snapshot_id=7).create_splits(entries)
