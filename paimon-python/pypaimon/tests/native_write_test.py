@@ -57,6 +57,7 @@ def _rows(table):
         builder.new_scan().plan().splits()).to_pylist(), key=lambda row: row['id'])
 
 
+@pytest.mark.python_write
 def test_native_write_is_opt_in():
     assert not CoreOptions(Options({})).native_write_enabled()
     assert CoreOptions(Options({'write.native.enabled': 'true'})).native_write_enabled()

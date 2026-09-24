@@ -213,13 +213,15 @@ jobs:
             vortex-data==0.70.0 'paimon-mosaic>=0.1.0'
           python -m pip check
 
-      - name: Verify upstream native planning APIs
+      - name: Verify upstream native APIs
         run: |
           python - <<'PY'
           import importlib.metadata as metadata
           import json
 
           from pypaimon_rust.datafusion import PaimonCatalog, ReadBuilder, Split
+          from pypaimon.write.native_commit import native_commit_available
+          from pypaimon.write.native_write import native_write_available
 
           distribution = metadata.distribution('pypaimon-rust')
           source = json.loads(distribution.read_text('direct_url.json'))
@@ -230,13 +232,17 @@ jobs:
           assert hasattr(Split, 'is_streaming'), 'Missing stream-aware Split.is_streaming'
           assert hasattr(ReadBuilder, 'new_incremental_scan'), 'Missing ReadBuilder.new_incremental_scan'
           assert hasattr(ReadBuilder, 'with_row_ranges'), 'Missing ReadBuilder.with_row_ranges'
+          assert native_write_available(), 'Missing native write bridge'
+          assert native_commit_available(), 'Missing native commit bridge'
           PY
 
-      - name: Run Python tests with Rust planning and reading
+      - name: Run Python tests with native planning, reading, writing and committing
         shell: bash
         env:
           PYPAIMON_TEST_NATIVE_PLAN: '1'
           PYPAIMON_TEST_NATIVE_READ: '1'
+          PYPAIMON_TEST_NATIVE_WRITE: '1'
+          PYPAIMON_TEST_NATIVE_COMMIT: '1'
         run: |
           bash paimon-python/dev/lint-python.sh -i pytest
 

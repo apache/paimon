@@ -33,6 +33,9 @@ from pypaimon.write.native_commit import (
 from pypaimon.write.table_write import StreamTableWrite
 
 
+pytestmark = pytest.mark.python_write
+
+
 def requires_native(test):
     # Native commit needs the from-source paimon-rust runtime built in the Rust
     # Plan CI job; the PyPI pypaimon-rust wheel used by the standard test job
@@ -95,6 +98,7 @@ def _seed(table):
         commit.close()
 
 
+@pytest.mark.python_commit
 def test_native_commit_is_opt_in():
     assert not CoreOptions(Options({})).native_commit_enabled()
     assert CoreOptions(Options({'commit.native.enabled': 'true'})).native_commit_enabled()
