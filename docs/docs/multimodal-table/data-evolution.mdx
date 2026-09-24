@@ -151,10 +151,12 @@ whether the file was created by an update.
 An append table that already holds data can be converted in place. The
 `enable_data_evolution` procedure assigns a row ID range to every existing data
 file by rewriting the manifests of the latest snapshot, then switches on
-`row-tracking.enabled` and `data-evolution.enabled` in a new schema. No data
-file is rewritten. The table must be an append table without primary key,
-with `bucket = -1` and without `clustering.incremental`; REST catalog tables
-are not supported yet.
+`row-tracking.enabled` and `data-evolution.enabled` in a new schema, and
+finally commits an empty snapshot that fences off writers which checked the
+previous schema. No data file is rewritten. The table must be an append table
+without primary key, with `bucket = -1` and without `clustering.incremental`;
+REST catalog tables are not supported yet. The two options cannot be switched
+on by a plain schema change while the table has data files without a row ID.
 
 <Tabs groupId="data-evolution-enable">
 
@@ -188,6 +190,9 @@ writes continue after the assigned range.
 
 What to expect around the conversion:
 
+- Stop writers that run an older Paimon version before the conversion. They
+  do not refuse to commit after the schema change, so files they commit
+  afterwards would have no row ID.
 - A writer that loaded the table before the conversion cannot commit anymore:
   its commit is refused with a message asking to restart it, because a file it
   commits would have no row ID. Restart such jobs after the conversion; they

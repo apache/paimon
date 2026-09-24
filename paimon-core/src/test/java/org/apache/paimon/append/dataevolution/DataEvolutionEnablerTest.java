@@ -28,8 +28,12 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -44,6 +48,7 @@ import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -56,6 +61,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -63,6 +69,7 @@ import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -71,7 +78,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.SpecialFields.rowTypeWithRowId;
@@ -95,7 +106,7 @@ public class DataEvolutionEnablerTest extends TableTestBase {
     // ---------------------------------------------------------------------------------------------
 
     @Test
-    public void testEmptyTableOnlyFlipsSchema() throws Exception {
+    public void testEmptyTableSwitchesSchemaAndCommitsFence() throws Exception {
         createTable(Collections.emptyMap());
 
         DataEvolutionEnabler.Result result = enabler().run(false);
@@ -104,12 +115,17 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         assertThat(result.schemaBefore).isEqualTo(0L);
         assertThat(result.schemaAfter).isEqualTo(1L);
         assertThat(result.snapshotBefore).isNull();
-        assertThat(result.snapshotAfter).isNull();
+        // no row id commit, only the fence on the new schema
+        assertThat(result.snapshotAfter).isEqualTo(1L);
         assertThat(result.assignedFileCount).isZero();
-        assertThat(result.nextRowId).isNull();
         assertThat(result.describe(TABLE)).startsWith("Success.");
 
         FileStoreTable table = loadTable();
+        Snapshot fence = table.snapshotManager().latestSnapshot();
+        assertThat(fence.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+        assertThat(fence.schemaId()).isEqualTo(1L);
+        assertThat(liveFiles(table)).isEmpty();
+        assertThat(result.nextRowId).isEqualTo(fence.nextRowId());
         assertThat(table.coreOptions().rowTrackingEnabled()).isTrue();
         assertThat(table.coreOptions().dataEvolutionEnabled()).isTrue();
         writeRows(table, row(1, "a", "p1"), row(2, "b", "p1"));
@@ -130,14 +146,22 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         assertThat(result.assignedRowCount).isEqualTo(6L);
         assertThat(result.nextRowId).isEqualTo(6L);
         assertThat(result.snapshotBefore).isEqualTo(snapshotBefore);
-        assertThat(result.snapshotAfter).isEqualTo(snapshotBefore + 1);
+        // the row id commit, then the fence on the new schema
+        assertThat(result.snapshotAfter).isEqualTo(snapshotBefore + 2);
 
         table = loadTable();
-        Snapshot latest = table.snapshotManager().latestSnapshot();
-        assertThat(latest.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
-        assertThat(latest.nextRowId()).isEqualTo(6L);
-        assertThat(latest.schemaId()).isEqualTo(0L);
-        assertThat(latest.totalRecordCount()).isEqualTo(6L);
+        Snapshot rowIdSnapshot = table.snapshotManager().snapshot(snapshotBefore + 1);
+        assertThat(rowIdSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
+        assertThat(rowIdSnapshot.nextRowId()).isEqualTo(6L);
+        assertThat(rowIdSnapshot.schemaId()).isEqualTo(0L);
+        assertThat(rowIdSnapshot.totalRecordCount()).isEqualTo(6L);
+        assertThat(DataEvolutionEnabler.rowIdsAssigned(rowIdSnapshot)).isTrue();
+        Snapshot fence = table.snapshotManager().latestSnapshot();
+        assertThat(fence.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+        assertThat(fence.schemaId()).isEqualTo(1L);
+        assertThat(fence.nextRowId()).isEqualTo(6L);
+        assertThat(fence.totalRecordCount()).isEqualTo(6L);
+        assertThat(DataEvolutionEnabler.rowIdsAssigned(fence)).isFalse();
 
         // files in commit order, ids contiguous, row id = first row id + position
         assertThat(liveFiles(table).stream().map(DataFileMeta::firstRowId))
@@ -413,6 +437,23 @@ public class DataEvolutionEnablerTest extends TableTestBase {
                 restCatalog.createDatabase(TABLE.getDatabaseName(), true);
                 restCatalog.createTable(
                         TABLE, Schema.newBuilder().column("id", DataTypes.INT()).build(), false);
+                FileStoreTable restTable = (FileStoreTable) restCatalog.getTable(TABLE);
+                BatchWriteBuilder writeBuilder = restTable.newBatchWriteBuilder();
+                try (BatchTableWrite write = writeBuilder.newWrite();
+                        BatchTableCommit commit = writeBuilder.newCommit()) {
+                    write.write(GenericRow.of(1));
+                    commit.commit(write.prepareCommit());
+                }
+
+                // the schema change alone cannot be sent either
+                assertThatThrownBy(
+                                () ->
+                                        restCatalog.alterTable(
+                                                TABLE, SchemaChange.enableDataEvolution(), false))
+                        .isInstanceOf(UnsupportedOperationException.class)
+                        .hasMessage(
+                                "Enabling data evolution on table default.t of a REST catalog is "
+                                        + "not supported yet.");
 
                 DataEvolutionEnabler enabler = new DataEvolutionEnabler(restCatalog, TABLE);
                 for (boolean dryRun : new boolean[] {true, false}) {
@@ -523,6 +564,7 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         FileStoreTable table = createTable(Collections.emptyMap());
         writeRows(table, row(1, "a", "p1"));
         FileStoreTable staleWriter = loadTable();
+        AtomicBoolean written = new AtomicBoolean();
 
         DataEvolutionEnabler enabler =
                 new DataEvolutionEnabler(
@@ -530,7 +572,11 @@ public class DataEvolutionEnablerTest extends TableTestBase {
                         TABLE,
                         () -> {},
                         // after the row ids were committed, before the schema changes
-                        () -> writeRowsUnchecked(staleWriter, row(2, "b", "p1")));
+                        () -> {
+                            if (written.compareAndSet(false, true)) {
+                                writeRowsUnchecked(staleWriter, row(2, "b", "p1"));
+                            }
+                        });
         DataEvolutionEnabler.Result result = enabler.run(false);
 
         assertThat(result.assignedFileCount).isEqualTo(2L);
@@ -538,6 +584,12 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         table = loadTable();
         assertThat(table.coreOptions().dataEvolutionEnabled()).isTrue();
         assertNoDuplicateOrMissingRowIds(table, 2);
+        // 2: row ids, 3: the stale write, which made the schema change fail, 4: row ids again,
+        // 5: the fence
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(5L);
+        assertThat(table.schemaManager().listAllIds()).containsExactly(0L, 1L);
+        assertThat(DataEvolutionEnabler.rowIdsAssigned(table.snapshotManager().snapshot(4)))
+                .isTrue();
         assertThat(table.snapshotManager().latestSnapshot().schemaId()).isEqualTo(1L);
 
         // and from now on the stale writer is refused
@@ -605,6 +657,268 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         assertThat(table.schema().id()).isEqualTo(0L);
         assertThat(table.coreOptions().dataEvolutionEnabled()).isFalse();
         assertThat(liveFiles(table)).allMatch(file -> file.firstRowId() == null);
+    }
+
+    @Test
+    public void testSchemaChangeAloneIsRefusedWhileFilesHaveNoRowId() throws Exception {
+        FileStoreTable table = createTable(Collections.emptyMap());
+        writeRows(table, row(1, "a", "p1"));
+
+        assertThatThrownBy(
+                        () -> catalog.alterTable(TABLE, SchemaChange.enableDataEvolution(), false))
+                .hasStackTraceContaining(
+                        "Cannot enable data evolution on table default.t: its data files have no "
+                                + "row id")
+                .hasStackTraceContaining("sys.enable_data_evolution");
+        table = loadTable();
+        assertThat(table.schema().id()).isEqualTo(0L);
+        assertThat(table.coreOptions().rowTrackingEnabled()).isFalse();
+        assertThat(table.coreOptions().dataEvolutionEnabled()).isFalse();
+    }
+
+    @Test
+    public void testSchemaChangeAloneIsAcceptedOnTableWithoutSnapshot() throws Exception {
+        createTable(Collections.emptyMap());
+
+        catalog.alterTable(TABLE, SchemaChange.enableDataEvolution(), false);
+
+        FileStoreTable table = loadTable();
+        assertThat(table.coreOptions().rowTrackingEnabled()).isTrue();
+        assertThat(table.coreOptions().dataEvolutionEnabled()).isTrue();
+    }
+
+    @Test
+    public void testSchemaChangeNeedsTheLatestSnapshotToBeAMarkedOne() throws Exception {
+        FileStoreTable table = createTable(Collections.emptyMap());
+        writeRows(table, row(1, "a", "p1"));
+        // stop after the row id commit
+        assertThatThrownBy(
+                        () ->
+                                new DataEvolutionEnabler(
+                                                catalog,
+                                                TABLE,
+                                                () -> {},
+                                                () -> {
+                                                    throw new RuntimeException("stop");
+                                                })
+                                        .run(false))
+                .hasMessage("stop");
+        table = loadTable();
+        Snapshot marked = table.snapshotManager().latestSnapshot();
+        assertThat(DataEvolutionEnabler.rowIdsAssigned(marked)).isTrue();
+
+        // a snapshot that copies the properties of its base does not inherit the mark
+        try (FileStoreCommitImpl commit =
+                (FileStoreCommitImpl) table.store().newCommit(commitUser, table)) {
+            assertThat(
+                            commit.replaceManifestList(
+                                    marked,
+                                    marked.totalRecordCount(),
+                                    Pair.of(
+                                            marked.baseManifestList(),
+                                            marked.baseManifestListSize()),
+                                    Pair.of(
+                                            marked.deltaManifestList(),
+                                            marked.deltaManifestListSize())))
+                    .isTrue();
+        }
+        Snapshot copy = table.snapshotManager().latestSnapshot();
+        assertThat(copy.properties())
+                .containsEntry(
+                        DataEvolutionEnabler.ROW_IDS_ASSIGNED_SNAPSHOT_ID,
+                        Long.toString(marked.id()));
+        assertThat(DataEvolutionEnabler.rowIdsAssigned(copy)).isFalse();
+        assertThatThrownBy(
+                        () -> catalog.alterTable(TABLE, SchemaChange.enableDataEvolution(), false))
+                .hasStackTraceContaining("its data files have no row id");
+
+        // the procedure completes the conversion
+        DataEvolutionEnabler.Result result = enabler().run(false);
+        assertThat(result.describe(TABLE)).startsWith("Success.");
+        assertThat(result.assignedFileCount).isZero();
+        assertNoDuplicateOrMissingRowIds(loadTable(), 1);
+    }
+
+    @Test
+    public void testRowIdCommitReferencesTheLatestSchema() throws Exception {
+        FileStoreTable table = createTable(Collections.emptyMap());
+        writeRows(table, row(1, "a", "p1"));
+        AtomicBoolean altered = new AtomicBoolean();
+
+        // a schema change creates no snapshot, so it does not fail the row id commit
+        new DataEvolutionEnabler(
+                        catalog,
+                        TABLE,
+                        () -> {
+                            if (altered.compareAndSet(false, true)) {
+                                alterUnchecked(SchemaChange.addColumn("c", DataTypes.INT()));
+                            }
+                        },
+                        () -> {})
+                .run(false);
+
+        table = loadTable();
+        Snapshot rowIdSnapshot = table.snapshotManager().snapshot(2);
+        assertThat(rowIdSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
+        assertThat(rowIdSnapshot.schemaId()).isEqualTo(1L);
+        FileStoreTable travelled =
+                table.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2"));
+        assertThat(travelled.rowType().getFieldNames()).containsExactly("id", "v", "pt", "c");
+
+        assertThat(table.schema().id()).isEqualTo(2L);
+        assertThat(table.rowType().getFieldNames()).containsExactly("id", "v", "pt", "c");
+        assertThat(table.coreOptions().dataEvolutionEnabled()).isTrue();
+        assertNoDuplicateOrMissingRowIds(table, 1);
+    }
+
+    @Test
+    public void testGivesUpWhenWritersKeepCommittingBeforeTheSchemaChange() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.COMMIT_MAX_RETRIES.key(), "2");
+        FileStoreTable table = createTable(options);
+        writeRows(table, row(1, "a", "p1"));
+        FileStoreTable concurrentWriter = loadTable();
+        AtomicInteger commits = new AtomicInteger();
+
+        DataEvolutionEnabler enabler =
+                new DataEvolutionEnabler(
+                        catalog,
+                        TABLE,
+                        () -> {},
+                        () ->
+                                writeRowsUnchecked(
+                                        concurrentWriter,
+                                        row(commits.incrementAndGet() + 1, "x", "p1")));
+
+        assertThatThrownBy(() -> enabler.run(false))
+                .hasMessageContaining("Failed to enable data evolution on table default.t")
+                .hasMessageContaining("between the row id assignment and the schema change");
+        assertThat(commits.get()).isEqualTo(3);
+        table = loadTable();
+        assertThat(table.schema().id()).isEqualTo(0L);
+        assertThat(table.coreOptions().dataEvolutionEnabled()).isFalse();
+
+        // once the writer stops, the procedure completes
+        assertThat(enabler().run(false).describe(TABLE)).startsWith("Success.");
+        assertNoDuplicateOrMissingRowIds(loadTable(), 4);
+    }
+
+    @Test
+    public void testRowTrackingTableKeepsItsRowIds() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        FileStoreTable table = createTable(options);
+        writeRows(table, row(1, "a", "p1"), row(2, "b", "p1"));
+        writeRows(table, row(3, "c", "p1"));
+        Map<Integer, Long> before = rowIdsById(table);
+        assertThat(before.values()).containsExactlyInAnyOrder(0L, 1L, 2L);
+
+        DataEvolutionEnabler.Result result = enabler().run(false);
+
+        assertThat(result.describe(TABLE)).startsWith("Success.");
+        assertThat(result.assignedFileCount).isZero();
+        table = loadTable();
+        assertThat(table.coreOptions().rowTrackingEnabled()).isTrue();
+        assertThat(table.coreOptions().dataEvolutionEnabled()).isTrue();
+        // the row ids that rows already had are kept
+        assertThat(rowIdsById(table)).isEqualTo(before);
+        writeRows(table, row(4, "d", "p1"));
+        assertThat(rowIdsById(table)).containsEntry(4, 3L);
+    }
+
+    @Test
+    public void testConcurrentRunsSwitchTheSchemaOnce() throws Exception {
+        FileStoreTable table = createTable(Collections.emptyMap());
+        writeRows(table, row(1, "a", "p1"));
+        AtomicReference<DataEvolutionEnabler.Result> inner = new AtomicReference<>();
+
+        // a second run completes while the first is between its row id commit and its schema
+        // change
+        DataEvolutionEnabler.Result outer =
+                new DataEvolutionEnabler(
+                                catalog,
+                                TABLE,
+                                () -> {},
+                                () -> {
+                                    if (inner.get() == null) {
+                                        try {
+                                            inner.set(enabler().run(false));
+                                        } catch (Exception e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                    }
+                                })
+                        .run(false);
+
+        assertThat(inner.get().describe(TABLE)).startsWith("Success.");
+        assertThat(outer.describe(TABLE)).startsWith("Success.");
+        table = loadTable();
+        assertThat(table.schemaManager().listAllIds()).containsExactly(0L, 1L);
+        assertNoDuplicateOrMissingRowIds(table, 1);
+    }
+
+    @Test
+    public void testWriterPausedAfterItsSchemaCheckIsRefusedAfterTheFence() throws Exception {
+        FileStoreTable table = createTable(Collections.emptyMap());
+        writeRows(table, row(1, "a", "p1"));
+        // reads the row id snapshot, passes the check of the previous schema, then waits
+        PausedWriter writer = new PausedWriter(row(2, "b", "p1"));
+
+        DataEvolutionEnabler.Result result =
+                new DataEvolutionEnabler(catalog, TABLE, () -> {}, writer::startAndAwaitPause)
+                        .run(false);
+        assertThat(result.describe(TABLE)).startsWith("Success.");
+
+        // the fence took the snapshot id the writer was going to commit: it retries and is
+        // refused on the new schema
+        assertThat(writer.releaseAndJoin())
+                .hasStackTraceContaining("enabled row tracking in schema 1")
+                .hasStackTraceContaining("Restart the writer");
+        table = loadTable();
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(result.snapshotAfter);
+        assertThat(valuesById(table)).containsOnlyKeys(1);
+        assertNoDuplicateOrMissingRowIds(table, 1);
+    }
+
+    @Test
+    public void testWriterPausedAfterItsSchemaCheckCommittingBeforeTheFenceIsRepaired()
+            throws Exception {
+        FileStoreTable table = createTable(Collections.emptyMap());
+        writeRows(table, row(1, "a", "p1"));
+        PausedWriter writer = new PausedWriter(row(2, "b", "p1"));
+
+        // the writer commits after the schema change, before the fence
+        DataEvolutionEnabler.Result result =
+                new DataEvolutionEnabler(
+                                catalog,
+                                TABLE,
+                                () -> {},
+                                writer::startAndAwaitPause,
+                                () -> assertThat(writer.releaseAndJoin()).isNull())
+                        .run(false);
+
+        assertThat(result.describe(TABLE)).startsWith("Success.");
+        assertThat(result.assignedFileCount).isEqualTo(2L);
+        assertThat(result.nextRowId).isEqualTo(2L);
+        table = loadTable();
+        assertThat(valuesById(table)).containsOnlyKeys(1, 2);
+        assertNoDuplicateOrMissingRowIds(table, 2);
+    }
+
+    @Test
+    public void testWriterPausedOnEmptyTableIsRefusedAfterTheFence() throws Exception {
+        createTable(Collections.emptyMap());
+        PausedWriter writer = new PausedWriter(row(1, "a", "p1"));
+
+        DataEvolutionEnabler.Result result =
+                new DataEvolutionEnabler(catalog, TABLE, () -> {}, writer::startAndAwaitPause)
+                        .run(false);
+        assertThat(result.describe(TABLE)).startsWith("Success.");
+
+        assertThat(writer.releaseAndJoin()).hasStackTraceContaining("enabled row tracking");
+        FileStoreTable table = loadTable();
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(1L);
+        assertThat(liveFiles(table)).isEmpty();
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -767,5 +1081,107 @@ public class DataEvolutionEnablerTest extends TableTestBase {
             }
         }
         return rows;
+    }
+
+    private void alterUnchecked(SchemaChange change) {
+        try {
+            catalog.alterTable(TABLE, change, false);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * A writer on the table as it is now, whose commit stops right after its schema check: the
+     * first file a commit writes after that check is its delta manifest.
+     */
+    private final class PausedWriter {
+
+        private final CountDownLatch paused = new CountDownLatch(1);
+        private final CountDownLatch released = new CountDownLatch(1);
+        private final AtomicReference<Throwable> error = new AtomicReference<>();
+        private final Thread thread;
+
+        private PausedWriter(GenericRow... rows) throws Exception {
+            AtomicReference<Thread> committer = new AtomicReference<>();
+            FileStoreTable table =
+                    FileStoreTableFactory.create(
+                            new PausingFileIO(committer, paused, released), loadTable().location());
+            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            BatchTableWrite write = writeBuilder.newWrite();
+            for (GenericRow row : rows) {
+                write.write(row);
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            BatchTableCommit commit = writeBuilder.newCommit();
+            this.thread =
+                    new Thread(
+                            () -> {
+                                try {
+                                    commit.commit(messages);
+                                } catch (Throwable t) {
+                                    error.set(t);
+                                } finally {
+                                    try {
+                                        commit.close();
+                                        write.close();
+                                    } catch (Exception ignored) {
+                                    }
+                                }
+                            });
+            committer.set(thread);
+        }
+
+        private void startAndAwaitPause() {
+            thread.start();
+            try {
+                assertThat(paused.await(30, TimeUnit.SECONDS)).isTrue();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        /** Lets the commit continue and returns what it threw, if anything. */
+        private Throwable releaseAndJoin() {
+            released.countDown();
+            try {
+                thread.join(TimeUnit.SECONDS.toMillis(60));
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            assertThat(thread.isAlive()).isFalse();
+            return error.get();
+        }
+    }
+
+    private static class PausingFileIO extends LocalFileIO {
+
+        private final AtomicReference<Thread> committer;
+        private final CountDownLatch paused;
+        private final CountDownLatch released;
+        private final AtomicBoolean pausedOnce = new AtomicBoolean();
+
+        private PausingFileIO(
+                AtomicReference<Thread> committer, CountDownLatch paused, CountDownLatch released) {
+            this.committer = committer;
+            this.paused = paused;
+            this.released = released;
+        }
+
+        @Override
+        public PositionOutputStream newOutputStream(Path path, boolean overwrite)
+                throws IOException {
+            if (Thread.currentThread() == committer.get()
+                    && path.getParent().getName().equals("manifest")
+                    && pausedOnce.compareAndSet(false, true)) {
+                paused.countDown();
+                try {
+                    released.await(60, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    throw new IOException(e);
+                }
+            }
+            return super.newOutputStream(path, overwrite);
+        }
     }
 }

@@ -19,7 +19,9 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.append.dataevolution.DataEvolutionEnabler;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
@@ -218,6 +220,7 @@ public class FileSystemSchemaManager implements SchemaManager {
                             () ->
                                     SchemaManager.identifierFromPath(
                                             tableRoot.toString(), true, branch));
+            checkEnableDataEvolution(oldTableSchema, changes, snapshotManager, lazyIdentifier);
             TableSchema newTableSchema =
                     SchemaManager.generateTableSchema(
                             oldTableSchema, changes, hasSnapshots, lazyIdentifier);
@@ -229,6 +232,31 @@ public class FileSystemSchemaManager implements SchemaManager {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
+        }
+    }
+
+    /**
+     * {@link SchemaChange.EnableDataEvolution} switches on row tracking without assigning row ids.
+     * Accept it only while every live data file already has one: the table has no snapshot yet, or
+     * its latest snapshot was committed by {@code sys.enable_data_evolution} for that purpose.
+     */
+    private static void checkEnableDataEvolution(
+            TableSchema oldTableSchema,
+            List<SchemaChange> changes,
+            SnapshotManager snapshotManager,
+            LazyField<Identifier> lazyIdentifier) {
+        if (changes.stream().noneMatch(c -> c instanceof SchemaChange.EnableDataEvolution)
+                || CoreOptions.fromMap(oldTableSchema.options()).rowTrackingEnabled()) {
+            return;
+        }
+        Snapshot latest = snapshotManager.latestSnapshot();
+        if (latest != null && !DataEvolutionEnabler.rowIdsAssigned(latest)) {
+            throw new IllegalStateException(
+                    String.format(
+                            "Cannot enable data evolution on table %s: its data files have no "
+                                    + "row id. Use the sys.enable_data_evolution procedure, which "
+                                    + "assigns them first.",
+                            lazyIdentifier.get().getFullName()));
         }
     }
 

@@ -58,7 +58,8 @@ class EnableDataEvolutionProcedureTest extends PaimonSparkTestBase {
       val table = loadTable("t")
       assert(table.coreOptions().rowTrackingEnabled())
       assert(table.coreOptions().dataEvolutionEnabled())
-      assert(table.snapshotManager().latestSnapshotId() == snapshotBefore + 1)
+      // one snapshot assigning the row ids, one fencing writers that predate the schema change
+      assert(table.snapshotManager().latestSnapshotId() == snapshotBefore + 2)
       checkAnswer(
         sql("SELECT id, v, w, _ROW_ID FROM t ORDER BY id"),
         Seq(Row(1, 10, 100, 0), Row(2, 20, 200, 1), Row(3, 30, 300, 2)))

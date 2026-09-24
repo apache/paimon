@@ -128,9 +128,10 @@ public class EnableDataEvolutionProcedureITCase extends CatalogITCaseBase {
         sql("CREATE TABLE T (id INT, v STRING)");
         sql("INSERT INTO T VALUES (1, 'a')");
 
-        // two readers started before the conversion: the default one skips OVERWRITE snapshots,
-        // the other reads their delta, which the conversion leaves empty. Neither may replay the
-        // table or stall on the conversion snapshot.
+        // Two readers started before the conversion, which commits an OVERWRITE snapshot assigning
+        // the row ids and an empty APPEND snapshot fencing old writers. The default reader skips
+        // OVERWRITE snapshots, the other reads their delta, which the conversion leaves empty.
+        // Neither may replay the table or stall on the conversion snapshots.
         BlockingIterator<Row, Row> skipping = streamSqlBlockIter("SELECT * FROM T");
         BlockingIterator<Row, Row> readingOverwrite =
                 streamSqlBlockIter(
