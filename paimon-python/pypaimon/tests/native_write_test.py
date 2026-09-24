@@ -24,11 +24,10 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
-from pypaimon.write.native_write import NativeTableWrite, native_write_available
+from pypaimon.write.native_write import NativeTableWrite
 
 
-requires_native = pytest.mark.skipif(
-    not native_write_available(), reason='pypaimon-rust writer required')
+requires_native = pytest.mark.native_plan
 
 
 def _table(tmp_path, primary_key=False, commit_native=True, table_options=None):
@@ -93,7 +92,6 @@ def test_batch_native_write_commits_through_both_committers(
 
 
 @requires_native
-@pytest.mark.native_plan
 def test_rest_native_write_and_commit(tmp_path, native_rest_catalog):
     catalog = native_rest_catalog
     catalog.create_table('default.t', Schema.from_pyarrow_schema(
