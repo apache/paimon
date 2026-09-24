@@ -289,22 +289,14 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             [{'id': 1, 'a': 'first', 'b': None, 'c': None}],
         )
 
-    def test_aggregation_engine_write_logs_fallback_warning(self):
-        """The write-side fallback to deduplicate for unsupported engines
-        is silent in terms of return value -- a ``logging.warning`` is
-        the only signal that file contents will not match the table's
-        declared semantics. Important when the same table is read back
-        by a reader that honours the declared engine; the pypaimon
-        read-side raise wouldn't fire there.
-        """
-        table = self._create_pk_table('agg_warning',
-                                      merge_engine='aggregation')
-        with self.assertLogs(
-                'pypaimon.write.file_store_write', level='WARNING') as cm:
+    def test_unsupported_aggregation_write_rejected(self):
+        table = self._create_pk_table(
+            'agg_unsupported', merge_engine='aggregation',
+            extra_options={'aggregation.remove-record-on-delete': 'true'})
+        with self.assertRaisesRegex(
+                NotImplementedError, 'aggregation.remove-record-on-delete'):
             self._write(table, [{'id': 1, 'a': 'x', 'b': None, 'c': None}])
-        combined = '\n'.join(cm.output)
-        self.assertIn('aggregation', combined)
-        self.assertIn('deduplicate', combined)
+        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
 
     # -- partial-update + out-of-scope option combinations ---------------
     #
