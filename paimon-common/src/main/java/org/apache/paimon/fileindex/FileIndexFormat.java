@@ -127,6 +127,25 @@ public final class FileIndexFormat {
     /** Writer for file index file. */
     public abstract static class Writer implements Closeable {
 
+        /**
+         * @deprecated Use {@link #writeIndex(String, String, Payload)} and {@link #finish()} to
+         *     stream payloads into the container.
+         */
+        @Deprecated
+        public void writeColumnIndexes(Map<String, Map<String, byte[]>> indexes)
+                throws IOException {
+            for (Map.Entry<String, Map<String, byte[]>> column : indexes.entrySet()) {
+                for (Map.Entry<String, byte[]> index : column.getValue().entrySet()) {
+                    byte[] payload = index.getValue();
+                    writeIndex(
+                            column.getKey(),
+                            index.getKey(),
+                            payload == null ? null : output -> output.write(payload));
+                }
+            }
+            finish();
+        }
+
         /** Writes one payload to the container. A null payload is empty. */
         public abstract void writeIndex(
                 String columnName, String indexType, @Nullable Payload payload) throws IOException;
