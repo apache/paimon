@@ -59,4 +59,27 @@ class ChangelogEventMetadataTest {
         assertThat(extended.getField("__internal__event_ts").type().isNullable()).isTrue();
         assertThat(extended.getField("__internal__event_ts").id()).isEqualTo(2);
     }
+
+    @Test
+    void testMetadataFieldIdsIncludeNestedFields() {
+        RowType valueType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(
+                                        1,
+                                        "payload",
+                                        DataTypes.ROW(new DataField(3, "nested", DataTypes.INT()))),
+                                new DataField(2, "event_ts", DataTypes.BIGINT())));
+        Options options = new Options();
+        options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);
+        options.set(CoreOptions.CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA, "event_ts");
+        CoreOptions coreOptions = new CoreOptions(options);
+
+        RowType extended =
+                ChangelogEventMetadata.appendMetadataFields(valueType, valueType, coreOptions);
+
+        assertThat(extended.getField("__internal__event_ts").id()).isEqualTo(4);
+        assertThat(RowType.currentHighestFieldId(extended.getFields())).isEqualTo(4);
+    }
 }
