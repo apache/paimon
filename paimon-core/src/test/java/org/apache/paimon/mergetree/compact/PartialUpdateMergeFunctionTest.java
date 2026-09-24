@@ -26,10 +26,13 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ProjectedRow;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.apache.paimon.CoreOptions.FIELDS_DEFAULT_AGG_FUNC;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
@@ -422,6 +425,122 @@ public class PartialUpdateMergeFunctionTest {
         add(func, 1, 1, 1, 1, 1);
         add(func, 1, null, 1, 2, 2);
         validate(func, 1, 1, 1, 2, 2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "id", "v1", "seq1", "v2", "seq2", "extra", "v2,id"})
+    public void testSequenceGroupDeleteWithProjection(String selectedFields) {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("v1", DataTypes.INT())
+                        .field("seq1", DataTypes.INT())
+                        .field("v2", DataTypes.INT())
+                        .field("seq2", DataTypes.INT())
+                        .field("extra", DataTypes.INT())
+                        .build();
+        Options options = new Options();
+        options.set("fields.seq1.sequence-group", "v1");
+        options.set("fields.seq2.sequence-group", "v2");
+        options.set("partial-update.remove-record-on-sequence-group", "seq2");
+        MergeFunctionFactory<KeyValue> factory =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("id"));
+        // An empty selection models COUNT(*); other selections cover each field and reordering.
+        RowType readType =
+                factory.adjustReadType(
+                        rowType.project(
+                                selectedFields.isEmpty()
+                                        ? new String[0]
+                                        : selectedFields.split(",")));
+        MergeFunction<KeyValue> func = factory.create(readType);
+        ProjectedRow projection = ProjectedRow.from(readType, rowType);
+        GenericRow inserted = GenericRow.of(1, 10, 1, 20, 1, 100);
+
+        // A newer or equal seq2 deletes the whole row, even if seq2 was not selected.
+        assertProjectedDelete(
+                func,
+                projection,
+                inserted,
+                GenericRow.of(1, null, null, null, 2, null),
+                RowKind.DELETE);
+        assertProjectedDelete(
+                func,
+                projection,
+                inserted,
+                GenericRow.of(1, null, null, null, 1, null),
+                RowKind.DELETE);
+        // An older seq2 must not delete the row.
+        assertProjectedDelete(
+                func,
+                projection,
+                inserted,
+                GenericRow.of(1, null, null, null, 0, null),
+                RowKind.INSERT);
+        // A null seq2 skips the group and must not delete the row.
+        assertProjectedDelete(
+                func,
+                projection,
+                inserted,
+                GenericRow.of(1, null, null, null, null, null),
+                RowKind.INSERT);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "id", "v1", "seq1", "v2", "seq2", "subSeq2", "v2,id"})
+    public void testMultiSequenceFieldsDeleteWithProjection(String selectedFields) {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("v1", DataTypes.INT())
+                        .field("seq1", DataTypes.INT())
+                        .field("v2", DataTypes.INT())
+                        .field("seq2", DataTypes.INT())
+                        .field("subSeq2", DataTypes.INT())
+                        .build();
+        Options options = new Options();
+        options.set("fields.seq1.sequence-group", "v1");
+        options.set("fields.seq2,subSeq2.sequence-group", "v2");
+        options.set("partial-update.remove-record-on-sequence-group", "seq2");
+        MergeFunctionFactory<KeyValue> factory =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("id"));
+        RowType readType =
+                factory.adjustReadType(
+                        rowType.project(
+                                selectedFields.isEmpty()
+                                        ? new String[0]
+                                        : selectedFields.split(",")));
+        MergeFunction<KeyValue> func = factory.create(readType);
+        ProjectedRow projection = ProjectedRow.from(readType, rowType);
+        GenericRow inserted = GenericRow.of(1, 10, 1, 20, 1, 1);
+
+        // seq2 stays equal: subSeq2 must be read to recognize the newer delete.
+        assertProjectedDelete(
+                func,
+                projection,
+                inserted,
+                GenericRow.of(1, null, null, null, 1, 2),
+                RowKind.DELETE);
+        // Equal composite sequences also allow deletion.
+        assertProjectedDelete(
+                func,
+                projection,
+                inserted,
+                GenericRow.of(1, null, null, null, 1, 1),
+                RowKind.DELETE);
+        // The older subSeq2 must prevent deletion, despite the equal seq2.
+        assertProjectedDelete(
+                func,
+                projection,
+                inserted,
+                GenericRow.of(1, null, null, null, 1, 0),
+                RowKind.INSERT);
+        // A fully null sequence group must not delete the row.
+        assertProjectedDelete(
+                func,
+                projection,
+                inserted,
+                GenericRow.of(1, null, null, null, null, null),
+                RowKind.INSERT);
     }
 
     @Test
@@ -1033,6 +1152,32 @@ public class PartialUpdateMergeFunctionTest {
         add(func, RowKind.DELETE, 1, 2, 2, null);
         // after delete with removeRecordOnDelete, row is re-initialized via initRow
         validate(func, 1, 2, 2, null);
+    }
+
+    private void assertProjectedDelete(
+            MergeFunction<KeyValue> function,
+            ProjectedRow projection,
+            GenericRow inserted,
+            GenericRow deleted,
+            RowKind expectedKind) {
+        function.reset();
+        function.add(
+                new KeyValue()
+                        .replace(
+                                GenericRow.of(1),
+                                sequence++,
+                                RowKind.INSERT,
+                                projection.replaceRow(inserted)));
+        function.add(
+                new KeyValue()
+                        .replace(
+                                GenericRow.of(1),
+                                sequence++,
+                                RowKind.DELETE,
+                                projection.replaceRow(deleted)));
+        assertThat(function.getResult().valueKind())
+                .as("delete record %s", deleted)
+                .isEqualTo(expectedKind);
     }
 
     private void add(MergeFunction<KeyValue> function, Integer... f) {

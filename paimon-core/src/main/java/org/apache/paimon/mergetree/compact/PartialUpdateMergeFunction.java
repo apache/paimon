@@ -621,8 +621,13 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
             LinkedHashSet<DataField> extraFields = new LinkedHashSet<>();
             List<String> readFieldNames = readType.getFieldNames();
-            for (DataField readField : readType.getFields()) {
-                int index = rowType.getFieldIndex(readField.name());
+            LinkedHashSet<Integer> requiredFields =
+                    readFieldNames.stream()
+                            .map(rowType::getFieldIndex)
+                            .collect(Collectors.toCollection(LinkedHashSet::new));
+            // These groups determine whether the whole row exists, even for an empty projection.
+            sequenceGroupPartialDelete.stream().sorted().forEach(requiredFields::add);
+            for (int index : requiredFields) {
                 Supplier<FieldsComparator> comparatorSupplier = fieldSeqComparators.get(index);
                 if (comparatorSupplier == null) {
                     continue;
