@@ -118,6 +118,17 @@ public class PartitionIndex {
         }
 
         // 4. exceed buckets upper bound
+        if (totalBucketArray.isEmpty()) {
+            // this assigner owns no bucket at all: the bucket filter rejected every bucket id
+            // below the upper bound, which happens when the upper bound is smaller than the
+            // number of assigners
+            throw new RuntimeException(
+                    String.format(
+                            "Cannot assign a bucket: the bucket filter rejected all buckets under "
+                                    + "the max buckets number %s. Check '%s' is not smaller than "
+                                    + "the writer parallelism.",
+                            maxBucketsNum, DYNAMIC_BUCKET_MAX_BUCKETS.key()));
+        }
         int bucket = ListUtils.pickRandomly(totalBucketArray);
         hash2Bucket.put(hash, toBucketShort(bucket));
         return bucket;
