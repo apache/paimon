@@ -151,7 +151,8 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     def __init__(self, options: Union[Options, Dict[str, str]] = None, **kwargs):
         if isinstance(options, dict):
             options = Options(options)
-        if not options.contains(CatalogOptions.HTTP_USER_AGENT_HEADER):
+        if not any(key.lower() == CatalogOptions.HTTP_USER_AGENT_HEADER.key().lower()
+                   for key in options.to_map()):
             options.set(
                 CatalogOptions.HTTP_USER_AGENT_HEADER,
                 "PythonPVFS PyPaimon/{} Python/{}".format(

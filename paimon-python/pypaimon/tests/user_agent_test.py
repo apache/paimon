@@ -19,6 +19,8 @@ import platform
 import unittest
 from unittest.mock import patch
 
+import requests
+
 from pypaimon.api.api_response import ConfigResponse
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.typedef import RESTAuthParameter
@@ -27,6 +29,13 @@ from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
 
 
 class UserAgentTest(unittest.TestCase):
+
+    @staticmethod
+    def prepared_user_agent(rest_api):
+        headers = rest_api.rest_auth_function.apply(
+            RESTAuthParameter("GET", "/v1/config", ""))
+        request = requests.Request("GET", "http://catalog/v1/config", headers=headers)
+        return requests.Session().prepare_request(request).headers["User-Agent"]
 
     def test_rest_api_uses_sdk_and_python_versions_in_default_user_agent(self):
         with patch(
@@ -104,6 +113,55 @@ class UserAgentTest(unittest.TestCase):
             rest_api.rest_auth_function.init_header["User-Agent"],
         )
 
+    def test_rest_api_preserves_lowercase_configured_user_agent_on_wire(self):
+        rest_api = RESTApi(
+            {
+                CatalogOptions.URI.key(): "http://catalog",
+                CatalogOptions.TOKEN_PROVIDER.key(): "bear",
+                CatalogOptions.TOKEN.key(): "token",
+                "header.user-agent": "custom-client/1.0",
+            },
+            config_required=False,
+        )
+
+        self.assertEqual("custom-client/1.0", self.prepared_user_agent(rest_api))
+
+    def test_rest_config_merge_preserves_lowercase_client_user_agent(self):
+        with patch("pypaimon.api.rest_api.HttpClient") as http_client_class:
+            http_client_class.return_value.get_with_params.return_value = ConfigResponse(
+                defaults={"header.User-Agent": "server-default/1.0"},
+                overrides=None,
+            )
+            rest_api = RESTApi(
+                {
+                    CatalogOptions.URI.key(): "http://catalog",
+                    CatalogOptions.WAREHOUSE.key(): "warehouse",
+                    CatalogOptions.TOKEN_PROVIDER.key(): "bear",
+                    CatalogOptions.TOKEN.key(): "token",
+                    "header.user-agent": "custom-client/1.0",
+                },
+            )
+
+        self.assertEqual("custom-client/1.0", self.prepared_user_agent(rest_api))
+
+    def test_rest_config_override_wins_over_lowercase_client_user_agent(self):
+        with patch("pypaimon.api.rest_api.HttpClient") as http_client_class:
+            http_client_class.return_value.get_with_params.return_value = ConfigResponse(
+                defaults={},
+                overrides={"header.USER-AGENT": "required-client/2.0"},
+            )
+            rest_api = RESTApi(
+                {
+                    CatalogOptions.URI.key(): "http://catalog",
+                    CatalogOptions.WAREHOUSE.key(): "warehouse",
+                    CatalogOptions.TOKEN_PROVIDER.key(): "bear",
+                    CatalogOptions.TOKEN.key(): "token",
+                    "header.user-agent": "custom-client/1.0",
+                },
+            )
+
+        self.assertEqual("required-client/2.0", self.prepared_user_agent(rest_api))
+
     def test_rest_config_request_uses_default_user_agent(self):
         with patch("pypaimon.api.rest_api.HttpClient") as http_client_class, patch(
                 "pypaimon.api.rest_api.build_info.full_version",
@@ -166,6 +224,19 @@ class UserAgentTest(unittest.TestCase):
             "custom-client/1.0",
             pvfs.options.get(CatalogOptions.HTTP_USER_AGENT_HEADER),
         )
+
+    def test_pvfs_preserves_lowercase_configured_user_agent(self):
+        pvfs = PaimonVirtualFileSystem(
+            {
+                OssOptions.OSS_ACCESS_KEY_ID.key(): "ak",
+                "header.user-agent": "custom-client/1.0",
+            },
+            skip_instance_cache=True,
+        )
+
+        self.assertNotIn("header.User-Agent", pvfs.options.to_map())
+        self.assertEqual(
+            "custom-client/1.0", pvfs.options.to_map()["header.user-agent"])
 
 
 if __name__ == "__main__":
