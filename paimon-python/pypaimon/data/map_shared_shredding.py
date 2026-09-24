@@ -495,6 +495,28 @@ def assemble_normal_map_selected_keys(
     """Materialize selected values when an older file stores a normal MAP."""
     if not pa.types.is_map(column.type):
         raise TypeError("Selected-key MAP must be stored as a map or shared struct")
+    # map_lookup preserves first-match semantics, including a null first value.
+    # Older supported Arrow releases do not provide this kernel.
+    map_lookup = getattr(pc, "map_lookup", None)
+    if map_lookup is not None and (
+        pa.types.is_string(column.type.key_type) or pa.types.is_large_string(column.type.key_type)
+    ):
+        try:
+            children = [
+                _restore_orc_temporal_values(
+                    map_lookup(column, pa.scalar(key, type=column.type.key_type), "first"),
+                    value_type,
+                )
+                for key in selected_keys
+            ]
+        except pa.ArrowNotImplementedError:
+            # Some value types support take but not the map_lookup builder.
+            pass
+        else:
+            fields = [pa.field(key, value_type) for key in selected_keys]
+            mask = column.is_null() if column.null_count else None
+            return pa.StructArray.from_arrays(children, fields=fields, mask=mask)
+
     offsets, start, end = _normalized_offsets(column)
     keys = column.keys.slice(start, end - start).to_pylist()
     values = _restore_orc_temporal_values(
