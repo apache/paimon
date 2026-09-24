@@ -322,6 +322,10 @@ class FileStoreWrite:
     def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
         self.commit_identifier = commit_identifier
         commit_messages = []
+        # A BlobConsumer owns the pack bytes. Commit abort must leave those
+        # ``.blob`` files alone; the writer still owns every other file and
+        # ``writer.abort()`` can still delete them.
+        preserve_blob_files = self.blob_consumer is not None
         for (partition, bucket), writer in self.data_writers.items():
             committed_files = writer.prepare_commit()
             changelog_files = writer.prepare_changelog_commit()
@@ -332,6 +336,7 @@ class FileStoreWrite:
                     new_files=committed_files,
                     changelog_files=changelog_files,
                     total_buckets=self._runtime_total_buckets.get(partition),
+                    preserve_blob_files_on_abort=preserve_blob_files,
                 )
                 commit_messages.append(commit_message)
         return commit_messages

@@ -85,12 +85,43 @@ def _reject_compact_increment(messages: List[CommitMessage]):
                 'Committing a compact increment requires a separate COMPACT snapshot.')
 
 
+def _preserve_blob_files(message) -> bool:
+    return message.preserve_blob_files_on_abort
+
+
+def _is_preserved_blob_pack(path) -> bool:
+    return str(path).endswith("." + CoreOptions.FILE_FORMAT_BLOB)
+
+
+def _aligned_extra_file_path(file, extra_file: str, resolved_path=None) -> str:
+    if "://" in extra_file or extra_file.startswith("/"):
+        return extra_file
+    file_path = file.external_path or file.file_path or resolved_path
+    if not file_path or "/" not in str(file_path):
+        return extra_file
+    return "{}/{}".format(str(file_path).rsplit("/", 1)[0], extra_file)
+
+
+def _delete_abort_paths(table, paths):
+    for path_to_delete in paths:
+        try:
+            table.file_io.delete_quietly(str(path_to_delete))
+        except Exception as error:
+            logger.warning(
+                "Failed to clean up file %s during abort: %s",
+                path_to_delete,
+                error,
+            )
+
+
 def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
     """Delete files created by messages known to be uncommitted."""
     for message in commit_messages:
+        preserve_blob_files = _preserve_blob_files(message)
         for file in (list(message.new_files) + list(message.changelog_files)
                      + list(message.compact_after)
                      + list(message.compact_changelog_files)):
+            paths = []
             path = None
             try:
                 path = file.external_path or file.file_path
@@ -98,14 +129,25 @@ def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
                     bucket_path = table.path_factory().bucket_path(
                         tuple(message.partition), message.bucket)
                     path = '%s/%s' % (bucket_path.rstrip('/'), file.file_name)
-                if path:
-                    table.file_io.delete_quietly(str(path))
+                if path and not (
+                        preserve_blob_files and _is_preserved_blob_pack(path)):
+                    paths.append(path)
+                for extra_file in (getattr(file, "extra_files", None) or []):
+                    extra_path = _aligned_extra_file_path(file, extra_file, path)
+                    if preserve_blob_files and _is_preserved_blob_pack(extra_path):
+                        continue
+                    paths.append(extra_path)
             except Exception as error:
+                # Extras failed after the data path was resolved. Delete that
+                # path before logging, then skip the rest of this file.
+                _delete_abort_paths(table, paths)
                 logger.warning(
                     "Failed to clean up file %s during abort: %s",
                     path,
                     error,
                 )
+                continue
+            _delete_abort_paths(table, paths)
         for entry in message.index_adds + message.compact_index_adds:
             file_name = None
             try:
