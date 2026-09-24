@@ -69,6 +69,12 @@ public class BitmapFileIndex implements FileIndexer {
 
     @Override
     public FileIndexReader createReader(
+            SeekableInputStream seekableInputStream, int start, int length) {
+        return createReader(seekableInputStream, (long) start, (long) length);
+    }
+
+    @Override
+    public FileIndexReader createReader(
             SeekableInputStream seekableInputStream, long start, long length) {
         try {
             Reader reader = new Reader(seekableInputStream, start, options);

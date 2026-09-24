@@ -309,7 +309,8 @@ public class FileIndexProcessorTest {
             // file), so the index was rebuilt over nulls and 100 would be absent.
             FieldRef vRef = new FieldRef(0, "v", DataTypes.INT());
             try (FileIndexFormat.Reader reader =
-                    FileIndexFormat.createReader(new ByteArraySeekableStream(embedded), rowType)) {
+                    FileIndexFormat.createReader(
+                            new ByteArraySeekableStream(embedded), rowType, embedded.length)) {
                 Set<FileIndexReader> vReaders = reader.readColumnIndex("v");
                 assertThat(vReaders).isNotEmpty();
                 for (FileIndexReader vReader : vReaders) {

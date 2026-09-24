@@ -60,6 +60,11 @@ public class RangeBitmapFileIndex implements FileIndexer {
     }
 
     @Override
+    public FileIndexReader createReader(SeekableInputStream in, int start, int length) {
+        return createReader(in, (long) start, (long) length);
+    }
+
+    @Override
     public FileIndexReader createReader(SeekableInputStream in, long start, long length) {
         return new Reader(dataType, in, start);
     }

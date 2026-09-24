@@ -69,6 +69,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 /** Tests for {@link DataFileIndexWriter}. */
 public class DataFileIndexWriterTest {
@@ -163,6 +164,41 @@ public class DataFileIndexWriterTest {
                 .hasMessageContaining("Test index write failure");
         assertThat(fileIO.exists(path)).isFalse();
         assertThat(writer.result().independentIndexFile()).isNull();
+    }
+
+    @Test
+    public void testV2FailedWriteReportsDeleteFailure() throws Exception {
+        Options options = new Options();
+        options.setString("file-index.format.version", "2");
+        options.setString("file-index.in-manifest-threshold", "1B");
+        options.setString("file-index.stream-test.columns", "a");
+        options.setString("file-index.stream-test.a.fail", "true");
+        Path path = new Path(tempFile.resolve("undeleted.index").toUri());
+        FileIO deleteFailingFileIO =
+                new LocalFileIO() {
+                    @Override
+                    public boolean delete(Path path, boolean recursive) {
+                        return false;
+                    }
+                };
+        DataFileIndexWriter writer =
+                new DataFileIndexWriter(
+                        deleteFailingFileIO,
+                        path,
+                        RowType.builder().field("a", DataTypes.INT()).build(),
+                        new FileIndexOptions(new CoreOptions(options)),
+                        null);
+        writer.write(GenericRow.of(1));
+
+        Throwable failure = catchThrowable(writer::close);
+        assertThat(failure)
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Test index write failure");
+        assertThat(failure.getSuppressed()).hasSize(1);
+        assertThat(failure.getSuppressed()[0])
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Failed to delete partial file index file");
+        assertThat(deleteFailingFileIO.exists(path)).isTrue();
     }
 
     @ParameterizedTest

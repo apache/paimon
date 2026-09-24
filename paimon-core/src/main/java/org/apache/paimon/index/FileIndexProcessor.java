@@ -138,7 +138,8 @@ public class FileIndexProcessor {
                 // projectedIndexCols index into the file schema. withProjection would re-interpret
                 // them against the current table schema, so a schema change that shifts columns
                 // would rebuild the index over the wrong column.
-                RowType indexReadType = schemaInfo.fileSchema.project(schemaInfo.projectedIndexCols);
+                RowType indexReadType =
+                        schemaInfo.fileSchema.project(schemaInfo.projectedIndexCols);
                 try (RecordReader<InternalRow> reader =
                         table.newReadBuilder()
                                 .withReadType(indexReadType)

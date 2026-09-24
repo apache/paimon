@@ -68,6 +68,11 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
     }
 
     @Override
+    public FileIndexReader createReader(SeekableInputStream inputStream, int start, int length) {
+        return createReader(inputStream, (long) start, (long) length);
+    }
+
+    @Override
     public FileIndexReader createReader(SeekableInputStream inputStream, long start, long length) {
         try {
             inputStream.seek(start);

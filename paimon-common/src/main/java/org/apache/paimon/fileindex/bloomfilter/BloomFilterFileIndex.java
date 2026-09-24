@@ -70,6 +70,11 @@ public class BloomFilterFileIndex implements FileIndexer {
     }
 
     @Override
+    public FileIndexReader createReader(SeekableInputStream inputStream, int start, int length) {
+        return createReader(inputStream, (long) start, (long) length);
+    }
+
+    @Override
     public FileIndexReader createReader(SeekableInputStream inputStream, long start, long length) {
         int payloadLength = checkedPayloadLength(length);
         try {

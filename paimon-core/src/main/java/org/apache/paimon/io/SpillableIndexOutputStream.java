@@ -104,7 +104,9 @@ public final class SpillableIndexOutputStream extends OutputStream {
             close();
         } finally {
             if (fileCreated) {
-                fileIO.delete(path, false);
+                if (!fileIO.delete(path, false) && fileIO.exists(path)) {
+                    throw new IOException("Failed to delete partial file index file " + path);
+                }
             }
         }
     }

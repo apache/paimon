@@ -32,7 +32,22 @@ public interface FileIndexer {
 
     FileIndexWriter createWriter();
 
-    FileIndexReader createReader(SeekableInputStream inputStream, long start, long length);
+    /** @deprecated Override the long overload to support positions and lengths beyond int32. */
+    @Deprecated
+    FileIndexReader createReader(SeekableInputStream inputStream, int start, int length);
+
+    default FileIndexReader createReader(SeekableInputStream inputStream, long start, long length) {
+        if (start < Integer.MIN_VALUE
+                || start > Integer.MAX_VALUE
+                || length < Integer.MIN_VALUE
+                || length > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "File index payload range exceeds int32: start = %s, length = %s.",
+                            start, length));
+        }
+        return createReader(inputStream, (int) start, (int) length);
+    }
 
     static FileIndexer create(String type, DataType dataType, Options options) {
         FileIndexerFactory fileIndexerFactory = FileIndexerFactoryUtils.load(type);
