@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.append.SortCompactCommitMessageRewriter;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -43,6 +44,8 @@ import java.util.stream.Collectors;
  */
 public class SortCompactCommitter extends StoreCommitter {
 
+    private final FileStoreTable table;
+    private final String commitUser;
     private final SortCompactCommitMessageRewriter rewriter;
 
     public SortCompactCommitter(
@@ -51,6 +54,8 @@ public class SortCompactCommitter extends StoreCommitter {
             Context context,
             SortCompactCommitMessageRewriter rewriter) {
         super(table, commit, context);
+        this.table = table;
+        this.commitUser = context.commitUser();
         this.rewriter = rewriter;
     }
 
@@ -96,7 +101,7 @@ public class SortCompactCommitter extends StoreCommitter {
                 globalCommittables.stream()
                         .sorted(Comparator.comparingLong(ManifestCommittable::identifier))
                         .collect(Collectors.toList());
-        List<ManifestCommittable> retryCommittables = commit.filterCommitted(sortedCommittables);
+        List<ManifestCommittable> retryCommittables = filterUncommitted(sortedCommittables);
         if (retryCommittables.isEmpty()) {
             // Delete-only compact commits are only valid at job end (filterAndCommit with
             // checkAppendFiles=false, e.g. CommitterOperator#endInput). Recovery paths call
@@ -133,6 +138,27 @@ public class SortCompactCommitter extends StoreCommitter {
         calcNumBytesAndRecordsOut(rewritten);
         commitListeners.notifyCommittable(globalCommittables, partitionMarkDoneRecoverFromState);
         return committed;
+    }
+
+    /**
+     * Drop committables already committed by this user before rewrite. Delegates to {@link
+     * FileStoreCommit#filterCommitted} on a short-lived commit, which runs {@code
+     * CommitCallback#retry} for dropped identifiers and honors {@code
+     * commit.strict-mode.last-safe-snapshot}. That commit is closed before rewrite, so a recovered
+     * batch does not persist deletion-vector index files again.
+     */
+    private List<ManifestCommittable> filterUncommitted(
+            List<ManifestCommittable> sortedCommittables) {
+        if (sortedCommittables.isEmpty()) {
+            return sortedCommittables;
+        }
+        try (FileStoreCommit filteringCommit = table.store().newCommit(commitUser, table)) {
+            return filteringCommit.filterCommitted(sortedCommittables);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private int filterAndCommitDeleteOnly(
