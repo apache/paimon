@@ -419,6 +419,7 @@ class RayRangeJoinTest(unittest.TestCase):
         self.assertEqual([(lo, hi) for _, lo, hi in ranged], [(3, 9)])
 
     @pytest.mark.python_plan
+    @pytest.mark.python_write
     def test_footer_failure_degrades_to_unknown(self):
         schema = pa.schema([("k", pa.int64())])
         self._table("default.rj_footer_failure", schema, [

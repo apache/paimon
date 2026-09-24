@@ -430,6 +430,7 @@ class SchemaEvolutionReadTest(unittest.TestCase):
         self.assertEqual(1, len(entries))  # verify scan filter success for schema evolution
 
     @pytest.mark.python_plan
+    @pytest.mark.python_write
     def test_schema_evolution_with_read_filter(self):
         # schema 0
         pa_schema = pa.schema([
