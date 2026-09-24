@@ -25,6 +25,7 @@ from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arr
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.write.commit_message_serializer import deserialize_commit_message
+from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 from pypaimon.write.native_commit import create_native_write_table
 from pypaimon.write.row_utils import row_to_named_values, row_values_to_arrow_table
 
@@ -174,12 +175,10 @@ class NativeTableWrite:
         decoded = [deserialize_commit_message(
             message.serialize(), self.table.partition_keys_fields,
             self.table.trimmed_primary_keys_fields) for message in messages]
-        path_factory = self.table.path_factory()
         for message in decoded:
-            bucket_path = path_factory.bucket_path(message.partition, message.bucket)
             for file in message.new_files + message.changelog_files:
-                file.file_path = file.external_path or (
-                    f"{bucket_path.rstrip('/')}/{file.file_name}")
+                file.file_path = file.external_path or canonical_data_file_path(
+                    self.table, message.partition, message.bucket, file.file_name)
         return decoded
 
     def close(self):

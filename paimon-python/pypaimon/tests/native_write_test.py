@@ -92,6 +92,52 @@ def test_batch_native_write_commits_through_both_committers(
 
 
 @requires_native
+def test_escaped_partition_file_path_and_abort(tmp_path, native_rest_catalog):
+    catalog = native_rest_catalog
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(
+        pa.schema([('id', pa.int64()), ('pt', pa.string())]),
+        options={'file.format': 'parquet', 'write.native.enabled': 'true',
+                 'commit.native.enabled': 'true'}, partition_keys=['pt']), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_batch_write_builder()
+    writer = builder.new_write()
+    assert isinstance(writer, NativeTableWrite)
+    try:
+        writer.write_arrow_batch(_batch([1], ['a/b']))
+        messages = writer.prepare_commit()
+        file = messages[0].new_files[0]
+        assert 'pt=a%2Fb/bucket-0' in file.file_path
+        assert table.file_io.exists(file.file_path)
+
+        commit = builder.new_commit()
+        try:
+            with patch.object(commit.file_store_commit, 'abort',
+                              side_effect=AssertionError('Python fallback')):
+                commit.abort(messages)
+            assert not table.file_io.exists(file.file_path)
+        finally:
+            commit.close()
+    finally:
+        writer.close()
+
+
+@requires_native
+@pytest.mark.python_plan
+@pytest.mark.python_read
+def test_escaped_partition_native_write_is_readable_by_python(tmp_path):
+    table = _table(tmp_path)
+    builder = table.new_batch_write_builder()
+    writer = builder.new_write()
+    try:
+        writer.write_arrow_batch(_batch([1], ['a/b']))
+        messages = writer.prepare_commit()
+        builder.new_commit().commit(messages)
+    finally:
+        writer.close()
+    assert _rows(table) == [{'id': 1, 'pt': 'a/b'}]
+
+
+@requires_native
 def test_rest_native_write_and_commit(tmp_path, native_rest_catalog):
     catalog = native_rest_catalog
     catalog.create_table('default.t', Schema.from_pyarrow_schema(

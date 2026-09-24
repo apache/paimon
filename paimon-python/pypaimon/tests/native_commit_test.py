@@ -332,6 +332,27 @@ def test_native_abort_removes_uncommitted_files(tmp_path, native_rest_catalog, o
         commit.close()
 
 
+@requires_native
+def test_python_file_in_legacy_partition_uses_python_abort(
+        tmp_path, native_rest_catalog):
+    table = _table(tmp_path, catalog=native_rest_catalog)
+    builder = table.new_batch_write_builder()
+    messages = _prepare(builder, [{'id': 1, 'pt': 'a/b'}])
+    file = messages[0].new_files[0]
+    assert table.file_io.exists(file.file_path)
+    assert not native_messages_supported(table, messages)
+
+    commit = builder.new_commit()
+    try:
+        with patch.object(commit.file_store_commit, 'abort',
+                          wraps=commit.file_store_commit.abort) as python_abort:
+            commit.abort(messages)
+        python_abort.assert_called_once_with(messages)
+        assert not table.file_io.exists(file.file_path)
+    finally:
+        commit.close()
+
+
 @pytest.mark.parametrize('failure', ['missing', 'construction', 'conversion'])
 def test_preflight_failure_uses_python(tmp_path, failure):
     table = _table(tmp_path)

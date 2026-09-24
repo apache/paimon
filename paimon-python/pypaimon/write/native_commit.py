@@ -23,6 +23,7 @@ from pypaimon.common.json_util import JSON
 from pypaimon.read.native_plan import (
     _catalog_context_options, _catalog_metastore, _option_value_to_string,
     _resolved_schema_file_io_options)
+from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 from pypaimon.write.commit_message_serializer import serialize_commit_message
 
 
@@ -48,11 +49,27 @@ def _native_publication_supported(table) -> bool:
 def native_messages_supported(table, messages) -> bool:
     if not _native_publication_supported(table):
         return False
+    path_factory = table.path_factory()
     for message in messages:
         if (message.compact_before or message.compact_after
                 or message.compact_changelog_files
                 or message.compact_index_adds or message.compact_index_deletes):
             return False
+        partition = tuple(message.partition)
+        bucket_path = path_factory.bucket_path(
+            partition, message.bucket, canonical_partition=True)
+        for file in message.new_files + message.changelog_files:
+            if file.external_path:
+                continue
+            expected = canonical_data_file_path(
+                table, partition, message.bucket, file.file_name)
+            if file.file_path:
+                if str(file.file_path) != expected:
+                    return False
+            elif path_factory.bucket_path(partition, message.bucket) != bucket_path:
+                # The message does not say which of the two partition layouts
+                # contains the file. Use Python's path-aware commit and abort.
+                return False
     return True
 
 

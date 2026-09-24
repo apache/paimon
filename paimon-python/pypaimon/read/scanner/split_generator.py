@@ -26,6 +26,7 @@ from pypaimon.read.split import Split
 from pypaimon.read.split import DataSplit
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.source.deletion_file import DeletionFile
+from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 
 
 class AbstractSplitGenerator(ABC):
@@ -94,6 +95,11 @@ class AbstractSplitGenerator(ABC):
         Build splits from packed files.
         """
         splits = []
+        partition = tuple(file_entries[0].partition.values)
+        path_factory = self.table.path_factory()
+        escaped_partition = (path_factory.bucket_path(
+            partition, file_entries[0].bucket, canonical_partition=True)
+            != path_factory.bucket_path(partition, file_entries[0].bucket))
         for file_group in packed_files:
             if use_optimized_path:
                 raw_convertible = True
@@ -109,6 +115,12 @@ class AbstractSplitGenerator(ABC):
                     file_entries[0].bucket,
                     self.default_part_value
                 )
+                if escaped_partition and not data_file.external_path:
+                    canonical_path = canonical_data_file_path(
+                        self.table, partition, file_entries[0].bucket,
+                        data_file.file_name)
+                    if self.table.file_io.exists(canonical_path):
+                        data_file.file_path = canonical_path
 
             if file_group:
                 # Get deletion files for this split
