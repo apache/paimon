@@ -1534,7 +1534,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 checkNotNull(
                         snapshotManager.latestSnapshot(),
                         "Latest snapshot is null, can not roll back.");
-        if (options.rowTrackingEnabled()
+        // Decide by the latest persisted schema, not by the options this commit was created with:
+        // a table loaded before row tracking was enabled still reports it as disabled.
+        TableSchema latestSchema =
+                schemaManager.latestOrThrow("Cannot get latest schema for table " + tableName);
+        if (CoreOptions.fromMap(latestSchema.options()).rowTrackingEnabled()
                 && !CoreOptions.fromMap(schemaManager.schema(targetSnapshot.schemaId()).options())
                         .rowTrackingEnabled()) {
             throw new IllegalStateException(

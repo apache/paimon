@@ -139,6 +139,46 @@ public class RowTrackingEnableGuardTest extends TableTestBase {
     }
 
     @Test
+    public void testRollbackThroughTableLoadedBeforeRowTrackingIsRefused() throws Exception {
+        // a table object loaded before row tracking was enabled still reports it as disabled: the
+        // guards must go by the latest persisted schema
+        FileStoreTable stale = createAppendTable();
+        writeRows(stale, row(1, "a"));
+        stale.createTag("before", 1);
+        enableRowTrackingDirectly(stale);
+        writeRows(reload(stale), row(2, "b"));
+        assertThat(stale.coreOptions().rowTrackingEnabled()).isFalse();
+
+        assertThatThrownBy(() -> stale.rollbackTo(1))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("before row tracking was enabled");
+        assertThatThrownBy(() -> stale.rollbackTo("before"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("before row tracking was enabled");
+        assertThatThrownBy(
+                        () -> {
+                            try (FileStoreCommitImpl commit =
+                                    (FileStoreCommitImpl)
+                                            stale.store().newCommit(commitUser, stale)) {
+                                commit.rollbackToAsLatest(stale.snapshotManager().snapshot(1));
+                            }
+                        })
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("before row tracking was enabled");
+
+        // nothing was rolled back
+        FileStoreTable table = reload(stale);
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(2L);
+        assertThat(table.tagManager().tagExists("before")).isTrue();
+        assertThat(firstRowIds(table)).containsExactlyInAnyOrder(null, 0L);
+
+        // a snapshot committed with row tracking is still a valid target through the same object
+        writeRows(table, row(3, "c"));
+        stale.rollbackTo(2);
+        assertThat(reload(stale).snapshotManager().latestSnapshotId()).isEqualTo(2L);
+    }
+
+    @Test
     public void testRollbackOnPlainAppendTableIsUnaffected() throws Exception {
         FileStoreTable table = createAppendTable();
         writeRows(table, row(1, "a"));

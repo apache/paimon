@@ -661,7 +661,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
      * it; roll the schema back first if the conversion really has to be undone.
      */
     private void checkRollbackKeepsRowTracking(Snapshot target) {
-        if (!coreOptions().rowTrackingEnabled()) {
+        // Decide by the latest persisted schema, not by the options of this object: a table loaded
+        // before row tracking was enabled still reports it as disabled.
+        Optional<TableSchema> latestSchema = schemaManager().latest();
+        if (!latestSchema.isPresent()
+                || !CoreOptions.fromMap(latestSchema.get().options()).rowTrackingEnabled()) {
             return;
         }
         TableSchema targetSchema = schemaManager().schema(target.schemaId());
