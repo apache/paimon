@@ -117,7 +117,8 @@ class AbstractSplitGenerator(ABC):
                     self.table.table_path,
                     file_entries[0].partition,
                     file_entries[0].bucket,
-                    self.default_part_value
+                    self.default_part_value,
+                    self.table.options.data_file_path_directory()
                 )
                 if escaped_partition and not data_file.external_path:
                     canonical_path = canonical_data_file_path(

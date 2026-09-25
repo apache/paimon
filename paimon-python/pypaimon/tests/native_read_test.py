@@ -36,6 +36,7 @@ def _table_read(limit=None):
     read.table = Mock()
     read.table.options.native_read_enabled.return_value = True
     read.table.options.file_format.return_value = 'parquet'
+    read.table.options.data_file_path_directory.return_value = None
     read.table.options.blob_as_descriptor.return_value = False
     read.table.options.blob_descriptor_fields.return_value = set()
     read.table.options.blob_view_fields.return_value = set()

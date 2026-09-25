@@ -426,6 +426,11 @@ class TableRead:
         """Return Rust-read batches, or ``None`` when this read must fall back."""
         if not self.table.options.native_read_enabled():
             return None
+        # data-file.path-directory relocates data files under a sub-directory
+        # the native reader resolves at the bucket root -- it would 404. The
+        # Python reader honors the directory, matching the write/plan fallback.
+        if self.table.options.data_file_path_directory() is not None:
+            return None
         if self.table.options.file_format() not in _NATIVE_READ_FILE_FORMATS:
             return None
         if not splits:

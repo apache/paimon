@@ -117,6 +117,11 @@ class TableCommit:
         if (not self.table.options.native_commit_enabled()
                 or self._commit_callbacks):
             return None
+        # data-file.path-directory keeps the whole pipeline on the Python
+        # path (which resolves the relocated directory); see the matching
+        # write / read / plan fallbacks.
+        if self.table.options.data_file_path_directory() is not None:
+            return None
         try:
             from pypaimon.write.native_commit import (
                 create_native_commit, native_messages_supported,

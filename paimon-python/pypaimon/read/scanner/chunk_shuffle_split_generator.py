@@ -251,6 +251,7 @@ class ChunkShuffleSplitGeneratorBase(AbstractSplitGenerator):
                         partition_row,
                         bucket,
                         self.default_part_value,
+                        self.table.options.data_file_path_directory(),
                     )
             for segments in self._slice_group_into_chunks(entries_in_group):
                 all_chunks.append(_Chunk(partition_row, bucket, segments))

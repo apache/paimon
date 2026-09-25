@@ -59,6 +59,7 @@ def _scan(native_enabled, file_scanner):
     scan.table.options.options.contains.return_value = False       # no incremental
     scan.table.options.merge_engine.return_value = None            # not first-row
     scan.table.options.query_auth_enabled = False
+    scan.table.options.data_file_path_directory.return_value = None  # no relocated dir
     scan.table.current_branch.return_value = 'main'
     scan.table.is_primary_key_table = False        # not a pk table
     scan.table.trimmed_primary_keys = ['k']        # non-empty trimmed pk
