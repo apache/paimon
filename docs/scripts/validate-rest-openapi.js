@@ -225,6 +225,46 @@ function requireExactEnum(contract, schemaName, expectedValues) {
 
 function validateCatalogOpenApi() {
   const contract = validateCommon('rest-catalog-open-api.yaml');
+  contract.checkSpec(
+    !Object.keys(contract.spec.paths).some((path) => /\/trees(?:\/|$)/.test(path)),
+    'Database branches and tags must use table-aligned paths; trees is not supported',
+  );
+  [
+    ['createDatabaseBranch', 'CreateBranchRequest'],
+    ['forwardDatabaseBranch', 'ForwardBranchRequest'],
+    ['createDatabaseTag', 'CreateDatabaseTagRequest'],
+  ].forEach(([operationId, schemaName]) => {
+    const operation = contract.requireOperation(operationId);
+    contract.checkSpec(
+      operation.requestBody.content['application/json'].schema.$ref === `#/components/schemas/${schemaName}`,
+      `${operationId} must use ${schemaName}`,
+    );
+    contract.checkSpec(!operation.responses['200'].content, `${operationId} must return no body`);
+  });
+  [['listDatabaseBranches', 'ListBranchesResponse'], ['listDatabaseTagsPaged', 'ListTagsResponse'],
+    ['getDatabaseTag', 'GetDatabaseTagResponse']].forEach(([operationId, schemaName]) => {
+    contract.checkSpec(
+      contract.requireOperation(operationId).responses['200'].content['application/json'].schema.$ref === `#/components/schemas/${schemaName}`,
+      `${operationId} must use ${schemaName}`,
+    );
+  });
+  ['dropDatabaseBranch', 'deleteDatabaseTag'].forEach((operationId) => {
+    const operation = contract.requireOperation(operationId);
+    contract.checkSpec(!operation.requestBody && !operation.responses['200'].content,
+      `${operationId} must have no request or response body`);
+  });
+  contract.checkSpec(!Object.keys(contract.spec.paths).some((path) =>
+    /\/databases\/\{database\}\/branches\/[^/]+\/merge$/.test(path)),
+  'Database merge is deferred');
+  const databaseParameter = contract.spec.components.parameters.Database;
+  contract.checkSpec(
+    databaseParameter.examples.branch.value === 'training$branch_experiment' &&
+      databaseParameter.examples.tag.value === 'training$tag_train_v1',
+    'Database reference examples must use the reserved branch and tag suffixes',
+  );
+  ['getDatabase', 'listTables', 'getTable', 'commitTable', 'getSchema', 'listSchemas'].forEach(
+    (operationId) => contract.requireResponses(operationId, ['404', '409', '501']),
+  );
   [
     'getConfig',
     'createDatabase',

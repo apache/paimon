@@ -112,6 +112,25 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testReferenceSuffixIsLiteralOutsideRestCatalog() throws Exception {
+        CachingCatalog cached = new CachingCatalog(catalog, new Options());
+        String literalDatabase = "db$branch_main";
+        cached.createDatabase(literalDatabase, false);
+        Identifier main = Identifier.create("db", "features");
+        Identifier literal = Identifier.create(literalDatabase, "features");
+        Schema schema = Schema.newBuilder().column("id", DataTypes.INT()).build();
+        cached.createTable(main, schema, false);
+        cached.createTable(literal, schema, false);
+        Table literalTable = cached.getTable(literal);
+
+        cached.alterTable(main, SchemaChange.addColumn("added", DataTypes.STRING()), false);
+
+        assertThat(cached.getTable(main).rowType().getFieldNames()).containsExactly("id", "added");
+        assertThat(cached.getTable(literal)).isSameAs(literalTable);
+        assertThat(literalTable.rowType().getFieldNames()).containsExactly("id");
+    }
+
+    @Test
     public void testInvalidateWhenDatabaseIsAltered() throws Exception {
         Catalog mockcatalog = Mockito.mock(Catalog.class);
         Catalog catalog = new CachingCatalog(mockcatalog, new Options());

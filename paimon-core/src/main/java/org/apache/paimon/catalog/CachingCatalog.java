@@ -25,6 +25,10 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.rest.DatabaseIdentifier;
+import org.apache.paimon.rest.DatabaseReference;
+import org.apache.paimon.rest.DatabaseReferenceType;
+import org.apache.paimon.rest.RESTCatalog;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
@@ -46,6 +50,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.options.CatalogOptions.CACHE_DV_MAX_NUM;
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRE_AFTER_ACCESS;
@@ -401,6 +406,24 @@ public class CachingCatalog extends DelegateCatalog {
 
     @Override
     public void invalidateTable(Identifier identifier) {
+        invalidateTableCache(identifier);
+        if (DelegateCatalog.rootCatalog(wrapped) instanceof RESTCatalog) {
+            DatabaseIdentifier database = DatabaseIdentifier.parse(identifier.getDatabaseName());
+            DatabaseReference reference = database.getReference();
+            String alias = null;
+            if (reference == null) {
+                alias = database.getDatabaseName() + "$branch_" + DEFAULT_MAIN_BRANCH;
+            } else if (reference.getType() == DatabaseReferenceType.BRANCH
+                    && DEFAULT_MAIN_BRANCH.equals(reference.getName())) {
+                alias = database.getDatabaseName();
+            }
+            if (alias != null) {
+                invalidateTableCache(Identifier.create(alias, identifier.getObjectName()));
+            }
+        }
+    }
+
+    private void invalidateTableCache(Identifier identifier) {
         tableCache.invalidate(identifier);
         if (partitionCache != null) {
             partitionCache.invalidate(identifier);

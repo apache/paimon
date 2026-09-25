@@ -52,13 +52,19 @@ payloads, and error responses are defined in the OpenAPI specification.
 | Commits and snapshots | Commit, roll back, and inspect table versions. | Table-scoped `commit`, `rollback`, `rollback-schema`, `snapshot`, and `snapshots`. |
 | Data access | Request storage credentials and authorize a query. | Table-scoped `token` and `auth`. |
 | Partitions | List, create, drop, and mark partitions done. | Table-scoped `partitions`. |
-| Branches and tags | Manage named histories and retained snapshots. | Table-scoped `branches` and `tags`. |
+| Table branches and tags | Manage named histories and retained snapshots. | Table-scoped `branches` and `tags`. |
+| Database branches and tags | Create, list, inspect, delete, and forward. | Database-scoped `branches`, `tags`, and `branches/{branch}/forward`. |
 | Consumers | List and reset streaming consumer progress. | Table-scoped `consumers`. |
 | Views and functions | Manage reusable SQL and function definitions. | Database- and catalog-scoped `views` and `functions`. |
 
 In this table, **table-scoped** means
 `/v1/{prefix}/databases/{database}/tables/{table}`. Catalog-wide listing and detail-listing
 endpoints are described in the specification alongside their database-scoped counterparts.
+
+See [Database Branches and Tags](./database-versioning) for table-aligned branch/tag examples, forward
+semantics, and the server MVP design. Supported table operations select a reference with a database
+name such as `training$branch_experiment` or `training$tag_train_v1`. The existing table paths,
+request/response structures and Java methods carry the full database name.
 
 ## Partition Compatibility
 

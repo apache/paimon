@@ -44,6 +44,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.LongConsumer;
 
@@ -63,6 +64,9 @@ public class CatalogEnvironment implements Serializable {
     @Nullable private final CatalogContext catalogContext;
     private final boolean supportsVersionManagement;
     private final boolean supportsPartitionModification;
+    // Physical branch resolved when loading a REST table; retained across option
+    // copies/serialization.
+    @Nullable private final String storageBranch;
 
     public CatalogEnvironment(
             @Nullable Identifier identifier,
@@ -73,6 +77,28 @@ public class CatalogEnvironment implements Serializable {
             @Nullable CatalogContext catalogContext,
             boolean supportsVersionManagement,
             boolean supportsPartitionModification) {
+        this(
+                identifier,
+                uuid,
+                catalogLoader,
+                lockFactory,
+                lockContext,
+                catalogContext,
+                supportsVersionManagement,
+                supportsPartitionModification,
+                null);
+    }
+
+    public CatalogEnvironment(
+            @Nullable Identifier identifier,
+            @Nullable String uuid,
+            @Nullable CatalogLoader catalogLoader,
+            @Nullable CatalogLockFactory lockFactory,
+            @Nullable CatalogLockContext lockContext,
+            @Nullable CatalogContext catalogContext,
+            boolean supportsVersionManagement,
+            boolean supportsPartitionModification,
+            @Nullable String storageBranch) {
         this.identifier = identifier;
         this.uuid = uuid;
         this.catalogLoader = catalogLoader;
@@ -81,6 +107,7 @@ public class CatalogEnvironment implements Serializable {
         this.catalogContext = catalogContext;
         this.supportsVersionManagement = supportsVersionManagement;
         this.supportsPartitionModification = supportsPartitionModification;
+        this.storageBranch = storageBranch;
     }
 
     public static CatalogEnvironment empty() {
@@ -135,7 +162,9 @@ public class CatalogEnvironment implements Serializable {
     public SnapshotCommit snapshotCommit(SnapshotManager snapshotManager) {
         SnapshotCommit snapshotCommit;
         if (catalogLoader != null && supportsVersionManagement) {
-            snapshotCommit = new CatalogSnapshotCommit(catalogLoader.load(), identifier, uuid);
+            snapshotCommit =
+                    new CatalogSnapshotCommit(
+                            catalogLoader.load(), identifier, uuid, storageBranch);
         } else {
             Lock lock =
                     Optional.ofNullable(lockFactory)
@@ -253,7 +282,8 @@ public class CatalogEnvironment implements Serializable {
                 lockContext,
                 catalogContext,
                 supportsVersionManagement,
-                supportsPartitionModification);
+                supportsPartitionModification,
+                Objects.equals(this.identifier, identifier) ? storageBranch : null);
     }
 
     public TableQueryAuth tableQueryAuth(CoreOptions options) {

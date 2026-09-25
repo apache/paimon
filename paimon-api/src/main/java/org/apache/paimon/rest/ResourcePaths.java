@@ -97,6 +97,7 @@ public class ResourcePaths {
     @Experimental
     public String semanticViews(String database) {
         checkArgument(database != null && !database.trim().isEmpty(), "database must not be blank");
+        DatabaseIdentifier.checkNoReference(database, "semanticViews");
         return SLASH.join(V1, prefix, DATABASES, encodePathSegment(database), SEMANTIC_VIEWS);
     }
 
@@ -127,6 +128,7 @@ public class ResourcePaths {
     @Experimental
     public String policies(PermissionResource resource) {
         resource.validatePolicyAttachment();
+        DatabaseIdentifier.checkNoReference(resource.getDatabase(), "policies");
         return SLASH.join(table(resource.getDatabase(), resource.getTable()), POLICIES);
     }
 
@@ -141,15 +143,46 @@ public class ResourcePaths {
     }
 
     public String database(String databaseName) {
+        DatabaseIdentifier.parse(databaseName);
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName));
     }
 
+    /** Database-level extension of table branch management. */
+    @Experimental
+    public String databaseBranches(String databaseName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "database branch management");
+        return SLASH.join(database(databaseName), BRANCHES);
+    }
+
+    @Experimental
+    public String databaseBranch(String databaseName, String branch) {
+        return SLASH.join(databaseBranches(databaseName), encodeString(branch));
+    }
+
+    /** The path names the source branch; main is the target. */
+    @Experimental
+    public String forwardDatabaseBranch(String databaseName, String branch) {
+        return SLASH.join(databaseBranch(databaseName, branch), "forward");
+    }
+
+    /** Database-level extension of table tag management. */
+    @Experimental
+    public String databaseTags(String databaseName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "database tag management");
+        return SLASH.join(database(databaseName), TAGS);
+    }
+
+    @Experimental
+    public String databaseTag(String databaseName, String tagName) {
+        return SLASH.join(databaseTags(databaseName), encodeString(tagName));
+    }
+
     public String tables(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLES);
+        return SLASH.join(database(databaseName), TABLES);
     }
 
     public String tableDetails(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLE_DETAILS);
+        return SLASH.join(database(databaseName), TABLE_DETAILS);
     }
 
     public String tables() {
@@ -161,13 +194,8 @@ public class ResourcePaths {
     }
 
     public String table(String databaseName, String objectName) {
-        return SLASH.join(
-                V1,
-                prefix,
-                DATABASES,
-                encodeString(databaseName),
-                TABLES,
-                encodeString(objectName));
+        DatabaseIdentifier.checkTableName(databaseName, objectName);
+        return SLASH.join(tables(databaseName), encodeString(objectName));
     }
 
     public String renameTable() {
@@ -175,6 +203,7 @@ public class ResourcePaths {
     }
 
     public String replaceTable(String databaseName, String objectName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "replaceTable");
         return SLASH.join(
                 V1,
                 prefix,
@@ -186,17 +215,11 @@ public class ResourcePaths {
     }
 
     public String commitTable(String databaseName, String objectName) {
-        return SLASH.join(
-                V1,
-                prefix,
-                DATABASES,
-                encodeString(databaseName),
-                TABLES,
-                encodeString(objectName),
-                "commit");
+        return SLASH.join(table(databaseName, objectName), "commit");
     }
 
     public String rollbackTable(String databaseName, String objectName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "rollbackTable");
         return SLASH.join(
                 V1,
                 prefix,
@@ -208,6 +231,7 @@ public class ResourcePaths {
     }
 
     public String rollbackSchemaTable(String databaseName, String objectName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "rollbackSchemaTable");
         return SLASH.join(
                 V1,
                 prefix,
@@ -219,63 +243,28 @@ public class ResourcePaths {
     }
 
     public String registerTable(String databaseName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "registerTable");
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), REGISTER);
     }
 
     public String tableToken(String databaseName, String objectName) {
-        return SLASH.join(
-                V1,
-                prefix,
-                DATABASES,
-                encodeString(databaseName),
-                TABLES,
-                encodeString(objectName),
-                "token");
+        return SLASH.join(table(databaseName, objectName), "token");
     }
 
     public String tableSnapshot(String databaseName, String objectName) {
-        return SLASH.join(
-                V1,
-                prefix,
-                DATABASES,
-                encodeString(databaseName),
-                TABLES,
-                encodeString(objectName),
-                "snapshot");
+        return SLASH.join(table(databaseName, objectName), "snapshot");
     }
 
     public String tableSnapshot(String databaseName, String objectName, String version) {
-        return SLASH.join(
-                V1,
-                prefix,
-                DATABASES,
-                encodeString(databaseName),
-                TABLES,
-                encodeString(objectName),
-                SNAPSHOTS,
-                version);
+        return SLASH.join(snapshots(databaseName, objectName), encodeString(version));
     }
 
     public String snapshots(String databaseName, String objectName) {
-        return SLASH.join(
-                V1,
-                prefix,
-                DATABASES,
-                encodeString(databaseName),
-                TABLES,
-                encodeString(objectName),
-                SNAPSHOTS);
+        return SLASH.join(table(databaseName, objectName), SNAPSHOTS);
     }
 
     public String schemas(String databaseName, String objectName) {
-        return SLASH.join(
-                V1,
-                prefix,
-                DATABASES,
-                encodeString(databaseName),
-                TABLES,
-                encodeString(objectName),
-                SCHEMAS);
+        return SLASH.join(table(databaseName, objectName), SCHEMAS);
     }
 
     public String schemas(String databaseName, String objectName, String version) {
@@ -283,17 +272,11 @@ public class ResourcePaths {
     }
 
     public String authTable(String databaseName, String objectName) {
-        return SLASH.join(
-                V1,
-                prefix,
-                DATABASES,
-                encodeString(databaseName),
-                TABLES,
-                encodeString(objectName),
-                "auth");
+        return SLASH.join(table(databaseName, objectName), "auth");
     }
 
     public String partitions(String databaseName, String objectName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "partitions");
         return SLASH.join(
                 V1,
                 prefix,
@@ -305,6 +288,7 @@ public class ResourcePaths {
     }
 
     public String dropPartitions(String databaseName, String objectName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "dropPartitions");
         return SLASH.join(
                 V1,
                 prefix,
@@ -317,6 +301,7 @@ public class ResourcePaths {
     }
 
     public String markDonePartitions(String databaseName, String objectName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "markDonePartitions");
         return SLASH.join(
                 V1,
                 prefix,
@@ -329,6 +314,7 @@ public class ResourcePaths {
     }
 
     public String listPartitionsByNames(String databaseName, String objectName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "listPartitionsByNames");
         return SLASH.join(
                 V1,
                 prefix,
@@ -341,6 +327,7 @@ public class ResourcePaths {
     }
 
     public String listPartitionsByFilter(String databaseName, String objectName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "listPartitionsByFilter");
         return SLASH.join(
                 V1,
                 prefix,
@@ -353,6 +340,7 @@ public class ResourcePaths {
     }
 
     public String branches(String databaseName, String objectName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "branches");
         return SLASH.join(
                 V1,
                 prefix,
@@ -364,6 +352,7 @@ public class ResourcePaths {
     }
 
     public String branch(String databaseName, String objectName, String branchName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "branch");
         return SLASH.join(
                 V1,
                 prefix,
@@ -376,6 +365,7 @@ public class ResourcePaths {
     }
 
     public String forwardBranch(String databaseName, String tableName, String branch) {
+        DatabaseIdentifier.checkNoReference(databaseName, "forwardBranch");
         return SLASH.join(
                 V1,
                 prefix,
@@ -389,6 +379,7 @@ public class ResourcePaths {
     }
 
     public String tags(String databaseName, String objectName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "tags");
         return SLASH.join(
                 V1,
                 prefix,
@@ -400,6 +391,7 @@ public class ResourcePaths {
     }
 
     public String consumers(String databaseName, String objectName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "consumers");
         return SLASH.join(
                 V1,
                 prefix,
@@ -411,6 +403,7 @@ public class ResourcePaths {
     }
 
     public String resetConsumer(String databaseName, String objectName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "resetConsumer");
         return SLASH.join(
                 V1,
                 prefix,
@@ -423,6 +416,7 @@ public class ResourcePaths {
     }
 
     public String tag(String databaseName, String objectName, String tagName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "tag");
         return SLASH.join(
                 V1,
                 prefix,
@@ -435,10 +429,12 @@ public class ResourcePaths {
     }
 
     public String views(String databaseName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "views");
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), VIEWS);
     }
 
     public String viewDetails(String databaseName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "viewDetails");
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), VIEW_DETAILS);
     }
 
@@ -447,6 +443,7 @@ public class ResourcePaths {
     }
 
     public String view(String databaseName, String viewName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "view");
         return SLASH.join(
                 V1, prefix, DATABASES, encodeString(databaseName), VIEWS, encodeString(viewName));
     }
@@ -456,6 +453,7 @@ public class ResourcePaths {
     }
 
     public String functions(String databaseName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "functions");
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), FUNCTIONS);
     }
 
@@ -464,10 +462,12 @@ public class ResourcePaths {
     }
 
     public String functionDetails(String databaseName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "functionDetails");
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), FUNCTION_DETAILS);
     }
 
     public String function(String databaseName, String functionName) {
+        DatabaseIdentifier.checkNoReference(databaseName, "function");
         return SLASH.join(
                 V1,
                 prefix,

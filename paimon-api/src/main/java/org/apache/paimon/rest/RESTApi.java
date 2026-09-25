@@ -48,6 +48,7 @@ import org.apache.paimon.rest.requests.AuthTableQueryRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreateDatabaseTagRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
@@ -78,6 +79,7 @@ import org.apache.paimon.rest.responses.CreatePartitionsResponse;
 import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetDatabaseTagResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetLabelResponse;
 import org.apache.paimon.rest.responses.GetSchemaResponse;
@@ -312,6 +314,7 @@ public class RESTApi {
      *     this database
      */
     public void createDatabase(String name, Map<String, String> properties) {
+        DatabaseIdentifier.checkNoReference(name, "createDatabase");
         CreateDatabaseRequest request = new CreateDatabaseRequest(name, properties);
         client.post(resourcePaths.databases(), request, restAuthFunction);
     }
@@ -339,6 +342,7 @@ public class RESTApi {
      *     this database
      */
     public void dropDatabase(String name) {
+        DatabaseIdentifier.checkNoReference(name, "dropDatabase");
         client.delete(resourcePaths.database(name), restAuthFunction);
     }
 
@@ -353,11 +357,94 @@ public class RESTApi {
      *     this database
      */
     public void alterDatabase(String name, List<String> removals, Map<String, String> updates) {
+        DatabaseIdentifier.checkNoReference(name, "alterDatabase");
         client.post(
                 resourcePaths.database(name),
                 new AlterDatabaseRequest(removals, updates),
                 AlterDatabaseResponse.class,
                 restAuthFunction);
+    }
+
+    /** Lists database branches using the table branch response. */
+    @Experimental
+    public List<String> listDatabaseBranches(String databaseName) {
+        ListBranchesResponse response =
+                client.get(
+                        resourcePaths.databaseBranches(databaseName),
+                        ListBranchesResponse.class,
+                        restAuthFunction);
+        return response.branches() == null ? emptyList() : response.branches();
+    }
+
+    /** Creates a schema-only branch, or restores the versions captured by fromTag. */
+    @Experimental
+    public void createDatabaseBranch(String databaseName, String branch, @Nullable String fromTag) {
+        client.post(
+                resourcePaths.databaseBranches(databaseName),
+                new CreateBranchRequest(branch, fromTag),
+                restAuthFunction);
+    }
+
+    /** Drops a database branch. */
+    @Experimental
+    public void dropDatabaseBranch(String databaseName, String branch) {
+        client.delete(resourcePaths.databaseBranch(databaseName, branch), restAuthFunction);
+    }
+
+    /** Forwards main to the source branch, using the table forward request. */
+    @Experimental
+    public void fastForwardDatabase(String databaseName, String branch) {
+        client.post(
+                resourcePaths.forwardDatabaseBranch(databaseName, branch),
+                new ForwardBranchRequest(),
+                restAuthFunction);
+    }
+
+    /** Captures the selected database branch; null fromBranch selects main. */
+    @Experimental
+    public void createDatabaseTag(
+            String databaseName,
+            String tagName,
+            @Nullable String fromBranch,
+            @Nullable String timeRetained) {
+        client.post(
+                resourcePaths.databaseTags(databaseName),
+                new CreateDatabaseTagRequest(tagName, fromBranch, timeRetained),
+                restAuthFunction);
+    }
+
+    /** Gets database tag metadata, without a fictitious database-wide snapshot ID. */
+    @Experimental
+    public GetDatabaseTagResponse getDatabaseTag(String databaseName, String tagName) {
+        return client.get(
+                resourcePaths.databaseTag(databaseName, tagName),
+                GetDatabaseTagResponse.class,
+                restAuthFunction);
+    }
+
+    /** Lists database tag names with table tag pagination and prefix filtering. */
+    @Experimental
+    public PagedList<String> listDatabaseTagsPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tagNamePrefix) {
+        ListTagsResponse response =
+                client.get(
+                        resourcePaths.databaseTags(databaseName),
+                        buildPagedQueryParams(
+                                maxResults, pageToken, Pair.of(TAG_NAME_PREFIX, tagNamePrefix)),
+                        ListTagsResponse.class,
+                        restAuthFunction);
+        return new PagedList<>(
+                response.tags() == null ? emptyList() : response.tags(),
+                response.getNextPageToken());
+    }
+
+    /** Deletes a database tag. */
+    @Experimental
+    public void deleteDatabaseTag(String databaseName, String tagName) {
+        client.delete(resourcePaths.databaseTag(databaseName, tagName), restAuthFunction);
     }
 
     /**
@@ -811,6 +898,7 @@ public class RESTApi {
      *     creating table
      */
     public void createTable(Identifier identifier, Schema schema) {
+        DatabaseIdentifier.checkTableName(identifier.getDatabaseName(), identifier.getObjectName());
         CreateTableRequest request = new CreateTableRequest(identifier, schema);
         client.post(resourcePaths.tables(identifier.getDatabaseName()), request, restAuthFunction);
     }
@@ -826,6 +914,8 @@ public class RESTApi {
      *     renaming table
      */
     public void renameTable(Identifier fromTable, Identifier toTable) {
+        DatabaseIdentifier.checkNoReference(fromTable.getDatabaseName(), "renameTable");
+        DatabaseIdentifier.checkNoReference(toTable.getDatabaseName(), "renameTable");
         RenameTableRequest request = new RenameTableRequest(fromTable, toTable);
         client.post(resourcePaths.renameTable(), request, restAuthFunction);
     }
@@ -1925,6 +2015,8 @@ public class RESTApi {
      *     views
      */
     public void renameView(Identifier fromView, Identifier toView) {
+        DatabaseIdentifier.checkNoReference(fromView.getDatabaseName(), "renameView");
+        DatabaseIdentifier.checkNoReference(toView.getDatabaseName(), "renameView");
         RenameTableRequest request = new RenameTableRequest(fromView, toView);
         client.post(resourcePaths.renameView(), request, restAuthFunction);
     }

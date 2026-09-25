@@ -44,6 +44,7 @@ import org.apache.paimon.management.LabelManagement;
 import org.apache.paimon.management.PermissionManagement;
 import org.apache.paimon.management.PolicyManagement;
 import org.apache.paimon.management.SemanticViewManagement;
+import org.apache.paimon.management.TreeManagement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -166,6 +167,11 @@ public class RESTCatalog implements Catalog {
         return new RESTSemanticViewManagement(api);
     }
 
+    @Experimental
+    public TreeManagement treeManagement() {
+        return new RESTTreeManagement(api);
+    }
+
     @Override
     public List<String> listDatabases() {
         return api.listDatabases();
@@ -218,6 +224,7 @@ public class RESTCatalog implements Catalog {
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
         checkNotSystemDatabase(name);
+        DatabaseIdentifier.checkNoReference(name, "dropDatabase");
         try {
             if (!cascade && !this.listTables(name).isEmpty()) {
                 throw new DatabaseNotEmptyException(name);
@@ -640,6 +647,10 @@ public class RESTCatalog implements Catalog {
             Schema newSchema = inferSchemaIfExternalPaimonTable(schema);
             api.createTable(identifier, newSchema);
         } catch (AlreadyExistsException e) {
+            if (DatabaseIdentifier.parse(identifier.getDatabaseName()).getReference() != null
+                    && !StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TABLE)) {
+                throw e;
+            }
             if (!ignoreIfExists) {
                 throw new TableAlreadyExistException(identifier);
             }
@@ -686,6 +697,10 @@ public class RESTCatalog implements Catalog {
         try {
             api.alterTable(identifier, changes);
         } catch (NoSuchResourceException e) {
+            if (!StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TABLE)
+                    && !StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_COLUMN)) {
+                throw e;
+            }
             if (!ignoreIfNotExists) {
                 if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TABLE)) {
                     throw new TableNotExistException(identifier);
@@ -695,6 +710,10 @@ public class RESTCatalog implements Catalog {
                 }
             }
         } catch (AlreadyExistsException e) {
+            if (DatabaseIdentifier.parse(identifier.getDatabaseName()).getReference() != null
+                    && !StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_COLUMN)) {
+                throw e;
+            }
             throw new ColumnAlreadyExistException(identifier, e.resourceName());
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
@@ -1213,6 +1232,10 @@ public class RESTCatalog implements Catalog {
     @Override
     public View getView(Identifier identifier) throws ViewNotExistException {
         try {
+            if (DatabaseIdentifier.parse(identifier.getDatabaseName()).getReference() != null) {
+                api.getDatabase(identifier.getDatabaseName());
+                throw new ViewNotExistException(identifier);
+            }
             GetViewResponse response = api.getView(identifier);
             return toView(identifier.getDatabaseName(), response);
         } catch (NoSuchResourceException e) {
@@ -1264,6 +1287,10 @@ public class RESTCatalog implements Catalog {
     @Override
     public List<String> listViews(String databaseName) throws DatabaseNotExistException {
         try {
+            if (DatabaseIdentifier.parse(databaseName).getReference() != null) {
+                api.getDatabase(databaseName);
+                return Collections.emptyList();
+            }
             return CatalogUtils.isSystemDatabase(databaseName)
                     ? Collections.emptyList()
                     : api.listViews(databaseName);
@@ -1282,6 +1309,10 @@ public class RESTCatalog implements Catalog {
             @Nullable String viewNamePattern)
             throws DatabaseNotExistException {
         try {
+            if (DatabaseIdentifier.parse(databaseName).getReference() != null) {
+                api.getDatabase(databaseName);
+                return new PagedList<>(Collections.emptyList(), null);
+            }
             return api.listViewsPaged(databaseName, maxResults, pageToken, viewNamePattern);
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
@@ -1298,6 +1329,10 @@ public class RESTCatalog implements Catalog {
             @Nullable String viewNamePattern)
             throws DatabaseNotExistException {
         try {
+            if (DatabaseIdentifier.parse(db).getReference() != null) {
+                api.getDatabase(db);
+                return new PagedList<>(Collections.emptyList(), null);
+            }
             PagedList<GetViewResponse> views =
                     api.listViewDetailsPaged(db, maxResults, pageToken, viewNamePattern);
             return new PagedList<>(

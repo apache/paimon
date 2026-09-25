@@ -31,11 +31,21 @@ public class CatalogSnapshotCommit implements SnapshotCommit {
     private final Catalog catalog;
     private final Identifier identifier;
     @Nullable private final String uuid;
+    @Nullable private final String storageBranch;
 
     public CatalogSnapshotCommit(Catalog catalog, Identifier identifier, @Nullable String uuid) {
+        this(catalog, identifier, uuid, null);
+    }
+
+    public CatalogSnapshotCommit(
+            Catalog catalog,
+            Identifier identifier,
+            @Nullable String uuid,
+            @Nullable String storageBranch) {
         this.catalog = catalog;
         this.identifier = identifier;
         this.uuid = uuid;
+        this.storageBranch = storageBranch;
     }
 
     @Override
@@ -45,8 +55,14 @@ public class CatalogSnapshotCommit implements SnapshotCommit {
             String branch,
             List<PartitionStatistics> statistics)
             throws Exception {
+        // REST resolves the original logical identifier to its physical storage branch. Keep
+        // that identifier even when main is backed by a different branch after publication.
+        // An explicit switch away from the loaded storage branch still selects a table branch.
         Identifier newIdentifier =
-                new Identifier(identifier.getDatabaseName(), identifier.getTableName(), branch);
+                storageBranch != null && storageBranch.equals(branch)
+                        ? identifier
+                        : new Identifier(
+                                identifier.getDatabaseName(), identifier.getTableName(), branch);
         return catalog.commitSnapshot(newIdentifier, uuid, baseSnapshotUuid, snapshot, statistics);
     }
 
