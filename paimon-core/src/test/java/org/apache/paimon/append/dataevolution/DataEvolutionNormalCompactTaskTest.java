@@ -18,6 +18,7 @@
 
 package org.apache.paimon.append.dataevolution;
 
+import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
@@ -27,6 +28,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.AppendFileStoreWrite;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -43,6 +45,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RecordWriter;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -61,6 +64,14 @@ import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.fileFields;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 
 /**
  * Tests for splitting and column sequence propagation in {@link DataEvolutionNormalCompactTask}.
@@ -596,6 +607,60 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
                         java.util.stream.IntStream.range(0, 3000)
                                 .boxed()
                                 .collect(Collectors.toList()));
+    }
+
+    @Test
+    public void testStoreWriteClosedWhenCompactionFails() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        for (int round = 0; round < 2; round++) {
+            BatchWriteBuilder builder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = builder.newWrite();
+                    BatchTableCommit commit = builder.newCommit()) {
+                for (int i = 0; i < ROW_COUNT; i++) {
+                    write.write(
+                            GenericRow.of(
+                                    BinaryString.fromString("p0"),
+                                    i + round * ROW_COUNT,
+                                    BinaryString.fromString("f1_" + i + "_" + round)));
+                }
+                commit.commit(write.prepareCommit());
+            }
+        }
+        List<ManifestEntry> entries = table.store().newScan().plan().files();
+        assertThat(entries).hasSize(2);
+        entries.sort(java.util.Comparator.comparing(e -> e.file().nonNullFirstRowId()));
+        // inflate the last file's row count: ranges stay contiguous, but the compact loop
+        // wants more rows than the files hold and fails after the writer was created
+        DataFileMeta last = entries.get(1).file();
+        DataFileMeta inflated = spy(last);
+        doReturn(last.rowCount() + 5).when(inflated).rowCount();
+        List<DataFileMeta> compactBefore = Arrays.asList(entries.get(0).file(), inflated);
+
+        AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();
+        String commitUser = "close-on-failure";
+        AppendFileStoreWrite realStoreWrite = (AppendFileStoreWrite) store.newWrite(commitUser);
+        RecordWriter<InternalRow> realWriter =
+                realStoreWrite.createWriter(entries.get(0).partition(), 0);
+        RecordWriter<InternalRow> spiedWriter = spy(realWriter);
+        AppendFileStoreWrite spiedStoreWrite = spy(realStoreWrite);
+        doReturn(spiedWriter).when(spiedStoreWrite).createWriter(any(), anyInt());
+        AppendOnlyFileStore spiedStore = spy(store);
+        doReturn(spiedStoreWrite).when(spiedStore).newWrite(anyString());
+        FileStoreTable spiedCopy = spy(table);
+        doReturn(spiedStore).when(spiedCopy).store();
+        FileStoreTable spiedTable = spy(table);
+        doReturn(spiedCopy).when(spiedTable).copy(anyMap());
+
+        DataEvolutionNormalCompactTask task =
+                new DataEvolutionNormalCompactTask(entries.get(0).partition(), compactBefore);
+        assertThatThrownBy(() -> task.doCompact(spiedTable, commitUser))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Missing rows in normal compaction input.");
+        // the writer was created before the failure, so both writer and store write
+        // must be closed
+        verify(spiedStoreWrite).close();
+        verify(spiedWriter).close();
     }
 
     private FileStoreTable createBlobSegmentsTable() throws Exception {

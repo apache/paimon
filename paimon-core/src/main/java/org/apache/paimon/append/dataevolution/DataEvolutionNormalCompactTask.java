@@ -124,6 +124,11 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         }
         table = table.copy(writeOptions);
         long firstRowId = compactBefore.get(0).nonNullFirstRowId();
+        // plan before any resource is created: planning failures must not leak a writer
+        List<Range> outputRanges =
+                options.dataEvolutionCompactionSplitLargeFiles()
+                        ? planOutputRanges(options.targetFileSize(false))
+                        : Collections.singletonList(checkContiguousRowRange(compactBefore));
 
         RowType readWriteType =
                 new RowType(
@@ -147,10 +152,6 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         storeWrite.withWriteType(readWriteType);
         storeWrite.withFileSource(FileSource.COMPACT);
         RecordWriter<InternalRow> writer = storeWrite.createWriter(partition, 0);
-        List<Range> outputRanges =
-                options.dataEvolutionCompactionSplitLargeFiles()
-                        ? planOutputRanges(options.targetFileSize(false))
-                        : Collections.singletonList(checkContiguousRowRange(compactBefore));
         List<DataFileMeta> writeResult = new ArrayList<>();
         try (RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
             for (Range range : outputRanges) {
@@ -166,12 +167,19 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
                 writeResult.add(output.get(0));
             }
             checkArgument(!iterator.hasNext(), "Unexpected extra rows in normal compaction input.");
-        }
-        try {
-            writer.close();
-            storeWrite.close();
-        } catch (Exception e) {
-            LOG.warn("Failed to close reader and writer.", e);
+        } finally {
+            // close even when compaction fails, otherwise the writer's open files and
+            // write buffers leak; a close failure must not mask the original exception
+            try {
+                writer.close();
+            } catch (Exception e) {
+                LOG.warn("Failed to close compaction writer.", e);
+            }
+            try {
+                storeWrite.close();
+            } catch (Exception e) {
+                LOG.warn("Failed to close compaction store write.", e);
+            }
         }
 
         long minSequenceNumber = minSequenceId(compactBefore);
