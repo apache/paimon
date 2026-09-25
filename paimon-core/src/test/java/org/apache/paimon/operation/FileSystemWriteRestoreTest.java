@@ -211,27 +211,23 @@ public class FileSystemWriteRestoreTest {
     @Test
     public void testWriteRejectsBucketOutsidePartitionLayout() throws Exception {
         // Partition 1 is created with 2 buckets.
-        FileStoreTable table = createPartitionedPkTable(2);
+        FileStoreTable table = createPartitionedPkTable(2, false);
         commitOneRow(table, /* pt */ 1, /* k */ 1);
 
         // Simulate a rescale: the table default is raised to 8 buckets, but partition 1
-        // still only has 2 buckets. writeOnly=false so the writer scans previous files and
-        // runs the per-partition bucket-layout check in AbstractFileStoreWrite.
-        FileStoreTable rescaledTable = withBucket(table, 8);
+        // still only has 2 buckets. Enable per-partition bucket counts after the existing layout
+        // is in place.
+        FileStoreTable rescaledTable = withBucket(table, 8, true);
 
-        // Writing an out-of-range bucket (>= the partition's 2 buckets) into an empty bucket of
-        // partition 1 must be rejected, even though the bucket id is valid for the 8-bucket
-        // default.
-        // This is the bucket that PartitionBucketMapping recovery would otherwise silently accept.
-        // write(row, bucket) routes the row (partition pt=1) to the explicitly given bucket.
+        // The legacy two-argument write does not carry the bucket count used to route the row and
+        // must be rejected for a per-partition bucket table.
         try (InnerTableWrite write = rescaledTable.newWrite(UUID.randomUUID().toString())) {
             assertThatThrownBy(() -> write.write(GenericRow.of(1, 1, 1L), /* bucket */ 6))
-                    .hasMessageContaining("only has 2 buckets")
-                    .hasMessageContaining("table default: 8");
+                    .hasMessageContaining("requires the partition-level total bucket count");
         }
 
-        // Writing an in-range bucket (< the partition's 2 buckets) into an empty bucket of the same
-        // partition is accepted: per-partition bucket counts are still honored.
+        // A caller which supplies a stale layout is still rejected, even when the bucket happens
+        // to be in range for the old partition layout.
         int emptyBucket = findEmptyBucket(rescaledTable, 1, /* totalBuckets */ 2);
         try (TableWriteImpl<?> write = rescaledTable.newWrite(UUID.randomUUID().toString())) {
             assertThatThrownBy(() -> write.writeAndReturn(GenericRow.of(1, 2, 2L), emptyBucket, 8))
@@ -241,9 +237,9 @@ public class FileSystemWriteRestoreTest {
 
         String user = UUID.randomUUID().toString();
         long id = rescaledTable.snapshotManager().latestSnapshotId();
-        try (InnerTableWrite write = rescaledTable.newWrite(user);
+        try (TableWriteImpl<?> write = rescaledTable.newWrite(user);
                 StreamTableCommit commit = rescaledTable.newCommit(user)) {
-            write.write(GenericRow.of(1, 2, 2L), emptyBucket);
+            write.writeAndReturn(GenericRow.of(1, 2, 2L), emptyBucket, 2);
             commit.commit(id, write.prepareCommit(true, id));
         }
     }
@@ -332,8 +328,16 @@ public class FileSystemWriteRestoreTest {
     }
 
     private FileStoreTable withBucket(FileStoreTable table, int newBucket) {
+        return withBucket(table, newBucket, null);
+    }
+
+    private FileStoreTable withBucket(
+            FileStoreTable table, int newBucket, Boolean perPartitionCountEnabled) {
         Options options = new Options(table.options());
         options.set(CoreOptions.BUCKET, newBucket);
+        if (perPartitionCountEnabled != null) {
+            options.set(CoreOptions.BUCKET_PER_PARTITION_COUNT_ENABLED, perPartitionCountEnabled);
+        }
         return table.copy(table.schema().copy(options.toMap()));
     }
 
