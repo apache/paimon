@@ -21,6 +21,7 @@ package org.apache.paimon.rest;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.fs.CredentialsSupplierRegistry;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -67,12 +68,12 @@ public class RESTTokenFileIO implements FileIO {
                     .defaultValue(false)
                     .withDescription("Whether to support data token provided by the REST server.");
 
-    private static final Cache<RESTToken, FileIO> FILE_IO_CACHE =
+    private static final Cache<RESTToken, CachedFileIO> FILE_IO_CACHE =
             Caffeine.newBuilder()
                     .maximumSize(1000)
                     .expireAfterAccess(10, TimeUnit.HOURS)
                     .removalListener(
-                            (ignored, value, cause) -> IOUtils.closeQuietly((FileIO) value))
+                            (ignored, value, cause) -> IOUtils.closeQuietly((CachedFileIO) value))
                     .scheduler(
                             Scheduler.forScheduledExecutorService(
                                     Executors.newSingleThreadScheduledExecutor(
@@ -245,28 +246,37 @@ public class RESTTokenFileIO implements FileIO {
                             + "REST credential lifetime after refresh.");
         }
 
-        FileIO fileIO = FILE_IO_CACHE.getIfPresent(currentToken);
-        if (fileIO != null) {
-            return new FileIOWithToken(fileIO, currentToken);
+        CachedFileIO cached = FILE_IO_CACHE.getIfPresent(currentToken);
+        if (cached != null) {
+            return new FileIOWithToken(cached.fileIO, currentToken);
         }
 
         synchronized (FILE_IO_CACHE) {
-            fileIO = FILE_IO_CACHE.getIfPresent(currentToken);
-            if (fileIO != null) {
-                return new FileIOWithToken(fileIO, currentToken);
+            cached = FILE_IO_CACHE.getIfPresent(currentToken);
+            if (cached != null) {
+                return new FileIOWithToken(cached.fileIO, currentToken);
             }
 
+            // Lets a FileIO that supports it, such as OSS, sign each request with a fresh token.
+            String supplierId = CredentialsSupplierRegistry.register(() -> validToken().token());
             Options options = catalogContext.options();
             options = new Options(RESTUtil.merge(options.toMap(), currentToken.token()));
             options.set(FILE_IO_ALLOW_CACHE, false);
+            options.set(CredentialsSupplierRegistry.SUPPLIER_ID, supplierId);
             CatalogContext context =
                     CatalogContext.create(
                             options,
                             catalogContext.hadoopConf(),
                             catalogContext.preferIO(),
                             catalogContext.fallbackIO());
-            fileIO = FileIO.get(path, context);
-            FILE_IO_CACHE.put(currentToken, fileIO);
+            FileIO fileIO;
+            try {
+                fileIO = FileIO.get(path, context);
+            } catch (IOException | RuntimeException e) {
+                CredentialsSupplierRegistry.unregister(supplierId);
+                throw e;
+            }
+            FILE_IO_CACHE.put(currentToken, new CachedFileIO(fileIO, supplierId));
             return new FileIOWithToken(fileIO, currentToken);
         }
     }
@@ -298,6 +308,24 @@ public class RESTTokenFileIO implements FileIO {
         return token == null
                 || token.expireAtMillis() - currentTimeMillis()
                         < Math.max(TOKEN_EXPIRATION_SAFE_TIME_MILLIS, minimumValidityMillis);
+    }
+
+    /** A delegate {@link FileIO} and the credentials supplier registered for it. */
+    private static class CachedFileIO implements AutoCloseable {
+
+        private final FileIO fileIO;
+        private final String supplierId;
+
+        private CachedFileIO(FileIO fileIO, String supplierId) {
+            this.fileIO = fileIO;
+            this.supplierId = supplierId;
+        }
+
+        @Override
+        public void close() throws Exception {
+            CredentialsSupplierRegistry.unregister(supplierId);
+            fileIO.close();
+        }
     }
 
     private static class FileIOWithToken {

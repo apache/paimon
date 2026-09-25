@@ -21,6 +21,7 @@ package org.apache.paimon.rest;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.fs.CredentialsSupplierRegistry;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOLoader;
 import org.apache.paimon.fs.FileStatus;
@@ -30,16 +31,20 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Collections;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -223,6 +228,51 @@ class RESTTokenFileIOTest {
         assertThat(fileIO.createBlobPresignedUrl(root, descriptor, validity))
                 .isEqualTo("https://refreshed");
         verify(delegate, times(2)).createBlobPresignedUrl(root, descriptor, validity);
+        verify(api, times(2)).loadTableToken(identifier);
+    }
+
+    @Test
+    void testDelegateCredentialsSupplierFollowsTokenRefresh() throws IOException {
+        Path root = new Path("oss://bucket/table");
+        AtomicLong now = new AtomicLong(1700000000000L);
+        FileIO delegate = mock(FileIO.class);
+        when(delegate.exists(any())).thenReturn(true);
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenReturn(delegate);
+        when(loader.getScheme()).thenReturn("oss");
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        String first = UUID.randomUUID().toString();
+        String second = UUID.randomUUID().toString();
+        when(api.loadTableToken(identifier))
+                .thenReturn(
+                        new GetTableTokenResponse(
+                                Collections.singletonMap("test.token", first),
+                                now.get() + Duration.ofHours(2).toMillis()),
+                        new GetTableTokenResponse(
+                                Collections.singletonMap("test.token", second),
+                                now.get() + Duration.ofHours(4).toMillis()));
+        RESTTokenFileIO fileIO =
+                new RESTTokenFileIO(
+                        CatalogContext.create(new Options(), loader, null), api, identifier, root) {
+                    @Override
+                    long currentTimeMillis() {
+                        return now.get();
+                    }
+                };
+
+        fileIO.exists(root);
+        ArgumentCaptor<CatalogContext> context = ArgumentCaptor.forClass(CatalogContext.class);
+        verify(delegate, atLeastOnce()).configure(context.capture());
+        String supplierId =
+                context.getValue().options().get(CredentialsSupplierRegistry.SUPPLIER_ID);
+        Supplier<Map<String, String>> supplier = CredentialsSupplierRegistry.get(supplierId);
+        assertThat(supplier).isNotNull();
+        assertThat(supplier.get()).containsEntry("test.token", first);
+
+        // 30 minutes left is inside the safe window, so the delegate is handed a new token
+        now.addAndGet(Duration.ofMinutes(90).toMillis());
+        assertThat(supplier.get()).containsEntry("test.token", second);
         verify(api, times(2)).loadTableToken(identifier);
     }
 
