@@ -227,7 +227,7 @@ public class GenericIndexTopoBuilder {
         readColumns.add(SpecialFields.ROW_ID.name());
         RowType projectedRowType = SpecialFields.rowTypeWithRowId(rowType).project(readColumns);
 
-        Options mergedOptions = new Options(table.options(), userOptions.toMap());
+        Options mergedOptions = new Options(table.options(), userOptions);
         byte[] sourceMeta =
                 new DataEvolutionIndexSourceMeta(scanResult.scanSnapshotId()).serialize();
 

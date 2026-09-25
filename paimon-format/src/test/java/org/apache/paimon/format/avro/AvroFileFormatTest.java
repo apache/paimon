@@ -759,13 +759,13 @@ public class AvroFileFormatTest {
         try (PositionOutputStream out = localFileIO.newOutputStream(file, false)) {
             FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
             ThreadLocalRandom random = ThreadLocalRandom.current();
-            // magic number tested by hand
             for (int i = 0; i < 100000; i++) {
                 writer.addElement(GenericRow.of(random.nextInt()));
             }
             writer.close();
         }
 
+        long failurePosition = localFileIO.getFileSize(file) / 2;
         FileIO failingFileIO =
                 new LocalFileIO() {
 
@@ -776,11 +776,8 @@ public class AvroFileFormatTest {
 
                     class FailingInputStream extends LocalFileIO.LocalSeekableInputStream {
 
-                        private int cnt;
-
                         public FailingInputStream(File file) throws FileNotFoundException {
                             super(file);
-                            cnt = 0;
                         }
 
                         @Override
@@ -796,15 +793,13 @@ public class AvroFileFormatTest {
                         }
 
                         private void checkException() throws IOException {
-                            cnt++;
-                            // magic number tested by hand
-                            if (cnt == 200) {
+                            if (getPos() >= failurePosition) {
                                 throw new IOException("Artificial exception");
                             }
                         }
                     }
                 };
-        RecordReader<InternalRow> reader =
+        try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
@@ -812,10 +807,11 @@ public class AvroFileFormatTest {
                                         file,
                                         failingFileIO.getFileSize(file),
                                         null,
-                                        null));
-        assertThatThrownBy(() -> reader.forEachRemaining(row -> {}))
-                .isInstanceOf(IOException.class)
-                .hasMessageContaining("Artificial exception");
+                                        null))) {
+            assertThatThrownBy(() -> reader.forEachRemaining(row -> {}))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("Artificial exception");
+        }
     }
 
     @Test

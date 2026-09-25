@@ -43,7 +43,7 @@ def table(tmp_path):
                                            "read.batch-size": "1"})
     table.add(pa.table({"id": [0, 1, 2], "name": ["alpha", "beta zeta", "gamma"],
                         "embedding": [[0., 1.], [1., 1.], [2., 1.]]}, schema=schema))
-    table.raw_table.copy({"deletion-vectors.enabled": "false"}).create_global_index(
+    table.raw_table.create_global_index(
         "embedding", "ivf-flat", options={"ivf-flat.nlist": "1", "ivf-flat.distance.metric": "l2"})
     return table
 

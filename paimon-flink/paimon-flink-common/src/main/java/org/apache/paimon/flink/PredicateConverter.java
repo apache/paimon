@@ -19,8 +19,11 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.NestedFieldTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.flink.table.data.conversion.DataStructureConverters;
@@ -39,8 +42,11 @@ import org.apache.flink.table.types.logical.LogicalTypeFamily;
 import org.apache.flink.table.types.logical.LogicalTypeRoot;
 import org.apache.flink.table.types.logical.RowType;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
@@ -61,12 +67,26 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
 
     private final PredicateBuilder builder;
 
+    /**
+     * The table's own type, used to address fields nested inside a row. A type round-tripped
+     * through Flink renumbers field ids, and {@link NestedFieldTransform} carries those ids as its
+     * identity, so on an evolved schema they would no longer match the table. Null when the caller
+     * only has a Flink type.
+     */
+    @Nullable private final org.apache.paimon.types.RowType tableType;
+
     public PredicateConverter(RowType type) {
         this(new PredicateBuilder(toDataType(type)));
     }
 
     public PredicateConverter(PredicateBuilder builder) {
+        this(builder, null);
+    }
+
+    private PredicateConverter(
+            PredicateBuilder builder, @Nullable org.apache.paimon.types.RowType tableType) {
         this.builder = builder;
+        this.tableType = tableType;
     }
 
     /** Accepts simple LIKE patterns like "abc%". */
@@ -96,56 +116,57 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             return visitComparison(
                     children,
                     negated,
-                    builder::notEqual,
-                    builder::notEqual,
-                    builder::equal,
-                    builder::equal);
+                    op(builder::notEqual, builder::notEqual),
+                    op(builder::notEqual, builder::notEqual),
+                    op(builder::equal, builder::equal),
+                    op(builder::equal, builder::equal));
         } else if (func == BuiltInFunctionDefinitions.NOT_EQUALS) {
             return visitComparison(
                     children,
                     negated,
-                    builder::equal,
-                    builder::equal,
-                    builder::notEqual,
-                    builder::notEqual);
+                    op(builder::equal, builder::equal),
+                    op(builder::equal, builder::equal),
+                    op(builder::notEqual, builder::notEqual),
+                    op(builder::notEqual, builder::notEqual));
         } else if (func == BuiltInFunctionDefinitions.GREATER_THAN) {
             return visitComparison(
                     children,
                     negated,
-                    builder::lessOrEqual,
-                    builder::greaterOrEqual,
-                    builder::greaterThan,
-                    builder::lessThan);
+                    op(builder::lessOrEqual, builder::lessOrEqual),
+                    op(builder::greaterOrEqual, builder::greaterOrEqual),
+                    op(builder::greaterThan, builder::greaterThan),
+                    op(builder::lessThan, builder::lessThan));
         } else if (func == BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL) {
             return visitComparison(
                     children,
                     negated,
-                    builder::lessThan,
-                    builder::greaterThan,
-                    builder::greaterOrEqual,
-                    builder::lessOrEqual);
+                    op(builder::lessThan, builder::lessThan),
+                    op(builder::greaterThan, builder::greaterThan),
+                    op(builder::greaterOrEqual, builder::greaterOrEqual),
+                    op(builder::lessOrEqual, builder::lessOrEqual));
         } else if (func == BuiltInFunctionDefinitions.LESS_THAN) {
             return visitComparison(
                     children,
                     negated,
-                    builder::greaterOrEqual,
-                    builder::lessOrEqual,
-                    builder::lessThan,
-                    builder::greaterThan);
+                    op(builder::greaterOrEqual, builder::greaterOrEqual),
+                    op(builder::lessOrEqual, builder::lessOrEqual),
+                    op(builder::lessThan, builder::lessThan),
+                    op(builder::greaterThan, builder::greaterThan));
         } else if (func == BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL) {
             return visitComparison(
                     children,
                     negated,
-                    builder::greaterThan,
-                    builder::lessThan,
-                    builder::lessOrEqual,
-                    builder::greaterOrEqual);
+                    op(builder::greaterThan, builder::greaterThan),
+                    op(builder::lessThan, builder::lessThan),
+                    op(builder::lessOrEqual, builder::lessOrEqual),
+                    op(builder::greaterOrEqual, builder::greaterOrEqual));
         } else if (func == BuiltInFunctionDefinitions.IN) {
             requireAtLeastArity(children, 2);
             ResolvedField field = resolveField(children.get(0));
+            rejectNestedFloatingPoint(field);
             List<Object> literals = new ArrayList<>();
             for (int i = 1; i < children.size(); i++) {
-                literals.add(extractLiteral(field.expression.getOutputDataType(), children.get(i)));
+                literals.add(extractLiteral(field.type(), children.get(i)));
             }
             if (negated) {
                 // SQL WHERE: v NOT IN (..., NULL, ...) is never true regardless of
@@ -154,27 +175,31 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                 if (literals.contains(null)) {
                     return PredicateBuilder.alwaysFalse();
                 }
-                rejectNegatedFloatingPoint(field.expression);
-                return builder.notIn(field.index, literals);
+                rejectNegatedFloatingPoint(field);
+                return build(field, builder::notIn, builder::notIn, literals);
             }
-            return builder.in(field.index, literals);
+            return build(field, builder::in, builder::in, literals);
         } else if (func == BuiltInFunctionDefinitions.IS_NULL) {
             requireArity(children, 1);
             ResolvedField field = resolveField(children.get(0));
-            return negated ? builder.isNotNull(field.index) : builder.isNull(field.index);
+            return negated ? isNotNull(field) : isNull(field);
         } else if (func == BuiltInFunctionDefinitions.IS_NOT_NULL) {
             requireArity(children, 1);
             ResolvedField field = resolveField(children.get(0));
-            return negated ? builder.isNull(field.index) : builder.isNotNull(field.index);
+            return negated ? isNull(field) : isNotNull(field);
         } else if (func == BuiltInFunctionDefinitions.BETWEEN) {
             requireArity(children, 3);
             ResolvedField field = resolveField(children.get(0));
-            DataType fieldType = field.expression.getOutputDataType();
+            rejectNestedFloatingPoint(field);
+            DataType fieldType = field.type();
             Object lower = extractLiteral(fieldType, children.get(1));
             Object upper = extractLiteral(fieldType, children.get(2));
-            Predicate between = builder.between(field.index, lower, upper);
+            Predicate between =
+                    field.isNested()
+                            ? builder.between(field.transform, lower, upper)
+                            : builder.between(field.index, lower, upper);
             if (negated) {
-                rejectNegatedFloatingPoint(field.expression);
+                rejectNegatedFloatingPoint(field);
                 // LeafTernaryFunction.test returns false if any literal is null, but
                 // 12 NOT BETWEEN 15 AND NULL is TRUE (TRUE OR UNKNOWN). Keep residual
                 // so Flink can evaluate the three-valued cases.
@@ -189,22 +214,16 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                 throw new UnsupportedExpression();
             }
             ResolvedField field = resolveField(children.get(0));
-            if (field.expression
-                    .getOutputDataType()
+            if (field.type()
                     .getLogicalType()
                     .getTypeRoot()
                     .getFamilies()
                     .contains(LogicalTypeFamily.CHARACTER_STRING)) {
-                String sqlPattern =
-                        extractNonNullLiteral(field.expression.getOutputDataType(), children.get(1))
-                                .toString();
+                String sqlPattern = extractNonNullLiteral(field.type(), children.get(1)).toString();
                 String escape =
                         children.size() <= 2
                                 ? null
-                                : extractNonNullLiteral(
-                                                field.expression.getOutputDataType(),
-                                                children.get(2))
-                                        .toString();
+                                : extractNonNullLiteral(field.type(), children.get(2)).toString();
                 String escapedSqlPattern = sqlPattern;
                 boolean allowQuick = false;
                 if (escape == null && !sqlPattern.contains("_")) {
@@ -252,8 +271,11 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                             // residual filter evaluated by Flink.
                             throw new UnsupportedExpression();
                         }
-                        return builder.startsWith(
-                                field.index, BinaryString.fromString(beginMatcher.group(1)));
+                        return build(
+                                field,
+                                builder::startsWith,
+                                builder::startsWith,
+                                BinaryString.fromString(beginMatcher.group(1)));
                     }
                 }
             }
@@ -282,16 +304,25 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
     }
 
     private Predicate booleanTest(ResolvedField field, boolean expected, boolean complement) {
-        if (field.expression.getOutputDataType().getLogicalType().getTypeRoot()
-                != LogicalTypeRoot.BOOLEAN) {
+        if (field.type().getLogicalType().getTypeRoot() != LogicalTypeRoot.BOOLEAN) {
             throw new UnsupportedExpression();
         }
-        Predicate equals = builder.equal(field.index, expected);
+        Predicate equals = build(field, builder::equal, builder::equal, expected);
         if (!complement) {
             return equals;
         }
         return PredicateBuilder.or(
-                builder.isNull(field.index), builder.notEqual(field.index, expected));
+                isNull(field), build(field, builder::notEqual, builder::notEqual, expected));
+    }
+
+    private Predicate isNull(ResolvedField field) {
+        return field.isNested() ? builder.isNull(field.transform) : builder.isNull(field.index);
+    }
+
+    private Predicate isNotNull(ResolvedField field) {
+        return field.isNested()
+                ? builder.isNotNull(field.transform)
+                : builder.isNotNull(field.index);
     }
 
     private Predicate negate(Predicate predicate) {
@@ -338,10 +369,10 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
     private Predicate visitComparison(
             List<Expression> children,
             boolean negated,
-            BiFunction<Integer, Object, Predicate> negatedVisit1,
-            BiFunction<Integer, Object, Predicate> negatedVisit2,
-            BiFunction<Integer, Object, Predicate> visit1,
-            BiFunction<Integer, Object, Predicate> visit2) {
+            LeafFunction negatedVisit1,
+            LeafFunction negatedVisit2,
+            LeafFunction visit1,
+            LeafFunction visit2) {
         // Flink FLOAT/DOUBLE comparisons use Java operators; Paimon uses
         // Float/Double.compareTo. Negated equality, inequality, IN and BETWEEN
         // are therefore not equivalent (NaN identity and signed zeros). Simple
@@ -356,8 +387,20 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                 : visitBiFunction(children, visit1, visit2);
     }
 
-    private void rejectNegatedFloatingPoint(FieldReferenceExpression field) {
-        if (isFloatingPointField(field)) {
+    /**
+     * Flink compares FLOAT/DOUBLE with Java operators, so {@code -0.0 = 0.0} holds; Paimon's
+     * predicates use {@code compareTo}, which tells the two apart. Pruning a file on such a
+     * predicate could drop a row Flink would have kept, before Flink's own filter sees it, so
+     * comparisons, IN and BETWEEN on a nested floating-point field are left to Flink.
+     */
+    private void rejectNestedFloatingPoint(ResolvedField field) {
+        if (field.isNested() && isFloatingPointType(field.type())) {
+            throw new UnsupportedExpression();
+        }
+    }
+
+    private void rejectNegatedFloatingPoint(ResolvedField field) {
+        if (isFloatingPointType(field.type())) {
             throw new UnsupportedExpression();
         }
     }
@@ -365,46 +408,113 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
     private boolean isFloatingPointComparison(List<Expression> children) {
         for (Expression child : children) {
             Optional<FieldReferenceExpression> field = extractFieldReference(child);
-            if (field.isPresent() && isFloatingPointField(field.get())) {
+            if (field.isPresent() && isFloatingPointType(field.get().getOutputDataType())) {
+                return true;
+            }
+            if (NestedFieldReferences.isNestedFieldReference(child)
+                    && isFloatingPointType(NestedFieldReferences.outputDataType(child))) {
                 return true;
             }
         }
         return false;
     }
 
-    private boolean isFloatingPointField(FieldReferenceExpression field) {
-        LogicalTypeRoot root = field.getOutputDataType().getLogicalType().getTypeRoot();
+    private boolean isFloatingPointType(DataType type) {
+        LogicalTypeRoot root = type.getLogicalType().getTypeRoot();
         return root == LogicalTypeRoot.FLOAT || root == LogicalTypeRoot.DOUBLE;
     }
 
     private Predicate visitBiFunction(
-            List<Expression> children,
-            BiFunction<Integer, Object, Predicate> visit1,
-            BiFunction<Integer, Object, Predicate> visit2) {
+            List<Expression> children, LeafFunction visit1, LeafFunction visit2) {
         requireArity(children, 2);
-        Optional<FieldReferenceExpression> fieldRefExpr = extractFieldReference(children.get(0));
-        if (fieldRefExpr.isPresent()) {
-            int fieldIndex = resolveFieldIndex(fieldRefExpr.get());
-            Object literal =
-                    extractLiteral(fieldRefExpr.get().getOutputDataType(), children.get(1));
-            return visit1.apply(fieldIndex, literal);
-        } else {
-            fieldRefExpr = extractFieldReference(children.get(1));
-            if (fieldRefExpr.isPresent()) {
-                int fieldIndex = resolveFieldIndex(fieldRefExpr.get());
-                Object literal =
-                        extractLiteral(fieldRefExpr.get().getOutputDataType(), children.get(0));
-                return visit2.apply(fieldIndex, literal);
-            }
+        if (isFieldReference(children.get(0))) {
+            ResolvedField field = resolveField(children.get(0));
+            rejectNestedFloatingPoint(field);
+            return visit1.apply(field, extractLiteral(field.type(), children.get(1)));
+        }
+        if (isFieldReference(children.get(1))) {
+            ResolvedField field = resolveField(children.get(1));
+            rejectNestedFloatingPoint(field);
+            return visit2.apply(field, extractLiteral(field.type(), children.get(0)));
         }
 
         throw new UnsupportedExpression();
     }
 
+    private boolean isFieldReference(Expression expression) {
+        return expression instanceof FieldReferenceExpression
+                || NestedFieldReferences.isNestedFieldReference(expression);
+    }
+
+    /** A {@link PredicateBuilder} method that builds a leaf predicate over a field. */
+    @FunctionalInterface
+    private interface LeafFunction {
+        Predicate apply(ResolvedField field, Object literal);
+    }
+
+    /**
+     * Pairs the two {@link PredicateBuilder} overloads of one operation, so that a field can be
+     * addressed either by index or, when it is nested inside a row, by transform.
+     */
+    private static LeafFunction op(
+            BiFunction<Integer, Object, Predicate> byIndex,
+            BiFunction<Transform, Object, Predicate> byTransform) {
+        return (field, literal) -> build(field, byIndex, byTransform, literal);
+    }
+
     private ResolvedField resolveField(Expression expression) {
+        if (NestedFieldReferences.isNestedFieldReference(expression)) {
+            return resolveNestedField(expression);
+        }
         FieldReferenceExpression field =
                 extractFieldReference(expression).orElseThrow(UnsupportedExpression::new);
-        return new ResolvedField(field, resolveFieldIndex(field));
+        return ResolvedField.topLevel(field, resolveFieldIndex(field));
+    }
+
+    /**
+     * Resolves a field nested inside a row. Flink hands the path down as the names of the fields
+     * walked through, starting at the top-level one, which is what {@link NestedFieldTransform}
+     * addresses the field by as well.
+     */
+    private ResolvedField resolveNestedField(Expression expression) {
+        String[] fieldNames = NestedFieldReferences.fieldNames(expression);
+        if (fieldNames.length < 2) {
+            throw new UnsupportedExpression();
+        }
+
+        int rootIndex = builder.indexOf(fieldNames[0]);
+        if (rootIndex < 0) {
+            throw new UnsupportedExpression();
+        }
+        // Prefer the table's own type: its field ids are the transform's identity, and the
+        // round-tripped type behind the builder has renumbered them.
+        org.apache.paimon.types.RowType rootSource =
+                tableType != null ? tableType : builder.rowType();
+        FieldRef rootRef = new FieldRef(rootIndex, fieldNames[0], rootSource.getTypeAt(rootIndex));
+        List<String> path = Arrays.asList(fieldNames).subList(1, fieldNames.length);
+        try {
+            return ResolvedField.nested(
+                    NestedFieldReferences.outputDataType(expression),
+                    new NestedFieldTransform(rootRef, path));
+        } catch (IllegalArgumentException e) {
+            // The path does not address a field of this table: the root is not a row, or a field
+            // along the way was renamed or dropped. Leave the filter for Flink to evaluate.
+            throw new UnsupportedExpression();
+        }
+    }
+
+    /**
+     * Binds a {@link PredicateBuilder} method to a field, choosing the overload that addresses it:
+     * by index for a top-level field, by transform for one nested inside a row.
+     */
+    private static <T> Predicate build(
+            ResolvedField field,
+            BiFunction<Integer, T, Predicate> byIndex,
+            BiFunction<Transform, T, Predicate> byTransform,
+            T argument) {
+        return field.isNested()
+                ? byTransform.apply(field.transform, argument)
+                : byIndex.apply(field.index, argument);
     }
 
     private int resolveFieldIndex(FieldReferenceExpression field) {
@@ -504,14 +614,36 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         }
     }
 
+    /**
+     * A field a predicate can be built on: either a top-level field, addressed by its index, or a
+     * field nested inside a row, addressed by a {@link NestedFieldTransform}.
+     */
     private static class ResolvedField {
 
-        private final FieldReferenceExpression expression;
+        private final DataType type;
         private final int index;
+        @Nullable private final Transform transform;
 
-        private ResolvedField(FieldReferenceExpression expression, int index) {
-            this.expression = expression;
+        private ResolvedField(DataType type, int index, @Nullable Transform transform) {
+            this.type = type;
             this.index = index;
+            this.transform = transform;
+        }
+
+        static ResolvedField topLevel(FieldReferenceExpression expression, int index) {
+            return new ResolvedField(expression.getOutputDataType(), index, null);
+        }
+
+        static ResolvedField nested(DataType type, Transform transform) {
+            return new ResolvedField(type, -1, transform);
+        }
+
+        boolean isNested() {
+            return transform != null;
+        }
+
+        DataType type() {
+            return type;
         }
     }
 
@@ -542,8 +674,25 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
      * @return {@link Predicate} if no {@link UnsupportedExpression} thrown.
      */
     public static Optional<Predicate> convert(RowType rowType, ResolvedExpression filter) {
+        return convert(new PredicateConverter(rowType), filter);
+    }
+
+    /**
+     * Like {@link #convert(RowType, ResolvedExpression)}, for a table whose Paimon type is at hand.
+     * Predicates on fields nested inside a row are then bound to the table's own field ids, which
+     * is what reading the table later checks them against.
+     */
+    public static Optional<Predicate> convert(
+            org.apache.paimon.types.RowType tableType, ResolvedExpression filter) {
+        PredicateBuilder builder =
+                new PredicateBuilder(toDataType(LogicalTypeConversion.toLogicalType(tableType)));
+        return convert(new PredicateConverter(builder, tableType), filter);
+    }
+
+    private static Optional<Predicate> convert(
+            PredicateConverter converter, ResolvedExpression filter) {
         try {
-            return Optional.ofNullable(filter.accept(new PredicateConverter(rowType)));
+            return Optional.ofNullable(filter.accept(converter));
         } catch (UnsupportedExpression e) {
             return Optional.empty();
         }

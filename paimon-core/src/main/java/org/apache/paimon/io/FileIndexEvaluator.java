@@ -126,6 +126,42 @@ public class FileIndexEvaluator {
         }
     }
 
+    /**
+     * Intersects a previously evaluated file-index result with the live rows from a deletion
+     * vector.
+     *
+     * <p>The file index uses positions local to {@code file}, while a deletion vector may use
+     * positions relative to the merged group's anchor range. {@code fileOffset} converts the latter
+     * to the former. Keeping this operation separate from {@link #evaluate} allows callers to reuse
+     * an index result instead of reading the file-index sidecar a second time.
+     *
+     * <p>Only bitmap index results can be narrowed to a subset of live rows. A non-bitmap result
+     * remains conservative, except that an empty live-row selection always proves that the file can
+     * be skipped.
+     */
+    public static FileIndexResult intersectDeletionVector(
+            FileIndexResult result,
+            DataFileMeta file,
+            @Nullable DeletionVector dv,
+            long fileOffset) {
+        if (file.rowCount() > RoaringBitmap32.MAX_VALUE
+                || dv == null
+                || dv.isEmpty()
+                || dv instanceof Bitmap64DeletionVector) {
+            return result;
+        }
+        BitmapIndexResult liveRows = createBaseSelection(file, dv, fileOffset);
+        if (!liveRows.remain()) {
+            return FileIndexResult.SKIP;
+        }
+        if (result instanceof BitmapIndexResult) {
+            FileIndexResult intersected = result.and(liveRows);
+            return intersected.remain() ? intersected : FileIndexResult.SKIP;
+        }
+        return result;
+    }
+
+    /** Returns all local file positions minus the positions deleted by a bitmap DV. */
     private static BitmapIndexResult createBaseSelection(
             DataFileMeta file, @Nullable DeletionVector dv, long fileOffset) {
         BitmapIndexResult selection =

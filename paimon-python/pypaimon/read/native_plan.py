@@ -27,7 +27,6 @@ from typing import List, Optional, Tuple
 from packaging.version import InvalidVersion, Version
 
 from pypaimon.common.options.config import CatalogOptions, OssOptions
-from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.plan import Plan
@@ -167,44 +166,8 @@ def _catalog_context_options(table) -> dict:
     return normalized
 
 
-def _read_options(table) -> dict:
-    """Effective Rust read options, including FileStoreTable.copy overrides."""
-    options = {
-        CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(): str(
-            table.options.source_split_target_size()),
-        CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(): str(
-            table.options.source_split_open_file_cost()),
-        CoreOptions.DELETION_VECTORS_MERGE_ON_READ.key(): _option_value_to_string(
-            table.options.options.get(CoreOptions.DELETION_VECTORS_MERGE_ON_READ)),
-    }
-    table_options = table.options.options
-    for option in (
-            CoreOptions.SCAN_VERSION,
-            CoreOptions.SCAN_SNAPSHOT_ID,
-            CoreOptions.SCAN_TAG_NAME,
-            CoreOptions.SCAN_TIMESTAMP_MILLIS,
-            CoreOptions.SCAN_WATERMARK,
-            CoreOptions.GLOBAL_INDEX_SEARCH_MODE,
-            CoreOptions.SCALAR_INDEX_SEARCH_MODE,
-            CoreOptions.VECTOR_INDEX_SEARCH_MODE,
-            CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE):
-        if table_options.contains_key(option.key()):
-            options[option.key()] = _option_value_to_string(
-                table_options.to_map()[option.key()])
-
-    # Rust takes epoch millis but PyPaimon also accepts a timestamp string.
-    if table_options.contains_key(CoreOptions.SCAN_TIMESTAMP.key()):
-        from pypaimon.snapshot.time_travel_util import _parse_timestamp_to_millis
-        options[CoreOptions.SCAN_TIMESTAMP_MILLIS.key()] = str(
-            _parse_timestamp_to_millis(
-                table_options.get(CoreOptions.SCAN_TIMESTAMP)))
-    return options
-
-
 def _resolved_schema_file_io_options(table) -> Optional[dict]:
     """FileIO properties for tables whose metadata needs no catalog resolution."""
-    if not native_method_available('Table', 'from_resolved_schema'):
-        return None
     environment = table.catalog_environment
     loader = environment.catalog_loader
     if loader is None:
@@ -233,12 +196,10 @@ def _resolved_schema_file_io_options(table) -> Optional[dict]:
 
 
 def _resolved_schema_json(table) -> str:
+    """Preserve all effective table options as strings for Rust."""
     from pypaimon.common.json_util import JSON
     options = {str(key): _option_value_to_string(value)
                for key, value in table.table_schema.options.items() if value is not None}
-    options.update(_read_options(table))
-    # The timestamp string has already been converted to epoch millis.
-    options.pop(CoreOptions.SCAN_TIMESTAMP.key(), None)
     return JSON.to_json(table.table_schema.copy(new_options=options))
 
 
@@ -300,27 +261,21 @@ def _native_read_builder(table):
             database=table.identifier.get_database_name(),
             table=table.identifier.get_table_name(),
             branch=table.current_branch(), options=file_io_options)
-        builder = rt.new_read_builder()
     else:
         from pypaimon_rust.datafusion import PaimonCatalog
         catalog = PaimonCatalog(_catalog_options(table))
-        if native_method_available('Table', 'copy_with_resolved_schema'):
-            # REST may keep branch schemas in the catalog only. Load the base
-            # environment, then attach the schema/branch already resolved here.
-            rt = catalog.get_table((
-                table.identifier.get_database_name(), table.identifier.get_table_name()))
-            if rt.location() != table.table_path:
-                raise RuntimeError('Native catalog resolved a different table location')
-            rt = rt.copy_with_resolved_schema(_resolved_schema_json(table), branch=table.current_branch())
-            builder = rt.new_read_builder()
-        else:
-            rt = catalog.get_table(table.identifier.get_full_name())
-            builder = rt.new_read_builder(_read_options(table))
+        # REST may keep branch schemas in the catalog only. Load the base
+        # environment, then attach the schema/branch already resolved here.
+        rt = catalog.get_table((
+            table.identifier.get_database_name(), table.identifier.get_table_name()))
+        if rt.location() != table.table_path:
+            raise RuntimeError('Native catalog resolved a different table location')
+        rt = rt.copy_with_resolved_schema(_resolved_schema_json(table), branch=table.current_branch())
     if table.current_branch() != 'main':
         branch = getattr(rt, 'branch', None)
         if not callable(branch) or branch() != table.current_branch():
             raise RuntimeError("Native table did not resolve the requested branch")
-    return builder
+    return rt.new_read_builder()
 
 
 def _configure_native_read_builder(builder, predicate, limit, projection,
@@ -339,13 +294,13 @@ def _configure_native_read_builder(builder, predicate, limit, projection,
     return builder
 
 
-def native_read(table, splits, predicate: Optional[Predicate] = None,
-                limit: Optional[int] = None,
-                projection: Optional[List[str]] = None,
-                blob_parallelism: Optional[int] = None,
-                nested_projection: Optional[List[List[str]]] = None,
-                include_row_kind: bool = False):
-    """Read Rust ``Split`` objects into PyArrow ``RecordBatch`` objects."""
+def _prepare_native_read(table, predicate: Optional[Predicate] = None,
+                         limit: Optional[int] = None,
+                         projection: Optional[List[str]] = None,
+                         blob_parallelism: Optional[int] = None,
+                         nested_projection: Optional[List[List[str]]] = None,
+                         include_row_kind: bool = False):
+    """Create one Rust reader reusable across split groups."""
     if not native_reader_available():
         raise RuntimeError(
             "read.native.enabled needs the pypaimon-rust native reader API")
@@ -357,8 +312,20 @@ def native_read(table, splits, predicate: Optional[Predicate] = None,
         builder = builder.with_blob_parallelism(blob_parallelism)
     reader = builder.new_read()
     read_arrow = getattr(reader, 'read_arrow', None)
-    return (read_arrow(splits) if callable(read_arrow)
-            else reader.read(splits))
+    return read_arrow if callable(read_arrow) else reader.read
+
+
+def native_read(table, splits, predicate: Optional[Predicate] = None,
+                limit: Optional[int] = None,
+                projection: Optional[List[str]] = None,
+                blob_parallelism: Optional[int] = None,
+                nested_projection: Optional[List[List[str]]] = None,
+                include_row_kind: bool = False):
+    """Read Rust ``Split`` objects into PyArrow ``RecordBatch`` objects."""
+    read_splits = _prepare_native_read(
+        table, predicate, limit, projection, blob_parallelism,
+        nested_projection, include_row_kind)
+    return read_splits(splits)
 
 
 def native_plan(

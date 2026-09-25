@@ -681,8 +681,17 @@ class CoreOptions:
         ConfigOptions.key("commit.native.enabled")
         .boolean_type()
         .default_value(False)
-        .with_description("Commit append messages via pypaimon_rust. Unsupported "
+        .with_description("Commit append and batch overwrite messages via pypaimon_rust. Unsupported "
                           "operations use Python before any native commit is attempted.")
+    )
+
+    WRITE_NATIVE_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("write.native.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Write Arrow data via pypaimon_rust when the table and "
+                          "writer API are supported. Unsupported routes use Python "
+                          "before any native data is written.")
     )
 
     CHANGELOG_PRODUCER: ConfigOption[ChangelogProducer] = (
@@ -1602,6 +1611,9 @@ class CoreOptions:
 
     def native_commit_enabled(self, default=None):
         return self.options.get(CoreOptions.COMMIT_NATIVE_ENABLED, default)
+
+    def native_write_enabled(self, default=None):
+        return self.options.get(CoreOptions.WRITE_NATIVE_ENABLED, default)
 
     def changelog_producer(self, default=None):
         return self.options.get(CoreOptions.CHANGELOG_PRODUCER, default)

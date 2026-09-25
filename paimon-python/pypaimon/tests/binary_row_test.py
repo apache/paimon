@@ -269,11 +269,16 @@ class BinaryRowTest(unittest.TestCase):
         manifest_files = file_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = file_scanner.manifest_file_manager.read(manifest_files[0].file_name)
         self._transform_manifest_entries(manifest_entries, [])
-        for i, entry in enumerate(manifest_entries):
+        for entry in manifest_entries:
+            # Manifest entry order is not part of the file format. Derive the
+            # synthetic statistics from this file's partition value.
+            partition_id = entry.partition.values[0]
             entry.file.value_stats_cols = ['f2', 'f6', 'f8']
             entry.file.value_stats = SimpleStats(
-                GenericRow([10 * (i + 1), 100 * (i + 1), 5 - i], [table.fields[2], table.fields[6], table.fields[8]]),
-                GenericRow([10 * (i + 1), 100 * (i + 1), 5 - i], [table.fields[2], table.fields[6], table.fields[8]]),
+                GenericRow([10 * partition_id, 100 * partition_id, 6 - partition_id],
+                           [table.fields[2], table.fields[6], table.fields[8]]),
+                GenericRow([10 * partition_id, 100 * partition_id, 6 - partition_id],
+                           [table.fields[2], table.fields[6], table.fields[8]]),
                 [0, 0, 0],
             )
         file_scanner.manifest_file_manager.write(manifest_files[0].file_name, manifest_entries)
@@ -301,18 +306,21 @@ class BinaryRowTest(unittest.TestCase):
                          'f8': [0, -3, -4],
                          'f9': ['w5', 'w8', 'w9']
                          }
-        self.assertEqual(expected_data, actual.to_pydict())
+        self.assertEqual(expected_data, actual.sort_by('f0').to_pydict())
 
         file_scanner = FileScanner(table, lambda: ([], None))
         latest_snapshot = file_scanner.snapshot_manager.get_latest_snapshot()
         manifest_files = file_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = file_scanner.manifest_file_manager.read(manifest_files[0].file_name)
         self._transform_manifest_entries(manifest_entries, [])
-        for i, entry in enumerate(manifest_entries):
+        for entry in manifest_entries:
+            partition_id = entry.partition.values[0]
             entry.file.value_stats_cols = ['f2', 'f6', 'f8']
             entry.file.value_stats = SimpleStats(
-                GenericRow([0, 100 * (i + 1), 5 - i], [table.fields[2], table.fields[6], table.fields[8]]),
-                GenericRow([0, 100 * (i + 1), 5 - i], [table.fields[2], table.fields[6], table.fields[8]]),
+                GenericRow([0, 100 * partition_id, 6 - partition_id],
+                           [table.fields[2], table.fields[6], table.fields[8]]),
+                GenericRow([0, 100 * partition_id, 6 - partition_id],
+                           [table.fields[2], table.fields[6], table.fields[8]]),
                 [0, 0, 0],
             )
         file_scanner.manifest_file_manager.write(manifest_files[0].file_name, manifest_entries)

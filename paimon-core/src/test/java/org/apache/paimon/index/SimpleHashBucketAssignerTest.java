@@ -29,10 +29,31 @@ import java.util.Map;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
 
 /** Tests for {@link SimpleHashBucketAssigner}. */
 public class SimpleHashBucketAssignerTest {
+
+    @Test
+    public void testRejectsMaxBucketsSmallerThanAssignerNumber() {
+        // buckets are owned by 'bucket % assigners', so with a cap of 2 and 4 assigners the
+        // assigner with id 3 owns no bucket: it used to default to bucket 0 (owned by
+        // another assigner) and write all its records there
+        assertThatThrownBy(() -> new SimpleHashBucketAssigner(4, 3, 100, 2))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("dynamic-bucket.max-buckets");
+
+        // the exact boundary also leaves this assigner bucketless: it owns buckets 3, 7, ...
+        // but a cap of 3 only admits buckets 0-2
+        assertThatThrownBy(() -> new SimpleHashBucketAssigner(4, 3, 100, 3))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("dynamic-bucket.max-buckets");
+
+        // unlimited and the tightest legal cap (assigner id + 1) are both fine
+        new SimpleHashBucketAssigner(4, 3, 100, -1);
+        new SimpleHashBucketAssigner(4, 3, 100, 4);
+    }
 
     @Test
     public void testOverflowIsSpreadAcrossAllBuckets() {

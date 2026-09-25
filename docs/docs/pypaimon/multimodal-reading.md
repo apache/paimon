@@ -497,3 +497,14 @@ Best practices:
 - Use business keys or application columns when writing inference or training
   outputs back to a table.
 - Reorder `take_row_ids` results client-side when input order matters.
+
+### BLOB URI affinity
+
+For small inference batches, `map_with_blobs(..., batch_size=32,
+blob_uri_affinity=True)` sorts scalar BLOB descriptors by URI and offset to
+coalesce reads across inference batches. This distributed sort may reorder rows;
+use it when fewer storage requests outweigh the shuffle cost. `prefetch_bytes`
+defaults to 64 MiB per payload window, except for an oversized inference batch.
+Descriptor batches contain up to `max(1024, batch_size)` rows; the UDF still
+receives at most `batch_size` rows. MAP and ARRAY BLOB columns use the default
+mapping path without URI affinity.

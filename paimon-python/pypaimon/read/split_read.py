@@ -456,7 +456,8 @@ class SplitRead(ABC):
                 nested_name_paths=ordered_nested_paths,
                 predicate_field_names=predicate_fields,
                 row_ranges=parquet_row_ranges,
-                row_group_cache=self._parquet_row_group_cache)
+                row_group_cache=self._parquet_row_group_cache,
+                file_size=file.file_size)
         elif file_format == CoreOptions.FILE_FORMAT_ROW:
             if has_nested:
                 raise NotImplementedError(
