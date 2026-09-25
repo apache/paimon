@@ -67,7 +67,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private int[] notNullFieldIndex;
     private int[] deleteNotNullFieldIndex;
 
-    private final @Nullable DefaultValueRow defaultValueRow;
+    private @Nullable DefaultValueRow defaultValueRow;
     private final @Nullable Set<String> deleteNotNullFieldNames;
 
     public TableWriteImpl(
@@ -134,6 +134,11 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         write.withWriteType(writeType);
         this.writeType = writeType;
         updateNotNullFieldIndexes();
+        // the default values must follow the write type: a different type (e.g. extended
+        // with row-tracking special fields, or a narrowed partial-write projection) has
+        // different positions and arity, and the stale row would crash the write with an
+        // out-of-bounds read on null fields the original type does not have
+        this.defaultValueRow = DefaultValueRow.create(writeType);
         return this;
     }
 
