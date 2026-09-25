@@ -151,7 +151,9 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             blobFetchMetrics = new BlobFetchMetrics(metricRegistry, tableName);
             blobContext = blobContext.withBlobFetchMetricReporter(blobFetchMetrics);
         }
-        compactionFastPathMetrics = new CompactionFastPathMetrics(metricRegistry, tableName);
+        if (options.appendCompactionRowGroupCopyEnabled()) {
+            compactionFastPathMetrics = new CompactionFastPathMetrics(metricRegistry, tableName);
+        }
         return this;
     }
 
@@ -263,6 +265,9 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         super.close();
         if (blobFetchMetrics != null) {
             blobFetchMetrics.close();
+        }
+        if (compactionFastPathMetrics != null) {
+            compactionFastPathMetrics.close();
         }
     }
 

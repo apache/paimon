@@ -78,6 +78,10 @@ public class CompactionFastPathMetrics {
         missCounters.get(reason).inc();
     }
 
+    public void close() {
+        metricGroup.close();
+    }
+
     private static String capitalize(String value) {
         if (value.isEmpty()) {
             return value;
