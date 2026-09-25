@@ -33,6 +33,9 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.LazyField;
+import org.apache.paimon.utils.Range;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
@@ -117,6 +120,7 @@ public class BTreeGlobalIndexer implements SortedGlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             long totalRowCount,
+            @Nullable List<Range> rowRanges,
             ExecutorService executor) {
         return new LazyFilteredBTreeReader(
                 files,
@@ -125,6 +129,7 @@ public class BTreeGlobalIndexer implements SortedGlobalIndexer {
                 cacheManager.get(),
                 fallbackScanMaxSize,
                 totalRowCount,
+                rowRanges,
                 executor);
     }
 }

@@ -71,6 +71,7 @@ public class BTreeIndexReader implements Closeable {
     private final LazyField<RoaringNavigableMap64> nullBitmap;
     private final Object minKey;
     private final Object maxKey;
+    @Nullable private final RoaringNavigableMap64 rowIdFilter;
 
     /** A key and its local row ids stored in one btree entry. */
     public static class KeyRowIds {
@@ -141,10 +142,12 @@ public class BTreeIndexReader implements Closeable {
             KeySerializer keySerializer,
             GlobalIndexFileReader fileReader,
             GlobalIndexIOMeta globalIndexIOMeta,
-            CacheManager cacheManager)
+            CacheManager cacheManager,
+            @Nullable RoaringNavigableMap64 rowIdFilter)
             throws IOException {
         this.keySerializer = keySerializer;
         this.comparator = keySerializer.createComparator();
+        this.rowIdFilter = rowIdFilter;
         SortedIndexFileMeta indexMeta =
                 SortedIndexFileMeta.deserialize(globalIndexIOMeta.metadata());
         if (indexMeta.getFirstKey() != null) {
@@ -272,7 +275,11 @@ public class BTreeIndexReader implements Closeable {
     }
 
     public Optional<GlobalIndexResult> visitIsNull() {
-        return createResult(nullBitmap::get);
+        return createResult(
+                () ->
+                        rowIdFilter == null
+                                ? nullBitmap.get()
+                                : RoaringNavigableMap64.and(nullBitmap.get(), rowIdFilter));
     }
 
     public Optional<GlobalIndexResult> visitStartsWith(Object literal) {
@@ -550,10 +557,13 @@ public class BTreeIndexReader implements Closeable {
             MemorySliceInput input = slice.toInput();
             int count = readVersion1Count(input);
             for (int i = 0; i < count; i++) {
-                target.add(input.readVarLenLong());
+                long rowId = input.readVarLenLong();
+                if (rowIdFilter == null || rowIdFilter.contains(rowId)) {
+                    target.add(rowId);
+                }
             }
         } else {
-            BTreePostingList.addTo(slice, target);
+            BTreePostingList.addTo(slice, target, rowIdFilter);
         }
     }
 

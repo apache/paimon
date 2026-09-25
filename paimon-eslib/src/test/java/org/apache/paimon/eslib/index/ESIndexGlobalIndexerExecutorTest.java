@@ -66,7 +66,8 @@ class ESIndexGlobalIndexerExecutorTest {
         ExecutorService caller = Executors.newSingleThreadExecutor();
         try {
             ESIndexGlobalIndexer indexer = new ESIndexGlobalIndexer(FIELDS, new Options());
-            GlobalIndexReader reader = indexer.createReader(meta -> null, oneFile(), 1, caller);
+            GlobalIndexReader reader =
+                    indexer.createReader(meta -> null, oneFile(), 1, null, caller);
             assertSame(
                     caller,
                     ((ESIndexGlobalIndexReader) reader).queryExecutor(),
@@ -80,7 +81,8 @@ class ESIndexGlobalIndexerExecutorTest {
     void inlineValidationFailuresCompleteTheReturnedFutureExceptionally() throws Exception {
         ESIndexGlobalIndexer indexer = new ESIndexGlobalIndexer(FIELDS, new Options());
         ESIndexGlobalIndexReader reader =
-                (ESIndexGlobalIndexReader) indexer.createReader(meta -> null, oneFile(), 1, null);
+                (ESIndexGlobalIndexReader)
+                        indexer.createReader(meta -> null, oneFile(), 1, null, null);
         try {
             CompletableFuture<?> future =
                     reader.visitFullTextSearch(new FullTextSearch("k", "{not-json", 1));

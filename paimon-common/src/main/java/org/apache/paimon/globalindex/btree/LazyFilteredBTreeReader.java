@@ -53,6 +53,7 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     private final KeySerializer keySerializer;
     private final CacheManager cacheManager;
     private final GlobalIndexFileReader fileReader;
+    @Nullable private final RoaringNavigableMap64 rowIdFilter;
     private final Comparator<Object> comparator;
     private final long totalRowCount;
     @Nullable private final Pair<Object, Object> fullRangeBounds;
@@ -64,11 +65,14 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
             CacheManager cacheManager,
             long fallbackScanMaxSize,
             long totalRowCount,
+            @Nullable List<Range> rowRanges,
             ExecutorService executor) {
         super(files, keySerializer, fallbackScanMaxSize, totalRowCount, executor);
         this.cacheManager = cacheManager;
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
+        this.rowIdFilter =
+                rowRanges == null ? null : GlobalIndexResult.fromRanges(rowRanges).results();
         this.comparator = keySerializer.createComparator();
         this.totalRowCount = totalRowCount;
         this.fullRangeBounds = fullRangeBounds(files);
@@ -165,7 +169,10 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
                 && predicate.test(fullRangeBounds.getLeft())
                 && predicate.test(fullRangeBounds.getRight())) {
             return CompletableFuture.completedFuture(
-                    Optional.of(GlobalIndexResult.fromRange(new Range(0, totalRowCount - 1))));
+                    Optional.of(
+                            rowIdFilter == null
+                                    ? GlobalIndexResult.fromRange(new Range(0, totalRowCount - 1))
+                                    : GlobalIndexResult.create(rowIdFilter)));
         }
         return fallback.get();
     }
@@ -263,7 +270,7 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     @Override
     protected BTreeIndexReader openReader(GlobalIndexIOMeta meta) {
         try {
-            return new BTreeIndexReader(keySerializer, fileReader, meta, cacheManager);
+            return new BTreeIndexReader(keySerializer, fileReader, meta, cacheManager, rowIdFilter);
         } catch (IOException e) {
             throw new RuntimeException("Can't create BTree index reader for " + meta.filePath(), e);
         }

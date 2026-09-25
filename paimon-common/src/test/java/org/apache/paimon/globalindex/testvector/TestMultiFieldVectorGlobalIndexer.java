@@ -36,6 +36,7 @@ import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -82,6 +83,7 @@ class TestMultiFieldVectorGlobalIndexer implements VectorGlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             long totalRowCount,
+            @Nullable List<Range> rowRanges,
             ExecutorService executor) {
         List<GlobalIndexIOMeta> vectorFiles = new ArrayList<>();
         List<GlobalIndexIOMeta> scalarFiles = new ArrayList<>();
@@ -93,8 +95,10 @@ class TestMultiFieldVectorGlobalIndexer implements VectorGlobalIndexer {
         checkArgument(
                 scalarFiles.size() == 1, "Expected one scalar companion file, got: %s", files);
         return new MultiColumnReader(
-                vectorIndexer.createReader(fileReader, vectorFiles, totalRowCount, executor),
-                scalarIndexer.createReader(fileReader, scalarFiles, totalRowCount, executor));
+                vectorIndexer.createReader(
+                        fileReader, vectorFiles, totalRowCount, rowRanges, executor),
+                scalarIndexer.createReader(
+                        fileReader, scalarFiles, totalRowCount, rowRanges, executor));
     }
 
     @Override

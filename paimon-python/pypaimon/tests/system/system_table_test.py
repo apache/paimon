@@ -21,7 +21,9 @@ import types
 import unittest
 
 from pypaimon.common.identifier import Identifier
-from pypaimon.schema.data_types import AtomicType, DataField, RowType
+from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.schema.data_types import (
+    ArrayType, AtomicType, DataField, RowType)
 from pypaimon.table.system.system_table import SystemTable
 
 
@@ -48,6 +50,53 @@ class _DummySystemTable(SystemTable):
     def _build_arrow_table(self):  # pragma: no cover - not exercised in this test
         import pyarrow as pa
         return pa.table({"key": [], "value": []})
+
+
+_DATA_ROW_TYPE = RowType(False, [
+    DataField(0, "id", AtomicType("INT", nullable=False)),
+    DataField(1, "name", AtomicType("STRING", nullable=True)),
+])
+
+
+class _DataSystemTable(SystemTable):
+    """A SystemTable with a few real rows, used to exercise read filtering."""
+
+    def system_table_name(self) -> str:
+        return "data"
+
+    def row_type(self) -> RowType:
+        return _DATA_ROW_TYPE
+
+    def _build_arrow_table(self):
+        import pyarrow as pa
+        return pa.table({
+            "id": pa.array([1, 2, 3], pa.int32()),
+            "name": pa.array(["a", "b", "c"]),
+        })
+
+
+_ARRAY_ROW_TYPE = RowType(False, [
+    DataField(0, "id", AtomicType("INT", nullable=False)),
+    DataField(1, "tags",
+              ArrayType(True, AtomicType("STRING", nullable=True))),
+])
+
+
+class _ArraySystemTable(SystemTable):
+    """A SystemTable with a list-typed column (mirrors $files.write_cols)."""
+
+    def system_table_name(self) -> str:
+        return "arr"
+
+    def row_type(self) -> RowType:
+        return _ARRAY_ROW_TYPE
+
+    def _build_arrow_table(self):
+        import pyarrow as pa
+        return pa.table({
+            "id": pa.array([1, 2], pa.int32()),
+            "tags": pa.array([["a"], ["b"]], pa.list_(pa.string())),
+        })
 
 
 def _fake_base(database: str = "db", table: str = "t", branch=None):
@@ -107,6 +156,90 @@ class SystemTableTest(unittest.TestCase):
                 getattr(sys_table, method_name)()
             self.assertIn("read-only", str(ctx.exception).lower(),
                           "method {}: {}".format(method_name, ctx.exception))
+
+
+class SystemTableFilterTest(unittest.TestCase):
+    """``with_filter`` on a system table applies the predicate at read time."""
+
+    def _predicate_builder(self) -> PredicateBuilder:
+        return PredicateBuilder(_DATA_ROW_TYPE.fields)
+
+    def _read(self, predicate, projection=None):
+        sys_table = _DataSystemTable(_fake_base())
+        rb = sys_table.new_read_builder()
+        if projection is not None:
+            rb = rb.with_projection(projection)
+        rb = rb.with_filter(predicate)
+        splits = rb.new_scan().plan().splits()
+        return rb.new_read().to_arrow(splits)
+
+    def test_equal_filter_selects_matching_rows(self):
+        table = self._read(self._predicate_builder().equal("id", 2))
+        self.assertEqual(table.column("id").to_pylist(), [2])
+        self.assertEqual(table.column("name").to_pylist(), ["b"])
+
+    def test_greater_than_filter(self):
+        table = self._read(self._predicate_builder().greater_than("id", 1))
+        self.assertEqual(sorted(table.column("id").to_pylist()), [2, 3])
+
+    def test_is_in_filter(self):
+        table = self._read(self._predicate_builder().is_in("id", [1, 3]))
+        self.assertEqual(sorted(table.column("id").to_pylist()), [1, 3])
+
+    def test_filter_column_may_be_absent_from_projection(self):
+        # Filter on `id` while projecting only `name`: the predicate is applied
+        # before projection, so this must not raise a missing-column error.
+        table = self._read(self._predicate_builder().equal("id", 3),
+                           projection=["name"])
+        self.assertEqual(table.column_names, ["name"])
+        self.assertEqual(table.column("name").to_pylist(), ["c"])
+
+    def test_string_match_filter_still_raises(self):
+        # starts_with / ends_with / contains / like are not safe as final
+        # Arrow row filters, so they still surface a clear NotImplementedError.
+        pred = self._predicate_builder().contains("name", "b")
+        sys_table = _DataSystemTable(_fake_base())
+        rb = sys_table.new_read_builder().with_filter(pred)
+        splits = rb.new_scan().plan().splits()
+        read = rb.new_read()
+        with self.assertRaises(NotImplementedError):
+            read.to_arrow(splits)
+
+    def test_comparison_on_array_column_raises(self):
+        # PyArrow's ArrowNotImplementedError (a NotImplementedError subclass)
+        # for a list column carries only a cryptic "no kernel" message. The
+        # read must reject the comparison up front with the documented,
+        # column-named message instead.
+        pred = PredicateBuilder(_ARRAY_ROW_TYPE.fields).equal("tags", ["a"])
+        sys_table = _ArraySystemTable(_fake_base())
+        rb = sys_table.new_read_builder().with_filter(pred)
+        splits = rb.new_scan().plan().splits()
+        read = rb.new_read()
+        with self.assertRaises(NotImplementedError) as ctx:
+            read.to_arrow(splits)
+        message = str(ctx.exception)
+        self.assertIn("non-scalar", message)
+        self.assertIn("tags", message)
+
+    def test_null_check_on_array_column_is_allowed(self):
+        # is_null / is_valid kernels accept nested input, so a null check on a
+        # list column is filtered normally rather than rejected.
+        pred = PredicateBuilder(_ARRAY_ROW_TYPE.fields).is_not_null("tags")
+        sys_table = _ArraySystemTable(_fake_base())
+        rb = sys_table.new_read_builder().with_filter(pred)
+        splits = rb.new_scan().plan().splits()
+        table = rb.new_read().to_arrow(splits)
+        self.assertEqual(sorted(table.column("id").to_pylist()), [1, 2])
+
+    def test_non_predicate_filter_raises(self):
+        # with_filter(object()) must keep the public NotImplementedError
+        # contract instead of leaking an internal AttributeError.
+        sys_table = _DataSystemTable(_fake_base())
+        rb = sys_table.new_read_builder().with_filter(object())
+        splits = rb.new_scan().plan().splits()
+        read = rb.new_read()
+        with self.assertRaises(NotImplementedError):
+            read.to_arrow(splits)
 
 
 if __name__ == "__main__":

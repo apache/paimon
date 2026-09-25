@@ -190,6 +190,77 @@ public class SortedFileMetaSelectorTest {
     }
 
     @Test
+    public void testReaderSelectorBudgetUsesSelectedFiles() {
+        FieldRef ref = new FieldRef(1, "testField", new IntType());
+        KeySerializer serializer = KeySerializer.create(ref.type());
+        SortedFileMetaSelector disabled = new SortedFileIndexPlanner(files, serializer, 0);
+        Assertions.assertThat(disabled.visitGreaterThan(ref, 20)).isEmpty();
+        Assertions.assertThat(disabled.visitGreaterThan(ref, 100)).isEmpty();
+        assertFiles(disabled.visitEqual(ref, 22).get(), Arrays.asList("file3", "file5"));
+
+        SortedFileMetaSelector selector = new SortedFileIndexPlanner(files, serializer, 2);
+        assertFiles(selector.visitGreaterThan(ref, 20).get(), Arrays.asList("file3", "file5"));
+        Assertions.assertThat(selector.visitGreaterOrEqual(ref, 5)).isEmpty();
+        Assertions.assertThat(selector.visitGreaterThan(ref, 100))
+                .hasValue(java.util.Collections.emptyList());
+        Assertions.assertThat(selector.visitGreaterThan(ref, null)).isEmpty();
+        Assertions.assertThat(selector.visitIsNaN(ref)).isEmpty();
+
+        // NOT BETWEEN must check the union of both branches against one group budget.
+        Assertions.assertThat(
+                        new SortedFileIndexPlanner(files, serializer, 3)
+                                .visitNotBetween(ref, 8, 22))
+                .isEmpty();
+        assertFiles(
+                new SortedFileIndexPlanner(files, serializer, 4).visitNotBetween(ref, 8, 22).get(),
+                Arrays.asList("file1", "file3", "file4", "file5"));
+    }
+
+    @Test
+    public void testReaderSelectorLikeSupport() {
+        FieldRef ref = new FieldRef(1, "testField", new VarCharType());
+        KeySerializer serializer = KeySerializer.create(ref.type());
+        List<GlobalIndexIOMeta> stringFiles =
+                Arrays.asList(
+                        newStringFile("a", serializer, "alpha", "azalea", false),
+                        newStringFile("b", serializer, "beta", "delta", false));
+        SortedFileMetaSelector disabled = new SortedFileIndexPlanner(stringFiles, serializer, 0);
+        assertFiles(disabled.visitLike(ref, str("alpha")).get(), Arrays.asList("a"));
+        assertFiles(disabled.visitLike(ref, str("a%")).get(), Arrays.asList("a"));
+        for (String pattern : Arrays.asList("%a", "%a%", "a_%")) {
+            Assertions.assertThat(disabled.visitLike(ref, str(pattern))).isEmpty();
+            Assertions.assertThat(
+                            new SortedFileIndexPlanner(stringFiles, serializer, 1)
+                                    .visitLike(ref, str(pattern)))
+                    .isEmpty();
+            assertFiles(
+                    new SortedFileIndexPlanner(stringFiles, serializer, 2)
+                            .visitLike(ref, str(pattern))
+                            .get(),
+                    Arrays.asList("a", "b"));
+        }
+        Assertions.assertThat(disabled.visitLike(ref, null)).isEmpty();
+        Assertions.assertThat(
+                        disabled.visitLike(new FieldRef(1, "testField", new IntType()), str("a%")))
+                .isEmpty();
+    }
+
+    @Test
+    public void testReaderSelectorBudgetDoesNotOverflow() {
+        FieldRef ref = new FieldRef(1, "testField", new IntType());
+        List<GlobalIndexIOMeta> largeFiles =
+                Arrays.asList(
+                        new GlobalIndexIOMeta(
+                                new Path("large"), Long.MAX_VALUE, files.get(0).metadata()),
+                        new GlobalIndexIOMeta(new Path("tail"), 1, files.get(1).metadata()));
+        SortedFileMetaSelector selector =
+                new SortedFileIndexPlanner(
+                        largeFiles, KeySerializer.create(ref.type()), Long.MAX_VALUE);
+        Assertions.assertThat(selector.visitGreaterThan(ref, 0)).isEmpty();
+        assertFiles(selector.visitLessThan(ref, 5).get(), Arrays.asList("large"));
+    }
+
+    @Test
     public void testStringPrefixSelector() {
         DataType dataType = new VarCharType();
         FieldRef ref = new FieldRef(1, "testField", dataType);

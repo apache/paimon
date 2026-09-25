@@ -103,7 +103,8 @@ class BTreeBloomFilterTest {
                                 KeySerializer.create(new IntType()),
                                 ignored -> input,
                                 fixture.meta,
-                                cacheManager)) {
+                                cacheManager,
+                                null)) {
             input.resetCount();
 
             assertThat(lookup.apply(reader).get().results()).isEmpty();

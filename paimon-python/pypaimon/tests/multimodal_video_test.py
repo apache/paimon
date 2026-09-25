@@ -50,6 +50,99 @@ class _FailingCloseDecoder(_Decoder):
         raise RuntimeError("decoder close failed")
 
 
+class ImageVideoEncoderTest(unittest.TestCase):
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_encodes_ordered_image_bytes_as_video(self):
+        try:
+            import av
+            from PIL import Image
+        except ImportError:
+            self.skipTest("PyAV and Pillow are required for video encoding")
+        from pypaimon.multimodal.video import _encode_images_to_video
+
+        images = []
+        for color in ((255, 0, 0), (0, 255, 0)):
+            output = io.BytesIO()
+            Image.new("RGB", (8, 6), color).save(output, format="PNG")
+            images.append(output.getvalue())
+        video_path = os.path.join(self.temp_dir.name, "encoded.mp4")
+
+        count = _encode_images_to_video(
+            images,
+            video_path,
+            fps=10,
+            codec="mpeg4",
+            pixel_format="yuv420p",
+            gop_size=1,
+            codec_options={"qscale": "3"},
+        )
+
+        with av.open(video_path) as container:
+            stream = container.streams.video[0]
+            frames = list(container.decode(stream))
+            size = stream.width, stream.height
+        self.assertEqual(2, count)
+        self.assertEqual(2, len(frames))
+        self.assertEqual((8, 6), size)
+
+    def test_image_video_encoder_rejects_invalid_required_options(self):
+        from pypaimon.multimodal.video import _encode_images_to_video
+
+        defaults = {
+            "fps": 10,
+            "codec": "mpeg4",
+            "pixel_format": "yuv420p",
+            "gop_size": 1,
+        }
+        cases = [
+            ({"fps": True}, "fps must be a positive int"),
+            ({"codec": ""}, "codec must be a non-empty string"),
+            ({"pixel_format": ""},
+             "pixel_format must be a non-empty string"),
+            ({"gop_size": 0}, "gop_size must be a positive int"),
+            ({"codec_options": []}, "codec_options must be a mapping"),
+        ]
+        for overrides, message in cases:
+            options = dict(defaults)
+            options.update(overrides)
+            with self.subTest(options=options):
+                with self.assertRaisesRegex(ValueError, message):
+                    _encode_images_to_video(
+                        [],
+                        os.path.join(self.temp_dir.name, "invalid.mp4"),
+                        **options,
+                    )
+
+    def test_image_video_encoder_rejects_mixed_dimensions_and_cleans_output(self):
+        try:
+            from PIL import Image
+            import av  # noqa: F401
+        except ImportError:
+            self.skipTest("PyAV and Pillow are required for video encoding")
+        from pypaimon.multimodal.video import _encode_images_to_video
+
+        video_path = os.path.join(self.temp_dir.name, "mixed.mp4")
+        with self.assertRaisesRegex(ValueError, "same dimensions"):
+            _encode_images_to_video(
+                [
+                    Image.new("RGB", (8, 6), "red"),
+                    Image.new("RGB", (10, 6), "green"),
+                ],
+                video_path,
+                fps=10,
+                codec="mpeg4",
+                pixel_format="yuv420p",
+                gop_size=1,
+            )
+        self.assertFalse(os.path.exists(video_path))
+
+
 class VideoFrameCollatorTest(unittest.TestCase):
 
     def setUp(self):

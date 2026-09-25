@@ -23,7 +23,7 @@ new module.
 
 The following short names are intentionally not registered here yet:
 
-  audit_log, binlog, read_optimized, consumers, statistics,
+  audit_log, binlog, read_optimized, statistics,
   aggregation_fields, row_tracking, all_tables, all_partitions, all_table_options,
   catalog_options
 """
@@ -48,6 +48,7 @@ SYSTEM_TABLES: Tuple[str, ...] = (
     "branches",
     "file_key_ranges",
     "table_indexes",
+    "consumers",
 )
 
 
@@ -75,6 +76,8 @@ SYSTEM_TABLE_LOADERS: Dict[str, Callable[..., "SystemTable"]] = {
         "pypaimon.table.system.file_key_ranges_table", "FileKeyRangesTable"),
     "table_indexes": _lazy(
         "pypaimon.table.system.table_indexes_table", "TableIndexesTable"),
+    "consumers": _lazy(
+        "pypaimon.table.system.consumers_table", "ConsumersTable"),
 }
 
 

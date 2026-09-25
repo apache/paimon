@@ -426,10 +426,23 @@ class TableRead:
         """Return Rust-read batches, or ``None`` when this read must fall back."""
         if not self.table.options.native_read_enabled():
             return None
+        # data-file.path-directory relocates data files under a sub-directory
+        # the native reader resolves at the bucket root -- it would 404. The
+        # Python reader honors the directory, matching the write/plan fallback.
+        if self.table.options.data_file_path_directory() is not None:
+            return None
         if self.table.options.file_format() not in _NATIVE_READ_FILE_FORMATS:
             return None
         if not splits:
             return []
+        sequence_fields = self.table.options.sequence_field()
+        if self.table.is_primary_key_table and sequence_fields:
+            sequence_schema = PyarrowFieldParser.from_paimon_schema(
+                [self.table.field_dict[name] for name in sequence_fields])
+            # Native merge cannot extract floating sequence values: they
+            # would silently become missing sequence values.
+            if any(pyarrow.types.is_floating(field.type) for field in sequence_schema):
+                return None
         if not self._native_blob_view_supported():
             return None
         if (self._deferred_blob_limit_may_prune(splits)

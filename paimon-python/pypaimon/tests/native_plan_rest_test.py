@@ -23,7 +23,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.api.api_response import ConfigResponse, ErrorResponse, GetTableSnapshotResponse
 from pypaimon.api.auth import BearTokenAuthProvider
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.read.native_plan import native_method_available, native_runtime_available
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.table.row.blob import BlobViewStruct
 from pypaimon.tests.rest.rest_server import RESTCatalogServer
@@ -108,6 +108,25 @@ def test_rest_branch_keeps_catalog_snapshot_and_schema(rest_source, rest_catalog
         _assert_parity(branch, [{'id': 1, 'value': 'old'}] if from_tag else [], 1 if from_tag else None)
         assert load.call_count >= 2
         assert all(call.args[2] == 'dev' for call in load.call_args_list)
+
+
+@pytest.mark.parametrize('from_tag', [False, True], ids=['empty-branch', 'tagged-branch'])
+def test_dynamic_branch_uses_native_catalog(rest_source, rest_catalog, from_tag):
+    from pypaimon.read.native_plan import _resolved_rest_table_response, native_plan
+    table, _, _ = rest_source
+    catalog, _ = rest_catalog
+    if from_tag:
+        catalog.create_tag(table.identifier, 'first', 1)
+    catalog.create_branch(table.identifier, 'dev', tag_name='first' if from_tag else None)
+    branch = table.copy({'branch': 'dev', 'read.native.enabled': 'true'})
+    assert branch.catalog_environment.rest_table_response == table.catalog_environment.rest_table_response
+    assert _resolved_rest_table_response(branch) is None
+    plan = native_plan(branch)
+    assert plan.snapshot_id == (1 if from_tag else None)
+    with patch('pypaimon.read.table_read.TableRead._create_split_read',
+               side_effect=AssertionError('native read fell back')):
+        rows = branch.new_read_builder().new_read().to_arrow(plan.splits()).to_pylist()
+    assert rows == ([{'id': 1, 'value': 'old'}] if from_tag else [])
 
 
 def test_resolved_rest_table_keeps_refreshable_file_io(rest_source, rest_catalog):
@@ -196,3 +215,91 @@ def test_rest_blob_view_limit_filters_before_resolving_unselected_view(rest_cata
                side_effect=AssertionError('native view read fell back')):
         assert builder.new_read().to_arrow(plan.splits()).to_pylist() == [
             {'id': 11, 'payload': b'selected'}]
+
+
+def test_reused_rest_environment_sees_new_snapshot(rest_source):
+    from pypaimon.tests.native_plan_resolved_schema_test import _assert_parity, _write
+    table, _, _ = rest_source
+    rows = [{'id': 1, 'value': 'old'}, {'id': 2, 'value': 'new'}]
+    _assert_parity(table, rows, 2)
+    _write(table, [{'id': 3, 'value': 'latest'}])
+    _assert_parity(table.copy({'read.batch-size': '1'}), rows + [{'id': 3, 'value': 'latest'}], 3)
+
+
+@pytest.mark.skipif(not native_method_available('Table', 'from_rest_response'),
+                    reason='REST response binding required')
+def test_repeated_plans_reuse_remote_file_sizes(rest_source, tmp_path):
+    import json
+    from collections import Counter
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from pathlib import Path
+    from threading import Thread
+    from urllib.parse import urlparse
+
+    from pypaimon.catalog.catalog_context import CatalogContext
+    from pypaimon.catalog.catalog_environment import CatalogEnvironment
+    from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
+    from pypaimon.common.options.options import Options
+    from pypaimon.read.native_plan import native_plan
+
+    table, _, _ = rest_source
+    root = Path(urlparse(table.table_path).path)
+    requests = Counter()
+
+    class ObjectStore(BaseHTTPRequestHandler):
+        def do_HEAD(self):
+            self.serve()
+
+        def do_GET(self):
+            self.serve()
+
+        def serve(self):
+            path = urlparse(self.path).path
+            requests[self.command, path] += 1
+            file = root / path[len('/bucket/t/'):]
+            if not file.is_file():
+                self.send_error(404)
+                return
+            data = file.read_bytes()
+            size = len(data)
+            byte_range = self.headers.get('Range')
+            self.send_response(206 if byte_range else 200)
+            if byte_range:
+                start, end = byte_range[6:].split('-')
+                start, end = int(start), int(end) if end else size - 1
+                data = data[start:end + 1]
+                self.send_header('Content-Range', 'bytes %s-%s/%s' % (start, end, size))
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            if self.command == 'GET':
+                self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), ObjectStore)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        options = dict(table.catalog_environment.catalog_loader.context().options.to_map(), **{
+            's3.endpoint': 'http://127.0.0.1:%s' % server.server_port,
+            's3.region': 'us-east-1', 's3.path.style.access': 'true', 's3.anonymous': 'true',
+            'local-cache.enabled': 'true', 'local-cache.dir': str(tmp_path / 'cache')})
+        response = json.loads(table.catalog_environment.rest_table_response)
+        response['path'] = 's3://bucket/t'
+        table.table_path = response['path']
+        table.catalog_environment = CatalogEnvironment(
+            identifier=table.identifier, uuid=response['id'], supports_version_management=True,
+            catalog_loader=RESTCatalogLoader(CatalogContext.create_from_options(Options(options))),
+            rest_table_response=json.dumps(response))
+        first = native_plan(table)
+        initial = requests.copy()
+        assert sum(n for (method, _), n in initial.items() if method == 'HEAD') > 0
+        second = native_plan(table.copy({'read.batch-size': '1'}))
+        assert second.snapshot_id == first.snapshot_id == 2
+        assert len(second.splits()) == len(first.splits()) > 0
+        assert requests == initial
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()

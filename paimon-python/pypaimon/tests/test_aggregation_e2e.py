@@ -232,8 +232,12 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
         table = self._create_pk_table(
             table_name, extra_options=extra_options
         )
-        # Writing is fine — the guard fires when a reader is built.
-        self._write(table, [{'id': 1, 'total': 1, 'max_score': 1, 'label': 'a'}])
+        rows = [{'id': 1, 'total': 1, 'max_score': 1, 'label': 'a'}]
+        if error_type is ValueError:
+            with self.assertRaises(error_type):
+                self._write(table, rows)
+        else:
+            self._write(table, rows)
         rb = table.new_read_builder()
         with self.assertRaises(error_type) as cm:
             rb.new_read()
