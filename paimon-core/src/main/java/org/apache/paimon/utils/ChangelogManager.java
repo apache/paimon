@@ -121,7 +121,19 @@ public class ChangelogManager implements Serializable {
     }
 
     public void commitChangelog(Changelog changelog, long id) throws IOException {
-        fileIO.writeFile(longLivedChangelogPath(id), changelog.toJson(), true);
+        Path changelogPath = longLivedChangelogPath(id);
+        boolean committed = fileIO.tryToWriteAtomic(changelogPath, changelog.toJson());
+        if (!committed) {
+            if (!fileIO.exists(changelogPath)) {
+                throw new IOException(
+                        "Commit changelog " + id + " failed and " + changelogPath + " not found");
+            }
+            // the file exists from a previous attempt; the same id commits the same content
+            if (!changelog.equals(Changelog.fromJson(fileIO.readFileUtf8(changelogPath)))) {
+                throw new IOException(
+                        "Changelog file " + changelogPath + " exists with different content");
+            }
+        }
     }
 
     public void commitLongLivedChangelogLatestHint(long snapshotId) throws IOException {

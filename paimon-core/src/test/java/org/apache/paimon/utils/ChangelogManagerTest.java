@@ -27,9 +27,14 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
+
+import java.io.IOException;
 
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link ChangelogManager}. */
 public class ChangelogManagerTest {
@@ -43,6 +48,34 @@ public class ChangelogManagerTest {
     public void before() {
         fileIO = LocalFileIO.create();
         changelogManager = new ChangelogManager(fileIO, new Path(tempDir.toUri().toString()), null);
+    }
+
+    @Test
+    public void testCommitChangelogWritesAtomically() throws Exception {
+        FileIO spyIO = Mockito.spy(fileIO);
+        ChangelogManager spyManager =
+                new ChangelogManager(spyIO, new Path(tempDir.toUri().toString()), null);
+        Changelog changelog = new Changelog(createSnapshotWithMillis(1, 1000));
+        Path changelogPath = spyManager.longLivedChangelogPath(1);
+
+        spyManager.commitChangelog(changelog, 1);
+
+        // the target must never be opened for a direct overwrite: a crash midway would
+        // leave readers with an empty or partial changelog file
+        Mockito.verify(spyIO, Mockito.never())
+                .writeFile(
+                        ArgumentMatchers.eq(changelogPath),
+                        ArgumentMatchers.anyString(),
+                        ArgumentMatchers.eq(true));
+        // readFileUtf8 strips newlines, so compare through a parse round-trip
+        assertThat(Changelog.fromJson(fileIO.readFileUtf8(changelogPath))).isEqualTo(changelog);
+
+        // retrying the same commit is idempotent, a different content for the same id fails
+        spyManager.commitChangelog(changelog, 1);
+        Changelog other = new Changelog(createSnapshotWithMillis(1, 2000));
+        assertThatThrownBy(() -> spyManager.commitChangelog(other, 1))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("exists with different content");
     }
 
     @Test
