@@ -85,6 +85,7 @@ import javax.annotation.Nullable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -1216,13 +1217,22 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         // exists. Otherwise an Iceberg client fails to parse the metadata and all reads fail.
         Set<Long> snapshotIds =
                 snapshots.stream().map(IcebergSnapshot::snapshotId).collect(Collectors.toSet());
+        // every tag of a snapshot becomes its own ref: dropping sibling tags would make
+        // them invisible in Iceberg and break VERSION AS OF for them
         Map<String, IcebergRef> refs =
                 table.tagManager().tags().entrySet().stream()
                         .filter(entry -> snapshotIds.contains(entry.getKey().id()))
-                        .collect(
-                                Collectors.toMap(
-                                        entry -> entry.getValue().get(0),
-                                        entry -> new IcebergRef(entry.getKey().id())));
+                        .flatMap(
+                                entry ->
+                                        entry.getValue().stream()
+                                                .map(
+                                                        name ->
+                                                                new AbstractMap.SimpleEntry<>(
+                                                                        name,
+                                                                        new IcebergRef(
+                                                                                entry.getKey()
+                                                                                        .id()))))
+                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
         IcebergMetadata metadata =
                 new IcebergMetadata(
