@@ -30,6 +30,9 @@ import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.PositionOutputStreamWrapper;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
@@ -39,6 +42,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -46,6 +50,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.function.Function;
 
@@ -83,7 +88,7 @@ class MergeTreeWriterCloseFailureTest {
                 .isEmpty();
     }
 
-    private MergeTreeWriter createWriter(Path path) {
+    private MergeTreeWriter createWriter(Path path, CommitIncrement increment) {
         RowType keyType = new RowType(singletonList(new DataField(0, "k", new IntType())));
         RowType valueType = new RowType(singletonList(new DataField(0, "v", new IntType())));
 
@@ -122,11 +127,15 @@ class MergeTreeWriterCloseFailureTest {
                         writerFactory,
                         false,
                         INPUT,
-                        null,
+                        increment,
                         null);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(coreOptions.writeBufferSize(), coreOptions.pageSize()));
         return writer;
+    }
+
+    private MergeTreeWriter createWriter(Path path) {
+        return createWriter(path, null);
     }
 
     private KeyValue kv(int k, int v) {
@@ -146,5 +155,33 @@ class MergeTreeWriterCloseFailureTest {
                 }
             };
         }
+    }
+
+    @Test
+    void testRestoreReplayKeepsIndexFiles() throws Exception {
+        IndexFileMeta payload = new IndexFileMeta("hash", "index-1", 0, 0, null, null, null);
+        IndexFileMeta removed = new IndexFileMeta("hash", "index-0", 0, 0, null, null, null);
+        CommitIncrement increment =
+                new CommitIncrement(
+                        new DataIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(payload),
+                                Collections.emptyList()),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(removed)),
+                        null);
+
+        java.nio.file.Path folder = java.nio.file.Files.createTempDirectory(tempDir, "restore");
+        MergeTreeWriter writer = createWriter(new Path(folder.toUri()), increment);
+        CommitIncrement drained = writer.prepareCommit(false);
+
+        assertThat(drained.newFilesIncrement().newIndexFiles()).containsExactly(payload);
+        assertThat(drained.compactIncrement().deletedIndexFiles()).containsExactly(removed);
     }
 }
