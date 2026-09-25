@@ -131,35 +131,48 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
                     .add(file);
         }
 
-        for (Map.Entry<Long, List<DataFileMeta>> entry : sequenceGroups.entrySet()) {
-            // within each group, sort by first row id
-            List<DataFileMeta> groupFiles = entry.getValue();
-            groupFiles.sort(comparingLong(DataFileMeta::nonNullFirstRowId));
+        try {
+            for (Map.Entry<Long, List<DataFileMeta>> entry : sequenceGroups.entrySet()) {
+                // within each group, sort by first row id
+                List<DataFileMeta> groupFiles = entry.getValue();
+                groupFiles.sort(comparingLong(DataFileMeta::nonNullFirstRowId));
 
-            DataFileMeta current, next;
-            for (int i = 0; i < groupFiles.size() - 1; i++) {
-                current = groupFiles.get(i);
-                next = groupFiles.get(i + 1);
+                DataFileMeta current, next;
+                for (int i = 0; i < groupFiles.size() - 1; i++) {
+                    current = groupFiles.get(i);
+                    next = groupFiles.get(i + 1);
 
-                Preconditions.checkState(
-                        !current.nonNullRowIdRange().hasIntersection(next.nonNullRowIdRange()),
-                        "Blob files within a same max_seq_num should not overlap. Find: %s, %s",
-                        current,
-                        next);
+                    Preconditions.checkState(
+                            !current.nonNullRowIdRange().hasIntersection(next.nonNullRowIdRange()),
+                            "Blob files within a same max_seq_num should not overlap. Find: %s, %s",
+                            current,
+                            next);
+                }
+
+                groupReaders.add(
+                        new ForceSingleBatchReader(
+                                new BlobSequenceGroupRecordReader(
+                                        entry.getKey(),
+                                        groupFiles,
+                                        readerFactory,
+                                        readerWrapper,
+                                        rowRanges,
+                                        readRowType,
+                                        blobIndex,
+                                        firstRowId,
+                                        lastRowId)));
             }
-
-            groupReaders.add(
-                    new ForceSingleBatchReader(
-                            new BlobSequenceGroupRecordReader(
-                                    entry.getKey(),
-                                    groupFiles,
-                                    readerFactory,
-                                    readerWrapper,
-                                    rowRanges,
-                                    readRowType,
-                                    blobIndex,
-                                    firstRowId,
-                                    lastRowId)));
+        } catch (Throwable e) {
+            // single-file groups open their reader eagerly, so a later group failing to
+            // build would leak the streams of the groups already created
+            for (RecordReader<InternalRow> groupReader : groupReaders) {
+                try {
+                    groupReader.close();
+                } catch (Throwable suppressed) {
+                    e.addSuppressed(suppressed);
+                }
+            }
+            throw e;
         }
     }
 

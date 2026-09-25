@@ -428,43 +428,60 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         }
 
         // Build the per-bunch readers from the planned partial read row types.
-        for (int i = 0; i < numBunches; i++) {
-            List<DataField> readFields = plan.bunchReadFields.get(i);
-            if (readFields.isEmpty()) {
-                fileRecordReaders[i] = null;
-                continue;
+        try {
+            for (int i = 0; i < numBunches; i++) {
+                List<DataField> readFields = plan.bunchReadFields.get(i);
+                if (readFields.isEmpty()) {
+                    fileRecordReaders[i] = null;
+                    continue;
+                }
+                FieldBunch bunch = fieldsFiles.get(i);
+                DataFileMeta firstFile = bunch.files().get(0);
+                FileReadTarget readTarget = readTarget(firstFile, dataFilePathFactory, rowRanges);
+                String formatIdentifier = readTarget.formatIdentifier;
+                long schemaId = firstFile.schemaId();
+                TableSchema dataSchema = bunchDataSchemas[i];
+                RowType partialReadRowType = new RowType(readFields);
+                List<String> cacheKey =
+                        nestedFieldEnabled
+                                ? readerCacheKey(readFields, dataSchema.fields(), true)
+                                : readFields.stream()
+                                        .map(DataField::name)
+                                        .collect(Collectors.toList());
+                FormatReaderMapping formatReaderMapping =
+                        formatReaderMappings.computeIfAbsent(
+                                new FormatKey(schemaId, formatIdentifier, cacheKey),
+                                key ->
+                                        formatBuilder.build(
+                                                formatIdentifier,
+                                                schema,
+                                                dataSchema,
+                                                readFields,
+                                                false));
+                fileRecordReaders[i] =
+                        new ForceSingleBatchReader(
+                                createFieldBunchReader(
+                                        partition,
+                                        bunch,
+                                        dataFilePathFactory,
+                                        formatReaderMapping,
+                                        rowRanges,
+                                        partialReadRowType,
+                                        deletionVector));
             }
-            FieldBunch bunch = fieldsFiles.get(i);
-            DataFileMeta firstFile = bunch.files().get(0);
-            FileReadTarget readTarget = readTarget(firstFile, dataFilePathFactory, rowRanges);
-            String formatIdentifier = readTarget.formatIdentifier;
-            long schemaId = firstFile.schemaId();
-            TableSchema dataSchema = bunchDataSchemas[i];
-            RowType partialReadRowType = new RowType(readFields);
-            List<String> cacheKey =
-                    nestedFieldEnabled
-                            ? readerCacheKey(readFields, dataSchema.fields(), true)
-                            : readFields.stream().map(DataField::name).collect(Collectors.toList());
-            FormatReaderMapping formatReaderMapping =
-                    formatReaderMappings.computeIfAbsent(
-                            new FormatKey(schemaId, formatIdentifier, cacheKey),
-                            key ->
-                                    formatBuilder.build(
-                                            formatIdentifier,
-                                            schema,
-                                            dataSchema,
-                                            readFields,
-                                            false));
-            fileRecordReaders[i] =
-                    new ForceSingleBatchReader(
-                            createFieldBunchReader(
-                                    partition,
-                                    bunch,
-                                    dataFilePathFactory,
-                                    formatReaderMapping,
-                                    rowRanges,
-                                    partialReadRowType,
-                                    deletionVector));
+        } catch (Throwable e) {
+            // readers already built hold open file streams; without closing them here a
+            // failure in a later bunch leaks every earlier bunch's streams
+            for (RecordReader<InternalRow> reader : fileRecordReaders) {
+                if (reader != null) {
+                    try {
+                        reader.close();
+                    } catch (Throwable suppressed) {
+                        e.addSuppressed(suppressed);
+                    }
+                }
+            }
+            throw e;
         }
 
         return nestedFieldEnabled
