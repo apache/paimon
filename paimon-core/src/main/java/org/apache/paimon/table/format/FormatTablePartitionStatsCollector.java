@@ -302,7 +302,8 @@ public class FormatTablePartitionStatsCollector {
         }
         return new Path(
                 table.location(),
-                PartitionPathUtils.generatePartitionPathUtil(ordered, onlyValueInPath));
+                PartitionPathUtils.generatePartitionPathUtil(
+                        ordered, onlyValueInPath, table.defaultPartName()));
     }
 
     private static RuntimeException asRuntime(Throwable cause) {

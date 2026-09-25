@@ -49,6 +49,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.utils.TypeUtils.castFromString;
 
 /** Utils for file system. */
@@ -97,6 +98,17 @@ public class PartitionPathUtils {
 
     public static String generatePartitionPathUtil(
             LinkedHashMap<String, String> partitionSpec, boolean onlyValue) {
+        return generatePartitionPathUtil(partitionSpec, onlyValue, null);
+    }
+
+    /**
+     * @param defaultPartName the table's configured default partition name, exempt from the
+     *     value-only hidden-name rejection; {@code null} falls back to the well-known default
+     */
+    public static String generatePartitionPathUtil(
+            LinkedHashMap<String, String> partitionSpec,
+            boolean onlyValue,
+            @Nullable String defaultPartName) {
         if (partitionSpec.isEmpty()) {
             return "";
         }
@@ -111,7 +123,7 @@ public class PartitionPathUtils {
                 suffixBuf.append('=');
             }
             String value = e.getValue();
-            validatePartitionValueForPath(value, onlyValue);
+            validatePartitionValueForPath(value, onlyValue, defaultPartName);
             suffixBuf.append(escapePathName(value));
             i++;
         }
@@ -134,13 +146,23 @@ public class PartitionPathUtils {
     /**
      * Validate that a partition value is safe for the configured path layout. In a key-value
      * layout, values such as {@code "."} are part of a component such as {@code "pt=."} and are
-     * safe. In a value-only layout, {@code "."} and {@code ".."} are complete path components and
-     * would resolve to a different directory.
+     * safe. In a value-only layout the value is the whole component: {@code "."} and {@code ".."}
+     * would resolve to a different directory, and any other leading {@code '_'} or {@code '.'}
+     * marks the directory hidden, so the read path would skip the partition entirely. Only the
+     * table's configured default partition name is exempt, because scans un-hide exactly that name;
+     * a {@code null} defaultPartName falls back to the well-known default.
      */
     public static void validatePartitionValueForPath(String value, boolean onlyValueInPath) {
+        validatePartitionValueForPath(value, onlyValueInPath, null);
+    }
+
+    public static void validatePartitionValueForPath(
+            String value, boolean onlyValueInPath, @Nullable String defaultPartName) {
+        String exempt =
+                defaultPartName != null ? defaultPartName : PARTITION_DEFAULT_NAME.defaultValue();
         if (value == null
                 || value.isEmpty()
-                || (onlyValueInPath && (".".equals(value) || "..".equals(value)))) {
+                || (onlyValueInPath && isHiddenName(value) && !exempt.equals(value))) {
             throw new IllegalArgumentException(
                     String.format(
                             "Partition value '%s' cannot be used as a partition path component.",
@@ -156,8 +178,15 @@ public class PartitionPathUtils {
     /** Validate every value of a partition spec for the configured path layout. */
     public static void validatePartitionSpecForPath(
             Map<String, String> partitionSpec, boolean onlyValueInPath) {
+        validatePartitionSpecForPath(partitionSpec, onlyValueInPath, null);
+    }
+
+    public static void validatePartitionSpecForPath(
+            Map<String, String> partitionSpec,
+            boolean onlyValueInPath,
+            @Nullable String defaultPartName) {
         for (String value : partitionSpec.values()) {
-            validatePartitionValueForPath(value, onlyValueInPath);
+            validatePartitionValueForPath(value, onlyValueInPath, defaultPartName);
         }
     }
 

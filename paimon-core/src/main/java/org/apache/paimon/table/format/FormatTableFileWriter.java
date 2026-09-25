@@ -138,7 +138,9 @@ public class FormatTableFileWriter {
                     new Path(
                             parent,
                             generatePartitionPathUtil(
-                                    partValues, options.formatTablePartitionOnlyValueInPath()));
+                                    partValues,
+                                    options.formatTablePartitionOnlyValueInPath(),
+                                    options.partitionDefaultName()));
         }
         return new FormatTableRecordWriter(
                 fileIO,

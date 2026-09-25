@@ -41,6 +41,24 @@ public final class FormatTablePartitionRegistryValidator {
             String tableName,
             boolean onlyValueInPath,
             @Nullable CatalogContext catalogContext) {
+        validatePartitionLocations(
+                partitions,
+                partitionKeys,
+                tablePath,
+                tableName,
+                onlyValueInPath,
+                catalogContext,
+                null);
+    }
+
+    public static void validatePartitionLocations(
+            List<Partition> partitions,
+            List<String> partitionKeys,
+            Path tablePath,
+            String tableName,
+            boolean onlyValueInPath,
+            @Nullable CatalogContext catalogContext,
+            @Nullable String defaultPartName) {
         validate(
                 partitions,
                 partitionKeys,
@@ -48,6 +66,7 @@ public final class FormatTablePartitionRegistryValidator {
                 tableName,
                 onlyValueInPath,
                 catalogContext,
+                defaultPartName,
                 true);
     }
 
@@ -64,6 +83,24 @@ public final class FormatTablePartitionRegistryValidator {
             String tableName,
             boolean onlyValueInPath,
             @Nullable CatalogContext catalogContext) {
+        validateEachPartitionLocation(
+                partitions,
+                partitionKeys,
+                tablePath,
+                tableName,
+                onlyValueInPath,
+                catalogContext,
+                null);
+    }
+
+    public static void validateEachPartitionLocation(
+            List<Partition> partitions,
+            List<String> partitionKeys,
+            Path tablePath,
+            String tableName,
+            boolean onlyValueInPath,
+            @Nullable CatalogContext catalogContext,
+            @Nullable String defaultPartName) {
         validate(
                 partitions,
                 partitionKeys,
@@ -71,6 +108,7 @@ public final class FormatTablePartitionRegistryValidator {
                 tableName,
                 onlyValueInPath,
                 catalogContext,
+                defaultPartName,
                 false);
     }
 
@@ -81,10 +119,11 @@ public final class FormatTablePartitionRegistryValidator {
             String tableName,
             boolean onlyValueInPath,
             @Nullable CatalogContext catalogContext,
+            @Nullable String defaultPartName,
             boolean rejectPartitionsClaimingEachOther) {
         FormatTablePartitionPathResolver resolver =
                 new FormatTablePartitionPathResolver(
-                        tablePath, tableName, onlyValueInPath, catalogContext);
+                        tablePath, tableName, onlyValueInPath, catalogContext, defaultPartName);
         for (Partition partition : partitions) {
             Map<String, String> spec = partition.spec();
             if (spec == null

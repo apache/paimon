@@ -32,6 +32,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 
+import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.utils.PartitionPathUtils.mightMatch;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -56,6 +57,60 @@ class PartitionPathUtilsTest {
         assertThatThrownBy(() -> PartitionPathUtils.generatePartitionPathUtil(partitionSpec, true))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(rawValue);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"_x", ".x"})
+    void testValueOnlyHiddenPrefixIsRejected(String rawValue) {
+        // a leading '_' or '.' marks the directory hidden and the read path skips it, so
+        // writing such a value would silently make the partition invisible
+        LinkedHashMap<String, String> partitionSpec = new LinkedHashMap<>();
+        partitionSpec.put("pt", rawValue);
+
+        assertThatThrownBy(() -> PartitionPathUtils.generatePartitionPathUtil(partitionSpec, true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(rawValue);
+    }
+
+    @Test
+    void testValueOnlyDefaultPartitionNameIsAllowed() {
+        // the scan un-hides exactly the default partition name, so it must stay writable
+        LinkedHashMap<String, String> partitionSpec = new LinkedHashMap<>();
+        partitionSpec.put("pt", PARTITION_DEFAULT_NAME.defaultValue());
+
+        assertThat(PartitionPathUtils.generatePartitionPathUtil(partitionSpec, true))
+                .isEqualTo(PARTITION_DEFAULT_NAME.defaultValue() + Path.SEPARATOR);
+    }
+
+    @Test
+    void testValueOnlyConfiguredDefaultPartitionNameIsAllowed() {
+        // a table may configure partition.default-name, and the scan un-hides exactly that
+        // configured name, so writing it must not be rejected either
+        LinkedHashMap<String, String> partitionSpec = new LinkedHashMap<>();
+        partitionSpec.put("pt", "__MY_NULL__");
+
+        assertThat(PartitionPathUtils.generatePartitionPathUtil(partitionSpec, true, "__MY_NULL__"))
+                .isEqualTo("__MY_NULL__" + Path.SEPARATOR);
+        // other hidden-leading values stay rejected even with a custom default configured
+        partitionSpec.put("pt", "_x");
+        assertThatThrownBy(
+                        () ->
+                                PartitionPathUtils.generatePartitionPathUtil(
+                                        partitionSpec, true, "__MY_NULL__"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("_x");
+    }
+
+    @Test
+    void testKeyedHiddenPrefixValueStaysVisible() {
+        LinkedHashMap<String, String> partitionSpec = new LinkedHashMap<>();
+        partitionSpec.put("pt", "_x");
+
+        String partitionPath = PartitionPathUtils.generatePartitionPathUtil(partitionSpec, false);
+
+        assertThat(partitionPath).isEqualTo("pt=_x" + Path.SEPARATOR);
+        // the whole component "pt=_x" does not start with '_' or '.', so it stays visible
+        assertThat(PartitionPathUtils.isHiddenName("pt=_x")).isFalse();
     }
 
     @ParameterizedTest

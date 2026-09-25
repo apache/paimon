@@ -534,7 +534,8 @@ public class FormatTableCommit implements BatchTableCommit {
                 new Path(location),
                 tableIdentifier.getFullName(),
                 formatTablePartitionOnlyValueInPath,
-                catalogContext);
+                catalogContext,
+                defaultPartName);
         return partitions;
     }
 
@@ -674,7 +675,7 @@ public class FormatTableCommit implements BatchTableCommit {
         return partitionSpec;
     }
 
-    private static Path buildPartitionPath(
+    private Path buildPartitionPath(
             String location,
             Map<String, String> partitionSpec,
             boolean formatTablePartitionOnlyValueInPath,
@@ -700,7 +701,7 @@ public class FormatTableCommit implements BatchTableCommit {
         return new Path(
                 location,
                 PartitionPathUtils.generatePartitionPathUtil(
-                        orderedSpec, formatTablePartitionOnlyValueInPath));
+                        orderedSpec, formatTablePartitionOnlyValueInPath, defaultPartName));
     }
 
     @Override

@@ -279,7 +279,11 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
         Path tablePath = new Path(table.location());
         FormatTablePartitionPathResolver pathResolver =
                 new FormatTablePartitionPathResolver(
-                        tablePath, table.fullName(), onlyValueInPath, table.catalogContext());
+                        tablePath,
+                        table.fullName(),
+                        onlyValueInPath,
+                        table.catalogContext(),
+                        table.defaultPartName());
         for (Partition partition : partitions) {
             LinkedHashMap<String, String> spec = normalizeSpec(partition.spec(), onlyValueInPath);
             Path partitionPath =
@@ -306,7 +310,7 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
                                 new Path(
                                         tablePath,
                                         PartitionPathUtils.generatePartitionPathUtil(
-                                                spec, onlyValueInPath))));
+                                                spec, onlyValueInPath, table.defaultPartName()))));
             }
         }
         return result;
@@ -325,7 +329,8 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
             String value = spec.get(partitionKey);
             // In a value-only layout, "." and ".." would resolve outside the table.
             try {
-                PartitionPathUtils.validatePartitionValueForPath(value, onlyValueInPath);
+                PartitionPathUtils.validatePartitionValueForPath(
+                        value, onlyValueInPath, table.defaultPartName());
             } catch (IllegalArgumentException e) {
                 throw corruptPartitionSpec(spec);
             }

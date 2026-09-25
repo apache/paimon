@@ -320,7 +320,8 @@ public class FormatTableScan implements InnerTableScan {
 
             String path =
                     onlyValueInPath
-                            ? PartitionPathUtils.generatePartitionPathUtil(partSpec, true)
+                            ? PartitionPathUtils.generatePartitionPathUtil(
+                                    partSpec, true, defaultPartName)
                             : PartitionPathUtils.generatePartitionPath(partSpec);
             result.add(Pair.of(partSpec, new Path(tablePath, path)));
         }

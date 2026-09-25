@@ -441,6 +441,8 @@ public class HiveCatalog extends AbstractCatalog {
         int currentTime = (int) (System.currentTimeMillis() / 1000);
         StorageDescriptor sd = hmsTable.getSd();
         String dataFilePath = getDataFilePath(tableIdentifier, hmsTable);
+        String defaultPartName =
+                new CoreOptions(loadTableSchema(tableIdentifier).options()).partitionDefaultName();
         List<Partition> hivePartitions = new ArrayList<>();
         for (Map<String, String> partitionSpec : partitions) {
             Partition hivePartition = new Partition();
@@ -452,7 +454,8 @@ public class HiveCatalog extends AbstractCatalog {
             hivePartition.setCreateTime(currentTime);
             hivePartition.setLastAccessTime(currentTime);
             String partitionLocation =
-                    getPartitionLocation(dataFilePath, partitionSpec, partitionOnlyValueInPath);
+                    getPartitionLocation(
+                            dataFilePath, partitionSpec, partitionOnlyValueInPath, defaultPartName);
             locationHelper.specifyPartitionLocation(hivePartition, partitionLocation);
             hivePartitions.add(hivePartition);
         }
@@ -507,11 +510,14 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private String getPartitionLocation(
-            String dataFilePath, Map<String, String> partitionSpec, boolean onlyValue) {
+            String dataFilePath,
+            Map<String, String> partitionSpec,
+            boolean onlyValue,
+            String defaultPartName) {
         return dataFilePath
                 + Path.SEPARATOR
                 + PartitionPathUtils.generatePartitionPathUtil(
-                        new LinkedHashMap<>(partitionSpec), onlyValue);
+                        new LinkedHashMap<>(partitionSpec), onlyValue, defaultPartName);
     }
 
     @Override

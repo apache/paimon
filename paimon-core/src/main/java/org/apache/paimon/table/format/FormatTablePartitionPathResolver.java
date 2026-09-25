@@ -48,11 +48,12 @@ public final class FormatTablePartitionPathResolver {
     private final String tableName;
     private final boolean onlyValueInPath;
     @Nullable private final CatalogContext catalogContext;
+    @Nullable private final String defaultPartName;
     private final Map<Map<String, String>, String> pathsBySpec = new LinkedHashMap<>();
     private final Map<String, OwnershipNode> ownershipRoots = new HashMap<>();
 
     FormatTablePartitionPathResolver(Path tablePath, String tableName, boolean onlyValueInPath) {
-        this(tablePath, tableName, onlyValueInPath, null);
+        this(tablePath, tableName, onlyValueInPath, null, null);
     }
 
     FormatTablePartitionPathResolver(
@@ -60,10 +61,20 @@ public final class FormatTablePartitionPathResolver {
             String tableName,
             boolean onlyValueInPath,
             @Nullable CatalogContext catalogContext) {
+        this(tablePath, tableName, onlyValueInPath, catalogContext, null);
+    }
+
+    FormatTablePartitionPathResolver(
+            Path tablePath,
+            String tableName,
+            boolean onlyValueInPath,
+            @Nullable CatalogContext catalogContext,
+            @Nullable String defaultPartName) {
         this.tablePath = tablePath;
         this.tableName = tableName;
         this.onlyValueInPath = onlyValueInPath;
         this.catalogContext = catalogContext;
+        this.defaultPartName = defaultPartName;
     }
 
     @Nullable
@@ -81,12 +92,17 @@ public final class FormatTablePartitionPathResolver {
 
     Path resolve(LinkedHashMap<String, String> spec, @Nullable String customLocation) {
         if (customLocation == null) {
-            return defaultPartitionPath(tablePath, spec, onlyValueInPath);
+            return defaultPartitionPath(tablePath, spec, onlyValueInPath, defaultPartName);
         }
 
         try {
             return resolveCustomLocation(
-                    tablePath, spec, onlyValueInPath, customLocation, catalogContext);
+                    tablePath,
+                    spec,
+                    onlyValueInPath,
+                    customLocation,
+                    catalogContext,
+                    defaultPartName);
         } catch (IllegalArgumentException e) {
             throw invalidLocation(spec, e);
         }
@@ -95,8 +111,18 @@ public final class FormatTablePartitionPathResolver {
     /** Where a partition lives when it carries no location of its own. */
     public static Path defaultPartitionPath(
             Path tablePath, LinkedHashMap<String, String> spec, boolean onlyValueInPath) {
+        return defaultPartitionPath(tablePath, spec, onlyValueInPath, null);
+    }
+
+    public static Path defaultPartitionPath(
+            Path tablePath,
+            LinkedHashMap<String, String> spec,
+            boolean onlyValueInPath,
+            @Nullable String defaultPartName) {
         return new Path(
-                tablePath, PartitionPathUtils.generatePartitionPathUtil(spec, onlyValueInPath));
+                tablePath,
+                PartitionPathUtils.generatePartitionPathUtil(
+                        spec, onlyValueInPath, defaultPartName));
     }
 
     /**
@@ -111,9 +137,20 @@ public final class FormatTablePartitionPathResolver {
             boolean onlyValueInPath,
             String requestedLocation,
             @Nullable CatalogContext catalogContext) {
+        return isDefaultPartitionPath(
+                tablePath, spec, onlyValueInPath, requestedLocation, catalogContext, null);
+    }
+
+    public static boolean isDefaultPartitionPath(
+            Path tablePath,
+            LinkedHashMap<String, String> spec,
+            boolean onlyValueInPath,
+            String requestedLocation,
+            @Nullable CatalogContext catalogContext,
+            @Nullable String defaultPartName) {
         Path requested;
         try {
-            PartitionPathUtils.validatePartitionSpecForPath(spec, onlyValueInPath);
+            PartitionPathUtils.validatePartitionSpecForPath(spec, onlyValueInPath, defaultPartName);
             requested = canonicalizeLocation(requestedLocation, catalogContext);
         } catch (IllegalArgumentException e) {
             return false;
@@ -121,7 +158,8 @@ public final class FormatTablePartitionPathResolver {
         return ResolvedPath.of(requested, catalogContext)
                 .equals(
                         ResolvedPath.of(
-                                defaultPartitionPath(tablePath, spec, onlyValueInPath),
+                                defaultPartitionPath(
+                                        tablePath, spec, onlyValueInPath, defaultPartName),
                                 catalogContext));
     }
 
@@ -132,7 +170,18 @@ public final class FormatTablePartitionPathResolver {
             boolean onlyValueInPath,
             String customLocation,
             @Nullable CatalogContext catalogContext) {
-        PartitionPathUtils.validatePartitionSpecForPath(spec, onlyValueInPath);
+        return resolveCustomLocation(
+                tablePath, spec, onlyValueInPath, customLocation, catalogContext, null);
+    }
+
+    public static Path resolveCustomLocation(
+            Path tablePath,
+            LinkedHashMap<String, String> spec,
+            boolean onlyValueInPath,
+            String customLocation,
+            @Nullable CatalogContext catalogContext,
+            @Nullable String defaultPartName) {
+        PartitionPathUtils.validatePartitionSpecForPath(spec, onlyValueInPath, defaultPartName);
         Path customPath = canonicalizeCustomLocation(customLocation, catalogContext);
         if (usesViewFileSystem(tablePath) || usesViewFileSystem(customPath)) {
             throw new IllegalArgumentException(

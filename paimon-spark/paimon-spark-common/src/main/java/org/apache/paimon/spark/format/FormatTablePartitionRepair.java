@@ -116,7 +116,8 @@ public class FormatTablePartitionRepair {
                         formatTable.defaultPartName());
         List<Map<String, String>> specs = new ArrayList<>(found.size());
         for (Pair<LinkedHashMap<String, String>, Path> pair : found) {
-            PartitionPathUtils.validatePartitionSpecForPath(pair.getKey(), onlyValueInPath);
+            PartitionPathUtils.validatePartitionSpecForPath(
+                    pair.getKey(), onlyValueInPath, formatTable.defaultPartName());
             specs.add(pair.getKey());
         }
         return specs;
