@@ -163,7 +163,7 @@ public class FileSystemWriteRestoreTest {
         // and ask the WriteRestore for an empty bucket. It must return
         // totalBuckets=4 (the partition's actual bucket count), NOT 32 (the new
         // table default).
-        FileStoreTable table = createPartitionedPkTable(4);
+        FileStoreTable table = createPartitionedPkTable(4, false);
 
         // Write enough rows to populate at least one bucket within partition 1.
         commitOneRow(table, /* pt */ 1, /* k */ 1);
@@ -175,7 +175,7 @@ public class FileSystemWriteRestoreTest {
         // Simulate a rescale by raising the table-level default bucket count
         // (without rewriting existing files). Existing manifest entries still
         // carry totalBuckets=4.
-        table = withBucket(table, 32);
+        table = withBucket(table, 32, true);
 
         WriteRestore restore = newWriteRestore(table);
 
@@ -197,8 +197,10 @@ public class FileSystemWriteRestoreTest {
         // Return null so the writer falls back to its expected table-level bucket count. In
         // particular, this preserves postpone-bucket writes whose table default is -2 while the
         // staged writer assigns real fixed buckets.
-        FileStoreTable table = createPartitionedPkTable(8);
+        FileStoreTable table = createPartitionedPkTable(8, false);
         commitOneRow(table, 1, 100); // ensures the snapshot exists
+
+        table = withBucket(table, 8, true);
 
         WriteRestore restore = newWriteRestore(table);
         RestoreFiles restored =
@@ -249,7 +251,7 @@ public class FileSystemWriteRestoreTest {
         // Sanity test: when a bucket has files, totalBuckets must come from the
         // manifest entries (not from the fallback path). This guards against
         // accidentally always overriding totalBuckets via PartitionBucketMapping.
-        FileStoreTable table = createPartitionedPkTable(2);
+        FileStoreTable table = createPartitionedPkTable(2, false);
         commitOneRow(table, 1, 1);
         commitOneRow(table, 1, 2);
 
@@ -258,7 +260,7 @@ public class FileSystemWriteRestoreTest {
 
         // Change the table default to ensure the returned totalBuckets is from the
         // manifest entry, not the schema.
-        table = withBucket(table, 32);
+        table = withBucket(table, 32, true);
 
         WriteRestore restore = newWriteRestore(table);
         RestoreFiles restored =
