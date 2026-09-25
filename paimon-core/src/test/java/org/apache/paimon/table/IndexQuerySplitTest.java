@@ -630,6 +630,8 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
                         invocation -> {
                             SnapshotReader.Plan plan =
                                     (SnapshotReader.Plan) invocation.callRealMethod();
+                            assertThat(plan.snapshot()).isNotNull();
+                            assertThat(plan.snapshot().id()).isEqualTo(snapshotId);
                             taggedTable.replaceTag("index-query-read", latestSnapshotId, null);
                             return plan;
                         })

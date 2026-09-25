@@ -137,12 +137,6 @@ public interface SnapshotReader {
     /** Whether the pushed filter still contains non-partition predicates. */
     boolean hasNonPartitionFilter();
 
-    /** Snapshot used by the most recent full read plan, if available. */
-    @Nullable
-    default Snapshot plannedSnapshot() {
-        return null;
-    }
-
     /** Get splits plan from snapshot. */
     Plan read();
 
@@ -172,6 +166,10 @@ public interface SnapshotReader {
          */
         @Nullable
         Long snapshotId();
+
+        /** Snapshot used to plan the splits, if available. */
+        @Nullable
+        Snapshot snapshot();
 
         /** Result splits. */
         List<Split> splits();

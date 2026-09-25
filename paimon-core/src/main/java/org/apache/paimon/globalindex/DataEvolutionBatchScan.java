@@ -43,6 +43,7 @@ import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
@@ -356,9 +357,12 @@ public class DataEvolutionBatchScan implements DataTableScan {
         }
         // Use the exact snapshot that produced the data splits, including explicit tag reads.
         long snapshotId = dataSplit(splits.get(0)).snapshotId();
+        Preconditions.checkState(
+                dataPlan instanceof SnapshotReader.Plan,
+                "No snapshot plan found for index query planning");
         Snapshot snapshot =
                 Preconditions.checkNotNull(
-                        batchScan.snapshotReader().plannedSnapshot(),
+                        ((SnapshotReader.Plan) dataPlan).snapshot(),
                         "No snapshot found for index query planning");
         Preconditions.checkState(
                 snapshot.id() == snapshotId,

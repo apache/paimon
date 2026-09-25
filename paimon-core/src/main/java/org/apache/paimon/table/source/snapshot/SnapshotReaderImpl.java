@@ -102,7 +102,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     private ScanMode scanMode = ScanMode.ALL;
     private boolean hasNonPartitionFilter;
-    @Nullable private Snapshot plannedSnapshot;
     private RecordComparator lazyPartitionComparator;
     private CacheMetrics dvMetaCacheMetrics;
 
@@ -365,12 +364,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
-    @Nullable
-    public Snapshot plannedSnapshot() {
-        return plannedSnapshot;
-    }
-
-    @Override
     public SnapshotReader dropStats() {
         scan.dropStats();
         return this;
@@ -400,7 +393,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
     public Plan read() {
         FileStoreScan.Plan plan = scan.plan();
         @Nullable Snapshot snapshot = plan.snapshot();
-        plannedSnapshot = snapshot;
 
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> grouped =
                 groupByPartFiles(plan.files(FileKind.ADD));
@@ -414,7 +406,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
         List<DataSplit> splits =
                 generateSplits(snapshot, scanMode != ScanMode.ALL, splitGenerator, grouped);
         return new PlanImpl(
-                plan.watermark(), snapshot == null ? null : snapshot.id(), (List) splits);
+                plan.watermark(), snapshot == null ? null : snapshot.id(), snapshot, (List) splits);
     }
 
     private List<DataSplit> generateSplits(
@@ -605,7 +597,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
         }
 
         return new PlanImpl(
-                afterWatermark, afterSnapshot == null ? null : afterSnapshot.id(), splits);
+                afterWatermark,
+                afterSnapshot == null ? null : afterSnapshot.id(),
+                afterSnapshot,
+                splits);
     }
 
     @Override
