@@ -30,6 +30,7 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
@@ -57,6 +58,7 @@ import org.mockito.MockedStatic;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -84,6 +86,53 @@ import static org.mockito.Mockito.when;
 class GlobalIndexQueryTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "bitmap"})
+    void testPrunesSortedFilesBeforeSplitSerialization(String indexType) throws Exception {
+        RowType rowType = RowType.of(DataTypes.INT());
+        KeySerializer serializer = KeySerializer.create(DataTypes.INT());
+        List<IndexFileMeta> files = new ArrayList<>();
+        for (int firstKey : new int[] {0, 20, 40}) {
+            byte[] first = serializer.serialize(firstKey);
+            byte[] last = serializer.serialize(firstKey + 9);
+            files.add(
+                    new IndexFileMeta(
+                            indexType,
+                            "file-" + firstKey,
+                            100,
+                            100,
+                            new GlobalIndexMeta(
+                                    0,
+                                    99,
+                                    0,
+                                    null,
+                                    new SortedIndexFileMeta(first, last, false).serialize()),
+                            null));
+        }
+        IndexPathFactory paths = mock(IndexPathFactory.class);
+        when(paths.toPath(any(IndexFileMeta.class)))
+                .thenAnswer(
+                        invocation ->
+                                new Path(
+                                        "index/"
+                                                + invocation
+                                                        .<IndexFileMeta>getArgument(0)
+                                                        .fileName()));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        for (Predicate predicate :
+                Arrays.asList(
+                        builder.equal(0, 25),
+                        PredicateBuilder.and(
+                                builder.greaterThan(0, 15), builder.lessThan(0, 35)))) {
+            GlobalIndexQuery query = GlobalIndexQuery.create(rowType, predicate, files, paths);
+            assertThat(query).isNotNull();
+            DataOutputSerializer out = new DataOutputSerializer(256);
+            query.forRanges(Collections.singletonList(new Range(0, 99))).serialize(out);
+            String serialized = new String(out.getCopyOfBuffer(), StandardCharsets.ISO_8859_1);
+            assertThat(serialized).contains("file-20").doesNotContain("file-0", "file-40");
+        }
+    }
 
     @ParameterizedTest
     @CsvSource({"false,false", "true,true"})

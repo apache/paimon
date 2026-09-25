@@ -134,7 +134,7 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
                 .isNotEmpty();
         ReadBuilder read = table.newReadBuilder().withFilter(predicate);
         List<Split> splits = read.newScan().plan().splits();
-        assertThat(splits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
+        assertThat(splits).isEmpty();
         assertThat(read(read, splits)).isEmpty();
     }
 

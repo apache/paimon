@@ -125,11 +125,7 @@ class GlobalIndexQuery {
             if (!field.isPresent()) {
                 return null;
             }
-            List<IndexGroup> fieldGroups = groups.get(rowType.getField(field.get().name()).id());
-            if (fieldGroups == null) {
-                return null;
-            }
-            return new GlobalIndexQuery(leaf, false, Collections.emptyList(), fieldGroups);
+            return createForIndexedField(leaf, field.get(), rowType, groups);
         }
         CompoundPredicate compound = (CompoundPredicate) predicate;
         boolean union = compound.function() instanceof Or;
@@ -153,15 +149,12 @@ class GlobalIndexQuery {
                     }
                     LeafPredicate lower = GlobalIndexEvaluator.isLowerBound(first) ? first : second;
                     LeafPredicate upper = GlobalIndexEvaluator.isLowerBound(first) ? second : first;
-                    GlobalIndexQuery lowerQuery = createForPredicate(lower, rowType, groups);
-                    if (lowerQuery != null) {
-                        query =
-                                new GlobalIndexQuery(
-                                        new CompoundPredicate(
-                                                And.INSTANCE, Arrays.asList(lower, upper)),
-                                        false,
-                                        Collections.emptyList(),
-                                        lowerQuery.groups);
+                    Predicate rangeQuery =
+                            new CompoundPredicate(And.INSTANCE, Arrays.asList(lower, upper));
+                    query =
+                            createForIndexedField(
+                                    rangeQuery, lower.fieldRefOptional().get(), rowType, groups);
+                    if (query != null) {
                         predicates.remove(j);
                         break;
                     }
@@ -181,6 +174,36 @@ class GlobalIndexQuery {
         return children.isEmpty()
                 ? null
                 : new GlobalIndexQuery(null, union, children, Collections.emptyList());
+    }
+
+    @Nullable
+    private static GlobalIndexQuery createForIndexedField(
+            Predicate predicate,
+            FieldRef field,
+            RowType rowType,
+            Map<Integer, List<IndexGroup>> groups) {
+        List<IndexGroup> fieldGroups = groups.get(rowType.getField(field.name()).id());
+        if (fieldGroups == null) {
+            return null;
+        }
+        List<IndexGroup> selectedGroups = new ArrayList<>();
+        for (IndexGroup group : fieldGroups) {
+            List<GlobalIndexIOMeta> selectedFiles =
+                    GlobalIndexerFactoryUtils.selectFiles(
+                            group.type, group.field, group.extraFields, predicate, group.files);
+            if (!selectedFiles.isEmpty()) {
+                selectedGroups.add(
+                        selectedFiles == group.files
+                                ? group
+                                : new IndexGroup(
+                                        group.type,
+                                        group.field,
+                                        group.extraFields,
+                                        group.range,
+                                        selectedFiles));
+            }
+        }
+        return new GlobalIndexQuery(predicate, false, Collections.emptyList(), selectedGroups);
     }
 
     boolean isEmpty() {
