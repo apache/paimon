@@ -42,6 +42,7 @@ import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -59,6 +60,7 @@ import static org.apache.paimon.manifest.FileKind.DELETE;
 import static org.apache.paimon.operation.commit.ConflictDetection.buildBaseEntriesWithDV;
 import static org.apache.paimon.operation.commit.ConflictDetection.buildDeltaEntriesWithDV;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -67,6 +69,74 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ConflictDetectionTest {
+
+    @Test
+    void testIndexManifestReadFailureIsNotClassifiedAsConflict() {
+        // a failing index-manifest read is an IO problem; wrapping it into "file deletion
+        // conflicts detected" would make the commit give up (and can roll back a valid
+        // compact snapshot) instead of surfacing the real cause
+        IndexFileHandler failingHandler =
+                new IndexFileHandler(null, null, null, null, null, false) {
+                    @Override
+                    public List<IndexManifestEntry> readManifestWithIOException(
+                            String indexManifest) throws IOException {
+                        throw new IOException("fs unavailable");
+                    }
+                };
+        Snapshot latest =
+                new Snapshot(
+                        1,
+                        0,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        "index-manifest-file",
+                        "commit-user",
+                        null,
+                        1,
+                        Snapshot.CommitKind.APPEND,
+                        1,
+                        0,
+                        0,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+
+        ConflictDetection detection =
+                ConflictDetection.create(
+                        "t",
+                        "u",
+                        RowType.of(),
+                        null,
+                        null,
+                        BucketMode.BUCKET_UNAWARE,
+                        true,
+                        true,
+                        false,
+                        false,
+                        failingHandler,
+                        null,
+                        null);
+
+        assertThatThrownBy(
+                        () ->
+                                detection.checkConflicts(
+                                        latest,
+                                        Collections.singletonList(createLevelFileEntry("base", 1)),
+                                        Collections.singletonList(createLevelFileEntry("delta", 1)),
+                                        Collections.emptyList(),
+                                        null,
+                                        Snapshot.CommitKind.APPEND))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to read index manifest")
+                .hasRootCauseMessage("fs unavailable");
+    }
 
     @Test
     void testCreateConflictDetectionByTableType() {
