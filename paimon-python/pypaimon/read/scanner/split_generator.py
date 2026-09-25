@@ -98,10 +98,12 @@ class AbstractSplitGenerator(ABC):
         if not packed_files or not file_entries:
             return splits
         partition = tuple(file_entries[0].partition.values)
-        path_factory = self.table.path_factory()
-        escaped_partition = (path_factory.bucket_path(
-            partition, file_entries[0].bucket, canonical_partition=True)
-            != path_factory.bucket_path(partition, file_entries[0].bucket))
+        escaped_partition = False
+        if partition:
+            path_factory = self.table.path_factory()
+            escaped_partition = (path_factory.bucket_path(
+                partition, file_entries[0].bucket, canonical_partition=True)
+                != path_factory.bucket_path(partition, file_entries[0].bucket))
         for file_group in packed_files:
             if use_optimized_path:
                 raw_convertible = True
