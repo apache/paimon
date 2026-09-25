@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import datetime
 import os
 import struct
 import tempfile
@@ -149,6 +150,66 @@ class TestFormatRowReaderWriter:
         buf = _varint(len(raw)) + raw
         got = _read_field(_RowDecoder(buf, 0), AtomicType("DECIMAL(38, 10)"))
         assert got == Decimal("1234567890123456789012345678.9012345678")
+
+    def test_timestamp_precisions(self):
+        # from_paimon_type maps the precision to an Arrow unit (0 -> s, 1-3 -> ms,
+        # 4-6 -> us, 7-9 -> ns); the reader must return the value in that unit.
+        # Precision 0 overflowed (millis read as seconds) and 7-9 read low (micros
+        # read as nanos); 1-6 were already correct.
+        fields = [
+            DataField(0, "ts0", AtomicType("TIMESTAMP(0)")),
+            DataField(1, "ts3", AtomicType("TIMESTAMP(3)")),
+            DataField(2, "ts6", AtomicType("TIMESTAMP(6)")),
+            DataField(3, "ts9", AtomicType("TIMESTAMP(9)")),
+        ]
+        base = datetime.datetime(2020, 9, 13, 12, 26, 40)
+        ts0 = base
+        ts3 = base.replace(microsecond=123000)
+        ts6 = base.replace(microsecond=123456)
+        ts9 = base.replace(microsecond=123456)
+        data = pa.table({
+            "ts0": pa.array([ts0], type=pa.timestamp('s')),
+            "ts3": pa.array([ts3], type=pa.timestamp('ms')),
+            "ts6": pa.array([ts6], type=pa.timestamp('us')),
+            "ts9": pa.array([ts9], type=pa.timestamp('ns')),
+        })
+
+        with tempfile.NamedTemporaryFile(suffix=".row", delete=False) as tmp:
+            path = tmp.name
+
+        try:
+            _write_row_file(path, fields, data)
+            result = _read_row_file(path, fields)
+            assert result.column("ts0").to_pylist() == [ts0]
+            assert result.column("ts3").to_pylist() == [ts3]
+            assert result.column("ts6").to_pylist() == [ts6]
+            assert result.column("ts9").to_pylist() == [ts9]
+        finally:
+            os.unlink(path)
+
+    def test_timestamp_nanos_decoded_from_wire(self):
+        # A Java-written TIMESTAMP(9) carries nano_of_milli in 0..999999 (genuine
+        # sub-millisecond nanoseconds). The Python writer only emits multiples of
+        # 1000, so decode a hand-built wire buffer to exercise the ns formula with a
+        # non-multiple-of-1000 nano_of_milli directly.
+        from pypaimon.read.reader.format_row_reader import _read_field, _RowDecoder
+
+        def _varint(n):
+            out = bytearray()
+            while True:
+                b = n & 0x7F
+                n >>= 7
+                if n:
+                    out.append(b | 0x80)
+                else:
+                    out.append(b)
+                    return bytes(out)
+
+        millis = 1600000000000
+        nano_of_milli = 123456
+        buf = struct.pack('<q', millis) + _varint(nano_of_milli)
+        got = _read_field(_RowDecoder(buf, 0), AtomicType("TIMESTAMP(9)"))
+        assert got == millis * 1_000_000 + nano_of_milli
 
     def test_all_primitive_types(self):
         fields = [
