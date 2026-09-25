@@ -383,13 +383,13 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (indexFiles.isEmpty()) {
             return dataPlan;
         }
-        GlobalIndexQueryPlan indexPlan =
-                GlobalIndexQueryPlan.create(
+        GlobalIndexQuery indexQuery =
+                GlobalIndexQuery.create(
                         table.rowType(),
                         indexFilter,
                         indexFiles,
                         table.store().pathFactory().globalIndexFileFactory());
-        if (indexPlan == null) {
+        if (indexQuery == null) {
             return planEagerIndex(dataPlan, snapshot, partitionFilter, indexFiles, indexFilter);
         }
         List<Range> unindexed =
@@ -400,7 +400,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
                                 indexFiles,
                                 table.coreOptions().scalarIndexSearchMode())
                         .unindexedRanges(
-                                indexPlan.contributingFieldIds(table.rowType()),
+                                indexQuery.contributingFieldIds(table.rowType()),
                                 table.coreOptions().scalarIndexSearchMode()
                                                 == CoreOptions.GlobalIndexSearchMode.DETAIL
                                         ? GlobalIndexBuilderUtils.calcRowRanges(
@@ -413,13 +413,13 @@ public class DataEvolutionBatchScan implements DataTableScan {
             DataSplit dataSplit = dataSplit(split);
             List<Range> ranges =
                     GlobalIndexBuilderUtils.calcRowRanges(Collections.singletonList(dataSplit));
-            GlobalIndexQueryPlan splitPlan = indexPlan.forRanges(ranges);
+            GlobalIndexQuery splitQuery = indexQuery.forRanges(ranges);
             List<Range> splitUnindexed = Range.and(unindexed, ranges);
-            if (splitPlan.isEmpty() && splitUnindexed.isEmpty()) {
+            if (splitQuery.isEmpty() && splitUnindexed.isEmpty()) {
                 continue;
             }
             Split indexQuerySplit =
-                    new IndexQuerySplit(dataSplit, splitPlan, table.options(), splitUnindexed);
+                    new IndexQuerySplit(dataSplit, splitQuery, table.options(), splitUnindexed);
             indexQuerySplits.add(withAuth(split, indexQuerySplit));
         }
         return () -> indexQuerySplits;

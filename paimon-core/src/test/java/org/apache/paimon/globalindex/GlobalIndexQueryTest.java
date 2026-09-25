@@ -80,8 +80,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** Tests predicate type preservation and unsupported predicates in index query plans. */
-class GlobalIndexQueryPlanTest {
+/** Tests predicate type preservation and unsupported predicates in index queries. */
+class GlobalIndexQueryTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -104,7 +104,7 @@ class GlobalIndexQueryPlanTest {
                         invocation ->
                                 new Path(invocation.<IndexFileMeta>getArgument(0).fileName()));
         Options options = new Options();
-        GlobalIndexQueryPlan plan = GlobalIndexQueryPlan.create(rowType, range, files, paths);
+        GlobalIndexQuery plan = GlobalIndexQuery.create(rowType, range, files, paths);
         assertThat(plan).isNotNull();
         IndexQuerySplit split =
                 new IndexQuerySplit(dataSplit(), plan, options.toMap(), Collections.emptyList());
@@ -141,7 +141,7 @@ class GlobalIndexQueryPlanTest {
         }
 
         assertThat(
-                        GlobalIndexQueryPlan.create(
+                        GlobalIndexQuery.create(
                                 rowType, PredicateBuilder.or(lower, upper), files, paths))
                 .isNotNull();
     }
@@ -199,8 +199,8 @@ class GlobalIndexQueryPlanTest {
         List<Predicate> predicates =
                 Arrays.asList(b.isNotNull(0), b.notEqual(0, 1), b.notIn(0, Arrays.asList(1, 3)));
         for (int i = 0; i < predicates.size(); i++) {
-            GlobalIndexQueryPlan plan =
-                    GlobalIndexQueryPlan.create(rowType, predicates.get(i), files, paths);
+            GlobalIndexQuery plan =
+                    GlobalIndexQuery.create(rowType, predicates.get(i), files, paths);
             List<Range> ranges = Collections.singletonList(new Range(100, 102));
             assertThat(plan).isNotNull();
             assertThat(plan.evaluate(fileIO, new Options(), ranges).results().toRangeList())
@@ -276,7 +276,7 @@ class GlobalIndexQueryPlanTest {
                         equal,
                         PredicateBuilder.and(equal, builder.isNotNull(0)),
                         PredicateBuilder.or(equal, builder.isNull(0)))) {
-            GlobalIndexQueryPlan plan = create(indexType, rowType, predicate, literal);
+            GlobalIndexQuery plan = create(indexType, rowType, predicate, literal);
             assertThat(plan).isNotNull();
             IndexQuerySplit split =
                     new IndexQuerySplit(
@@ -299,11 +299,10 @@ class GlobalIndexQueryPlanTest {
         PredicateBuilder builder = new PredicateBuilder(rowType);
         Predicate isNaN = builder.isNaN(0);
         Predicate equal = builder.equal(0, 1.0);
-        GlobalIndexQueryPlan unsupported = create(indexType, rowType, isNaN, 1.0);
+        GlobalIndexQuery unsupported = create(indexType, rowType, isNaN, 1.0);
         assertThat(unsupported).isNotNull();
         assertThat(create(indexType, rowType, PredicateBuilder.or(isNaN, equal), 1.0)).isNotNull();
-        GlobalIndexQueryPlan and =
-                create(indexType, rowType, PredicateBuilder.and(isNaN, equal), 1.0);
+        GlobalIndexQuery and = create(indexType, rowType, PredicateBuilder.and(isNaN, equal), 1.0);
         assertThat(and).isNotNull();
 
         GlobalIndexReader reader = mock(GlobalIndexReader.class);
@@ -388,7 +387,7 @@ class GlobalIndexQueryPlanTest {
                 .thenReturn(indexer);
 
         RowType rowType = RowType.of(DataTypes.INT());
-        GlobalIndexQueryPlan plan =
+        GlobalIndexQuery plan =
                 create(
                         "bitmap",
                         rowType,
@@ -450,7 +449,7 @@ class GlobalIndexQueryPlanTest {
     @ValueSource(strings = {"btree", "bitmap"})
     void testPushesLocalRangesToIndexer(String indexType) throws Exception {
         RowType rowType = RowType.of(DataTypes.INT());
-        GlobalIndexQueryPlan plan =
+        GlobalIndexQuery plan =
                 create(indexType, rowType, new PredicateBuilder(rowType).equal(0, 1), 1, 100, 199);
         GlobalIndexReader reader = mock(GlobalIndexReader.class);
         when(reader.visitEqual(any(), eq(1)))
@@ -565,8 +564,8 @@ class GlobalIndexQueryPlanTest {
 
         Predicate supportedLeaf = builder.equal(0, 1);
         Predicate unsupportedLeaf = builder.equal(1, 2);
-        GlobalIndexQueryPlan andPlan =
-                GlobalIndexQueryPlan.create(
+        GlobalIndexQuery andPlan =
+                GlobalIndexQuery.create(
                         rowType,
                         PredicateBuilder.and(supportedLeaf, unsupportedLeaf),
                         files,
@@ -578,14 +577,14 @@ class GlobalIndexQueryPlanTest {
                         dataSplit(), andPlan, Collections.emptyMap(), Collections.emptyList());
         assertThat(SplitSerializer.deserialize(SplitSerializer.serialize(split))).isEqualTo(split);
         assertThat(
-                        GlobalIndexQueryPlan.create(
+                        GlobalIndexQuery.create(
                                 rowType,
                                 PredicateBuilder.or(supportedLeaf, unsupportedLeaf),
                                 files,
                                 paths))
                 .isNotNull();
         assertThat(
-                        GlobalIndexQueryPlan.create(
+                        GlobalIndexQuery.create(
                                 rowType,
                                 supportedLeaf,
                                 Arrays.asList(supported, indexFile("fm", "fm", 0, 99, 0, null)),
@@ -604,12 +603,12 @@ class GlobalIndexQueryPlanTest {
                 null);
     }
 
-    private GlobalIndexQueryPlan create(
+    private GlobalIndexQuery create(
             String indexType, RowType rowType, Predicate predicate, Object literal) {
         return create(indexType, rowType, predicate, literal, 0, 0);
     }
 
-    private GlobalIndexQueryPlan create(
+    private GlobalIndexQuery create(
             String indexType,
             RowType rowType,
             Predicate predicate,
@@ -647,7 +646,6 @@ class GlobalIndexQueryPlanTest {
                         return false;
                     }
                 };
-        return GlobalIndexQueryPlan.create(
-                rowType, predicate, Collections.singletonList(file), paths);
+        return GlobalIndexQuery.create(rowType, predicate, Collections.singletonList(file), paths);
     }
 }

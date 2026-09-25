@@ -55,8 +55,10 @@ public class IndexQuerySplit implements Split {
     /** Keeps the snapshot ID, complete column-merge file groups and deletion metadata. */
     private DataSplit dataSplit;
 
-    /** Index plan pruned to this split's data ranges, with original index row-ID offsets intact. */
-    private GlobalIndexQueryPlan indexPlan;
+    /**
+     * Index query pruned to this split's data ranges, with original index row-ID offsets intact.
+     */
+    private GlobalIndexQuery indexQuery;
 
     /** Planning-time index options, retained so recovery uses the same query configuration. */
     private Map<String, String> indexOptions;
@@ -69,11 +71,11 @@ public class IndexQuerySplit implements Split {
 
     IndexQuerySplit(
             DataSplit dataSplit,
-            GlobalIndexQueryPlan indexPlan,
+            GlobalIndexQuery indexQuery,
             Map<String, String> indexOptions,
             List<Range> unindexedRanges) {
         this.dataSplit = dataSplit;
-        this.indexPlan = indexPlan;
+        this.indexQuery = indexQuery;
         this.indexOptions = new HashMap<>(indexOptions);
         this.unindexedRanges = new ArrayList<>(unindexedRanges);
     }
@@ -86,7 +88,7 @@ public class IndexQuerySplit implements Split {
         List<Range> ranges =
                 GlobalIndexBuilderUtils.calcRowRanges(Collections.singletonList(dataSplit));
         GlobalIndexResult matches =
-                indexPlan.evaluate(fileIO, Options.fromMap(indexOptions), ranges);
+                indexQuery.evaluate(fileIO, Options.fromMap(indexOptions), ranges);
         List<Range> candidates = new ArrayList<>(matches.results().toRangeList());
         candidates.addAll(unindexedRanges);
         return new IndexedSplit(dataSplit, Range.sortAndMergeOverlap(candidates, true), null);
@@ -106,11 +108,11 @@ public class IndexQuerySplit implements Split {
     public void serialize(DataOutputView out) throws IOException {
         out.writeInt(VERSION);
         dataSplit.serialize(out);
-        indexPlan.serialize(out);
+        indexQuery.serialize(out);
         out.writeInt(indexOptions.size());
         for (Map.Entry<String, String> entry : indexOptions.entrySet()) {
-            GlobalIndexQueryPlan.writeString(out, entry.getKey());
-            GlobalIndexQueryPlan.writeString(out, entry.getValue());
+            GlobalIndexQuery.writeString(out, entry.getKey());
+            GlobalIndexQuery.writeString(out, entry.getValue());
         }
         out.writeInt(unindexedRanges.size());
         for (Range range : unindexedRanges) {
@@ -125,18 +127,18 @@ public class IndexQuerySplit implements Split {
             throw new IOException("Unsupported IndexQuerySplit version: " + version);
         }
         DataSplit dataSplit = DataSplit.deserialize(in);
-        GlobalIndexQueryPlan plan = GlobalIndexQueryPlan.deserialize(in);
+        GlobalIndexQuery query = GlobalIndexQuery.deserialize(in);
         Map<String, String> options = new HashMap<>();
         int size = in.readInt();
         for (int i = 0; i < size; i++) {
-            options.put(GlobalIndexQueryPlan.readString(in), GlobalIndexQueryPlan.readString(in));
+            options.put(GlobalIndexQuery.readString(in), GlobalIndexQuery.readString(in));
         }
         List<Range> unindexed = new ArrayList<>();
         size = in.readInt();
         for (int i = 0; i < size; i++) {
             unindexed.add(new Range(in.readLong(), in.readLong()));
         }
-        return new IndexQuerySplit(dataSplit, plan, options, unindexed);
+        return new IndexQuerySplit(dataSplit, query, options, unindexed);
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
@@ -146,7 +148,7 @@ public class IndexQuerySplit implements Split {
     private void readObject(ObjectInputStream in) throws IOException {
         IndexQuerySplit restored = deserialize(new DataInputViewStreamWrapper(in));
         this.dataSplit = restored.dataSplit;
-        this.indexPlan = restored.indexPlan;
+        this.indexQuery = restored.indexQuery;
         this.indexOptions = restored.indexOptions;
         this.unindexedRanges = restored.unindexedRanges;
     }
@@ -158,13 +160,13 @@ public class IndexQuerySplit implements Split {
         }
         IndexQuerySplit that = (IndexQuerySplit) obj;
         return dataSplit.equals(that.dataSplit)
-                && indexPlan.equals(that.indexPlan)
+                && indexQuery.equals(that.indexQuery)
                 && indexOptions.equals(that.indexOptions)
                 && unindexedRanges.equals(that.unindexedRanges);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(dataSplit, indexPlan, indexOptions, unindexedRanges);
+        return Objects.hash(dataSplit, indexQuery, indexOptions, unindexedRanges);
     }
 }

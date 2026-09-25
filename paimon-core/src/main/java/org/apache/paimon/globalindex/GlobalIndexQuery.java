@@ -71,7 +71,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBytes;
  * <p>Each data split receives the overlapping index groups; its reader executes the predicate to
  * obtain row IDs.
  */
-class GlobalIndexQueryPlan {
+class GlobalIndexQuery {
 
     /** A leaf or paired range query; null for an AND/OR node. */
     @Nullable private final Predicate predicate;
@@ -79,16 +79,16 @@ class GlobalIndexQueryPlan {
     /** For compound nodes, true means OR and false means AND; ignored for leaves. */
     private final boolean union;
 
-    /** Indexed child plans of a compound node; empty for leaves. */
-    private final List<GlobalIndexQueryPlan> children;
+    /** Indexed child queries of a compound node; empty for leaves. */
+    private final List<GlobalIndexQuery> children;
 
     /** A query's index groups; empty when none overlap this data split. */
     private final List<IndexGroup> groups;
 
-    private GlobalIndexQueryPlan(
+    private GlobalIndexQuery(
             @Nullable Predicate predicate,
             boolean union,
-            List<GlobalIndexQueryPlan> children,
+            List<GlobalIndexQuery> children,
             List<IndexGroup> groups) {
         this.predicate = predicate;
         this.union = union;
@@ -97,7 +97,7 @@ class GlobalIndexQueryPlan {
     }
 
     @Nullable
-    static GlobalIndexQueryPlan create(
+    static GlobalIndexQuery create(
             RowType rowType,
             Predicate predicate,
             List<IndexFileMeta> files,
@@ -113,11 +113,11 @@ class GlobalIndexQueryPlan {
                     }
                     groups.put(fieldId, indexGroups);
                 });
-        return createPredicatePlan(predicate, rowType, groups);
+        return createForPredicate(predicate, rowType, groups);
     }
 
     @Nullable
-    private static GlobalIndexQueryPlan createPredicatePlan(
+    private static GlobalIndexQuery createForPredicate(
             Predicate predicate, RowType rowType, Map<Integer, List<IndexGroup>> groups) {
         if (predicate instanceof LeafPredicate) {
             LeafPredicate leaf = (LeafPredicate) predicate;
@@ -129,15 +129,15 @@ class GlobalIndexQueryPlan {
             if (fieldGroups == null) {
                 return null;
             }
-            return new GlobalIndexQueryPlan(leaf, false, Collections.emptyList(), fieldGroups);
+            return new GlobalIndexQuery(leaf, false, Collections.emptyList(), fieldGroups);
         }
         CompoundPredicate compound = (CompoundPredicate) predicate;
         boolean union = compound.function() instanceof Or;
-        List<GlobalIndexQueryPlan> children = new ArrayList<>();
+        List<GlobalIndexQuery> children = new ArrayList<>();
         List<Predicate> predicates = GlobalIndexEvaluator.normalizedChildren(compound);
         for (int i = 0; i < predicates.size(); i++) {
             Predicate child = predicates.get(i);
-            GlobalIndexQueryPlan plan = null;
+            GlobalIndexQuery query = null;
             if (!union && GlobalIndexEvaluator.isRangeBound(child)) {
                 LeafPredicate first = (LeafPredicate) child;
                 for (int j = i + 1; j < predicates.size(); j++) {
@@ -153,34 +153,34 @@ class GlobalIndexQueryPlan {
                     }
                     LeafPredicate lower = GlobalIndexEvaluator.isLowerBound(first) ? first : second;
                     LeafPredicate upper = GlobalIndexEvaluator.isLowerBound(first) ? second : first;
-                    GlobalIndexQueryPlan lowerPlan = createPredicatePlan(lower, rowType, groups);
-                    if (lowerPlan != null) {
-                        plan =
-                                new GlobalIndexQueryPlan(
+                    GlobalIndexQuery lowerQuery = createForPredicate(lower, rowType, groups);
+                    if (lowerQuery != null) {
+                        query =
+                                new GlobalIndexQuery(
                                         new CompoundPredicate(
                                                 And.INSTANCE, Arrays.asList(lower, upper)),
                                         false,
                                         Collections.emptyList(),
-                                        lowerPlan.groups);
+                                        lowerQuery.groups);
                         predicates.remove(j);
                         break;
                     }
                 }
             }
-            if (plan == null) {
-                plan = createPredicatePlan(child, rowType, groups);
+            if (query == null) {
+                query = createForPredicate(child, rowType, groups);
             }
-            if (plan == null) {
+            if (query == null) {
                 if (union) {
                     return null;
                 }
             } else {
-                children.add(plan);
+                children.add(query);
             }
         }
         return children.isEmpty()
                 ? null
-                : new GlobalIndexQueryPlan(null, union, children, Collections.emptyList());
+                : new GlobalIndexQuery(null, union, children, Collections.emptyList());
     }
 
     boolean isEmpty() {
@@ -188,8 +188,8 @@ class GlobalIndexQueryPlan {
             return groups.isEmpty();
         }
         return union
-                ? children.stream().allMatch(GlobalIndexQueryPlan::isEmpty)
-                : children.stream().anyMatch(GlobalIndexQueryPlan::isEmpty);
+                ? children.stream().allMatch(GlobalIndexQuery::isEmpty)
+                : children.stream().anyMatch(GlobalIndexQuery::isEmpty);
     }
 
     /** Residual predicates discarded during planning must not expand unindexed coverage. */
@@ -198,7 +198,7 @@ class GlobalIndexQueryPlan {
         if (predicate != null) {
             fields.addAll(collectFieldIds(rowType, predicate));
         } else {
-            for (GlobalIndexQueryPlan child : children) {
+            for (GlobalIndexQuery child : children) {
                 fields.addAll(child.contributingFieldIds(rowType));
             }
         }
@@ -206,7 +206,7 @@ class GlobalIndexQueryPlan {
     }
 
     /** Keep original row-ID offsets while removing groups unrelated to this data split. */
-    GlobalIndexQueryPlan forRanges(List<Range> ranges) {
+    GlobalIndexQuery forRanges(List<Range> ranges) {
         List<IndexGroup> selected = new ArrayList<>();
         for (IndexGroup group : groups) {
             if (ranges.stream()
@@ -220,12 +220,12 @@ class GlobalIndexQueryPlan {
                 selected.add(group);
             }
         }
-        List<GlobalIndexQueryPlan> selectedChildren = new ArrayList<>();
-        for (GlobalIndexQueryPlan child : children) {
+        List<GlobalIndexQuery> selectedChildren = new ArrayList<>();
+        for (GlobalIndexQuery child : children) {
             selectedChildren.add(child.forRanges(ranges));
         }
         // A query without a local group evaluates to an empty result.
-        return new GlobalIndexQueryPlan(predicate, union, selectedChildren, selected);
+        return new GlobalIndexQuery(predicate, union, selectedChildren, selected);
     }
 
     GlobalIndexResult evaluate(FileIO fileIO, Options options, List<Range> ranges)
@@ -240,7 +240,7 @@ class GlobalIndexQueryPlan {
             throws IOException {
         if (predicate == null) {
             GlobalIndexResult result = null;
-            for (GlobalIndexQueryPlan child : children) {
+            for (GlobalIndexQuery child : children) {
                 GlobalIndexResult matches =
                         child.evaluateWithExecutor(fileIO, options, ranges, executor);
                 result =
@@ -341,20 +341,20 @@ class GlobalIndexQueryPlan {
             }
         } else {
             out.writeInt(children.size());
-            for (GlobalIndexQueryPlan child : children) {
+            for (GlobalIndexQuery child : children) {
                 child.serialize(out);
             }
         }
     }
 
-    static GlobalIndexQueryPlan deserialize(DataInputView in) throws IOException {
+    static GlobalIndexQuery deserialize(DataInputView in) throws IOException {
         int type = in.readByte();
         if (type == 0) {
             Predicate predicate;
             try {
                 predicate =
                         InstantiationUtil.deserializeObject(
-                                deserializedBytes(in), GlobalIndexQueryPlan.class.getClassLoader());
+                                deserializedBytes(in), GlobalIndexQuery.class.getClassLoader());
             } catch (ClassNotFoundException e) {
                 throw new IOException("Failed to deserialize index query predicate", e);
             }
@@ -384,17 +384,17 @@ class GlobalIndexQueryPlan {
                 }
                 groups.add(new IndexGroup(indexType, field, extraFields, range, files));
             }
-            return new GlobalIndexQueryPlan(predicate, false, Collections.emptyList(), groups);
+            return new GlobalIndexQuery(predicate, false, Collections.emptyList(), groups);
         }
         if (type != 1 && type != 2) {
-            throw new IOException("Unknown index plan node: " + type);
+            throw new IOException("Unknown index query node: " + type);
         }
-        List<GlobalIndexQueryPlan> children = new ArrayList<>();
+        List<GlobalIndexQuery> children = new ArrayList<>();
         int size = in.readInt();
         for (int i = 0; i < size; i++) {
             children.add(deserialize(in));
         }
-        return new GlobalIndexQueryPlan(null, type == 2, children, Collections.emptyList());
+        return new GlobalIndexQuery(null, type == 2, children, Collections.emptyList());
     }
 
     static void writeString(DataOutputView out, String value) throws IOException {
@@ -407,10 +407,10 @@ class GlobalIndexQueryPlan {
 
     @Override
     public boolean equals(Object obj) {
-        if (!(obj instanceof GlobalIndexQueryPlan)) {
+        if (!(obj instanceof GlobalIndexQuery)) {
             return false;
         }
-        GlobalIndexQueryPlan that = (GlobalIndexQueryPlan) obj;
+        GlobalIndexQuery that = (GlobalIndexQuery) obj;
         return union == that.union
                 && Objects.equals(predicate, that.predicate)
                 && children.equals(that.children)
