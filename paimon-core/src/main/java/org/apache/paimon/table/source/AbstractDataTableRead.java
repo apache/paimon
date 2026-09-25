@@ -120,7 +120,8 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
         QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
-        return createDataReader(queryAuthContext.split(), queryAuthContext.authResult());
+        return createDataReader(
+                queryAuthContext.split(), queryAuthContext.authResult(), executeFilter);
     }
 
     protected final QueryAuthContext unwrapQueryAuthSplit(Split split) {
@@ -129,11 +130,6 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
             return new QueryAuthContext(authSplit.split(), authSplit.authResult());
         }
         return new QueryAuthContext(split, null);
-    }
-
-    protected final RecordReader<InternalRow> createDataReader(
-            Split split, @Nullable TableQueryAuthResult authResult) throws IOException {
-        return createDataReader(split, authResult, executeFilter);
     }
 
     protected final RecordReader<InternalRow> createDataReader(

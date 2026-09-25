@@ -22,21 +22,18 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.globalindex.IndexQuerySplit;
 import org.apache.paimon.globalindex.IndexedSplit;
-import org.apache.paimon.globalindex.LazyIndexedSplit;
 import org.apache.paimon.reader.EmptyRecordReader;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.splitread.SplitReadConfig;
 import org.apache.paimon.table.source.splitread.SplitReadProvider;
-import org.apache.paimon.utils.ExceptionUtils;
 
 import javax.annotation.Nullable;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.nio.file.NoSuchFileException;
 import java.util.List;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -47,16 +44,7 @@ public class DataEvolutionTableRead extends AppendTableRead {
     private final CoreOptions options;
     @Nullable private final CatalogContext catalogContext;
     @Nullable private final Supplier<InnerTableRead> readFactory;
-    @Nullable private final FileIO fileIO;
-
-    public DataEvolutionTableRead(
-            List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
-            TableSchema schema,
-            CoreOptions options,
-            @Nullable CatalogContext catalogContext,
-            @Nullable Supplier<InnerTableRead> readFactory) {
-        this(providerFactories, schema, options, catalogContext, readFactory, null);
-    }
+    private final FileIO fileIO;
 
     public DataEvolutionTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
@@ -64,7 +52,7 @@ public class DataEvolutionTableRead extends AppendTableRead {
             CoreOptions options,
             @Nullable CatalogContext catalogContext,
             @Nullable Supplier<InnerTableRead> readFactory,
-            @Nullable FileIO fileIO) {
+            FileIO fileIO) {
         super(providerFactories, schema);
         this.options = options;
         this.catalogContext = catalogContext;
@@ -75,43 +63,27 @@ public class DataEvolutionTableRead extends AppendTableRead {
     @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
         QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
-        final Split dataSplit;
-        boolean filterOnRead = executeFilter;
-        if (queryAuthContext.split() instanceof LazyIndexedSplit) {
-            if (fileIO == null) {
-                throw new IllegalStateException("FileIO is required for lazy index evaluation.");
-            }
-            LazyIndexedSplit lazySplit = (LazyIndexedSplit) queryAuthContext.split();
-            Split selectedSplit;
-            try {
-                IndexedSplit indexedSplit = lazySplit.evaluate(fileIO);
-                if (indexedSplit.rowRanges().isEmpty()) {
-                    return new EmptyRecordReader<>();
-                }
-                selectedSplit = indexedSplit;
-            } catch (IOException e) {
-                if (!ExceptionUtils.findThrowable(
-                                        e,
-                                        cause ->
-                                                cause instanceof FileNotFoundException
-                                                        || cause instanceof NoSuchFileException)
-                                .isPresent()
-                        || options.scalarIndexSearchMode()
-                                == CoreOptions.GlobalIndexSearchMode.FAST) {
-                    throw e;
-                }
-                if (predicate() == null) {
-                    throw new IOException(
-                            "Cannot scan a split without its index and query filter", e);
-                }
-                selectedSplit = lazySplit.dataSplit();
-                filterOnRead = true;
-            }
-            dataSplit = selectedSplit;
-        } else {
-            dataSplit = queryAuthContext.split();
+        if (queryAuthContext.split() instanceof IndexQuerySplit) {
+            return createIndexQueryReader(
+                    (IndexQuerySplit) queryAuthContext.split(), queryAuthContext);
         }
-        final boolean applyFilter = filterOnRead;
+        return createSelectedReader(queryAuthContext.split(), queryAuthContext, executeFilter);
+    }
+
+    private RecordReader<InternalRow> createIndexQueryReader(
+            IndexQuerySplit split, QueryAuthContext queryAuthContext) throws IOException {
+        // A full-scan fallback can change the output sequence used by Flink's recordsToSkip,
+        // especially when an index is stale. Fail if a planned index file is unavailable.
+        IndexedSplit indexedSplit = split.evaluate(fileIO);
+        if (indexedSplit.rowRanges().isEmpty()) {
+            return new EmptyRecordReader<>();
+        }
+        return createSelectedReader(indexedSplit, queryAuthContext, executeFilter);
+    }
+
+    private RecordReader<InternalRow> createSelectedReader(
+            Split dataSplit, QueryAuthContext queryAuthContext, boolean filterOnRead)
+            throws IOException {
         int[] blobViewFields =
                 BlobViewTableReadSupport.blobViewFieldIndexes(currentReadType(), options);
         ReadBatchSizer sizer = readBatchSizer();
@@ -129,15 +101,15 @@ public class DataEvolutionTableRead extends AppendTableRead {
                     predicate(),
                     topN,
                     limit,
-                    applyFilter,
-                    () -> createDataReader(dataSplit, queryAuthContext.authResult(), applyFilter),
+                    filterOnRead,
+                    () -> createDataReader(dataSplit, queryAuthContext.authResult(), filterOnRead),
                     () -> {
                         InnerTableRead prescanRead = readFactory.get();
                         if (sizer != null) {
                             // Blob-view prescan is a separate physical read under the same budget.
                             prescanRead.withReadBatchSizer(sizer);
                         }
-                        if (applyFilter) {
+                        if (filterOnRead) {
                             prescanRead.executeFilter();
                         }
                         return prescanRead;

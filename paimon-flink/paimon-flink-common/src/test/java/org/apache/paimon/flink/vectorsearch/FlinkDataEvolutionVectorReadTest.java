@@ -544,6 +544,7 @@ public class FlinkDataEvolutionVectorReadTest {
                 GlobalIndexFileReader fileReader,
                 List<GlobalIndexIOMeta> files,
                 long totalRowCount,
+                List<Range> rowRanges,
                 ExecutorService executor) {
             throw new UnsupportedOperationException();
         }

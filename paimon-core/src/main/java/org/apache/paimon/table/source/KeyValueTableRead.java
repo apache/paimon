@@ -164,7 +164,9 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         if (catalogContext != null && blobViewFields.length > 0) {
             reader = createReaderWithBlobView(queryAuthContext, blobViewFields);
         } else {
-            reader = createDataReader(queryAuthContext.split(), queryAuthContext.authResult());
+            reader =
+                    createDataReader(
+                            queryAuthContext.split(), queryAuthContext.authResult(), executeFilter);
         }
         return LimitRecordReader.limit(reader, limit);
     }
@@ -185,7 +187,9 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
                         executeFilter,
                         () ->
                                 createDataReader(
-                                        queryAuthContext.split(), queryAuthContext.authResult()),
+                                        queryAuthContext.split(),
+                                        queryAuthContext.authResult(),
+                                        executeFilter),
                         this::createBlobViewPrescanRead);
         return reader;
     }

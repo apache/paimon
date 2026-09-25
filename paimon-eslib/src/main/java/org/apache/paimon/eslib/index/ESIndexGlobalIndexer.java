@@ -26,6 +26,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -86,6 +87,7 @@ public class ESIndexGlobalIndexer implements VectorGlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             long totalRowCount,
+            List<Range> rowRanges,
             ExecutorService executor) {
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(fileReader, files, fields, indexOptions, executor);

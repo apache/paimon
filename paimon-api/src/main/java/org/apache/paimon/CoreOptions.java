@@ -2993,11 +2993,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The max parallelism of Flink/Spark for building global index.");
 
-    public static final ConfigOption<Boolean> SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED =
-            key("scan.index-distributed-query.enabled")
+    public static final ConfigOption<Boolean> GLOBAL_INDEX_QUERY_IN_READER_ENABLED =
+            key("global-index.query-in-reader.enabled")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("Enable distributed global index queries in Flink.");
+                    .withDescription(
+                            "Query supported scalar global indexes per data split in readers "
+                                    + "instead of materializing index results during scan planning.");
 
     public static final ConfigOption<Boolean> GLOBAL_INDEX_ENABLED =
             key("global-index.enabled")
