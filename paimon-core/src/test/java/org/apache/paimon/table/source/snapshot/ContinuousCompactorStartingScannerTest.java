@@ -42,6 +42,42 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ContinuousCompactorStartingScannerTest extends ScannerTestBase {
 
     @Test
+    public void testScanSkipsExpiredSnapshots() throws Exception {
+        SnapshotManager snapshotManager = table.snapshotManager();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // commit 0: snapshot 1 (append)
+        write.write(rowData(1, 10, 100L));
+        commit.commit(0, write.prepareCommit(true, 0));
+        // commit 1: snapshots 2 (append) + 3 (compact)
+        write.write(rowData(1, 10, 101L));
+        write.compact(binaryRow(1), 0, true);
+        commit.commit(1, write.prepareCommit(true, 1));
+        // commit 2: snapshots 4 (append) + 5 (compact)
+        write.write(rowData(1, 10, 103L));
+        write.compact(binaryRow(1), 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(5);
+
+        // delete the latest compact snapshot behind the manager's back, as a concurrent
+        // expiry would: the scanner must skip the gap and fall back to the earlier
+        // compact instead of failing
+        java.nio.file.Files.delete(
+                java.nio.file.Paths.get(tempDir.toString(), "snapshot", "snapshot-5"));
+
+        ContinuousCompactorStartingScanner scanner =
+                new ContinuousCompactorStartingScanner(snapshotManager);
+        StartingScanner.NextSnapshot result =
+                (StartingScanner.NextSnapshot) scanner.scan(snapshotReader);
+        assertThat(result.nextSnapshotId()).isEqualTo(4);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
     public void testScan() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
