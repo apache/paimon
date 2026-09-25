@@ -85,19 +85,18 @@ public class CompactedChangelogPathResolver {
         if (split.length == 2) {
             return new DecodeResult(path, 0, Long.parseLong(split[1]));
         } else {
-            Path realPath =
-                    new Path(
-                            path.getParent().getParent(),
-                            "bucket-"
-                                    + split[0]
-                                    + "/"
-                                    + names[0]
-                                    + "$"
-                                    + split[0]
-                                    + "-"
-                                    + split[1]
-                                    + "."
-                                    + nameAndFormat[1]);
+            String realName = names[0] + "$" + split[0] + "-" + split[1] + "." + nameAndFormat[1];
+            Path parent = path.getParent();
+            Path realPath;
+            if (parent != null && parent.getName().startsWith("bucket-")) {
+                // without external paths the fake entry is placed by its own bucket, while the
+                // real file lives in the bucket encoded in the fake name
+                realPath = new Path(new Path(parent.getParent(), "bucket-" + split[0]), realName);
+            } else {
+                // with external paths, possibly entropy-injected, the compact task records the
+                // fake entry next to the real file, so the real file is a sibling
+                realPath = new Path(parent, realName);
+            }
             return new DecodeResult(realPath, Long.parseLong(split[2]), Long.parseLong(split[3]));
         }
     }

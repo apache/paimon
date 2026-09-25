@@ -81,6 +81,22 @@ public class CompactedChangelogPathResolverTest {
     }
 
     @Test
+    public void testResolveFakeWithExternalPath() {
+        // with external paths the compact task records the fake entry in the real file's
+        // directory, for example an entropy-injected <ext>/bucket-0/<hashDirs> directory
+        String fakeName =
+                "compacted-changelog-8e049c65-5ce4-4ce7-b1b0-78ce694ab351$0-39253-39253-35699.cc-parquet";
+        String realName =
+                "compacted-changelog-8e049c65-5ce4-4ce7-b1b0-78ce694ab351$0-39253.cc-parquet";
+        Path fakeFile = new Path("/ext/table/bucket-0/0110/1001/0101/00100110/" + fakeName);
+
+        Path resolved = CompactedChangelogPathResolver.resolveCompactedChangelogPath(fakeFile);
+
+        assertThat(resolved)
+                .isEqualTo(new Path("/ext/table/bucket-0/0110/1001/0101/00100110/" + realName));
+    }
+
+    @Test
     public void testResolveWithDifferentFormats() {
         // Test with different file formats
         Path fakeOrcFile =
