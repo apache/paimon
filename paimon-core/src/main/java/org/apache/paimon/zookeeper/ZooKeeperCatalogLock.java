@@ -166,24 +166,35 @@ public class ZooKeeperCatalogLock implements CatalogLock {
 
     /** A warehouse URI cannot appear in a znode path literally, so it is hashed. */
     static String hashWarehouse(String warehouse) {
-        String trimmed = warehouse.trim();
-        String lowerScheme = trimmed.toLowerCase(Locale.ROOT);
-        String normalized = trimmed;
-        int schemeEnd = trimmed.indexOf("://");
-        if (schemeEnd >= 0
-                && (lowerScheme.startsWith("s3://")
-                        || lowerScheme.startsWith("s3a://")
-                        || lowerScheme.startsWith("s3n://"))) {
-            String rest = trimmed.substring(schemeEnd + 3);
-            int slash = rest.indexOf('/');
-            String bucket = slash < 0 ? rest : rest.substring(0, slash);
-            String path = slash < 0 ? "" : rest.substring(slash);
-            normalized = "s3://" + bucket.toLowerCase(Locale.ROOT) + path;
-        }
+        String normalized = normalizeS3Path(warehouse.trim());
         while (normalized.endsWith("/")) {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
         return shortHash(normalized);
+    }
+
+    /**
+     * Folds the s3/s3a/s3n scheme aliases and bucket case onto one canonical {@code s3://} form, so
+     * e.g. {@code s3a://Bucket/p} and {@code s3://bucket/p} hash to the same lock namespace. Only
+     * S3 has this multi-scheme aliasing; any other scheme (e.g. {@code gs://}) is returned
+     * unchanged.
+     */
+    private static String normalizeS3Path(String warehouse) {
+        String lowerScheme = warehouse.toLowerCase(Locale.ROOT);
+        int schemeEnd = warehouse.indexOf("://");
+        boolean isS3 =
+                schemeEnd >= 0
+                        && (lowerScheme.startsWith("s3://")
+                                || lowerScheme.startsWith("s3a://")
+                                || lowerScheme.startsWith("s3n://"));
+        if (!isS3) {
+            return warehouse;
+        }
+        String rest = warehouse.substring(schemeEnd + 3);
+        int slash = rest.indexOf('/');
+        String bucket = slash < 0 ? rest : rest.substring(0, slash);
+        String path = slash < 0 ? "" : rest.substring(slash);
+        return "s3://" + bucket.toLowerCase(Locale.ROOT) + path;
     }
 
     static String shortHash(String value) {
