@@ -43,6 +43,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -53,66 +54,56 @@ public class RegisteredCredentialsProviderTest {
     @Test
     public void testEveryRequestIsSignedWithTheCurrentCredentials() throws Exception {
         AtomicReference<String> accessKeyId = new AtomicReference<>("ak-1");
-        String id = CredentialsSupplierRegistry.register(() -> credentials(accessKeyId.get()));
-        try {
-            List<String> authorizations = new ArrayList<>();
-            OSSObjectOperation operation =
-                    new OSSObjectOperation(capturingClient(authorizations), provider(id, null));
-            operation.setEndpoint(new URI("http://oss-cn-hangzhou.aliyuncs.com"));
+        Supplier<Map<String, String>> supplier = () -> credentials(accessKeyId.get());
+        String id = CredentialsSupplierRegistry.register(supplier);
+        List<String> authorizations = new ArrayList<>();
+        OSSObjectOperation operation =
+                new OSSObjectOperation(capturingClient(authorizations), provider(id, null));
+        operation.setEndpoint(new URI("http://oss-cn-hangzhou.aliyuncs.com"));
 
-            GenericRequest request = new GenericRequest("bucket", "key");
-            assertThatThrownBy(() -> operation.getObjectMetadata(request))
-                    .isInstanceOf(ClientException.class);
-            accessKeyId.set("ak-2");
-            assertThatThrownBy(() -> operation.getObjectMetadata(request))
-                    .isInstanceOf(ClientException.class);
+        GenericRequest request = new GenericRequest("bucket", "key");
+        assertThatThrownBy(() -> operation.getObjectMetadata(request))
+                .isInstanceOf(ClientException.class);
+        accessKeyId.set("ak-2");
+        assertThatThrownBy(() -> operation.getObjectMetadata(request))
+                .isInstanceOf(ClientException.class);
 
-            assertThat(authorizations).hasSize(2);
-            assertThat(authorizations.get(0)).contains("ak-1").doesNotContain("ak-2");
-            assertThat(authorizations.get(1)).contains("ak-2").doesNotContain("ak-1");
-        } finally {
-            CredentialsSupplierRegistry.unregister(id);
-        }
+        assertThat(authorizations).hasSize(2);
+        assertThat(authorizations.get(0)).contains("ak-1").doesNotContain("ak-2");
+        assertThat(authorizations.get(1)).contains("ak-2").doesNotContain("ak-1");
     }
 
     @Test
-    public void testKeepsTheLastCredentialsOnceTheSupplierIsGone() {
-        String id = CredentialsSupplierRegistry.register(() -> credentials("ak-2"));
-        RegisteredCredentialsProvider provider = provider(id, "ak-1");
-        assertThat(provider.getCredentials().getAccessKeyId()).isEqualTo("ak-2");
-
-        CredentialsSupplierRegistry.unregister(id);
-        assertThat(provider.getCredentials().getAccessKeyId()).isEqualTo("ak-2");
-        assertThat(provider(id, "ak-1").getCredentials().getAccessKeyId()).isEqualTo("ak-1");
+    public void testUsesConfiguredCredentialsWithoutARegisteredSupplier() {
+        RegisteredCredentialsProvider provider = provider("unknown-id", "ak-1");
+        assertThat(provider.getCredentials().getAccessKeyId()).isEqualTo("ak-1");
     }
 
     @Test
     public void testKeepsTheLastCredentialsWhenTheSupplierFails() {
         AtomicBoolean failing = new AtomicBoolean(false);
-        String id =
-                CredentialsSupplierRegistry.register(
-                        () -> {
-                            if (failing.get()) {
-                                throw new IllegalStateException("REST server unavailable");
-                            }
-                            return credentials("ak-2");
-                        });
-        try {
-            RegisteredCredentialsProvider provider = provider(id, null);
-            assertThat(provider.getCredentials().getAccessKeyId()).isEqualTo("ak-2");
+        Supplier<Map<String, String>> supplier =
+                () -> {
+                    if (failing.get()) {
+                        throw new IllegalStateException("REST server unavailable");
+                    }
+                    return credentials("ak-2");
+                };
+        String id = CredentialsSupplierRegistry.register(supplier);
+        RegisteredCredentialsProvider provider = provider(id, null);
+        assertThat(provider.getCredentials().getAccessKeyId()).isEqualTo("ak-2");
 
-            failing.set(true);
-            assertThat(provider.getCredentials().getAccessKeyId()).isEqualTo("ak-2");
-            assertThatThrownBy(() -> provider(id, null).getCredentials())
-                    .hasMessageContaining("REST server unavailable");
-        } finally {
-            CredentialsSupplierRegistry.unregister(id);
-        }
+        failing.set(true);
+        assertThat(provider.getCredentials().getAccessKeyId()).isEqualTo("ak-2");
+        assertThatThrownBy(() -> provider(id, null).getCredentials())
+                .hasMessageContaining("REST server unavailable");
+        assertThat(supplier).isNotNull();
     }
 
     @Test
     public void testOSSFileIOResolvesCredentialsFromTheRegisteredSupplier() throws Exception {
-        String id = CredentialsSupplierRegistry.register(() -> credentials("ak-2"));
+        Supplier<Map<String, String>> supplier = () -> credentials("ak-2");
+        String id = CredentialsSupplierRegistry.register(supplier);
         OSSFileIO fileIO = new OSSFileIO();
         try {
             Options options = new Options();
@@ -132,7 +123,6 @@ public class RegisteredCredentialsProviderTest {
                     .doesNotContain("fs.oss.credentials.provider");
         } finally {
             fileIO.close();
-            CredentialsSupplierRegistry.unregister(id);
         }
     }
 
