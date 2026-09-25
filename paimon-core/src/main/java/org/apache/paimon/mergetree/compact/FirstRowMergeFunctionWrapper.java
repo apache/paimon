@@ -56,6 +56,11 @@ public class FirstRowMergeFunctionWrapper implements MergeFunctionWrapper<Change
     public ChangelogResult getResult() {
         reusedResult.reset();
         KeyValue result = mergeFunction.getResult();
+        if (result == null) {
+            // with ignore-delete, a merge group may consist solely of retract records
+            // (0.7- tables could persist them into data files); nothing remains
+            return reusedResult;
+        }
         if (mergeFunction.containsHighLevel) {
             reusedResult.setResult(result);
             return reusedResult;

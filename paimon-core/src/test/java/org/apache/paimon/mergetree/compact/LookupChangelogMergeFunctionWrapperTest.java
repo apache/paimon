@@ -57,6 +57,26 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link LookupChangelogMergeFunctionWrapper}. */
 public class LookupChangelogMergeFunctionWrapperTest {
 
+    @org.junit.jupiter.api.Test
+    public void testFirstRowAllRetractRecordsWithIgnoreDelete() {
+        // 0.7- tables could persist lone retract records into data files; with
+        // ignore-delete they are all skipped and the merge result is null, which must
+        // surface as an empty result instead of an NPE
+        FirstRowMergeFunctionWrapper function =
+                new FirstRowMergeFunctionWrapper(
+                        FirstRowMergeFunction.factory(
+                                org.apache.paimon.options.Options.fromMap(
+                                        Collections.singletonMap("ignore-delete", "true"))),
+                        row -> false);
+
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 1, DELETE, null).setLevel(0));
+        ChangelogResult result = function.getResult();
+        assertThat(result).isNotNull();
+        assertThat(result.result()).isNull();
+        assertThat(result.changelogs()).isEmpty();
+    }
+
     private static final RecordEqualiser EQUALISER =
             (row1, row2) -> row1.getInt(0) == row2.getInt(0);
 
