@@ -28,6 +28,7 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.writer.data_writer import DataWriter
+from pypaimon.write.writer import stats_mode
 from pypaimon.write.writer.write_buffer import WriteBuffer
 
 
@@ -139,9 +140,21 @@ class CompositeDataWriter(DataWriter):
             is_external_path = self.external_path_provider is not None
             external_path_str = file_path if is_external_path else None
 
-            metadata_stats_enabled = self.options.metadata_stats_enabled()
-            stats_columns = self.normal_columns if metadata_stats_enabled else []
-            value_stats = self._collect_value_stats(data, stats_columns)
+            # Value stats honor metadata.stats-mode (not just full): none
+            # records nothing, counts keeps null counts, truncate(N)
+            # truncates min/max, full keeps them.
+            value_stats_enabled = self._value_stats_on
+            stats_columns = self.normal_columns if value_stats_enabled else []
+            if value_stats_enabled and self._stats_mode_kind != stats_mode.FULL:
+                column_stats = {
+                    column.name: self._get_column_stats(data, column.name)
+                    for column in stats_columns
+                }
+                value_stats = self._collect_value_stats(
+                    data, stats_columns,
+                    self._converted_value_column_stats(stats_columns, column_stats))
+            else:
+                value_stats = self._collect_value_stats(data, stats_columns)
 
             min_seq, max_seq = self._append_file_sequence_range(data.num_rows)
 
