@@ -68,6 +68,7 @@ import org.apache.paimon.table.source.TableQueryAuth;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.DataEvolutionUtils;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -561,7 +562,7 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"fast", "full", "detail"})
-    public void testMissingDeferredIndexFile(String mode) throws Exception {
+    public void testMissingDeferredIndexFileFails(String mode) throws Exception {
         write(100);
         createIndex("btree", "f1");
         FileStoreTable table =
@@ -584,15 +585,56 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
                             table.store().pathFactory().globalIndexFileFactory().toPath(file),
                             false);
         }
-        if (mode.equals("fast")) {
-            assertThatThrownBy(() -> read(read, splits)).isInstanceOf(IOException.class);
-        } else {
-            List<Integer> result = new ArrayList<>();
-            try (RecordReader<InternalRow> reader = read.newRead().createReader(() -> splits)) {
-                reader.forEachRemaining(row -> result.add(row.getInt(0)));
-            }
-            assertThat(result).containsExactly(50);
+        assertThatThrownBy(() -> read(read, splits)).isInstanceOf(IOException.class);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"full", "detail"})
+    public void testRestoreAfterIndexLossFailsBeforeSkippingRecords(String mode) throws Exception {
+        write(100);
+        createIndex("btree", "f1");
+        appendRows(100, 200);
+        FileStoreTable table =
+                distributedTable(getTableDefault())
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), mode));
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.startsWith(1, str("a")),
+                        PredicateBuilder.or(
+                                builder.equal(2, str("b50")), builder.equal(2, str("b150"))));
+        ReadBuilder read =
+                table.newReadBuilder()
+                        .withFilter(predicate)
+                        .withReadType(table.rowType().project(new int[] {0}));
+        List<Split> splits = read.newScan().plan().splits();
+        assertThat(splits).hasSize(1).allMatch(IndexQuerySplit.class::isInstance);
+
+        // Flink checkpoints the split with recordsToSkip=1 after emitting its first candidate.
+        try (CloseableIterator<InternalRow> records =
+                read.newRead().createReader(() -> splits).toCloseableIterator()) {
+            assertThat(records.next()).isNotNull();
         }
+
+        Split restored = SplitSerializer.deserialize(SplitSerializer.serialize(splits.get(0)));
+        for (IndexFileMeta file : indexFiles(table)) {
+            table.fileIO()
+                    .delete(
+                            table.store().pathFactory().globalIndexFileFactory().toPath(file),
+                            false);
+        }
+        assertThatThrownBy(
+                        () -> {
+                            try (RecordReader<InternalRow> reader =
+                                    read.newRead()
+                                            .createReader(
+                                                    () -> Collections.singletonList(restored))) {
+                                reader.readBatch();
+                            }
+                        })
+                .isInstanceOf(IOException.class);
     }
 
     @Test

@@ -128,15 +128,16 @@ public class IndexQuerySourceTest extends DataEvolutionTestBase {
     public void testReaderRestoresIndexQuerySplitAndPosition() throws Exception {
         FileStoreTable table = distributedTable(indexedTable());
         FileStoreSourceSplit split = plan(table, FlinkConnectorOptions.SplitAssignMode.FAIR).get(0);
-        List<Integer> complete = readSplit(readBuilder(table).newRead().executeFilter(), split);
-        assertThat(complete).hasSize(19);
+        List<Integer> complete = readSplit(readBuilder(table).newRead(), split);
+        // Flink checkpoints candidate rows before applying the residual filter downstream.
+        assertThat(complete).hasSize(100).startsWith(0).endsWith(99);
         FileStoreSourceSplit checkpoint = split.updateWithRecordsToSkip(7);
         FileStoreSourceSplitSerializer serializer = new FileStoreSourceSplitSerializer();
         FileStoreSourceSplit restored =
                 serializer.deserialize(serializer.getVersion(), serializer.serialize(checkpoint));
         assertThat(restored).isEqualTo(checkpoint);
         assertThat(restored.split()).isInstanceOf(IndexQuerySplit.class);
-        assertThat(readSplit(readBuilder(table).newRead().executeFilter(), restored))
+        assertThat(readSplit(readBuilder(table).newRead(), restored))
                 .containsExactlyElementsOf(complete.subList(7, complete.size()));
     }
 

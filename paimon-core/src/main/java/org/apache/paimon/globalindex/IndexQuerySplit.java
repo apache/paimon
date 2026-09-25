@@ -44,6 +44,8 @@ import java.util.OptionalLong;
  *
  * <p>Recovery retains this split and re-evaluates the same index files before skipping previously
  * read records. Index evaluation produces an {@link IndexedSplit} for the existing data read path.
+ * If a planned index file is missing, reading fails because a full scan could change the record
+ * sequence used by checkpoint recovery.
  */
 public class IndexQuerySplit implements Split {
 

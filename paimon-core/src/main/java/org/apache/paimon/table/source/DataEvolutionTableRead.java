@@ -30,13 +30,10 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.splitread.SplitReadConfig;
 import org.apache.paimon.table.source.splitread.SplitReadProvider;
-import org.apache.paimon.utils.ExceptionUtils;
 
 import javax.annotation.Nullable;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.nio.file.NoSuchFileException;
 import java.util.List;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -75,24 +72,9 @@ public class DataEvolutionTableRead extends AppendTableRead {
 
     private RecordReader<InternalRow> createIndexQueryReader(
             IndexQuerySplit split, QueryAuthContext queryAuthContext) throws IOException {
-        final IndexedSplit indexedSplit;
-        try {
-            indexedSplit = split.evaluate(fileIO);
-        } catch (IOException e) {
-            if (!ExceptionUtils.findThrowable(
-                                    e,
-                                    cause ->
-                                            cause instanceof FileNotFoundException
-                                                    || cause instanceof NoSuchFileException)
-                            .isPresent()
-                    || options.scalarIndexSearchMode() == CoreOptions.GlobalIndexSearchMode.FAST) {
-                throw e;
-            }
-            if (predicate() == null) {
-                throw new IOException("Cannot scan a split without its index and query filter", e);
-            }
-            return createSelectedReader(split.dataSplit(), queryAuthContext, true);
-        }
+        // A full-scan fallback can change the output sequence used by Flink's recordsToSkip,
+        // especially when an index is stale. Fail if a planned index file is unavailable.
+        IndexedSplit indexedSplit = split.evaluate(fileIO);
         if (indexedSplit.rowRanges().isEmpty()) {
             return new EmptyRecordReader<>();
         }
