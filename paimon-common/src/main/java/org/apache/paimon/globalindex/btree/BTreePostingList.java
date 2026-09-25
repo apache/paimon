@@ -71,10 +71,6 @@ final class BTreePostingList {
                 : serializeDeltaList(rowIds, sizes.deltaList);
     }
 
-    static void addTo(MemorySlice slice, RoaringNavigableMap64 target) throws IOException {
-        addTo(slice, target, null);
-    }
-
     static void addTo(
             MemorySlice slice,
             RoaringNavigableMap64 target,

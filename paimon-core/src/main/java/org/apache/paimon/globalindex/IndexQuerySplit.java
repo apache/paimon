@@ -44,8 +44,10 @@ import java.util.OptionalLong;
  *
  * <p>Recovery retains this split and re-evaluates the same index files before skipping previously
  * read records. Index evaluation produces an {@link IndexedSplit} for the existing data read path.
+ * If a planned index file is missing, reading fails because a full scan could change the record
+ * sequence used by checkpoint recovery.
  */
-public class LazyIndexedSplit implements Split {
+public class IndexQuerySplit implements Split {
 
     private static final long serialVersionUID = 1L;
 
@@ -55,8 +57,10 @@ public class LazyIndexedSplit implements Split {
     /** Keeps the snapshot ID, complete column-merge file groups and deletion metadata. */
     private DataSplit dataSplit;
 
-    /** Index plan pruned to this split's data ranges, with original index row-ID offsets intact. */
-    private GlobalIndexScanPlan indexPlan;
+    /**
+     * Index query pruned to this split's data ranges, with original index row-ID offsets intact.
+     */
+    private GlobalIndexQuery indexQuery;
 
     /** Planning-time index options, retained so recovery uses the same query configuration. */
     private Map<String, String> indexOptions;
@@ -67,13 +71,13 @@ public class LazyIndexedSplit implements Split {
      */
     private List<Range> unindexedRanges;
 
-    LazyIndexedSplit(
+    IndexQuerySplit(
             DataSplit dataSplit,
-            GlobalIndexScanPlan indexPlan,
+            GlobalIndexQuery indexQuery,
             Map<String, String> indexOptions,
             List<Range> unindexedRanges) {
         this.dataSplit = dataSplit;
-        this.indexPlan = indexPlan;
+        this.indexQuery = indexQuery;
         this.indexOptions = new HashMap<>(indexOptions);
         this.unindexedRanges = new ArrayList<>(unindexedRanges);
     }
@@ -86,7 +90,7 @@ public class LazyIndexedSplit implements Split {
         List<Range> ranges =
                 GlobalIndexBuilderUtils.calcRowRanges(Collections.singletonList(dataSplit));
         GlobalIndexResult matches =
-                indexPlan.evaluate(fileIO, Options.fromMap(indexOptions), ranges);
+                indexQuery.evaluate(fileIO, Options.fromMap(indexOptions), ranges);
         List<Range> candidates = new ArrayList<>(matches.results().toRangeList());
         candidates.addAll(unindexedRanges);
         return new IndexedSplit(dataSplit, Range.sortAndMergeOverlap(candidates, true), null);
@@ -106,11 +110,11 @@ public class LazyIndexedSplit implements Split {
     public void serialize(DataOutputView out) throws IOException {
         out.writeInt(VERSION);
         dataSplit.serialize(out);
-        indexPlan.serialize(out);
+        indexQuery.serialize(out);
         out.writeInt(indexOptions.size());
         for (Map.Entry<String, String> entry : indexOptions.entrySet()) {
-            GlobalIndexScanPlan.writeString(out, entry.getKey());
-            GlobalIndexScanPlan.writeString(out, entry.getValue());
+            GlobalIndexQuery.writeString(out, entry.getKey());
+            GlobalIndexQuery.writeString(out, entry.getValue());
         }
         out.writeInt(unindexedRanges.size());
         for (Range range : unindexedRanges) {
@@ -119,24 +123,24 @@ public class LazyIndexedSplit implements Split {
         }
     }
 
-    public static LazyIndexedSplit deserialize(DataInputView in) throws IOException {
+    public static IndexQuerySplit deserialize(DataInputView in) throws IOException {
         int version = in.readInt();
         if (version != VERSION) {
-            throw new IOException("Unsupported LazyIndexedSplit version: " + version);
+            throw new IOException("Unsupported IndexQuerySplit version: " + version);
         }
         DataSplit dataSplit = DataSplit.deserialize(in);
-        GlobalIndexScanPlan plan = GlobalIndexScanPlan.deserialize(in);
+        GlobalIndexQuery query = GlobalIndexQuery.deserialize(in);
         Map<String, String> options = new HashMap<>();
         int size = in.readInt();
         for (int i = 0; i < size; i++) {
-            options.put(GlobalIndexScanPlan.readString(in), GlobalIndexScanPlan.readString(in));
+            options.put(GlobalIndexQuery.readString(in), GlobalIndexQuery.readString(in));
         }
         List<Range> unindexed = new ArrayList<>();
         size = in.readInt();
         for (int i = 0; i < size; i++) {
             unindexed.add(new Range(in.readLong(), in.readLong()));
         }
-        return new LazyIndexedSplit(dataSplit, plan, options, unindexed);
+        return new IndexQuerySplit(dataSplit, query, options, unindexed);
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
@@ -144,27 +148,27 @@ public class LazyIndexedSplit implements Split {
     }
 
     private void readObject(ObjectInputStream in) throws IOException {
-        LazyIndexedSplit restored = deserialize(new DataInputViewStreamWrapper(in));
+        IndexQuerySplit restored = deserialize(new DataInputViewStreamWrapper(in));
         this.dataSplit = restored.dataSplit;
-        this.indexPlan = restored.indexPlan;
+        this.indexQuery = restored.indexQuery;
         this.indexOptions = restored.indexOptions;
         this.unindexedRanges = restored.unindexedRanges;
     }
 
     @Override
     public boolean equals(Object obj) {
-        if (!(obj instanceof LazyIndexedSplit)) {
+        if (!(obj instanceof IndexQuerySplit)) {
             return false;
         }
-        LazyIndexedSplit that = (LazyIndexedSplit) obj;
+        IndexQuerySplit that = (IndexQuerySplit) obj;
         return dataSplit.equals(that.dataSplit)
-                && indexPlan.equals(that.indexPlan)
+                && indexQuery.equals(that.indexQuery)
                 && indexOptions.equals(that.indexOptions)
                 && unindexedRanges.equals(that.unindexedRanges);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(dataSplit, indexPlan, indexOptions, unindexedRanges);
+        return Objects.hash(dataSplit, indexQuery, indexOptions, unindexedRanges);
     }
 }

@@ -879,6 +879,12 @@ under the License.
             <td>Whether a vector, hybrid or full-text search may read the filter columns of candidate rows to verify a row filter that the scalar global index can only answer with a superset, such as contains, ends-with or like on a BTree index or a conjunction with a member no index can evaluate. When false, such candidates are excluded from the search, which never returns a non-matching row but may return fewer than the requested top-k. When true, the read runs on the caller and may cover every candidate row.</td>
         </tr>
         <tr>
+            <td><h5>global-index.query-in-reader.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Query supported scalar global indexes per data split in readers instead of materializing index results during scan planning.</td>
+        </tr>
+        <tr>
             <td><h5>global-index.row-count-per-shard</h5></td>
             <td style="word-wrap: break-word;">100000</td>
             <td>Long</td>
@@ -1547,12 +1553,6 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Ignore lost files while scanning.</td>
-        </tr>
-        <tr>
-            <td><h5>scan.index-distributed-query.enabled</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Enable distributed global index queries in Flink.</td>
         </tr>
         <tr>
             <td><h5>scan.manifest.parallelism</h5></td>

@@ -420,6 +420,7 @@ public class DataEvolutionFullTextRead implements FullTextRead {
                         indexFileReader,
                         indexIOMetaList,
                         rowRangeEnd - rowRangeStart + 1,
+                        null,
                         executor);
         // Each split returns its own top-k; the union's top-k after merge equals the global
         // top-k, and the native engine scores compound queries per document, so there is no

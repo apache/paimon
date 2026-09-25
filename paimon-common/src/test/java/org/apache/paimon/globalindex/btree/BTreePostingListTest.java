@@ -188,7 +188,7 @@ public class BTreePostingListTest {
                 .containsExactly(rowIds.toArray());
 
         RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
-        BTreePostingList.addTo(paddedSlice, bitmap);
+        BTreePostingList.addTo(paddedSlice, bitmap, null);
         List<Long> actual = new ArrayList<>();
         bitmap.iterator().forEachRemaining(actual::add);
         assertThat(actual).containsExactlyElementsOf(asList(rowIds));

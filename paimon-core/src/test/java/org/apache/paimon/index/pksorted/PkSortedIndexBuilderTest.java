@@ -147,6 +147,7 @@ class PkSortedIndexBuilderTest {
                                 new GlobalIndexFileReadWrite(fileIO, pathFactory),
                                 ioMetas,
                                 payload.rowCount(),
+                                null,
                                 executor)) {
             FieldRef fieldRef = new FieldRef(8, "tags", tags.type());
             assertThat(reader.visitArrayContains(fieldRef, 2).join().get().results())
@@ -395,6 +396,7 @@ class PkSortedIndexBuilderTest {
                                 new GlobalIndexFileReadWrite(fileIO, pathFactory),
                                 ioMetas,
                                 payload.rowCount(),
+                                null,
                                 executor)) {
             FieldRef fieldRef = new FieldRef(7, "indexed", DataTypes.INT());
             GlobalIndexResult result =

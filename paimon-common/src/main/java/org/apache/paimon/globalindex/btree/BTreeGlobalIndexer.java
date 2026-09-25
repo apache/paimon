@@ -120,15 +120,6 @@ public class BTreeGlobalIndexer implements SortedGlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             long totalRowCount,
-            ExecutorService executor) {
-        return createReader(fileReader, files, totalRowCount, null, executor);
-    }
-
-    @Override
-    public GlobalIndexReader createReader(
-            GlobalIndexFileReader fileReader,
-            List<GlobalIndexIOMeta> files,
-            long totalRowCount,
             @Nullable List<Range> rowRanges,
             ExecutorService executor) {
         return new LazyFilteredBTreeReader(

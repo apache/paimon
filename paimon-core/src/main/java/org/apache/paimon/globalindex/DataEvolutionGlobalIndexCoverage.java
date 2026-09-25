@@ -78,15 +78,11 @@ public class DataEvolutionGlobalIndexCoverage {
     }
 
     public List<Range> unindexedRanges(RowType rowType, @Nullable Predicate predicate) {
-        return unindexedRanges(collectFieldIds(rowType, predicate));
+        return unindexedRanges(collectFieldIds(rowType, predicate), null);
     }
 
     public List<Range> unindexedRanges(int fieldId) {
-        return unindexedRanges(Collections.singleton(fieldId));
-    }
-
-    public List<Range> unindexedRanges(Collection<Integer> fieldIds) {
-        return unindexedRanges(fieldIds, null);
+        return unindexedRanges(Collections.singleton(fieldId), null);
     }
 
     public List<Range> unindexedRanges(

@@ -135,6 +135,7 @@ class PrimaryKeySortedIndexBatchScanTest {
                 new PlanImpl(
                         null,
                         11L,
+                        null,
                         Collections.<Split>singletonList(dataSplit(11, fixture.dataFile)));
 
         TableScan.Plan result = fixture.scan.postProcessPlan(dataPlan);
@@ -198,7 +199,9 @@ class PrimaryKeySortedIndexBatchScanTest {
         when(snapshotReader.snapshotManager()).thenReturn(snapshotManager);
         when(snapshotReader.hasNonPartitionFilter()).thenReturn(true);
         when(snapshotReader.read())
-                .thenReturn(new PlanImpl(null, 11L, Collections.<Split>singletonList(dataSplit)));
+                .thenReturn(
+                        new PlanImpl(
+                                null, 11L, snapshot, Collections.<Split>singletonList(dataSplit)));
         IndexFileHandler indexFileHandler = mock(IndexFileHandler.class);
         when(snapshotReader.indexFileHandler()).thenReturn(indexFileHandler);
         when(indexFileHandler.scan(

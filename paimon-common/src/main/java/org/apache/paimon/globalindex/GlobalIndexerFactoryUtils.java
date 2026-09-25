@@ -18,10 +18,14 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.types.DataField;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
 
@@ -52,5 +56,18 @@ public class GlobalIndexerFactoryUtils {
             throw new RuntimeException("Can't find global index for type: " + type);
         }
         return globalIndexerFactory;
+    }
+
+    /** Keep unrecognized index types for the reader to resolve at execution time. */
+    public static List<GlobalIndexIOMeta> selectFiles(
+            String type,
+            DataField indexField,
+            List<DataField> extraFields,
+            Predicate predicate,
+            List<GlobalIndexIOMeta> files) {
+        GlobalIndexerFactory factory = factories.get(type);
+        return factory == null
+                ? files
+                : factory.selectFiles(indexField, extraFields, predicate, files);
     }
 }
