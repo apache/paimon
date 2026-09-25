@@ -156,9 +156,12 @@ public class ChangelogManager implements Serializable {
                     try {
                         String changelogStr = fileIO.readFileUtf8(path);
                         if (StringUtils.isNullOrWhitespaceOnly(changelogStr)) {
+                            // skip a torn or truncated changelog file instead of letting the
+                            // empty parse failure kill the whole enumeration
                             LOG.warn("Changelog file is empty, path: {}", path);
+                        } else {
+                            changelogs.add(Changelog.fromJson(changelogStr));
                         }
-                        changelogs.add(Changelog.fromJson(changelogStr));
                     } catch (IOException e) {
                         if (!(e instanceof FileNotFoundException)) {
                             throw new RuntimeException(e);
