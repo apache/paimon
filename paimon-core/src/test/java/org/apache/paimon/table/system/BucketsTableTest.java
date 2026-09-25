@@ -118,6 +118,39 @@ public class BucketsTableTest extends TableTestBase {
     }
 
     @Test
+    public void testBucketsTableWithUnparseablePartitionFilterIsConservative() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(BucketsTable.TABLE_TYPE);
+
+        // "{x, y}" does not round-trip the rendering format for a single partition key
+        // (the value contains the ", " separator): claiming "no partition matches"
+        // would silently drop the partition whose value really is "x, y", so the
+        // filter must degrade to reading all partitions for the engine to re-apply
+        Predicate filter = builder.equal(0, BinaryString.fromString("{x, y}"));
+        assertThat(readWithFilter(bucketsTable, filter, new int[] {0, 1, 2, 4}))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(BinaryString.fromString("{1}"), 0, 2L, 2L),
+                        GenericRow.of(BinaryString.fromString("{2}"), 0, 2L, 2L));
+    }
+
+    @Test
+    public void testBucketsTableWithPartiallyUnparseableInFilterIsConservative() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(BucketsTable.TABLE_TYPE);
+
+        // one literal of the IN list does not round-trip: dropping just that literal
+        // from the pushed filter would silently vanish its partitions from the results,
+        // so the whole pushdown is skipped
+        Predicate filter =
+                builder.in(
+                        0,
+                        Arrays.asList(
+                                BinaryString.fromString("{x, y}"), BinaryString.fromString("{1}")));
+        assertThat(readWithFilter(bucketsTable, filter, new int[] {0, 1, 2, 4}))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(BinaryString.fromString("{1}"), 0, 2L, 2L),
+                        GenericRow.of(BinaryString.fromString("{2}"), 0, 2L, 2L));
+    }
+
+    @Test
     public void testBucketsTableWithBucketFilter() throws Exception {
         PredicateBuilder builder = new PredicateBuilder(BucketsTable.TABLE_TYPE);
 
