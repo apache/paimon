@@ -66,40 +66,42 @@ public class DataEvolutionTableRead extends AppendTableRead {
     @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
         QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
-        final Split dataSplit;
-        boolean filterOnRead = executeFilter;
         if (queryAuthContext.split() instanceof IndexQuerySplit) {
-            IndexQuerySplit indexQuerySplit = (IndexQuerySplit) queryAuthContext.split();
-            Split selectedSplit;
-            try {
-                IndexedSplit indexedSplit = indexQuerySplit.evaluate(fileIO);
-                if (indexedSplit.rowRanges().isEmpty()) {
-                    return new EmptyRecordReader<>();
-                }
-                selectedSplit = indexedSplit;
-            } catch (IOException e) {
-                if (!ExceptionUtils.findThrowable(
-                                        e,
-                                        cause ->
-                                                cause instanceof FileNotFoundException
-                                                        || cause instanceof NoSuchFileException)
-                                .isPresent()
-                        || options.scalarIndexSearchMode()
-                                == CoreOptions.GlobalIndexSearchMode.FAST) {
-                    throw e;
-                }
-                if (predicate() == null) {
-                    throw new IOException(
-                            "Cannot scan a split without its index and query filter", e);
-                }
-                selectedSplit = indexQuerySplit.dataSplit();
-                filterOnRead = true;
-            }
-            dataSplit = selectedSplit;
-        } else {
-            dataSplit = queryAuthContext.split();
+            return createIndexQueryReader(
+                    (IndexQuerySplit) queryAuthContext.split(), queryAuthContext);
         }
-        final boolean applyFilter = filterOnRead;
+        return createSelectedReader(queryAuthContext.split(), queryAuthContext, executeFilter);
+    }
+
+    private RecordReader<InternalRow> createIndexQueryReader(
+            IndexQuerySplit split, QueryAuthContext queryAuthContext) throws IOException {
+        final IndexedSplit indexedSplit;
+        try {
+            indexedSplit = split.evaluate(fileIO);
+        } catch (IOException e) {
+            if (!ExceptionUtils.findThrowable(
+                                    e,
+                                    cause ->
+                                            cause instanceof FileNotFoundException
+                                                    || cause instanceof NoSuchFileException)
+                            .isPresent()
+                    || options.scalarIndexSearchMode() == CoreOptions.GlobalIndexSearchMode.FAST) {
+                throw e;
+            }
+            if (predicate() == null) {
+                throw new IOException("Cannot scan a split without its index and query filter", e);
+            }
+            return createSelectedReader(split.dataSplit(), queryAuthContext, true);
+        }
+        if (indexedSplit.rowRanges().isEmpty()) {
+            return new EmptyRecordReader<>();
+        }
+        return createSelectedReader(indexedSplit, queryAuthContext, executeFilter);
+    }
+
+    private RecordReader<InternalRow> createSelectedReader(
+            Split dataSplit, QueryAuthContext queryAuthContext, boolean filterOnRead)
+            throws IOException {
         int[] blobViewFields =
                 BlobViewTableReadSupport.blobViewFieldIndexes(currentReadType(), options);
         ReadBatchSizer sizer = readBatchSizer();
@@ -117,15 +119,15 @@ public class DataEvolutionTableRead extends AppendTableRead {
                     predicate(),
                     topN,
                     limit,
-                    applyFilter,
-                    () -> createDataReader(dataSplit, queryAuthContext.authResult(), applyFilter),
+                    filterOnRead,
+                    () -> createDataReader(dataSplit, queryAuthContext.authResult(), filterOnRead),
                     () -> {
                         InnerTableRead prescanRead = readFactory.get();
                         if (sizer != null) {
                             // Blob-view prescan is a separate physical read under the same budget.
                             prescanRead.withReadBatchSizer(sizer);
                         }
-                        if (applyFilter) {
+                        if (filterOnRead) {
                             prescanRead.executeFilter();
                         }
                         return prescanRead;
