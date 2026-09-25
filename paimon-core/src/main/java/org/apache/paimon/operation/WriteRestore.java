@@ -67,17 +67,16 @@ public interface WriteRestore {
     }
 
     /**
-     * Extracts the {@link DataFileMeta} list from the given manifest entries, validating that all
-     * entries agree on {@code totalBuckets}.
+     * Extracts data files into the supplied list and returns their common bucket count.
      *
      * @param entries manifest entries for a single (partition, bucket) pair
-     * @return the list of data files; empty if {@code entries} is empty
-     * @throws RuntimeException if entries carry inconsistent {@code totalBuckets} values, which
-     *     indicates a corrupted manifest
+     * @param dataFiles destination for the extracted data files
+     * @return the common bucket count, or {@code null} when {@code entries} is empty
+     * @throws RuntimeException if entries carry inconsistent {@code totalBuckets} values
      */
-    static List<DataFileMeta> extractDataFiles(List<ManifestEntry> entries) {
+    @Nullable
+    static Integer extractDataFiles(List<ManifestEntry> entries, List<DataFileMeta> dataFiles) {
         Integer totalBuckets = null;
-        List<DataFileMeta> dataFiles = new ArrayList<>();
         for (ManifestEntry entry : entries) {
             if (totalBuckets != null && totalBuckets != entry.totalBuckets()) {
                 throw new RuntimeException(
@@ -88,6 +87,21 @@ public interface WriteRestore {
             totalBuckets = entry.totalBuckets();
             dataFiles.add(entry.file());
         }
+        return totalBuckets;
+    }
+
+    /**
+     * Extracts the {@link DataFileMeta} list from the given manifest entries, validating that all
+     * entries agree on {@code totalBuckets}.
+     *
+     * @param entries manifest entries for a single (partition, bucket) pair
+     * @return the list of data files; empty if {@code entries} is empty
+     * @throws RuntimeException if entries carry inconsistent {@code totalBuckets} values, which
+     *     indicates a corrupted manifest
+     */
+    static List<DataFileMeta> extractDataFiles(List<ManifestEntry> entries) {
+        List<DataFileMeta> dataFiles = new ArrayList<>();
+        extractDataFiles(entries, dataFiles);
         return dataFiles;
     }
 }
