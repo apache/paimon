@@ -227,11 +227,17 @@ public class StatisticTable implements ReadonlyTable {
         }
 
         private InternalRow toRow(Statistics statistics) {
+            // merged counts are absent for statistics written without merge results; the
+            // system table reports NULL instead of failing the whole query
             return GenericRow.of(
                     statistics.snapshotId(),
                     statistics.schemaId(),
-                    statistics.mergedRecordCount().getAsLong(),
-                    statistics.mergedRecordSize().getAsLong(),
+                    statistics.mergedRecordCount().isPresent()
+                            ? statistics.mergedRecordCount().getAsLong()
+                            : null,
+                    statistics.mergedRecordSize().isPresent()
+                            ? statistics.mergedRecordSize().getAsLong()
+                            : null,
                     BinaryString.fromString(JsonSerdeUtil.toJson(statistics.colStats())));
         }
     }

@@ -123,7 +123,13 @@ public class AllTablesTable implements ReadonlyTable {
         if (s == null) {
             return null;
         }
-        return Long.parseLong(s);
+        try {
+            return Long.parseLong(s);
+        } catch (NumberFormatException e) {
+            // created-at/updated-at are ordinary table options; a non-numeric value must
+            // not fail the whole ALL_TABLES listing
+            return null;
+        }
     }
 
     @Override
