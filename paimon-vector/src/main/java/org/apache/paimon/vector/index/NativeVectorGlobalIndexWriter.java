@@ -290,7 +290,10 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                     identifier,
                     System.currentTimeMillis() - buildStart);
 
-            VectorIndexMeta meta = new VectorIndexMeta();
+            VectorIndexMeta meta =
+                    new VectorIndexMeta(
+                            nativeOptions.getOrDefault(
+                                    "metric", NativeVectorGlobalIndexer.DEFAULT_METRIC));
             return new ResultEntry(fileName, rowCount, meta.serialize());
         }
     }

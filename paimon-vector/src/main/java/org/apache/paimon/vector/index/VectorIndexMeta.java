@@ -21,17 +21,20 @@ package org.apache.paimon.vector.index;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.Serializable;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
  * Metadata for a vector index file.
  *
- * <p>Serialized as an empty JSON {@code Map<String, String>}. Search-time parameters are passed
- * through {@link org.apache.paimon.predicate.VectorSearch#options()}.
+ * <p>Serialized as a JSON {@code Map<String, String>}; it records the metric the index was built
+ * with so searches can reject segments built under a different metric. Legacy segments carry an
+ * empty map. Search-time parameters are passed through {@link
+ * org.apache.paimon.predicate.VectorSearch#options()}.
  */
 public class VectorIndexMeta implements Serializable {
 
@@ -42,14 +45,30 @@ public class VectorIndexMeta implements Serializable {
     private static final TypeReference<LinkedHashMap<String, String>> MAP_TYPE_REF =
             new TypeReference<LinkedHashMap<String, String>>() {};
 
-    VectorIndexMeta() {}
+    private static final String METRIC_KEY = "metric";
+
+    @Nullable private final String metric;
+
+    VectorIndexMeta(@Nullable String metric) {
+        this.metric = metric;
+    }
 
     public byte[] serialize() throws IOException {
-        return OBJECT_MAPPER.writeValueAsBytes(Collections.<String, String>emptyMap());
+        Map<String, String> data = new LinkedHashMap<>();
+        if (metric != null) {
+            data.put(METRIC_KEY, metric);
+        }
+        return OBJECT_MAPPER.writeValueAsBytes(data);
     }
 
     public static VectorIndexMeta deserialize(byte[] data) throws IOException {
-        Map<String, String> ignored = OBJECT_MAPPER.readValue(data, MAP_TYPE_REF);
-        return new VectorIndexMeta();
+        Map<String, String> map = OBJECT_MAPPER.readValue(data, MAP_TYPE_REF);
+        return new VectorIndexMeta(map.get(METRIC_KEY));
+    }
+
+    /** The metric this index was built with, or null for legacy segments that record none. */
+    @Nullable
+    public String metric() {
+        return metric;
     }
 }

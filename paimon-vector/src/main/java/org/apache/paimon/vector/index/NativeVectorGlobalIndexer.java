@@ -27,6 +27,8 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Range;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -84,6 +86,15 @@ public class NativeVectorGlobalIndexer implements VectorGlobalIndexer {
             List<Range> rowRanges,
             ExecutorService executor) {
         return new NativeVectorGlobalIndexReader(fileReader, files, fieldType, executor);
+    }
+
+    @Override
+    public String segmentMetric(byte[] indexMeta) {
+        try {
+            return VectorIndexMeta.deserialize(indexMeta).metric();
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read vector index metadata.", e);
+        }
     }
 
     @Override

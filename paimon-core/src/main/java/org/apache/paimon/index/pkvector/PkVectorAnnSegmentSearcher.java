@@ -193,6 +193,7 @@ public class PkVectorAnnSegmentSearcher {
                 "ANN segment metric %s does not match index reader metric %s.",
                 metric,
                 readerMetric);
+        checkSegmentMetric(indexer, metric, globalIndexMeta.indexMeta());
 
         GlobalIndexIOMeta ioMeta =
                 new GlobalIndexIOMeta(
@@ -291,6 +292,7 @@ public class PkVectorAnnSegmentSearcher {
                 "ANN segment metric %s does not match index reader metric %s.",
                 metric,
                 readerMetric);
+        checkSegmentMetric(indexer, metric, globalIndexMeta.indexMeta());
 
         GlobalIndexIOMeta ioMeta =
                 new GlobalIndexIOMeta(
@@ -489,6 +491,27 @@ public class PkVectorAnnSegmentSearcher {
         private FilePosition(String dataFileName, long rowPosition) {
             this.dataFileName = dataFileName;
             this.rowPosition = rowPosition;
+        }
+    }
+
+    /**
+     * The guard above compares two values from the current config; the segment metadata records
+     * what the index was actually built with, and a mismatch would mean silently wrong distances.
+     * Legacy segments record no metric and are not checked.
+     */
+    static void checkSegmentMetric(
+            GlobalIndexer indexer, String normalizedMetric, byte[] indexMeta) {
+        if (!(indexer instanceof VectorGlobalIndexer)) {
+            return;
+        }
+        String segmentMetric = ((VectorGlobalIndexer) indexer).segmentMetric(indexMeta);
+        if (segmentMetric != null) {
+            String normalized = VectorSearchMetric.normalize(segmentMetric);
+            checkArgument(
+                    normalizedMetric.equals(normalized),
+                    "ANN segment was built with metric %s but the current metric is %s.",
+                    normalized,
+                    normalizedMetric);
         }
     }
 }

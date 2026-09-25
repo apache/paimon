@@ -16,20 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex;
+package org.apache.paimon.vector.index;
 
-/** A {@link GlobalIndexer} that supports vector similarity search. */
-public interface VectorGlobalIndexer extends GlobalIndexer {
+import org.junit.jupiter.api.Test;
 
-    /** Returns the metric name used to convert vector distances to comparable scores. */
-    String metric();
+import static org.assertj.core.api.Assertions.assertThat;
 
-    /**
-     * Returns the metric recorded in a segment's index metadata when it was built, or {@code null}
-     * when the metadata records none (legacy segments or indexers that do not persist it).
-     * Searchers use it to reject segments built with a different metric than the current one.
-     */
-    default String segmentMetric(byte[] indexMeta) {
-        return null;
+/** Tests for {@link VectorIndexMeta} metric persistence. */
+class VectorIndexMetaTest {
+
+    @Test
+    void testMetricRoundTrip() throws Exception {
+        byte[] data = new VectorIndexMeta("cosine").serialize();
+        assertThat(VectorIndexMeta.deserialize(data).metric()).isEqualTo("cosine");
+
+        // a null metric writes an empty map, matching legacy segments
+        byte[] legacy = new VectorIndexMeta(null).serialize();
+        assertThat(VectorIndexMeta.deserialize(legacy).metric()).isNull();
+        assertThat(VectorIndexMeta.deserialize("{}".getBytes()).metric()).isNull();
     }
 }

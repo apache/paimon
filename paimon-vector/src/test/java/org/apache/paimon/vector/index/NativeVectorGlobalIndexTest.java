@@ -229,7 +229,7 @@ public class NativeVectorGlobalIndexTest {
 
     @Test
     public void testMetaSerializationIsEmptyMap() throws IOException {
-        VectorIndexMeta meta = new VectorIndexMeta();
+        VectorIndexMeta meta = new VectorIndexMeta(null);
         byte[] serialized = meta.serialize();
         VectorIndexMeta deserialized = VectorIndexMeta.deserialize(serialized);
 
