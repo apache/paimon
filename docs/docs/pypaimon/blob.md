@@ -176,6 +176,13 @@ The factory auto-dispatches based on the bytes content (`BLOBDESC`,
 `VIDEOFRM`, or blob-view magic header). This mirrors Java's
 `Blob.fromBytes(...)`.
 
+## Python BLOB index cache
+
+Set `cache.blob-index.max-num` in Catalog options, for example `"32"`.
+It limits cached BLOB file indexes per Catalog context (default: 16; 0 disables
+caching). Tables share the context's cache; deserialized contexts start empty.
+The limit counts files, not bytes, and applies only to the Python BLOB reader.
+
 ## See Also
 
 - [Blob Storage](../multimodal-table/blob) — concept, storage modes,
