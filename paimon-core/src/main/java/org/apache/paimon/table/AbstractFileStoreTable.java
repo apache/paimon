@@ -25,13 +25,17 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergCommitCallback;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.options.FallbackKey;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
@@ -74,11 +78,15 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.function.BiConsumer;
 import java.util.function.LongConsumer;
@@ -95,7 +103,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
 
+    // Track explicit copy() keys, including removals, separately from persisted schema options.
+    @Nullable private Set<String> appliedDynamicOptionKeys;
+
     @Nullable protected transient SegmentsCache<Path> manifestCache;
+    @Nullable protected transient SegmentsCache<Path> manifestSidecarCache;
     @Nullable protected transient Cache<Path, Snapshot> snapshotCache;
     @Nullable protected transient Cache<String, Statistics> statsCache;
     @Nullable protected transient DVMetaCache dvmetaCache;
@@ -131,6 +143,18 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public SegmentsCache<Path> getManifestCache() {
         return manifestCache;
+    }
+
+    @Override
+    public void setManifestSidecarCache(SegmentsCache<Path> manifestSidecarCache) {
+        this.manifestSidecarCache = manifestSidecarCache;
+        store().setManifestSidecarCache(manifestSidecarCache);
+    }
+
+    @Nullable
+    @Override
+    public SegmentsCache<Path> getManifestSidecarCache() {
+        return manifestSidecarCache;
     }
 
     @Override
@@ -290,6 +314,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         DataTableStreamScan scan =
                 new DataTableStreamScan(
                         tableSchema,
+                        schemaManager(),
                         coreOptions(),
                         newSnapshotReader(),
                         snapshotManager(),
@@ -360,15 +385,34 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         // copy a new table schema to contain dynamic options
         TableSchema newTableSchema = tableSchema.copy(newOptions.toMap());
 
+        Set<String> mergedDynamicOptionKeys = new HashSet<>(dynamicOptions.keySet());
+        if (appliedDynamicOptionKeys != null) {
+            mergedDynamicOptionKeys.addAll(appliedDynamicOptionKeys);
+        }
+
         if (tryTimeTravel) {
             // see if merged options contain time travel option
-            newTableSchema = tryTimeTravel(newOptions).orElse(newTableSchema);
+            newTableSchema =
+                    tryTimeTravel(newOptions, mergedDynamicOptionKeys).orElse(newTableSchema);
         }
 
         // validate schema with new options
         SchemaValidation.validateTableSchema(newTableSchema, dynamicOptions.keySet());
+        if (new CoreOptions(tableSchema.options())
+                        .toConfiguration()
+                        .get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            // turning the mirror on here publishes the schemas already on disk, which no commit
+            // has judged under these options
+            SchemaValidation.validateHistoricalIcebergTypes(
+                    () -> schemaManager().listAll(), new CoreOptions(newTableSchema.options()));
+        }
 
-        return copy(newTableSchema);
+        FileStoreTable copied = copy(newTableSchema);
+        if (copied instanceof AbstractFileStoreTable) {
+            ((AbstractFileStoreTable) copied).appliedDynamicOptionKeys = mergedDynamicOptionKeys;
+        }
+        return copied;
     }
 
     @Override
@@ -394,11 +438,15 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                                 fileIO, path, newTableSchema, catalogEnvironment)
                         : new PrimaryKeyFileStoreTable(
                                 fileIO, path, newTableSchema, catalogEnvironment);
+        copied.appliedDynamicOptionKeys = appliedDynamicOptionKeys;
         if (snapshotCache != null) {
             copied.setSnapshotCache(snapshotCache);
         }
         if (manifestCache != null) {
             copied.setManifestCache(manifestCache);
+        }
+        if (manifestSidecarCache != null) {
+            copied.setManifestSidecarCache(manifestSidecarCache);
         }
         if (statsCache != null) {
             copied.setStatsCache(statsCache);
@@ -411,7 +459,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public SchemaManager schemaManager() {
-        return new SchemaManager(fileIO(), path, currentBranch());
+        return new FileSystemSchemaManager(fileIO(), path, currentBranch());
     }
 
     @Override
@@ -450,7 +498,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 changelogManager(),
                 store().newSnapshotDeletion(),
-                store().newTagManager());
+                store().newTagManager(),
+                store().options().scanManifestParallelism());
     }
 
     @Override
@@ -505,7 +554,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         return snapshotExpire;
     }
 
-    private Optional<TableSchema> tryTimeTravel(Options options) {
+    private Optional<TableSchema> tryTimeTravel(Options options, Set<String> dynamicOptionKeys) {
         Snapshot snapshot;
         try {
             snapshot =
@@ -517,7 +566,46 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         if (snapshot == null) {
             return Optional.empty();
         }
-        return Optional.of(schemaManager().schema(snapshot.schemaId()).copy(options.toMap()));
+        TableSchema historicalSchema = schemaManager().schema(snapshot.schemaId());
+        return Optional.of(
+                historicalSchema.copy(
+                        excludeCurrentSchemaFieldOptions(
+                                historicalSchema, options, dynamicOptionKeys)));
+    }
+
+    /** Prevents current column declarations from overriding a historical schema's field options. */
+    private static Map<String, String> excludeCurrentSchemaFieldOptions(
+            TableSchema historicalSchema, Options options, Set<String> dynamicOptionKeys) {
+        // Keep scan and runtime options. Only these directive-managed column declarations
+        // must follow the historical schema, since columns may have been added or dropped.
+        Map<String, String> historicalOptions = new HashMap<>(options.toMap());
+        for (ConfigOption<String> option :
+                Arrays.asList(
+                        CoreOptions.VECTOR_FIELD,
+                        CoreOptions.BLOB_FIELD,
+                        CoreOptions.BLOB_DESCRIPTOR_FIELD,
+                        CoreOptions.BLOB_VIEW_FIELD)) {
+            // Restore the canonical key and aliases together, or a stale alias may take effect
+            // when the historical schema has no canonical value.
+            List<String> keys = new ArrayList<>();
+            keys.add(option.key());
+            for (FallbackKey fallback : option.fallbackKeys()) {
+                keys.add(fallback.getKey());
+            }
+            if (keys.stream().anyMatch(dynamicOptionKeys::contains)) {
+                // Preserve explicit overrides; invalid values must still fail schema validation.
+                continue;
+            }
+            for (String key : keys) {
+                String value = historicalSchema.options().get(key);
+                if (value == null) {
+                    historicalOptions.remove(key);
+                } else {
+                    historicalOptions.put(key, value);
+                }
+            }
+        }
+        return historicalOptions;
     }
 
     @Override
@@ -770,7 +858,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
 
         Optional<TableSchema> optionalSchema =
-                new SchemaManager(fileIO(), location(), targetBranch).latest();
+                new FileSystemSchemaManager(fileIO(), location(), targetBranch).latest();
         Preconditions.checkArgument(
                 optionalSchema.isPresent(), "Branch " + targetBranch + " does not exist");
 

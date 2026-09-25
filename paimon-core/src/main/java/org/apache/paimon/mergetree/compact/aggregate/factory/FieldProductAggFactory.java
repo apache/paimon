@@ -19,9 +19,12 @@
 package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.mergetree.compact.aggregate.FieldProductAgg;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeFamily;
+
+import java.util.Collections;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -30,13 +33,19 @@ public class FieldProductAggFactory implements FieldAggregatorFactory {
 
     public static final String NAME = "product";
 
+    @VisibleForTesting
+    public FieldProductAgg create(DataType fieldType) {
+        return create(fieldType, CoreOptions.fromMap(Collections.emptyMap()), null);
+    }
+
     @Override
     public FieldProductAgg create(DataType fieldType, CoreOptions options, String field) {
         checkArgument(
                 fieldType.getTypeRoot().getFamilies().contains(DataTypeFamily.NUMERIC),
                 "Data type for product column must be 'NumericType' but was '%s'.",
                 fieldType);
-        return new FieldProductAgg(identifier(), fieldType);
+        return new FieldProductAgg(
+                identifier(), fieldType, options.fieldProductAggFailOnOverflow(field));
     }
 
     @Override

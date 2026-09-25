@@ -33,6 +33,7 @@ from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 from pypaimon.schema.data_types import DataField
 from pypaimon.read.plan import Plan
+from pypaimon.read.scan_distribution import validate_shard, validate_slice
 from pypaimon.read.push_down_utils import (_get_all_fields,
                                            exclude_predicate_with_fields,
                                            remove_row_id_filter,
@@ -221,7 +222,9 @@ class FileScanner:
         manifest_scanner: Callable[[], Tuple[List[ManifestFileMeta], Optional[Snapshot]]],
         predicate: Optional[Predicate] = None,
         limit: Optional[int] = None,
-        partition_predicate: Optional[Predicate] = None
+        partition_predicate: Optional[Predicate] = None,
+        skip_level0: bool = False,
+        is_streaming: bool = False,
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -273,6 +276,8 @@ class FileScanner:
         self.only_read_real_buckets = options.bucket() == BucketMode.POSTPONE_BUCKET.value
         self.data_evolution = options.data_evolution_enabled()
         self.deletion_vectors_enabled = options.deletion_vectors_enabled()
+        self.skip_level0 = skip_level0
+        self.is_streaming = is_streaming
         self._global_index_result = None
         self._row_ranges = None
         self._scanned_snapshot = None
@@ -303,8 +308,14 @@ class FileScanner:
             return self.table.table_schema.fields
         return self.table.schema_manager.get_schema(schema_id).fields
 
+    def _schema(self, schema_id: int):
+        """Resolve the complete schema including its dedicated-file options."""
+        if schema_id == self.table.table_schema.id:
+            return self.table.table_schema
+        return self.table.schema_manager.get_schema(schema_id)
+
     def _deletion_files_map(self, entries: List[ManifestEntry]) -> Dict[tuple, Dict[str, DeletionFile]]:
-        if not self.deletion_vectors_enabled:
+        if self.is_streaming or not self.deletion_vectors_enabled:
             return {}
         # Extract unique partition-bucket pairs from file entries
         bucket_files = set()
@@ -344,6 +355,7 @@ class FileScanner:
                     self._deletion_files_map(entries),
                     seed=seed,
                     chunk_size=chunk_size,
+                    snapshot_id=self._scanned_snapshot_id,
                 )
             else:
                 split_generator = AppendChunkShuffleSplitGenerator(
@@ -353,6 +365,7 @@ class FileScanner:
                     self._deletion_files_map(entries),
                     seed=seed,
                     chunk_size=chunk_size,
+                    snapshot_id=self._scanned_snapshot_id,
                 )
         elif self.table.is_primary_key_table:
             entries = self.plan_files()
@@ -360,7 +373,8 @@ class FileScanner:
                 self.table,
                 self.target_split_size,
                 self.open_file_cost,
-                self._deletion_files_map(entries)
+                self._deletion_files_map(entries),
+                snapshot_id=self._scanned_snapshot_id,
             )
         elif self.data_evolution:
             entries, split_generator = self._create_data_evolution_split_generator()
@@ -370,7 +384,8 @@ class FileScanner:
                 self.table,
                 self.target_split_size,
                 self.open_file_cost,
-                self._deletion_files_map(entries)
+                self._deletion_files_map(entries),
+                snapshot_id=self._scanned_snapshot_id,
             )
 
         if not entries:
@@ -384,6 +399,11 @@ class FileScanner:
 
         # Generate splits
         splits = split_generator.create_splits(entries)
+        if self.is_streaming:
+            for split in splits:
+                while callable(getattr(split, 'data_split', None)):
+                    split = split.data_split()
+                split.is_streaming = True
 
         if self.data_evolution and self.scan_stats is not None:
             # Data-evolution stats pruning happens on complete row-id groups
@@ -391,7 +411,7 @@ class FileScanner:
             self.scan_stats.entries_after_stats = sum(
                 len(split.files) for split in splits)
 
-        if self.table.is_primary_key_table:
+        if self.table.is_primary_key_table and not self.is_streaming:
             splits = self._apply_primary_key_sorted_indexes(splits)
 
         splits = self._apply_push_down_limit(splits)
@@ -402,10 +422,11 @@ class FileScanner:
         )
         return Plan(splits, snapshot_id=self._scanned_snapshot_id)
 
-    def _apply_primary_key_sorted_indexes(self, splits):
+    def _apply_primary_key_sorted_indexes(self, splits, snapshot=None):
+        snapshot = snapshot if snapshot is not None else self._scanned_snapshot
         if (not self.table.options.global_index_enabled()
                 or self.predicate is None
-                or self._scanned_snapshot is None
+                or snapshot is None
                 or not splits):
             return splits
 
@@ -421,7 +442,7 @@ class FileScanner:
             return splits
         field_ids = {definition.field_id for definition in definitions}
         entries = IndexFileHandler(self.table).scan(
-            self._scanned_snapshot,
+            snapshot,
             lambda entry: (
                 entry.kind == 0
                 and entry.index_file.global_index_meta is not None
@@ -430,7 +451,7 @@ class FileScanner:
             ),
         )
         index_plan = primary_key_sorted_index_scan.plan(
-            self._scanned_snapshot_id, splits, definitions, entries)
+            snapshot.id, splits, definitions, entries)
         evaluated = primary_key_sorted_index_scan.evaluate(
             index_plan,
             self.table.fields,
@@ -478,30 +499,35 @@ class FileScanner:
                 row_ranges,
                 score_getter,
                 None,
+                snapshot_id=self._scanned_snapshot_id,
             )
 
-        # Filter manifest files by row ranges if available
-        if row_ranges is not None:
-            manifest_files = _filter_manifest_files_by_row_ranges(manifest_files, row_ranges)
+        # Position selection counts the complete candidate row-id space. Early
+        # range pruning would renumber later files; the split generator applies
+        # the range intersection after assigning slice/shard positions.
+        positional = self.idx_of_this_subtask is not None or self.start_pos_of_this_subtask is not None
+        early_row_ranges = None if positional else row_ranges
+        if early_row_ranges is not None:
+            manifest_files = _filter_manifest_files_by_row_ranges(manifest_files, early_row_ranges)
 
         stats_predicate = getattr(self, 'predicate_for_stats', None)
         group_stats_enabled = stats_predicate is not None and score_getter is None
         entries = self.read_manifest_entries(
             manifest_files,
-            row_ranges=row_ranges,
+            row_ranges=early_row_ranges,
             keep_stats=group_stats_enabled,
         )
 
         # Redundant when early_record_filter ran; kept for explain mode and as safety net.
-        if row_ranges is not None:
-            entries = _filter_manifest_entries_by_row_ranges(entries, row_ranges)
+        if early_row_ranges is not None:
+            entries = _filter_manifest_entries_by_row_ranges(entries, early_row_ranges)
 
         group_stats_filter = None
         if group_stats_enabled:
             group_stats_filter = DataEvolutionGroupStatsFilter(
                 stats_predicate,
                 self.table.fields,
-                self._schema_fields,
+                self._schema,
             )
 
         return entries, DataEvolutionSplitGenerator(
@@ -512,6 +538,7 @@ class FileScanner:
             row_ranges,
             score_getter,
             group_stats_filter,
+            snapshot_id=self._scanned_snapshot_id,
         )
 
     def plan_files(self) -> List[ManifestEntry]:
@@ -523,8 +550,8 @@ class FileScanner:
         return self.read_manifest_entries(manifest_files)
 
     def _eval_global_index(self, snapshot=None):
-        # No filter - nothing to evaluate
-        if self.predicate is None:
+        # Snapshot indexes describe current state, not historical change events.
+        if self.is_streaming or self.predicate is None:
             return None
 
         # Check if global index is enabled
@@ -577,7 +604,7 @@ class FileScanner:
             self.scan_stats.manifest_files_after_partition += len(manifest_files)
             # Force single-threaded so we can mutate stats without locking.
             max_workers = 1
-        # Disable both early filters in explain mode (scan_stats) so all entries
+        # Disable early entry filters and sidecar pruning in explain mode so all entries
         # flow through _filter_manifest_entry for accurate funnel counting.
         early_row_filter = None if self.scan_stats is not None \
             else _build_early_row_range_filter(row_ranges)
@@ -591,6 +618,7 @@ class FileScanner:
             early_entry_filter=self._build_early_bucket_filter(),
             early_record_filter=early_row_filter,
             partition_filter=partition_filter,
+            row_ranges=row_ranges if self.scan_stats is None else None,
         )
 
     def _build_early_bucket_filter(self):
@@ -626,19 +654,19 @@ class FileScanner:
         return _filter
 
     def with_shard(self, idx_of_this_subtask: int, number_of_para_subtasks: int) -> 'FileScanner':
-        if idx_of_this_subtask >= number_of_para_subtasks:
-            raise ValueError("idx_of_this_subtask must be less than number_of_para_subtasks")
+        validate_shard(idx_of_this_subtask, number_of_para_subtasks)
         if self.start_pos_of_this_subtask is not None:
-            raise Exception("with_shard and with_slice cannot be used simultaneously")
+            raise ValueError("with_shard and with_slice cannot be used simultaneously")
         self.idx_of_this_subtask = idx_of_this_subtask
         self.number_of_para_subtasks = number_of_para_subtasks
         return self
 
     def with_slice(self, start_pos: int, end_pos: int) -> 'FileScanner':
-        if start_pos >= end_pos:
-            raise ValueError("start_pos must be less than end_pos")
+        validate_slice(start_pos, end_pos)
+        if self.table.is_primary_key_table:
+            raise NotImplementedError("Primary key tables do not support with_slice(); use with_shard instead")
         if self.idx_of_this_subtask is not None:
-            raise Exception("with_slice and with_shard cannot be used simultaneously")
+            raise ValueError("with_slice and with_shard cannot be used simultaneously")
         self.start_pos_of_this_subtask = start_pos
         self.end_pos_of_this_subtask = end_pos
         return self
@@ -723,11 +751,12 @@ class FileScanner:
         limited_splits: List[DataSplit] = []
         for split in splits:
             merged = split.merged_row_count()
-            if merged is not None:
-                limited_splits.append(split)
-                scanned_row_count += merged
-                if scanned_row_count >= self.limit:
-                    return limited_splits
+            if merged is None:
+                return splits
+            limited_splits.append(split)
+            scanned_row_count += merged
+            if scanned_row_count >= self.limit:
+                return limited_splits
         return splits
 
     def _has_non_partition_filter(self) -> bool:
@@ -738,6 +767,18 @@ class FileScanner:
         return not _get_all_fields(self.predicate).issubset(partition_keys)
 
     def _filter_manifest_file(self, file: ManifestFileMeta) -> bool:
+        # explain() counts bucket rejections at entry level, as with the early
+        # bucket filter. Keep reading those entries when collecting scan stats.
+        if self.scan_stats is None and file.min_bucket is not None and file.max_bucket is not None:
+            if self.only_read_real_buckets and file.max_bucket < 0:
+                return False
+            if (self._bucket_selector is not None
+                    and file.min_bucket >= 0
+                    and file.total_buckets is not None
+                    and file.total_buckets > 0
+                    and not self._bucket_selector.may_contain(
+                        file.min_bucket, file.max_bucket, file.total_buckets)):
+                return False
         if not self.partition_key_predicate:
             return True
         return self.partition_key_predicate.test_by_simple_stats(
@@ -804,6 +845,8 @@ class FileScanner:
         )
 
     def _filter_manifest_entry(self, entry: ManifestEntry) -> bool:
+        if self.is_streaming and entry.kind != 0:
+            raise ValueError("Incremental delta manifests must contain only ADD entries")
         stats = self.scan_stats
         if stats is not None:
             stats.entries_total += 1
@@ -845,7 +888,7 @@ class FileScanner:
 
         # Apply evolution to stats
         if self.table.is_primary_key_table:
-            if self.deletion_vectors_enabled and entry.file.level == 0:  # do not read level 0 file
+            if self.skip_level0 and entry.file.level == 0:
                 return False
             if self.primary_key_predicate:
                 if not self.primary_key_predicate.test_by_simple_stats(
@@ -853,9 +896,9 @@ class FileScanner:
                     entry.file.row_count
                 ):
                     return False
-            # In DV mode, files within a bucket don't overlap (level 0 excluded above),
-            # so we can safely filter by value stats per file.
-            if self.deletion_vectors_enabled and self.predicate_for_stats:
+            # Java enables value filtering only when batch scans exclude L0.
+            # With L0 present, pruning an update can expose an older value.
+            if self.skip_level0 and self.predicate_for_stats:
                 if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
                     stats_fields = entry.file.write_cols
                 else:
@@ -926,7 +969,7 @@ class FileScanner:
             # Convert to deletion files
             deletion_files = self._to_deletion_files(entry)
             if deletion_files:
-                result[partition_bucket] = deletion_files
+                result.setdefault(partition_bucket, {}).update(deletion_files)
 
         return result
 
@@ -942,10 +985,8 @@ class FileScanner:
         if not index_file.dv_ranges:
             return deletion_files
 
-        # Build deletion file path
-        # Format: manifest/index-manifest-{uuid}
-        index_path = self.table.table_path.rstrip('/') + '/index'
-        dv_file_path = f"{index_path}/{index_file.file_name}"
+        dv_file_path = self.table.path_factory().bucket_index_path(
+            tuple(index_entry.partition.values), index_entry.bucket, index_file, self.table.file_io)
 
         # Convert each DeletionVectorMeta to DeletionFile
         for data_file_name, dv_meta in index_file.dv_ranges.items():

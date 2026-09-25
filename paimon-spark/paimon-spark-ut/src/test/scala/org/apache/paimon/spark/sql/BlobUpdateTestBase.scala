@@ -60,6 +60,34 @@ class BlobUpdateTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: merge-into updates newly added BLOB column") {
+    withTable("s", "t") {
+      sql(
+        "CREATE TABLE t (id INT, name STRING) TBLPROPERTIES " +
+          "('row-tracking.enabled'='true', 'data-evolution.enabled'='true')")
+      sql(
+        "INSERT INTO t SELECT /*+ REPARTITION(1) */ * FROM VALUES " +
+          "(1, 'name1'), (2, 'name2'), (3, 'name3') AS v(id, name)")
+
+      sql("ALTER TABLE t ADD COLUMN picture BINARY COMMENT '__BLOB_FIELD'")
+      sql("INSERT INTO t VALUES (4, 'name4', CAST(NULL AS BINARY))")
+
+      sql("CREATE TABLE s (id INT, picture BINARY)")
+      sql("INSERT INTO s VALUES (1, X'4E4557')")
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.picture = s.picture
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, picture FROM t WHERE id <= 3 ORDER BY id"),
+        Seq(Row(1, Array[Byte](78, 69, 87)), Row(2, null), Row(3, null))
+      )
+    }
+  }
+
   test("Blob: merge-into updates raw-data array blob column") {
     withTable("s", "t") {
       sql("CREATE TABLE t (id INT, name STRING, pictures ARRAY<BINARY>) TBLPROPERTIES " +

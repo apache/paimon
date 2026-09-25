@@ -31,6 +31,11 @@ from pypaimon.ray.data_evolution_merge_transform import (
     vectorized_insert_transform,
     vectorized_matched_transform,
 )
+from pypaimon.ray.partitioning import (
+    _default_hash_shuffle_parallelism,
+    _resolve_num_partitions,
+    _resolve_row_id_num_partitions,
+)
 
 
 def _map_kwargs(
@@ -43,6 +48,26 @@ def _map_kwargs(
     if ray_remote_args:
         kwargs.update(ray_remote_args)
     return kwargs
+
+
+def _resolve_matched_num_partitions(
+    num_partitions: Optional[int],
+    estimated_size_bytes: Optional[int],
+    target_ds,
+) -> int:
+    """Resolve a target-left join from the context sealed on its left input."""
+    if num_partitions is not None:
+        return num_partitions
+
+    data_context = getattr(target_ds, "context", None)
+    default_shuffle = _default_hash_shuffle_parallelism(data_context)
+    return _resolve_num_partitions(
+        num_partitions,
+        estimated_size_bytes,
+        min_partitions=default_shuffle,
+        unknown_num_partitions=default_shuffle,
+        data_context=data_context,
+    )
 
 
 @dataclass(frozen=True)
@@ -543,8 +568,9 @@ def build_matched_update_ds(
     target_pa_schema: pa.Schema,
     update_cols: Sequence[str],
     catalog_options: Dict[str, str],
-    num_partitions: int,
+    num_partitions: Optional[int],
     resolve_target_projection,
+    estimated_size_bytes: Optional[int] = None,
     snapshot_id: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ) -> Tuple:
@@ -565,6 +591,9 @@ def build_matched_update_ds(
 
     target_renamed = target_ds.rename_columns(
         {c: f"t.{c}" for c in target_ds.schema().names}
+    )
+    num_partitions = _resolve_matched_num_partitions(
+        num_partitions, estimated_size_bytes, target_renamed,
     )
     source_cols = _resolve_source_projection(
         clauses, source_on, source_ds.schema().names,
@@ -602,8 +631,9 @@ def build_matched_delete_ds(
     clauses: List[_NormalizedClause],
     target_field_names: Sequence[str],
     catalog_options: Dict[str, str],
-    num_partitions: int,
+    num_partitions: Optional[int],
     resolve_target_projection,
+    estimated_size_bytes: Optional[int] = None,
     snapshot_id: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ) -> Tuple:
@@ -627,6 +657,9 @@ def build_matched_delete_ds(
 
     target_renamed = target_ds.rename_columns(
         {c: f"t.{c}" for c in target_ds.schema().names}
+    )
+    num_partitions = _resolve_matched_num_partitions(
+        num_partitions, estimated_size_bytes, target_renamed,
     )
     source_cols = list(source_ds.schema().names)
     source_renamed = source_ds.rename_columns(
@@ -655,10 +688,13 @@ def distributed_update_apply(
     table,
     write_update_cols: Sequence[str],
     *,
-    num_partitions: int,
+    num_partitions: Optional[int],
     ray_remote_args: Optional[Dict[str, Any]] = None,
     base_snapshot_id: Optional[int] = None,
     collect_row_ids: bool = False,
+    estimated_size_bytes: Optional[int] = None,
+    estimated_num_rows: Optional[int] = None,
+    data_context=None,
 ) -> Tuple[list, int, list]:
     import numpy as np
     import pickle
@@ -696,6 +732,14 @@ def distributed_update_apply(
     sorted_first_row_ids = list(planner.first_row_ids)
     if not sorted_first_row_ids:
         return [], 0, []
+
+    num_partitions = _resolve_row_id_num_partitions(
+        num_partitions,
+        estimated_size_bytes,
+        estimated_num_rows,
+        len(sorted_first_row_ids),
+        data_context=data_context,
+    )
 
     # Pin commit-time conflict check to the snapshot the join was built on,
     # so concurrent commits between read and planner are detected.
@@ -858,21 +902,23 @@ def distributed_read_by_row_id(
     table,
     projection: Sequence[str],
     *,
-    num_partitions: int,
+    num_partitions: Optional[int],
     ray_remote_args: Optional[Dict[str, Any]] = None,
-    base_snapshot_id: Optional[int] = None,
+    estimated_size_bytes: Optional[int] = None,
+    estimated_num_rows: Optional[int] = None,
+    data_context=None,
 ):
     """Read ``projection`` for the ``_ROW_ID``s in ``row_ids_ds``, routing each to its
     owning file and reading only the matched rows via ``IndexedSplit`` slicing (blob
-    resolved). Returns a ``ray.data.Dataset`` of ``(*projection, _ROW_ID)``, or ``None``
-    if the target is empty. Read-side mirror of ``distributed_update_apply``.
+    resolved). ``table`` carries the resolved read snapshot. Returns a
+    ``ray.data.Dataset`` of ``(*projection, _ROW_ID)``, or ``None`` if the target
+    is empty. Read-side mirror of ``distributed_update_apply``.
     """
     import numpy as np
     import uuid
 
     import ray
 
-    from pypaimon.common.options.core_options import CoreOptions
     from pypaimon.globalindex.indexed_split import IndexedSplit
     from pypaimon.read.split import DataSplit
     from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
@@ -888,19 +934,23 @@ def distributed_read_by_row_id(
     # Typed empty block so all output blocks share one schema.
     empty_out = _read_output_schema(table, read_cols).empty_table()
 
-    # Read-only planner (only scans the manifest); pinned to the base snapshot for stable routing.
-    scan_table = (
-        table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
-        if base_snapshot_id is not None else table
-    )
+    # The caller pinned the resolved snapshot, including any retained tag metadata.
     planner = TableUpdateByRowId(
-        scan_table,
+        table,
         "_read_by_row_id_planner_" + uuid.uuid4().hex[:8],
         BATCH_COMMIT_IDENTIFIER,
     )
     sorted_first_row_ids = list(planner.first_row_ids)
     if not sorted_first_row_ids:
         return None
+
+    num_partitions = _resolve_row_id_num_partitions(
+        num_partitions,
+        estimated_size_bytes,
+        estimated_num_rows,
+        len(sorted_first_row_ids),
+        data_context=data_context,
+    )
 
     precomputed_info_ref = ray.put(planner._snapshot_files_info())
     frid_col = "_FIRST_ROW_ID"
@@ -940,7 +990,7 @@ def distributed_read_by_row_id(
             frid_col, pa.array(sorted_arr[idx], type=pa.int64())
         )
 
-    captured_table = scan_table  # read at the same pinned snapshot the planner routed on
+    captured_table = table  # read at the same pinned snapshot the planner routed on
     captured_read_cols = read_cols
     captured_empty = empty_out
 
@@ -1143,7 +1193,7 @@ def build_not_matched_insert_ds(
     )
 
     if target_empty:
-        unmatched = source_renamed
+        unmatched = source_renamed.repartition(num_partitions)
     else:
         target_ds = read_paimon(
             target_identifier, catalog_options,

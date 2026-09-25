@@ -21,7 +21,11 @@ from decimal import Decimal
 import os
 import struct
 import sys
+import threading
+import time
 import types
+import tempfile
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 
@@ -31,6 +35,7 @@ from pypaimon.globalindex.build_plan import (
     split_one_by_contiguous_row_range as _split_one_by_contiguous_row_range,
 )
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
+from pypaimon.globalindex.btree.btree_file_footer import BTreeFileFooter
 from pypaimon.globalindex.key_serializer import create_serializer
 from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
     FULL_TEXT_IDENTIFIER,
@@ -41,7 +46,7 @@ from pypaimon.globalindex.full_text.native_full_text_index_writer import (
 )
 from pypaimon.globalindex.vindex.vindex_vector_index_writer import (
     VindexVectorIndexWriter,
-    _sample_training_vectors,
+    _iter_training_batches,
     native_options,
     train_sample_ratio,
 )
@@ -54,6 +59,7 @@ from pypaimon.tests.data_evolution_test_helpers import (
 )
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
+from pypaimon.write.commit_message import CommitMessage
 
 
 class _FakeFile:
@@ -93,9 +99,26 @@ class _FakeVectorIndexTraining:
 
 class _FakeVectorIndexTrainer:
 
+    def __init__(self, options):
+        self.options = options
+        self.batches = []
+
     @classmethod
-    def train(cls, options, data):
-        return _FakeVectorIndexTraining(options, data)
+    def create(cls, options):
+        return cls(options)
+
+    def add_training_vectors(self, data):
+        self.batches.append(data.copy())
+
+    def finish_training(self):
+        import numpy as np
+        return _FakeVectorIndexTraining(self.options, np.concatenate(self.batches))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
 
 
 class _FakeVectorIndexWriter:
@@ -213,7 +236,10 @@ class GlobalIndexBuildTest(
 
         added = table.create_global_index(
             'id',
-            options={'sorted-index.records-per-range': '2'},
+            options={
+                'sorted-index.records-per-range': '2',
+                'btree-index.bloom-filter.enabled': 'true',
+            },
         )
 
         self.assertEqual(2, added)
@@ -225,6 +251,19 @@ class GlobalIndexBuildTest(
         self.assertEqual({'btree'}, {e.index_file.index_type for e in entries})
         self.assertEqual({0}, {e.index_file.global_index_meta.row_range_start for e in entries})
         self.assertEqual({3}, {e.index_file.global_index_meta.row_range_end for e in entries})
+
+        index_path_factory = table.path_factory().global_index_path_factory()
+        for entry in entries:
+            index_file = entry.index_file
+            index_path = index_file.external_path or index_path_factory.to_path(
+                index_file.file_name)
+            footer_bytes = table.file_io.read_file_range(
+                index_path,
+                index_file.file_size - BTreeFileFooter.ENCODED_LENGTH,
+                BTreeFileFooter.ENCODED_LENGTH,
+            )
+            footer = BTreeFileFooter.read_footer(footer_bytes)
+            self.assertIsNotNone(footer.bloom_filter_handle)
 
         read_builder = table.new_read_builder()
         predicate = read_builder.new_predicate_builder().equal('id', 2)
@@ -415,7 +454,7 @@ class GlobalIndexBuildTest(
                 options={'bitmap-index.compression': 'lz4'},
             )
 
-    def test_sorted_index_records_per_range_matches_java_floating_factor(self):
+    def test_sorted_index_records_per_file_matches_java_floating_factor(self):
         table = self._create_table()
         rows = list(range(12))
         self._write_arrow(table, pa.table(
@@ -430,7 +469,7 @@ class GlobalIndexBuildTest(
 
         added = table.create_global_index(
             'id',
-            options={'sorted-index.records-per-range': '10'},
+            options={'sorted-index.records-per-file': '10'},
         )
 
         self.assertEqual(1, added)
@@ -556,7 +595,8 @@ class GlobalIndexBuildTest(
             ('id', pa.int32()),
             ('embedding', pa.list_(pa.float32())),
         ])
-        table = self._create_table(pa_schema=schema, options=self.table_options)
+        table = self._create_table(pa_schema=schema, options=dict(
+            self.table_options, **{'read.batch-size': '1'}))
         vectors = pa.array(
             [[1.0, 0.0], [0.0, 1.0], None],
             type=pa.list_(pa.float32()),
@@ -610,12 +650,56 @@ class GlobalIndexBuildTest(
             table.path_factory().global_index_path_factory().to_path(
                 entry.index_file.file_name)))
 
+    def test_create_vindex_streaming_failure_cleans_resources(self):
+        from pypaimon.read.table_read import TableRead
+
+        schema = pa.schema([('embedding', pa.list_(pa.float32()))])
+        table = self._create_table(pa_schema=schema, options=dict(
+            self.table_options, **{'read.batch-size': '1'}))
+        self._write_arrow(table, pa.table(
+            {'embedding': [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]]}, schema=schema))
+        snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+        original_write = VindexVectorIndexWriter.write_batch
+        original_batches = TableRead._arrow_batch_generator
+        temp_paths = []
+        closed = []
+        generators = []
+
+        def failing_write(writer, vector, row_id):
+            original_write(writer, vector, row_id)
+            if 1 in row_id.to_pylist():
+                temp_paths.extend([writer._row_id_temp_path, writer._vector_temp_path])
+                raise RuntimeError('injected write failure')
+
+        def tracked_batches(reader, *args):
+            def generate():
+                try:
+                    yield from original_batches(reader, *args)
+                finally:
+                    closed.append(True)
+            generator = generate()
+            generators.append(generator)
+            return generator
+
+        with patch.object(VindexVectorIndexWriter, 'write_batch', failing_write), \
+                patch.object(TableRead, '_arrow_batch_generator', tracked_batches):
+            with self.assertRaisesRegex(RuntimeError, 'injected write failure'):
+                table.create_global_index('embedding', index_type='ivf-flat', options={
+                    'ivf-flat.dimension': '2',
+                })
+
+        self.assertEqual([True], closed)
+        self.assertEqual(2, len(temp_paths))
+        self.assertTrue(all(not os.path.exists(path) for path in temp_paths))
+        self.assertEqual(snapshot_id, table.snapshot_manager().get_latest_snapshot().id)
+
     def test_create_vindex_global_index_respects_row_count_per_shard(self):
         schema = pa.schema([
             ('id', pa.int32()),
             ('embedding', pa.list_(pa.float32())),
         ])
-        table = self._create_table(pa_schema=schema, options=self.table_options)
+        table = self._create_table(pa_schema=schema, options=dict(
+            self.table_options, **{'read.batch-size': '1'}))
         vectors = pa.array(
             [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5], [0.2, 0.8], [0.9, 0.1]],
             type=pa.list_(pa.float32()),
@@ -774,7 +858,8 @@ class GlobalIndexBuildTest(
             ('id', pa.int32()),
             ('content', pa.string()),
         ])
-        table = self._create_table(pa_schema=schema, options=self.table_options)
+        table = self._create_table(pa_schema=schema, options=dict(
+            self.table_options, **{'read.batch-size': '1'}))
         self._write_arrow(table, pa.table(
             {
                 'id': [1, 2, 3],
@@ -963,11 +1048,13 @@ class GlobalIndexBuildTest(
         dv_options['deletion-vectors.enabled'] = 'true'
         dv_table = self._create_table(pa_schema=schema, options=dv_options)
         with self.assertRaisesRegex(ValueError, 'deletion vectors'):
-            dv_table.create_global_index(
+            dv_table.copy({'data-evolution.enabled': 'false'}).create_global_index(
                 'embedding',
                 index_type='ivf-flat',
                 options={'ivf-flat.dimension': '2'},
             )
+        with self.assertRaisesRegex(ValueError, 'deletion vectors'):
+            dv_table.create_global_index('embedding', index_type=FULL_TEXT_IDENTIFIER)
 
     def test_vindex_native_options_follow_java_mapping(self):
         data_type = ArrayType(True, AtomicType('FLOAT'))
@@ -1001,20 +1088,85 @@ class GlobalIndexBuildTest(
         }
 
         rq_result = native_options(
-            data_type, options, 'ivf-rq', 'embedding')
+            data_type, options, 'ivf-rq', 'embedding', {})
         self.assertEqual('ivf_rq', rq_result['index.type'])
         self.assertEqual('5', rq_result['rq.bits'])
         self.assertEqual('96', rq_result['max-bytes-per-vector'])
         self.assertEqual('inner_product', rq_result['metric'])
 
         diskann_result = native_options(
-            data_type, options, 'diskann', 'embedding')
+            data_type, options, 'diskann', 'embedding', {})
         self.assertEqual('diskann', diskann_result['index.type'])
         self.assertEqual(
             'balanced', diskann_result['diskann.build-preset'])
         self.assertEqual('0.0625', diskann_result['pq.code-ratio'])
         self.assertEqual(
             'f16', diskann_result['diskann.raw-vector-encoding'])
+
+    def test_vindex_native_options_support_050_build_options(self):
+        data_type = ArrayType(True, AtomicType('FLOAT'))
+        native_names = {
+            'ivf.coarse-assignment': 'auto',
+            'ivf.pq-encoding': 'auto',
+            'ivf.train.max-points-per-centroid': '32',
+            'pq.train.max-points-per-centroid': '64',
+        }
+
+        result = native_options(
+            data_type, native_names, 'ivf-pq', 'embedding')
+        self.assertEqual('auto', result['ivf.coarse-assignment'])
+        self.assertEqual('auto', result['ivf.pq-encoding'])
+        self.assertEqual('32', result['ivf.train.max-points-per-centroid'])
+        self.assertEqual('64', result['pq.train.max-points-per-centroid'])
+
+        prefixed_names = {
+            'ivf-pq.ivf.coarse-assignment': 'exact',
+            'fields.embedding.ivf.pq-encoding': 'canonical',
+            'ivf-pq.ivf.train.max-points-per-centroid': '16',
+            'fields.embedding.pq.train.max-points-per-centroid': '48',
+        }
+        result = native_options(
+            data_type, prefixed_names, 'ivf-pq', 'embedding')
+        self.assertEqual('exact', result['ivf.coarse-assignment'])
+        self.assertEqual('canonical', result['ivf.pq-encoding'])
+        self.assertEqual('16', result['ivf.train.max-points-per-centroid'])
+        self.assertEqual('48', result['pq.train.max-points-per-centroid'])
+
+        result = native_options(
+            data_type,
+            {'diskann.pq.train.max-points-per-centroid': '24'},
+            'diskann',
+            'embedding',
+        )
+        self.assertEqual('24', result['pq.train.max-points-per-centroid'])
+
+        table_options = {'fields.embedding.ivf.pq-encoding': 'auto'}
+        result = native_options(
+            data_type,
+            table_options,
+            'ivf-pq',
+            'embedding',
+            {'ivf.pq-encoding': 'canonical'},
+        )
+        self.assertEqual('canonical', result['ivf.pq-encoding'])
+        result = native_options(
+            data_type, table_options, 'ivf-flat', 'embedding', {})
+        self.assertNotIn('ivf.pq-encoding', result)
+
+        with self.assertRaisesRegex(ValueError, 'ivf-flat.ivf.pq-encoding'):
+            native_options(
+                data_type,
+                {'ivf-flat.ivf.pq-encoding': 'canonical'},
+                'ivf-flat',
+                'embedding',
+            )
+        with self.assertRaisesRegex(ValueError, 'diskann.ivf.coarse-assignment'):
+            native_options(
+                data_type,
+                {'diskann.ivf.coarse-assignment': 'exact'},
+                'diskann',
+                'embedding',
+            )
 
     def test_vindex_training_sample_ratio(self):
         options = {
@@ -1025,10 +1177,23 @@ class GlobalIndexBuildTest(
             0.25, train_sample_ratio(options, 'ivf-rq', 'embedding'))
         self.assertEqual(
             0.5, train_sample_ratio(options, 'ivf-rq', 'other'))
+        self.assertEqual(
+            0.5,
+            train_sample_ratio(
+                {'fields.embedding.train.sample-ratio': '0.75'},
+                'ivf-rq',
+                'embedding',
+                {'ivf-rq.train.sample-ratio': '0.5'},
+            ),
+        )
 
         import numpy as np
         vectors = np.arange(20, dtype=np.float32).reshape(10, 2)
-        sampled = _sample_training_vectors(np, vectors, 0.4)
+        with tempfile.TemporaryFile() as vector_file:
+            vectors.tofile(vector_file)
+            vector_file.flush()
+            sampled = np.concatenate(list(_iter_training_batches(
+                np, vector_file, 10, 2, 0.4, batch_size=3)))
         self.assertEqual(
             [[0.0, 1.0], [4.0, 5.0], [10.0, 11.0], [14.0, 15.0]],
             sampled.tolist(),
@@ -1179,6 +1344,334 @@ class GlobalIndexBuildTest(
                     self.assertAlmostEqual(value, actual, places=12)
                 else:
                     self.assertEqual(value, actual)
+
+
+class GenericIndexStreamingTest(unittest.TestCase):
+
+    schema = pa.schema([
+        ('embedding', pa.list_(pa.float32())),
+        ('_ROW_ID', pa.int64()),
+    ])
+
+    def setUp(self):
+        self.builder = object.__new__(GlobalIndexBuilder)
+        self.builder._table = Mock()
+        self.builder._core_options = Mock()
+        self.builder._core_options.global_index_row_count_per_shard.return_value = 10
+        self.builder._core_options.global_index_build_parallelism.return_value = 1
+        self.builder._index_columns = ['embedding']
+        self.builder._index_type = 'ivf-flat'
+        self.writer = Mock()
+        self.writer.finish.return_value = []
+        self.builder._create_generic_index_writer = Mock(return_value=self.writer)
+        self.read = Mock()
+        self.read.to_arrow.side_effect = AssertionError('Must not materialize a shard')
+        self.events = []
+
+    def _batch(self, values, row_ids):
+        return pa.RecordBatch.from_arrays([
+            pa.array(values, type=self.schema.field(0).type),
+            pa.array(row_ids, type=pa.int64()),
+        ], schema=self.schema)
+
+    def _build(self, batches):
+        def generate():
+            try:
+                for batch in batches:
+                    self.events.append('read')
+                    yield batch
+            finally:
+                self.events.append('reader closed')
+
+        # Retain the generator: cleanup must be explicit, not depend on GC.
+        self.generator = generate()
+        reader = pa.RecordBatchReader.from_batches(self.schema, self.generator)
+        self.read._new_arrow_batch_reader.return_value = reader, self.generator
+        module = 'pypaimon.globalindex.create_global_index'
+        with patch(module + '._split_by_global_index_shard', return_value=[
+            (_FakeSplit([]), Range(10, 19)),
+        ]), patch(module + '._to_index_manifest_entries', return_value=[]):
+            return self.builder._build_generic_index(
+                [], [], Mock(), self.read, '/unused')
+
+    def test_batches_are_written_before_reading_the_next_batch(self):
+        self.builder._index_type = 'lucene'
+        written = []
+
+        def write(value, row_id):
+            self.events.append('write')
+            written.append((value, row_id))
+
+        def finish():
+            self.assertEqual('reader closed', self.events[-1])
+            return []
+
+        self.writer.write.side_effect = write
+        self.writer.finish.side_effect = finish
+        self._build([
+            self._batch([], []),
+            self._batch([[9.0], [10.0], None], [9, 10, 11]),
+            self._batch([[19.0], [20.0]], [19, 20]),
+        ])
+        self.assertEqual([([10.0], 0), (None, 1), ([19.0], 9)], written)
+        self.assertEqual([
+            'read', 'read', 'write', 'write', 'read', 'write', 'reader closed',
+        ], self.events)
+        self.writer.finish.assert_called_once()
+        self.writer.close.assert_called_once()
+        self.read.to_arrow.assert_not_called()
+
+    def test_vector_batches_are_bounded_and_written_before_next_read(self):
+        written = []
+
+        def write_batch(vectors, row_ids):
+            self.assertLessEqual(len(row_ids), 2)
+            self.events.append('write batch')
+            written.extend(zip(vectors.to_pylist(), row_ids.to_pylist()))
+
+        self.writer.write_batch.side_effect = write_batch
+        with patch('pypaimon.globalindex.create_global_index.ADD_BATCH_SIZE', 2):
+            self._build([
+                self._batch([], []),
+                self._batch([[9.0], [10.0], None, [12.0]], [9, 10, 11, 12]),
+                self._batch([[19.0], [20.0]], [19, 20]),
+            ])
+        self.assertEqual([([10.0], 0), (None, 1), ([12.0], 2), ([19.0], 9)], written)
+        self.assertEqual([
+            'read', 'read', 'write batch', 'write batch', 'read',
+            'write batch', 'reader closed',
+        ], self.events)
+        self.writer.write.assert_not_called()
+        self.writer.finish.assert_called_once()
+        self.writer.close.assert_called_once()
+        self.read.to_arrow.assert_not_called()
+
+    def test_empty_input_does_not_create_a_writer(self):
+        for batches in ([], [self._batch([], [])]):
+            with self.subTest(batches=len(batches)):
+                self.assertEqual([], self._build(batches))
+                self.builder._create_generic_index_writer.assert_not_called()
+                self.assertEqual('reader closed', self.events[-1])
+
+    def test_failures_close_reader_and_writer(self):
+        for failure in ('create', 'read', 'write', 'finish', 'null_row_id'):
+            with self.subTest(failure=failure):
+                self.setUp()
+                error = RuntimeError('injected failure')
+                if failure == 'create':
+                    self.builder._create_generic_index_writer.side_effect = error
+                elif failure in ('write', 'finish'):
+                    getattr(self.writer, 'write_batch' if failure == 'write' else failure).side_effect = error
+
+                def batches():
+                    yield self._batch([[10.0]], [10])
+                    if failure == 'read':
+                        raise error
+                    yield self._batch([[11.0]], [
+                        None if failure == 'null_row_id' else 11])
+
+                exception = ValueError if failure == 'null_row_id' else RuntimeError
+                message = '_ROW_ID is null' if failure == 'null_row_id' else 'injected failure'
+                with self.assertRaisesRegex(exception, message):
+                    self._build(batches())
+                self.assertEqual('reader closed', self.events[-1])
+                if failure == 'create':
+                    self.writer.close.assert_not_called()
+                else:
+                    self.writer.close.assert_called_once()
+                if failure != 'finish':
+                    self.writer.finish.assert_not_called()
+
+    def test_build_parallelism_defaults_to_one_and_accepts_override(self):
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.common.options.options import Options
+
+        self.assertEqual(
+            1, CoreOptions(Options({})).global_index_build_parallelism())
+        self.assertEqual(
+            3,
+            CoreOptions(Options({
+                'global-index.build.parallelism': '3',
+            })).global_index_build_parallelism(),
+        )
+
+    def test_build_parallelism_must_be_positive(self):
+        self.builder._core_options.global_index_build_parallelism.return_value = 0
+        with self.assertRaisesRegex(
+                ValueError, "global-index.build.parallelism.*greater than 0"):
+            self._build([self._batch([[10.0]], [10])])
+
+    def test_parallel_build_is_bounded_and_keeps_shard_order(self):
+        self.builder._core_options.global_index_build_parallelism.return_value = 2
+        shards = [
+            (_FakeSplit([]), Range(start, start + 9))
+            for start in (0, 10, 20, 30)
+        ]
+        lock = threading.Lock()
+        first_workers = threading.Barrier(2)
+        active = 0
+        max_active = 0
+
+        def build_shard(_split, row_range, *_args):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                if row_range.from_ in (0, 10):
+                    first_workers.wait(timeout=2)
+                time.sleep((40 - row_range.from_) / 1000.0)
+                return CommitMessage(
+                    partition=(row_range.from_,),
+                    bucket=0,
+                    new_files=[],
+                )
+            finally:
+                with lock:
+                    active -= 1
+
+        self.builder._build_generic_shard = Mock(side_effect=build_shard)
+        module = 'pypaimon.globalindex.create_global_index'
+        with patch(module + '._split_by_global_index_shard', return_value=shards):
+            messages = self.builder._build_generic_index(
+                [], [], Mock(), self.read, '/unused')
+
+        self.assertEqual(2, max_active)
+        self.assertEqual(
+            [(0,), (10,), (20,), (30,)],
+            [message.partition for message in messages],
+        )
+
+    def test_parallel_failure_deletes_completed_uncommitted_indexes(self):
+        self.builder._core_options.global_index_build_parallelism.return_value = 2
+        shards = [
+            (_FakeSplit([]), Range(0, 9)),
+            (_FakeSplit([]), Range(10, 19)),
+        ]
+        first_started = threading.Event()
+        failure_released = threading.Event()
+        index_file = types.SimpleNamespace(
+            external_path='/index/completed.index',
+            file_name='completed.index',
+        )
+        completed = CommitMessage(
+            partition=(),
+            bucket=0,
+            new_files=[],
+            index_adds=[types.SimpleNamespace(index_file=index_file)],
+        )
+
+        def build_shard(_split, row_range, *_args):
+            if row_range.from_ == 0:
+                first_started.set()
+                self.assertTrue(failure_released.wait(timeout=2))
+                return completed
+            self.assertTrue(first_started.wait(timeout=2))
+            failure_released.set()
+            raise RuntimeError('injected shard failure')
+
+        self.builder._build_generic_shard = Mock(side_effect=build_shard)
+        module = 'pypaimon.globalindex.create_global_index'
+        with patch(module + '._split_by_global_index_shard', return_value=shards), \
+                self.assertRaisesRegex(RuntimeError, 'injected shard failure'):
+            self.builder._build_generic_index(
+                [], [], Mock(), self.read, '/unused')
+
+        self.builder._table.file_io.delete_quietly.assert_called_once_with(
+            '/index/completed.index')
+
+    def test_submit_failure_deletes_indexes_built_before_the_failure(self):
+        # ThreadPoolExecutor.submit() enqueues the work item before starting an
+        # extra worker, so a submission that raises can still have its shard run
+        # on an already running worker. Rollback must cover those outputs.
+        self.builder._core_options.global_index_build_parallelism.return_value = 2
+        shards = [
+            (_FakeSplit([]), Range(start, start + 9))
+            for start in (0, 10, 20, 30)
+        ]
+        started = threading.Semaphore(0)
+        release = threading.Event()
+
+        def build_shard(_split, row_range, *_args):
+            started.release()
+            self.assertTrue(release.wait(timeout=5))
+            index_file = types.SimpleNamespace(
+                external_path='/index/shard-%d.index' % row_range.from_,
+                file_name='shard-%d.index' % row_range.from_,
+            )
+            return CommitMessage(
+                partition=(row_range.from_,),
+                bucket=0,
+                new_files=[],
+                index_adds=[types.SimpleNamespace(index_file=index_file)],
+            )
+
+        self.builder._build_generic_shard = Mock(side_effect=build_shard)
+
+        real_start = threading.Thread.start
+        submits = []
+
+        def failing_start(thread):
+            if thread.name.startswith('paimon-global-index-build'):
+                submits.append(thread.name)
+                if len(submits) == 2:
+                    # The first worker already holds a queued shard; releasing it
+                    # here proves rollback sees work accepted before the failure.
+                    self.assertTrue(started.acquire(timeout=5))
+                    release.set()
+                    raise RuntimeError("can't start new thread")
+            return real_start(thread)
+
+        module = 'pypaimon.globalindex.create_global_index'
+        with patch(module + '._split_by_global_index_shard', return_value=shards), \
+                patch.object(threading.Thread, 'start', failing_start), \
+                self.assertRaisesRegex(RuntimeError, "can't start new thread"):
+            self.builder._build_generic_index(
+                [], [], Mock(), self.read, '/unused')
+
+        deleted = {
+            call[0][0]
+            for call in self.builder._table.file_io.delete_quietly.call_args_list
+        }
+        # Every shard that produced an index file is rolled back, and nothing
+        # that never ran is deleted.
+        built = {
+            '/index/shard-%d.index' % call[0][1].from_
+            for call in self.builder._build_generic_shard.call_args_list
+        }
+        self.assertTrue(built)
+        self.assertEqual(built, deleted)
+
+    def test_serial_failure_deletes_completed_uncommitted_indexes(self):
+        shards = [
+            (_FakeSplit([]), Range(0, 9)),
+            (_FakeSplit([]), Range(10, 19)),
+        ]
+        index_file = types.SimpleNamespace(
+            external_path='/index/completed.index',
+            file_name='completed.index',
+        )
+        completed = CommitMessage(
+            partition=(),
+            bucket=0,
+            new_files=[],
+            index_adds=[types.SimpleNamespace(index_file=index_file)],
+        )
+
+        def build_shard(_split, row_range, *_args):
+            if row_range.from_ == 0:
+                return completed
+            raise RuntimeError('injected shard failure')
+
+        self.builder._build_generic_shard = Mock(side_effect=build_shard)
+        module = 'pypaimon.globalindex.create_global_index'
+        with patch(module + '._split_by_global_index_shard', return_value=shards), \
+                self.assertRaisesRegex(RuntimeError, 'injected shard failure'):
+            self.builder._build_generic_index(
+                [], [], Mock(), self.read, '/unused')
+
+        self.builder._table.file_io.delete_quietly.assert_called_once_with(
+            '/index/completed.index')
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@
 
 import logging
 from typing import Any, Callable, Dict, List, Optional, Union
-from pypaimon.api.api_response import GetTableResponse, PagedList, ErrorResponse
+from pypaimon.api.api_response import ErrorResponse, GetTableResponse, GetTagResponse, PagedList, Partition
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.catalog.catalog_exception import IllegalArgumentError, IllegalStateError
 from pypaimon.api.rest_exception import (NoSuchResourceException, AlreadyExistsException,
@@ -39,20 +39,26 @@ from pypaimon.catalog.database import Database
 from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.catalog.rest.table_metadata import TableMetadata
+from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.common.options.config import CatalogOptions, FuseOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.filesystem.caching_file_io import CachingFileIO
 from pypaimon.common.identifier import Identifier
+from pypaimon.common.json_util import JSON
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
+from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.format.format_table import FormatTable, Format
 from pypaimon.table.iceberg.iceberg_table import IcebergTable
+from pypaimon.table.instant import Instant
 from pypaimon.table.object.object_table import ObjectTable
+from pypaimon.table.table import Table
+
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +150,8 @@ class RESTCatalog(Catalog):
                              database_name_pattern: Optional[str] = None) -> PagedList[str]:
         return self.rest_api.list_databases_paged(max_results, page_token, database_name_pattern)
 
-    def create_database(self, name: str, ignore_if_exists: bool, properties: Dict[str, str] = None):
+    def create_database(self, name: str, ignore_if_exists: bool,
+                        properties: Optional[Dict[str, str]] = None) -> None:
         try:
             self.rest_api.create_database(name, properties)
         except AlreadyExistsException as e:
@@ -167,7 +174,7 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise DatabaseNoPermissionException(name) from e
 
-    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False) -> None:
         if not cascade:
             try:
                 tables = self.list_tables(name)
@@ -189,7 +196,7 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise DatabaseNoPermissionException(name) from e
 
-    def alter_database(self, name: str, changes: List[PropertyChange]):
+    def alter_database(self, name: str, changes: List[PropertyChange]) -> None:
         try:
             set_properties, remove_keys = PropertyChange.get_set_properties_to_remove_keys(changes)
             self.rest_api.alter_database(name, list(remove_keys), set_properties)
@@ -227,14 +234,14 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise DatabaseNoPermissionException(database_name) from e
 
-    def get_table(self, identifier: Union[str, Identifier]):
+    def get_table(self, identifier: Union[str, Identifier]) -> Table:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         if identifier.is_system_table():
             return self._load_system_table(identifier)
         return self._load_data_table(identifier)
 
-    def _load_data_table(self, identifier: Identifier):
+    def _load_data_table(self, identifier: Identifier) -> Union[FormatTable, IcebergTable, ObjectTable, FileStoreTable]:
         return self.load_table(
             identifier,
             lambda path: self.file_io_for_data(path, identifier),
@@ -242,7 +249,7 @@ class RESTCatalog(Catalog):
             self.load_table_metadata,
         )
 
-    def _load_system_table(self, identifier: Identifier):
+    def _load_system_table(self, identifier: Identifier) -> Table:
         from pypaimon.table.system import system_table_loader
 
         base_identifier = Identifier.create(
@@ -258,7 +265,7 @@ class RESTCatalog(Catalog):
             raise TableNotExistException(identifier)
         return sys_table
 
-    def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
+    def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
@@ -267,7 +274,8 @@ class RESTCatalog(Catalog):
             if not ignore_if_exists:
                 raise TableAlreadyExistException(identifier) from e
 
-    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+    def rename_table(self, source_identifier: Union[str, Identifier],
+                     target_identifier: Union[str, Identifier]) -> None:
         if not isinstance(source_identifier, Identifier):
             source_identifier = Identifier.from_string(source_identifier)
         if not isinstance(target_identifier, Identifier):
@@ -281,7 +289,7 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise TableNoPermissionException(source_identifier) from e
 
-    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
+    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
@@ -342,7 +350,7 @@ class RESTCatalog(Catalog):
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
             partition_name_pattern: Optional[str] = None,
-    ):
+    ) -> PagedList[Partition]:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
@@ -362,7 +370,7 @@ class RESTCatalog(Catalog):
         identifier: Union[str, Identifier],
         changes: List[SchemaChange],
         ignore_if_not_exists: bool = False
-    ):
+    ) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
@@ -373,7 +381,8 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
 
-    def rollback_to(self, identifier, instant, from_snapshot=None):
+    def rollback_to(self, identifier: Union[str, Identifier], instant: Instant,
+                    from_snapshot: Optional[int] = None) -> None:
         """Rollback table by the given identifier and instant.
 
         Args:
@@ -401,7 +410,7 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
 
-    def load_snapshot(self, identifier: Union[str, Identifier]) -> Optional['TableSnapshot']:
+    def load_snapshot(self, identifier: Union[str, Identifier]) -> Optional[TableSnapshot]:
         """Load the latest snapshot for table.
 
         Args:
@@ -547,7 +556,7 @@ class RESTCatalog(Catalog):
         except BadRequestException as e:
             raise IllegalArgumentError(str(e)) from e
 
-    def get_tag(self, identifier: Union[str, Identifier], tag_name: str):
+    def get_tag(self, identifier: Union[str, Identifier], tag_name: str) -> GetTagResponse:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
@@ -664,7 +673,8 @@ class RESTCatalog(Catalog):
         return TableMetadata(
             schema=schema.copy(options),
             is_external=response.get_is_external(),
-            uuid=response.get_id()
+            uuid=response.get_id(),
+            rest_table_response=JSON.to_json(response)
         )
 
     def file_io_from_options(self, table_path: str) -> FileIO:
@@ -695,7 +705,7 @@ class RESTCatalog(Catalog):
                    internal_file_io: Callable[[str], Any],
                    external_file_io: Callable[[str], Any],
                    metadata_loader: Callable[[Identifier], TableMetadata],
-                   ):
+                   ) -> Union[FormatTable, IcebergTable, ObjectTable, FileStoreTable]:
         metadata = metadata_loader(identifier)
         schema = metadata.schema
         table_type = schema.options.get(CoreOptions.TYPE.key(), "").strip().lower()
@@ -710,7 +720,8 @@ class RESTCatalog(Catalog):
             identifier=identifier,
             uuid=metadata.uuid,
             catalog_loader=self.catalog_loader(),
-            supports_version_management=True  # REST catalogs support version management
+            supports_version_management=True,
+            rest_table_response=getattr(metadata, 'rest_table_response', None)
         )
         # Use the path from server response directly (do not trim scheme)
         table_path = schema.options.get(CoreOptions.PATH.key())
@@ -788,8 +799,8 @@ class RESTCatalog(Catalog):
         """Create FileStoreTable with dynamic options and catalog environment"""
         return FileStoreTable(file_io, catalog_environment.identifier, table_path, table_schema, catalog_environment)
 
-    def auth_table_query(self, identifier, select=None):
-        from pypaimon.catalog.table_query_auth import TableQueryAuthResult
+    def auth_table_query(self, identifier: Identifier,
+                         select: Optional[List[str]] = None) -> TableQueryAuthResult:
         try:
             response = self.rest_api.auth_table_query(identifier, select)
             return TableQueryAuthResult(response.filter, response.column_masking)

@@ -27,11 +27,11 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.fs.FileIO;
 
 import java.io.Serializable;
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 /** Columnar array to support access to vector column data. */
@@ -131,12 +131,14 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
         }
     }
 
+    /** Returns a view of the binary value without copying its column-vector bytes. */
+    public ByteBuffer getBinaryBuffer(int pos) {
+        return ((BytesColumnVector) data).getByteBuffer(offset + pos);
+    }
+
     @Override
     public Variant getVariant(int pos) {
-        InternalRow row = getRow(pos, 2);
-        byte[] value = row.getBinary(0);
-        byte[] metadata = row.getBinary(1);
-        return new GenericVariant(value, metadata);
+        return Variant.fromRow(getRow(pos, 2));
     }
 
     @Override

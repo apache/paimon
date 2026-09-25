@@ -231,8 +231,14 @@ public class HiveSplitGenerator {
 
     private static Long computeSplitSize(
             JobConf jobConf, List<DataSplit> splits, int numSplits, long openCostInBytes) {
-        long maxSize = HiveConf.getLongVar(jobConf, HiveConf.ConfVars.MAPREDMAXSPLITSIZE);
-        long minSize = HiveConf.getLongVar(jobConf, HiveConf.ConfVars.MAPREDMINSPLITSIZE);
+        long maxSize =
+                HiveConf.getLongVar(
+                        jobConf,
+                        HiveConf.getConfVars("mapreduce.input.fileinputformat.split.maxsize"));
+        long minSize =
+                HiveConf.getLongVar(
+                        jobConf,
+                        HiveConf.getConfVars("mapreduce.input.fileinputformat.split.minsize"));
         long avgSize;
         long splitSize;
         if (numSplits > 0) {

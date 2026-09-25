@@ -76,6 +76,17 @@ public class FlinkAnalyzeTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testAnalyzeAllNullDecimalColumn() throws Catalog.TableNotExistException {
+        sql("CREATE TABLE T (id INT, amount DECIMAL(10, 2))");
+        sql("INSERT INTO T VALUES (1, CAST(NULL AS DECIMAL(10, 2)))");
+
+        sql("ANALYZE TABLE T COMPUTE STATISTICS FOR ALL COLUMNS");
+
+        ColStats<?> decimalStats = paimonTable("T").statistics().get().colStats().get("amount");
+        assertThat(decimalStats).isEqualTo(ColStats.newColStats(1, 0L, null, null, 1L, null, null));
+    }
+
+    @Test
     public void testAnalyzeTableColumn() throws Catalog.TableNotExistException {
         sql(
                 "CREATE TABLE T ("

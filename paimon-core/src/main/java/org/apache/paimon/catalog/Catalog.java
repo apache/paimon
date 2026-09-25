@@ -31,6 +31,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
@@ -881,6 +882,37 @@ public interface Catalog extends AutoCloseable {
     }
 
     /**
+     * Return the schema of a table for the given version. The version can be {@code EARLIEST},
+     * {@code LATEST}, or a schema ID.
+     *
+     * @param identifier path of the table
+     * @param version version of the schema
+     * @return the requested schema
+     * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not support loading schemas
+     */
+    default Optional<TableSchema> loadSchema(Identifier identifier, String version)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Get a paged schema list of a table in descending schema ID order.
+     *
+     * @param identifier path of the table
+     * @param maxResults maximum number of results, or {@code null} for the server default
+     * @param pageToken token from the previous response, or {@code null} for the first page
+     * @return schemas and the token for the next page
+     * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not support listing schemas
+     */
+    default PagedList<TableSchema> listSchemasPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
      * Create a new branch for this table. By default, an empty branch will be created using the
      * latest schema. If you provide {@code #fromTag}, a branch will be created from the tag and the
      * data files will be inherited from it.
@@ -1072,35 +1104,34 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException {}
 
     /**
-     * Create partitions of the specify table, with explicit existence semantics and optionally
-     * reporting statistics for them in the same call.
+     * Create partitions atomically unless existing entries are ignored, with optional statistics
+     * and position-aligned options.
      *
-     * <p>The statistics are matched to {@code partitions} by {@link PartitionStatistics#spec()}, so
-     * they may cover only some of them, and {@code replaceStatistics} says whether they replace
-     * what the catalog already holds or add to it. What decides whether they survive is whether a
-     * catalog overrides this method: one that does not registers the partitions exactly as {@link
-     * #createPartitions(Identifier, List)} does and drops the report, however much of it the
-     * catalog could have stored, and for a catalog that keeps no partitions at all that means it
-     * does nothing.
-     *
-     * @param identifier path of the table to create partitions
-     * @param partitions partitions to be created
-     * @param ignoreIfExists if false, fail when any partition already exists and apply none of the
-     *     batch; if true, behave like {@link #createPartitions(Identifier, List)}
-     * @param statistics statistics to report, or null to report none
-     * @param replaceStatistics whether the report replaces the stored values rather than adding to
-     *     them; ignored when {@code statistics} is null
-     * @throws TableNotExistException if the table does not exist
-     * @throws UnsupportedOperationException if {@code ignoreIfExists} is false and the catalog does
-     *     not implement strict creation, which is what the default here does
+     * <p>For an existing partition, omitting {@code path} keeps its location, and naming the
+     * partition's own default directory returns it there without deleting data, which needs
+     * replacement statistics for that partition. Additive statistics are rejected for a Format
+     * Table partition that already has a custom location. Each call is atomic on its own.
      */
     default void createPartitions(
             Identifier identifier,
             List<Map<String, String>> partitions,
             boolean ignoreIfExists,
             @Nullable List<PartitionStatistics> statistics,
-            boolean replaceStatistics)
+            boolean replaceStatistics,
+            @Nullable List<Map<String, String>> partitionOptions)
             throws TableNotExistException {
+        if (partitionOptions != null) {
+            if (partitionOptions.size() != partitions.size() || partitionOptions.contains(null)) {
+                throw new IllegalArgumentException(
+                        "Partition options must contain one non-null map per partition.");
+            }
+            if (partitionOptions.stream().anyMatch(options -> !options.isEmpty())) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Catalog %s does not support partition options.",
+                                getClass().getName()));
+            }
+        }
         if (!ignoreIfExists) {
             throw new UnsupportedOperationException(
                     String.format(

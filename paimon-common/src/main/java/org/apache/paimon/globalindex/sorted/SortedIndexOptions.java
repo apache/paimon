@@ -24,11 +24,12 @@ import org.apache.paimon.options.ConfigOptions;
 /** Options for sorted global index build. */
 public class SortedIndexOptions {
 
-    public static final ConfigOption<Long> SORTED_INDEX_RECORDS_PER_RANGE =
-            ConfigOptions.key("sorted-index.records-per-range")
+    public static final ConfigOption<Long> SORTED_INDEX_RECORDS_PER_FILE =
+            ConfigOptions.key("sorted-index.records-per-file")
                     .longType()
-                    .defaultValue(10_000_000L)
-                    .withFallbackKeys("btree-index.records-per-range")
+                    .defaultValue(25_000_000L)
+                    .withFallbackKeys(
+                            "sorted-index.records-per-range", "btree-index.records-per-range")
                     .withDescription("The expected number of records per sorted index file.");
 
     public static final ConfigOption<Integer> SORTED_INDEX_BUILD_MAX_PARALLELISM =

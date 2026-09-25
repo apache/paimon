@@ -26,10 +26,11 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
-import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.utils.FileStorePathFactory;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -49,7 +50,8 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
             IndexFileHandler indexFileHandler,
             StatsFileHandler statsFileHandler,
             boolean cleanEmptyDirectories,
-            int fileOperationThreadNum) {
+            int fileOperationThreadNum,
+            @Nullable Integer manifestReadParallelism) {
         super(
                 fileIO,
                 pathFactory,
@@ -58,7 +60,8 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
                 indexFileHandler,
                 statsFileHandler,
                 cleanEmptyDirectories,
-                fileOperationThreadNum);
+                fileOperationThreadNum,
+                manifestReadParallelism);
     }
 
     @Override
@@ -96,17 +99,17 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
             // base manifests
             if (manifestList.exists(skippingSnapshot.baseManifestList())) {
                 skippingSet.add(skippingSnapshot.baseManifestList());
-                manifestList.read(skippingSnapshot.baseManifestList()).stream()
-                        .map(ManifestFileMeta::fileName)
-                        .forEach(skippingSet::add);
+                manifestList
+                        .read(skippingSnapshot.baseManifestList())
+                        .forEach(manifest -> addManifestToSkippingSet(skippingSet, manifest));
             }
 
             // delta manifests
             if (manifestList.exists(skippingSnapshot.deltaManifestList())) {
                 skippingSet.add(skippingSnapshot.deltaManifestList());
-                manifestList.read(skippingSnapshot.deltaManifestList()).stream()
-                        .map(ManifestFileMeta::fileName)
-                        .forEach(skippingSet::add);
+                manifestList
+                        .read(skippingSnapshot.deltaManifestList())
+                        .forEach(manifest -> addManifestToSkippingSet(skippingSet, manifest));
             }
 
             // index manifests

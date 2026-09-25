@@ -25,6 +25,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.tag.Tag;
@@ -267,8 +268,10 @@ public class FileSystemBranchManager implements BranchManager {
     }
 
     private void validateLatestSchema(String sourceBranch, String targetBranch) {
-        SchemaManager sourceSchemaMgr = new SchemaManager(fileIO, tablePath, sourceBranch);
-        SchemaManager targetSchemaMgr = new SchemaManager(fileIO, tablePath, targetBranch);
+        SchemaManager sourceSchemaMgr =
+                new FileSystemSchemaManager(fileIO, tablePath, sourceBranch);
+        SchemaManager targetSchemaMgr =
+                new FileSystemSchemaManager(fileIO, tablePath, targetBranch);
         TableSchema sourceSchema = sourceSchemaMgr.latest().get();
         TableSchema targetSchema = targetSchemaMgr.latest().get();
         checkArgument(
@@ -280,8 +283,10 @@ public class FileSystemBranchManager implements BranchManager {
 
     private void validateMergeFileSchemas(
             String sourceBranch, String targetBranch, List<ManifestEntry> filesToMerge) {
-        SchemaManager sourceSchemaMgr = new SchemaManager(fileIO, tablePath, sourceBranch);
-        SchemaManager targetSchemaMgr = new SchemaManager(fileIO, tablePath, targetBranch);
+        SchemaManager sourceSchemaMgr =
+                new FileSystemSchemaManager(fileIO, tablePath, sourceBranch);
+        SchemaManager targetSchemaMgr =
+                new FileSystemSchemaManager(fileIO, tablePath, targetBranch);
 
         for (Long schemaId :
                 filesToMerge.stream()
@@ -307,7 +312,8 @@ public class FileSystemBranchManager implements BranchManager {
     }
 
     private void validateAppendOnly(String sourceBranch, String targetBranch) {
-        SchemaManager sourceSchemaMgr = new SchemaManager(fileIO, tablePath, sourceBranch);
+        SchemaManager sourceSchemaMgr =
+                new FileSystemSchemaManager(fileIO, tablePath, sourceBranch);
         TableSchema sourceSchema = sourceSchemaMgr.latest().get();
         checkArgument(
                 sourceSchema.primaryKeys().isEmpty(),
@@ -315,7 +321,8 @@ public class FileSystemBranchManager implements BranchManager {
                         + "but branch '%s' has primary keys.",
                 sourceBranch);
 
-        SchemaManager targetSchemaMgr = new SchemaManager(fileIO, tablePath, targetBranch);
+        SchemaManager targetSchemaMgr =
+                new FileSystemSchemaManager(fileIO, tablePath, targetBranch);
         TableSchema targetSchema = targetSchemaMgr.latest().get();
         checkArgument(
                 targetSchema.primaryKeys().isEmpty(),
@@ -369,7 +376,7 @@ public class FileSystemBranchManager implements BranchManager {
 
     private void validateNoDataEvolution(String sourceBranch, String targetBranch) {
         for (String branch : new String[] {sourceBranch, targetBranch}) {
-            SchemaManager sm = new SchemaManager(fileIO, tablePath, branch);
+            SchemaManager sm = new FileSystemSchemaManager(fileIO, tablePath, branch);
             TableSchema schema = sm.latest().get();
             CoreOptions opts = new CoreOptions(schema.options());
             checkArgument(
@@ -393,7 +400,7 @@ public class FileSystemBranchManager implements BranchManager {
     }
 
     private boolean isRowTrackingEnabled(String branch) {
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath, branch);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath, branch);
         TableSchema schema = schemaManager.latest().get();
         return new CoreOptions(schema.options()).rowTrackingEnabled();
     }

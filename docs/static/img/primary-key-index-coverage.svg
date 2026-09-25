@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="538" viewBox="0 0 960 538" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">What happens to files without an index?</title>
+<desc id="desc">Two files are already visible to a batch scan: F1 has an active index group and F2 does not. Scalar and array predicates use the F1 index and scan F2. Vector fast and Full Text fast search indexed files only. Vector full or detail combines ANN candidates from F1 with exact evaluation of F2.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="958" height="536" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">What happens to files without an index?</text>
+<text x="28" y="76" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Coverage applies after data visibility is resolved. Both F1 and F2 are visible in this example.</text>
+<rect x="28" y="105" width="432" height="89" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="44" y="136" font-size="21" font-weight="700" text-anchor="start" fill="#2463b4">F1 · covered</text>
+<text x="44" y="166" font-size="18" font-weight="400" text-anchor="start" fill="#526277">An active index group matches this file</text>
+<rect x="500" y="105" width="432" height="89" rx="8" fill="#fff2d7" stroke="#9a5200" stroke-width="1.5"/>
+<text x="516" y="136" font-size="21" font-weight="700" text-anchor="start" fill="#9a5200">F2 · uncovered</text>
+<text x="516" y="166" font-size="18" font-weight="400" text-anchor="start" fill="#526277">No active index group for this file</text>
+<path d="M 244 194 L 244 218 L 716 218 L 716 194" fill="none" stroke="#526277" stroke-width="2"/>
+<path d="M 480 218 L 480 246" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="480" y="273" font-size="22" font-weight="700" text-anchor="middle" fill="#172b4d">The query selects the fallback behavior</text>
+<rect x="28" y="298" width="284" height="202" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="44" y="329" font-size="21" font-weight="700" text-anchor="start" fill="#2463b4">Scalar / array predicates</text>
+<text x="44" y="359" font-size="18" font-weight="400" text-anchor="start" fill="#526277">BTree, Bitmap,</text>
+<text x="44" y="384" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Multivalue, FM</text>
+<text x="44" y="409" font-size="18" font-weight="400" text-anchor="start" fill="#526277"></text>
+<text x="44" y="434" font-size="18" font-weight="400" text-anchor="start" fill="#526277">F1: use index</text>
+<text x="44" y="459" font-size="18" font-weight="400" text-anchor="start" fill="#526277">F2: scan normally</text>
+<rect x="338" y="298" width="284" height="202" rx="8" fill="#fff2d7" stroke="#9a5200" stroke-width="1.5"/>
+<text x="354" y="329" font-size="21" font-weight="700" text-anchor="start" fill="#9a5200">Vector / Full Text fast</text>
+<text x="354" y="359" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Default search modes</text>
+<text x="354" y="384" font-size="18" font-weight="400" text-anchor="start" fill="#526277"></text>
+<text x="354" y="409" font-size="18" font-weight="400" text-anchor="start" fill="#526277"></text>
+<text x="354" y="434" font-size="18" font-weight="400" text-anchor="start" fill="#526277">F1: search index</text>
+<text x="354" y="459" font-size="18" font-weight="400" text-anchor="start" fill="#526277">F2: omit from results</text>
+<rect x="648" y="298" width="284" height="202" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="664" y="329" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Vector full / detail</text>
+<text x="664" y="359" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Include unindexed files</text>
+<text x="664" y="384" font-size="18" font-weight="400" text-anchor="start" fill="#526277"></text>
+<text x="664" y="409" font-size="18" font-weight="400" text-anchor="start" fill="#526277"></text>
+<text x="664" y="434" font-size="18" font-weight="400" text-anchor="start" fill="#526277">F1: ANN candidates</text>
+<text x="664" y="459" font-size="18" font-weight="400" text-anchor="start" fill="#526277">F2: exact evaluation</text>
+<text x="28" y="526" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Full Text supports fast only. Vector full/detail still use ANN for indexed files.</text>
+</g>
+</svg>

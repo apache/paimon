@@ -21,12 +21,35 @@ from unittest.mock import Mock, patch
 
 from pypaimon.ray.data_evolution_merge_into import _reraise_inner
 from pypaimon.ray.row_id_conflict_rewriter import (
+    _partial_file_write_cols,
     commit_self_merge_with_compaction_retry,
 )
+from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.table_schema import TableSchema
 from pypaimon.write.commit.conflict_detection import RowIdExistenceConflict
 
 
 class RayRowIdConflictRewriterTest(unittest.TestCase):
+
+    def test_resolve_compact_null_write_cols_for_rewrite(self):
+        schema = TableSchema(
+            id=1,
+            fields=[
+                DataField(0, 'id', AtomicType('INT')),
+                DataField(1, 'blob', AtomicType('BLOB')),
+                DataField(2, 'name', AtomicType('STRING')),
+            ],
+            options={
+                'data-evolution.enabled': 'true',
+                'data-evolution.write-cols-optimization.enabled': 'true',
+            },
+        )
+        table = Mock(table_schema=schema)
+        file = Mock(schema_id=1, write_cols=None)
+
+        self.assertEqual(
+            ['id', 'name'], _partial_file_write_cols(table, file)
+        )
 
     @staticmethod
     def _message(snapshot_id, name):

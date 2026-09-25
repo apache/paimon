@@ -25,6 +25,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.beans.ConstructorProperties;
 import java.util.List;
 import java.util.Map;
 
@@ -42,6 +43,7 @@ public class AlterDatabaseRequest implements RESTRequest {
     private final Map<String, String> updates;
 
     @JsonCreator
+    @ConstructorProperties({FIELD_REMOVALS, FIELD_UPDATES})
     public AlterDatabaseRequest(
             @JsonProperty(FIELD_REMOVALS) List<String> removals,
             @JsonProperty(FIELD_UPDATES) Map<String, String> updates) {

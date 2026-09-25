@@ -51,6 +51,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -72,6 +73,8 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
     private final String tableName;
     private final String commitUser;
     private final SnapshotManager snapshotManager;
+    private final IndexFileHandler indexFileHandler;
+    private final boolean nestedFieldEnabled;
 
     private @Nullable Long rowIdCheckFromSnapshot;
     private @Nullable RowIdConflictCheckStrategy rowIdConflictCheckStrategy;
@@ -83,6 +86,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             FileStorePathFactory pathFactory,
             BucketMode bucketMode,
             boolean deletionVectorsEnabled,
+            boolean nestedFieldEnabled,
             IndexFileHandler indexFileHandler,
             SnapshotManager snapshotManager,
             CommitScanner commitScanner) {
@@ -98,6 +102,8 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         this.tableName = tableName;
         this.commitUser = commitUser;
         this.snapshotManager = snapshotManager;
+        this.indexFileHandler = indexFileHandler;
+        this.nestedFieldEnabled = nestedFieldEnabled;
     }
 
     @Override
@@ -132,13 +138,118 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         if (!shouldCheckRowIdFromSnapshot(commitKind)) {
             return null;
         }
-        return rowIdConflictCheckStrategy().createChecker(schemaManager, deltaFiles);
+        return rowIdConflictCheckStrategy()
+                .createChecker(schemaManager, deltaFiles, nestedFieldEnabled);
     }
 
     private RowIdConflictCheckStrategy rowIdConflictCheckStrategy() {
         checkState(
                 rowIdConflictCheckStrategy != null, "Row ID conflict check strategy is not set.");
         return rowIdConflictCheckStrategy;
+    }
+
+    @Override
+    public boolean canSkipDataFileConflictDetection(
+            Snapshot latestSnapshot,
+            List<ManifestEntry> deltaFiles,
+            List<IndexManifestEntry> indexFiles,
+            CommitKind commitKind) {
+        if (commitKind != CommitKind.COMPACT
+                || !deltaFiles.isEmpty()
+                || indexFiles.isEmpty()
+                || rowIdCheckFromSnapshot != null
+                || latestSnapshot.indexManifest() == null) {
+            return false;
+        }
+
+        Map<String, IndexManifestEntry> removedFiles = new HashMap<>();
+        Set<String> addedFiles = new HashSet<>();
+        Map<IndexCompactionKey, List<Range>> removedRanges = new HashMap<>();
+        Map<IndexCompactionKey, List<Range>> addedRanges = new HashMap<>();
+        for (IndexManifestEntry entry : indexFiles) {
+            IndexFileMeta file = entry.indexFile();
+            GlobalIndexMeta meta = file.globalIndexMeta();
+            if (meta == null || file.dvRanges() != null) {
+                return false;
+            }
+            Map<IndexCompactionKey, List<Range>> ranges;
+            if (entry.kind() == FileKind.DELETE) {
+                if (removedFiles.put(file.fileName(), entry) != null) {
+                    return false;
+                }
+                ranges = removedRanges;
+            } else {
+                if (!addedFiles.add(file.fileName())) {
+                    return false;
+                }
+                ranges = addedRanges;
+            }
+            ranges.computeIfAbsent(new IndexCompactionKey(entry), key -> new ArrayList<>())
+                    .add(meta.rowRange());
+        }
+        if (removedFiles.isEmpty()
+                || addedFiles.isEmpty()
+                || !Collections.disjoint(removedFiles.keySet(), addedFiles)
+                || !removedRanges.keySet().equals(addedRanges.keySet())) {
+            return false;
+        }
+        for (Map.Entry<IndexCompactionKey, List<Range>> removed : removedRanges.entrySet()) {
+            if (!Range.sortAndMergeOverlap(removed.getValue(), true)
+                    .equals(Range.sortAndMergeOverlap(addedRanges.get(removed.getKey()), true))) {
+                return false;
+            }
+        }
+
+        for (IndexManifestEntry current :
+                indexFileHandler.readManifest(latestSnapshot.indexManifest())) {
+            IndexManifestEntry removed = removedFiles.get(current.indexFile().fileName());
+            if (removed == null) {
+                continue;
+            }
+            if (current.kind() != FileKind.ADD
+                    || !current.partition().equals(removed.partition())
+                    || current.bucket() != removed.bucket()
+                    || !current.indexFile().equals(removed.indexFile())) {
+                return false;
+            }
+            removedFiles.remove(current.indexFile().fileName());
+        }
+        return removedFiles.isEmpty();
+    }
+
+    private static class IndexCompactionKey {
+
+        private final BinaryRow partition;
+        private final int bucket;
+        private final String indexType;
+        private final List<Integer> fieldIds;
+
+        private IndexCompactionKey(IndexManifestEntry entry) {
+            this.partition = entry.partition();
+            this.bucket = entry.bucket();
+            this.indexType = entry.indexFile().indexType();
+            this.fieldIds = entry.indexFile().globalIndexMeta().getIndexedFieldIds();
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof IndexCompactionKey)) {
+                return false;
+            }
+            IndexCompactionKey that = (IndexCompactionKey) other;
+            return bucket == that.bucket
+                    && partition.equals(that.partition)
+                    && indexType.equals(that.indexType)
+                    && fieldIds.equals(that.fieldIds);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(partition, bucket, indexType, fieldIds);
+        }
     }
 
     @Override
@@ -402,7 +513,9 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         boolean appliesTo(CommitKind commitKind);
 
         RowIdConflictChecker createChecker(
-                SchemaManager schemaManager, List<ManifestEntry> deltaFiles);
+                SchemaManager schemaManager,
+                List<ManifestEntry> deltaFiles,
+                boolean nestedFieldEnabled);
 
         boolean shouldCheckHistoricalEntry(FileKind kind);
     }
@@ -419,10 +532,13 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
 
         @Override
         public RowIdConflictChecker createChecker(
-                SchemaManager schemaManager, List<ManifestEntry> deltaFiles) {
+                SchemaManager schemaManager,
+                List<ManifestEntry> deltaFiles,
+                boolean nestedFieldEnabled) {
             return RowIdColumnConflictChecker.fromDataFiles(
                     schemaManager,
-                    deltaFiles.stream().map(ManifestEntry::file).collect(Collectors.toList()));
+                    deltaFiles.stream().map(ManifestEntry::file).collect(Collectors.toList()),
+                    nestedFieldEnabled);
         }
 
         @Override
@@ -443,7 +559,9 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
 
         @Override
         public RowIdConflictChecker createChecker(
-                SchemaManager schemaManager, List<ManifestEntry> deltaFiles) {
+                SchemaManager schemaManager,
+                List<ManifestEntry> deltaFiles,
+                boolean nestedFieldEnabled) {
             // Materializing deletion vectors rewrites complete row ranges. A concurrent ADD in a
             // deleted normal-file range can otherwise restore logically deleted rows.
             List<DataFileMeta> deletedNormalFiles =

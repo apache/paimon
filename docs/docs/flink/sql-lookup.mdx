@@ -31,48 +31,88 @@ under the License.
 
 Paimon supports lookup joins on tables with primary keys and append tables in Flink. The following example illustrates this feature.
 
+## Choose a Lookup Strategy
+
+| Situation | Approach | Constraint |
+| --- | --- | --- |
+| Dimension data fits in each lookup task | [Normal lookup](#normal-lookup) | Each task maintains a local copy by default. |
+| Dimension updates arrive after the main stream | [Retry lookup](#retry-lookup) | A miss can delay processing; retries are bounded by the configured attempts. |
+| Retries block unrelated records | [Async retry](#async-retry-lookup) | Unordered output applies to append streams; CDC inputs have additional ordering constraints. |
+| A full local copy is too large | [Shuffle lookup](#large-scale-lookup-fixed-bucket) | Flink 2.0+, fixed buckets, and join keys containing all bucket keys. |
+| Only the newest partition is needed | [Dynamic partition](#dynamic-partition) | Configure partition selection and refresh interval. |
+| A shared query service is running | [Query Service](#query-service) | Requires a fixed-bucket primary-key table. |
+
+![Normal lookup tasks each hold a full local table copy; shuffle lookup routes records by bucket to tasks holding subsets.](/img/flink-lookup-distribution.svg)
+
 ## Prepare
 
-First, let's create a Paimon table and update it in real-time.
+This example uses Flink's built-in [DataGen connector](https://nightlies.apache.org/flink/flink-docs-release-1.20/docs/connectors/table/datagen/)
+and a small Paimon dimension table. Complete [Installation](./installation) first. Run the SQL
+in a new session, or use different table names if they already exist.
+
+### Create and Populate the Dimension Table
 
 ```sql
--- Create a paimon catalog
 CREATE CATALOG my_catalog WITH (
-  'type'='paimon',
-  'warehouse'='hdfs://nn:8020/warehouse/path' -- or 'file://tmp/foo/bar'
+    'type' = 'paimon',
+    'warehouse' = 'file:/tmp/paimon-lookup'
 );
-
 USE CATALOG my_catalog;
 
--- Create a table in paimon catalog
+SET 'execution.runtime-mode' = 'batch';
+SET 'table.dml-sync' = 'true';
+SET 'parallelism.default' = '1';
+
 CREATE TABLE customers (
     id INT PRIMARY KEY NOT ENFORCED,
     name STRING,
     country STRING,
     zip STRING
-);
+) WITH ('bucket' = '4');
 
--- Launch a streaming job to update customers table
-INSERT INTO customers ...
+INSERT INTO customers VALUES
+    (1, 'Alice', 'US', '10001'),
+    (2, 'Bob', 'DE', '10115'),
+    (3, 'Chen', 'CN', '200000');
+```
 
--- Create a temporary left table, like from kafka
+Wait for the insert to finish before starting the lookup query. In a production pipeline, a
+separate [streaming writer](./sql-write#insert-into) can keep the dimension table up to date.
+Use a warehouse on shared storage for a distributed cluster.
+
+### Create the Incoming Stream
+
+```sql
+SET 'execution.runtime-mode' = 'streaming';
+
 CREATE TEMPORARY TABLE orders (
     order_id INT,
     total INT,
     customer_id INT,
     proc_time AS PROCTIME()
 ) WITH (
-    'connector' = 'kafka',
-    'topic' = '...',
-    'properties.bootstrap.servers' = '...',
-    'format' = 'csv'
-    ...
+    'connector' = 'datagen',
+    'rows-per-second' = '1',
+    'fields.order_id.kind' = 'sequence',
+    'fields.order_id.start' = '1',
+    'fields.order_id.end' = '3',
+    'fields.customer_id.kind' = 'sequence',
+    'fields.customer_id.start' = '1',
+    'fields.customer_id.end' = '3',
+    'fields.total.min' = '10',
+    'fields.total.max' = '100'
 );
 ```
 
+The source emits three orders and finishes. The `proc_time` column provides the processing-time
+attribute required by the lookup join. Replace this temporary table with your Kafka or other
+streaming source when adapting the example.
+
 ## Normal Lookup
 
-You can now use `customers` in a lookup join query.
+Use `customers` as the lookup side of the join. Each order is enriched using the dimension data
+available to the lookup operator when the record is processed. This is a processing-time lookup,
+not a historical read of the dimension table at the order's event time.
 
 ```sql
 -- enrich each order with customer information
@@ -83,15 +123,25 @@ FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
 ```
 
+The example returns one enriched row for each of the three orders. An inner `JOIN` drops an
+order when no customer matches; use `LEFT JOIN` to retain it with null dimension fields.
+
 ## Retry Lookup
 
-If the records of `orders` (main table) join missing because the corresponding data of `customers` (lookup table) is not ready.
-You can consider using Flink's [Delayed Retry Strategy For Lookup](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/queries/hints/#3-enable-delayed-retry-strategy-for-lookup).
-Only for Flink 1.16+.
+Use a delayed retry when an order arrives before its customer is visible to the lookup operator.
+Flink 1.16+ supports a [delayed retry strategy](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/queries/hints/#3-enable-delayed-retry-strategy-for-lookup).
+The example retries a lookup miss with a one-second delay and at most 600 attempts. Choose
+the retry budget for the expected dimension-data delay.
 
 ```sql
 -- enrich each order with customer information
-SELECT /*+ LOOKUP('table'='c', 'retry-predicate'='lookup_miss', 'retry-strategy'='fixed_delay', 'fixed-delay'='1s', 'max-attempts'='600') */
+SELECT /*+ LOOKUP(
+    'table' = 'c',
+    'retry-predicate' = 'lookup_miss',
+    'retry-strategy' = 'fixed_delay',
+    'fixed-delay' = '1s',
+    'max-attempts' = '600'
+) */
 o.order_id, o.total, c.country, c.zip
 FROM orders AS o
 JOIN customers
@@ -101,13 +151,19 @@ ON o.customer_id = c.id;
 
 ## Async Retry Lookup
 
-The problem with synchronous retry is that one record will block subsequent records, causing the entire job to be blocked.
-You can consider using async + allow_unordered to avoid blocking, the records that join missing will no longer block
-other records.
+Synchronous retries delay subsequent records in the same lookup task. Enable asynchronous
+lookup and allow unordered output to let other completed lookups proceed while a miss is retried.
 
 ```sql
 -- enrich each order with customer information
-SELECT /*+ LOOKUP('table'='c', 'retry-predicate'='lookup_miss', 'output-mode'='allow_unordered', 'retry-strategy'='fixed_delay', 'fixed-delay'='1s', 'max-attempts'='600') */
+SELECT /*+ LOOKUP(
+    'table' = 'c',
+    'retry-predicate' = 'lookup_miss',
+    'output-mode' = 'allow_unordered',
+    'retry-strategy' = 'fixed_delay',
+    'fixed-delay' = '1s',
+    'max-attempts' = '600'
+) */
 o.order_id, o.total, c.country, c.zip
 FROM orders AS o
 JOIN customers /*+ OPTIONS('lookup.async'='true', 'lookup.async-thread-number'='16') */
@@ -117,17 +173,18 @@ ON o.customer_id = c.id;
 
 :::info
 
-If the main table (`orders`) is CDC stream, `allow_unordered` will be ignored by Flink SQL (only supports append stream),
-your streaming job may be blocked. You can try to use `audit_log` system table feature of Paimon to walk around
-(convert CDC stream to append stream).
+Flink only allows unordered lookup output for append streams. For a CDC input, ordering
+constraints can still delay subsequent records. An [audit-log table](../concepts/system-tables#audit-log-table)
+exposes changes as append records, but the query must then interpret the row kinds explicitly;
+it is not a transparent replacement for a CDC stream.
 
 :::
 
 ## Large Scale Lookup (Fixed Bucket)
 
-By default, each Flink subtask would store a whole copy of the lookup table. If the amount of data in `customers` 
-(lookup table) is too large for a single subtask, you can enable the shuffle lookup optimization as follows 
-(For Flink 2.0+ and fixed-bucket Paimon table). This optimization enables sending data of the same bucket to designated 
+By default, each Flink subtask would store a whole copy of the lookup table. If the amount of data in `customers`
+(lookup table) is too large for a single subtask, you can enable the shuffle lookup optimization as follows
+(For Flink 2.0+ and fixed-bucket Paimon table). This optimization enables sending data of the same bucket to designated
 subtask(s), so each Flink subtask would only need to store a part of the whole data.
 
 ```sql
@@ -140,17 +197,20 @@ FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
 ```
 
-Note that this optimization only takes effect when the join keys contain all the bucket keys.
+This requires Flink 2.0+, a **fixed-bucket** dimension table, and join keys containing all bucket
+keys. The `customers` table above uses four fixed buckets. Choose the bucket count for your workload;
+see [Data Distribution](../primary-key-table/data-distribution).
 
 ## Dynamic Partition
 
-In traditional data warehouses, each partition often maintains the latest full data, so this partition table only 
-needs to join the latest partition. Paimon has specifically developed the `max_pt` feature for this scenario.
+When each partition contains a complete dimension snapshot, use `max_pt()` to select the
+partition with the largest partition value. The lookup operator periodically refreshes the
+selection. The following example uses a separate table from the unpartitioned `customers` above.
 
 **Create Paimon Partitioned Table**
 
 ```sql
-CREATE TABLE customers (
+CREATE TABLE partitioned_customers (
   id INT,
   name STRING,
   country STRING,
@@ -165,7 +225,10 @@ CREATE TABLE customers (
 ```sql
 SELECT o.order_id, o.total, c.country, c.zip
 FROM orders AS o
-JOIN customers /*+ OPTIONS('scan.partitions'='max_pt()', 'lookup.dynamic-partition.refresh-interval'='1 h') */
+JOIN partitioned_customers /*+ OPTIONS(
+    'scan.partitions' = 'max_pt()',
+    'lookup.dynamic-partition.refresh-interval' = '1 h'
+) */
 FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
 ```
@@ -177,22 +240,26 @@ Multiple partitions should be separated by semicolon (`;`).
 When specifying fixed partitions, this option can also be used in batch joins.
 
 The option `scan.partitions` can also specify max_pt() for parent partition in the form of `key1=max_pt(),key2=max_pt()`.
-All subpartitions for the latest parent partition will be loaded. For example, if partition keys is `'year', 'day', 'hh'`, 
+All subpartitions for the latest parent partition will be loaded. For example, if partition keys is `'year', 'day', 'hh'`,
 you can specify `year=max_pt()`, it will find the latest partition for `year` and load all its subpartitions for lookup.
 Only supports partitions to be specified hierarchically. For example, if setting `year=max_pt(),hh=max_pt()`, `hh=max_pt()`
 makes no sense.
 
 ## Query Service
 
-You can run a Flink Streaming Job to start query service for the table. When QueryService exists, Flink Lookup Join
-will prioritize obtaining data from it, which will effectively improve query performance.
+A query service runs as a separate Flink streaming job. It requires a **primary-key table with
+fixed buckets**, such as the `customers` table in this example. When a query service is available,
+lookup joins prioritize it. Allocate enough cluster resources for both the service and the
+lookup job.
 
 <Tabs groupId="query-service">
 
 <TabItem value="flink-sql" label="Flink SQL">
 
 ```sql
-CALL sys.query_service('database_name.table_name', parallelism);
+SET 'execution.runtime-mode' = 'streaming';
+SET 'table.dml-sync' = 'false';
+CALL sys.query_service('default.customers', 1);
 ```
 
 </TabItem>
@@ -213,3 +280,11 @@ CALL sys.query_service('database_name.table_name', parallelism);
 </TabItem>
 
 </Tabs>
+
+## Verify the Result
+
+If a lookup returns no match, first query the dimension table in batch mode and check the join
+keys. If the data exists, check the lookup's selected partitions and refresh settings. Retrying
+cannot fix an incorrect key or a partition excluded by the query.
+
+See [Troubleshooting](./troubleshooting#lookup-matches-are-missing) for the full diagnostic sequence.

@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 590" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Paimon in a data lake</title>
+<desc id="desc">Compute engines work with named tables and committed file sets in shared storage.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<rect width="1040" height="590" rx="16" fill="#ffffff"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<text x="32" y="44" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">Paimon in a data lake</text>
+<text x="32" y="75" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Compute engines work with named tables and committed file sets in shared storage.</text>
+<rect x="32" y="108" width="470" height="115" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="50" y="139" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Read and write</text>
+<text x="50" y="168" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Flink · Spark · Python / program APIs</text>
+<text x="50" y="195" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Batch jobs, streaming pipelines, CDC</text>
+<rect x="530" y="108" width="478" height="115" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="548" y="139" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Query integrations</text>
+<text x="548" y="168" font-size="18" font-weight="400" text-anchor="start" fill="#526277">StarRocks · Doris · Hive · Trino</text>
+<text x="548" y="195" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Use the capabilities of each connector</text>
+<path d="M 265 223 V 266 H 176 V 302" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="42" y="257" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Catalog requests</text>
+<path d="M 768 223 V 302" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="787" y="268" font-size="18" font-weight="400" text-anchor="start" fill="#526277">File I/O</text>
+<path d="M 450 223 V 302" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="32" y="302" width="288" height="153" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="50" y="333" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Catalog</text>
+<text x="50" y="362" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Discover named tables</text>
+<text x="50" y="389" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Manage table metadata</text>
+<text x="50" y="416" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Filesystem · Hive · JDBC · REST</text>
+<rect x="364" y="302" width="644" height="153" rx="10" fill="#f5f8fc" stroke="#cfd9e6" stroke-width="1.5"/>
+<text x="384" y="333" font-size="23" font-weight="700" text-anchor="start" fill="#172b4d">Paimon table format</text>
+<rect x="384" y="351" width="278" height="84" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="402" y="382" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Committed state</text>
+<text x="402" y="411" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Schema · snapshot · manifest</text>
+<rect x="682" y="351" width="306" height="84" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="700" y="382" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Records and indexes</text>
+<text x="700" y="411" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Data · changelogs · index files</text>
+<path d="M 320 375 H 364" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 686 455 V 498" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="32" y="498" width="976" height="62" rx="10" fill="#f5f8fc" stroke="#cfd9e6" stroke-width="1.5"/>
+<text x="520" y="537" font-size="21" font-weight="400" text-anchor="middle" fill="#172b4d">Filesystem or object store  ·  HDFS / S3 / OSS / other supported storage</text>
+</g>
+</svg>

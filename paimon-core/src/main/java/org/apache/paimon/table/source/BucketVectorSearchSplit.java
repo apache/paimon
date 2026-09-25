@@ -20,7 +20,9 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexFileMetaSerializer;
+import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
+import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.utils.Range;
 
@@ -33,6 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -40,10 +43,12 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class BucketVectorSearchSplit extends VectorSearchSplit {
 
     private static final long serialVersionUID = 1L;
+
+    private static final long MAGIC = 0x504B5653504C4954L;
     private static final int VERSION = 1;
 
     private DataSplit dataSplit;
-    private transient List<IndexFileMeta> payloadFiles;
+    private List<IndexFileMeta> payloadFiles;
     private Map<String, List<Range>> rowRangesByFile;
 
     public BucketVectorSearchSplit(DataSplit dataSplit, List<IndexFileMeta> payloadFiles) {
@@ -84,32 +89,70 @@ public class BucketVectorSearchSplit extends VectorSearchSplit {
         return rowRangesByFile;
     }
 
-    private void writeObject(ObjectOutputStream out) throws IOException {
-        out.defaultWriteObject();
+    /**
+     * Serialize to the byte form a reader outside the JVM consumes, following {@code IndexedSplit}:
+     * magic and version, then the nested {@link DataSplit}, then this split's own state.
+     *
+     * <p>Row-range entries are written sorted by file name, so two splits that compare equal
+     * serialize to the same bytes even though the map's iteration order is its construction order.
+     *
+     * <p>{@link #VERSION} pins this envelope and the layout of what it nests, not the nested bytes
+     * themselves: {@link DataSplit#serialize} carries its own version, while {@link
+     * IndexFileMetaSerializer} carries none, so a change to {@code IndexFileMeta.SCHEMA} has to
+     * bump this version too.
+     */
+    public void serialize(DataOutputView out) throws IOException {
+        out.writeLong(MAGIC);
         out.writeInt(VERSION);
-        out.writeInt(payloadFiles.size());
-        IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
-        for (IndexFileMeta payloadFile : payloadFiles) {
-            serializer.serialize(payloadFile, new DataOutputViewStreamWrapper(out));
+        dataSplit.serialize(out);
+        new IndexFileMetaSerializer().serializeList(payloadFiles, out);
+        out.writeInt(rowRangesByFile.size());
+        for (Map.Entry<String, List<Range>> entry : new TreeMap<>(rowRangesByFile).entrySet()) {
+            out.writeUTF(entry.getKey());
+            out.writeInt(entry.getValue().size());
+            for (Range range : entry.getValue()) {
+                out.writeLong(range.from);
+                out.writeLong(range.to);
+            }
         }
     }
 
-    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
-        in.defaultReadObject();
+    /** Reverse of {@link #serialize(DataOutputView)}. */
+    public static BucketVectorSearchSplit deserialize(DataInputView in) throws IOException {
+        long magic = in.readLong();
+        if (magic != MAGIC) {
+            throw new IOException("Corrupted BucketVectorSearchSplit: wrong magic number " + magic);
+        }
         int version = in.readInt();
         if (version != VERSION) {
             throw new IOException("Unsupported BucketVectorSearchSplit version: " + version);
         }
-        int payloadFileCount = in.readInt();
-        if (payloadFileCount < 0) {
-            throw new IOException("Negative primary-key vector payload file count.");
+        DataSplit dataSplit = DataSplit.deserialize(in);
+        List<IndexFileMeta> payloadFiles = new IndexFileMetaSerializer().deserializeList(in);
+        int rangeFileCount = in.readInt();
+        Map<String, List<Range>> rowRangesByFile = new LinkedHashMap<>();
+        for (int i = 0; i < rangeFileCount; i++) {
+            String fileName = in.readUTF();
+            int rangeCount = in.readInt();
+            List<Range> ranges = new ArrayList<>(rangeCount);
+            for (int j = 0; j < rangeCount; j++) {
+                ranges.add(new Range(in.readLong(), in.readLong()));
+            }
+            rowRangesByFile.put(fileName, ranges);
         }
-        List<IndexFileMeta> payloadFiles = new ArrayList<>(payloadFileCount);
-        IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
-        for (int i = 0; i < payloadFileCount; i++) {
-            payloadFiles.add(serializer.deserialize(new DataInputViewStreamWrapper(in)));
-        }
-        this.payloadFiles = Collections.unmodifiableList(payloadFiles);
+        return new BucketVectorSearchSplit(dataSplit, payloadFiles, rowRangesByFile);
+    }
+
+    private void writeObject(ObjectOutputStream out) throws IOException {
+        serialize(new DataOutputViewStreamWrapper(out));
+    }
+
+    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
+        BucketVectorSearchSplit other = deserialize(new DataInputViewStreamWrapper(in));
+
+        this.dataSplit = other.dataSplit;
+        this.payloadFiles = other.payloadFiles;
+        this.rowRangesByFile = other.rowRangesByFile;
     }
 
     @Override
@@ -129,5 +172,17 @@ public class BucketVectorSearchSplit extends VectorSearchSplit {
     @Override
     public int hashCode() {
         return Objects.hash(dataSplit, payloadFiles, rowRangesByFile);
+    }
+
+    @Override
+    public String toString() {
+        return "BucketVectorSearchSplit{"
+                + "dataSplit="
+                + dataSplit
+                + ", payloadFiles="
+                + payloadFiles
+                + ", rowRangesByFile="
+                + rowRangesByFile
+                + '}';
     }
 }

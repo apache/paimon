@@ -104,6 +104,39 @@ class AoReaderTest(unittest.TestCase):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
+    def test_avro_ao_reader_filter_keeps_rows_past_first_batch(self):
+        # A filtered Avro read must not stop when a full batch_size (1024) block
+        # matches nothing: the reader returned None there, which the caller reads as
+        # end-of-input, silently dropping every later matching row.
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema, partition_keys=['dt'], options={'file.format': 'avro'})
+        self.catalog.create_table('default.test_avro_filter_batches', schema, False)
+        table = self.catalog.get_table('default.test_avro_filter_batches')
+
+        n = 3000
+        data = pa.Table.from_pydict({
+            'user_id': list(range(n)),
+            'item_id': [1000 + i for i in range(n)],
+            'behavior': ['a'] * n,
+            'dt': ['p1'] * n,
+        }, schema=self.pa_schema)
+        wb = table.new_batch_write_builder()
+        w, c = wb.new_write(), wb.new_commit()
+        w.write_arrow(data)
+        c.commit(w.prepare_commit())
+        w.close()
+        c.close()
+
+        pb = table.new_read_builder().new_predicate_builder()
+        # >= 2500 over 3000 rows fully filters the first two 1024-row batches, so the
+        # test distinguishes the loop from an implementation that only retries once.
+        read_builder = table.new_read_builder().with_filter(
+            pb.greater_or_equal('user_id', 2500))
+        result = self._read_test_table(read_builder)
+
+        self.assertEqual(
+            sorted(result.column('user_id').to_pylist()), list(range(2500, n)))
+
     def test_lance_ao_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
         self.catalog.create_table('default.test_append_only_lance', schema, False)
@@ -1090,7 +1123,8 @@ class AoReaderTest(unittest.TestCase):
         def counting_read(self_mgr, manifest_file_name,
                           manifest_entry_filter=None,
                           drop_stats=True, early_entry_filter=None,
-                          early_record_filter=None, partition_filter=None):
+                          early_record_filter=None, partition_filter=None,
+                          selected_blocks=None):
             # avro_total = every entry in the manifest (no manifest-file pruning
             # here: single file, is_in spans its partition stats).
             path = f"{self_mgr.manifest_path}/{manifest_file_name}"
@@ -1100,7 +1134,8 @@ class AoReaderTest(unittest.TestCase):
             return original_read(
                 self_mgr, manifest_file_name,
                 manifest_entry_filter, drop_stats,
-                early_entry_filter, early_record_filter, partition_filter)
+                early_entry_filter, early_record_filter, partition_filter,
+                selected_blocks=selected_blocks)
 
         def counting_dfm_init(self_dfm, *args, **kwargs):
             entry_counts['constructed'] += 1

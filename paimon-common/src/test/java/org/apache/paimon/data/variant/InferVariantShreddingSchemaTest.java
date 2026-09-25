@@ -31,6 +31,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -70,6 +71,25 @@ public class InferVariantShreddingSchemaTest {
                         new String[] {"age", "name"});
         assertThat(inferredSchema.getField("v").type())
                 .isEqualTo(variantShreddingSchema(expectShreddedType));
+    }
+
+    @Test
+    void testInferSchemaFromByteBufferBackedVariant() {
+        RowType schema = RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"v"});
+        GenericVariant expected = GenericVariant.fromJson("{\"name\":\"Alice\",\"age\":30}");
+        GenericVariant bufferBacked =
+                new GenericVariant(expected.valueBuffer(), expected.metadataBuffer());
+
+        RowType inferredSchema =
+                defaultInferVariantShreddingSchema(schema)
+                        .inferSchema(Arrays.asList(GenericRow.of(bufferBacked)));
+
+        RowType expectedType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"age", "name"});
+        assertThat(inferredSchema.getField("v").type())
+                .isEqualTo(variantShreddingSchema(expectedType));
     }
 
     @Test
@@ -158,6 +178,112 @@ public class InferVariantShreddingSchemaTest {
                         new String[] {"bool", "dec", "num", "str"});
         assertThat(inferredSchema.getField("v").type())
                 .isEqualTo(variantShreddingSchema(expectedType));
+    }
+
+    @Test
+    void testInferSchemaWithDecimalTrailingZeros() {
+        RowType schema = RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"v"});
+
+        // getDecimal() strips trailing zeros, so 10.0 and 100.00 arrive with a negative scale
+        // and 0.05 with a precision below its scale; none of them may break inference
+        GenericVariant variant1 =
+                GenericVariant.fromJson(
+                        "{\"price\": 10.0, \"whole\": 100.00, \"tiny\": 0.05,"
+                                + " \"big\": 100000000000000000000}");
+        GenericVariant variant2 =
+                GenericVariant.fromJson(
+                        "{\"price\": 20.5, \"whole\": 7, \"tiny\": 0.001, \"big\": 1}");
+
+        List<InternalRow> rows = Arrays.asList(GenericRow.of(variant1), GenericRow.of(variant2));
+
+        InferVariantShreddingSchema inferrer = defaultInferVariantShreddingSchema(schema);
+        RowType inferredSchema = inferrer.inferSchema(rows);
+
+        RowType expectedType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.DECIMAL(38, 0),
+                            DataTypes.DECIMAL(18, 1),
+                            DataTypes.DECIMAL(18, 3),
+                            DataTypes.BIGINT()
+                        },
+                        new String[] {"big", "price", "tiny", "whole"});
+        assertThat(inferredSchema.getField("v").type())
+                .isEqualTo(variantShreddingSchema(expectedType));
+    }
+
+    @Test
+    void testInferSchemaSkipsBlankKeys() {
+        RowType schema = RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"v"});
+
+        // An empty or blank key is a valid variant object key but not a RowType field name;
+        // it must stay in the unshredded value rather than fail the inference
+        GenericVariant variant1 = GenericVariant.fromJson("{\"\": 1, \" \": 2, \"a\": 3}");
+        GenericVariant variant2 = GenericVariant.fromJson("{\"\": 4, \"a\": 5}");
+
+        List<InternalRow> rows = Arrays.asList(GenericRow.of(variant1), GenericRow.of(variant2));
+
+        InferVariantShreddingSchema inferrer = defaultInferVariantShreddingSchema(schema);
+        RowType inferredSchema = inferrer.inferSchema(rows);
+
+        RowType expectedType = RowType.of(new DataType[] {DataTypes.BIGINT()}, new String[] {"a"});
+        assertThat(inferredSchema.getField("v").type())
+                .isEqualTo(variantShreddingSchema(expectedType));
+
+        // an object made only of blank keys has nothing to shred and stays unshredded
+        RowType blankOnly =
+                inferrer.inferSchema(
+                        Collections.singletonList(
+                                GenericRow.of(GenericVariant.fromJson("{\"\": 1}"))));
+        assertThat(blankOnly.getField("v").type())
+                .isEqualTo(variantShreddingSchema(DataTypes.VARIANT()));
+    }
+
+    @Test
+    void testInferSchemaWithKeysInEitherWriterOrder() {
+        RowType schema = RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"v"});
+
+        // Paimon's builder sorts keys by UTF-8 bytes, where U+FFE5 (EF BF A5) precedes the
+        // emoji U+1F600 (F0 9F 98 80); Spark's sorts by UTF-16 code units, where the emoji's
+        // surrogate pair (D83D) comes first. Inference used to reject the byte order as unsorted,
+        // and it must merge objects written in either order.
+        String yen = "\uFFE5";
+        String smile = new String(Character.toChars(0x1F600));
+        GenericVariant byteOrdered =
+                GenericVariant.fromJson("{\"" + yen + "\": 100, \"" + smile + "\": \"s\"}");
+        GenericVariant codeUnitOrdered = withSwappedFields(byteOrdered);
+        assertThat(byteOrdered.getFieldAtIndex(0).key).isEqualTo(yen);
+        assertThat(codeUnitOrdered.getFieldAtIndex(0).key).isEqualTo(smile);
+        GenericVariant third = GenericVariant.fromJson("{\"" + smile + "\": \"t\", \"a\": 2}");
+
+        // merged in byte order, with every key kept exactly once and both rows counted
+        RowType expectedType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"a", yen, smile});
+        for (GenericVariant first : new GenericVariant[] {byteOrdered, codeUnitOrdered}) {
+            List<InternalRow> rows = Arrays.asList(GenericRow.of(first), GenericRow.of(third));
+            RowType inferredSchema = defaultInferVariantShreddingSchema(schema).inferSchema(rows);
+            assertThat(inferredSchema.getField("v").type())
+                    .isEqualTo(variantShreddingSchema(expectedType));
+        }
+    }
+
+    /**
+     * The same two-field object with its entries swapped, the order a UTF-16 sorting writer uses.
+     */
+    private static GenericVariant withSwappedFields(GenericVariant twoFields) {
+        byte[] value = twoFields.value().clone();
+        // header, size, then 2 one-byte ids and 3 one-byte offsets
+        int idStart = 2;
+        int offsetStart = idStart + 2;
+        byte temporary = value[idStart];
+        value[idStart] = value[idStart + 1];
+        value[idStart + 1] = temporary;
+        temporary = value[offsetStart];
+        value[offsetStart] = value[offsetStart + 1];
+        value[offsetStart + 1] = temporary;
+        return new GenericVariant(value, twoFields.metadata());
     }
 
     @Test
@@ -294,6 +420,149 @@ public class InferVariantShreddingSchemaTest {
                                 RowType.of(
                                         new DataType[] {DataTypes.BIGINT()},
                                         new String[] {"historical"})));
+    }
+
+    /**
+     * A node can drift from scalar to object, which degrades its combined evidence to VARIANT while
+     * the selected schema for it is a ROW, and then be absent from the next file. With no evidence
+     * to fall back on, the selected schema is the only thing left - but it is not evidence: its
+     * fields carry no counts, so it cannot be run through admission and retention a second time.
+     */
+    @Test
+    void testAdaptiveInferenceKeepsSelectedRowWhenEvidenceDegradedAndNodeIsAbsent() {
+        RowType schema = RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"v"});
+        VariantShreddingInferenceSession session =
+                new VariantShreddingInferenceSession(
+                        new InferVariantShreddingSchema(schema, 300, 50, 0.1), 256, 0.1, 0.05);
+
+        session.inferSchema(
+                Collections.singletonList(
+                        GenericRow.of(GenericVariant.fromJson("{\"k\":1,\"p\":5}"))));
+        session.commitPendingInference();
+        session.inferSchema(
+                Collections.singletonList(
+                        GenericRow.of(GenericVariant.fromJson("{\"k\":1,\"p\":{\"x\":1}}"))));
+        session.commitPendingInference();
+
+        RowType afterAbsence =
+                session.inferSchema(
+                        Collections.singletonList(
+                                GenericRow.of(GenericVariant.fromJson("{\"k\":1}"))));
+
+        assertThat(afterAbsence.getField("v").type())
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {
+                                            DataTypes.BIGINT(),
+                                            RowType.of(
+                                                    new DataType[] {DataTypes.BIGINT()},
+                                                    new String[] {"x"})
+                                        },
+                                        new String[] {"k", "p"})));
+    }
+
+    /**
+     * maxSchemaWidth is one budget shared by every variant column. A schema carried forward for a
+     * node with no evidence still occupies it, so a later column must not get to spend what the
+     * carried-forward schema is holding.
+     */
+    @Test
+    void testRetainedSchemaStillConsumesTheSharedWidthBudget() {
+        RowType schema =
+                RowType.of(
+                        new DataType[] {DataTypes.VARIANT(), DataTypes.VARIANT()},
+                        new String[] {"a", "b"});
+        VariantShreddingInferenceSession session =
+                new VariantShreddingInferenceSession(
+                        new InferVariantShreddingSchema(schema, 8, 50, 0.1), 256, 0.1, 0.05);
+
+        session.inferSchema(
+                Collections.singletonList(
+                        GenericRow.of(
+                                GenericVariant.fromJson("{\"p\":5}"),
+                                GenericVariant.fromJson("{\"q\":1}"))));
+        session.commitPendingInference();
+        session.inferSchema(
+                Collections.singletonList(
+                        GenericRow.of(
+                                GenericVariant.fromJson("{\"p\":{\"x\":1}}"),
+                                GenericVariant.fromJson("{\"q\":1}"))));
+        session.commitPendingInference();
+
+        RowType afterAbsence =
+                session.inferSchema(
+                        Collections.singletonList(
+                                GenericRow.of(
+                                        GenericVariant.fromJson("{}"),
+                                        GenericVariant.fromJson("{\"q\":1,\"r\":1}"))));
+
+        // "a" keeps ROW<x BIGINT> under "p", and the budget it holds leaves "r" untyped in "b".
+        assertThat(afterAbsence.getField("b").type().toString())
+                .contains("`q` ROW<`value` BYTES, `typed_value` BIGINT>")
+                .doesNotContain("`r` ROW<`value` BYTES, `typed_value`");
+    }
+
+    /**
+     * At the last budget unit the evidence-driven walk still keeps the field and downgrades its
+     * child to VARIANT. Retaining a schema has to do the same rather than drop the field, or the
+     * whole retained node collapses.
+     */
+    @Test
+    void testRetainedSchemaKeepsItsFieldsAtTheLastBudgetUnit() {
+        RowType schema =
+                RowType.of(
+                        new DataType[] {DataTypes.VARIANT(), DataTypes.VARIANT()},
+                        new String[] {"a", "b"});
+        VariantShreddingInferenceSession session =
+                new VariantShreddingInferenceSession(
+                        new InferVariantShreddingSchema(schema, 7, 50, 0.1), 256, 0.1, 0.05);
+
+        session.inferSchema(
+                Collections.singletonList(
+                        GenericRow.of(GenericVariant.fromJson("1"), GenericVariant.fromJson("5"))));
+        session.commitPendingInference();
+        session.inferSchema(
+                Collections.singletonList(
+                        GenericRow.of(
+                                GenericVariant.fromJson("1"),
+                                GenericVariant.fromJson("{\"q\":1}"))));
+        session.commitPendingInference();
+
+        RowType afterAbsence =
+                session.inferSchema(
+                        Collections.singletonList(
+                                GenericRow.of(GenericVariant.fromJson("{\"x\":1,\"y\":1}"), null)));
+
+        assertThat(afterAbsence.getField("b").type().toString()).contains("`q`");
+    }
+
+    /**
+     * A retained VARIANT leaf costs the entry unit the caller already spent and nothing more - it
+     * has no typed child to spend a second on. Charging it twice takes width away from the columns
+     * that follow.
+     */
+    @Test
+    void testRetainedVariantLeafIsNotChargedTwice() {
+        RowType schema =
+                RowType.of(
+                        new DataType[] {DataTypes.VARIANT(), DataTypes.VARIANT()},
+                        new String[] {"a", "b"});
+        VariantShreddingInferenceSession session =
+                new VariantShreddingInferenceSession(
+                        new InferVariantShreddingSchema(schema, 3, 50, 0.1), 256, 0.1, 0.05);
+
+        session.inferSchema(
+                Collections.singletonList(GenericRow.of(null, GenericVariant.fromJson("5"))));
+        session.commitPendingInference();
+
+        RowType afterAbsence =
+                session.inferSchema(
+                        Collections.singletonList(
+                                GenericRow.of(null, GenericVariant.fromJson("6"))));
+
+        assertThat(afterAbsence.getField("b").type())
+                .isEqualTo(variantShreddingSchema(DataTypes.BIGINT()));
     }
 
     @Test

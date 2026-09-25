@@ -26,8 +26,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
@@ -95,7 +95,7 @@ public class CreateTableITCase extends HiveTestBase {
                         "");
         Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
         Path tablePath = newTableLocation(path, identifier);
-        new SchemaManager(LocalFileIO.create(), tablePath).createTable(schema);
+        new FileSystemSchemaManager(LocalFileIO.create(), tablePath).createTable(schema);
 
         // Create hive external table
         String hiveSql =
@@ -191,7 +191,7 @@ public class CreateTableITCase extends HiveTestBase {
         Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
         Path tablePath = newTableLocation(path, identifier);
         Optional<TableSchema> tableSchema =
-                new SchemaManager(LocalFileIO.create(), tablePath).latest();
+                new FileSystemSchemaManager(LocalFileIO.create(), tablePath).latest();
         assertThat(tableSchema).isPresent();
         assertThat(tableSchema.get().primaryKeys()).contains("dt", "hh", "user_id");
         assertThat(tableSchema.get().partitionKeys()).contains("dt", "hh");
@@ -253,7 +253,7 @@ public class CreateTableITCase extends HiveTestBase {
         Table table = catalog.getTable(identifier);
         assertThat(table.name()).isEqualTo(tableName.toLowerCase());
         Optional<TableSchema> tableSchema =
-                new SchemaManager(LocalFileIO.create(), tablePath).latest();
+                new FileSystemSchemaManager(LocalFileIO.create(), tablePath).latest();
         assertThat(tableSchema).isPresent();
     }
 
@@ -318,7 +318,7 @@ public class CreateTableITCase extends HiveTestBase {
         Table table = catalog.getTable(identifier);
         assertThat(table.name()).isEqualTo(tableName.toLowerCase());
         Optional<TableSchema> tableSchema =
-                new SchemaManager(LocalFileIO.create(), tablePath).latest();
+                new FileSystemSchemaManager(LocalFileIO.create(), tablePath).latest();
         assertThat(tableSchema).isPresent();
     }
 
@@ -357,7 +357,7 @@ public class CreateTableITCase extends HiveTestBase {
         Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
         Path tablePath = newTableLocation(path, identifier);
         Optional<TableSchema> tableSchema =
-                new SchemaManager(LocalFileIO.create(), tablePath).latest();
+                new FileSystemSchemaManager(LocalFileIO.create(), tablePath).latest();
         assertThat(tableSchema).isPresent();
         assertThat(tableSchema.get().primaryKeys()).contains("dt", "hh", "user_id");
         assertThat(tableSchema.get().partitionKeys()).isEmpty();
@@ -399,7 +399,7 @@ public class CreateTableITCase extends HiveTestBase {
         Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
         Path tablePath = newTableLocation(path, identifier);
         Optional<TableSchema> tableSchema =
-                new SchemaManager(LocalFileIO.create(), tablePath).latest();
+                new FileSystemSchemaManager(LocalFileIO.create(), tablePath).latest();
         assertThat(tableSchema).isPresent();
         assertThat(tableSchema.get().primaryKeys()).contains("dt", "hh", "user_id");
         assertThat(tableSchema.get().partitionKeys()).contains("dt", "hh");
@@ -443,7 +443,7 @@ public class CreateTableITCase extends HiveTestBase {
         Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
         Path tablePath = newTableLocation(path, identifier);
         Optional<TableSchema> tableSchema =
-                new SchemaManager(LocalFileIO.create(), tablePath).latest();
+                new FileSystemSchemaManager(LocalFileIO.create(), tablePath).latest();
         assertThat(tableSchema).isPresent();
         assertThat(tableSchema.get().options()).containsEntry("bucket", "2");
         assertThat(tableSchema.get().options()).containsEntry("bucket-key", "user_id");
@@ -490,7 +490,7 @@ public class CreateTableITCase extends HiveTestBase {
                             "");
             Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
             Path tablePath = newTableLocation(path, identifier);
-            new SchemaManager(LocalFileIO.create(), tablePath).createTable(schema);
+            new FileSystemSchemaManager(LocalFileIO.create(), tablePath).createTable(schema);
 
             String hiveSql =
                     String.join(
@@ -504,7 +504,9 @@ public class CreateTableITCase extends HiveTestBase {
             } catch (Throwable ignore) {
             } finally {
                 boolean isPresent =
-                        new SchemaManager(LocalFileIO.create(), tablePath).latest().isPresent();
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath)
+                                .latest()
+                                .isPresent();
                 Assertions.assertThat(isPresent).isTrue();
             }
         }
@@ -535,7 +537,9 @@ public class CreateTableITCase extends HiveTestBase {
                 Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
                 Path tablePath = newTableLocation(path, identifier);
                 boolean isPresent =
-                        new SchemaManager(LocalFileIO.create(), tablePath).latest().isPresent();
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath)
+                                .latest()
+                                .isPresent();
                 Assertions.assertThat(isPresent).isFalse();
             }
         }

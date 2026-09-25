@@ -353,7 +353,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
-    public SnapshotReader withLimit(int limit) {
+    public SnapshotReader withLimit(long limit) {
         scan.withLimit(limit);
         return this;
     }
@@ -406,7 +406,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
         List<DataSplit> splits =
                 generateSplits(snapshot, scanMode != ScanMode.ALL, splitGenerator, grouped);
         return new PlanImpl(
-                plan.watermark(), snapshot == null ? null : snapshot.id(), (List) splits);
+                plan.watermark(), snapshot == null ? null : snapshot.id(), snapshot, (List) splits);
     }
 
     private List<DataSplit> generateSplits(
@@ -597,7 +597,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
         }
 
         return new PlanImpl(
-                afterWatermark, afterSnapshot == null ? null : afterSnapshot.id(), splits);
+                afterWatermark,
+                afterSnapshot == null ? null : afterSnapshot.id(),
+                afterSnapshot,
+                splits);
     }
 
     @Override

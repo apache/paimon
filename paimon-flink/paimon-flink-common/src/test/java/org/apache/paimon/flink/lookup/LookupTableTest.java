@@ -31,8 +31,8 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -1147,7 +1147,7 @@ public class LookupTableTest extends TableTestBase {
                         .option(CoreOptions.BUCKET_KEY.key(), "pk2")
                         .build();
         TableSchema tableSchema =
-                SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);
+                SchemaUtils.forceCommit(new FileSystemSchemaManager(fileIO, tablePath), schema);
         return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }
 

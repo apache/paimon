@@ -18,21 +18,32 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.catalog.{DelegateCatalog, Identifier}
+import org.apache.paimon.catalog.{CatalogContext, DelegateCatalog, Identifier}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.hive.HiveCatalog
+import org.apache.paimon.options.Options
 import org.apache.paimon.spark.{PaimonFormatTableScan, PaimonHiveTestBase, PaimonInputPartition}
 import org.apache.paimon.spark.PaimonHiveTestBase.hiveUri
+import org.apache.paimon.spark.format.PaimonFormatTable
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.source.Split
+import org.apache.paimon.types.DataTypes
 import org.apache.paimon.utils.{CompressUtils, PartitionPathUtils}
 
-import org.apache.spark.sql.Row
+import org.apache.spark.sql.{AnalysisException, PaimonUtils, Row}
 import org.apache.spark.sql.catalyst.analysis.NoSuchPartitionException
+import org.apache.spark.sql.catalyst.plans.logical.AppendData
+import org.apache.spark.sql.connector.catalog.{Identifier => SparkIdentifier, TableCatalog}
 import org.apache.spark.sql.connector.read.InputPartition
+import org.apache.spark.sql.connector.write.LogicalWriteInfo
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
-import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
+import org.apache.spark.sql.execution.datasources.InsertIntoHadoopFsRelationCommand
+import org.apache.spark.sql.execution.datasources.v2.{BatchScanExec, DataSourceV2Relation, FileTable}
+import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import java.util.{Collections, Locale}
 
 abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSparkPlanHelper {
 
@@ -41,6 +52,261 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
   override protected def beforeEach(): Unit = {
     sql(s"USE $paimonHiveCatalogName")
     sql(s"USE $hiveDbName")
+  }
+
+  test("Format table: LEGACY casts strings without changing the SQL or schema") {
+    for (ansiEnabled <- Seq("true", "false")) {
+      withSparkSQLConf(
+        "spark.sql.storeAssignmentPolicy" -> "LEGACY",
+        "spark.sql.ansi.enabled" -> ansiEnabled,
+        "spark.paimon.format-table.implementation" -> "paimon") {
+        withTable("t") {
+          sql("CREATE TABLE t (group_id BIGINT, label STRING) USING parquet")
+          val schema = spark.table("t").schema
+          sql("INSERT INTO t SELECT '123', 'valid'")
+          sql(
+            "INSERT INTO t VALUES ('-456', 'negative'), ('bad', 'invalid'), " +
+              "('9223372036854775808', 'overflow'), (NULL, 'null')")
+          checkAnswer(
+            sql("SELECT * FROM t"),
+            Seq(
+              Row(123L, "valid"),
+              Row(-456L, "negative"),
+              Row(null, "invalid"),
+              Row(null, "overflow"),
+              Row(null, "null")))
+          assert(spark.table("t").schema == schema)
+          assert(spark.conf.get("spark.sql.ansi.enabled") == ansiEnabled)
+        }
+      }
+    }
+  }
+
+  test("Format table: LEGACY aligns by name without filling missing columns or evolving schema") {
+    withSparkSQLConf(
+      "spark.sql.storeAssignmentPolicy" -> "LEGACY",
+      "spark.paimon.format-table.implementation" -> "paimon",
+      "spark.paimon.write.merge-schema" -> "true") {
+      withTable("t") {
+        sql("CREATE TABLE t (group_id BIGINT, label STRING) USING parquet")
+        val schema = spark.table("t").schema
+        val source = Seq(("first", "123")).toDF("label", "group_id")
+        source.writeTo("t").append()
+        // Reusing the source for a different table must not reuse that table's alignment.
+        withTable("other") {
+          sql("CREATE TABLE other (group_id STRING, label STRING) USING parquet")
+          source.writeTo("other").append()
+          checkAnswer(sql("SELECT * FROM other"), Row("123", "first"))
+        }
+        intercept[AnalysisException] {
+          source.drop("label").writeTo("t").append()
+        }
+        intercept[AnalysisException] {
+          Seq(("123", "first", "extra"))
+            .toDF("group_id", "label", "extra")
+            .writeTo("t")
+            .append()
+        }
+        intercept[AnalysisException] {
+          Seq(("123", "first")).toDF("wrong_name", "label").writeTo("t").append()
+        }
+        intercept[AnalysisException] {
+          sql("INSERT INTO t SELECT '123'")
+        }
+        intercept[AnalysisException] {
+          sql("INSERT INTO t SELECT '123', 'first', 'extra'")
+        }
+        assert(spark.table("t").schema == schema)
+        checkAnswer(sql("SELECT * FROM t"), Row(123L, "first"))
+      }
+    }
+  }
+
+  test("Format table: LEGACY keeps fixed nested schemas and Spark's field matching rules") {
+    withSparkSQLConf(
+      "spark.sql.storeAssignmentPolicy" -> "LEGACY",
+      "spark.paimon.format-table.implementation" -> "paimon") {
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (s STRUCT<id: BIGINT>, a ARRAY<BIGINT>, m MAP<STRING, BIGINT>) " +
+            "USING parquet")
+        sql("INSERT INTO t SELECT named_struct('id', '123'), array('4', '5'), map('key', '6')")
+        checkAnswer(sql("SELECT * FROM t"), Row(Row(123L), Seq(4L, 5L), Map("key" -> 6L)))
+        intercept[AnalysisException] {
+          sql(
+            "INSERT INTO t SELECT named_struct('id', '1', 'extra', '2'), " +
+              "array('4'), map('key', '6')")
+        }
+        val renamedField =
+          sql("SELECT named_struct('other', '1') AS s, array('4') AS a, map('key', '6') AS m")
+        if (gteqSpark3_3) {
+          intercept[AnalysisException] {
+            renamedField.writeTo("t").append()
+          }
+        } else {
+          // Spark 3.2's resolver aligns nested structs positionally, even for a by-name write.
+          // Preserve its matching semantics while retaining the target's field names and types.
+          renamedField.writeTo("t").append()
+          checkAnswer(
+            sql("SELECT * FROM t"),
+            Seq(
+              Row(Row(123L), Seq(4L, 5L), Map("key" -> 6L)),
+              Row(Row(1L), Seq(4L), Map("key" -> 6L))))
+        }
+      }
+    }
+  }
+
+  test("Format table: LEGACY casts append and static or dynamic partition overwrites") {
+    withSparkSQLConf(
+      "spark.sql.storeAssignmentPolicy" -> "LEGACY",
+      "spark.paimon.format-table.implementation" -> "paimon") {
+      withTable("t") {
+        sql("CREATE TABLE t (group_id BIGINT, pt INT) USING parquet PARTITIONED BY (pt)")
+        sql("INSERT INTO t VALUES ('1', '1'), ('2', '2')")
+        sql("INSERT OVERWRITE t PARTITION (pt=1) SELECT '3'")
+        checkAnswer(sql("SELECT * FROM t"), Seq(Row(3L, 1), Row(2L, 2)))
+        withSparkSQLConf("spark.sql.sources.partitionOverwriteMode" -> "dynamic") {
+          sql("INSERT OVERWRITE t PARTITION (pt) SELECT '4', '2'")
+        }
+        checkAnswer(sql("SELECT * FROM t"), Seq(Row(3L, 1), Row(4L, 2)))
+      }
+      withTable("t") {
+        sql("CREATE TABLE t (group_id BIGINT) USING parquet")
+        sql("INSERT INTO t SELECT '1'")
+        sql("INSERT OVERWRITE t SELECT '2'")
+        checkAnswer(sql("SELECT * FROM t"), Row(2L))
+      }
+    }
+  }
+
+  test("Format table: ANSI and STRICT retain their assignment rules for both implementations") {
+    for (implementation <- Seq("paimon", "engine"); policy <- Seq("ANSI", "STRICT")) {
+      withSparkSQLConf(
+        "spark.paimon.format-table.implementation" -> implementation,
+        "spark.sql.storeAssignmentPolicy" -> policy,
+        "spark.sql.ansi.enabled" -> "false") {
+        withTable("t") {
+          sql("CREATE TABLE t (group_id BIGINT) USING parquet")
+          intercept[AnalysisException] {
+            sql("INSERT INTO t SELECT '123'")
+          }
+          sql("INSERT INTO t SELECT 123")
+          checkAnswer(sql("SELECT * FROM t"), Row(123L))
+        }
+        if (policy == "STRICT") {
+          withTable("t") {
+            sql("CREATE TABLE t (group_id INT) USING parquet")
+            intercept[AnalysisException] {
+              sql("INSERT INTO t SELECT 123L")
+            }
+          }
+        } else {
+          withTable("t") {
+            sql("CREATE TABLE t (group_id INT) USING parquet")
+            val error = intercept[Exception] {
+              sql("INSERT INTO t SELECT 2147483648L")
+            }
+            assert(
+              Iterator
+                .iterate[Throwable](error)(_.getCause)
+                .takeWhile(_ != null)
+                .exists(
+                  e =>
+                    Option(e.getMessage).exists(_.toLowerCase(Locale.ROOT).contains("overflow"))))
+          }
+        }
+      }
+    }
+  }
+
+  test("Format table: engine retains Spark's V1 write path and LEGACY casts") {
+    withSparkSQLConf(
+      "spark.paimon.format-table.implementation" -> "engine",
+      "spark.sql.storeAssignmentPolicy" -> "LEGACY") {
+      withTable("t") {
+        sql("CREATE TABLE t (group_id BIGINT) USING parquet")
+        val table = spark.sessionState.catalogManager.currentCatalog
+          .asInstanceOf[TableCatalog]
+          .loadTable(SparkIdentifier.of(Array(hiveDbName), "t"))
+        assert(table.isInstanceOf[FileTable], table.getClass.getName)
+        assert(table.schema().fields.head.dataType == LongType)
+        val result = sql("INSERT INTO t SELECT '123'")
+        assert(result.queryExecution.analyzed.collect {
+          case command: InsertIntoHadoopFsRelationCommand => command
+        }.nonEmpty)
+        sql("INSERT INTO t SELECT 'bad'")
+        checkAnswer(sql("SELECT * FROM t"), Seq(Row(123L), Row(null)))
+      }
+    }
+  }
+
+  test("Format table: LEGACY casts preserve NOT NULL enforcement and analyzer convergence") {
+    withSparkSQLConf(
+      "spark.sql.storeAssignmentPolicy" -> "LEGACY",
+      "spark.sql.ansi.enabled" -> "true") {
+      withTempDir {
+        dir =>
+          // Build the relation directly so the Hive metastore cannot erase field nullability.
+          val options = new Options
+          options.setString("path", dir.toURI.toString)
+          options.setString("file.format", "parquet")
+          val table = FormatTable
+            .builder()
+            .fileIO(fileIO)
+            .identifier(Identifier.create(hiveDbName, "not_null_format"))
+            .rowType(DataTypes.ROW(DataTypes.FIELD(0, "group_id", DataTypes.BIGINT().notNull())))
+            .partitionKeys(Collections.emptyList[String]())
+            .location(dir.toURI.toString)
+            .format(FormatTable.Format.PARQUET)
+            .options(options.toMap)
+            .catalogContext(CatalogContext.create(new Options))
+            .build()
+          val relation = DataSourceV2Relation.create(PaimonFormatTable(table), None, None)
+
+          def insert(value: String): Unit = {
+            val query = Seq(value).toDF("group_id").queryExecution.analyzed
+            PaimonUtils.createDataset(spark, AppendData.byPosition(relation, query)).collect()
+          }
+
+          insert("123")
+          checkAnswer(PaimonUtils.createDataset(spark, relation), Row(123L))
+          val error = intercept[Exception] {
+            insert("bad")
+          }
+          assert(
+            Iterator
+              .iterate[Throwable](error)(_.getCause)
+              .takeWhile(_ != null)
+              .exists(
+                e => Option(e.getMessage).exists(_.contains("Cannot write null to non-null"))))
+      }
+    }
+  }
+
+  test("Format table: write builder rejects a schema that bypassed output resolution") {
+    withTable("t") {
+      sql("CREATE TABLE t (group_id BIGINT) USING parquet")
+      val table =
+        paimonCatalog.getTable(Identifier.create(hiveDbName, "t")).asInstanceOf[FormatTable]
+      val sparkTable = PaimonFormatTable(table)
+      for (
+        inputSchema <- Seq(
+          StructType(Seq(StructField("group_id", StringType))),
+          StructType(Seq(StructField("wrong_name", LongType))),
+          StructType(Nil))
+      ) {
+        val error = intercept[IllegalArgumentException] {
+          sparkTable.newWriteBuilder(new LogicalWriteInfo {
+            override def queryId(): String = "unresolved-format-write"
+            override def schema(): StructType = inputSchema
+            override def options(): CaseInsensitiveStringMap =
+              new CaseInsensitiveStringMap(Collections.emptyMap[String, String]())
+          })
+        }
+        assert(error.getMessage.contains("Format table writes must match the table schema"))
+      }
+    }
   }
 
   test("Format table: csv with field-delimiter") {
@@ -197,17 +463,53 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
 
   test("Format table: CTAS with partitioned table") {
     withTable("t1", "t2") {
-      sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv PARTITIONED BY (p1, p2)")
-      sql("INSERT INTO t1 VALUES (1, 2, 3)")
+      sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv")
+      sql("INSERT INTO t1 VALUES (1, 2, 3), (2, 2, 4), (3, 5, 6)")
 
-      assertThrows[UnsupportedOperationException] {
-        sql("""
-              |CREATE TABLE t2
-              |USING csv
-              |PARTITIONED BY (p1, p2)
-              |AS SELECT * FROM t1
-              |""".stripMargin)
+      sql("""
+            |CREATE TABLE t2
+            |USING parquet
+            |PARTITIONED BY (p1, p2)
+            |AS SELECT * FROM t1
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM t2 ORDER BY id"),
+        Seq(Row(1, 2, 3), Row(2, 2, 4), Row(3, 5, 6)))
+      checkAnswer(
+        sql("SHOW PARTITIONS t2"),
+        Seq(Row("p1=2/p2=3"), Row("p1=2/p2=4"), Row("p1=5/p2=6")))
+
+      val filtered = sql("SELECT * FROM t2 WHERE p1 = 2 AND p2 = 4")
+      checkAnswer(filtered, Seq(Row(2, 2, 4)))
+      assert(collectFilteredInputSplits(filtered.queryExecution.executedPlan, "t2").size == 1)
+    }
+  }
+
+  test("Format table: CTAS with partitioned engine table") {
+    def checkRejected(tableProperties: String): Unit = {
+      withTable("t1", "t2") {
+        sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv")
+        sql("INSERT INTO t1 VALUES (1, 2, 3)")
+
+        val exception = intercept[UnsupportedOperationException] {
+          sql(s"""
+                 |CREATE TABLE t2
+                 |USING parquet
+                 |PARTITIONED BY (p1, p2)
+                 |$tableProperties
+                 |AS SELECT * FROM t1
+                 |""".stripMargin)
+        }
+        assert(exception.getMessage.contains("partitioned engine format table"))
+        assert(!spark.catalog.tableExists("t2"))
       }
+    }
+
+    checkRejected("TBLPROPERTIES ('format-table.implementation'='engine')")
+    withSparkSQLConf("spark.paimon.format-table.implementation" -> "engine") {
+      checkRejected("")
+      checkRejected("TBLPROPERTIES ('format-table.implementation'='paimon')")
     }
   }
 

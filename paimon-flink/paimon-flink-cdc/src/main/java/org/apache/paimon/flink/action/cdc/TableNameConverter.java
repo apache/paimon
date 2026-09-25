@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Identifier;
 
 import java.io.Serializable;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import static org.apache.paimon.utils.StringUtils.toLowerCaseIfNeed;
@@ -78,8 +79,8 @@ public class TableNameConverter implements Serializable {
 
     public String convert(String originDbName, String originTblName) {
         // top priority: table mapping
-        if (tableMapping.containsKey(originTblName.toLowerCase())) {
-            String mappedName = tableMapping.get(originTblName.toLowerCase());
+        if (tableMapping.containsKey(originTblName.toLowerCase(Locale.ROOT))) {
+            String mappedName = tableMapping.get(originTblName.toLowerCase(Locale.ROOT));
             return toLowerCaseIfNeed(mappedName, caseSensitive);
         }
 
@@ -87,11 +88,11 @@ public class TableNameConverter implements Serializable {
         String tblSuffix = suffix;
 
         // second priority: prefix and postfix specified by db
-        if (dbPrefix.containsKey(originDbName.toLowerCase())) {
-            tblPrefix = dbPrefix.get(originDbName.toLowerCase());
+        if (dbPrefix.containsKey(originDbName.toLowerCase(Locale.ROOT))) {
+            tblPrefix = dbPrefix.get(originDbName.toLowerCase(Locale.ROOT));
         }
-        if (dbSuffix.containsKey(originDbName.toLowerCase())) {
-            tblSuffix = dbSuffix.get(originDbName.toLowerCase());
+        if (dbSuffix.containsKey(originDbName.toLowerCase(Locale.ROOT))) {
+            tblSuffix = dbSuffix.get(originDbName.toLowerCase(Locale.ROOT));
         }
 
         // third priority: normal prefix and suffix
@@ -117,7 +118,7 @@ public class TableNameConverter implements Serializable {
         }
 
         for (String key : map.keySet()) {
-            lowerKeyMap.put(key.toLowerCase(), map.get(key));
+            lowerKeyMap.put(key.toLowerCase(Locale.ROOT), map.get(key));
         }
 
         return lowerKeyMap;

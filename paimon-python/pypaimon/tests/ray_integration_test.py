@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import os
 import shutil
 import tempfile
@@ -25,6 +26,8 @@ import pyarrow as pa
 import ray
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.catalog.catalog_environment import CatalogEnvironment
+from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 
 
 class RayIntegrationTest(unittest.TestCase):
@@ -100,6 +103,60 @@ class RayIntegrationTest(unittest.TestCase):
         self.assertEqual(list(df['id']), [1, 2, 3])
         self.assertEqual(list(df['name']), ['a', 'b', 'c'])
 
+    def test_to_ray_preserves_row_kind(self):
+        from pypaimon.read.table_read import TableRead
+
+        pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        identifier = self._create_and_populate_table(
+            'test_to_ray_row_kind', pa_schema,
+            {'id': [1, 2], 'name': ['a', 'b']},
+        )
+        table = CatalogFactory.create(self.catalog_options).get_table(identifier)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        self.assertTrue(splits)
+        predicate = rb.new_predicate_builder().equal('id', 999)
+        cases = [('data', splits, None), ('no_splits', [], None),
+                 ('filtered_empty', splits, predicate)]
+
+        for include_row_kind in (False, True):
+            for name, task_splits, task_predicate in cases:
+                with self.subTest(include_row_kind=include_row_kind, case=name):
+                    read = TableRead(
+                        table, task_predicate, rb.read_type(),
+                        include_row_kind=include_row_kind)
+                    arrow = read.to_arrow(task_splits)
+                    expected_schema = pa_schema
+                    if include_row_kind:
+                        expected_schema = pa.schema(
+                            [pa.field('_row_kind', pa.string())] + list(pa_schema))
+                    self.assertEqual(arrow.schema, expected_schema)
+                    if name == 'data' and include_row_kind:
+                        self.assertEqual(arrow.column('_row_kind').to_pylist(), ['+I', '+I'])
+
+                    with patch.object(ray.data, 'read_datasource',
+                                      wraps=ray.data.read_datasource) as read_datasource:
+                        ds = read.to_ray(task_splits, override_num_blocks=1)
+                    self.assertEqual(ds.schema().base_schema, expected_schema)
+                    materialized = ds.materialize()
+                    self.assertEqual(materialized.schema().base_schema, expected_schema)
+                    self.assertEqual(materialized.take_all(), arrow.to_pylist())
+
+                    if task_splits:
+                        datasource = read_datasource.call_args[0][0]
+                        tasks = datasource.get_read_tasks(1)
+                        self.assertEqual(len(tasks), 1)
+                        task = tasks[0]
+                        task_schema = (task.schema if hasattr(task, 'schema')
+                                       else task.metadata.schema)
+                        self.assertEqual(task_schema, expected_schema)
+                        task = ray.cloudpickle.loads(ray.cloudpickle.dumps(task))
+                        blocks = list(task())
+                        self.assertTrue(blocks)
+                        for block in blocks:
+                            self.assertEqual(block.schema, expected_schema)
+                        self.assertEqual(pa.concat_tables(blocks), arrow)
+
     def test_read_paimon_with_projection(self):
         """read_paimon() respects column projection."""
         from pypaimon.ray import read_paimon
@@ -118,6 +175,69 @@ class RayIntegrationTest(unittest.TestCase):
         df = ds.to_pandas()
         self.assertEqual(set(df.columns), {'id', 'name'})
         self.assertEqual(len(df), 2)
+
+    def test_read_paimon_count_with_query_auth(self):
+        from pypaimon.ray import read_paimon
+
+        identifier = self._create_and_populate_table(
+            'test_count_query_auth',
+            pa.schema([('id', pa.int64()), ('dept', pa.string()), ('part', pa.string())]),
+            {'id': list(range(100)),
+             'dept': ['eng' if i % 5 == 0 else 'sales' for i in range(100)],
+             'part': ['a'] * 50 + ['b'] * 50},
+            partition_keys=['part'],
+        )
+        for dept, expected_ids in [('eng', list(range(0, 100, 5))), ('missing', [])]:
+            with self.subTest(dept=dept):
+                auth = TableQueryAuthResult([json.dumps({
+                    'kind': 'LEAF',
+                    'transform': {'name': 'FIELD_REF', 'fieldRef': {'name': 'dept'}},
+                    'function': 'EQUAL',
+                    'literals': [dept],
+                })], None)
+                # Replace only the catalog authorization response; filtering runs in Ray workers.
+                with patch.object(CatalogEnvironment, 'table_query_auth',
+                                  return_value=lambda select: auth):
+                    ds = read_paimon(identifier, self.catalog_options, override_num_blocks=2)
+                    # Count before materialization exercises the datasource metadata path.
+                    self.assertEqual(ds.count(), len(expected_ids))
+                    self.assertEqual(sorted(row['id'] for row in ds.take_all()), expected_ids)
+
+    def test_ray_datasource_logical_row_count_metadata(self):
+        from pypaimon.read.datasource.ray_datasource import RayDatasource
+        from pypaimon.read.datasource.split_provider import PreResolvedSplitProvider
+        from pypaimon.read.query_auth_split import QueryAuthSplit
+        from pypaimon.read.split import DataSplit
+
+        identifier = self._create_and_populate_table(
+            'test_count_metadata', pa.schema([('id', pa.int64()), ('part', pa.string())]),
+            {'id': [1, 2, 3, 4], 'part': ['a', 'a', 'b', 'b']}, partition_keys=['part'],
+        )
+        table = CatalogFactory.create(self.catalog_options).get_table(identifier)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        self.assertEqual(len(splits), 2)
+        auth = TableQueryAuthResult([json.dumps({
+            'kind': 'LEAF',
+            'transform': {'name': 'FIELD_REF', 'fieldRef': {'name': 'id'}},
+            'function': 'EQUAL', 'literals': [1],
+        })], None)
+        masked = TableQueryAuthResult(None, {'id': json.dumps({'name': 'NULL'})})
+        empty = DataSplit([], splits[0].partition, splits[0].bucket, raw_convertible=True)
+        cases = [
+            ('known', splits, 4),
+            ('masked', [QueryAuthSplit(s, masked) for s in splits], 4),
+            ('first_unknown', [QueryAuthSplit(splits[0], auth), splits[1]], None),
+            ('second_unknown', [splits[0], QueryAuthSplit(splits[1], auth)], None),
+            ('zero', [empty], 0),
+        ]
+        for name, task_splits, expected in cases:
+            with self.subTest(name=name):
+                datasource = RayDatasource(PreResolvedSplitProvider(
+                    table, task_splits, rb.read_type()))
+                tasks = datasource.get_read_tasks(1)
+                self.assertEqual(len(tasks), 1)
+                self.assertEqual(tasks[0].metadata.num_rows, expected)
 
     def test_read_paimon_with_nested_projection(self):
         """read_paimon() respects a nested-leaf projection.

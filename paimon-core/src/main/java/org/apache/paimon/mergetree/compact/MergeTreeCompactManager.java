@@ -298,6 +298,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         if (metricsReporter != null) {
             metricsReporter.reportLevel0FileCount(levels.level0().size());
             metricsReporter.reportTotalFileSize(levels.totalFileSize());
+            metricsReporter.reportTotalFileCount(levels.totalFileCount());
         }
     }
 

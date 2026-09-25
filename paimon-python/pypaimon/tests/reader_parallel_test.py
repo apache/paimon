@@ -24,6 +24,7 @@ import unittest
 from unittest import mock
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.read.table_read import TableRead, _RemainingRows
@@ -237,6 +238,7 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
         self.assertEqual(serial, auto)
         self.assertEqual(auto.num_rows, self.expected_rows)
 
+    @pytest.mark.python_read
     def test_default_none_auto_takes_parallel_path_when_multicore(self):
         read = self.table.new_read_builder().new_read()
         splits = self._scan_splits(self.table.new_read_builder())
@@ -263,6 +265,7 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
             splits = self._scan_splits(self.table_opt_4.new_read_builder())
             read.to_arrow(splits, parallelism=1)
 
+    @pytest.mark.python_read
     def test_method_arg_overrides_option_to_parallel(self):
         # option=1 (forces serial) but caller passes 4: should enable parallelism.
         read = self.table_opt_1.new_read_builder().new_read()
@@ -349,6 +352,7 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
             df = rb.new_read().to_pandas(splits, parallelism=4)
             self.assertEqual(len(df), limit)
 
+    @pytest.mark.python_read
     def test_parallel_reader_error_propagates(self):
         rb = self.table.new_read_builder()
         splits = self._scan_splits(rb)

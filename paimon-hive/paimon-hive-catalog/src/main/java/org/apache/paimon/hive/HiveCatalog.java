@@ -40,6 +40,7 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -93,6 +94,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -101,7 +103,6 @@ import java.util.concurrent.Callable;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREWAREHOUSE;
 import static org.apache.hadoop.hive.serde.serdeConstants.FIELD_DELIM;
 import static org.apache.paimon.CoreOptions.DATA_FILE_PATH_DIRECTORY;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
@@ -189,7 +190,7 @@ public class HiveCatalog extends AbstractCatalog {
             locationHelper = new TBPropertiesLocationHelper();
         } else {
             // set the warehouse location to the hiveConf
-            hiveConf.set(HiveConf.ConfVars.METASTOREWAREHOUSE.varname, warehouse);
+            hiveConf.set("hive.metastore.warehouse.dir", warehouse);
             locationHelper = new StorageLocationHelper();
         }
     }
@@ -1170,8 +1171,8 @@ public class HiveCatalog extends AbstractCatalog {
 
         String externalPropValue =
                 tableOptions.getOrDefault(
-                        HIVE_EXTERNAL_TABLE_PROP.toLowerCase(),
-                        tableOptions.get(HIVE_EXTERNAL_TABLE_PROP.toUpperCase()));
+                        HIVE_EXTERNAL_TABLE_PROP.toLowerCase(Locale.ROOT),
+                        tableOptions.get(HIVE_EXTERNAL_TABLE_PROP.toUpperCase(Locale.ROOT)));
         return CatalogTableType.EXTERNAL.equals(tableType)
                 || "TRUE".equalsIgnoreCase(externalPropValue);
     }
@@ -1337,7 +1338,7 @@ public class HiveCatalog extends AbstractCatalog {
             FileIO fileIO = fileIO(fromPath);
             if (!isExternalTable(table)
                     && !fromPath.equals(toPath)
-                    && !new SchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
+                    && !new FileSystemSchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
                 // Rename the file system's table directory. Maintain consistency between tables in
                 // the file system and tables in the Hive Metastore.
                 try {
@@ -1705,7 +1706,7 @@ public class HiveCatalog extends AbstractCatalog {
         } else {
             // format table
             table.getParameters().put(TABLE_TYPE_PROP, provider.name());
-            table.getParameters().put(FILE_FORMAT.key(), provider.name().toLowerCase());
+            table.getParameters().put(FILE_FORMAT.key(), provider.name().toLowerCase(Locale.ROOT));
             table.getParameters().put(TYPE.key(), FORMAT_TABLE.toString());
         }
 
@@ -1909,7 +1910,8 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private SchemaManager schemaManager(Identifier identifier, Path location) {
-        return new SchemaManager(fileIO(location), location, identifier.getBranchNameOrDefault());
+        return new FileSystemSchemaManager(
+                fileIO(location), location, identifier.getBranchNameOrDefault());
     }
 
     public <T> T runWithLock(Identifier identifier, Callable<T> callable) throws Exception {
@@ -1964,7 +1966,7 @@ public class HiveCatalog extends AbstractCatalog {
             try (InputStream inputStream = hiveSite.getFileSystem(hadoopConf).open(hiveSite)) {
                 hiveConf.addResource(inputStream, hiveSite.toString());
                 // trigger a read from the conf to avoid input stream is closed
-                hiveConf.getVar(HiveConf.ConfVars.METASTOREURIS);
+                hiveConf.getVar(HiveConf.getConfVars("hive.metastore.uris"));
             } catch (IOException e) {
                 throw new RuntimeException(
                         "Failed to load hive-site.xml from specified path:" + hiveSite, e);
@@ -1990,8 +1992,7 @@ public class HiveCatalog extends AbstractCatalog {
         Options options = context.options();
         String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
         if (warehouseStr == null) {
-            warehouseStr =
-                    hiveConf.get(METASTOREWAREHOUSE.varname, METASTOREWAREHOUSE.defaultStrVal);
+            warehouseStr = hiveConf.getVar(HiveConf.getConfVars("hive.metastore.warehouse.dir"));
         }
         Path warehouse = new Path(warehouseStr);
         Path uri =
@@ -2024,10 +2025,10 @@ public class HiveCatalog extends AbstractCatalog {
         // always using user-set parameters overwrite hive-site.xml parameters
         context.options().toMap().forEach(hiveConf::set);
         if (uri != null) {
-            hiveConf.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
+            hiveConf.set("hive.metastore.uris", uri);
         }
 
-        if (hiveConf.get(HiveConf.ConfVars.METASTOREURIS.varname) == null) {
+        if (hiveConf.get("hive.metastore.uris") == null) {
             LOG.error(
                     "Can't find hive metastore uri to connect: "
                             + " either set "

@@ -18,8 +18,12 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
@@ -53,19 +57,24 @@ import org.apache.paimon.table.Instant;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.view.ViewChange;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
 import org.junit.Test;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Test for {@link RESTApi} json. */
@@ -290,6 +299,52 @@ public class RESTApiJsonTest {
     }
 
     @Test
+    public void listPartitionsByFilterRequestPreservesTemporalAndDecimalLiterals()
+            throws Exception {
+        // A partition filter reaches the server as JsonSerdeUtil.toFlatJson(predicate) carried in
+        // the request's filter field. DATE/TIME/TIMESTAMP/TIMESTAMP_LTZ/DECIMAL literals travel as
+        // strings; assert they survive the full request round-trip that a server parses, including
+        // a decimal with more significant digits than a double can hold.
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        RowType.of(
+                                DataTypes.DATE(),
+                                DataTypes.TIME(3),
+                                DataTypes.TIMESTAMP(6),
+                                DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9),
+                                DataTypes.DECIMAL(38, 18)));
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.equal(0, (int) java.time.LocalDate.of(2026, 1, 15).toEpochDay()),
+                        builder.equal(1, 45_296_789), // 12:34:56.789
+                        builder.equal(
+                                2,
+                                Timestamp.fromLocalDateTime(
+                                        java.time.LocalDateTime.of(
+                                                2026, 1, 15, 12, 34, 56, 789_000_000))),
+                        builder.equal(
+                                3,
+                                Timestamp.fromInstant(
+                                        java.time.Instant.parse("2026-01-15T04:34:56.789Z"))),
+                        builder.equal(
+                                4,
+                                Decimal.fromBigDecimal(
+                                        new java.math.BigDecimal(
+                                                "12345678901234567890.123456789012345678"),
+                                        38,
+                                        18)));
+
+        ListPartitionsByFilterRequest request =
+                new ListPartitionsByFilterRequest(
+                        JsonSerdeUtil.toFlatJson(predicate), "dt=2026%", 2, null);
+        ListPartitionsByFilterRequest parsed =
+                RESTApi.fromJson(RESTApi.toJson(request), ListPartitionsByFilterRequest.class);
+        Predicate serverSide = JsonSerdeUtil.fromJson(parsed.getFilter(), Predicate.class);
+
+        assertEquals(predicate, serverSide);
+    }
+
+    @Test
     public void createPartitionsResponseParseTest() throws Exception {
         Map<String, String> created = new HashMap<>();
         created.put("dt", "20260714");
@@ -335,6 +390,104 @@ public class RESTApiJsonTest {
         assertFalse(explicitRequestJson.contains("replaceStatistics"));
         assertNull(defaultRequest.getPartitionStatistics());
         assertNull(defaultRequest.replaceStatistics());
+    }
+
+    @Test
+    public void createPartitionsRequestPreservesOptionsTest() throws Exception {
+        String json =
+                "{\"partitionSpecs\":[{\"dt\":\"20260901\"},{\"dt\":\"20260902\"}],"
+                        + "\"partitionOptions\":[{},"
+                        + "{\"path\":\"oss://archive-bucket/table/dt=20260902\","
+                        + "\"owner\":\"data-platform\"}]}";
+
+        CreatePartitionsRequest request = RESTApi.fromJson(json, CreatePartitionsRequest.class);
+        Map<?, ?> serialized = RESTApi.fromJson(RESTApi.toJson(request), Map.class);
+        Map<String, String> customOptions = new HashMap<>();
+        customOptions.put("path", "oss://archive-bucket/table/dt=20260902");
+        customOptions.put("owner", "data-platform");
+
+        assertEquals(
+                Arrays.asList(Collections.emptyMap(), customOptions),
+                serialized.get("partitionOptions"));
+    }
+
+    @Test
+    public void createPartitionsRequestCarriesPartitionLocationsTest() throws Exception {
+        Map<String, String> returningSpec = Collections.singletonMap("dt", "20260901");
+        Map<String, String> untouchedSpec = Collections.singletonMap("dt", "20260902");
+        Map<String, String> defaultDirectory =
+                Collections.singletonMap("path", "file:/warehouse/db/table/dt=20260901");
+        PartitionStatistics replacement =
+                new PartitionStatistics(returningSpec, 0L, 0L, 0L, 1756684800000L, -1);
+        CreatePartitionsRequest request =
+                new CreatePartitionsRequest(
+                        Arrays.asList(returningSpec, untouchedSpec),
+                        true,
+                        Collections.singletonList(replacement),
+                        true,
+                        Arrays.asList(defaultDirectory, Collections.emptyMap()));
+
+        String json = RESTApi.toJson(request);
+        CreatePartitionsRequest parsed = RESTApi.fromJson(json, CreatePartitionsRequest.class);
+        Map<?, ?> wireObject = RESTApi.fromJson(json, Map.class);
+
+        // Naming the partition's own default directory is how a request asks for it back; an
+        // absent path leaves the stored location alone.
+        assertTrue(json.contains("\"path\":\"file:/warehouse/db/table/dt=20260901\""));
+        assertEquals(
+                Arrays.asList(defaultDirectory, Collections.emptyMap()),
+                parsed.getPartitionOptions());
+        assertEquals(5, wireObject.size());
+        assertTrue(wireObject.containsKey("partitionSpecs"));
+        assertTrue(wireObject.containsKey("ignoreIfExists"));
+        assertTrue(wireObject.containsKey("partitionStatistics"));
+        assertTrue(wireObject.containsKey("replaceStatistics"));
+        assertTrue(wireObject.containsKey("partitionOptions"));
+    }
+
+    @Test
+    public void createPartitionsRequestRejectsNullMapsKeysAndValuesTest() {
+        List<Map<String, String>> specs =
+                Arrays.asList(
+                        Collections.singletonMap("dt", "20260901"),
+                        Collections.singletonMap("dt", "20260902"));
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new CreatePartitionsRequest(
+                                specs,
+                                true,
+                                null,
+                                null,
+                                Arrays.asList(null, Collections.emptyMap())));
+
+        Map<String, String> nullValue = new HashMap<>();
+        nullValue.put("path", null);
+        nullValue.put("owner", null);
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new CreatePartitionsRequest(
+                                specs,
+                                true,
+                                Collections.singletonList(
+                                        new PartitionStatistics(
+                                                specs.get(1), 0L, 0L, 0L, 1756684800000L, -1)),
+                                true,
+                                Arrays.asList(Collections.emptyMap(), nullValue)));
+
+        Map<String, String> nullKey = new HashMap<>();
+        nullKey.put(null, "value");
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new CreatePartitionsRequest(
+                                specs,
+                                true,
+                                null,
+                                null,
+                                Arrays.asList(Collections.emptyMap(), nullKey)));
     }
 
     @Test

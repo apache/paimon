@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.spark.SparkTypeUtils
 import org.apache.paimon.table.DataTable
-import org.apache.paimon.table.source.{DataSplit, StreamDataTableScan}
+import org.apache.paimon.table.source.{DataSplit, SnapshotNotExistPlan, StreamDataTableScan}
 import org.apache.paimon.table.source.TableScan.Plan
 import org.apache.paimon.table.source.snapshot.StartingContext
 import org.apache.paimon.utils.{InternalRowPartitionComputer, TypeUtils}
@@ -48,6 +48,10 @@ case class IndexedDataSplit(snapshotId: Long, index: Long, entry: DataSplit) {
     this
   }
 }
+
+private case class BatchResult(
+    indexedDataSplits: Array[IndexedDataSplit],
+    emptyFullSnapshotNextId: Option[Long])
 
 private[spark] trait StreamHelper {
 
@@ -85,20 +89,36 @@ private[spark] trait StreamHelper {
       startOffset: PaimonSourceOffset,
       endOffset: Option[PaimonSourceOffset],
       limit: ReadLimit): Option[PaimonSourceOffset] = {
-    val indexedDataSplits = getBatch(startOffset, endOffset, Some(limit))
-    indexedDataSplits.lastOption
+    val batchResult = getBatchResult(startOffset, endOffset, Some(limit))
+    batchResult.indexedDataSplits.lastOption
       .map {
         ids =>
           val scanSnapshot =
             startOffset.scanSnapshot && ids.snapshotId.equals(startOffset.snapshotId)
           if (includeSnapshotCompletionInOffset) {
-            val totalSplits = ids.totalSplits.getOrElse(
-              throw new IllegalStateException(
-                s"Missing total splits for snapshot ${ids.snapshotId}."))
+            val totalSplits = ids.totalSplits.getOrElse(throw new IllegalStateException(
+              s"Missing total splits for snapshot ${ids.snapshotId}."))
             PaimonSourceOffset.withTotalSplits(ids.snapshotId, ids.index, scanSnapshot, totalSplits)
           } else {
             PaimonSourceOffset(ids.snapshotId, ids.index, scanSnapshot)
           }
+      }
+      .orElse {
+        batchResult.emptyFullSnapshotNextId.map {
+          nextSnapshotId =>
+            if (includeSnapshotCompletionInOffset) {
+              PaimonSourceOffset.withTotalSplits(
+                nextSnapshotId,
+                PaimonSourceOffset.INIT_OFFSET_INDEX,
+                scanSnapshot = false,
+                totalSplits = 0L)
+            } else {
+              PaimonSourceOffset(
+                nextSnapshotId,
+                PaimonSourceOffset.INIT_OFFSET_INDEX,
+                scanSnapshot = false)
+            }
+        }
       }
   }
 
@@ -106,8 +126,17 @@ private[spark] trait StreamHelper {
       startOffset: PaimonSourceOffset,
       endOffset: Option[PaimonSourceOffset],
       limit: Option[ReadLimit]): Array[IndexedDataSplit] = {
+    getBatchResult(startOffset, endOffset, limit).indexedDataSplits
+  }
+
+  private def getBatchResult(
+      startOffset: PaimonSourceOffset,
+      endOffset: Option[PaimonSourceOffset],
+      limit: Option[ReadLimit]): BatchResult = {
     if (startOffset != null) {
-      if (startOffset.snapshotCompleted) {
+      if (startOffset.emptySnapshotCompleted) {
+        streamScan.restore(startOffset.snapshotId, false)
+      } else if (startOffset.snapshotCompleted) {
         streamScan.restore(startOffset.snapshotId + 1, false)
       } else {
         streamScan.restore(startOffset.snapshotId, startOffset.scanSnapshot)
@@ -116,6 +145,9 @@ private[spark] trait StreamHelper {
 
     val readLimitGuard = limit.flatMap(PaimonReadLimits(_, lastTriggerMillis))
     var hasSplits = true
+    var hasNonEmptyPlan = false
+    var firstPlan = true
+    var emptyFullSnapshotNextId: Option[Long] = None
     def continue: Boolean = {
       hasSplits && readLimitGuard.forall(_.hasCapacity) && endOffset.forall(
         streamScan.checkpoint() <= _.snapshotId)
@@ -125,22 +157,35 @@ private[spark] trait StreamHelper {
     while (continue) {
       val plan = streamScan.plan()
       if (plan.splits.isEmpty) {
-        hasSplits = false
+        val isCompletedEmptyFullSnapshot =
+          firstPlan &&
+            startOffset != null &&
+            startOffset.scanSnapshot &&
+            (plan ne SnapshotNotExistPlan.INSTANCE)
+        if (isCompletedEmptyFullSnapshot) {
+          Option(streamScan.checkpoint()).foreach {
+            nextSnapshotId => emptyFullSnapshotNextId = Some(nextSnapshotId)
+          }
+        } else {
+          hasSplits = false
+        }
       } else {
+        hasNonEmptyPlan = true
         indexedDataSplits ++= convertPlanToIndexedSplits(plan)
           // Filter by (start, end]
           .filter(ids => inRange(ids, startOffset, endOffset))
           // Filter splits by read limits other than ReadMinRows.
           .takeWhile(s => readLimitGuard.forall(_.admit(s)))
       }
+      firstPlan = false
     }
 
     // Filter splits by ReadMinRows read limit if exists.
     // If this batch doesn't meet the condition of ReadMinRows, then nothing will be returned.
-    if (readLimitGuard.exists(_.skipBatch)) {
-      Array.empty
+    if (readLimitGuard.exists(_.skipBatch) && hasNonEmptyPlan) {
+      BatchResult(Array.empty, None)
     } else {
-      indexedDataSplits.toArray
+      BatchResult(indexedDataSplits.toArray, emptyFullSnapshotNextId)
     }
   }
 

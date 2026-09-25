@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import pyarrow as pa
 
+from pypaimon.common.options.core_options import ChangelogProducer
+from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import BlobConsumer
@@ -42,6 +44,11 @@ class TableWrite:
         self.commit_user = commit_user
         self.static_partition = static_partition
         self.file_store_write = self._create_file_store_write(commit_user)
+        if static_partition is not None:
+            # An overwrite replaces state, not an input changelog. Java's
+            # overwrite commit does not publish changelog manifests; avoid
+            # writing unreferenced changelog files in the first place.
+            self.file_store_write.changelog_producer = ChangelogProducer.NONE
         self.row_key_extractor = self._create_row_key_extractor(static_partition)
 
     def _create_file_store_write(self, commit_user):
@@ -53,13 +60,13 @@ class TableWrite:
         )
 
     def write_arrow(self, table: pa.Table):
-        self._validate_pyarrow_schema(table.schema)
+        table = self._prepare_arrow_data(table)
         batches_iterator = table.to_batches()
         for batch in batches_iterator:
             self.write_arrow_batch(batch)
 
     def write_arrow_batch(self, data: pa.RecordBatch):
-        self._validate_pyarrow_schema(data.schema)
+        data = self._prepare_arrow_data(data)
 
         for partition, bucket, row_indices in \
                 self.row_key_extractor.extract_partition_bucket_groups(data):
@@ -84,6 +91,13 @@ class TableWrite:
                 else:
                     sub_table = pa.compute.take(data, row_indices)
             self._write_partition_bucket_batch(partition, bucket, sub_table)
+
+    def roll_before_group_if_needed(self, row_count: int):
+        """Roll current files before the next logical write group if needed."""
+        if isinstance(row_count, bool) or not isinstance(row_count, int) \
+                or row_count <= 0:
+            raise ValueError("Group row count must be a positive integer.")
+        self.file_store_write.roll_before_group_if_needed(row_count)
 
     def _write_partition_bucket_batch(self, partition, bucket, data):
         self.file_store_write.write(partition, bucket, data)
@@ -134,7 +148,7 @@ class TableWrite:
         if not isinstance(self.row_key_extractor, DynamicBucketRowKeyExtractor):
             if bucket_mode == BucketMode.HASH_DYNAMIC:
                 raise RuntimeError("Dynamic bucket extractor is not configured")
-        self._validate_pyarrow_schema(data.schema)
+        data = self._prepare_arrow_data(data)
         if bucket_mode == BucketMode.HASH_DYNAMIC:
             if key_hashes is None:
                 partition = self.row_key_extractor.notify_precomputed_bucket_batch(
@@ -226,6 +240,15 @@ class TableWrite:
         self.file_store_write.blob_consumer = blob_consumer
         return self
 
+    def with_blob_uri_reader_factory(self, uri_reader_factory):
+        if self.file_store_write.data_writers:
+            raise RuntimeError(
+                "with_blob_uri_reader_factory must be called before any "
+                "write operation."
+            )
+        self.file_store_write.blob_uri_reader_factory = uri_reader_factory
+        return self
+
     def write_ray(
         self,
         dataset: "Dataset",
@@ -296,9 +319,6 @@ class TableWrite:
             return commit_messages
 
         index_changes = prepare_indexes()
-        base_snapshot_id = getattr(
-            self.row_key_extractor, "base_snapshot_id", None
-        )
         messages_by_bucket = {
             (tuple(message.partition), message.bucket): message
             for message in commit_messages
@@ -315,18 +335,16 @@ class TableWrite:
                 messages_by_bucket[(partition, bucket)] = message
             message.index_adds.extend(changes.additions)
             message.index_deletes.extend(changes.deletions)
-        if base_snapshot_id is not None:
-            # Data-only upserts must participate too. A concurrent overwrite
-            # can rebuild the HASH index and move an existing key, making a
-            # stale data file unsafe even when this writer added no mapping.
-            for message in commit_messages:
-                message.hash_index_base_snapshot = base_snapshot_id
         return commit_messages
 
     def _release_prepared_indexes(self) -> None:
         release = getattr(self.row_key_extractor, "release_prepared", None)
         if release is not None:
             release()
+
+    def _prepare_arrow_data(self, data):
+        self._validate_pyarrow_schema(data.schema)
+        return normalize_arrow_strings(data)
 
     def _validate_pyarrow_schema(self, data_schema: pa.Schema):
         if self._is_compatible_pyarrow_schema(data_schema, self.table_pyarrow_schema):
@@ -342,18 +360,8 @@ class TableWrite:
 
     def _is_compatible_pyarrow_schema(
             self, data_schema: pa.Schema, expected_schema: pa.Schema) -> bool:
-        # Allow compatible binary types: binary, fixed_size_binary[N] are interchangeable
-        if data_schema.names != expected_schema.names:
-            return False
-        for i in range(len(data_schema)):
-            input_type = data_schema.field(i).type
-            expected_type = expected_schema.field(i).type
-            if input_type == expected_type:
-                continue
-            if self._is_binary_family(input_type) and self._is_binary_family(expected_type):
-                continue
-            return False
-        return True
+        return arrow_schemas_compatible(
+            data_schema, expected_schema, check_top_level_nullability=False, allow_binary_compatibility=True)
 
     def _write_cols_pyarrow_schema(self, write_cols: List[str]) -> pa.Schema:
         table_fields = {
@@ -366,10 +374,6 @@ class TableWrite:
                          f"Input schema is: {data_schema} "
                          f"Table schema is: {self.table_pyarrow_schema} "
                          f"Write cols is: {self.file_store_write.write_cols}")
-
-    @staticmethod
-    def _is_binary_family(arrow_type) -> bool:
-        return pa.types.is_binary(arrow_type) or pa.types.is_fixed_size_binary(arrow_type)
 
 
 class BatchTableWrite(TableWrite):
@@ -385,6 +389,9 @@ class BatchTableWrite(TableWrite):
 
 
 class StreamTableWrite(TableWrite):
+
+    def __init__(self, table, commit_user):
+        super().__init__(table, commit_user, None)
 
     def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
         messages = self._prepare_commit(commit_identifier)

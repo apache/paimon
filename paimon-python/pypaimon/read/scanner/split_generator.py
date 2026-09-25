@@ -21,10 +21,12 @@ from typing import Callable, List, Optional, Dict, Tuple
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.read.scan_distribution import shard_range, validate_shard, validate_slice
 from pypaimon.read.split import Split
 from pypaimon.read.split import DataSplit
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.source.deletion_file import DeletionFile
+from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 
 
 class AbstractSplitGenerator(ABC):
@@ -40,12 +42,14 @@ class AbstractSplitGenerator(ABC):
         table,
         target_split_size: int,
         open_file_cost: int,
-        deletion_files_map: Optional[Dict] = None
+        deletion_files_map: Optional[Dict] = None,
+        snapshot_id: Optional[int] = None,
     ):
         self.table = table
         self.target_split_size = target_split_size
         self.open_file_cost = open_file_cost
         self.deletion_files_map = deletion_files_map or {}
+        self.snapshot_id = snapshot_id
         self.default_part_value = table.options.options.get(
             CoreOptions.PARTITION_DEFAULT_NAME, "__DEFAULT_PARTITION__")
         
@@ -57,8 +61,7 @@ class AbstractSplitGenerator(ABC):
 
     def with_shard(self, idx_of_this_subtask: int, number_of_para_subtasks: int):
         """Configure sharding for parallel processing."""
-        if idx_of_this_subtask >= number_of_para_subtasks:
-            raise ValueError("idx_of_this_subtask must be less than number_of_para_subtasks")
+        validate_shard(idx_of_this_subtask, number_of_para_subtasks)
         if self.start_pos_of_this_subtask is not None:
             raise ValueError("with_shard and with_slice cannot be used simultaneously")
         self.idx_of_this_subtask = idx_of_this_subtask
@@ -67,8 +70,7 @@ class AbstractSplitGenerator(ABC):
 
     def with_slice(self, start_pos: int, end_pos: int):
         """Configure slice range for processing."""
-        if start_pos >= end_pos:
-            raise ValueError("start_pos must be less than end_pos")
+        validate_slice(start_pos, end_pos)
         if self.idx_of_this_subtask is not None:
             raise ValueError("with_slice and with_shard cannot be used simultaneously")
         self.start_pos_of_this_subtask = start_pos
@@ -93,6 +95,15 @@ class AbstractSplitGenerator(ABC):
         Build splits from packed files.
         """
         splits = []
+        if not packed_files or not file_entries:
+            return splits
+        partition = tuple(file_entries[0].partition.values)
+        escaped_partition = False
+        if partition:
+            path_factory = self.table.path_factory()
+            escaped_partition = (path_factory.bucket_path(
+                partition, file_entries[0].bucket, canonical_partition=True)
+                != path_factory.bucket_path(partition, file_entries[0].bucket))
         for file_group in packed_files:
             if use_optimized_path:
                 raw_convertible = True
@@ -106,8 +117,15 @@ class AbstractSplitGenerator(ABC):
                     self.table.table_path,
                     file_entries[0].partition,
                     file_entries[0].bucket,
-                    self.default_part_value
+                    self.default_part_value,
+                    self.table.options.data_file_path_directory()
                 )
+                if escaped_partition and not data_file.external_path:
+                    canonical_path = canonical_data_file_path(
+                        self.table, partition, file_entries[0].bucket,
+                        data_file.file_name)
+                    if self.table.file_io.exists(canonical_path):
+                        data_file.file_path = canonical_path
 
             if file_group:
                 # Get deletion files for this split
@@ -124,7 +142,8 @@ class AbstractSplitGenerator(ABC):
                     partition=file_entries[0].partition,
                     bucket=file_entries[0].bucket,
                     raw_convertible=raw_convertible,
-                    data_deletion_files=data_deletion_files
+                    data_deletion_files=data_deletion_files,
+                    snapshot_id=self.snapshot_id,
                 )
                 splits.append(split)
         return splits
@@ -193,22 +212,7 @@ class AbstractSplitGenerator(ABC):
         Calculate start and end positions for this shard based on total rows.
         Uses balanced distribution to avoid last shard overload.
         """
-        base_rows_per_shard = total_row // self.number_of_para_subtasks
-        remainder = total_row % self.number_of_para_subtasks
-
-        # Each of the first 'remainder' shards gets one extra row
-        if self.idx_of_this_subtask < remainder:
-            num_row = base_rows_per_shard + 1
-            start_pos = self.idx_of_this_subtask * (base_rows_per_shard + 1)
-        else:
-            num_row = base_rows_per_shard
-            start_pos = (
-                remainder * (base_rows_per_shard + 1) +
-                (self.idx_of_this_subtask - remainder) * base_rows_per_shard
-            )
-
-        end_pos = start_pos + num_row
-        return start_pos, end_pos
+        return shard_range(total_row, self.idx_of_this_subtask, self.number_of_para_subtasks)
 
     @staticmethod
     def _compute_file_range(

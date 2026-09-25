@@ -1,6 +1,5 @@
 ---
 title: "Data Evolution"
-sidebar_position: 6
 ---
 
 import Tabs from '@theme/Tabs';
@@ -20,32 +19,43 @@ with the License.  You may obtain a copy of the License at
 Unless required by applicable law or agreed to in writing,
 software distributed under the License is distributed on an
 "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-KIND, either express or implied.
-See the License for the specific language governing
-permissions and limitations under the License.
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
 -->
 
 # Data Evolution
 
 ## Overview
 
-Paimon supports schema evolution, allowing you to add, modify, or delete column
-schema. Data Evolution mode extends this for append tables by allowing partial
-column updates without rewriting entire data files. Updated column data is
-written to new files and merged with the original data during reads.
+Data Evolution lets an append table update selected columns while keeping the
+files for untouched columns. A logical row can therefore be assembled from
+several physical files: its scalar fields from normal data files, its payload
+from BLOB files, and its embedding from dedicated vector files. Paimon aligns
+these pieces by **row ID**, and uses file versions to select the current values.
 
-Data Evolution mode offers the following advantages:
+This is useful when a pipeline ingests data once and enriches it repeatedly,
+for example by adding captions, labels, or embeddings to images. Schema
+evolution changes which columns exist; Data Evolution writes or replaces their
+values for existing rows. Adding a column alone does not backfill it.
 
-- **Efficient partial-column updates**: update a subset of columns and avoid the
-  I/O cost of rewriting untouched columns.
-- **Reduced file rewrites**: append new column data to dedicated files when
-  backfilling or evolving data.
-- **Delete support**: record row deletions with deletion vectors without
-  rewriting existing column files.
-- **Optimized reads**: merge original and updated column files at read time.
+The unit of a normal partial-column write is **the selected columns over a
+complete file row-ID range**. Updating one row can still rewrite those columns
+for every row in its file group. The saving comes from leaving the other
+columns, especially large payloads, untouched. Repeated updates add files and
+read work until compaction consolidates them.
 
-To enable Data Evolution, create an append table with both
-`row-tracking.enabled` and `data-evolution.enabled` set to `true`.
+## Create a Table
+
+Set both `row-tracking.enabled` and `data-evolution.enabled` when creating the
+table. These options are immutable. Data Evolution requires an append table
+with no primary key and `bucket = -1` (the default for an append table).
+`clustering.incremental` cannot be enabled with Data Evolution.
+
+The following examples assume a configured Paimon catalog and the `default`
+database. Deletion vectors are enabled so the same table can also run the
+[delete examples](#deletes); they are optional if row-level deletes are not
+needed.
 
 <Tabs groupId="data-evolution-create-table">
 
@@ -54,10 +64,11 @@ To enable Data Evolution, create an append table with both
 ```sql
 CREATE TABLE target_table (id INT, b INT, c INT) TBLPROPERTIES (
     'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true'
+    'data-evolution.enabled' = 'true',
+    'deletion-vectors.enabled' = 'true'
 );
 
-INSERT INTO target_table VALUES (1, 1, 1), (2, 2, 2);
+INSERT INTO target_table VALUES (1, 1, 10), (2, 2, 20);
 ```
 
 </TabItem>
@@ -65,13 +76,18 @@ INSERT INTO target_table VALUES (1, 1, 1), (2, 2, 2);
 <TabItem value="flink-sql" label="Flink SQL">
 
 ```sql
+SET 'execution.runtime-mode' = 'batch';
+
 CREATE TABLE target_table (id INT, b INT, c INT) WITH (
     'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true'
+    'data-evolution.enabled' = 'true',
+    'deletion-vectors.enabled' = 'true'
 );
 
-INSERT INTO target_table VALUES (1, 1, 1), (2, 2, 2);
+INSERT INTO target_table VALUES (1, 1, 10), (2, 2, 20);
 ```
+
+Wait for the initial insert job to finish before running an update.
 
 </TabItem>
 
@@ -79,13 +95,10 @@ INSERT INTO target_table VALUES (1, 1, 1), (2, 2, 2);
 
 ```python
 import pyarrow as pa
-
 from pypaimon import CatalogFactory, Schema
 
-catalog_options = {"warehouse": "/path/to/warehouse"}
-catalog = CatalogFactory.create(catalog_options)
+catalog = CatalogFactory.create({"warehouse": "/path/to/warehouse"})
 catalog.create_database("default", True)
-
 pa_schema = pa.schema([
     ("id", pa.int32()),
     ("b", pa.int32()),
@@ -96,320 +109,377 @@ schema = Schema.from_pyarrow_schema(
     options={
         "row-tracking.enabled": "true",
         "data-evolution.enabled": "true",
+        "deletion-vectors.enabled": "true",
     },
 )
 catalog.create_table("default.target_table", schema, False)
-
 table = catalog.get_table("default.target_table")
+
 builder = table.new_batch_write_builder()
 write = builder.new_write()
 commit = builder.new_commit()
-write.write_arrow(pa.Table.from_pydict(
-    {"id": [1, 2], "b": [1, 2], "c": [1, 2]},
-    schema=pa_schema,
-))
-commit.commit(write.prepare_commit())
-write.close()
-commit.close()
+try:
+    write.write_arrow(pa.Table.from_pydict(
+        {"id": [1, 2], "b": [1, 2], "c": [10, 20]}, schema=pa_schema,
+    ))
+    commit.commit(write.prepare_commit())
+finally:
+    write.close()
+    commit.close()
 ```
 
 </TabItem>
 
 </Tabs>
 
+A business column such as `id` is not a primary key. Repeated `INSERT` statements
+append new rows, even when business-key values repeat. `UPDATE` and `MERGE INTO`
+use their predicates to find rows and use Paimon's `_ROW_ID` internally to
+write the changes.
+
+For multimodal columns, see [BLOB](./blob) and [Vector](./vector) for their type
+declarations and storage options. Dedicated BLOB/vector storage needs normal
+columns alongside it. A partial-column file containing ordinary columns is
+still a **normal file**; “dedicated” refers to the storage format, not to
+whether the file was created by an update.
+
+## File Group Spec
+
+Normal files for the same group cover the same complete row-ID range. A dedicated
+BLOB or vector file must fit inside one normal range. Readers select the newest
+provider for each requested column, then combine values at matching row positions.
+
+<span id="row-ids-and-file-metadata" />
+<span id="normal-files-equal-or-disjoint-ranges" />
+<span id="dedicated-files-contained-within-one-normal-range" />
+<span id="valid-and-invalid-layouts" />
+<span id="how-reads-reconstruct-rows" />
+
+See [File Layout and Reads](./data-evolution-file-layout) for range diagrams,
+column-version selection, and the distinction between an omitted column, explicit
+`NULL`, and a BLOB placeholder.
+
 ## Partial Updates
 
-You can update selected columns with Spark SQL `UPDATE` or `MERGE INTO`, the
-Flink `data_evolution_merge_into` procedure, or the PyPaimon table update API.
-Only the updated column files are written; untouched columns remain in their
-original files.
+For a normal-column update, the write path preserves the file contract through
+the following steps:
 
-<Tabs groupId="data-evolution-partial-update">
+1. Pin a target snapshot, find the matching row IDs, and map them to normal
+   file ranges in that snapshot.
+2. For each affected range, produce the selected columns in row-ID order:
+   new values for matched rows and existing values for unmatched rows. Keep
+   deleted positions aligned as well.
+3. Write a normal partial file with the original range's `firstRowId` and
+   `rowCount`. Normal-file rolling is disabled for this write, because a
+   smaller output would violate the equal-range rule.
+4. Commit the new files atomically with conflict checks. Readers of the new
+   snapshot see the updated column versions; older snapshots keep their
+   previous view.
 
-<TabItem value="spark-sql" label="Spark SQL">
+The engine and update APIs perform this alignment. Applications specify the
+matching rows and values; they do not need to construct file groups themselves.
+
+![Updating b for one matched row writes a new b-only file for all three row positions, preserving b for unmatched rows and leaving the original file unchanged.](/img/data-evolution-partial-update.svg)
+
+Here `id = 20` selects only row ID 1, but N1 still contains three values of
+`b`. The row-ID labels show alignment; they are not extra business columns.
+
+### Spark SQL
+
+Spark supports `UPDATE` expressions and `MERGE INTO`. For example:
 
 ```sql
 UPDATE target_table SET b = b + 10 WHERE id = 1;
 
-CREATE TABLE source_table (id INT, b INT);
-INSERT INTO source_table VALUES (1, 11), (2, 22);
+CREATE TABLE source_table (id INT, b INT, c INT);
+INSERT INTO source_table VALUES (1, 100, 1000), (3, 300, 3000);
 
 MERGE INTO target_table AS t
 USING source_table AS s
 ON t.id = s.id
-WHEN MATCHED THEN UPDATE SET t.b = s.b;
+WHEN MATCHED THEN UPDATE SET t.b = s.b
+WHEN NOT MATCHED THEN INSERT (id, b, c) VALUES (s.id, s.b, s.c);
 
-SELECT * FROM target_table;
-+----+----+----+
-| id | b  | c  |
-+----+----+----+
-| 1  | 11 | 1  |
-| 2  | 22 | 2  |
-+----+----+----+
+SELECT * FROM target_table ORDER BY id;
+-- (1, 100, 10), (2, 2, 20), (3, 300, 3000)
 ```
+
+The matched update writes `b` over the affected existing normal ranges and
+keeps their row IDs. The unmatched insert writes a new row and receives a new
+row ID. Assign only the columns you intend to change; assigning every column
+can remove the I/O benefit of a partial update. Partition columns cannot be
+changed by a matched partial update.
+
+### Flink SQL
+
+Use the `data_evolution_merge_into` procedure for matched updates. It runs in
+batch mode and can populate an existing column, including a newly added
+column, but does not append unmatched source rows or perform deletes. The
+target must already contain data.
+
+```sql
+CREATE TABLE source_table (id INT, b INT);
+INSERT INTO source_table VALUES (1, 100), (2, 200);
+
+-- Wait for the source insert to finish before calling the procedure.
+CALL sys.data_evolution_merge_into(
+    'default.target_table', -- target table
+    't',                    -- target alias
+    '',                     -- optional source SQL statements
+    'source_table',          -- source table or view
+    't.id=source_table.id',  -- match condition
+    'b=source_table.b',      -- columns and expressions to write
+    2                       -- sink parallelism
+);
+```
+
+Use `''` for unused optional positional arguments. Updating partition columns
+is not supported. For BLOB updates, this Flink procedure supports
+[descriptor-only](./blob-references#descriptor-only-storage) and [BLOB view](./blob-references#blob-view)
+fields; it rejects raw-data BLOB fields, including BLOB arrays and maps.
+
+### Python API
+
+PyPaimon returns commit messages from its update APIs. Commit them to make the
+change visible:
+
+```python
+table = catalog.get_table("default.target_table")
+builder = table.new_batch_write_builder()
+update = builder.new_update()
+predicate = update.new_predicate_builder().is_in("id", [1, 2])
+messages = update.update_by_predicate(predicate, {"b": 100})
+
+commit = builder.new_commit()
+try:
+    commit.commit(messages)
+finally:
+    commit.close()
+```
+
+For expressions, row-ID updates, business-key upserts, `merge_into`, and stream
+writer lifecycles, see [PyPaimon Data Evolution](../pypaimon/data-evolution).
+These APIs handle file alignment; writing an arbitrary small normal file and
+assigning it an existing row ID does not satisfy the file contract.
+
+## Self Updates
+
+A self update derives new values from the table's current rows. It is also the
+usual backfill workflow: first add a nullable column, then compute its values.
+The examples in this section are alternatives to run after creating the table.
+
+<Tabs groupId="data-evolution-self-update">
+
+<TabItem value="spark-sql" label="Spark SQL">
+
+```sql
+ALTER TABLE target_table ADD COLUMN total INT;
+
+UPDATE target_table SET total = b + c;
+
+SELECT id, total FROM target_table ORDER BY id;
+```
+
+This writes `total` for the existing ranges. It leaves `id`, `b`, and `c` in
+their existing column files.
 
 </TabItem>
 
 <TabItem value="flink-sql" label="Flink SQL">
 
-Flink does not currently support `MERGE INTO` syntax. Use the
-`data_evolution_merge_into` procedure instead:
-
 ```sql
-CREATE TABLE source_table (id INT, b INT);
-INSERT INTO source_table VALUES (1, 11), (2, 22);
+ALTER TABLE target_table ADD total INT;
+
+CREATE TEMPORARY VIEW source_view AS
+SELECT _ROW_ID, b + c AS total
+FROM default.`target_table$row_tracking`;
 
 CALL sys.data_evolution_merge_into(
     'default.target_table',
+    't',
     '',
-    '',
-    'source_table',
-    'source_table.id=target_table.id',
-    'b=source_table.b',
+    'source_view',
+    't._ROW_ID=source_view._ROW_ID',
+    'total=source_view.total',
     2
 );
-
-SELECT * FROM target_table;
-+----+----+----+
-| id | b  | c  |
-+----+----+----+
-| 1  | 11 | 1  |
-| 2  | 22 | 2  |
-+----+----+----+
 ```
+
+The temporary view supplies the source because the procedure does not allow
+identical source and target table names. The `_ROW_ID` equality identifies
+the self-merge pattern. It supports matched updates only.
 
 </TabItem>
 
 <TabItem value="python-api" label="Python API">
 
-PyPaimon exposes an UPDATE-like table update API. It accepts a `Predicate`
-for the `WHERE` condition and literal assignments for the `SET` clause.
+For a derived-column workflow, read a shard and write the computed values in
+exactly the same order. This example replaces the existing `b` column:
 
 ```python
 table = catalog.get_table("default.target_table")
-
 builder = table.new_batch_write_builder()
-table_update = builder.new_update()
-predicate = table_update.new_predicate_builder().is_in("id", [1, 2])
+update = builder.new_update()
+update.with_read_projection(["b", "c"])
+update.with_update_type(["b"])
 
-messages = table_update.update_by_predicate(predicate, {"b": 100})
+updater = update.new_shard_updator(0, 1)
+reader = updater.arrow_reader()
+for batch in iter(reader.read_next_batch, None):
+    b = batch.column("b").to_pylist()
+    c = batch.column("c").to_pylist()
+    updater.update_by_arrow_batch(pa.RecordBatch.from_pydict(
+        {"b": [None if bi is None or ci is None else bi + ci
+               for bi, ci in zip(b, c)]},
+        schema=pa.schema([("b", pa.int32())]),
+    ))
 
+messages = updater.prepare_commit()
 commit = builder.new_commit()
-commit.commit(messages)
-commit.close()
+try:
+    commit.commit(messages)
+finally:
+    commit.close()
 ```
+
+Each output batch must have the same row count and order as its input batch.
+Do not filter, sort, or duplicate rows between the read and update steps.
+Multiple workers can use distinct shard indices with the same shard count.
 
 </TabItem>
 
 </Tabs>
 
-Notes:
+For explicit row-ID inspection in SQL, query the system table:
 
-- Spark SQL supports standalone `UPDATE` statements for Data Evolution tables.
-- Concurrent Spark SQL `UPDATE` statements that update the same data file and
-  columns may be retried automatically. Configure retry attempts with
-  `spark.paimon.write.data-evolution.update-conflict-retry.max-attempts` and
-  retry wait time with
-  `spark.paimon.write.data-evolution.update-conflict-retry.wait-ms`.
-- If concurrent compaction changes row-ID file boundaries after Spark SQL
-  `MERGE INTO` stages regular partial-column files, Spark rebases those staged
-  files onto the latest boundaries before committing instead of rerunning the
-  MERGE source and join. Spark performs this rewrite with distributed DataFrame
-  processing, so the PyPaimon-only
-  `data-evolution.row-id-conflict-rewrite.max-size` limit does not apply.
-  Recovery does not apply when deletion vectors are enabled or when
-  existing-row BLOB or VECTOR files are staged, and it does not hide logical
-  concurrent-update conflicts.
-- In Spark SQL, `MERGE INTO` supports `WHEN NOT MATCHED BY SOURCE` for delete
-  actions on Data Evolution tables.
-- The Flink `data_evolution_merge_into` procedure currently supports updating
-  or inserting columns, but not inserting new rows.
+```sql
+SELECT _ROW_ID, id, b, c FROM default.`target_table$row_tracking`;
+```
 
-## Deletes
+Obtain row IDs from the table instead of deriving them from a business key or
+from result order. Ordinary updates and compaction preserve them, but
+[maintenance that reassigns row IDs](./data-evolution-maintenance#row-id-lifetime) does not.
 
-Data Evolution tables can use deletion vectors to record deleted rows without
-rewriting existing column files. To write deletes, enable deletion vectors
-together with row tracking and Data Evolution:
+### Nested Fields
+
+By default, the physical update unit is a top-level column, including a whole
+`ROW`/`STRUCT` column. To write only direct struct subfields, persist
+`data-evolution.nested-field.enabled = true` on the table. Written-column
+metadata can then contain paths such as `payload.caption`, and readers select
+the latest provider for the corresponding subfields. Row alignment still
+covers the full normal-file range.
+
+The current implementation supports composing one level of struct subfields
+across files. It does not support splitting a deeper sub-struct across
+multiple files. Engine support for assignment syntax also matters; for
+example, the Flink procedure requires the option for a subfield assignment.
 
 :::warning
 
-Deleting rows with deletion vectors does not physically remove the original
-data immediately. Data Evolution compaction preserves row IDs and logical
-deletions, so it does not materialize deleted rows. The legacy
-`data-evolution.compaction.rewrite-row-ids` option is no longer supported. Use
-the `materialize_deletion_vectors` procedure to apply deletion vectors to the
-latest table state and replace the affected files. Historical snapshots and
-tags may still reference the replaced files; reclaiming their storage requires
-those references to expire and snapshot expiration to remove the files.
+Upgrade every reader, writer, compactor, and maintenance job before enabling
+nested-field evolution. Enable it through a persisted table-option change;
+dynamic overrides and later disabling or removing the option are unsupported.
+Older components cannot reconstruct files containing nested write paths, so a
+binary downgrade is unsafe once these files have been committed.
 
 :::
 
-Both Flink and Spark expose the same procedure:
+## Deletes
 
-```sql
-CALL sys.materialize_deletion_vectors(`table` => 'default.target_table');
-```
+Row-level deletes require `deletion-vectors.enabled = true`. A deletion vector
+records deleted positions against a normal anchor file in the group (the
+oldest normal file, ordered by version and then file name). Readers apply
+these deletions to all column providers for the same logical rows. Deleting
+a row therefore hides its scalar, BLOB, and vector values together without
+rewriting those data files.
 
-The procedure can limit the rewrite to selected partitions. `partitions` and
-`where` cannot be used together:
-
-```sql
-CALL sys.materialize_deletion_vectors(
-    `table` => 'default.target_table',
-    partitions => 'dt=2026-08-12');
-
-CALL sys.materialize_deletion_vectors(
-    `table` => 'default.target_table',
-    `where` => 'dt >= 20260801');
-```
-
-Materialization rewrites the affected data, assigns new row IDs to surviving
-rows, removes the applied deletion vectors, and drops affected global indexes.
-Consumers which persist `_ROW_ID` values must therefore coordinate with this
-operation. Concurrent changes to affected row-ID ranges cause the procedure to
-fail instead of committing stale results. Materialization of vector-store files
-is not currently supported.
-
-Spark processes bounded batches until all matching deletion vectors have been
-materialized. To keep a Flink job bounded, one Flink procedure invocation
-processes one batch with a soft target of 100,000 deletion vectors. An
-overlapping row-ID component is never split and can exceed the target. Invoke
-the Flink procedure repeatedly until an invocation makes no changes.
-
-```sql
-CREATE TABLE target_table (id INT, b INT, c INT) TBLPROPERTIES (
-    'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true',
-    'deletion-vectors.enabled' = 'true'
-);
-```
-
-Spark SQL supports `DELETE FROM` for Data Evolution tables:
+Spark SQL supports:
 
 ```sql
 DELETE FROM target_table WHERE id = 1;
 ```
 
-Spark SQL also supports delete actions in `MERGE INTO`:
+Spark can also combine update and delete clauses in `MERGE INTO`:
 
 ```sql
-CREATE TABLE source_table (id INT, op STRING);
-INSERT INTO source_table VALUES (2, 'delete'), (3, 'update');
+CREATE TABLE delete_source (id INT, op STRING);
+INSERT INTO delete_source VALUES (2, 'delete'), (3, 'update');
 
 MERGE INTO target_table AS t
-USING source_table AS s
+USING delete_source AS s
 ON t.id = s.id
 WHEN MATCHED AND s.op = 'delete' THEN DELETE
 WHEN MATCHED AND s.op = 'update' THEN UPDATE SET t.b = t.b + 10
 WHEN NOT MATCHED BY SOURCE AND t.id > 10 THEN DELETE;
 ```
 
-The `WHEN NOT MATCHED BY SOURCE` clause requires Spark 3.4 or later.
+`WHEN NOT MATCHED BY SOURCE` requires Spark 3.4 or later.
 
-With Flink 1.17 or later, SQL supports `DELETE FROM` for Data Evolution tables
-in batch mode. For row-level predicates, matching rows are recorded in deletion
-vectors, so data files are not rewritten:
-
-```sql
-DELETE FROM target_table WHERE id = 1;
-```
-
-Flink users can also submit the
+Flink 1.17 or later supports `DELETE FROM` for Data Evolution tables in batch
+mode. Flink also provides the
 [`delete` action](../flink/action-jars#deleting-from-a-data-evolution-table).
+PyPaimon provides `delete_by_predicate` and `delete_by_row_id`; see its
+[delete examples](../pypaimon/data-evolution#delete-rows). Partition-only deletes
+can use a partition-removal path instead of row-level deletion vectors.
 
-## Self Updates
+Deleting a row leaves its position in the file range occupied but invisible.
+For example, deleting row ID 2 from `[0, 5]` leaves the metadata range `[0, 5]`,
+with five visible rows. An update must not close that gap or shift rows 3–5.
 
-Self updates transform existing column values in place. In Flink SQL, create a
-temporary source view from the `$row_tracking` system table and join by
-`_ROW_ID`. In PyPaimon, use the shard scan + rewrite workflow to read existing
-values and write the derived columns back.
+## Concurrent Writes
 
-<Tabs groupId="data-evolution-self-update">
+Updates are planned against a snapshot and checked when committing. Paimon
+checks both the layout contract and whether intervening writes conflict with
+the staged changes.
 
-<TabItem value="flink-sql" label="Flink SQL">
+- A new normal partial file must exactly match a current normal range; an
+  existing-row dedicated file must be contained within one current normal
+  range. A removed row range cannot be updated using stale metadata.
+- Logical update conflicts consider both overlapping row ranges and written
+  field IDs. Updating different columns can avoid this conflict. Updating the
+  same column in the same normal range can conflict even when the predicates
+  selected different rows, because each staged file covers the full range.
+- A concurrent compaction can change boundaries while preserving the row IDs.
+  This is a layout conflict and is distinct from another writer changing the
+  same column values.
 
-```sql
-CREATE TEMPORARY VIEW source_view AS
-SELECT _ROW_ID, b + c AS b
-FROM default.target_table$row_tracking;
+Spark `UPDATE` can retry update conflicts. Configure it with
+`spark.paimon.write.data-evolution.update-conflict-retry.max-attempts` and
+`spark.paimon.write.data-evolution.update-conflict-retry.wait-ms`.
 
-CALL sys.data_evolution_merge_into(
-    'default.target_table',
-    'TempT',
-    '',
-    'source_view',
-    'TempT._ROW_ID=source_view._ROW_ID',
-    'b=source_view.b',
-    2
-);
-```
+Spark `MERGE INTO` can rebase staged normal partial-column files onto the
+latest boundaries after concurrent compaction, using distributed processing
+without rerunning the source and join. PyPaimon has similar recovery bounded
+by `data-evolution.row-id-conflict-rewrite.max-size` (default `256 MB`, `0 B`
+disables it), measured over the affected current data files. This size limit
+does not apply to Spark.
 
-</TabItem>
+This boundary recovery is not attempted when deletion vectors are enabled or
+when the commit contains existing-row BLOB or VECTOR staged files. It does
+not suppress logical concurrent-update conflicts. If recovery is unavailable,
+re-plan the operation against the latest snapshot.
 
-<TabItem value="python-api" label="Python API">
+## Compaction and Row-ID Lifetime
 
-```python
-import pyarrow as pa
+Repeated updates add column files. Ordinary compaction consolidates them while
+preserving row IDs and logical deletions. Deletion-vector materialization removes
+deleted positions and assigns new row IDs to surviving rows in rewritten ranges.
+Persisted row-ID references must be coordinated with this maintenance.
 
-table = catalog.get_table("default.target_table")
+<span id="ordinary-compaction" />
+<span id="splitting-large-files-during-compaction" />
+<span id="materialize-deletion-vectors" />
+<span id="row-id-lifetime" />
 
-builder = table.new_batch_write_builder()
-table_update = builder.new_update()
-table_update.with_read_projection(["b", "c"])
-table_update.with_update_type(["b"])
+See [Data Evolution Maintenance](./data-evolution-maintenance) for commands,
+large-file splitting, limitations, and the row-ID lifetime table.
 
-updater = table_update.new_shard_updator(0, 1)
-reader = updater.arrow_reader()
-for batch in iter(reader.read_next_batch, None):
-    b = batch.column("b").to_pylist()
-    c = batch.column("c").to_pylist()
-    updater.update_by_arrow_batch(pa.RecordBatch.from_pydict(
-        {"b": [bi + ci for bi, ci in zip(b, c)]},
-        schema=pa.schema([("b", pa.int32())]),
-    ))
+## File Sizing and Metadata Compatibility
 
-messages = updater.prepare_commit()
-commit = builder.new_commit()
-commit.commit(messages)
-commit.close()
-```
+<span id="compact-write-column-metadata" />
+<span id="inspect-the-layout" />
 
-</TabItem>
-
-</Tabs>
-
-Self-update notes:
-
-- The source and target table name cannot be the same in the Flink procedure.
-  Create a temporary view as the source.
-- Use `view._ROW_ID = source._ROW_ID` to identify the self-merge pattern in
-  Flink.
-- `_ROW_ID` is only available via the `$row_tracking` system table in SQL.
-- Self-merge only supports `WHEN MATCHED THEN UPDATE` semantics.
-
-## File Group Spec
-
-Through the row-id metadata, files are organized into file groups.
-
-When writing, the Data Evolution update path writes only the specified updated
-columns to new files. The original data files remain unchanged.
-
-When reading, Paimon reads both the original data files and the new files
-containing updated column data, then merges files with the same `first row id`
-to present a unified view of the table.
-
-After writing, files in `target_table` are organized as below:
-
-![](/img/data-evolution.png)
-
-When reading, files with the same `first row id` are merged:
-
-![](/img/data-evolution2.png)
-
-The advantages of this mode are:
-
-- Avoid rewriting the whole file when updating partial columns, reducing I/O
-  cost.
-- Keep read performance efficient through optimized merge processing.
-- Use disk space more efficiently because only updated columns are written to
-  new files.
+Choose [file sizes](./data-evolution-maintenance#file-sizing) with future
+partial-update costs in mind. See the [metadata reference](./data-evolution-file-layout#compact-write-column-metadata)
+before enabling compact write-column encoding, and use the
+[`$files` query](./data-evolution-file-layout#inspect-the-layout) to inspect alignment.

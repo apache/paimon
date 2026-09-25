@@ -26,7 +26,7 @@ import org.apache.paimon.spark.util.OptionUtils
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{Row, SparkSession}
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeReference, EqualTo, Expression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeReference, EqualTo, Expression, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, Filter, Project, SupportsSubquery}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
@@ -69,12 +69,17 @@ case class UpdatePaimonDataEvolutionTableCommand(
     val (updateTable, updateRelation) =
       MergeIntoPaimonDataEvolutionTable.withMatchedUpdateScanOptions(v2Table, relation)
     val targetRowId = rowIdAttribute(updateRelation)
-    val sourceTable = updatedRowIdSource(updateTable, updateRelation, targetRowId)
+    val matchedActionCondition = conditionAsMatchedAction
+    val sourceTable = updatedRowIdSource(
+      updateTable,
+      updateRelation,
+      targetRowId,
+      filterSource = !matchedActionCondition)
     val sourceRowId = sourceTable.output.head.asInstanceOf[AttributeReference]
 
     val matchedCondition = EqualTo(targetRowId, sourceRowId)
     val updateAction = SparkShimLoader.shim.createUpdateAction(
-      None,
+      if (matchedActionCondition) Some(condition) else None,
       alignedExpressions.map { case (expression, attribute) => Assignment(attribute, expression) })
 
     MergeIntoPaimonDataEvolutionTable(
@@ -84,7 +89,8 @@ case class UpdatePaimonDataEvolutionTableCommand(
       matchedCondition,
       Seq(updateAction),
       Nil,
-      Nil).run(sparkSession)
+      Nil,
+      allowPinnedSelfMergeShortcut = true).run(sparkSession)
   }
 
   private def deterministicUpdate: Boolean = {
@@ -123,20 +129,51 @@ case class UpdatePaimonDataEvolutionTableCommand(
     false
   }
 
+  /**
+   * Whether the WHERE condition is carried as the WHEN MATCHED condition of the self-merge instead
+   * of as a Filter on the source side.
+   *
+   * With the condition on the action, the source is `Project(PaimonRelation)` and
+   * [[MergeIntoPaimonDataEvolutionTable]] takes its self-merge shortcut: one scan of the files the
+   * condition can touch (pruned by file statistics), no self-join, no shuffle and no sort. Rows
+   * that fail the condition are copied through unchanged, which is exactly `UPDATE ... WHERE`.
+   *
+   * The Filter shape is kept when the condition cannot be evaluated inside `MergeRows`:
+   *   - a subquery can only be planned on a regular scan;
+   *   - attributes that do not belong to the relation (e.g. the read-side CHAR padding Project the
+   *     analyzer inserts on top of it) would be unresolved in the merge plan;
+   *   - a condition without column references (a constant, or e.g. `rand() < 0.1`) gains nothing
+   *     from file pruning, and a constant-false one would rewrite every file as a no-op.
+   */
+  private def conditionAsMatchedAction: Boolean = {
+    if (condition == TrueLiteral || SubqueryExpression.hasSubquery(condition)) {
+      return false
+    }
+    val relationAttributes = relation.output ++ relation.metadataOutput
+    val references = condition.references.toSeq
+    references.nonEmpty &&
+    references.forall(attr => relationAttributes.exists(_.exprId == attr.exprId))
+  }
+
   private def updatedRowIdSource(
       updateTable: SparkTable,
       updateRelation: DataSourceV2Relation,
-      targetRowId: AttributeReference): Project = {
-    val conditionReferences = condition.references.toSeq.collect {
-      case attr: AttributeReference => attr
-    }
+      targetRowId: AttributeReference,
+      filterSource: Boolean): Project = {
+    val conditionReferences =
+      if (filterSource) {
+        condition.references.toSeq.collect { case attr: AttributeReference => attr }
+      } else {
+        Seq.empty
+      }
     val readOutput = deduplicateByExprId(conditionReferences :+ targetRowId)
     val sourceScan =
       SparkShimLoader.shim.copyDataSourceV2Relation(updateRelation, updateTable, readOutput)
-    // Keep the Filter visible for conditional UPDATEs. The data-evolution MERGE command uses a
-    // self-merge shortcut for Project(PaimonRelation); if a WHERE update were shaped that way, the
-    // shortcut would bypass the source join path and update every row.
-    val filteredSource = if (condition == TrueLiteral) sourceScan else Filter(condition, sourceScan)
+    // When the condition stays on the source side, keep the Filter visible: the data-evolution
+    // MERGE command uses a self-merge shortcut for Project(PaimonRelation), and that shortcut has
+    // no place for a source Filter, so it would update every row.
+    val filteredSource =
+      if (filterSource && condition != TrueLiteral) Filter(condition, sourceScan) else sourceScan
 
     Project(Seq(Alias(targetRowId, ROW_ID_COLUMN)()), filteredSource)
   }

@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="448" viewBox="0 0 960 448" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Incremental reads use (start, end]</title>
+<desc id="desc">A batch incremental read from snapshot 12 to snapshot 15 excludes snapshot 12, includes changes from snapshots 13, 14, and 15, and does not include snapshot 16. The result is the changes in the range, not the full contents of snapshot 15.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="958" height="446" rx="12" fill="#fff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">Incremental reads use (start, end]</text>
+<text x="28" y="78" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Example: incremental-between = &#x27;12,15&#x27;</text>
+<text x="44" y="123" font-size="16" fill="#526277" font-weight="700" text-anchor="start">START: EXCLUDED</text>
+<text x="588" y="123" font-size="16" fill="#10705d" font-weight="700" text-anchor="start">END: INCLUDED</text>
+<rect x="40" y="144" width="154" height="92" rx="8" fill="#f3f5f8" stroke="#526277" stroke-width="1.5"/>
+<text x="117" y="180" font-size="21" fill="#526277" font-weight="700" text-anchor="middle">Snapshot 12</text>
+<text x="117" y="213" font-size="16" fill="#526277" font-weight="400" text-anchor="middle">Outside range</text>
+<path d="M 196 190 H 217" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="221" y="144" width="154" height="92" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="298" y="180" font-size="21" fill="#10705d" font-weight="700" text-anchor="middle">Snapshot 13</text>
+<text x="298" y="213" font-size="16" fill="#526277" font-weight="400" text-anchor="middle">Read changes</text>
+<path d="M 377 190 H 398" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="402" y="144" width="154" height="92" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="479" y="180" font-size="21" fill="#10705d" font-weight="700" text-anchor="middle">Snapshot 14</text>
+<text x="479" y="213" font-size="16" fill="#526277" font-weight="400" text-anchor="middle">Read changes</text>
+<path d="M 558 190 H 579" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="583" y="144" width="154" height="92" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="660" y="180" font-size="21" fill="#10705d" font-weight="700" text-anchor="middle">Snapshot 15</text>
+<text x="660" y="213" font-size="16" fill="#526277" font-weight="400" text-anchor="middle">Read changes</text>
+<path d="M 739 190 H 760" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="764" y="144" width="154" height="92" rx="8" fill="#f3f5f8" stroke="#526277" stroke-width="1.5"/>
+<text x="841" y="180" font-size="21" fill="#526277" font-weight="700" text-anchor="middle">Snapshot 16</text>
+<text x="841" y="213" font-size="16" fill="#526277" font-weight="400" text-anchor="middle">Outside range</text>
+<rect x="221" y="256" width="516" height="83" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="240" y="288" font-size="22" fill="#10705d" font-weight="700" text-anchor="start">Result: changes from 13, 14, and 15</text>
+<text x="240" y="319" font-size="18" fill="#526277" font-weight="400" text-anchor="start">The batch query stops at the selected end boundary.</text>
+<rect x="28" y="365" width="904" height="57" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="44" y="399" font-size="18" fill="#526277" font-weight="400" text-anchor="start">A full snapshot read at 15 returns table contents; an incremental read returns changes.</text>
+</g>
+</svg>

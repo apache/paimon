@@ -294,6 +294,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                                         + commitUser
                                                         + " and identifier "
                                                         + committable.identifier()
+                                                        + " for table "
+                                                        + table.name()
                                                         + ". This is unexpected."));
         long snapshotId = snapshot.id();
         createMetadata(
@@ -630,7 +632,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
         if (!written && !metadataMatchesSnapshot(snapshotId, paimonSnapshot)) {
             // no twin published this snapshot's metadata; fail so the commit retries
-            throw new IllegalStateException("Failed to replace Iceberg metadata " + metadataPath);
+            throw new IllegalStateException(
+                    "Failed to replace Iceberg metadata "
+                            + metadataPath
+                            + " for table "
+                            + table.name());
         }
         // a delayed callback may still write its metadata (a newer commit extends it), but
         // only the current head may move the hint and the external catalog
@@ -733,7 +739,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         return result;
     }
 
-    /** VARIANT needs Iceberg row lineage, which Paimon Iceberg compatibility cannot publish. */
+    /** VARIANT is an Iceberg format-version-3 type; reject publishing it into v2 metadata. */
     static void checkVariantNotPublishable(RowType rowType) {
         Collection<String> variantFields = new LinkedHashSet<>();
         for (DataField field : rowType.getFields()) {
@@ -741,9 +747,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
         Preconditions.checkArgument(
                 variantFields.isEmpty(),
-                "Columns %s use the VARIANT type, which Paimon Iceberg compatibility cannot "
-                        + "publish: it is an Iceberg format-version-3 type that requires row "
-                        + "lineage.",
+                "Columns %s use the VARIANT type, which requires Iceberg format version 3. "
+                        + "Set 'metadata.iceberg.format-version' = '3' to publish this table.",
                 variantFields);
     }
 
@@ -1252,7 +1257,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
         if (!written && !metadataMatchesSnapshot(snapshotId, snapshot)) {
             // no twin published this snapshot's metadata; fail so the commit retries
-            throw new IllegalStateException("Failed to replace Iceberg metadata " + metadataPath);
+            throw new IllegalStateException(
+                    "Failed to replace Iceberg metadata "
+                            + metadataPath
+                            + " for table "
+                            + table.name());
         }
         // a delayed callback may still write its metadata (a newer commit extends it), but
         // only the current head may move the hint and the external catalog
@@ -1738,7 +1747,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     snapshotId);
 
         } catch (IOException e) {
-            throw new UncheckedIOException("Failed to create tag " + tagName, e);
+            throw new UncheckedIOException(
+                    "Failed to create tag " + tagName + " for table " + table.name(), e);
         }
     }
 
@@ -1796,7 +1806,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     tagName);
 
         } catch (IOException e) {
-            throw new UncheckedIOException("Failed to create tag " + tagName, e);
+            throw new UncheckedIOException(
+                    "Failed to create tag " + tagName + " for table " + table.name(), e);
         }
     }
 
@@ -2135,7 +2146,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
     private class SchemaCache {
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = table.schemaManager();
         Map<Long, IcebergSchema> schemas = new HashMap<>();
 
         private IcebergSchema get(long schemaId) {
@@ -2143,9 +2154,14 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     schemaId,
                     id -> {
                         TableSchema schema = schemaManager.schema(id);
-                        // backstop: reject variant on each schema as it is emitted
-                        checkVariantNotPublishable(schema.logicalRowType());
+                        if (formatVersion < IcebergMetadata.FORMAT_VERSION_V3) {
+                            // VARIANT is an Iceberg format-version-3 type; v2 metadata cannot
+                            // represent it
+                            checkVariantNotPublishable(schema.logicalRowType());
+                        }
                         SchemaValidation.validateIcebergGeospatialTypes(
+                                schema.logicalRowType(), table.coreOptions());
+                        SchemaValidation.validateIcebergTimestampPrecisions(
                                 schema.logicalRowType(), table.coreOptions());
                         return IcebergSchema.create(schema);
                     });

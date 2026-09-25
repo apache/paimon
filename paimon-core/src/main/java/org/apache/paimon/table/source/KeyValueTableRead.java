@@ -68,7 +68,7 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     private Predicate predicate = null;
     private IOManager ioManager = null;
     @Nullable private TopN topN = null;
-    @Nullable private Integer limit = null;
+    @Nullable private Long limit = null;
     @Nullable private ReadBatchSizer readBatchSizer;
 
     public KeyValueTableRead(
@@ -146,7 +146,7 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     }
 
     @Override
-    public InnerTableRead withLimit(int limit) {
+    public InnerTableRead withLimit(long limit) {
         this.limit = limit;
         return this;
     }
@@ -164,7 +164,9 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         if (catalogContext != null && blobViewFields.length > 0) {
             reader = createReaderWithBlobView(queryAuthContext, blobViewFields);
         } else {
-            reader = createDataReader(queryAuthContext.split(), queryAuthContext.authResult());
+            reader =
+                    createDataReader(
+                            queryAuthContext.split(), queryAuthContext.authResult(), executeFilter);
         }
         return LimitRecordReader.limit(reader, limit);
     }
@@ -185,7 +187,9 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
                         executeFilter,
                         () ->
                                 createDataReader(
-                                        queryAuthContext.split(), queryAuthContext.authResult()),
+                                        queryAuthContext.split(),
+                                        queryAuthContext.authResult(),
+                                        executeFilter),
                         this::createBlobViewPrescanRead);
         return reader;
     }

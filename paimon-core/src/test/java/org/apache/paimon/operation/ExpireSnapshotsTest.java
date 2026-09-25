@@ -33,13 +33,20 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.BucketFilter;
 import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestIndexTestUtils;
+import org.apache.paimon.manifest.ManifestSidecar;
+import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.operation.FileDeletionBase.DataFileDeletionPlan;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.SimpleStats;
@@ -59,6 +66,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -68,6 +77,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -79,11 +89,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static java.util.Objects.requireNonNull;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.utils.HintFileUtils.EARLIEST;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Base test class for {@link ExpireSnapshotsImpl}. */
 public class ExpireSnapshotsTest {
@@ -102,7 +114,8 @@ public class ExpireSnapshotsTest {
         store = createStore();
         snapshotManager = store.snapshotManager();
         changelogManager = store.changelogManager();
-        SchemaManager schemaManager = new SchemaManager(fileIO, new Path(tempDir.toUri()));
+        SchemaManager schemaManager =
+                new FileSystemSchemaManager(fileIO, new Path(tempDir.toUri()));
         schemaManager.createTable(
                 new Schema(
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
@@ -402,10 +415,15 @@ public class ExpireSnapshotsTest {
 
     private Snapshot snapshotWithManifestLists(
             String deltaManifestList, String changelogManifestList) {
+        return snapshotWithManifestLists(null, deltaManifestList, changelogManifestList);
+    }
+
+    private Snapshot snapshotWithManifestLists(
+            String baseManifestList, String deltaManifestList, String changelogManifestList) {
         return new Snapshot(
                 0,
                 0L,
-                null,
+                baseManifestList,
                 null,
                 deltaManifestList,
                 null,
@@ -425,6 +443,112 @@ public class ExpireSnapshotsTest {
                 null,
                 null,
                 null);
+    }
+
+    @Test
+    public void testCleanUnusedManifestExtraFiles() throws Exception {
+        ManifestFileMeta base = manifestWithExtraFiles("base", null);
+        ManifestFileMeta empty = manifestWithExtraFiles("empty", Collections.emptyList());
+        ManifestFileMeta delta =
+                manifestWithExtraFiles("delta", Arrays.asList("delta-extra-1", "delta-extra-2"));
+        ManifestFileMeta changelog =
+                manifestWithExtraFiles("changelog", Collections.singletonList("changelog-extra"));
+        Snapshot snapshot =
+                snapshotWithManifestLists(
+                        writeManifestList(base, empty),
+                        writeManifestList(delta),
+                        writeManifestList(changelog));
+
+        store.newSnapshotDeletion().cleanUnusedManifests(snapshot, new HashSet<>());
+
+        for (String name :
+                Arrays.asList(
+                        "base",
+                        "empty",
+                        "delta",
+                        "changelog",
+                        "delta-extra-1",
+                        "delta-extra-2",
+                        "changelog-extra",
+                        snapshot.baseManifestList(),
+                        snapshot.deltaManifestList(),
+                        snapshot.changelogManifestList())) {
+            assertThat(fileIO.exists(store.pathFactory().toManifestFilePath(name)))
+                    .as(name)
+                    .isFalse();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"snapshot", "tag", "changelog"})
+    public void testCleanManifestExtraFilesFollowsManifestRetention(String cleaner)
+            throws Exception {
+        ManifestFileMeta expired =
+                manifestWithExtraFiles("expired", Collections.singletonList("expired-extra"));
+        ManifestFileMeta retained =
+                manifestWithExtraFiles("retained", Collections.singletonList("retained-extra"));
+        Snapshot expiredSnapshot =
+                snapshotWithManifestLists(
+                        writeManifestList(), writeManifestList(expired, retained), null);
+        Snapshot retainedSnapshot =
+                snapshotWithManifestLists(writeManifestList(), writeManifestList(retained), null);
+
+        SnapshotDeletion snapshotDeletion = store.newSnapshotDeletion();
+        List<Snapshot> skippingSnapshots = Collections.singletonList(retainedSnapshot);
+        if ("changelog".equals(cleaner)) {
+            ChangelogDeletion deletion = store.newChangelogDeletion();
+            deletion.cleanUnusedManifestList(
+                    expiredSnapshot.deltaManifestList(),
+                    deletion.manifestSkippingSet(skippingSnapshots));
+        } else {
+            FileDeletionBase<Snapshot> deletion =
+                    "tag".equals(cleaner) ? store.newTagDeletion() : snapshotDeletion;
+            deletion.cleanUnusedManifests(
+                    expiredSnapshot, deletion.manifestSkippingSet(skippingSnapshots));
+        }
+
+        assertThat(fileIO.exists(store.pathFactory().toManifestFilePath("expired"))).isFalse();
+        assertThat(fileIO.exists(store.pathFactory().toManifestFilePath("expired-extra")))
+                .isFalse();
+        for (String name : Arrays.asList("retained", "retained-extra")) {
+            assertThat(fileIO.exists(store.pathFactory().toManifestFilePath(name)))
+                    .as(name)
+                    .isTrue();
+        }
+
+        snapshotDeletion.cleanUnusedManifests(retainedSnapshot, new HashSet<>());
+        assertThat(fileIO.exists(store.pathFactory().toManifestFilePath("retained"))).isFalse();
+        assertThat(fileIO.exists(store.pathFactory().toManifestFilePath("retained-extra")))
+                .isFalse();
+    }
+
+    private ManifestFileMeta manifestWithExtraFiles(String fileName, List<String> extraFiles)
+            throws IOException {
+        fileIO.writeFile(store.pathFactory().toManifestFilePath(fileName), "manifest", true);
+        if (extraFiles != null) {
+            for (String extraFile : extraFiles) {
+                fileIO.writeFile(store.pathFactory().toManifestFilePath(extraFile), "extra", true);
+            }
+        }
+        return new ManifestFileMeta(
+                fileName,
+                0L,
+                0L,
+                0L,
+                SimpleStats.EMPTY_STATS,
+                0L,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                extraFiles);
+    }
+
+    private String writeManifestList(ManifestFileMeta... manifests) {
+        return store.manifestListFactory().create().write(Arrays.asList(manifests)).getKey();
     }
 
     @Test
@@ -617,6 +741,42 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
+    public void testExpireRejectsNonPositiveRetainMin() throws Exception {
+        TestFileStore inputStore = createStore(CoreOptions.ChangelogProducer.INPUT);
+        SnapshotManager snapshotManager = inputStore.snapshotManager();
+
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(inputStore, 5, allData, snapshotPositions);
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        for (int i = 1; i <= latestSnapshotId; i++) {
+            rewriteSnapshotTime(inputStore.fileIO(), snapshotManager, i, 0);
+        }
+        Set<java.nio.file.Path> filesBefore = listFiles();
+
+        for (int retainMin : new int[] {0, -1}) {
+            ExpireConfig config =
+                    ExpireConfig.builder()
+                            .snapshotRetainMin(retainMin)
+                            .snapshotRetainMax(Integer.MAX_VALUE)
+                            .snapshotTimeRetain(Duration.ZERO)
+                            .build();
+            ExpireSnapshots expire = inputStore.newExpire(config);
+            assertThatThrownBy(expire::expire)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("retainMin (" + retainMin + ") must be at least 1.");
+        }
+
+        // nothing may be deleted, every snapshot must still be readable
+        assertThat(listFiles()).isEqualTo(filesBefore);
+        for (int i = 1; i <= latestSnapshotId; i++) {
+            assertThat(snapshotManager.snapshotExists(i)).isTrue();
+            assertSnapshot(inputStore, i, allData, snapshotPositions);
+        }
+        inputStore.assertCleaned();
+    }
+
+    @Test
     public void testExpireCollectsSnapshotsConcurrently() throws Exception {
         store.options().toConfiguration().set(CoreOptions.FILE_OPERATION_THREAD_NUM, 4);
 
@@ -635,7 +795,8 @@ public class ExpireSnapshotsTest {
                         blockingSnapshotManager,
                         changelogManager,
                         store.newSnapshotDeletion(),
-                        store.newTagManager());
+                        store.newTagManager(),
+                        store.options().scanManifestParallelism());
 
         expire.expireUntil(1, latestSnapshotId);
 
@@ -739,6 +900,75 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
+    void testSidecarsFollowSnapshotAndTagRetention() throws Exception {
+        store.options().toConfiguration().set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 2);
+        store.options()
+                .toConfiguration()
+                .set(CoreOptions.MANIFEST_TARGET_FILE_SIZE, MemorySize.parse("8 mb"));
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(8, allData, snapshotPositions);
+        int latest = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        Set<Path> manifests = new HashSet<>();
+        Set<Path> retainedManifests = new HashSet<>();
+        for (int snapshotId = 1; snapshotId <= latest; snapshotId++) {
+            rewriteSnapshotTime(snapshotId, 0);
+            ManifestIndexTestUtils.registerIndexReferences(store, snapshotId);
+            snapshotManager.invalidateCache();
+            for (ManifestFileMeta meta :
+                    store.manifestListFactory()
+                            .create()
+                            .readDataManifests(snapshotManager.snapshot(snapshotId))) {
+                Path manifest = store.pathFactory().toManifestFilePath(meta.fileName());
+                manifests.add(manifest);
+                if (snapshotId == 3 || snapshotId == latest) {
+                    retainedManifests.add(manifest);
+                }
+            }
+        }
+        store.newTagManager()
+                .createTag(
+                        snapshotManager.snapshot(3),
+                        "keep-sidecars",
+                        store.options().tagDefaultTimeRetained(),
+                        Collections.emptyList(),
+                        false);
+        Set<Path> expiredManifests = new HashSet<>(manifests);
+        expiredManifests.removeAll(retainedManifests);
+        assertThat(expiredManifests).isNotEmpty();
+        ExpireSnapshotsImpl expire =
+                (ExpireSnapshotsImpl) store.newExpire(expireAllButLatestConfig());
+        expire.setCurrentTimeMillis(() -> 1000L);
+        expire.expire();
+        for (Path manifest : manifests) {
+            boolean retained = retainedManifests.contains(manifest);
+            assertThat(fileIO.exists(manifest)).as("manifest %s", manifest).isEqualTo(retained);
+            assertThat(
+                            fileIO.exists(
+                                    new Path(
+                                            manifest.getParent(),
+                                            "index-for-"
+                                                    + manifest.getName()
+                                                    + ManifestSidecar.SUFFIX)))
+                    .as("sidecar for %s", manifest)
+                    .isEqualTo(retained);
+        }
+        for (ManifestFileMeta meta :
+                store.manifestListFactory()
+                        .create()
+                        .readDataManifests(
+                                store.newTagManager()
+                                        .getOrThrow("keep-sidecars")
+                                        .trimToSnapshot())) {
+            assertThat(
+                            fileIO.exists(
+                                    store.pathFactory()
+                                            .toManifestFilePath(ManifestSidecar.fileName(meta))))
+                    .isTrue();
+        }
+    }
+
+    @Test
     public void testExpireWithTagsAndConcurrentPlanningKeepsTaggedSnapshotsReadable()
             throws Exception {
         store.options().toConfiguration().set(CoreOptions.FILE_OPERATION_THREAD_NUM, 4);
@@ -776,6 +1006,85 @@ public class ExpireSnapshotsTest {
         assertSnapshot(latestSnapshotId, allData, snapshotPositions);
         assertSnapshot(tagManager.getOrThrow("tag3").trimToSnapshot(), allData, snapshotPositions);
         assertSnapshot(tagManager.getOrThrow("tag6").trimToSnapshot(), allData, snapshotPositions);
+    }
+
+    @Test
+    public void testExpireFiltersTagFilesByDeletionCandidates() throws Exception {
+        List<KeyValue> candidateData = FileStoreTestUtils.partitionedData(5, gen, "0401", 8);
+        List<KeyValue> unrelatedData = FileStoreTestUtils.partitionedData(5, gen, "0402", 8);
+        BinaryRow candidatePartition = gen.getPartition(candidateData.get(0));
+        BinaryRow unrelatedPartition = gen.getPartition(unrelatedData.get(0));
+        Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
+        writers.put(
+                candidatePartition,
+                Collections.singletonMap(
+                        0,
+                        FileStoreTestUtils.writeData(store, candidateData, candidatePartition, 0)));
+        writers.put(
+                unrelatedPartition,
+                Collections.singletonMap(
+                        0,
+                        FileStoreTestUtils.writeData(store, unrelatedData, unrelatedPartition, 0)));
+        FileStoreTestUtils.commitData(store, 0, writers);
+
+        Snapshot taggedSnapshot = snapshotManager.latestSnapshot();
+        TagManager tagManager = store.newTagManager();
+        tagManager.createTag(
+                taggedSnapshot,
+                "tag1",
+                store.options().tagDefaultTimeRetained(),
+                Collections.emptyList(),
+                false);
+
+        List<ManifestEntry> delete =
+                store.newScan().plan().files().stream()
+                        .filter(entry -> entry.partition().equals(candidatePartition))
+                        .map(
+                                entry ->
+                                        ManifestEntry.create(
+                                                FileKind.DELETE,
+                                                entry.partition(),
+                                                entry.bucket(),
+                                                entry.totalBuckets(),
+                                                entry.file()))
+                        .collect(Collectors.toList());
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.tryCommitOnce(
+                    null,
+                    delete,
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    1,
+                    null,
+                    Collections.emptyMap(),
+                    Snapshot.CommitKind.APPEND,
+                    false,
+                    taggedSnapshot,
+                    true,
+                    null);
+        }
+
+        CandidateTrackingSnapshotDeletion snapshotDeletion =
+                new CandidateTrackingSnapshotDeletion(store);
+        ExpireSnapshotsImpl expire =
+                newExpireWithSnapshotDeletion(store, snapshotManager, snapshotDeletion);
+        expire.config(
+                ExpireConfig.builder()
+                        .snapshotRetainMin(1)
+                        .snapshotRetainMax(1)
+                        .snapshotTimeRetain(Duration.ofMillis(Long.MAX_VALUE))
+                        .build());
+        expire.expire();
+
+        assertThat(snapshotDeletion.candidateTagSkipperCalls()).isGreaterThan(0);
+        assertThat(snapshotDeletion.filteredTagReads()).isGreaterThan(0);
+        assertThat(snapshotDeletion.materializedTagEntries()).isOne();
+        List<KeyValue> taggedData = new ArrayList<>(candidateData);
+        taggedData.addAll(unrelatedData);
+        assertSnapshot(
+                tagManager.getOrThrow("tag1").trimToSnapshot(),
+                taggedData,
+                Collections.singletonList(taggedData.size()));
     }
 
     @Test
@@ -827,6 +1136,8 @@ public class ExpireSnapshotsTest {
                         1,
                         SimpleStats.EMPTY_STATS,
                         0,
+                        null,
+                        null,
                         null,
                         null,
                         null,
@@ -961,7 +1272,8 @@ public class ExpireSnapshotsTest {
                         failingSnapshotManager,
                         changelogManager,
                         store.newSnapshotDeletion(),
-                        store.newTagManager());
+                        store.newTagManager(),
+                        store.options().scanManifestParallelism());
         expire.config(config);
         expire.setCurrentTimeMillis(() -> 6000L);
 
@@ -1217,7 +1529,17 @@ public class ExpireSnapshotsTest {
             SnapshotManager snapshotManager,
             SnapshotDeletion snapshotDeletion) {
         return new ExpireSnapshotsImpl(
-                snapshotManager, store.changelogManager(), snapshotDeletion, store.newTagManager());
+                snapshotManager,
+                store.changelogManager(),
+                snapshotDeletion,
+                store.newTagManager(),
+                store.options().scanManifestParallelism());
+    }
+
+    private Set<java.nio.file.Path> listFiles() throws IOException {
+        try (Stream<java.nio.file.Path> files = Files.walk(tempDir)) {
+            return files.filter(Files::isRegularFile).collect(Collectors.toSet());
+        }
     }
 
     private void rewriteSnapshotTime(long snapshotId, long newTimeMillis) throws IOException {
@@ -1353,7 +1675,8 @@ public class ExpireSnapshotsTest {
                     store.newStatsFileHandler(),
                     store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                     store.options().cleanEmptyDirectories(),
-                    store.options().fileOperationThreadNum());
+                    store.options().fileOperationThreadNum(),
+                    store.options().scanManifestParallelism());
             this.minBlockedSnapshotId = minBlockedSnapshotId;
             this.maxBlockedSnapshotId = maxBlockedSnapshotId;
         }
@@ -1371,12 +1694,11 @@ public class ExpireSnapshotsTest {
         }
 
         @Override
-        public List<Path> planDeletedInDeltaManifest(
-                Snapshot snapshot, Predicate<ExpireFileEntry> skipper) {
+        public DataFileDeletionPlan planDeletedInDeltaManifest(Snapshot snapshot) {
             if (blockDataFilePlans && shouldBlock(snapshot.id())) {
                 dataFilePlans.awaitConcurrentCall();
             }
-            return super.planDeletedInDeltaManifest(snapshot, skipper);
+            return super.planDeletedInDeltaManifest(snapshot);
         }
 
         @Override
@@ -1412,6 +1734,71 @@ public class ExpireSnapshotsTest {
         }
     }
 
+    private static class CandidateTrackingSnapshotDeletion extends SnapshotDeletion {
+
+        private final AtomicInteger candidateTagSkipperCalls = new AtomicInteger();
+        private final AtomicInteger filteredTagReads = new AtomicInteger();
+        private final AtomicInteger materializedTagEntries = new AtomicInteger();
+
+        private CandidateTrackingSnapshotDeletion(TestFileStore store) {
+            super(
+                    store.fileIO(),
+                    store.pathFactory(),
+                    store.manifestFileFactory().create(),
+                    store.manifestListFactory().create(),
+                    store.newIndexFileHandler(),
+                    store.newStatsFileHandler(),
+                    store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
+                    store.options().cleanEmptyDirectories(),
+                    store.options().fileOperationThreadNum(),
+                    store.options().scanManifestParallelism());
+        }
+
+        @Override
+        public Predicate<ExpireFileEntry> createDataFileSkipperForTag(Snapshot tag)
+                throws Exception {
+            throw new AssertionError("Snapshot expiration must not index all files in a tag.");
+        }
+
+        @Override
+        public Predicate<ExpireFileEntry> createDataFileSkipperForTag(
+                Snapshot tag, Collection<DataFileDeletionPlan> plans) throws Exception {
+            candidateTagSkipperCalls.incrementAndGet();
+            return super.createDataFileSkipperForTag(tag, plans);
+        }
+
+        @Override
+        protected Collection<ExpireFileEntry> readMergedDataFiles(List<ManifestFileMeta> manifests)
+                throws IOException {
+            throw new AssertionError("Snapshot expiration must not merge all files in a tag.");
+        }
+
+        @Override
+        protected Collection<ExpireFileEntry> readMergedDataFiles(
+                List<ManifestFileMeta> manifests,
+                BucketFilter bucketFilter,
+                Predicate<ProjectedManifestEntry> filter)
+                throws IOException {
+            filteredTagReads.incrementAndGet();
+            Collection<ExpireFileEntry> entries =
+                    super.readMergedDataFiles(manifests, bucketFilter, filter);
+            materializedTagEntries.addAndGet(entries.size());
+            return entries;
+        }
+
+        private int candidateTagSkipperCalls() {
+            return candidateTagSkipperCalls.get();
+        }
+
+        private int filteredTagReads() {
+            return filteredTagReads.get();
+        }
+
+        private int materializedTagEntries() {
+            return materializedTagEntries.get();
+        }
+    }
+
     private static class CapturingSnapshotDeletion extends SnapshotDeletion {
 
         private final List<List<Object>> deleteBatches = new ArrayList<>();
@@ -1426,7 +1813,8 @@ public class ExpireSnapshotsTest {
                     store.newStatsFileHandler(),
                     store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                     store.options().cleanEmptyDirectories(),
-                    store.options().fileOperationThreadNum());
+                    store.options().fileOperationThreadNum(),
+                    store.options().scanManifestParallelism());
         }
 
         @Override

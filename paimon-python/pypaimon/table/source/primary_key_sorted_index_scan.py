@@ -24,6 +24,7 @@ from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.data_evolution_global_index_scanner import _create_inner_readers
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.index.pk.primary_key_index_source_file import PrimaryKeyIndexSourceFile
+from pypaimon.index.pk.primary_key_index_source_policy import should_read
 from pypaimon.index.pksorted.pk_sorted_bucket_index_state import PkSortedBucketIndexState
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
@@ -77,9 +78,12 @@ def plan(snapshot_id, data_splits, definitions, index_entries):
     groups_by_bucket = {}
     for bucket, data_files in data_files_by_bucket.items():
         payloads = payloads_by_bucket.get(bucket, [])
-        active_sources = {
-            PrimaryKeyIndexSourceFile(f.file_name, f.row_count) for f in data_files
-        }
+        active_sources_by_level = {}
+        for data_file in data_files:
+            if should_read(data_file):
+                active_sources_by_level.setdefault(data_file.level, set()).add(
+                    PrimaryKeyIndexSourceFile(
+                        data_file.file_name, data_file.row_count))
         by_source = {}
         for definition in definitions:
             definition_payloads = [
@@ -92,8 +96,10 @@ def plan(snapshot_id, data_splits, definitions, index_entries):
                     definition.field_id, definition.index_type,
                     data_files, definition_payloads)
                 for group in state.groups:
+                    active_group_sources = active_sources_by_level.get(
+                        group.data_level, set())
                     for source in group.source_files:
-                        if source in active_sources:
+                        if source in active_group_sources:
                             by_source.setdefault(source.file_name, {})[definition.field_id] = group
             except Exception as exc:
                 LOG.warning("Failed to plan primary-key sorted index for field %s: %s",

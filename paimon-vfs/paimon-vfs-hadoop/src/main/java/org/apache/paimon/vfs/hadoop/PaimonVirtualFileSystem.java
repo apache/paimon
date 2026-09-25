@@ -67,11 +67,13 @@ public class PaimonVirtualFileSystem extends FileSystem {
         this.conf = conf;
         super.initialize(uri, conf);
 
-        this.workingDirectory = new Path(uri);
         if (uri.getAuthority() == null || uri.getAuthority().isEmpty()) {
             throw new IllegalArgumentException("URI authority is empty: " + uri);
         }
         this.uri = URI.create(uri.getScheme() + "://" + uri.getAuthority() + "/");
+        // Hadoop passes the full user URI here, path component included, so the working
+        // directory must be derived from the normalized catalog root.
+        this.workingDirectory = new Path(this.uri);
 
         initVFSOperations();
     }

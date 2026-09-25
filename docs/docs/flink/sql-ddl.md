@@ -24,38 +24,20 @@ under the License.
 
 # SQL DDL
 
+Create a catalog first, then define the table's columns, keys, partitions, and options.
+Use [SQL Alter](./sql-alter) to evolve an existing table and [SQL Write](./sql-write) to populate it.
+
 ## Create Catalog
 
-Paimon catalogs currently support three types of metastores:
-
-* `filesystem` metastore (default), which stores both metadata and table files in filesystems.
-* `hive` metastore, which additionally stores metadata in Hive metastore. Users can directly access the tables from Hive.
-* `jdbc` metastore, which additionally stores metadata in relational databases such as MySQL, Postgres, etc.
+| Catalog | Metadata location and use case | Guide |
+| --- | --- | --- |
+| Filesystem (default) | Store metadata and data in the warehouse filesystem. | [Filesystem Catalog](#create-filesystem-catalog) |
+| Hive | Register tables with Hive Metastore for shared access. | [Hive Catalog](#creating-hive-catalog) |
+| JDBC | Store catalog metadata in a relational database. | [JDBC Catalog](#creating-jdbc-catalog) |
+| REST | Access a catalog service through the REST API. | [REST Catalog](../concepts/rest/) |
+| Generic | Use Hive Metastore to manage Paimon, Hive, and other Flink connector tables together. | [Generic Catalog](#creating-generic-catalog) |
 
 See [CatalogOptions](../maintenance/configurations#catalogoptions) for detailed options when creating a catalog.
-
-:::info
-
-For an internal Format Table in a REST catalog, `metastore.partitioned-table = true` makes the
-catalog the source of truth for partitions, which requires an internal table in a catalog that supports it (currently the REST
-catalog) and cannot be combined with `format-table.implementation = engine`. On a Paimon table
-the same option keeps its existing meaning (synchronize partitions into the metastore); on a
-Format Table it only takes effect in a REST catalog, and elsewhere partitions are still discovered
-from the filesystem.
-
-**A Flink job reads only the partitions the catalog knows.** Directories written before the option
-was enabled, by an older writer, or by anything that does not register what it wrote are invisible,
-and a table whose catalog holds no partitions reads as empty. Flink has no SQL command to register
-them: use Spark's `MSCK REPAIR TABLE` or the catalog's partition API. Flink writes on a current
-version do register the partitions they produce.
-
-In a REST catalog, asking for catalog-managed partitions on a table that cannot have them — an
-external table, or `format-table.implementation = engine` — fails. In any other catalog the option
-keeps the meaning it has always had on a Format Table — none — and partitions come from the
-filesystem. Removing the option needs a catalog that can alter the table; Flink's Format Table path
-cannot, so use another engine.
-
-:::
 
 ### Create Filesystem Catalog
 
@@ -89,7 +71,7 @@ The following Flink SQL registers and uses a Paimon Hive catalog named `my_hive`
 
 If your Hive requires security authentication such as Kerberos, LDAP, Ranger or you want the paimon table to be managed
 by Apache Atlas(Setting 'hive.metastore.event.listeners' in hive-site.xml). You can specify the hive-conf-dir and
-hadoop-conf-dir parameter to the hive-site.xml file path. 
+hadoop-conf-dir parameter to the hive-site.xml file path.
 
 ```sql
 CREATE CATALOG my_hive WITH (
@@ -108,7 +90,7 @@ You can define any default table options with the prefix `table-default.` for ta
 
 Also, you can create [FlinkGenericCatalog](./quick-start).
 
-> When using hive catalog to change incompatible column types through alter table, you need to configure `hive.metastore.disallow.incompatible.col.type.changes=false`. see [HIVE-17832](https://issues.apache.org/jira/browse/HIVE-17832).
+> When using hive catalog to change incompatible column types through alter table, you need to configure `hive.metastore.disallow.incompatible.col.type.changes=false` on the **Hive Metastore server** (in its `hive-site.xml`, then restart HMS). Setting this on the Paimon catalog or via Flink SQL `SET` only configures the client-side HiveConf and is not propagated to the remote HMS over Thrift. See [HIVE-17832](https://issues.apache.org/jira/browse/HIVE-17832).
 
 > If you are using Hive3, please disable Hive ACID:
 >
@@ -126,8 +108,8 @@ If you want to see a partitioned table in Hive and also synchronize newly create
 
 #### Adding Parameters to a Hive Table
 
-Using the table option facilitates the convenient definition of Hive table parameters. 
-Parameters prefixed with `hive.` will be automatically defined in the `TBLPROPERTIES` of the Hive table. 
+Using the table option facilitates the convenient definition of Hive table parameters.
+Parameters prefixed with `hive.` will be automatically defined in the `TBLPROPERTIES` of the Hive table.
 For instance, using the option `hive.table.owner=Jon` will automatically add the parameter `table.owner=Jon` to the table properties during the creation process.
 
 #### Setting Location in Properties
@@ -155,8 +137,8 @@ CREATE CATALOG my_jdbc WITH (
     'type' = 'paimon',
     'metastore' = 'jdbc',
     'uri' = 'jdbc:mysql://<host>:<port>/<databaseName>',
-    'jdbc.user' = '...', 
-    'jdbc.password' = '...', 
+    'jdbc.user' = '...',
+    'jdbc.password' = '...',
     'catalog-key'='jdbc',
     'warehouse' = 'hdfs:///path/to/warehouse'
 );
@@ -188,12 +170,45 @@ DROP VIEW sales_view;
 
 You can define any default table options with the prefix `table-default.` for tables created in the catalog.
 
+### Creating Generic Catalog
+
+A generic catalog uses Hive Metastore and can contain Paimon, Hive, and Flink connector tables
+(such as Kafka tables). Install the [Hive dependencies](#creating-hive-catalog) first.
+
+Specify `'connector' = 'paimon'` when creating a Paimon table in this catalog.
+
+:::info
+
+Paimon will use `hive.metastore.warehouse.dir` in your `hive-site.xml`, please use path with scheme.
+For example, `hdfs://...`. Otherwise, Paimon will use the local path.
+
+:::
+
+```sql
+CREATE CATALOG my_catalog WITH (
+    'type'='paimon-generic',
+    'hive-conf-dir'='...',
+    'hadoop-conf-dir'='...'
+);
+
+USE CATALOG my_catalog;
+
+-- create a word count table
+CREATE TABLE word_count (
+    word STRING PRIMARY KEY NOT ENFORCED,
+    cnt BIGINT
+) WITH (
+    'connector'='paimon'
+);
+```
+
 ## Create Table
 
-After use Paimon catalog, you can create and drop tables. Tables created in Paimon Catalogs are managed by the catalog.
-When the table is dropped from catalog, its table files will also be deleted.
+The following examples create managed Paimon tables in the selected catalog. Dropping these
+tables also deletes their table files. Choose [append-table](../append-table/) or
+[primary-key](../primary-key-table/) semantics before defining keys and partitions.
 
-The following SQL assumes that you have registered and are using a Paimon catalog. It creates a managed table named 
+The following SQL assumes that you have registered and are using a Paimon catalog. It creates a managed table named
 `my_table` with five columns in the catalog's `default` database, where `dt`, `hh` and `user_id` are the primary keys.
 
 ```sql
@@ -207,10 +222,10 @@ CREATE TABLE my_table (
 );
 ```
 
-You can create partitioned table:
+To partition the same row layout by day and hour, create a separate table:
 
 ```sql
-CREATE TABLE my_table (
+CREATE TABLE partitioned_events (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -250,111 +265,124 @@ storage size of the manifest. But the Paimon sdk in reading engine requires at l
 
 ### Field Default Value
 
-Paimon table currently supports setting default values for fields in table properties by `'fields.item_id.default-value'`,
+For the default-value procedure and write semantics, see [Default Value](./default-value).
+You can also set a field default through the table property `'fields.item_id.default-value'`,
 note that partition fields and primary key fields can not be specified.
 
 ## Create Table As Select
 
-Table can be created and populated by the results of a query, for example, we have a sql like this: `CREATE TABLE table_b AS SELECT id, name FROM table_a`,
-The resulting table `table_b` will be equivalent to create the table and insert the data with the following statement:
-`CREATE TABLE table_b (id INT, name STRING); INSERT INTO table_b SELECT id, name FROM table_a;`
+`CREATE TABLE AS SELECT` (CTAS) derives columns from a query and writes its result into the
+new table. Choose batch mode for a bounded copy, or enable checkpointing for streaming CTAS.
 
-We can specify the primary key or partition when use `CREATE TABLE AS SELECT`, for syntax, please refer to the following sql.
-
-```sql
-/* For streaming mode, you need to enable the checkpoint. */
-
-CREATE TABLE my_table (
-    user_id BIGINT,
-    item_id BIGINT
-);
-CREATE TABLE my_table_as AS SELECT * FROM my_table;
-
-/* partitioned table */
-CREATE TABLE my_table_partition (
-     user_id BIGINT,
-     item_id BIGINT,
-     behavior STRING,
-     dt STRING,
-     hh STRING
-) PARTITIONED BY (dt, hh);
-CREATE TABLE my_table_partition_as WITH ('partition' = 'dt') AS SELECT * FROM my_table_partition;
-    
-/* change options */
-CREATE TABLE my_table_options (
-       user_id BIGINT,
-       item_id BIGINT
-) WITH ('file.format' = 'orc');
-CREATE TABLE my_table_options_as WITH ('file.format' = 'parquet') AS SELECT * FROM my_table_options;
-
-/* primary key */
-CREATE TABLE my_table_pk (
-      user_id BIGINT,
-      item_id BIGINT,
-      behavior STRING,
-      dt STRING,
-      hh STRING,
-      PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
-);
-CREATE TABLE my_table_pk_as WITH ('primary-key' = 'dt,hh') AS SELECT * FROM my_table_pk;
-
-
-/* primary key + partition */
-CREATE TABLE my_table_all (
-      user_id BIGINT,
-      item_id BIGINT,
-      behavior STRING,
-      dt STRING,
-      hh STRING,
-      PRIMARY KEY (dt, hh, user_id) NOT ENFORCED 
-) PARTITIONED BY (dt, hh);
-CREATE TABLE my_table_all_as WITH ('primary-key' = 'dt,hh', 'partition' = 'dt') AS SELECT * FROM my_table_all;
-```
-
-## Create Table Like
-
-To create a table with the same schema, partition, and table properties as another table, use CREATE TABLE LIKE.
+The following examples use one source schema and create independent destination tables:
 
 ```sql
-CREATE TABLE my_table (
+SET 'execution.runtime-mode' = 'batch';
+
+CREATE TABLE source_events (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
     dt STRING,
-    hh STRING,
-    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
+    hh STRING
 );
 
-CREATE TABLE my_table_like LIKE my_table (EXCLUDING OPTIONS);
+INSERT INTO source_events VALUES (1, 10, 'view', '2026-09-01', '10');
+
+-- Copy the query result using default table options.
+CREATE TABLE copied_events AS SELECT * FROM source_events;
+
+-- Select a partition field for the destination.
+CREATE TABLE daily_events WITH ('partition' = 'dt')
+AS SELECT * FROM source_events;
+
+-- Choose a file format.
+CREATE TABLE parquet_events WITH ('file.format' = 'parquet')
+AS SELECT * FROM source_events;
+
+-- Define a primary key for upsert semantics.
+CREATE TABLE keyed_events WITH ('primary-key' = 'dt,hh,user_id')
+AS SELECT * FROM source_events;
+
+-- Combine primary keys and partitions.
+CREATE TABLE partitioned_keyed_events WITH (
+    'primary-key' = 'dt,hh,user_id',
+    'partition' = 'dt'
+) AS SELECT * FROM source_events;
 ```
+
+## Create Table Like
+
+Use `CREATE TABLE LIKE` to copy a schema and partition definition. This example uses
+`EXCLUDING OPTIONS`, so it does **not** inherit the source table's options. Configure the target
+options separately instead of inadvertently reusing source-specific settings such as a path.
+
+```sql
+-- Reuse the partitioned_events definition from Create Table above.
+CREATE TABLE events_like LIKE partitioned_events (EXCLUDING OPTIONS);
+```
+
+`LIKE` copies the definition without copying data. Use CTAS when the new table should also
+contain the result of a query.
 
 ## Work with Flink Temporary Tables
 
-Flink Temporary tables are just recorded but not managed by the current Flink SQL session. If the temporary table is
-dropped, its resources will not be deleted. Temporary tables are also dropped when Flink SQL session is closed.
+A temporary table's definition belongs to the current SQL session. Dropping it or closing the
+session removes that definition without deleting the external data. Use temporary tables to
+read another connector alongside tables in the Paimon catalog.
 
-If you want to use Paimon catalog along with other tables but do not want to store them in other catalogs, you can
-create a temporary table. The following Flink SQL creates a Paimon catalog and a temporary table and also illustrates
-how to use both tables together.
+This example assumes a Paimon catalog is selected and that the CSV file exists at the configured
+path. Both sides of the join explicitly use the same key column:
 
 ```sql
-CREATE CATALOG my_catalog WITH (
-    'type' = 'paimon',
-    'warehouse' = 'hdfs:///path/to/warehouse'
+SET 'execution.runtime-mode' = 'batch';
+
+CREATE TABLE product_names (
+    product_id BIGINT PRIMARY KEY NOT ENFORCED,
+    name STRING
 );
 
-USE CATALOG my_catalog;
-
--- Assume that there is already a table named my_table in my_catalog
-
-CREATE TEMPORARY TABLE temp_table (
-    k INT,
-    v STRING
+CREATE TEMPORARY TABLE product_prices (
+    product_id BIGINT,
+    price DECIMAL(10, 2)
 ) WITH (
     'connector' = 'filesystem',
-    'path' = 'hdfs:///path/to/temp_table.csv',
+    'path' = 'file:/tmp/product-prices.csv',
     'format' = 'csv'
 );
 
-SELECT my_table.k, my_table.v, temp_table.v FROM my_table JOIN temp_table ON my_table.k = temp_table.k;
+SELECT n.product_id, n.name, p.price
+FROM product_names AS n
+JOIN product_prices AS p ON n.product_id = p.product_id;
 ```
+
+For a distributed job, use a path accessible to all tasks and install the required filesystem
+dependencies; see [Installation](./installation).
+
+## Catalog-managed Format Table Partitions
+
+:::info
+
+For an internal Format Table in a REST catalog, `metastore.partitioned-table = true` makes the
+catalog the source of truth for partitions, which requires an internal table in a catalog that supports it (currently the REST
+catalog) and cannot be combined with `format-table.implementation = engine`. On a Paimon table
+the same option keeps its existing meaning (synchronize partitions into the metastore); on a
+Format Table it only takes effect in a REST catalog, and elsewhere partitions are still discovered
+from the filesystem.
+
+**A Flink job reads only the partitions the catalog knows.** Directories written before the option
+was enabled, by an older writer, or by anything that does not register what it wrote are invisible,
+and a table whose catalog holds no partitions reads as empty. Flink has no SQL command to register
+them: use Spark's `MSCK REPAIR TABLE` or the catalog's partition API. Flink writes on a current
+version do register the partitions they produce.
+
+Flink SQL cannot set a custom partition `LOCATION`. Upgrade Flink readers before registering custom
+locations through the catalog API.
+
+In a REST catalog, asking for catalog-managed partitions on a table that cannot have them — an
+external table, or `format-table.implementation = engine` — fails. In any other catalog the option
+keeps the meaning it has always had on a Format Table — none — and partitions come from the
+filesystem. Removing the option needs a catalog that can alter the table; Flink's Format Table path
+cannot, so use another engine.
+
+:::

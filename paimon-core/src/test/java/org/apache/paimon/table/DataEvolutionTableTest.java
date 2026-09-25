@@ -45,7 +45,6 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
-import org.apache.paimon.table.sink.BatchWriteBuilderImpl;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
@@ -599,6 +598,62 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         TableScan.Plan plan =
                 table.newReadBuilder().withFilter(predicate).withLimit(1).newScan().plan();
         assertThat(plannedFirstRowIds(plan)).isEqualTo(Arrays.asList(0L, 1L));
+    }
+
+    @Test
+    public void testDescendingRowIdInIntersectBetweenReadsCorrectRows() throws Exception {
+        // Table-level regression: a descending _ROW_ID IN list intersected with a BETWEEN used to
+        // drop ranges (Range.toRanges/Range.and need ascending, deduped input), and the dropped
+        // ranges are rows that are never read. This is the TableRead equivalent of
+        // RowIdPredicateVisitorTest#testUnsortedInLiteralsIntersectCorrectly.
+        write(30); // one batch per column group; row id i <-> f0 == i
+        Schema schema = schemaDefault();
+        PredicateBuilder pb = new PredicateBuilder(rowTypeWithRowId(schema));
+        int rowIdIndex = schema.rowType().getFieldCount();
+
+        // IN (25,24,...,5) is 21 descending literals (> 20, so PredicateBuilder keeps a real In
+        // leaf) intersected with BETWEEN 3 AND 8 -> {5,6,7,8}.
+        Predicate filter =
+                PredicateBuilder.and(
+                        pb.in(rowIdIndex, descendingRowIds(25L, 5L)),
+                        pb.between(rowIdIndex, 3L, 8L));
+        assertThat(readF0WithFilter(filter)).isEqualTo(Arrays.asList(5, 6, 7, 8));
+    }
+
+    @Test
+    public void testEmptyRowIdIntersectionUnderOrReadsOtherBranch() throws Exception {
+        // The empty branch (disjoint IN ∩ BETWEEN) has to yield a mutable empty range list so the
+        // Or union can accumulate the other branch into it; before the fix this threw
+        // UnsupportedOperationException while planning the scan.
+        write(30);
+        Schema schema = schemaDefault();
+        PredicateBuilder pb = new PredicateBuilder(rowTypeWithRowId(schema));
+        int rowIdIndex = schema.rowType().getFieldCount();
+
+        Predicate emptyIntersection =
+                PredicateBuilder.and(
+                        pb.in(rowIdIndex, descendingRowIds(25L, 5L)),
+                        pb.between(rowIdIndex, 100L, 110L)); // disjoint from the IN -> empty
+        Predicate filter = PredicateBuilder.or(emptyIntersection, pb.between(rowIdIndex, 10L, 12L));
+        assertThat(readF0WithFilter(filter)).isEqualTo(Arrays.asList(10, 11, 12));
+    }
+
+    private List<Integer> readF0WithFilter(Predicate filter) throws Exception {
+        ReadBuilder rb = getTableDefault().newReadBuilder().withFilter(filter);
+        List<Integer> f0 = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = rb.newRead().createReader(rb.newScan().plan())) {
+            reader.forEachRemaining(r -> f0.add(r.getInt(0)));
+        }
+        Collections.sort(f0);
+        return f0;
+    }
+
+    private static List<Object> descendingRowIds(long hi, long lo) {
+        List<Object> ids = new ArrayList<>();
+        for (long v = hi; v >= lo; v--) {
+            ids.add(v);
+        }
+        return ids;
     }
 
     @Test
@@ -1186,18 +1241,24 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         long readSnapshotId = table.latestSnapshot().get().id();
 
         RowType writeType = table.rowType().project(Collections.singletonList("f2"));
-        BatchWriteBuilderImpl staleBuilder = (BatchWriteBuilderImpl) table.newBatchWriteBuilder();
+        BatchWriteBuilder staleBuilder = table.newBatchWriteBuilder();
         List<CommitMessage> staleMessages;
         try (BatchTableWrite write = staleBuilder.newWrite().withWriteType(writeType)) {
             write.write(GenericRow.of(BinaryString.fromString("stale-10")));
             write.write(GenericRow.of(BinaryString.fromString("stale-11")));
-            staleMessages = write.prepareCommit();
-            setFirstRowId(staleMessages, firstRowId);
+            List<CommitMessage> prepared = write.prepareCommit();
+            setFirstRowId(prepared, firstRowId);
+            staleMessages =
+                    prepared.stream()
+                            .map(
+                                    message ->
+                                            ((CommitMessageImpl) message)
+                                                    .withCheckFromSnapshot(readSnapshotId))
+                            .collect(Collectors.toList());
         }
 
         updateF2(table, firstRowId, 100, 101);
         long concurrentSnapshotId = table.latestSnapshot().get().id();
-        staleBuilder.rowIdCheckConflict(readSnapshotId);
 
         assertThatThrownBy(
                         () -> {
@@ -1209,6 +1270,70 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
                 .hasMessageContaining(DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE);
         assertThat(table.latestSnapshot().get().id()).isEqualTo(concurrentSnapshotId);
         assertThat(readF0AndF2(table)).isEqualTo(Arrays.asList("10|updated-100", "11|updated-101"));
+    }
+
+    @Test
+    public void testRejectDifferentRowIdCheckSnapshotsInOneCommit() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        long firstRowId = writeFullRows(table, 10);
+        long readSnapshotId = table.latestSnapshot().get().id();
+
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        List<CommitMessage> messages;
+        try (BatchTableWrite write =
+                builder.newWrite()
+                        .withWriteType(table.rowType().project(Collections.singletonList("f2")))) {
+            write.write(GenericRow.of(BinaryString.fromString("updated")));
+            messages = write.prepareCommit();
+            setFirstRowId(messages, firstRowId);
+        }
+
+        CommitMessageImpl message = (CommitMessageImpl) messages.get(0);
+        long snapshotBeforeCommit = table.latestSnapshot().get().id();
+        try (BatchTableCommit commit = builder.newCommit()) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.commit(
+                                            Arrays.asList(
+                                                    message.withCheckFromSnapshot(readSnapshotId),
+                                                    message.withCheckFromSnapshot(
+                                                            readSnapshotId + 1))))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("different row-id check snapshots");
+        }
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(snapshotBeforeCommit);
+    }
+
+    @Test
+    public void testRejectMissingRowIdCheckSnapshotInMixedCommit() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        long firstRowId = writeFullRows(table, 10);
+        long readSnapshotId = table.latestSnapshot().get().id();
+
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        List<CommitMessage> messages;
+        try (BatchTableWrite write =
+                builder.newWrite()
+                        .withWriteType(table.rowType().project(Collections.singletonList("f2")))) {
+            write.write(GenericRow.of(BinaryString.fromString("updated")));
+            messages = write.prepareCommit();
+            setFirstRowId(messages, firstRowId);
+        }
+
+        CommitMessageImpl message = (CommitMessageImpl) messages.get(0);
+        try (BatchTableCommit commit = builder.newCommit()) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.commit(
+                                            Arrays.asList(
+                                                    message.withCheckFromSnapshot(readSnapshotId),
+                                                    message)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("missing its check-from snapshot");
+        }
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(readSnapshotId);
     }
 
     @Test

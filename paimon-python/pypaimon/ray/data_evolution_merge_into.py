@@ -27,6 +27,7 @@ import pyarrow as pa
 from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.ray.data_evolution_merge_join import (
+    _resolve_matched_num_partitions,
     _resolve_source_projection,
     build_matched_delete_ds,
     build_matched_update_ds,
@@ -48,6 +49,11 @@ from pypaimon.ray.data_evolution_merge_transform import (
     WhenMatched,
     WhenNotMatched,
     _NormalizedClause,
+)
+from pypaimon.ray.partitioning import (
+    _default_hash_shuffle_parallelism,
+    _estimate_dataset_size_bytes,
+    _resolve_num_partitions,
 )
 
 __all__ = ["merge_into", "WhenMatched", "WhenNotMatched"]
@@ -84,7 +90,7 @@ def merge_into(
     read_columns: Optional[Sequence[str]] = None,
 ) -> Dict[str, int]:
     _require_ray_join()
-    num_partitions = _resolve_num_partitions(num_partitions)
+    requested_num_partitions = num_partitions
 
     table, source_ds, matched_specs, not_matched_specs, ctx = _prepare(
         target, source, catalog_options,
@@ -92,16 +98,61 @@ def merge_into(
         read_columns,
     )
     base_snapshot = table.snapshot_manager().get_latest_snapshot()
+    target_empty = _is_target_empty(base_snapshot)
+    estimated_size_bytes = None
+    if num_partitions is None:
+        estimated_size_bytes = _estimate_merge_input_size_bytes(
+            source_ds, ctx,
+        )
+    min_partitions = 1
+    unknown_num_partitions = None
+    data_context = (
+        None
+        if ctx.is_self_merge
+        else getattr(source_ds, "context", None)
+    )
+    if num_partitions is None and not ctx.is_self_merge:
+        unknown_num_partitions = _default_hash_shuffle_parallelism(
+            data_context
+        )
+        if not target_empty:
+            min_partitions = unknown_num_partitions
+    source_num_partitions = _resolve_num_partitions(
+        num_partitions,
+        estimated_size_bytes,
+        min_partitions=min_partitions,
+        unknown_num_partitions=unknown_num_partitions,
+        data_context=data_context,
+    )
 
     update_ds, delete_ds, insert_ds, update_cols_union = _build_datasets(
         table, target, source_ds, matched_specs, not_matched_specs,
-        ctx, base_snapshot, num_partitions, ray_remote_args,
+        ctx, base_snapshot, source_num_partitions, ray_remote_args,
+        requested_num_partitions=requested_num_partitions,
+        estimated_size_bytes=estimated_size_bytes,
     )
+    update_num_partitions = None
+    delete_num_partitions = None
+    if not ctx.is_self_merge:
+        if update_ds is not None:
+            update_num_partitions = _resolve_matched_num_partitions(
+                requested_num_partitions,
+                estimated_size_bytes,
+                update_ds,
+            )
+        if delete_ds is not None:
+            delete_num_partitions = _resolve_matched_num_partitions(
+                requested_num_partitions,
+                estimated_size_bytes,
+                delete_ds,
+            )
 
     return _execute_and_commit(
         table, update_ds, delete_ds, insert_ds, update_cols_union,
-        base_snapshot, num_partitions,
+        base_snapshot, source_num_partitions,
         ray_remote_args, concurrency,
+        update_num_partitions=update_num_partitions,
+        delete_num_partitions=delete_num_partitions,
     )
 
 
@@ -326,7 +377,9 @@ def _is_self_merge(target, source, target_on_cols, source_on_cols) -> bool:
 
 def _build_datasets(
     table, target, source_ds, matched_specs, not_matched_specs,
-    ctx: "_PrepareCtx", base_snapshot, num_partitions, ray_remote_args,
+    ctx: "_PrepareCtx", base_snapshot, source_num_partitions, ray_remote_args,
+    requested_num_partitions: Optional[int] = None,
+    estimated_size_bytes: Optional[int] = None,
 ):
     # Pin every target read to base_snapshot so all branches see the same
     # snapshot the caller observed; otherwise concurrent commits in between
@@ -337,9 +390,10 @@ def _build_datasets(
     delete_ds = None
     insert_ds = None
     update_cols_union: List[str] = []
+    target_empty = _is_target_empty(base_snapshot)
 
     if ctx.is_self_merge:
-        if matched_specs and base_snapshot is not None:
+        if matched_specs and not target_empty:
             update_cols_union = _union_update_cols(matched_specs)
             if update_cols_union:
                 update_ds = build_self_merge_update_plan(
@@ -369,7 +423,7 @@ def _build_datasets(
     # Mirror Spark: matched/not-matched run as two independent joins
     # (inner / left_anti). One unified left_outer join would force
     # joined.materialize() to feed both branches, which can OOM on large merges.
-    if matched_specs and base_snapshot is not None:
+    if matched_specs and not target_empty:
         update_cols_union = _union_update_cols(matched_specs)
         if update_cols_union:
             update_ds = build_matched_update_ds(
@@ -382,7 +436,8 @@ def _build_datasets(
                 target_pa_schema=ctx.update_pa_schema,
                 update_cols=update_cols_union,
                 catalog_options=ctx.catalog_options,
-                num_partitions=num_partitions,
+                num_partitions=requested_num_partitions,
+                estimated_size_bytes=estimated_size_bytes,
                 resolve_target_projection=_resolve_target_projection,
                 snapshot_id=base_snapshot_id,
                 ray_remote_args=ray_remote_args,
@@ -396,7 +451,8 @@ def _build_datasets(
                 clauses=matched_specs,
                 target_field_names=ctx.settable_field_names,
                 catalog_options=ctx.catalog_options,
-                num_partitions=num_partitions,
+                num_partitions=requested_num_partitions,
+                estimated_size_bytes=estimated_size_bytes,
                 resolve_target_projection=_resolve_target_projection,
                 snapshot_id=base_snapshot_id,
                 ray_remote_args=ray_remote_args,
@@ -412,9 +468,9 @@ def _build_datasets(
             target_field_names=ctx.full_target_field_names,
             target_pa_schema=ctx.full_pa_schema,
             catalog_options=ctx.catalog_options,
-            num_partitions=num_partitions,
+            num_partitions=source_num_partitions,
             snapshot_id=base_snapshot_id,
-            target_empty=base_snapshot is None,
+            target_empty=target_empty,
             ray_remote_args=ray_remote_args,
         )
 
@@ -425,6 +481,8 @@ def _execute_and_commit(
     table, update_ds, delete_ds, insert_ds, update_cols_union,
     base_snapshot, num_partitions,
     ray_remote_args, concurrency,
+    update_num_partitions=None,
+    delete_num_partitions=None,
 ):
     collect_action_row_ids = update_ds is not None and delete_ds is not None
     commit_messages: list = []
@@ -438,6 +496,16 @@ def _execute_and_commit(
     num_inserted = 0
     insert_msgs: list = []
     self_merge_update = isinstance(update_ds, _SelfMergeUpdatePlan)
+    update_num_partitions = (
+        num_partitions
+        if update_num_partitions is None
+        else update_num_partitions
+    )
+    delete_num_partitions = (
+        num_partitions
+        if delete_num_partitions is None
+        else delete_num_partitions
+    )
 
     try:
         if update_ds is not None:
@@ -445,7 +513,7 @@ def _execute_and_commit(
                 update_msgs, num_updated, update_row_ids = (
                     distributed_self_merge_update_apply(
                         update_ds,
-                        num_partitions=num_partitions,
+                        num_partitions=update_num_partitions,
                         ray_remote_args=ray_remote_args,
                         collect_row_ids=collect_action_row_ids,
                     )
@@ -454,7 +522,7 @@ def _execute_and_commit(
                 update_msgs, num_updated, update_row_ids = (
                     distributed_update_apply(
                         update_ds, table, update_cols_union,
-                        num_partitions=num_partitions,
+                        num_partitions=update_num_partitions,
                         ray_remote_args=ray_remote_args,
                         base_snapshot_id=(
                             base_snapshot.id
@@ -468,7 +536,7 @@ def _execute_and_commit(
         if delete_ds is not None:
             delete_msgs, num_deleted, delete_row_ids = distributed_delete_apply(
                 delete_ds, table,
-                num_partitions=num_partitions,
+                num_partitions=delete_num_partitions,
                 ray_remote_args=ray_remote_args,
                 base_snapshot_id=(
                     base_snapshot.id
@@ -545,16 +613,17 @@ def _normalize_on(on: OnSpec) -> Tuple[List[str], List[str]]:
     return target_cols, source_cols
 
 
-def _resolve_num_partitions(num_partitions: Optional[int]) -> int:
-    if num_partitions is not None:
-        return num_partitions
-    try:
-        import ray
+def _estimate_merge_input_size_bytes(
+    source_ds,
+    ctx: "_PrepareCtx",
+) -> Optional[int]:
+    if ctx.is_self_merge:
+        return None
+    return _estimate_dataset_size_bytes(source_ds)
 
-        cpus = int(ray.cluster_resources().get("CPU", 4))
-        return max(1, cpus * 2)
-    except Exception:
-        return 4
+
+def _is_target_empty(snapshot) -> bool:
+    return snapshot is None or snapshot.total_record_count == 0
 
 
 def _require_ray_join() -> None:

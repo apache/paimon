@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action.cdc.mysql;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -732,7 +733,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
             waitForResult(newExpected, table, newRowType, Arrays.asList("pt", "_id"));
         } finally {
             statement.executeUpdate("ALTER TABLE all_types_table DROP COLUMN v");
-            SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+            SchemaManager schemaManager =
+                    new FileSystemSchemaManager(table.fileIO(), table.location());
             schemaManager.commitChanges(SchemaChange.dropColumn("v"));
         }
     }

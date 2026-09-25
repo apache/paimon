@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.util
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.catalog.{CatalogUtils, Identifier}
 import org.apache.paimon.options.ConfigOption
 import org.apache.paimon.spark.{SparkCatalogOptions, SparkConnectorOptions}
 import org.apache.paimon.table.Table
@@ -211,6 +211,18 @@ object OptionUtils extends SQLConfHelper with Logging {
     } else {
       mergeSQLConf(extraOptions)
     }
+  }
+
+  def usePaimonFormatTableImplementation(
+      catalogName: String,
+      ident: Identifier,
+      catalogOptions: JMap[String, String],
+      tableOptions: JMap[String, String]): Boolean = {
+    val mergedOptions =
+      new JHashMap[String, String](CatalogUtils.tableDefaultOptions(catalogOptions))
+    mergedOptions.putAll(tableOptions)
+    mergedOptions.putAll(getMergedOptions(catalogName, ident))
+    new CoreOptions(mergedOptions).formatTableImplementationIsPaimon
   }
 
   def withBranchFromOptions(

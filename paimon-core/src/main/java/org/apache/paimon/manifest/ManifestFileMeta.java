@@ -20,6 +20,7 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
@@ -57,7 +58,13 @@ public class ManifestFileMeta {
                             new DataField(8, "_MIN_LEVEL", new IntType(true)),
                             new DataField(9, "_MAX_LEVEL", new IntType(true)),
                             new DataField(10, "_MIN_ROW_ID", new BigIntType(true)),
-                            new DataField(11, "_MAX_ROW_ID", new BigIntType(true))));
+                            new DataField(11, "_MAX_ROW_ID", new BigIntType(true)),
+                            new DataField(12, "_TOTAL_BUCKETS", new IntType(true)),
+                            new DataField(
+                                    13,
+                                    "_EXTRA_FILES",
+                                    new ArrayType(
+                                            true, new VarCharType(false, Integer.MAX_VALUE)))));
 
     private final String fileName;
     private final long fileSize;
@@ -71,6 +78,8 @@ public class ManifestFileMeta {
     private final @Nullable Integer maxLevel;
     private final @Nullable Long minRowId;
     private final @Nullable Long maxRowId;
+    private final @Nullable Integer totalBuckets;
+    private final @Nullable List<String> extraFiles;
 
     public ManifestFileMeta(
             String fileName,
@@ -84,7 +93,9 @@ public class ManifestFileMeta {
             @Nullable Integer minLevel,
             @Nullable Integer maxLevel,
             @Nullable Long minRowId,
-            @Nullable Long maxRowId) {
+            @Nullable Long maxRowId,
+            @Nullable Integer totalBuckets,
+            @Nullable List<String> extraFiles) {
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.numAddedFiles = numAddedFiles;
@@ -97,6 +108,8 @@ public class ManifestFileMeta {
         this.maxLevel = maxLevel;
         this.minRowId = minRowId;
         this.maxRowId = maxRowId;
+        this.totalBuckets = totalBuckets;
+        this.extraFiles = extraFiles;
     }
 
     public String fileName() {
@@ -147,6 +160,14 @@ public class ManifestFileMeta {
         return maxRowId;
     }
 
+    public @Nullable Integer totalBuckets() {
+        return totalBuckets;
+    }
+
+    public @Nullable List<String> extraFiles() {
+        return extraFiles;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof ManifestFileMeta)) {
@@ -164,7 +185,9 @@ public class ManifestFileMeta {
                 && Objects.equals(minLevel, that.minLevel)
                 && Objects.equals(maxLevel, that.maxLevel)
                 && Objects.equals(minRowId, that.minRowId)
-                && Objects.equals(maxRowId, that.maxRowId);
+                && Objects.equals(maxRowId, that.maxRowId)
+                && Objects.equals(totalBuckets, that.totalBuckets)
+                && Objects.equals(extraFiles, that.extraFiles);
     }
 
     @Override
@@ -181,13 +204,15 @@ public class ManifestFileMeta {
                 minLevel,
                 maxLevel,
                 minRowId,
-                maxRowId);
+                maxRowId,
+                totalBuckets,
+                extraFiles);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "{%s, %d, %d, %d, %s, %d, %s, %s, %s, %s, %s, %s}",
+                "{%s, %d, %d, %d, %s, %d, %s, %s, %s, %s, %s, %s, %s, %s}",
                 fileName,
                 fileSize,
                 numAddedFiles,
@@ -199,7 +224,9 @@ public class ManifestFileMeta {
                 minLevel,
                 maxLevel,
                 minRowId,
-                maxRowId);
+                maxRowId,
+                totalBuckets,
+                extraFiles);
     }
 
     // ----------------------- Serialization -----------------------------

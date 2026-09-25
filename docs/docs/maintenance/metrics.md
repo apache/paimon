@@ -35,6 +35,95 @@ There are three types of metrics provided in the Paimon metric system, `Gauge`, 
 
 Paimon has supported built-in metrics to measure operations of **commits**, **scans**, **writes**, **compactions** and **lookups**, which can be bridged to any computing engine that supports, like Flink, Spark etc.
 
+## Bridging To Flink
+
+Paimon has implemented bridging metrics to Flink's metrics system, which can be reported by Flink, and the lifecycle of metric groups are managed by Flink.
+
+Please join the `<scope>.<infix>.<metric_name>` to get the complete metric identifier when using Flink to access Paimon, `metric_name` can be got from [Metric List](./metrics#metrics-list).
+
+For example, the identifier of metric `lastPartitionsWritten` for table `word_count` in Flink job named `insert_word_count` is:
+
+`localhost.taskmanager.localhost:60340-775a20.insert_word_count.Global Committer : word_count.0.paimon.table.word_count.commit.lastPartitionsWritten`.
+
+From Flink Web-UI, go to the committer operator's metrics, it's shown as:
+
+`0.Global_Committer___word_count.paimon.table.word_count.commit.lastPartitionsWritten`.
+
+:::info
+
+1. Please refer to [System Scope](https://nightlies.apache.org/flink/flink-docs-master/docs/ops/metrics/#system-scope) to understand Flink `scope`
+2. Scan metrics are only supported by Flink versions >= 1.18
+
+:::
+
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 130pt"></th>
+      <th class="text-left" style="width: 280pt">Scope</th>
+      <th class="text-left" style="width: 250pt">Infix</th>
+    </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>Scan Metrics</td>
+            <td>&lt;host&gt;.jobmanager.&lt;job_name&gt;</td>
+            <td>&lt;source_operator_name&gt;.coordinator. enumerator.paimon.table.&lt;table_name&gt;.scan</td>
+        </tr>
+        <tr>
+            <td>Lookup Metrics</td>
+            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;lookup_operator_name&gt;.&lt;subtask_index&gt;</td>
+            <td>paimon.table.&lt;table_name&gt;.lookup</td>
+        </tr>
+        <tr>
+            <td>Commit Metrics</td>
+            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;committer_operator_name&gt;.&lt;subtask_index&gt;</td>
+            <td>paimon.table.&lt;table_name&gt;.commit</td>
+        </tr>
+        <tr>
+            <td>Write Metrics</td>
+            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;writer_operator_name&gt;.&lt;subtask_index&gt;</td>
+            <td>paimon.table.&lt;table_name&gt;.partition.&lt;partition_string&gt;.bucket.&lt;bucket_index&gt;.writer</td>
+        </tr>
+        <tr>
+            <td>Write Buffer Metrics</td>
+            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;writer_operator_name&gt;.&lt;subtask_index&gt;</td>
+            <td>paimon.table.&lt;table_name&gt;.writeBuffer</td>
+        </tr>
+        <tr>
+            <td>Blob Fetch Metrics</td>
+            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;writer_operator_name&gt;.&lt;subtask_index&gt;</td>
+            <td>paimon.table.&lt;table_name&gt;.blobFetch</td>
+        </tr>
+        <tr>
+            <td>Compaction Metrics</td>
+            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;writer_operator_name&gt;.&lt;subtask_index&gt;</td>
+            <td>paimon.table.&lt;table_name&gt;.partition.&lt;partition_string&gt;.bucket.&lt;bucket_index&gt;.compaction</td>
+        </tr>
+        <tr>
+            <td>Flink Source Metrics</td>
+            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;source_operator_name&gt;.&lt;subtask_index&gt;</td>
+            <td>-</td>
+        </tr>
+        <tr>
+            <td>Flink Sink Metrics</td>
+            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;committer_operator_name&gt;.&lt;subtask_index&gt;</td>
+            <td>-</td>
+        </tr>
+    </tbody>
+</table>
+
+## Choose Metrics for a Task
+
+Use these groups to identify the operation to investigate. For tuning options, follow the related guide.
+
+| Task | Metrics to inspect | Related guide |
+| --- | --- | --- |
+| Investigate slow commits | [Commit duration and attempts](#commit-metrics) | [Commit Memory](./write-performance#commit-memory) |
+| Investigate writer memory pressure | [Write buffer usage](#write-buffer-metrics) | [Write Memory](./write-performance#write-memory) |
+| Check whether compaction is keeping up | [Level 0 file counts and compaction activity](#compaction-metrics) | [Compaction](../primary-key-table/compaction) and [Dedicated Compaction](./dedicated-compaction) |
+| Track Flink source latency or sink throughput | [Flink Connector Standard Metrics](#flink-connector-standard-metrics) | [Write Performance](./write-performance) |
+
 ## Metrics List
 
 Below is lists of Paimon built-in metrics. They are summarized into types of scan metrics, commit metrics, write metrics, write buffer metrics, blob fetch metrics, compaction metrics and lookup metrics.
@@ -408,6 +497,21 @@ Lookup metrics are available for local partial lookup. They are reported at look
             <td>The average total file size of all active (currently being written) buckets.</td>
         </tr>
         <tr>
+            <td>maxTotalFileCount</td>
+            <td>Gauge</td>
+            <td>The maximum total file count of an active (currently being written) bucket.</td>
+        </tr>
+        <tr>
+            <td>avgTotalFileCount</td>
+            <td>Gauge</td>
+            <td>The average total file count of all active (currently being written) buckets.</td>
+        </tr>
+        <tr>
+            <td>minAvgFileSize</td>
+            <td>Gauge</td>
+            <td>The minimum average file size across all active buckets, computed as total file size divided by total file count per bucket. Directly indicates if any bucket has a small file problem. Only reported for primary-key tables.</td>
+        </tr>
+        <tr>
             <td>maxSortBufferUsedBytes</td>
             <td>Gauge</td>
             <td>The maximum sort buffer memory currently used across all active compaction buckets, in bytes. High values relative to <code>maxSortBufferTotalBytes</code> indicate memory pressure during compaction; consider lowering <code>sort-spill-threshold</code> or reducing <code>sort-spill-buffer-size</code>.</td>
@@ -430,89 +534,11 @@ Lookup metrics are available for local partial lookup. They are reported at look
     </tbody>
 </table>
 
-## Bridging To Flink
-
-Paimon has implemented bridging metrics to Flink's metrics system, which can be reported by Flink, and the lifecycle of metric groups are managed by Flink.
-
-Please join the `<scope>.<infix>.<metric_name>` to get the complete metric identifier when using Flink to access Paimon, `metric_name` can be got from [Metric List](./metrics#metrics-list).
-
-For example, the identifier of metric `lastPartitionsWritten` for table `word_count` in Flink job named `insert_word_count` is:
-
-`localhost.taskmanager.localhost:60340-775a20.insert_word_count.Global Committer : word_count.0.paimon.table.word_count.commit.lastPartitionsWritten`.
-
-From Flink Web-UI, go to the committer operator's metrics, it's shown as:
-
-`0.Global_Committer___word_count.paimon.table.word_count.commit.lastPartitionsWritten`.
-
-:::info
-
-1. Please refer to [System Scope](https://nightlies.apache.org/flink/flink-docs-master/docs/ops/metrics/#system-scope) to understand Flink `scope`
-2. Scan metrics are only supported by Flink versions >= 1.18
-
-:::
-
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 130pt"></th>
-      <th class="text-left" style="width: 280pt">Scope</th>
-      <th class="text-left" style="width: 250pt">Infix</th>
-    </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td>Scan Metrics</td>
-            <td>&lt;host&gt;.jobmanager.&lt;job_name&gt;</td>
-            <td>&lt;source_operator_name&gt;.coordinator. enumerator.paimon.table.&lt;table_name&gt;.scan</td>
-        </tr>
-        <tr>
-            <td>Lookup Metrics</td>
-            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;lookup_operator_name&gt;.&lt;subtask_index&gt;</td>
-            <td>paimon.table.&lt;table_name&gt;.lookup</td>
-        </tr>
-        <tr>
-            <td>Commit Metrics</td>
-            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;committer_operator_name&gt;.&lt;subtask_index&gt;</td>
-            <td>paimon.table.&lt;table_name&gt;.commit</td>
-        </tr>
-        <tr>
-            <td>Write Metrics</td>
-            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;writer_operator_name&gt;.&lt;subtask_index&gt;</td>
-            <td>paimon.table.&lt;table_name&gt;.partition.&lt;partition_string&gt;.bucket.&lt;bucket_index&gt;.writer</td>
-        </tr>
-        <tr>
-            <td>Write Buffer Metrics</td>
-            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;writer_operator_name&gt;.&lt;subtask_index&gt;</td>
-            <td>paimon.table.&lt;table_name&gt;.writeBuffer</td>
-        </tr>
-        <tr>
-            <td>Blob Fetch Metrics</td>
-            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;writer_operator_name&gt;.&lt;subtask_index&gt;</td>
-            <td>paimon.table.&lt;table_name&gt;.blobFetch</td>
-        </tr>
-        <tr>
-            <td>Compaction Metrics</td>
-            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;writer_operator_name&gt;.&lt;subtask_index&gt;</td>
-            <td>paimon.table.&lt;table_name&gt;.partition.&lt;partition_string&gt;.bucket.&lt;bucket_index&gt;.compaction</td>
-        </tr>
-        <tr>
-            <td>Flink Source Metrics</td>
-            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;source_operator_name&gt;.&lt;subtask_index&gt;</td>
-            <td>-</td>
-        </tr>
-        <tr>
-            <td>Flink Sink Metrics</td>
-            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;committer_operator_name&gt;.&lt;subtask_index&gt;</td>
-            <td>-</td>
-        </tr>  
-    </tbody>
-</table>
-
-### Flink Connector Standard Metrics
+## Flink Connector Standard Metrics
 
 When using Flink to read and write, Paimon has implemented some key standard Flink connector metrics to measure the source latency and output of sink, see [FLIP-33: Standardize Connector Metrics](https://cwiki.apache.org/confluence/display/FLINK/FLIP-33%3A+Standardize+Connector+Metrics). Flink source / sink metrics implemented are listed here.
 
-#### Source Metrics (Flink)
+### Source Metrics (Flink)
 
 <table class="table table-bordered">
     <thead>
@@ -551,7 +577,7 @@ Please note that if you specified `consumer-id` in your streaming query, the lev
 
 :::
 
-#### Sink Metrics (Flink)
+### Sink Metrics (Flink)
 
 <table class="table table-bordered">
     <thead>

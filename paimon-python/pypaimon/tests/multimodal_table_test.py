@@ -21,8 +21,12 @@ import os
 import shutil
 import tempfile
 import unittest
+from dataclasses import replace
+from datetime import timedelta
+from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 import pypaimon.multimodal as pmm
 from pypaimon.multimodal import source_col
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -112,10 +116,400 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual("true", options["blob-as-descriptor"])
         self.assertNotIn("data-evolution.row-sidecar.enabled", options)
         self.assertEqual("full", options["global-index.search-mode"])
-        self.assertEqual("vortex", options["vector.file.format"])
+        self.assertEqual("parquet", options["vector.file.format"])
         self.assertEqual("default.docs", self.conn.get_table("docs").identifier)
         self.assertEqual(["id", "content", "embedding", "payload"],
                          [field.name for field in table.raw_table.fields])
+
+    def test_add_video_embeds_frame_ordinals_outside_normal_data(self):
+        table = self.conn.create_table(
+            "video_frames",
+            schema=_schema({
+                "episode_id": pa.int64(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "video",
+                "blob-as-descriptor": "true",
+            }),
+        )
+        video_path = os.path.join(self.temp_dir, "episode-42.mp4")
+        video_bytes = b"fake-mp4-payload"
+        with open(video_path, "wb") as output:
+            output.write(video_bytes)
+        video = pmm.Blob.from_local(video_path)
+
+        table.add_video(
+            video,
+            [{"episode_id": 42} for _ in range(3)],
+            first_frame=7,
+        )
+
+        rows = table.scan().select(["episode_id", "video"]).to_list()
+        descriptors = [
+            pmm.VideoFrameDescriptor.deserialize(row["video"])
+            for row in rows
+        ]
+        self.assertEqual([7, 8, 9], [value.frame_index for value in descriptors])
+        self.assertTrue(all(
+            value.payload_descriptor == descriptors[0].payload_descriptor
+            for value in descriptors
+        ))
+        self.assertTrue(descriptors[0].uri.endswith(".video"))
+        self.assertEqual(len(video_bytes), descriptors[0].length)
+
+        _, bodies = table.scan().read_blobs("video", parallelism=2)
+        self.assertEqual([video_bytes] * 3, bodies["video"])
+
+    def test_add_images_as_video_encodes_and_stores_frame_rows(self):
+        table = self.conn.create_table(
+            "image_video_frames",
+            schema=_schema({
+                "episode_id": pa.int64(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "video",
+                "blob-as-descriptor": "true",
+            }),
+        )
+        calls = []
+
+        def encode(images, output_path, **options):
+            images = list(images)
+            calls.append((images, options))
+            with open(output_path, "wb") as output:
+                output.write(b"encoded-video")
+            return len(images)
+
+        with patch(
+                "pypaimon.multimodal.video._encode_images_to_video",
+                encode):
+            table.add_images_as_video(
+                [b"frame-0", b"frame-1"],
+                [{"episode_id": 42}, {"episode_id": 42}],
+                fps=30,
+                codec="mpeg4",
+                pixel_format="yuv420p",
+                gop_size=2,
+                codec_options={"qscale": "3"},
+            )
+
+        self.assertEqual(
+            [
+                (
+                    [b"frame-0", b"frame-1"],
+                    {
+                        "fps": 30,
+                        "codec": "mpeg4",
+                        "pixel_format": "yuv420p",
+                        "gop_size": 2,
+                        "codec_options": {"qscale": "3"},
+                    },
+                )
+            ],
+            calls,
+        )
+        rows = table.scan().select(["episode_id", "video"]).to_list()
+        descriptors = [
+            pmm.VideoFrameDescriptor.deserialize(row["video"])
+            for row in rows
+        ]
+        self.assertEqual([0, 1], [value.frame_index for value in descriptors])
+        _, bodies = table.scan().read_blobs("video")
+        self.assertEqual([b"encoded-video"] * 2, bodies["video"])
+
+    def test_add_images_as_video_rejects_frame_count_mismatch(self):
+        table = self.conn.create_table(
+            "mismatched_image_video_frames",
+            schema=_schema({
+                "episode_id": pa.int64(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "video",
+                "blob-as-descriptor": "true",
+            }),
+        )
+        output_paths = []
+
+        def encode(unused_images, output_path, **unused_options):
+            output_paths.append(output_path)
+            with open(output_path, "wb") as output:
+                output.write(b"one-frame-video")
+            return 1
+
+        with patch(
+                "pypaimon.multimodal.video._encode_images_to_video",
+                encode):
+            with self.assertRaisesRegex(
+                    ValueError,
+                    "Image count 1 does not match frame row count 2"):
+                table.add_images_as_video(
+                    [b"frame-0"],
+                    [{"episode_id": 42}, {"episode_id": 42}],
+                    fps=30,
+                    codec="mpeg4",
+                    pixel_format="yuv420p",
+                    gop_size=2,
+                )
+
+        self.assertFalse(os.path.exists(output_paths[0]))
+        self.assertIsNone(
+            table.raw_table.snapshot_manager().get_latest_snapshot()
+        )
+
+    def test_add_videos_packs_multiple_videos_in_one_commit(self):
+        from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
+
+        table = self.conn.create_table(
+            "batched_video_frames",
+            schema=_schema({
+                "episode_id": pa.int64(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "video",
+                "blob-as-descriptor": "true",
+            }),
+        )
+        paths = [os.path.join(self.temp_dir, "episode-%s.mp4" % index)
+                 for index in (1, 2)]
+        payloads = [b"first-video", b"second-video"]
+        for path, payload in zip(paths, payloads):
+            with open(path, "wb") as output:
+                output.write(payload)
+
+        table.add_videos([
+            (Blob.from_local(paths[0]), [{"episode_id": 1}] * 2, 3),
+            (Blob.from_local(paths[1]), [{"episode_id": 2}] * 3, 10),
+        ])
+
+        snapshot = table.raw_table.snapshot_manager().get_latest_snapshot()
+        self.assertEqual(1, snapshot.id)
+        rows = table.scan().select(["episode_id", "video"]).to_list()
+        rows.sort(key=lambda row: (row["episode_id"], row["video"]))
+        descriptors = [
+            VideoFrameDescriptor.deserialize(row["video"])
+            for row in rows
+        ]
+        self.assertEqual([3, 4, 10, 11, 12], [d.frame_index for d in descriptors])
+        self.assertEqual(1, len({d.uri for d in descriptors}))
+        self.assertTrue(descriptors[0].uri.endswith(".video"))
+        self.assertEqual(2, len({d.payload_descriptor for d in descriptors}))
+
+    def test_normal_update_preserves_video_descriptors(self):
+        from pypaimon.table.row.blob import Blob
+
+        table = self.conn.create_table(
+            "update_video_frame_metadata",
+            schema=_schema({
+                "episode_id": pa.int64(),
+                "frame_id": pa.int32(),
+                "label": pa.string(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "video",
+                "blob-as-descriptor": "false",
+            }),
+        )
+        video_path = os.path.join(self.temp_dir, "update-metadata.mp4")
+        with open(video_path, "wb") as output:
+            output.write(b"video-kept-by-normal-update")
+        table.add_video(
+            Blob.from_local(video_path),
+            [
+                {"episode_id": 42, "frame_id": index, "label": "old"}
+                for index in range(3)
+            ],
+        )
+        before = sorted(
+            table.scan().select(["frame_id", "video"]).to_list(),
+            key=lambda row: row["frame_id"],
+        )
+
+        table.update("episode_id = 42", {"label": "new"})
+
+        after = sorted(
+            table.scan().select(["frame_id", "label", "video"]).to_list(),
+            key=lambda row: row["frame_id"],
+        )
+        self.assertEqual(["new"] * 3, [row["label"] for row in after])
+        self.assertEqual(
+            [row["video"] for row in before],
+            [row["video"] for row in after],
+        )
+
+    def test_update_rejects_video_field(self):
+        table = self.conn.create_table(
+            "reject_generic_video_update",
+            schema=_schema({
+                "frame_id": pa.int32(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "video",
+            }),
+        )
+
+        with self.assertRaisesRegex(ValueError, "replace_video"):
+            table.update("frame_id = 0", {"video": b"not-an-mp4"})
+
+        self.assertIsNone(
+            table.raw_table.snapshot_manager().get_latest_snapshot()
+        )
+
+    def test_replace_video_updates_only_matching_frame_rows(self):
+        from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
+
+        table = self.conn.create_table(
+            "replace_video_frames",
+            schema=_schema({
+                "episode_id": pa.int64(),
+                "frame_id": pa.int32(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "video",
+                "blob-as-descriptor": "false",
+            }),
+        )
+        old_path = os.path.join(self.temp_dir, "old-episode.mp4")
+        new_path = os.path.join(self.temp_dir, "new-episode.mp4")
+        old_payload = b"old-complete-video"
+        new_payload = b"new-complete-video"
+        with open(old_path, "wb") as output:
+            output.write(old_payload)
+        with open(new_path, "wb") as output:
+            output.write(new_payload)
+        table.add_video(
+            Blob.from_local(old_path),
+            [
+                {"episode_id": 42, "frame_id": index}
+                for index in range(3)
+            ],
+        )
+
+        table.replace_video(
+            "frame_id >= 1",
+            Blob.from_local(new_path),
+            first_frame=20,
+        )
+
+        rows = sorted(
+            table.scan().select(["frame_id", "video"]).to_list(),
+            key=lambda row: row["frame_id"],
+        )
+        descriptors = [
+            VideoFrameDescriptor.deserialize(row["video"])
+            for row in rows
+        ]
+        self.assertEqual([0, 20, 21], [value.frame_index for value in descriptors])
+        self.assertNotEqual(descriptors[0].uri, descriptors[1].uri)
+        self.assertEqual(descriptors[1].payload_descriptor,
+                         descriptors[2].payload_descriptor)
+        self.assertTrue(descriptors[1].uri.endswith(".video"))
+
+        scalar, bodies = table.scan().read_blobs("video", parallelism=2)
+        body_by_frame = dict(zip(
+            scalar["frame_id"].to_pylist(), bodies["video"]
+        ))
+        self.assertEqual({
+            0: old_payload,
+            1: new_payload,
+            2: new_payload,
+        }, body_by_frame)
+
+    def test_add_batches_aborts_before_commit_on_invalid_video_frame(self):
+        from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
+
+        table = self.conn.create_table(
+            "failed_batched_video_frames",
+            schema=_schema({
+                "episode_id": pa.int32(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "video",
+            }),
+        )
+        video_path = os.path.join(self.temp_dir, "valid-before-failure.mp4")
+        with open(video_path, "wb") as output:
+            output.write(b"valid-video")
+
+        payload = Blob.from_local(video_path).to_descriptor()
+        valid = VideoFrameDescriptor(
+            payload.uri, payload.offset, payload.length, 0
+        ).serialize()
+        with self.assertRaisesRegex(ValueError, "VideoFrameDescriptor"):
+            table.add_batches([
+                [{"episode_id": 1, "video": valid}],
+                [{"episode_id": 1, "video": b"inline-is-invalid"}],
+            ])
+
+        self.assertIsNone(
+            table.raw_table.snapshot_manager().get_latest_snapshot()
+        )
+
+    def test_add_batches_empty_iterable_is_noop(self):
+        table = self.conn.create_table(
+            "empty_batched_frames",
+            schema=_schema({"frame_index": pa.int32()}),
+            options=_PARQUET_OPTIONS,
+        )
+
+        self.assertIs(table, table.add_batches(iter(())))
+        self.assertIsNone(
+            table.raw_table.snapshot_manager().get_latest_snapshot()
+        )
+
+    def test_scan_to_torch_keeps_blob_descriptors(self):
+        table = self.conn.create_table(
+            "torch_video_frames",
+            schema=_schema({
+                "episode_id": pa.int32(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "video",
+                "blob-as-descriptor": "false",
+            }),
+        )
+        from pypaimon.table.row.blob import Blob
+        video_path = os.path.join(self.temp_dir, "torch-episode.mp4")
+        with open(video_path, "wb") as output:
+            output.write(b"fake-video")
+        table.add_video(
+            Blob.from_local(video_path), [{"episode_id": 1}]
+        )
+        sentinel = object()
+        captured = {}
+
+        def fake_to_torch(table_read, splits, **kwargs):
+            captured["descriptor"] = table_read.table.options.blob_as_descriptor()
+            captured["splits"] = splits
+            captured["kwargs"] = kwargs
+            return sentinel
+
+        with patch(
+            "pypaimon.read.table_read.TableRead.to_torch",
+            autospec=True,
+            side_effect=fake_to_torch,
+        ):
+            result = table.scan().select(
+                ["episode_id", "video"]
+            ).to_torch(
+                streaming=True,
+                prefetch_concurrency=2,
+                shuffle=False,
+            )
+
+        self.assertIs(sentinel, result)
+        self.assertTrue(captured["descriptor"])
+        self.assertTrue(captured["splits"])
+        self.assertEqual(True, captured["kwargs"]["streaming"])
+        self.assertEqual(2, captured["kwargs"]["prefetch_concurrency"])
 
     def test_create_table_uses_options_and_partitioned(self):
         table = self.conn.create_table(
@@ -225,6 +619,25 @@ class MultimodalTableTest(unittest.TestCase):
 
         cat = store.get_object("images/cat.jpg")
         self.assertEqual(b"cat-image-v1", cat.read())
+        self.assertEqual(table.raw_table.table_path, cat.table_root)
+        with patch.object(cat.file_io, 'create_blob_presigned_url',
+                          return_value="https://signed-url") as presign:
+            validity = timedelta(minutes=30)
+            self.assertEqual("https://signed-url", cat.to_presigned_url(validity))
+            presign.assert_called_once_with(cat.table_root, cat.descriptor, validity)
+            presign.reset_mock()
+            ranged = store.get_object("images/cat.jpg", range="bytes=1-4")
+            self.assertEqual("https://signed-url", ranged.to_presigned_url(validity))
+            root, descriptor, expiry = presign.call_args[0]
+            self.assertEqual(cat.table_root, root)
+            self.assertEqual(cat.descriptor.uri, descriptor.uri)
+            self.assertEqual(cat.descriptor.offset + 1, descriptor.offset)
+            self.assertEqual(4, descriptor.length)
+            self.assertEqual(validity, expiry)
+            presign.reset_mock()
+            with self.assertRaisesRegex(ValueError, "bound to a table root"):
+                replace(cat, table_root=None).to_presigned_url(validity)
+            presign.assert_not_called()
         self.assertEqual(b"at-i", store.get_object(
             "images/cat.jpg", range="bytes=1-4").read())
         clipped = store.get_object("images/cat.jpg", range="bytes=10-999")
@@ -315,6 +728,74 @@ class MultimodalTableTest(unittest.TestCase):
                          [obj.key for obj in store.list_objects(prefix="images/")])
         store.delete_object("images/cat.jpg")
         self.assertEqual([], store.list_objects(prefix="images/"))
+
+    @pytest.mark.python_read
+    def test_blob_store_list_reads_batches_and_stops_at_limit(self):
+        from pypaimon.read.table_read import TableRead
+
+        table = self.conn.create_table(
+            "list_batches", schema=_schema({
+                "key": pa.string(), "image": pa.large_binary(), "owner": pa.string(),
+            }), options=dict(_PARQUET_OPTIONS, **{"read.batch-size": "2"}))
+        table.add([
+            {"key": key, "image": b"body", "owner": "alice"}
+            for key in ("other/a", "other/b", "images/a", "images/b", "images/c", "images/d")
+        ])
+        store = table.blobs(column="image")
+        original = TableRead._arrow_batch_generator
+        batches, closed = [], []
+
+        def tracked_read(read, *args, **kwargs):
+            reader = original(read, *args, **kwargs)
+            try:
+                for batch in reader:
+                    batches.append(batch.num_rows)
+                    yield batch
+            finally:
+                reader.close()
+                closed.append(True)
+
+        with patch.object(TableRead, "to_arrow", side_effect=AssertionError("full read")), \
+                patch.object(TableRead, "_arrow_batch_generator", tracked_read):
+            self.assertEqual([], store.list_objects(limit=0))
+            self.assertEqual([], batches)
+            listed = store.list_objects(prefix="images/", limit=1, columns=["owner"])
+            self.assertEqual(["images/a"], [obj.key for obj in listed])
+            self.assertEqual({"owner": "alice"}, listed[0].columns)
+            self.assertEqual(4, listed[0].size)
+            self.assertEqual([2, 2], batches)
+            self.assertEqual([True], closed)
+
+            batches.clear()
+            listed = store.list_objects(limit=1, columns=[])
+            self.assertEqual(1, len(listed))
+            self.assertEqual({}, listed[0].columns)
+            self.assertEqual([1], batches)
+            self.assertEqual(2, len(closed))
+
+            with patch.object(store, "_row_to_info", side_effect=ValueError("invalid descriptor")):
+                try:
+                    store.list_objects()
+                except ValueError as error:
+                    self.assertEqual("invalid descriptor", str(error))
+                    # Check while the traceback still holds the reader's frame.
+                    self.assertEqual(3, len(closed))
+                else:
+                    self.fail("Expected invalid descriptor")
+            self.assertEqual([], store.list_objects(prefix="absent/"))
+            self.assertEqual(4, len(closed))
+
+    def test_blob_store_list_preserves_non_string_prefix_semantics(self):
+        table = self.conn.create_table(
+            "numeric_keys", schema=_schema({"key": pa.int32(), "image": pa.large_binary()}),
+            options=_PARQUET_OPTIONS)
+        table.add([
+            {"key": value, "image": b"body"} for value in (None, 10, 20, 21)
+        ])
+        store = table.blobs(column="image")
+        self.assertEqual([None], [obj.key for obj in store.list_objects(prefix="N", limit=1)])
+        self.assertEqual([20], [obj.key for obj in store.list_objects(prefix="2", limit=1)])
+        self.assertEqual(4, len(store.list_objects(prefix="")))
 
     def test_blob_store_put_object_accepts_blob_without_materializing(self):
         from pypaimon.table.row.blob import Blob, BlobDescriptor
@@ -467,6 +948,130 @@ class MultimodalTableTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "primary keys"):
             self.conn.get_table("pk")
 
+    def test_create_table_ignores_invalid_options_when_table_exists(self):
+        schema = _schema({"id": pa.int32()})
+        expected = self.conn.create_table("existing", schema=schema)
+
+        actual = self.conn.create_table(
+            "existing",
+            schema=_schema({
+                "id": pa.int32(),
+                "embedding": _vector(3),
+            }),
+            options={"data-evolution.enabled": "false"},
+            ignore_if_exists=True,
+        )
+
+        self.assertEqual(expected.identifier, actual.identifier)
+        with patch(
+                "pypaimon.multimodal.connection._table_exists",
+                return_value=False):
+            raced = self.conn.create_table(
+                "existing",
+                schema=_schema({
+                    "id": pa.int32(),
+                    "embedding": _vector(3),
+                }),
+                options={"data-evolution.enabled": "false"},
+                ignore_if_exists=True,
+            )
+        self.assertEqual(expected.identifier, raced.identifier)
+
+    def test_create_table_handles_concurrent_delete_when_ignoring(self):
+        schema = _schema({"id": pa.int32()})
+        self.conn.create_table("deleted", schema=schema)
+        original_get = self.conn.get_table
+        deleted = [False]
+
+        def delete_once(name):
+            if not deleted[0]:
+                deleted[0] = True
+                self.conn.catalog.drop_table("default.deleted", False)
+            return original_get(name)
+
+        with patch.object(
+                self.conn, "get_table", side_effect=delete_once):
+            table = self.conn.create_table(
+                "deleted",
+                data=pa.table({"id": [1, 2, 3]}),
+                schema=schema,
+                ignore_if_exists=True,
+            )
+        self.assertEqual("default.deleted", table.identifier)
+        self.assertEqual(
+            [1, 2, 3], table.scan().to_arrow()["id"].to_pylist())
+
+        self.conn.create_table("fallback_deleted", schema=schema)
+        deleted[0] = False
+
+        def delete_fallback_once(name):
+            if not deleted[0]:
+                deleted[0] = True
+                self.conn.catalog.drop_table(
+                    "default.fallback_deleted", False)
+            return original_get(name)
+
+        with patch(
+                "pypaimon.multimodal.connection._table_exists",
+                return_value=False):
+            with patch.object(
+                    self.conn,
+                    "get_table",
+                    side_effect=delete_fallback_once):
+                with self.assertRaisesRegex(
+                        ValueError, "data-evolution.enabled"):
+                    self.conn.create_table(
+                        "fallback_deleted",
+                        schema=schema,
+                        options={"data-evolution.enabled": "false"},
+                        ignore_if_exists=True,
+                    )
+
+    def test_create_table_does_not_add_data_to_concurrent_winner(self):
+        schema = _schema({"id": pa.int32()})
+        winner = self.conn.create_table("winner", schema=schema)
+
+        with patch(
+                "pypaimon.multimodal.connection._table_exists",
+                return_value=False):
+            actual = self.conn.create_table(
+                "winner",
+                data=pa.table({"id": [1, 2, 3]}),
+                schema=schema,
+                ignore_if_exists=True,
+            )
+
+        self.assertEqual(winner.identifier, actual.identifier)
+        self.assertEqual([], actual.scan().to_arrow().to_pylist())
+
+    def test_create_table_preserves_unknown_create_error(self):
+        schema = _schema({"id": pa.int32()})
+        create = self.conn.catalog.create_table
+        create_error = TimeoutError("create response lost")
+
+        def create_then_lose_response(*args, **kwargs):
+            create(*args, **kwargs)
+            raise create_error
+
+        with patch.object(
+                self.conn.catalog,
+                "create_table",
+                side_effect=create_then_lose_response):
+            with self.assertRaises(TimeoutError) as context:
+                self.conn.create_table(
+                    "failed_create",
+                    data=pa.table({"id": [1, 2, 3]}),
+                    schema=schema,
+                    ignore_if_exists=True,
+                )
+
+        self.assertIs(create_error, context.exception)
+        self.assertEqual(
+            [],
+            self.conn.get_table("failed_create")
+            .scan().to_arrow().to_pylist(),
+        )
+
     def test_create_table_can_add_initial_data_and_get_by_short_name(self):
         self.conn.create_table(
             "users",
@@ -487,6 +1092,63 @@ class MultimodalTableTest(unittest.TestCase):
 
         self.assertEqual(["id", "name"], result.column_names)
         self.assertEqual([1, 2], result["id"].to_pylist())
+
+    def test_add_preserves_fields_missing_from_first_row(self):
+        table = self.conn.create_table(
+            "sparse_rows", schema=_schema({
+                "id": pa.int32(), "caption": pa.string(), "quality": pa.float64(),
+                "image": pa.large_binary(), "missing": pa.string(),
+            }), options=_PARQUET_OPTIONS)
+        table.add([
+            {"id": "1"},
+            {"id": "2", "caption": "keep-me", "quality": 0.9,
+             "image": b"payload", "extra": "ignored"},
+        ])
+        scalar, blobs = table.scan().read_blobs("image")
+        rows = sorted(zip(scalar.to_pylist(), blobs["image"]), key=lambda row: row[0]["id"])
+        self.assertEqual([
+            ({"id": 1, "caption": None, "quality": None, "missing": None}, None),
+            ({"id": 2, "caption": "keep-me", "quality": 0.9, "missing": None}, b"payload"),
+        ], rows)
+
+    def test_add_python_map_values(self):
+        schema = _schema({
+            "id": pa.int32(), "assets": pa.map_(pa.string(), pa.large_binary()),
+            "scores": pa.map_(pa.string(), pa.int64()),
+        })
+        rows = [
+            {"id": 1, "assets": {"image": pmm.Blob.from_data(b"body"), "missing": None},
+             "scores": {"quality": 9}},
+            {"id": 2, "assets": [("empty", b""), ("image", b"second")], "scores": []},
+            {"id": 3, "assets": [], "scores": None},
+            {"id": 4, "assets": None, "scores": None},
+        ]
+        for columnar in (False, True):
+            with self.subTest(columnar=columnar):
+                table = self.conn.create_table(
+                    "map_input_%s" % columnar, schema=schema, options=_PARQUET_OPTIONS)
+                data = {name: [row[name] for row in rows] for name in schema.names} if columnar else rows
+                table.add(data)
+                scalar, blobs = table.scan().read_blobs("assets")
+                self.assertEqual({
+                    1: [("image", b"body"), ("missing", None)],
+                    2: [("empty", b""), ("image", b"second")], 3: [], 4: None,
+                }, dict(zip(scalar["id"].to_pylist(), blobs["assets"])))
+                self.assertEqual({1: [("quality", 9)], 2: [], 3: None, 4: None},
+                                 dict(zip(scalar["id"].to_pylist(), scalar["scores"].to_pylist())))
+
+    def test_python_input_preserves_safe_casts_and_empty_rows(self):
+        from pypaimon.multimodal.table import _to_arrow_table
+
+        schema = _schema({"id": pa.int32(), "caption": pa.string()})
+        for data in ([{"id": 1.5}], {"id": [1.5]}):
+            with self.assertRaises(pa.ArrowInvalid):
+                _to_arrow_table(data, schema)
+        self.assertEqual([], _to_arrow_table([], schema).to_pylist())
+        self.assertEqual([{"id": None, "caption": None}] * 2,
+                         _to_arrow_table([{}, {}], schema).to_pylist())
+        self.assertEqual([{"id": 2, "caption": None}],
+                         _to_arrow_table({"id": ["2"]}, schema).to_pylist())
 
     def test_add_scan_where_select_limit(self):
         users = self.conn.create_table(
@@ -516,6 +1178,70 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(["id", "name"], result.column_names)
         self.assertEqual(1, result.num_rows)
         self.assertEqual([1], result["id"].to_pylist())
+
+    @pytest.mark.python_read
+    def test_scan_to_arrow_batch_reader(self):
+        users = self.conn.create_table(
+            "batch_users",
+            data=[
+                {"id": 1, "age": 20},
+                {"id": 2, "age": 30},
+                {"id": 3, "age": 40},
+            ],
+            schema=_schema({"id": pa.int32(), "age": pa.int32()}),
+            options=_PARQUET_OPTIONS,
+        )
+
+        reader = (
+            users.scan()
+            .where("age >= 30")
+            .select("id")
+            .to_arrow_batch_reader()
+        )
+
+        self.assertEqual([{"id": 2}, {"id": 3}], reader.read_all().to_pylist())
+
+        closed = []
+
+        def batches(*args):
+            try:
+                yield pa.record_batch(
+                    [pa.array([1], type=pa.int32())], names=["id"])
+                yield pa.record_batch(
+                    [pa.array([2], type=pa.int32())], names=["id"])
+            finally:
+                closed.append(True)
+
+        with patch(
+                "pypaimon.read.table_read.TableRead._arrow_batch_generator",
+                new=batches), patch(
+                    "pypaimon.read.table_read."
+                    "_RECORD_BATCH_READER_FROM_STREAM", None):
+            reader = users.scan().select("id").to_arrow_batch_reader()
+            reader.read_next_batch()
+            reader.close()
+        self.assertEqual([True], closed)
+
+        closed.clear()
+        with patch(
+                "pypaimon.read.table_read.TableRead._arrow_batch_generator",
+                new=batches):
+            reader = users.scan().select("id").to_arrow_batch_reader()
+            reader.read_next_batch()
+            reader.close()
+        self.assertEqual([True], closed)
+
+        read_builder = users.raw_table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        with patch(
+                "pypaimon.read.table_read."
+                "_RECORD_BATCH_READER_FROM_STREAM", None):
+            reader = read_builder.new_read().to_arrow_batch_reader(splits)
+        self.assertIsInstance(reader, pa.RecordBatchReader)
+        reader.close()
+
+        with self.assertRaisesRegex(TypeError, "only supported on scan"):
+            users.search("thirty", column="id").to_arrow_batch_reader()
 
     def test_scan_with_row_id_returns_system_column(self):
         users = self.conn.create_table(
@@ -842,6 +1568,131 @@ class MultimodalTableTest(unittest.TestCase):
         _, blobs3 = obs.scan().where("clip = 'c1'").read_blobs(["img", "img"])
         self.assertEqual({"img"}, set(blobs3))
 
+    def test_scan_read_and_stream_map_blobs(self):
+        map_blob_type = pa.map_(pa.string(), pa.large_binary())
+        schema = _schema({
+            "id": pa.int32(),
+            "preview": pa.large_binary(),
+            "assets": map_blob_type,
+        })
+        obs = self.conn.create_table(
+            "map_blobs",
+            schema=schema,
+            options=_PARQUET_OPTIONS,
+        )
+        obs.add(pa.Table.from_pydict({
+            "id": [1, 2, 3, 4],
+            "preview": [b"preview-1", None, b"preview-3", b"preview-4"],
+            "assets": pa.array(
+                [
+                    [
+                        ("thumb", b"thumb-1"),
+                        ("empty", b""),
+                        ("missing", None),
+                    ],
+                    None,
+                    [],
+                    [("original", b"original-4")],
+                ],
+                type=map_blob_type,
+            ),
+        }, schema=schema))
+
+        scalar, blobs = obs.scan().read_blobs(
+            ["preview", "assets"], parallelism=2
+        )
+        ids = scalar.column("id").to_pylist()
+        self.assertNotIn("assets", scalar.column_names)
+        self.assertEqual(
+            {
+                1: b"preview-1",
+                2: None,
+                3: b"preview-3",
+                4: b"preview-4",
+            },
+            dict(zip(ids, blobs["preview"])),
+        )
+        self.assertEqual(
+            {
+                1: {"thumb": b"thumb-1", "empty": b"", "missing": None},
+                2: None,
+                3: {},
+                4: {"original": b"original-4"},
+            },
+            {
+                row_id: None if values is None else dict(values)
+                for row_id, values in zip(ids, blobs["assets"])
+            },
+        )
+
+        streamed = {}
+        for scalar_batch, blob_batch in obs.scan().stream_blobs("assets"):
+            for row_id, values in zip(
+                    scalar_batch.column("id").to_pylist(),
+                    blob_batch["assets"]):
+                streamed[row_id] = None if values is None else dict(values)
+        self.assertEqual(
+            {
+                1: {"thumb": b"thumb-1", "empty": b"", "missing": None},
+                2: None,
+                3: {},
+                4: {"original": b"original-4"},
+            },
+            streamed,
+        )
+
+        _, selected = obs.scan().select(["id", "assets"]).read_blobs()
+        self.assertEqual({"assets"}, set(selected))
+
+    def test_scan_read_and_stream_array_blobs(self):
+        schema = _schema({
+            "id": pa.int32(),
+            "preview": pa.large_binary(),
+            "pages": pa.list_(pa.large_binary()),
+            "assets": pa.map_(pa.string(), pa.large_binary()),
+        })
+        obs = self.conn.create_table(
+            "array_blobs", schema=schema,
+            options=dict(_PARQUET_OPTIONS, **{"read.batch-size": "2"}))
+        data = {
+            "id": [1, 2, 3, 4],
+            "preview": [b"p1", None, b"p3", b"p4"],
+            "pages": [[b"first", None, b"", b"last", b"first"], None, [], [b"fourth"]],
+            "assets": [[("cover", b"c1")], None, [], [("missing", None)]],
+        }
+        obs.add(pa.Table.from_pydict(data, schema=schema))
+        expected = dict(zip(data["id"], data["pages"]))
+
+        scalar, blobs = obs.scan().read_blobs()
+        self.assertEqual(["id"], scalar.column_names)
+        self.assertEqual({"preview", "pages", "assets"}, set(blobs))
+        for name in blobs:
+            self.assertEqual(dict(zip(data["id"], data[name])),
+                             dict(zip(scalar.column("id").to_pylist(), blobs[name])))
+
+        streamed = {}
+        for scalar_batch, blob_batch in obs.scan().stream_blobs("pages"):
+            self.assertEqual(["id"], scalar_batch.schema.names)
+            self.assertLessEqual(scalar_batch.num_rows, 2)
+            streamed.update(zip(scalar_batch.column("id").to_pylist(), blob_batch["pages"]))
+        self.assertEqual(expected, streamed)
+
+        # Projection hides the filter column and other BLOBs, but keeps row IDs.
+        query = obs.scan().select(["pages"]).with_row_id().where("id = 4").limit(1)
+        for scalar, blobs in [query.read_blobs(), *list(query.stream_blobs())]:
+            self.assertEqual(["_ROW_ID"], scalar.schema.names)
+            self.assertEqual(1, scalar.num_rows)
+            self.assertEqual({"pages": [[b"fourth"]]}, blobs)
+
+        scalar, blobs = obs.scan().where("id < 0").read_blobs("pages")
+        self.assertEqual(0, scalar.num_rows)
+        self.assertEqual({"pages": []}, blobs)
+        self.assertEqual([], list(obs.scan().where("id < 0").stream_blobs("pages")))
+        _, blobs = obs.scan().read_blobs(["pages", "pages"])
+        self.assertEqual({"pages"}, set(blobs))
+        scalar, _ = obs.scan().read_blobs("preview")
+        self.assertEqual(["id"], scalar.column_names)
+
     def test_scan_read_blobs_filter_column_not_selected(self):
         # The row filter must apply even when its column is not in select().
         obs = self.conn.create_table(
@@ -990,6 +1841,47 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(
             [], list(obs.scan().where("clip = 'none'").stream_blobs("image")))
 
+    def test_scan_stream_blobs_closes_underlying_iterator(self):
+        from pypaimon.read.table_read import TableRead
+
+        table = self.conn.create_table(
+            "stream_cleanup", schema=_schema({
+                "id": pa.int32(), "image": pa.large_binary(),
+            }), options=dict(_PARQUET_OPTIONS, **{"read.batch-size": "1"}))
+        table.add([{"id": i, "image": b"body"} for i in range(3)])
+        original = TableRead._arrow_batch_generator
+        closed = []
+
+        def tracked_read(read, *args, **kwargs):
+            reader = original(read, *args, **kwargs)
+            try:
+                yield from reader
+            finally:
+                reader.close()
+                closed.append(True)
+
+        with patch.object(TableRead, "_try_native_batches", return_value=None), \
+                patch.object(TableRead, "_arrow_batch_generator", tracked_read):
+            stream = table.scan().stream_blobs("image")
+            next(stream)
+            stream.close()
+            self.assertEqual([True], closed)
+
+            for method in ("_fetch_bodies", "_scalar_columns"):
+                with self.subTest(method=method):
+                    closed.clear()
+                    query = table.scan()
+                    with patch.object(query, method, side_effect=ValueError("batch failed")):
+                        stream = query.stream_blobs("image")
+                        try:
+                            next(stream)
+                        except ValueError as error:
+                            self.assertEqual("batch failed", str(error))
+                            # Assert while the traceback still retains the reader's frame.
+                            self.assertEqual([True], closed)
+                        else:
+                            self.fail("Expected batch failure")
+
     @unittest.skipIf(ray is None, "ray is not installed")
     def test_scan_to_ray_map_with_blobs(self):
         started_ray = False
@@ -1062,10 +1954,12 @@ class MultimodalTableTest(unittest.TestCase):
                 collect_batch,
                 parallelism=2,
                 batch_size=1,
+                blob_uri_affinity=True,
+                prefetch_bytes=32,
                 fn_kwargs={"prefix": b"got-"},
                 ray_remote_args={"num_cpus": 1},
             )
-            rows = sorted(result.to_pandas().to_dict("records"), key=lambda row: row["idx"])
+            rows = sorted(result.take_all(), key=lambda row: row["idx"])
 
             self.assertEqual(
                 [
@@ -1077,6 +1971,181 @@ class MultimodalTableTest(unittest.TestCase):
         finally:
             if started_ray:
                 ray.shutdown()
+
+    @unittest.skipIf(ray is None, "ray is not installed")
+    def test_scan_to_ray_map_with_nested_blobs(self):
+        from pypaimon.ray import map_with_blobs
+
+        schema = _schema({
+            "id": pa.int32(), "image": pa.large_binary(),
+            "pages": pa.list_(pa.large_binary()),
+            "assets": pa.map_(pa.string(), pa.large_binary()),
+        })
+        table = self.conn.create_table(
+            "ray_nested_blobs", schema=schema, options=_PARQUET_OPTIONS)
+        rows = [
+            {"id": 1, "image": b"preview", "pages": [b"a", None, b"", b"b"],
+             "assets": [("thumb", b"thumb"), ("missing", None), ("empty", b"")]},
+            {"id": 2, "image": None, "pages": None, "assets": None},
+            {"id": 3, "image": b"preview", "pages": [], "assets": []},
+            {"id": 4, "image": b"preview", "pages": [b"d"], "assets": [("thumb", b"last")]},
+        ]
+        table.add(pa.Table.from_pylist(rows, schema=schema))
+        output_schema = pa.schema([schema.field(name) for name in ("id", "pages", "assets")])
+
+        def collect(scalar, blobs):
+            assert scalar.column_names == ["id"]
+            return pa.Table.from_pydict(dict(id=scalar["id"], **blobs), schema=output_schema)
+
+        started_ray = not ray.is_initialized()
+        if started_ray:
+            ray.init(ignore_reinit_error=True, num_cpus=2)
+        try:
+            dataset = table.scan().to_ray(concurrency=1, override_num_blocks=1)
+            for maps, arrays in ((["assets"], ["assets"]), (["unknown"], [])):
+                with self.assertRaisesRegex(ValueError, "disjoint subsets"):
+                    map_with_blobs(dataset, ["pages", "assets"], collect,
+                                   map_blob_columns=maps, array_blob_columns=arrays)
+            expected = [{name: row[name] for name in output_schema.names} for row in rows]
+            for use_table in (False, True):
+                with self.subTest(use_table=use_table):
+                    if use_table:
+                        # Ray transformations do not preserve the source metadata.
+                        result = table.map_with_blobs(
+                            dataset.filter(lambda row: row["id"] > 0),
+                            ["pages", "assets"], collect, batch_size=2)
+                    else:
+                        result = map_with_blobs(
+                            dataset, ["pages", "assets"], collect, batch_size=2)
+                    actual = [row for batch in result.iter_batches(batch_format="pyarrow")
+                              for row in batch.to_pylist()]
+                    self.assertEqual(expected, sorted(actual, key=lambda row: row["id"]))
+
+            projected = table.scan().select(["id", "pages"]).to_ray()
+            result = table.map_with_blobs(
+                projected, "pages", lambda scalar, blobs: scalar, batch_size=2)
+            self.assertEqual([1, 2, 3, 4], sorted(row["id"] for row in result.take_all()))
+            empty = table.scan().where("id < 0").to_ray()
+            self.assertEqual([], map_with_blobs(empty, ["pages", "assets"], collect).take_all())
+        finally:
+            if started_ray:
+                ray.shutdown()
+
+    def test_map_with_blobs_rejects_foreign_nested_descriptors(self):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+        from pypaimon.ray.ray_paimon import _map_blob_batch
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        descriptor = BlobDescriptor("oss://other-table/blob", 0, 1).serialize()
+        for arrow_type, values in (
+                (pa.list_(pa.large_binary()), [None, [], [b"inline", descriptor]]),
+                (pa.map_(pa.string(), pa.large_binary()),
+                 [None, [], [("inline", b"inline"), ("foreign", descriptor)]]),
+                (pa.list_(pa.list_(pa.string())),
+                 [None, [], [("inline", "inline"), ("foreign", descriptor.decode("utf-8"))]])):
+            with self.subTest(arrow_type=arrow_type):
+                batch = pa.table({
+                    "image": [b"inline"] * 3,
+                    "text": [descriptor.decode("utf-8")] * 3,
+                    "foreign": pa.array(values, type=arrow_type),
+                })
+                with self.assertRaisesRegex(ValueError, "does not own"):
+                    _map_blob_batch(batch, None, ["image"], ["image"], 1, None, {})
+                # A descriptor outside the current slice is not a foreign column value.
+                _map_blob_batch(batch.slice(0, 2), LocalFileIO(), ["image"], ["image"], 1,
+                                lambda scalar, blobs: scalar, {})
+                empty = pa.table({
+                    "image": pa.chunked_array([], type=pa.large_binary()),
+                    "foreign": pa.chunked_array([], type=arrow_type),
+                })
+                result = _map_blob_batch(empty, LocalFileIO(), ["image"], ["image"], 1,
+                                         lambda scalar, blobs: scalar, {})
+                self.assertEqual(0, result.num_rows)
+
+    def test_map_with_blobs_restores_utf8_map_values(self):
+        from unittest.mock import Mock
+
+        from pypaimon.ray.ray_paimon import _map_blob_batch
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        descriptor = BlobDescriptor("test://blob", 0, 4).serialize()
+        entries = [("blob", descriptor.decode("utf-8")), ("text", "\u4f60\u597d"),
+                   ("empty", ""), ("missing", None), ("blob", descriptor.decode("utf-8"))]
+        batch = pa.table({"assets": pa.array([None, [], entries],
+                                             type=pa.list_(pa.list_(pa.string())))})
+        file_io = Mock()
+        file_io.read_ranges_coalesced.return_value = [b"body", None, None, None, b"body"]
+        actual = _map_blob_batch(
+            batch, file_io, ["assets"], ["assets"], 2, lambda scalar, blobs: blobs, {},
+            map_blob_cols=["assets"])
+        self.assertEqual({"assets": [None, [], [
+            ("blob", b"body"), ("text", "\u4f60\u597d".encode("utf-8")),
+            ("empty", b""), ("missing", None), ("blob", b"body"),
+        ]]}, actual)
+        file_io.read_ranges_coalesced.assert_called_once_with(
+            [("test://blob", 0, 4), None, None, None, ("test://blob", 0, 4)], 2)
+
+    @unittest.skipIf(ray is None, "ray is not installed")
+    def test_ray_filter_preserves_map_blob_bytes(self):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+        from pypaimon.ray import map_with_blobs
+
+        schema = _schema({"id": pa.int32(), "assets": pa.map_(pa.string(), pa.large_binary())})
+
+        def collect(scalar, blobs):
+            return pa.Table.from_pydict(dict(id=scalar["id"], **blobs), schema=schema)
+
+        started_ray = not ray.is_initialized()
+        if started_ray:
+            ray.init(ignore_reinit_error=True, num_cpus=2)
+        try:
+            # Exercise string inference and object fallback independently of descriptor URI length.
+            for payload in ("\u4f60\u597d\0".encode("utf-8"), b"\xff\0"):
+                with self.subTest(payload=payload):
+                    rows = [
+                        {"id": 1, "assets": None}, {"id": 2, "assets": []},
+                        {"id": 3, "assets": [("body", payload), ("empty", b""), ("missing", None)]},
+                    ]
+                    dataset = ray.data.from_arrow(pa.Table.from_pylist(rows, schema=schema))
+                    result = map_with_blobs(
+                        dataset.filter(lambda row: row["id"] > 0), "assets", collect,
+                        file_io=LocalFileIO(), all_blob_columns=["assets"], map_blob_columns=["assets"],
+                        batch_size=2)
+                    actual = [row for batch in result.iter_batches(batch_format="pyarrow")
+                              for row in batch.to_pylist()]
+                    self.assertEqual(rows, sorted(actual, key=lambda row: row["id"]))
+        finally:
+            if started_ray:
+                ray.shutdown()
+
+    @unittest.skipIf(ray is None, "ray is not installed")
+    def test_map_with_blobs_python_object_columns(self):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+        from pypaimon.ray.ray_paimon import _map_blob_batch
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        try:
+            from ray.data.extensions import ArrowPythonObjectArray
+        except ImportError:
+            self.skipTest("Ray has no Python object extension type")
+
+        expected = {
+            "assets": [None, [], [("image", b"body"), ("missing", None)]],
+            "pages": [None, [], [b"page", None]],
+        }
+        batch = pa.table({name: ArrowPythonObjectArray.from_objects(values)
+                          for name, values in expected.items()})
+        actual = _map_blob_batch(
+            batch, LocalFileIO(), ["assets", "pages"], ["assets", "pages"], 1,
+            lambda scalar, blobs: blobs, {}, map_blob_cols=["assets"], array_blob_cols=["pages"])
+        self.assertEqual(expected, actual)
+
+        foreign = ArrowPythonObjectArray.from_objects([
+            None, [], [("inline", b"body"), ("foreign", BlobDescriptor("oss://other/blob", 0, 1).serialize())],
+        ])
+        with self.assertRaisesRegex(ValueError, "does not own"):
+            _map_blob_batch(batch.append_column("foreign", foreign), None,
+                            ["assets"], ["assets", "pages"], 1, None, {}, map_blob_cols=["assets"])
 
     @unittest.skipIf(ray is None, "ray is not installed")
     def test_scan_to_ray_map_with_blobs_guards(self):
@@ -1115,6 +2184,23 @@ class MultimodalTableTest(unittest.TestCase):
                     ["image"],
                     lambda scalar, blobs: pa.table({"rows": [scalar.num_rows]}),
                     file_io=obs.raw_table.file_io,
+                )
+
+            with self.assertRaisesRegex(ValueError, "requires batch_size"):
+                obs.map_with_blobs(
+                    ds,
+                    ["image"],
+                    return_none,
+                    batch_size=None,
+                    blob_uri_affinity=True,
+                )
+
+            with self.assertRaisesRegex(ValueError, "prefetch_bytes"):
+                obs.map_with_blobs(
+                    ds,
+                    ["image"],
+                    return_none,
+                    prefetch_bytes=0,
                 )
 
             with self.assertRaisesRegex(Exception, "must return"):
@@ -1202,6 +2288,33 @@ class MultimodalTableTest(unittest.TestCase):
         cells = [BlobDescriptor("oss://bucket/x", 4, 10).serialize(), b"inline-blob", None]
         bodies = ScanQuery._fetch_bodies(_FakeIO(), {"img": cells}, ["img"], 8)
         self.assertEqual([b"BODY:oss://bucket/x", b"inline-blob", None], bodies["img"])
+
+    def test_fetch_bodies_coalesces_mixed_array_map_and_scalar_blobs(self):
+        from pypaimon.multimodal.blob_read import fetch_blob_bodies
+        from pypaimon.common.file_io import FileIO
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        path = os.path.join(self.temp_dir, "array-blob.bin")
+        with open(path, "wb") as stream:
+            stream.write(b"0123456789")
+        file_io = FileIO.get("file://" + self.temp_dir, {})
+        descriptor = BlobDescriptor(path, 2, 3).serialize()
+        cells = {
+            "image": [descriptor],
+            "pages": [[descriptor, None, b"", b"inline", descriptor], [], None],
+            "assets": [[("cover", descriptor), ("missing", None)]],
+        }
+        with patch.object(file_io, "read_ranges_coalesced",
+                          wraps=file_io.read_ranges_coalesced) as read:
+            bodies = fetch_blob_bodies(
+                file_io, cells, list(cells), 2,
+                map_blob_cols=["assets"], array_blob_cols=["pages"])
+        self.assertEqual(1, read.call_count)
+        self.assertEqual({
+            "image": [b"234"],
+            "pages": [[b"234", None, b"", b"inline", b"234"], [], None],
+            "assets": [[("cover", b"234"), ("missing", None)]],
+        }, bodies)
 
     def test_fetch_bodies_rejects_unresolved_blob_view(self):
         from pypaimon.multimodal.query import ScanQuery
@@ -1379,6 +2492,52 @@ class MultimodalTableTest(unittest.TestCase):
             ],
             rows,
         )
+
+    def test_merge_preserves_fields_first_present_in_later_source_rows(self):
+        users = self.conn.create_table(
+            "sparse_merge",
+            data=[
+                {"id": 1, "name": "Alice", "age": 30},
+                {"id": 2, "name": "Bob", "age": 25},
+            ],
+            schema=_schema({
+                "id": pa.int32(), "name": pa.string(), "age": pa.int32(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        source = [{"id": 1}, {"id": 2, "name": "Bobby"},
+                  {"id": 3, "name": "Carol"}]
+
+        users.merge("id").when_matched_update() \
+            .when_not_matched_insert().execute(source)
+
+        self.assertEqual([
+            {"id": 1, "name": None, "age": 30},
+            {"id": 2, "name": "Bobby", "age": 25},
+            {"id": 3, "name": "Carol", "age": None},
+        ], sorted(users.scan().to_list(), key=lambda row: row["id"]))
+        self.assertEqual({"id": 1}, source[0])
+
+    def test_merge_preserves_later_source_only_fields_with_mapped_keys(self):
+        users = self.conn.create_table(
+            "sparse_mapped_merge",
+            data=[{"id": 1, "name": "Alice"}],
+            schema=_schema({"id": pa.int32(), "name": pa.string()}),
+            options=_PARQUET_OPTIONS,
+        )
+        values = {"name": source_col("new_name")}
+
+        users.merge({"id": "source_id"}).when_matched_update(values) \
+            .when_not_matched_insert({
+                "id": source_col("source_id"), **values,
+            }).execute([
+                {"source_id": 1},
+                {"source_id": 2, "new_name": "Bob"},
+            ])
+
+        self.assertEqual([
+            {"id": 1, "name": None}, {"id": 2, "name": "Bob"},
+        ], sorted(users.scan().to_list(), key=lambda row: row["id"]))
 
     def test_merge_supports_source_key_mapping(self):
         users = self.conn.create_table(
@@ -1643,7 +2802,9 @@ class MultimodalTableTest(unittest.TestCase):
             def execute_local(self):
                 return GlobalIndexResult.from_range(Range(1, 1))
 
-        docs.raw_table.new_vector_search_builder = lambda: FakeVectorBuilder()
+        patcher = patch.object(type(docs.raw_table), "new_vector_search_builder", return_value=FakeVectorBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         result = (
             docs.search([0.0, 1.0, 0.0])
@@ -1694,7 +2855,9 @@ class MultimodalTableTest(unittest.TestCase):
             def execute_local(self):
                 return GlobalIndexResult.from_range(Range(0, 0))
 
-        docs.raw_table.new_vector_search_builder = lambda: FakeVectorBuilder()
+        patcher = patch.object(type(docs.raw_table), "new_vector_search_builder", return_value=FakeVectorBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         docs.search(
             [1.0, 0.0, 0.0],
@@ -1704,6 +2867,98 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual("equal", calls["pre_filter"].method)
         self.assertEqual("category", calls["pre_filter"].field)
         self.assertEqual(["lake"], calls["pre_filter"].literals)
+
+    def test_searches_infer_vector_column_by_query_dimension(self):
+        docs = self.conn.create_table(
+            "docs",
+            schema=_schema({
+                "id": pa.int32(),
+                "image_embedding": _vector(2),
+                "text_embedding": _vector(3),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        docs.add([
+            {
+                "id": 1,
+                "image_embedding": [1.0, 0.0],
+                "text_embedding": [1.0, 0.0, 0.0],
+            },
+            {
+                "id": 2,
+                "image_embedding": [0.0, 1.0],
+                "text_embedding": [0.0, 1.0, 0.0],
+            },
+        ])
+
+        result = (
+            docs.search([0.0, 1.0, 0.0])
+            .select(["id"])
+            .limit(1)
+            .to_list()
+        )
+        batch_result = (
+            docs.search_vectors([[0.0, 1.0, 0.0]])
+            .select(["id"])
+            .limit(1)
+            .to_list()
+        )
+
+        self.assertEqual([{"id": 2}], result)
+        self.assertEqual([[{"id": 2}]], batch_result)
+
+    def test_search_reports_vector_column_dimension_errors(self):
+        docs = self.conn.create_table(
+            "docs",
+            schema=_schema({
+                "id": pa.int32(),
+                "content": pa.string(),
+                "image_embedding": _vector(2),
+                "text_embedding": _vector(3),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        with self.assertRaisesRegex(
+                ValueError,
+                r"No vector column found with dimension 4;.*"
+                r"image_embedding\(2\).*text_embedding\(3\)"):
+            docs.search([1.0, 0.0, 0.0, 0.0])
+
+        with self.assertRaisesRegex(ValueError, "not found in table schema"):
+            docs.search([1.0, 0.0], column="missing")
+
+        with self.assertRaisesRegex(ValueError, "not a fixed-size vector"):
+            docs.search([1.0, 0.0], column="content")
+
+        with self.assertRaisesRegex(
+                ValueError,
+                "Vector dimension 3 does not match column "
+                "'image_embedding' dimension 2"):
+            docs.search([1.0, 0.0, 0.0], column="image_embedding")
+
+        with self.assertRaisesRegex(ValueError, "same dimension"):
+            docs.search_vectors([
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0],
+            ])
+
+    def test_search_requires_column_for_same_dimension_vectors(self):
+        docs = self.conn.create_table(
+            "docs",
+            schema=_schema({
+                "id": pa.int32(),
+                "title_embedding": _vector(2),
+                "body_embedding": _vector(2),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        with self.assertRaisesRegex(
+                ValueError,
+                r"Multiple vector columns found with dimension 2: "
+                r"title_embedding, body_embedding; pass column\."):
+            docs.search([1.0, 0.0])
 
     def test_search_pre_filter_rejects_predicate_object(self):
         docs = self.conn.create_table(
@@ -1752,7 +3007,9 @@ class MultimodalTableTest(unittest.TestCase):
             def execute_local(self):
                 return GlobalIndexResult.from_range(Range(0, 0))
 
-        docs.raw_table.new_vector_search_builder = lambda: FakeVectorBuilder()
+        patcher = patch.object(type(docs.raw_table), "new_vector_search_builder", return_value=FakeVectorBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         result = docs.search((v for v in [1.0, 0.0, 0.0])).limit(1).to_list()
 
@@ -1787,7 +3044,9 @@ class MultimodalTableTest(unittest.TestCase):
             def execute_local(self):
                 return GlobalIndexResult.from_range(Range(0, 0))
 
-        docs.raw_table.new_vector_search_builder = lambda: FakeVectorBuilder()
+        patcher = patch.object(type(docs.raw_table), "new_vector_search_builder", return_value=FakeVectorBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         result = (
             docs.search([1.0, 0.0, 0.0], column="embedding")
@@ -1857,8 +3116,10 @@ class MultimodalTableTest(unittest.TestCase):
                     GlobalIndexResult.from_range(Range(2, 2)),
                 ]
 
-        docs.raw_table.new_batch_vector_search_builder = (
-            lambda: FakeBatchVectorBuilder())
+        patcher = patch.object(type(docs.raw_table), "new_batch_vector_search_builder",
+                               return_value=FakeBatchVectorBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         result = (
             docs.search_vectors(
@@ -1925,7 +3186,9 @@ class MultimodalTableTest(unittest.TestCase):
             def execute_local(self):
                 return GlobalIndexResult.from_range(Range(0, 0))
 
-        docs.raw_table.new_full_text_search_builder = lambda: FakeFullTextBuilder()
+        patcher = patch.object(type(docs.raw_table), "new_full_text_search_builder", return_value=FakeFullTextBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         result = (
             docs.search("paimon vector")
@@ -2016,7 +3279,9 @@ class MultimodalTableTest(unittest.TestCase):
             def execute_local(self):
                 return GlobalIndexResult.from_range(Range(0, 1))
 
-        docs.raw_table.new_hybrid_search_builder = lambda: FakeHybridBuilder()
+        patcher = patch.object(type(docs.raw_table), "new_hybrid_search_builder", return_value=FakeHybridBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         result = (
             docs.search_hybrid(
@@ -2078,7 +3343,9 @@ class MultimodalTableTest(unittest.TestCase):
             def execute_local(self):
                 return GlobalIndexResult.from_range(Range(0, 0))
 
-        docs.raw_table.new_hybrid_search_builder = lambda: FakeHybridBuilder()
+        patcher = patch.object(type(docs.raw_table), "new_hybrid_search_builder", return_value=FakeHybridBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         result = (
             docs.search_hybrid(
@@ -2157,7 +3424,9 @@ class MultimodalTableTest(unittest.TestCase):
             def execute_local(self):
                 return GlobalIndexResult.from_range(Range(0, 0))
 
-        docs.raw_table.new_hybrid_search_builder = lambda: FakeHybridBuilder()
+        patcher = patch.object(type(docs.raw_table), "new_hybrid_search_builder", return_value=FakeHybridBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         result = (
             docs.search_hybrid(

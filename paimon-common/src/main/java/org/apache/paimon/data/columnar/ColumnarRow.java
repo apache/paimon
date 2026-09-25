@@ -32,6 +32,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.types.RowKind;
 
 import java.io.Serializable;
+import java.nio.ByteBuffer;
 
 /**
  * Columnar row to support access to vector column data. It is a row view in {@link
@@ -147,6 +148,15 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
     @Override
     public byte[] getBinary(int pos) {
         return vectorizedColumnBatch.getBinary(rowId, pos);
+    }
+
+    /** Returns a view of the binary value without copying its column-vector bytes. */
+    public ByteBuffer getBinaryBuffer(int pos) {
+        return vectorizedColumnBatch.getByteBuffer(rowId, pos);
+    }
+
+    BytesColumnVector.Bytes getByteArray(int pos) {
+        return vectorizedColumnBatch.getByteArray(rowId, pos);
     }
 
     @Override

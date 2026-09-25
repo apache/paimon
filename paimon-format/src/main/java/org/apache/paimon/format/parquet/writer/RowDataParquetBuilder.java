@@ -39,6 +39,8 @@ import java.util.function.Supplier;
 /** A {@link ParquetBuilder} for {@link InternalRow}. */
 public class RowDataParquetBuilder implements MetadataParquetBuilder<InternalRow> {
 
+    private static final String ENABLE_BYTE_STREAM_SPLIT = "parquet.enable.bytestreamsplit";
+
     private final RowType rowType;
     private final Configuration conf;
 
@@ -96,6 +98,10 @@ public class RowDataParquetBuilder implements MetadataParquetBuilder<InternalRow
                                 conf.getBoolean(
                                         ParquetOutputFormat.ENABLE_DICTIONARY,
                                         ParquetProperties.DEFAULT_IS_DICTIONARY_ENABLED))
+                        .withByteStreamSplitEncoding(
+                                conf.getBoolean(
+                                        ENABLE_BYTE_STREAM_SPLIT,
+                                        ParquetProperties.DEFAULT_IS_BYTE_STREAM_SPLIT_ENABLED))
                         .withValidation(conf.getBoolean(ParquetOutputFormat.VALIDATION, false))
                         .withWriterVersion(
                                 ParquetProperties.WriterVersion.fromString(

@@ -20,6 +20,7 @@ package org.apache.paimon.data.variant;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 
 /* This file is based on source code from the Spark Project (http://spark.apache.org/), licensed by the Apache
@@ -45,11 +46,19 @@ public class VariantShreddingWriter {
 
         void addVariantValue(byte[] result);
 
+        default void addVariantValue(ByteBuffer result) {
+            addVariantValue(GenericVariantUtil.copyBytes(result, 0, result.remaining()));
+        }
+
         // Add a scalar to typed_value. The type of Object depends on the scalarSchema in the
         // shredding schema.
         void addScalar(Object result);
 
         void addMetadata(byte[] result);
+
+        default void addMetadata(ByteBuffer result) {
+            addMetadata(GenericVariantUtil.copyBytes(result, 0, result.remaining()));
+        }
     }
 
     /** Shredded result builder. */
@@ -73,7 +82,7 @@ public class VariantShreddingWriter {
         ShreddedResult result = builder.createEmpty(schema);
 
         if (schema.topLevelMetadataIdx >= 0) {
-            result.addMetadata(v.metadata());
+            result.addMetadata(v.metadataBuffer());
         }
 
         if (schema.arraySchema != null && variantType == GenericVariantUtil.Type.ARRAY) {
@@ -140,7 +149,7 @@ public class VariantShreddingWriter {
             if (variantBuilder.getWritePos() != start) {
                 // We added something to the untyped value.
                 variantBuilder.finishWritingObject(start, fieldEntries);
-                result.addVariantValue(variantBuilder.valueWithoutMetadata());
+                result.addVariantValue(variantBuilder.valueWithoutMetadataBuffer());
             }
         } else if (schema.scalarSchema != null) {
             VariantSchema.ScalarType scalarType = schema.scalarSchema;
@@ -149,11 +158,11 @@ public class VariantShreddingWriter {
                 // Store the typed value.
                 result.addScalar(typedValue);
             } else {
-                result.addVariantValue(v.value());
+                result.addVariantValue(v.valueBuffer());
             }
         } else {
             // Store in untyped.
-            result.addVariantValue(v.value());
+            result.addVariantValue(v.valueBuffer());
         }
         return result;
     }
@@ -220,7 +229,7 @@ public class VariantShreddingWriter {
                     // Use getDecimalWithOriginalScale so that we retain scale information if
                     // allowNumericScaleChanges() is false.
                     BigDecimal value =
-                            GenericVariantUtil.getDecimalWithOriginalScale(v.rawValue(), v.pos());
+                            GenericVariantUtil.getDecimalWithOriginalScale(v.valueBuffer(), 0);
                     if (value.precision() <= decimalType.precision
                             && value.scale() == decimalType.scale) {
                         return value;
@@ -320,6 +329,6 @@ public class VariantShreddingWriter {
     // Add the result to the shredding result.
     private static void addVariantValueVariant(
             Variant variantResult, VariantSchema schema, ShreddedResult result) {
-        result.addVariantValue(variantResult.value());
+        result.addVariantValue(variantResult.valueBuffer());
     }
 }

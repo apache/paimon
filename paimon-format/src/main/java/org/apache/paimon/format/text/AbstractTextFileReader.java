@@ -21,9 +21,11 @@ package org.apache.paimon.format.text;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IOUtils;
 
 import javax.annotation.Nullable;
 
@@ -55,9 +57,19 @@ public abstract class AbstractTextFileReader implements FileRecordReader<Interna
         this.filePath = filePath;
         this.rowType = rowType;
         this.offset = offset;
-        InputStream decompressedStream =
-                createDecompressedInputStream(fileIO.newInputStream(filePath), filePath);
-        this.lineReader = TextLineReader.create(decompressedStream, delimiter, offset, length);
+        // The line reader takes over the stream only once it is constructed, and both
+        // the decompression wrapper and the line reader itself can throw before that.
+        SeekableInputStream inputStream = fileIO.newInputStream(filePath);
+        InputStream stream = inputStream;
+        try {
+            stream = createDecompressedInputStream(inputStream, filePath);
+            this.lineReader = TextLineReader.create(stream, delimiter, offset, length);
+        } catch (Throwable t) {
+            // Closing the decompression wrapper closes the stream underneath it, so this
+            // is one close either way.
+            IOUtils.closeQuietly(stream);
+            throw t;
+        }
         this.reader = new TextRecordIterator();
     }
 

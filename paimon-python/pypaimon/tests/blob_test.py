@@ -28,9 +28,10 @@ import unittest
 import zlib
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
@@ -41,9 +42,19 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.reader.concat_batch_reader import BlobFallbackBatchReader
 from pypaimon.read.reader.format_blob_reader import BlobRecordIterator, FormatBlobReader
 from pypaimon.schema.data_types import ArrayType, AtomicType, DataField, MapType
-from pypaimon.table.row.blob import Blob, BlobData, BlobRef, BlobDescriptor, BlobViewStruct, BlobView
+from pypaimon.table.row.blob import (
+    Blob,
+    BlobData,
+    BlobRef,
+    BlobDescriptor,
+    BlobDescriptorSerde,
+    BlobViewStruct,
+    BlobView,
+    VideoFrameDescriptor,
+)
 from pypaimon.table.row.generic_row import GenericRowDeserializer, GenericRowSerializer, GenericRow
 from pypaimon.table.row.row_kind import RowKind
+from pypaimon.utils.range import Range
 
 
 class MockFileIO:
@@ -68,6 +79,29 @@ class MockFileIO:
         return self._file_io.new_input_stream(path)
 
 
+class CountingBlobFileIO(LocalFileIO):
+    def __init__(self, root):
+        super().__init__(root, Options({}))
+        self.stat_count = 0
+        self.streams = []
+
+    def get_file_size(self, path):
+        self.stat_count += 1
+        return super().get_file_size(path)
+
+    def new_input_stream(self, path):
+        stream = MagicMock(wraps=super().new_input_stream(path))
+        stream.__enter__.return_value = stream
+        stream.__exit__.side_effect = lambda *args: stream.close()
+        self.streams.append(stream)
+        return stream
+
+    def counts(self):
+        return (self.stat_count, len(self.streams),
+                sum(stream.read.call_count for stream in self.streams),
+                sum(stream.close.call_count for stream in self.streams))
+
+
 def _to_url(path):
     """Convert Path to file:// URI string."""
     if isinstance(path, Path):
@@ -81,6 +115,24 @@ def _to_url(path):
         else:
             return f"file://{path_str}"
     return str(path) if path else path
+
+
+def _fake_blob_values(reader, positions):
+    values = []
+    for position in positions:
+        length = reader.blob_lengths[position]
+        if length == -1:
+            values.append(None)
+        elif length == -2:
+            values.append(Blob.PLACE_HOLDER)
+        else:
+            values.append(Blob.from_file(
+                reader._file_io,
+                reader.file_path,
+                reader.blob_offsets[position] + 4,
+                length - 16,
+            ))
+    return values
 
 
 class RowUtilsTest(unittest.TestCase):
@@ -346,6 +398,9 @@ class BlobTest(unittest.TestCase):
                 self._input_stream = None
                 self.closed = False
 
+            def read_values_at(self, positions):
+                return _fake_blob_values(self, positions)
+
             def close(self):
                 self.closed = True
 
@@ -411,6 +466,9 @@ class BlobTest(unittest.TestCase):
                 self.blob_offsets = blob_offsets
                 self._input_stream = None
                 self.closed = False
+
+            def read_values_at(self, positions):
+                return _fake_blob_values(self, positions)
 
             def close(self):
                 self.closed = True
@@ -496,6 +554,9 @@ class BlobTest(unittest.TestCase):
                 self._input_stream = None
                 self.closed = False
 
+            def read_values_at(self, positions):
+                return _fake_blob_values(self, positions)
+
             def close(self):
                 self.closed = True
 
@@ -580,6 +641,55 @@ class BlobTest(unittest.TestCase):
                 reader.close()
                 self.assertTrue(created_by_file["third.blob"][0].closed)
 
+    def test_blob_fallback_batch_reader_fills_logical_range_gaps_with_null(self):
+        class FakeBlobReader:
+            def __init__(self):
+                self._file_io = None
+                self.file_path = "partial.blob"
+                self.blob_lengths = [20]
+                self.blob_offsets = [0]
+                self._input_stream = None
+
+            def read_values_at(self, positions):
+                return _fake_blob_values(self, positions)
+
+            def close(self):
+                pass
+
+        file = DataFileMeta(
+            file_name="partial.blob",
+            file_size=0,
+            row_count=1,
+            min_key=None,
+            max_key=None,
+            key_stats=None,
+            value_stats=None,
+            min_sequence_number=1,
+            max_sequence_number=1,
+            schema_id=0,
+            level=0,
+            extra_files=[],
+            first_row_id=2,
+            file_path="partial.blob",
+        )
+        reader = BlobFallbackBatchReader(
+            [(file, FakeBlobReader)],
+            "picture",
+            pa.large_binary(),
+            blob_as_descriptor=True,
+            logical_ranges=[Range(0, 4)],
+        )
+
+        batch = reader.read_arrow_batch()
+
+        values = batch.column("picture").to_pylist()
+        self.assertIsNone(values[0])
+        self.assertIsNone(values[1])
+        self.assertEqual(4, BlobDescriptor.deserialize(values[2]).offset)
+        self.assertIsNone(values[3])
+        self.assertIsNone(values[4])
+        self.assertIsNone(reader.read_arrow_batch())
+
     def test_blob_fallback_batch_reader_materializes_selected_values_in_parallel(self):
         class RecordingFileIO:
             def __init__(self):
@@ -600,6 +710,9 @@ class BlobTest(unittest.TestCase):
                 self.blob_lengths = blob_lengths
                 self.blob_offsets = blob_offsets
                 self._input_stream = None
+
+            def read_values_at(self, positions):
+                return _fake_blob_values(self, positions)
 
             def close(self):
                 pass
@@ -1202,6 +1315,14 @@ class BlobTest(unittest.TestCase):
             BlobDescriptor.deserialize(incomplete_data)
         self.assertIn("URI length exceeds data size", str(context.exception))
 
+        # Java reads uri length as a signed int and rejects negatives.
+        negative_uri = bytearray(valid_descriptor.serialize())
+        struct.pack_into('<i', negative_uri, 1 + 8, -1)
+        with self.assertRaises(ValueError) as context:
+            BlobDescriptor.deserialize(bytes(negative_uri))
+        self.assertIn("negative URI length", str(context.exception))
+        self.assertIsNone(BlobDescriptor.parse_if_serialized(bytes(negative_uri)))
+
     def test_blob_descriptor_equality_and_hashing(self):
         """Test BlobDescriptor equality and hashing."""
         # Create identical descriptors
@@ -1331,6 +1452,16 @@ class BlobTest(unittest.TestCase):
         )
         random_bytes = b"not-a-descriptor"
         fake_v1_prefix = b"\x01not-a-descriptor"
+        # v1-shaped inline payload: passes len/version/uri-length checks but fails
+        # exact total-length match, so it must not be parsed as a descriptor.
+        v1_shaped_inline = (
+            bytes([1])
+            + struct.pack('<I', 5)
+            + b"hello"
+            + struct.pack('<q', 0)
+            + struct.pack('<q', 5)
+            + b"\xff"
+        )
         v2_magic_only = bytes([2]) + struct.pack('<Q', BlobDescriptor.MAGIC)
 
         self.assertTrue(BlobDescriptor.is_blob_descriptor(descriptor_v2.serialize()))
@@ -1340,6 +1471,1687 @@ class BlobTest(unittest.TestCase):
         self.assertFalse(BlobDescriptor.is_blob_descriptor(random_bytes))
         self.assertFalse(BlobDescriptor.is_blob_descriptor(fake_v1_prefix))
         self.assertFalse(BlobDescriptor.is_blob_descriptor(b"tiny"))
+
+        self.assertIsNotNone(BlobDescriptor.parse_if_serialized(descriptor_v1_bytes))
+        self.assertIsNotNone(BlobDescriptor.parse_if_serialized(descriptor_v2.serialize()))
+        self.assertIsNone(BlobDescriptor.parse_if_serialized(random_bytes))
+        self.assertIsNone(BlobDescriptor.parse_if_serialized(fake_v1_prefix))
+        self.assertIsNone(BlobDescriptor.parse_if_serialized(v1_shaped_inline))
+        self.assertIsNone(BlobDescriptor.parse_if_serialized(b"tiny"))
+
+        video = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2)
+        video_bytes = video.serialize()
+        self.assertEqual(video_bytes, BlobDescriptor.deserialize(video_bytes).serialize())
+        self.assertEqual(video, BlobDescriptor.parse_if_serialized(video_bytes))
+        self.assertEqual(video, BlobDescriptorSerde.parse_if_serialized(video_bytes))
+        self.assertIsNone(BlobDescriptor.parse_if_serialized(video_bytes + b"x"))
+
+    def test_from_descriptor_bytes_rejects_non_descriptor_bytes(self):
+        with self.assertRaises(ValueError) as ctx:
+            Blob.from_descriptor_bytes(b"hello blob", file_io=LocalFileIO())
+        self.assertIn("Expected BlobDescriptor bytes", str(ctx.exception))
+
+    def test_from_descriptor_bytes_accepts_v1_descriptor_with_trailing_bytes(self):
+        uri = b"file:///tmp/blob.bin"
+        serialized_v1 = (
+            bytes([1])
+            + struct.pack('<I', len(uri))
+            + uri
+            + struct.pack('<q', 0)
+            + struct.pack('<q', 10)
+        )
+        padded = serialized_v1 + b"extra"
+        blob = Blob.from_descriptor_bytes(padded, file_io=LocalFileIO())
+        self.assertIsInstance(blob, BlobRef)
+        self.assertEqual(blob.to_descriptor().uri, "file:///tmp/blob.bin")
+
+    def test_from_descriptor_bytes_accepts_v2_descriptor_with_trailing_bytes(self):
+        descriptor = BlobDescriptor("file:///tmp/blob.bin", 0, 10)
+        padded = descriptor.serialize() + b"extra"
+        blob = Blob.from_descriptor_bytes(padded, file_io=LocalFileIO())
+        self.assertIsInstance(blob, BlobRef)
+        self.assertEqual(blob.to_descriptor().uri, descriptor.uri)
+
+    def test_from_bytes_allow_blob_data_false_rejects_raw_bytes(self):
+        with self.assertRaises(ValueError) as ctx:
+            Blob.from_bytes(b"hello blob", allow_blob_data=False)
+        self.assertIn("Expected BlobDescriptor bytes", str(ctx.exception))
+        self.assertIn("allow_blob_data=False", str(ctx.exception))
+
+    def test_from_bytes_allow_blob_data_false_requires_file_io_for_valid_descriptor(self):
+        descriptor = BlobDescriptor("file:///tmp/blob.bin", 0, 10)
+        with self.assertRaises(ValueError) as ctx:
+            Blob.from_bytes(descriptor.serialize(), allow_blob_data=False)
+        self.assertIn("file_io is required", str(ctx.exception))
+        self.assertNotIn("allow_blob_data=False", str(ctx.exception))
+
+    def test_from_bytes_allow_blob_data_false_accepts_v1_descriptor(self):
+        data = b"actual blob content"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "blob.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(data)
+            uri = blob_path.encode('utf-8')
+            serialized_v1 = (
+                bytes([1])
+                + struct.pack('<I', len(uri))
+                + uri
+                + struct.pack('<q', 0)
+                + struct.pack('<q', len(data))
+            )
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            blob = Blob.from_bytes(serialized_v1, file_io=file_io, allow_blob_data=False)
+            self.assertIsInstance(blob, BlobRef)
+            self.assertEqual(blob.to_data(), data)
+
+    def test_from_descriptor_bytes_with_v1_descriptor_bytes(self):
+        data = b"actual blob content"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "blob.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(data)
+            uri = blob_path.encode('utf-8')
+            serialized_v1 = (
+                bytes([1])
+                + struct.pack('<I', len(uri))
+                + uri
+                + struct.pack('<q', 0)
+                + struct.pack('<q', len(data))
+            )
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            blob = Blob.from_descriptor_bytes(serialized_v1, file_io)
+            self.assertIsInstance(blob, BlobRef)
+            self.assertEqual(blob.to_data(), data)
+
+    def test_from_bytes_does_not_misparse_v1_shaped_inline_payload(self):
+        # Exact-length inline bytes that match the v1 descriptor wire layout must
+        # stay as BlobData when parsed via the heuristic from_bytes entry point.
+        v1_shaped_inline = (
+            bytes([1])
+            + struct.pack('<I', 5)
+            + b"hello"
+            + struct.pack('<q', 0)
+            + struct.pack('<q', 5)
+        )
+        blob = Blob.from_bytes(v1_shaped_inline)
+        self.assertIsInstance(blob, BlobData)
+        self.assertEqual(blob.to_data(), v1_shaped_inline)
+
+    def test_blob_descriptor_serialize_uses_current_version(self):
+        uri = b"file:///tmp/blob.bin"
+        serialized_v1 = (
+            bytes([1])
+            + struct.pack('<I', len(uri))
+            + uri
+            + struct.pack('<q', 0)
+            + struct.pack('<q', 10)
+        )
+        descriptor = BlobDescriptor.deserialize(serialized_v1)
+        self.assertEqual(descriptor.version, 1)
+
+        serialized = descriptor.serialize()
+        self.assertEqual(serialized[0], BlobDescriptor.CURRENT_VERSION)
+        self.assertTrue(BlobDescriptor.is_blob_descriptor(serialized))
+        self.assertEqual(
+            BlobDescriptor.deserialize(serialized),
+            BlobDescriptor("file:///tmp/blob.bin", 0, 10),
+        )
+
+    def test_blob_descriptor_fields_ignores_legacy_stored_key(self):
+        from pypaimon.common.options.core_options import CoreOptions
+
+        # Python master ignored this key and wrote dedicated .blob files.
+        # A global fallback would break rolling upgrades.
+        legacy_only = CoreOptions(
+            Options({"blob.stored-descriptor-fields": "legacy_col"}))
+        self.assertEqual(set(), legacy_only.blob_descriptor_fields())
+
+        canonical_wins = CoreOptions(Options({
+            "blob-descriptor-field": "canon",
+            "blob.stored-descriptor-fields": "legacy_col",
+        }))
+        self.assertEqual({"canon"}, canonical_wins.blob_descriptor_fields())
+
+        blank_canonical = CoreOptions(Options({
+            "blob-descriptor-field": "",
+            "blob.stored-descriptor-fields": "legacy_col",
+        }))
+        self.assertEqual(set(), blank_canonical.blob_descriptor_fields())
+
+    def test_dedicated_writer_accepts_exact_v1_descriptor_bytes(self):
+        from pypaimon.write.writer.dedicated_format_writer import (
+            DedicatedFormatWriter)
+
+        uri = b"file:///tmp/blob.bin"
+        v1 = (
+            bytes([1])
+            + struct.pack('<I', len(uri))
+            + uri
+            + struct.pack('<q', 0)
+            + struct.pack('<q', 10)
+        )
+        writer = object.__new__(DedicatedFormatWriter)
+        writer.blob_inline_fields = {'payload'}
+        writer.blob_descriptor_fields = {'payload'}
+        writer.blob_view_fields = set()
+        v2 = BlobDescriptor("file:///tmp/blob.bin", 0, 10).serialize()
+        writer._validate_inline_stored_fields_input(
+            pa.RecordBatch.from_arrays(
+                [pa.array([v2], type=pa.large_binary())], names=['payload']))
+        writer._validate_inline_stored_fields_input(
+            pa.RecordBatch.from_arrays(
+                [pa.array([v1], type=pa.large_binary())], names=['payload']))
+
+        padded = pa.RecordBatch.from_arrays(
+            [pa.array([v1 + b"x"], type=pa.large_binary())], names=['payload'])
+        with self.assertRaisesRegex(ValueError, "trailing bytes"):
+            writer._validate_inline_stored_fields_input(padded)
+
+        v0 = bytes([0]) + v1[1:]
+        with self.assertRaisesRegex(ValueError, r"in \[1, 2\], but found 0"):
+            writer._validate_inline_stored_fields_input(
+                pa.RecordBatch.from_arrays(
+                    [pa.array([v0], type=pa.large_binary())], names=['payload']))
+
+        v3 = bytes([3]) + v2[1:]
+        with self.assertRaisesRegex(ValueError, r"in \[1, 2\], but found 3"):
+            writer._validate_inline_stored_fields_input(
+                pa.RecordBatch.from_arrays(
+                    [pa.array([v3], type=pa.large_binary())], names=['payload']))
+
+        # write_row() keeps raw bytes from _normal_row_value(); the same
+        # validator must accept exact v1 and reject padding.
+        self.assertEqual(writer._normal_row_value("payload", v1), v1)
+        writer._validate_inline_stored_fields_input(
+            pa.RecordBatch.from_arrays(
+                [pa.array([v1], type=pa.large_binary())], names=["payload"]))
+
+        video_bytes = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2).serialize()
+        writer._validate_inline_stored_fields_input(
+            pa.RecordBatch.from_arrays(
+                [pa.array([video_bytes], type=pa.large_binary())], names=["payload"]))
+        with self.assertRaisesRegex(ValueError, "serialized"):
+            writer._validate_inline_stored_fields_input(
+                pa.RecordBatch.from_arrays(
+                    [pa.array([video_bytes + b"x"], type=pa.large_binary())],
+                    names=["payload"]))
+
+    def test_offset_row_get_blob_uses_table_file_io(self):
+        from pypaimon.table.row.offset_row import OffsetRow
+
+        data = b"row table blob"
+        descriptor = BlobDescriptor("file-backed/row.bin", 0, len(data))
+        file_io = self._token_aware_file_io(data)
+        row = OffsetRow(
+            (descriptor.serialize(),), 0, 1,
+            file_io=file_io,
+            blob_field_indices=[0],
+            descriptor_field_indices=[0],
+        )
+        blob = row.get_blob(0)
+        self.assertIsInstance(blob, BlobRef)
+        self.assertEqual(blob.to_data(), data)
+        self.assertEqual(file_io.opened_paths, [descriptor.uri])
+
+        file_io = self._token_aware_file_io(data)
+        row = OffsetRow(
+            (descriptor.serialize(),), 0, 1,
+            file_io=file_io,
+            blob_field_indices=[0],
+        )
+        blob = row.get_blob(0)
+        self.assertIsInstance(blob, BlobRef)
+        self.assertEqual(blob.to_data(), data)
+        self.assertEqual(file_io.opened_paths, [descriptor.uri])
+
+    def test_blob_inline_convert_reader_uses_table_file_io(self):
+        from typing import Optional
+
+        from pyarrow import RecordBatch
+
+        from pypaimon.common.options import Options
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader.blob_descriptor_convert_reader import BlobInlineConvertReader
+        from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+
+        data = b"convert table blob"
+        descriptor = BlobDescriptor("file-backed/convert.bin", 0, len(data))
+        file_io = self._token_aware_file_io(data)
+        batch = RecordBatch.from_arrays(
+            [pa.array([descriptor.serialize()], type=pa.large_binary())],
+            names=["payload"],
+        )
+
+        class _InnerReader(RecordBatchReader):
+            def __init__(self):
+                self.file_io = file_io
+                self._batch = batch
+                self._done = False
+
+            def read_arrow_batch(self) -> Optional[RecordBatch]:
+                if self._done:
+                    return None
+                self._done = True
+                return self._batch
+
+            def close(self):
+                pass
+
+        class _CatalogEnvironment:
+            catalog_loader = None
+
+        class _Table:
+            options = CoreOptions(Options({
+                "blob-as-descriptor": "false",
+                "blob-descriptor-field": "payload",
+            }))
+            catalog_environment = _CatalogEnvironment()
+
+        table = _Table()
+        table.file_io = file_io
+        reader = BlobInlineConvertReader(_InnerReader(), table)
+        result = reader.read_arrow_batch()
+        self.assertEqual(result.column("payload").to_pylist(), [data])
+        self.assertEqual(file_io.opened_paths, [descriptor.uri])
+        reader.close()
+
+    def test_offset_row_get_blob_video_frame_descriptor_bytes(self):
+        from pypaimon.table.row.offset_row import OffsetRow
+
+        data = b"video-frame-payload"
+        descriptor = VideoFrameDescriptor(
+            "file-backed/video.mp4", 0, len(data), 2)
+        file_io = self._token_aware_file_io(data)
+        row = OffsetRow(
+            (descriptor.serialize(),), 0, 1,
+            file_io=file_io,
+            blob_field_indices=[0],
+            descriptor_field_indices=[0],
+        )
+        blob = row.get_blob(0)
+        self.assertIsInstance(blob, BlobRef)
+        self.assertEqual(blob.to_descriptor(), descriptor)
+        self.assertEqual(blob.to_data(), data)
+        self.assertEqual(file_io.opened_paths, [descriptor.uri])
+
+    def test_blob_inline_convert_reader_resolves_video_frame_descriptor(self):
+        from typing import Optional
+
+        from pyarrow import RecordBatch
+
+        from pypaimon.common.options import Options
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader.blob_descriptor_convert_reader import (
+            BlobInlineConvertReader)
+        from pypaimon.read.reader.iface.record_batch_reader import (
+            RecordBatchReader)
+
+        data = b"convert video blob"
+        descriptor = VideoFrameDescriptor(
+            "file-backed/convert.mp4", 0, len(data), 2)
+        file_io = self._token_aware_file_io(data)
+        batch = RecordBatch.from_arrays(
+            [pa.array([descriptor.serialize()], type=pa.large_binary())],
+            names=["payload"],
+        )
+
+        class _InnerReader(RecordBatchReader):
+            def __init__(self):
+                self.file_io = file_io
+                self._batch = batch
+                self._done = False
+
+            def read_arrow_batch(self) -> Optional[RecordBatch]:
+                if self._done:
+                    return None
+                self._done = True
+                return self._batch
+
+            def close(self):
+                pass
+
+        class _CatalogEnvironment:
+            catalog_loader = None
+
+        class _Table:
+            options = CoreOptions(Options({
+                "blob-as-descriptor": "false",
+                "blob-descriptor-field": "payload",
+            }))
+            catalog_environment = _CatalogEnvironment()
+
+        table = _Table()
+        table.file_io = file_io
+        reader = BlobInlineConvertReader(_InnerReader(), table)
+        result = reader.read_arrow_batch()
+        self.assertEqual(result.column("payload").to_pylist(), [data])
+        self.assertEqual(file_io.opened_paths, [descriptor.uri])
+        reader.close()
+
+    def test_read_blobs_concurrent_preserves_blob_ref_readers(self):
+        from unittest.mock import MagicMock
+
+        from pypaimon.common.file_io import FileIO
+        from pypaimon.common.uri_reader import FileUriReader, UriReader
+
+        shared_uri = "s3://shared/blob"
+        descriptor = BlobDescriptor(shared_uri, 0, 4)
+        source_a = MagicMock()
+        source_b = MagicMock()
+        source_a.read_ranges_coalesced.return_value = [b"AAAA"]
+        source_b.read_ranges_coalesced.return_value = [b"BBBB"]
+
+        class MemoryUriReader(UriReader):
+            def __init__(self):
+                self.opened = []
+
+            def new_input_stream(self, uri):
+                self.opened.append(uri)
+                return io.BytesIO(b"HTTP")
+
+        http_uri = "https://example.com/blob"
+        http_reader = MemoryUriReader()
+
+        class _BlobRefSubclass(BlobRef):
+            def new_input_stream(self):
+                return io.BytesIO(b"SUBC")
+
+        subclass_reader = FileUriReader(MagicMock())
+        blobs = [
+            BlobRef(FileUriReader(source_a), descriptor),
+            BlobRef(FileUriReader(source_b), descriptor),
+            BlobRef(http_reader, BlobDescriptor(http_uri, 0, 4)),
+            _BlobRefSubclass(subclass_reader, descriptor),
+        ]
+        target_file_io = MagicMock()
+
+        result = FileIO.read_blobs_concurrent(target_file_io, blobs, 4)
+
+        self.assertEqual(result, [b"AAAA", b"BBBB", b"HTTP", b"SUBC"])
+        source_a.read_ranges_coalesced.assert_called_once_with(
+            [(shared_uri, 0, 4)], 4)
+        source_b.read_ranges_coalesced.assert_called_once_with(
+            [(shared_uri, 0, 4)], 4)
+        target_file_io.read_ranges_coalesced.assert_not_called()
+        subclass_reader.file_io.read_ranges_coalesced.assert_not_called()
+        self.assertEqual(http_reader.opened, [http_uri])
+
+    def test_deferred_blob_resolve_reader_uses_table_file_io(self):
+        from typing import Optional
+
+        from pypaimon.read.reader.deferred_blob_resolve_reader import (
+            DeferredBlobResolveReader)
+        from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+
+        data = b"deferred table blob"
+        descriptor = BlobDescriptor("file-backed/blob.bin", 0, len(data))
+
+        class FailingFactory:
+            def create(self, uri):
+                raise AssertionError(
+                    "dedicated blob resolve should use table FileIO")
+
+        class FileBackedIO:
+            def __init__(self):
+                self.uri_reader_factory = FailingFactory()
+                self.opened_paths = []
+
+            def new_input_stream(self, path):
+                self.opened_paths.append(path)
+                return io.BytesIO(data)
+
+        file_io = FileBackedIO()
+        batch = pa.RecordBatch.from_arrays(
+            [pa.array([descriptor.serialize()], type=pa.large_binary())],
+            names=["payload"],
+        )
+
+        class _InnerReader(RecordBatchReader):
+            def __init__(self):
+                self._done = False
+
+            def read_arrow_batch(self) -> Optional[pa.RecordBatch]:
+                if self._done:
+                    return None
+                self._done = True
+                return batch
+
+            def close(self):
+                pass
+
+        reader = DeferredBlobResolveReader(_InnerReader(), file_io, ["payload"])
+        result = reader.read_arrow_batch()
+        self.assertEqual(result.column("payload").to_pylist(), [data])
+        self.assertEqual(file_io.opened_paths, [descriptor.uri])
+        reader.close()
+
+    def test_offset_row_get_blob_v1_descriptor_bytes(self):
+        from pypaimon.table.row.offset_row import OffsetRow
+
+        data = b"row-level blob payload"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "blob.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(data)
+            uri = blob_path.encode('utf-8')
+            serialized_v1 = (
+                bytes([1])
+                + struct.pack('<I', len(uri))
+                + uri
+                + struct.pack('<q', 0)
+                + struct.pack('<q', len(data))
+            )
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            row = OffsetRow(
+                (serialized_v1,), 0, 1, file_io=file_io,
+                blob_field_indices=[0], descriptor_field_indices=[0])
+            blob = row.get_blob(0)
+            self.assertIsInstance(blob, BlobRef)
+            self.assertEqual(blob.to_data(), data)
+
+    def test_descriptor_field_indices_for_table_includes_blob_view_fields(self):
+        from pypaimon.common.options import Options
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader.field_indices import descriptor_field_indices_for_table
+        from pypaimon.schema.data_types import AtomicType, DataField
+
+        class _Table:
+            options = CoreOptions(Options({
+                "blob-as-descriptor": "true",
+                "blob-descriptor-field": "desc_col",
+                "blob-view-field": "view_col",
+            }))
+
+        fields = [
+            DataField(0, "desc_col", AtomicType("BYTES")),
+            DataField(1, "view_col", AtomicType("BYTES")),
+            DataField(2, "payload", AtomicType("BYTES")),
+        ]
+        self.assertEqual(descriptor_field_indices_for_table(_Table(), fields), {0, 1})
+
+    def test_descriptor_field_indices_include_descriptor_fields_without_blob_as_descriptor(self):
+        from pypaimon.common.options import Options
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader.field_indices import descriptor_field_indices_for_table
+        from pypaimon.schema.data_types import AtomicType, DataField
+
+        class _Table:
+            options = CoreOptions(Options({
+                "blob-as-descriptor": "false",
+                "blob-descriptor-field": "desc_col",
+                "blob-view-field": "view_col",
+            }))
+
+        fields = [
+            DataField(0, "desc_col", AtomicType("BYTES")),
+            DataField(1, "view_col", AtomicType("BYTES")),
+        ]
+        self.assertEqual(descriptor_field_indices_for_table(_Table(), fields), {0})
+
+    def test_offset_row_get_blob_v1_descriptor_without_blob_as_descriptor(self):
+        from pypaimon.common.options import Options
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader.field_indices import descriptor_field_indices_for_table
+        from pypaimon.schema.data_types import AtomicType, DataField
+        from pypaimon.table.row.offset_row import OffsetRow
+
+        data = b"inline descriptor payload"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "blob.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(data)
+            uri = blob_path.encode('utf-8')
+            serialized_v1 = (
+                bytes([1])
+                + struct.pack('<I', len(uri))
+                + uri
+                + struct.pack('<q', 0)
+                + struct.pack('<q', len(data))
+            )
+
+            class _Table:
+                options = CoreOptions(Options({
+                    "blob-as-descriptor": "false",
+                    "blob-descriptor-field": "payload",
+                }))
+
+            fields = [DataField(0, "payload", AtomicType("BYTES"))]
+            descriptor_indices = descriptor_field_indices_for_table(_Table(), fields)
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            row = OffsetRow(
+                (serialized_v1,), 0, 1, file_io=file_io,
+                blob_field_indices=[0],
+                descriptor_field_indices=descriptor_indices)
+            blob = row.get_blob(0)
+            self.assertIsInstance(blob, BlobRef)
+            self.assertEqual(blob.to_data(), data)
+
+    def test_offset_row_get_blob_v1_descriptor_with_trailing_padding(self):
+        from pypaimon.table.row.offset_row import OffsetRow
+
+        data = b"row-level blob payload"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "blob.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(data)
+            uri = blob_path.encode('utf-8')
+            serialized_v1 = (
+                bytes([1])
+                + struct.pack('<I', len(uri))
+                + uri
+                + struct.pack('<q', 0)
+                + struct.pack('<q', len(data))
+                + b"padding"
+            )
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            row = OffsetRow(
+                (serialized_v1,), 0, 1, file_io=file_io,
+                blob_field_indices=[0], descriptor_field_indices=[0])
+            blob = row.get_blob(0)
+            self.assertIsInstance(blob, BlobRef)
+            self.assertEqual(blob.to_data(), data)
+
+    def test_offset_row_get_blob_materialized_descriptor_payload(self):
+        from pypaimon.table.row.blob import BlobData
+        from pypaimon.table.row.offset_row import OffsetRow
+
+        payload = b"already materialized payload"
+        row = OffsetRow(
+            (payload,), 0, 1,
+            blob_field_indices=[0],
+            descriptor_field_indices=set(),
+        )
+        blob = row.get_blob(0)
+        self.assertIsInstance(blob, BlobData)
+        self.assertEqual(blob.to_data(), payload)
+
+    def test_offset_row_get_blob_descriptor_field_rejects_truncated_bytes(self):
+        from pypaimon.table.row.offset_row import OffsetRow
+
+        truncated_v1 = bytes([1]) + struct.pack('<I', 5) + b"hel"
+        row = OffsetRow(
+            (truncated_v1,), 0, 1,
+            blob_field_indices=[0],
+            descriptor_field_indices=[0],
+        )
+        with self.assertRaises(ValueError):
+            row.get_blob(0)
+
+    def test_blob_inline_convert_reader_clears_descriptor_indices_after_materialize(self):
+        from typing import Optional
+
+        from pyarrow import RecordBatch
+
+        from pypaimon.common.options import Options
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader.blob_descriptor_convert_reader import BlobInlineConvertReader
+        from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+        from pypaimon.table.row.blob import BlobData
+
+        v1_shaped_inline = (
+            bytes([1])
+            + struct.pack('<I', 5)
+            + b"hello"
+            + struct.pack('<q', 0)
+            + struct.pack('<q', 5)
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "blob.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(v1_shaped_inline)
+            uri = blob_path.encode('utf-8')
+            serialized_v1 = (
+                bytes([1])
+                + struct.pack('<I', len(uri))
+                + uri
+                + struct.pack('<q', 0)
+                + struct.pack('<q', len(v1_shaped_inline))
+            )
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            batch = RecordBatch.from_arrays(
+                [pa.array([serialized_v1], type=pa.large_binary())],
+                names=["payload"],
+            )
+
+            class _InnerReader(RecordBatchReader):
+                def __init__(self):
+                    self.file_io = file_io
+                    self.blob_field_indices = {0}
+                    self.descriptor_field_indices = {0}
+                    self._batch = batch
+                    self._done = False
+
+                def read_arrow_batch(self) -> Optional[RecordBatch]:
+                    if self._done:
+                        return None
+                    self._done = True
+                    return self._batch
+
+                def close(self):
+                    pass
+
+            class _CatalogEnvironment:
+                catalog_loader = None
+
+            class _Table:
+                options = CoreOptions(Options({
+                    "blob-as-descriptor": "false",
+                    "blob-descriptor-field": "payload",
+                }))
+                catalog_environment = _CatalogEnvironment()
+
+            table = _Table()
+            table.file_io = file_io
+            inner = _InnerReader()
+            reader = BlobInlineConvertReader(inner, table)
+            self.assertEqual(reader.descriptor_field_indices, set())
+
+            row_iter = reader.read_batch()
+            self.assertIsNotNone(row_iter)
+            row = row_iter.next()
+            self.assertIsNotNone(row)
+            blob = row.get_blob(0)
+            self.assertIsInstance(blob, BlobData)
+            self.assertEqual(blob.to_data(), v1_shaped_inline)
+            reader.close()
+
+    def test_wrap_record_reader_propagates_blob_metadata_for_get_blob(self):
+        from pypaimon.common.options import Options
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader.blob_view_read_support import (
+            wrap_record_reader_with_blob_inline_convert)
+        from pypaimon.read.reader.iface.record_batch_reader import EmptyRecordBatchReader
+        from pypaimon.read.reader.iface.record_iterator import RecordIterator
+        from pypaimon.read.reader.iface.record_reader import RecordReader
+        from pypaimon.schema.data_types import AtomicType, DataField
+        from pypaimon.table.row.offset_row import OffsetRow
+
+        data = b"merge-path blob payload"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "blob.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(data)
+            serialized = BlobDescriptor(blob_path, 0, len(data)).serialize()
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+
+            class _OnceIterator(RecordIterator):
+                def __init__(self, row):
+                    self._row = row
+                    self._done = False
+
+                def next(self):
+                    if self._done:
+                        return None
+                    self._done = True
+                    return self._row
+
+            class _OnceReader(RecordReader):
+                def __init__(self, row):
+                    self._row = row
+                    self._done = False
+
+                def read_batch(self):
+                    if self._done:
+                        return None
+                    self._done = True
+                    return _OnceIterator(self._row)
+
+                def close(self):
+                    pass
+
+            class _CatalogEnvironment:
+                catalog_loader = None
+
+            class _Table:
+                options = CoreOptions(Options({
+                    "blob-as-descriptor": "true",
+                    "blob-descriptor-field": "picture",
+                }))
+                catalog_environment = _CatalogEnvironment()
+
+            table = _Table()
+            table.file_io = file_io
+
+            class _SplitRead:
+                def __init__(self):
+                    self.table = table
+                    self._blob_parallelism = 1
+
+                def _create_blob_view_prescan_reader(self, names):
+                    return EmptyRecordBatchReader()
+
+            fields = [DataField(0, "picture", AtomicType("BLOB"))]
+            inner = _OnceReader(OffsetRow((serialized,), 0, 1))
+            wrapped = wrap_record_reader_with_blob_inline_convert(
+                inner, _SplitRead(), fields)
+            row_iter = wrapped.read_batch()
+            self.assertIsNotNone(row_iter)
+            row = row_iter.next()
+            blob = row.get_blob(0)
+            self.assertIsInstance(blob, BlobRef)
+            self.assertEqual(blob.to_data(), data)
+            wrapped.close()
+
+    def test_wrap_record_reader_preserves_all_row_kinds(self):
+        from pypaimon.common.options import Options
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader.blob_view_read_support import (
+            wrap_record_reader_with_blob_inline_convert)
+        from pypaimon.read.reader.iface.record_batch_reader import EmptyRecordBatchReader
+        from pypaimon.read.reader.iface.record_iterator import RecordIterator
+        from pypaimon.read.reader.iface.record_reader import RecordReader
+        from pypaimon.schema.data_types import AtomicType, DataField
+        from pypaimon.table.row.offset_row import OffsetRow
+        from pypaimon.table.row.row_kind import RowKind
+
+        data = b"row-kind blob payload"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "blob.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(data)
+            serialized = BlobDescriptor(blob_path, 0, len(data)).serialize()
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+
+            class _KindIterator(RecordIterator):
+                def __init__(self, rows):
+                    self._rows = list(rows)
+
+                def next(self):
+                    if not self._rows:
+                        return None
+                    return self._rows.pop(0)
+
+            class _KindReader(RecordReader):
+                def __init__(self, rows):
+                    self._rows = rows
+                    self._done = False
+
+                def read_batch(self):
+                    if self._done:
+                        return None
+                    self._done = True
+                    return _KindIterator(self._rows)
+
+                def close(self):
+                    pass
+
+            class _CatalogEnvironment:
+                catalog_loader = None
+
+            class _Table:
+                options = CoreOptions(Options({
+                    "blob-as-descriptor": "true",
+                    "blob-descriptor-field": "picture",
+                }))
+                catalog_environment = _CatalogEnvironment()
+
+            table = _Table()
+            table.file_io = file_io
+
+            class _SplitRead:
+                def __init__(self):
+                    self.table = table
+                    self._blob_parallelism = 1
+
+                def _create_blob_view_prescan_reader(self, names):
+                    return EmptyRecordBatchReader()
+
+            kinds = (
+                RowKind.INSERT, RowKind.UPDATE_BEFORE,
+                RowKind.UPDATE_AFTER, RowKind.DELETE)
+            rows = []
+            for kind in kinds:
+                row = OffsetRow((serialized,), 0, 1)
+                row.set_row_kind_byte(kind.value)
+                rows.append(row)
+            wrapped = wrap_record_reader_with_blob_inline_convert(
+                _KindReader(rows), _SplitRead(),
+                [DataField(0, "picture", AtomicType("BLOB"))])
+            out = []
+            batch = wrapped.read_batch()
+            while batch is not None:
+                row = batch.next()
+                while row is not None:
+                    out.append(row.get_row_kind())
+                    row = batch.next()
+                batch = wrapped.read_batch()
+            wrapped.close()
+            self.assertEqual(list(kinds), out)
+
+    def test_limit_before_wrap_materializes_only_limited_descriptors(self):
+        from pypaimon.common.options import Options
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader.blob_view_read_support import (
+            wrap_record_reader_with_blob_inline_convert)
+        from pypaimon.read.reader.iface.record_batch_reader import EmptyRecordBatchReader
+        from pypaimon.read.reader.iface.record_iterator import RecordIterator
+        from pypaimon.read.reader.iface.record_reader import RecordReader
+        from pypaimon.read.reader.limited_record_reader import LimitedRecordReader
+        from pypaimon.schema.data_types import AtomicType, DataField
+        from pypaimon.table.row.offset_row import OffsetRow
+
+        payloads = [b"first-blob-payload", b"second-blob-payload"]
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            serialized = []
+            for index, payload in enumerate(payloads):
+                blob_path = os.path.join(tmp_dir, "blob-%d.bin" % index)
+                with open(blob_path, 'wb') as f:
+                    f.write(payload)
+                serialized.append(
+                    BlobDescriptor(blob_path, 0, len(payload)).serialize())
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            opened = []
+            original_open = file_io.new_input_stream
+
+            def counting_open(path):
+                opened.append(path)
+                return original_open(path)
+
+            file_io.new_input_stream = counting_open
+
+            class _Iter(RecordIterator):
+                def __init__(self, rows):
+                    self._rows = list(rows)
+
+                def next(self):
+                    if not self._rows:
+                        return None
+                    return self._rows.pop(0)
+
+            class _Reader(RecordReader):
+                def __init__(self, rows):
+                    self._rows = rows
+                    self._done = False
+
+                def read_batch(self):
+                    if self._done:
+                        return None
+                    self._done = True
+                    return _Iter(self._rows)
+
+                def close(self):
+                    pass
+
+            class _CatalogEnvironment:
+                catalog_loader = None
+
+            class _Table:
+                options = CoreOptions(Options({
+                    "blob-as-descriptor": "false",
+                    "blob-descriptor-field": "picture",
+                }))
+                catalog_environment = _CatalogEnvironment()
+
+            table = _Table()
+            table.file_io = file_io
+
+            class _SplitRead:
+                def __init__(self):
+                    self.table = table
+                    self._blob_parallelism = 1
+
+                def _create_blob_view_prescan_reader(self, names):
+                    return EmptyRecordBatchReader()
+
+            rows = [OffsetRow((value,), 0, 1) for value in serialized]
+            limited = LimitedRecordReader(_Reader(rows), 1)
+            wrapped = wrap_record_reader_with_blob_inline_convert(
+                limited, _SplitRead(),
+                [DataField(0, "picture", AtomicType("BLOB"))])
+            batch = wrapped.read_batch()
+            row = batch.next()
+            self.assertEqual(row.get_blob(0).to_data(), payloads[0])
+            self.assertIsNone(batch.next())
+            self.assertIsNone(wrapped.read_batch())
+            wrapped.close()
+            self.assertEqual(1, len(opened))
+
+    def test_needs_blob_inline_convert_when_blob_as_descriptor(self):
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader.blob_view_read_support import (
+            needs_blob_inline_convert)
+
+        class _Table:
+            def __init__(self, options):
+                self.options = CoreOptions(Options(options))
+
+        self.assertTrue(needs_blob_inline_convert(_Table({
+            "blob-as-descriptor": "true",
+            "blob-descriptor-field": "picture",
+        })))
+        self.assertTrue(needs_blob_inline_convert(_Table({
+            "blob-as-descriptor": "false",
+            "blob-descriptor-field": "picture",
+        })))
+        self.assertTrue(needs_blob_inline_convert(_Table({
+            "blob-as-descriptor": "true",
+            "blob-view-field": "picture",
+        })))
+        self.assertFalse(needs_blob_inline_convert(_Table({
+            "blob-as-descriptor": "true",
+        })))
+        self.assertFalse(needs_blob_inline_convert(_Table({
+            "blob.stored-descriptor-fields": "picture",
+        })))
+
+    def test_limited_record_reader_keeps_cleared_descriptor_indices(self):
+        from pypaimon.common.options import Options
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader.auth_masking_reader import (
+            BatchToRecordReaderAdapter, RecordReaderToBatchAdapter)
+        from pypaimon.read.reader.blob_view_read_support import (
+            wrap_record_reader_with_blob_inline_convert)
+        from pypaimon.read.reader.iface.record_batch_reader import EmptyRecordBatchReader
+        from pypaimon.read.reader.iface.record_iterator import RecordIterator
+        from pypaimon.read.reader.iface.record_reader import RecordReader
+        from pypaimon.read.reader.limited_record_reader import LimitedRecordReader
+        from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
+        from pypaimon.table.row.blob import BlobData
+        from pypaimon.table.row.offset_row import OffsetRow
+
+        data = b"materialized through limit wrapper"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "blob.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(data)
+            serialized = BlobDescriptor(blob_path, 0, len(data)).serialize()
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+
+            class _OnceIterator(RecordIterator):
+                def __init__(self, row):
+                    self._row = row
+                    self._done = False
+
+                def next(self):
+                    if self._done:
+                        return None
+                    self._done = True
+                    return self._row
+
+            class _OnceReader(RecordReader):
+                def __init__(self, row):
+                    self._row = row
+                    self._done = False
+
+                def read_batch(self):
+                    if self._done:
+                        return None
+                    self._done = True
+                    return _OnceIterator(self._row)
+
+                def close(self):
+                    pass
+
+            class _CatalogEnvironment:
+                catalog_loader = None
+
+            class _Table:
+                options = CoreOptions(Options({
+                    "blob-as-descriptor": "false",
+                    "blob-descriptor-field": "picture",
+                }))
+                catalog_environment = _CatalogEnvironment()
+
+            table = _Table()
+            table.file_io = file_io
+
+            class _SplitRead:
+                def __init__(self):
+                    self.table = table
+                    self._blob_parallelism = 1
+
+                def _create_blob_view_prescan_reader(self, names):
+                    return EmptyRecordBatchReader()
+
+            fields = [DataField(0, "picture", AtomicType("BLOB"))]
+            wrapped = wrap_record_reader_with_blob_inline_convert(
+                _OnceReader(OffsetRow((serialized,), 0, 1)), _SplitRead(), fields)
+            limited = LimitedRecordReader(wrapped, 10)
+            self.assertEqual(limited.descriptor_field_indices, set())
+
+            schema = PyarrowFieldParser.from_paimon_schema(fields)
+            batch_reader = RecordReaderToBatchAdapter(limited, schema)
+            if getattr(batch_reader, 'blob_field_indices', None) is None:
+                from pypaimon.read.reader.field_indices import (
+                    blob_field_indices, descriptor_field_indices_for_table,
+                    vector_field_indices)
+                batch_reader.file_io = file_io
+                batch_reader.blob_field_indices = blob_field_indices(fields)
+                batch_reader.descriptor_field_indices = (
+                    descriptor_field_indices_for_table(table, fields))
+                batch_reader.vector_field_indices = vector_field_indices(fields)
+            reader = BatchToRecordReaderAdapter(batch_reader)
+            blob = reader.read_batch().next().get_blob(0)
+            self.assertIsInstance(blob, BlobData)
+            self.assertEqual(blob.to_data(), data)
+            reader.close()
+
+    def test_batch_to_record_reader_roundtrip_preserves_get_blob(self):
+        from pypaimon.read.reader.auth_masking_reader import (
+            BatchToRecordReaderAdapter, RecordReaderToBatchAdapter)
+        from pypaimon.read.reader.iface.record_iterator import RecordIterator
+        from pypaimon.read.reader.iface.record_reader import RecordReader
+        from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
+        from pypaimon.table.row.offset_row import OffsetRow
+
+        data = b"roundtrip blob payload"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "blob.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(data)
+            serialized = BlobDescriptor(blob_path, 0, len(data)).serialize()
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+
+            class _OnceIterator(RecordIterator):
+                def __init__(self, row):
+                    self._row = row
+                    self._done = False
+
+                def next(self):
+                    if self._done:
+                        return None
+                    self._done = True
+                    return self._row
+
+            class _OnceReader(RecordReader):
+                def __init__(self, row):
+                    self._row = row
+                    self._done = False
+
+                def read_batch(self):
+                    if self._done:
+                        return None
+                    self._done = True
+                    return _OnceIterator(self._row)
+
+                def close(self):
+                    pass
+
+            fields = [DataField(0, "picture", AtomicType("BLOB"))]
+            schema = PyarrowFieldParser.from_paimon_schema(fields)
+            batch_reader = RecordReaderToBatchAdapter(
+                _OnceReader(OffsetRow((serialized,), 0, 1)), schema)
+            batch_reader.file_io = file_io
+            batch_reader.blob_field_indices = {0}
+            batch_reader.descriptor_field_indices = {0}
+            first = BatchToRecordReaderAdapter(batch_reader)
+            second_batch = RecordReaderToBatchAdapter(first, schema)
+            wrapped = BatchToRecordReaderAdapter(second_batch)
+            row = wrapped.read_batch().next()
+            blob = row.get_blob(0)
+            self.assertIsInstance(blob, BlobRef)
+            self.assertEqual(blob.to_data(), data)
+            wrapped.close()
+
+    def test_blob_view_prescan_limit_skips_when_predicate_present(self):
+        from pypaimon.read.split_read import RawFileSplitRead
+
+        obj = RawFileSplitRead.__new__(RawFileSplitRead)
+        obj.limit = 1
+        obj.predicate = None
+        obj._post_merge_filter = None
+        self.assertEqual(1, obj._blob_view_prescan_limit())
+
+        obj.predicate = object()
+        self.assertIsNone(obj._blob_view_prescan_limit())
+
+        obj.predicate = None
+        obj._post_merge_filter = object()
+        self.assertIsNone(obj._blob_view_prescan_limit())
+
+    def test_merge_blob_view_prescan_empty_projection_uses_batch_reader(self):
+        from pypaimon.read.reader.iface.record_batch_reader import EmptyRecordBatchReader
+        from pypaimon.read.split_read import MergeFileSplitRead
+        from pypaimon.schema.data_types import AtomicType, DataField
+
+        obj = MergeFileSplitRead.__new__(MergeFileSplitRead)
+        obj.read_fields = [
+            DataField(0, "_KEY_id", AtomicType("INT")),
+            DataField(1, "id", AtomicType("INT")),
+        ]
+        obj.value_arity = 1
+        reader = MergeFileSplitRead._create_blob_view_prescan_reader(
+            obj, {"picture"})
+        self.assertIsInstance(reader, EmptyRecordBatchReader)
+        self.assertIsNone(reader.read_arrow_batch())
+
+    def test_merge_blob_view_prescan_keeps_sequence_field(self):
+        from pypaimon.common.options import Options
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.split_read import MergeFileSplitRead
+        from pypaimon.schema.data_types import AtomicType, DataField
+
+        pic = DataField(1, "pic", AtomicType("BLOB"))
+        ts = DataField(2, "ts", AtomicType("INT"))
+        obj = MergeFileSplitRead.__new__(MergeFileSplitRead)
+        obj.read_fields = [
+            DataField(0, "_KEY_id", AtomicType("INT")),
+            DataField(0, "id", AtomicType("INT")),
+            ts,
+            pic,
+        ]
+        obj.value_arity = 3
+
+        class _Table:
+            options = CoreOptions(Options({"sequence.field": "ts"}))
+            fields = [
+                DataField(0, "id", AtomicType("INT")),
+                ts,
+                pic,
+            ]
+
+        obj.table = _Table()
+        names = [
+            f.name for f in
+            MergeFileSplitRead._blob_view_prescan_read_type(obj, {"pic"})
+        ]
+        self.assertEqual(names, ["pic", "ts"])
+
+    def test_refresh_blob_view_lookup_does_not_clobber_descriptor_indices(self):
+        from pypaimon.read.reader.auth_masking_reader import (
+            RecordReaderToBatchAdapter)
+        from pypaimon.read.reader.iface.record_iterator import RecordIterator
+        from pypaimon.read.reader.iface.record_reader import RecordReader
+        from pypaimon.read.reader.limited_record_reader import LimitedRecordReader
+        from pypaimon.read.reader.outer_projection_record_reader import (
+            OuterProjectionRecordReader)
+        from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
+        from pypaimon.table.row.offset_row import OffsetRow
+
+        class _Iter(RecordIterator):
+            def __init__(self, row):
+                self._row = row
+                self._done = False
+
+            def next(self):
+                if self._done:
+                    return None
+                self._done = True
+                return self._row
+
+        class _Reader(RecordReader):
+            def __init__(self, row):
+                self._row = row
+                self._done = False
+
+            def read_batch(self):
+                if self._done:
+                    return None
+                self._done = True
+                return _Iter(self._row)
+
+            def close(self):
+                pass
+
+        fields = [DataField(0, "picture", AtomicType("BLOB"))]
+        schema = PyarrowFieldParser.from_paimon_schema(fields)
+        limited = LimitedRecordReader(_Reader(OffsetRow((b"x",), 0, 1)), 1)
+        adapter = RecordReaderToBatchAdapter(limited, schema, include_row_kind=True)
+        adapter.descriptor_field_indices = {0}
+        self.assertIsNotNone(adapter.read_arrow_batch())
+        self.assertEqual(adapter.descriptor_field_indices, {0})
+
+        inner_row = OffsetRow((0, 1, 2, 3, 4, b"desc"), 0, 6)
+        projected = OuterProjectionRecordReader(
+            _Reader(inner_row),
+            ["a", "b", "c", "d", "e", "payload"],
+            [["payload"]],
+            descriptor_field_indices={5},
+        )
+        self.assertEqual(projected.descriptor_field_indices, {0})
+        self.assertIsNotNone(projected.read_batch())
+        self.assertEqual(projected.descriptor_field_indices, {0})
+
+    def test_blob_inline_convert_prescan_empty_projection_reads_main_batch(self):
+        from typing import Optional
+
+        from pyarrow import RecordBatch
+
+        from pypaimon.common.options import Options
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader.blob_descriptor_convert_reader import (
+            BlobInlineConvertReader)
+        from pypaimon.read.reader.iface.record_batch_reader import (
+            EmptyRecordBatchReader, RecordBatchReader)
+
+        batch = RecordBatch.from_arrays(
+            [pa.array([1], type=pa.int32())], names=["id"])
+
+        class _InnerReader(RecordBatchReader):
+            def __init__(self):
+                self._done = False
+
+            def read_arrow_batch(self) -> Optional[RecordBatch]:
+                if self._done:
+                    return None
+                self._done = True
+                return batch
+
+            def close(self):
+                pass
+
+        class _CatalogLoader:
+            pass
+
+        class _CatalogEnvironment:
+            catalog_loader = _CatalogLoader()
+
+        class _Table:
+            options = CoreOptions(Options({
+                "blob-as-descriptor": "true",
+                "blob-view-field": "picture",
+            }))
+            catalog_environment = _CatalogEnvironment()
+
+        reader = BlobInlineConvertReader(
+            _InnerReader(),
+            _Table(),
+            prescan_reader_factory=lambda names: EmptyRecordBatchReader(),
+        )
+        result = reader.read_arrow_batch()
+        self.assertIsNotNone(result)
+        self.assertEqual(result.column("id").to_pylist(), [1])
+        reader.close()
+
+    def test_blob_view_lookup_http_descriptor_uses_http_uri_reader(self):
+        from unittest.mock import MagicMock
+
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.common.uri_reader import HttpUriReader, UriReaderFactory
+        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+
+        class TokenFileIO:
+            def new_input_stream(self, path):
+                raise AssertionError(
+                    "HTTP descriptors must not use the table FileIO")
+
+        table_key = "db.source"
+        view_struct = BlobViewStruct(Identifier.from_string(table_key), 1, 0)
+        http_uri = "https://example.com/blob.bin"
+        descriptor = BlobDescriptor(http_uri, 0, 4)
+        lookup = BlobViewLookup(MagicMock())
+        lookup._uri_reader_factory_cache[table_key] = (
+            UriReaderFactory.from_file_io(TokenFileIO()))
+        lookup._store_chunk_results({view_struct: descriptor}, set())
+        reader = lookup.resolve_uri_reader(view_struct)
+        self.assertIsInstance(reader, HttpUriReader)
+
+    def test_blob_view_http_descriptor_materializes_serial_and_parallel(self):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        from pypaimon.common.file_io import FileIO
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.common.uri_reader import UriReader
+        from pypaimon.read.reader.blob_descriptor_convert_reader import (
+            BlobInlineConvertReader)
+
+        view_struct = BlobViewStruct(Identifier.from_string("db.source"), 1, 0)
+        descriptor = BlobDescriptor("https://example.com/blob", 0, 4)
+        batch = pa.RecordBatch.from_arrays(
+            [pa.array([view_struct.serialize()], type=pa.large_binary())],
+            names=["picture"],
+        )
+
+        class MemoryUriReader(UriReader):
+            def __init__(self):
+                self.opened = []
+
+            def new_input_stream(self, uri):
+                self.opened.append(uri)
+                return io.BytesIO(b"DATA")
+
+        class TargetFileIO:
+            def read_blobs_concurrent(self, blobs, parallelism):
+                return FileIO.read_blobs_concurrent(self, blobs, parallelism)
+
+            def read_ranges_coalesced(self, ranges, parallelism):
+                raise AssertionError("HTTP blobs must not use the target FileIO")
+
+        for parallelism in (1, 4):
+            with self.subTest(parallelism=parallelism):
+                uri_reader = MemoryUriReader()
+                lookup = MagicMock()
+                lookup.resolve_to_null.return_value = False
+                lookup.resolve_blob.return_value = BlobRef(uri_reader, descriptor)
+                reader = BlobInlineConvertReader.__new__(BlobInlineConvertReader)
+                reader._view_fields = {"picture"}
+                reader._descriptor_fields = set()
+                reader._blob_as_descriptor = False
+                reader._blob_parallelism = parallelism
+                reader._table = SimpleNamespace(file_io=TargetFileIO())
+
+                descriptor_batch, view_blobs = reader._resolve_view_fields(
+                    batch, lookup)
+                result = reader._resolve_descriptor_fields(
+                    descriptor_batch, view_blobs)
+
+                self.assertEqual(result.column("picture").to_pylist(), [b"DATA"])
+                self.assertEqual(uri_reader.opened, [descriptor.uri])
+                lookup.resolve_blob.assert_called_once_with(view_struct)
+
+    def test_internal_row_wrapper_iterator_passes_blob_view_lookup(self):
+        from unittest.mock import MagicMock
+
+        from pypaimon.read.reader.iface.record_batch_reader import InternalRowWrapperIterator
+        from pypaimon.table.row.blob import BlobViewStruct
+        from pypaimon.common.identifier import Identifier
+
+        view_struct = BlobViewStruct(Identifier.from_string("db.source"), 1, 42)
+        lookup = MagicMock()
+        lookup.resolve_to_null.return_value = True
+        iterator = InternalRowWrapperIterator(
+            iter([(view_struct.serialize(),)]),
+            1,
+            blob_field_indices=[0],
+            blob_view_lookup=lookup,
+        )
+        row = iterator.next()
+        self.assertIsNone(row.get_blob(0))
+        lookup.resolve_to_null.assert_called_once()
+
+    def _token_aware_file_io(self, data):
+        class FailingFactory:
+            def create(self, uri):
+                raise AssertionError(
+                    "descriptor reads must reuse the table FileIO, not catalog factory")
+
+        class TokenFileIO:
+            def __init__(self):
+                self.uri_reader_factory = FailingFactory()
+                self.opened_paths = []
+
+            def new_input_stream(self, path):
+                self.opened_paths.append(path)
+                return io.BytesIO(data)
+
+        return TokenFileIO()
+
+    def test_offset_row_get_blob_view_keeps_per_table_uri_reader(self):
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.common.uri_reader import FileUriReader, UriReaderFactory
+        from pypaimon.table.row.offset_row import OffsetRow
+        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+
+        shared_uri = "s3://shared/blob"
+        data_a = b"AAAA"
+        data_b = b"BBBB"
+        descriptor = BlobDescriptor(shared_uri, 0, len(data_a))
+        view_a = BlobViewStruct(Identifier.from_string("db.src_a"), 1, 0)
+        view_b = BlobViewStruct(Identifier.from_string("db.src_b"), 1, 0)
+
+        class TokenFileIO:
+            def __init__(self, payload):
+                self._payload = payload
+                self.opened = []
+
+            def new_input_stream(self, path):
+                self.opened.append(path)
+                return io.BytesIO(self._payload)
+
+        file_io_a = TokenFileIO(data_a)
+        file_io_b = TokenFileIO(data_b)
+        lookup = BlobViewLookup(object())
+        lookup._uri_reader_cache["db.src_a"] = FileUriReader(file_io_a)
+        lookup._uri_reader_cache["db.src_b"] = FileUriReader(file_io_b)
+        lookup._uri_reader_factory_cache["db.src_a"] = (
+            UriReaderFactory.from_file_io(file_io_a))
+        lookup._uri_reader_factory_cache["db.src_b"] = (
+            UriReaderFactory.from_file_io(file_io_b))
+        lookup._store_chunk_results(
+            {view_a: descriptor, view_b: descriptor}, set())
+
+        target_file_io = TokenFileIO(b"target-must-not-be-used")
+        row_a = OffsetRow(
+            (view_a.serialize(),), 0, 1,
+            file_io=target_file_io,
+            blob_field_indices=[0],
+            descriptor_field_indices=[0],
+            blob_view_lookup=lookup,
+        )
+        row_b = OffsetRow(
+            (view_b.serialize(),), 0, 1,
+            file_io=target_file_io,
+            blob_field_indices=[0],
+            descriptor_field_indices=[0],
+            blob_view_lookup=lookup,
+        )
+        self.assertEqual(row_a.get_blob(0).to_data(), data_a)
+        self.assertEqual(row_b.get_blob(0).to_data(), data_b)
+        self.assertEqual(file_io_a.opened, [shared_uri])
+        self.assertEqual(file_io_b.opened, [shared_uri])
+        self.assertEqual(target_file_io.opened, [])
+
+    def test_table_read_serializes_only_configured_blob_view_fields(self):
+        from types import SimpleNamespace
+
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.table_read import TableRead
+        from pypaimon.schema.data_types import AtomicType, DataField
+        from pypaimon.table.row.offset_row import OffsetRow
+        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+
+        view_struct = BlobViewStruct(Identifier.from_string("db.source"), 1, 0)
+        view_bytes = view_struct.serialize()
+        descriptor = BlobDescriptor("s3://source/blob", 0, 4)
+        lookup = BlobViewLookup(object())
+        lookup._store_chunk_results({view_struct: descriptor}, set())
+
+        table_read = TableRead.__new__(TableRead)
+        table_read.table = SimpleNamespace(options=CoreOptions(Options({
+            "blob-as-descriptor": "true",
+            "blob-view-field": "picture",
+        })))
+        table_read.read_type = [
+            DataField(0, "id", AtomicType("INT")),
+            DataField(1, "picture", AtomicType("BYTES")),
+        ]
+        table_read._blob_as_descriptor = True
+        table_read._blob_view_output_indices = (1,)
+        reader = SimpleNamespace(blob_view_lookup=lookup)
+        row = OffsetRow((view_bytes, view_bytes), 0, 2)
+
+        converted = table_read._serialize_blob_view_row_tuple(row, reader)
+
+        self.assertEqual(converted[0], view_bytes)
+        self.assertEqual(converted[1], descriptor.serialize())
+
+        table_read._blob_view_output_indices = ()
+        skipped = table_read._serialize_blob_view_row_tuple(
+            row, SimpleNamespace())
+        self.assertEqual(skipped, (view_bytes, view_bytes))
+
+        table_read._blob_view_output_indices = (1,)
+        table_read._blob_as_descriptor = False
+        not_descriptor = table_read._serialize_blob_view_row_tuple(row, reader)
+        self.assertEqual(not_descriptor, (view_bytes, view_bytes))
+
+    def test_offset_row_get_blob_v1_resolved_blob_view_field(self):
+        from pypaimon.common.options import Options
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader.field_indices import descriptor_field_indices_for_table
+        from pypaimon.schema.data_types import AtomicType, DataField
+        from pypaimon.table.row.offset_row import OffsetRow
+
+        data = b"resolved blob-view payload"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "blob.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(data)
+            uri = blob_path.encode('utf-8')
+            serialized_v1 = (
+                bytes([1])
+                + struct.pack('<I', len(uri))
+                + uri
+                + struct.pack('<q', 0)
+                + struct.pack('<q', len(data))
+            )
+
+            class _Table:
+                options = CoreOptions(Options({
+                    "blob-as-descriptor": "true",
+                    "blob-view-field": "picture",
+                }))
+
+            fields = [DataField(0, "picture", AtomicType("BYTES"))]
+            descriptor_indices = descriptor_field_indices_for_table(_Table(), fields)
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            row = OffsetRow(
+                (serialized_v1,), 0, 1, file_io=file_io,
+                blob_field_indices=[0],
+                descriptor_field_indices=descriptor_indices)
+            blob = row.get_blob(0)
+            self.assertIsInstance(blob, BlobRef)
+            self.assertEqual(blob.to_data(), data)
+
+    def test_offset_row_get_blob_resolves_null_blob_view(self):
+        from unittest.mock import MagicMock
+
+        from pypaimon.table.row.offset_row import OffsetRow
+        from pypaimon.table.row.blob import BlobViewStruct
+        from pypaimon.common.identifier import Identifier
+
+        view_struct = BlobViewStruct(Identifier.from_string("db.source"), 1, 42)
+        lookup = MagicMock()
+        lookup.resolve_to_null.return_value = True
+        row = OffsetRow(
+            (view_struct.serialize(),), 0, 1,
+            blob_field_indices=[0],
+            blob_view_lookup=lookup,
+        )
+        self.assertIsNone(row.get_blob(0))
+        lookup.resolve_to_null.assert_called_once()
+
+    def test_offset_row_get_blob_view_struct_without_view_field_indices(self):
+        from unittest.mock import MagicMock
+
+        from pypaimon.common.options import Options
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader.field_indices import descriptor_field_indices_for_table
+        from pypaimon.schema.data_types import AtomicType, DataField
+        from pypaimon.common.uri_reader import FileUriReader
+        from pypaimon.table.row.blob import BlobRef, BlobViewStruct
+        from pypaimon.table.row.offset_row import OffsetRow
+        from pypaimon.common.identifier import Identifier
+
+        data = b"resolved via view struct"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "blob.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(data)
+            descriptor = BlobDescriptor(blob_path, 0, len(data))
+
+            class _Table:
+                options = CoreOptions(Options({
+                    "blob-as-descriptor": "true",
+                    "blob-view-field": "picture",
+                }))
+
+            fields = [DataField(0, "picture", AtomicType("BYTES"))]
+            descriptor_indices = descriptor_field_indices_for_table(_Table(), fields)
+            view_struct = BlobViewStruct(Identifier.from_string("db.source"), 1, 42)
+            lookup = MagicMock()
+            lookup.resolve_to_null.return_value = False
+            lookup.resolve_blob.return_value = BlobRef(
+                FileUriReader(FileIO.get(f"file://{tmp_dir}", {})), descriptor)
+
+            row = OffsetRow(
+                (view_struct.serialize(),), 0, 1,
+                blob_field_indices=[0],
+                descriptor_field_indices=descriptor_indices,
+                blob_view_lookup=lookup,
+            )
+            blob = row.get_blob(0)
+            self.assertIsInstance(blob, BlobRef)
+            self.assertEqual(blob.to_data(), data)
+            lookup.resolve_blob.assert_called_once_with(view_struct)
+
+    def test_to_iterator_adapters_refresh_blob_view_lookup_after_first_read(self):
+        """Merge to_iterator rebuilds OffsetRow after wrap; lookup is filled on
+        the first convert read, so adapters must copy it then, not at wrap time.
+        """
+        from unittest.mock import MagicMock
+
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.common.uri_reader import FileUriReader
+        from pypaimon.read.reader.auth_masking_reader import (
+            BatchToRecordReaderAdapter, RecordReaderToBatchAdapter)
+        from pypaimon.read.reader.iface.record_iterator import RecordIterator
+        from pypaimon.read.reader.iface.record_reader import RecordReader
+        from pypaimon.read.reader.limited_record_reader import LimitedRecordReader
+        from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
+        from pypaimon.table.row.offset_row import OffsetRow
+
+        data = b"upstream blob via refreshed lookup"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "upstream.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(data)
+            view_struct = BlobViewStruct(Identifier.from_string("db.src"), 1, 0)
+            source_file_io = FileIO.get(f"file://{tmp_dir}", {})
+            target_file_io = MagicMock()
+            target_file_io.new_input_stream.side_effect = AssertionError(
+                "target FileIO must not read upstream blob")
+            lookup = MagicMock()
+            lookup.resolve_to_null.return_value = False
+            lookup.resolve_blob.return_value = BlobRef(
+                FileUriReader(source_file_io),
+                BlobDescriptor(blob_path, 0, len(data)),
+            )
+
+            class _OnceIterator(RecordIterator):
+                def __init__(self, row):
+                    self._row = row
+                    self._done = False
+
+                def next(self):
+                    if self._done:
+                        return None
+                    self._done = True
+                    return self._row
+
+            class _ConvertLikeReader(RecordReader):
+                def __init__(self, row):
+                    self._row = row
+                    self._done = False
+                    self.blob_view_lookup = None
+                    self.file_io = target_file_io
+                    self.blob_field_indices = {0}
+                    self.descriptor_field_indices = {0}
+
+                def read_batch(self):
+                    if self._done:
+                        return None
+                    self._done = True
+                    self.blob_view_lookup = lookup
+                    return _OnceIterator(self._row)
+
+                def close(self):
+                    pass
+
+            fields = [DataField(0, "picture", AtomicType("BLOB"))]
+            schema = PyarrowFieldParser.from_paimon_schema(fields)
+            inner = _ConvertLikeReader(OffsetRow(
+                (view_struct.serialize(),), 0, 1,
+                file_io=target_file_io,
+                blob_field_indices=[0],
+                descriptor_field_indices=[0],
+            ))
+            limited = LimitedRecordReader(inner, 10)
+            self.assertIsNone(limited.blob_view_lookup)
+            batch_reader = RecordReaderToBatchAdapter(limited, schema)
+            self.assertIsNone(batch_reader.blob_view_lookup)
+            wrapped = BatchToRecordReaderAdapter(batch_reader)
+            self.assertIsNone(wrapped.blob_view_lookup)
+            row = wrapped.read_batch().next()
+            blob = row.get_blob(0)
+            self.assertIsInstance(blob, BlobRef)
+            self.assertEqual(blob.to_data(), data)
+            lookup.resolve_blob.assert_called_once_with(view_struct)
+            target_file_io.new_input_stream.assert_not_called()
+            wrapped.close()
 
 
 class BlobEndToEndTest(unittest.TestCase):
@@ -1482,31 +3294,226 @@ class BlobEndToEndTest(unittest.TestCase):
         finally:
             reader.close()
 
+    def test_blob_readers_reuse_index_by_path(self):
+        from pypaimon.read.reader.format_blob_reader import _BLOB_INDEX_CACHE, _BLOB_INDEX_CACHE_LOCK
+
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = os.path.join(self.temp_dir, "cached-index.blob")
+        file_io = CountingBlobFileIO(self.temp_dir)
+        self._write_single_blob(path, field, b"cached-value")
+        with _BLOB_INDEX_CACHE_LOCK:
+            _BLOB_INDEX_CACHE.clear()
+        results = []
+
+        try:
+            with patch.object(
+                    DeltaVarintCompressor,
+                    "decompress",
+                    wraps=DeltaVarintCompressor.decompress,
+            ) as decompress:
+                for _ in range(2):
+                    reader = FormatBlobReader(
+                        file_io,
+                        path,
+                        [field.name],
+                        [field],
+                        None,
+                        True,
+                        file_size=os.path.getsize(path),
+                    )
+                    try:
+                        results.append(reader.read_arrow_batch().column(0).to_pylist())
+                    finally:
+                        reader.close()
+                        reader.close()
+                    self.assertEqual((0, 1, 2, 1), file_io.counts())
+
+                self.assertEqual(1, decompress.call_count)
+                self.assertEqual(results[0], results[1])
+                descriptor = BlobDescriptor.deserialize(results[0][0])
+                self.assertEqual((path, 4, len(b"cached-value")),
+                                 (descriptor.uri, descriptor.offset, descriptor.length))
+        finally:
+            with _BLOB_INDEX_CACHE_LOCK:
+                _BLOB_INDEX_CACHE.clear()
+
+    def test_blob_cached_index_keeps_payload_reads(self):
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = os.path.join(self.temp_dir, "cached-payload.blob")
+        file_io = CountingBlobFileIO(self.temp_dir)
+        self._write_single_blob(path, field, b"payload")
+        for descriptor, parallelism in [(True, 1), (False, 1), (False, 4)]:
+            with self.subTest(descriptor=descriptor, parallelism=parallelism):
+                previous_opens = len(file_io.streams)
+                reader = FormatBlobReader(
+                    file_io, path, [field.name], [field], None, descriptor,
+                    blob_parallelism=parallelism, file_size=os.path.getsize(path))
+                try:
+                    values = reader.read_arrow_batch().column(0).to_pylist()
+                    if not descriptor:
+                        self.assertEqual([b"payload"], values)
+                        self.assertEqual(previous_opens + 1, len(file_io.streams))
+                finally:
+                    reader.close()
+                    reader.close()
+        self.assertEqual(0, file_io.stat_count)
+        self.assertTrue(all(stream._mock_wraps.closed for stream in file_io.streams))
+        self.assertTrue(all(stream.close.call_count == 1 for stream in file_io.streams))
+
+    def test_blob_cached_index_reader_isolation(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = os.path.join(self.temp_dir, "cached-selection.blob")
+        file_io = CountingBlobFileIO(self.temp_dir)
+        with open(path, 'wb') as output:
+            writer = BlobFormatWriter(output)
+            for value in [BlobData(b"first"), None, Blob.PLACE_HOLDER, BlobData(b"last")]:
+                writer.add_element(GenericRow([value], [field], RowKind.INSERT))
+            writer.close()
+        readers = []
+        try:
+            for indices in ([3, 1, 0], [0, 3]):
+                readers.append(FormatBlobReader(
+                    file_io, path, [field.name], [field], None, False,
+                    row_indices=indices, file_size=os.path.getsize(path)))
+            self.assertIsNot(readers[0]._input_stream, readers[1]._input_stream)
+            self.assertEqual([b"last", None, b"first"],
+                             readers[0].read_arrow_batch().column(0).to_pylist())
+            readers[0].blob_lengths[0] = -1
+            readers[0].blob_offsets[0] = -1
+            readers[0].close()
+            self.assertEqual([b"first", b"last"],
+                             readers[1].read_arrow_batch().column(0).to_pylist())
+            previous = file_io.counts()
+            unselected = FormatBlobReader(
+                file_io, path, [field.name], [field], None, True,
+                file_size=os.path.getsize(path))
+            readers.append(unselected)
+            unselected.blob_lengths[3] = -1
+            unselected.blob_offsets[3] = -1
+            descriptor_reader = FormatBlobReader(
+                file_io, path, [field.name], [field], None, True,
+                row_indices=[3, 1, 2], file_size=os.path.getsize(path))
+            readers.append(descriptor_reader)
+            values = descriptor_reader.read_values_at([0, 1, 2])
+            self.assertEqual((len(b"first") + 16 + 4, len(b"last")),
+                             (values[0].to_descriptor().offset, values[0].to_descriptor().length))
+            self.assertIsNone(values[1])
+            self.assertIs(Blob.PLACE_HOLDER, values[2])
+            with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
+                descriptor_reader.read_arrow_batch()
+            with self.assertRaises(IndexError):
+                FormatBlobReader(
+                    file_io, path, [field.name], [field], None, True,
+                    row_indices=[4], file_size=os.path.getsize(path))
+            self.assertEqual(previous, file_io.counts())
+        finally:
+            for reader in readers:
+                reader.close()
+                reader.close()
+        self.assertTrue(all(stream._mock_wraps.closed for stream in file_io.streams))
+
+    def test_blob_cached_nested_layout_reads(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        for data_type, value in [
+            (ArrayType(True, AtomicType("BLOB")), [BlobData(b"a"), None, BlobData(b"bc")]),
+            (MapType(True, AtomicType("STRING"), AtomicType("BLOB")),
+             [("a", BlobData(b"a")), ("n", None), ("b", BlobData(b"bc"))]),
+        ]:
+            field = DataField(0, "blob_field", data_type)
+            path = os.path.join(self.temp_dir, type(data_type).__name__ + ".blob")
+            file_io = CountingBlobFileIO(self.temp_dir)
+            with open(path, 'wb') as output:
+                writer = BlobFormatWriter(output)
+                writer.add_element(GenericRow([value], [field], RowKind.INSERT))
+                writer.close()
+            for descriptor, parallelism in [(True, 1), (False, 1), (False, 4)]:
+                results = []
+                for _ in range(2):
+                    previous = len(file_io.streams)
+                    reader = FormatBlobReader(
+                        file_io, path, [field.name], [field], None, descriptor,
+                        blob_parallelism=parallelism, file_size=os.path.getsize(path))
+                    try:
+                        self.assertEqual(previous + 1, len(file_io.streams))
+                        results.append(reader.read_arrow_batch().column(0)[0].as_py())
+                    finally:
+                        reader.close()
+                        reader.close()
+                self.assertEqual(results[0], results[1])
+                values = list(dict(results[0]).values()) if isinstance(data_type, MapType) else results[0]
+                if descriptor:
+                    self.assertEqual([1, None, 2], [
+                        BlobDescriptor.deserialize(item).length if item is not None else None for item in values])
+                else:
+                    self.assertEqual([b"a", None, b"bc"], values)
+            self.assertEqual(0, file_io.stat_count)
+            self.assertTrue(all(stream._mock_wraps.closed for stream in file_io.streams))
+
+    def test_blob_index_failures_close_stream(self):
+        from pypaimon.read.reader.format_blob_reader import _BLOB_INDEX_CACHE
+
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        for failure in ('version', 'header', 'index', 'read', 'row_indices'):
+            with self.subTest(failure=failure):
+                path = os.path.join(self.temp_dir, failure + ".blob")
+                self._write_single_blob(path, field, b"value")
+                file_io = CountingBlobFileIO(self.temp_dir)
+                file_size = os.path.getsize(path)
+                if failure == 'version':
+                    with open(path, 'r+b') as output:
+                        output.seek(-1, os.SEEK_END)
+                        output.write(b'\x63')
+                elif failure == 'header':
+                    file_size += 3
+                original_open = file_io.new_input_stream
+
+                def open_stream(file_path):
+                    stream = original_open(file_path)
+                    if failure == 'read':
+                        stream.read.side_effect = IOError("injected read failure")
+                    elif failure == 'index':
+                        read = stream._mock_wraps.read
+                        stream.read.side_effect = lambda size: read(size) if size == 5 else read(size)[:-1]
+                    return stream
+
+                with patch.object(file_io, 'new_input_stream', side_effect=open_stream):
+                    with self.assertRaises(IndexError if failure == 'row_indices' else IOError):
+                        FormatBlobReader(
+                            file_io, path, [field.name], [field], None, True,
+                            row_indices=[1] if failure == 'row_indices' else None,
+                            file_size=file_size)
+                self.assertEqual(1, len(file_io.streams))
+                self.assertTrue(file_io.streams[0]._mock_wraps.closed)
+                self.assertEqual(1, file_io.streams[0].close.call_count)
+                if failure != 'row_indices':
+                    self.assertNotIn(path, _BLOB_INDEX_CACHE)
+
     def test_blob_reader_falls_back_to_file_size_lookup(self):
         field = DataField(0, "blob_field", AtomicType("BLOB"))
         path = os.path.join(self.temp_dir, "fallback-size.blob")
-        file_io = LocalFileIO(self.temp_dir, Options({}))
         self._write_single_blob(path, field, b"value")
 
         for file_size in [None, 0, -1]:
-            with self.subTest(file_size=file_size):
-                counting_file_io = MockFileIO(file_io)
-                reader = FormatBlobReader(
-                    counting_file_io,
-                    path,
-                    [field.name],
-                    [field],
-                    None,
-                    False,
-                    file_size=file_size,
-                )
-                try:
-                    self.assertEqual(
-                        [b"value"],
-                        reader.read_arrow_batch().column(0).to_pylist())
-                    self.assertEqual(1, counting_file_io.file_size_calls)
-                finally:
-                    reader.close()
+            for descriptor in (False, True):
+                with self.subTest(file_size=file_size, descriptor=descriptor):
+                    file_io = CountingBlobFileIO(self.temp_dir)
+                    reader = FormatBlobReader(
+                        file_io, path, [field.name], [field], None, descriptor,
+                        file_size=file_size)
+                    try:
+                        values = reader.read_arrow_batch().column(0).to_pylist()
+                        if descriptor:
+                            self.assertEqual(BlobDescriptor(path, 4, 5).serialize(), values[0])
+                            self.assertEqual((1, 0, 0, 0), file_io.counts())
+                        else:
+                            self.assertEqual([b"value"], values)
+                            self.assertEqual(1, file_io.stat_count)
+                            self.assertEqual(1, len(file_io.streams))
+                    finally:
+                        reader.close()
 
     def test_split_read_passes_blob_file_size(self):
         from pypaimon.read.split import DataSplit
@@ -2181,12 +4188,29 @@ class BlobEndToEndTest(unittest.TestCase):
         return output.getvalue(), payload
 
     def test_blob_crc_fallback_matches_zlib(self):
+        record, _ = self._write_blob_record_with_crc_backend(zlib)
+        self._assert_record_crc(record)
+
+    def test_blob_array_crc_includes_record_length(self):
         from pypaimon.write.blob_format_writer import BlobFormatWriter
 
-        record, payload = self._write_blob_record_with_crc_backend(zlib)
-        expected_crc = zlib.crc32(
-            struct.pack('<I', BlobFormatWriter.MAGIC_NUMBER))
-        expected_crc = zlib.crc32(payload, expected_crc) & 0xffffffff
+        output = io.BytesIO()
+        writer = BlobFormatWriter(output)
+        writer.add_blob_array(
+            'blob_field', [BlobData(b'first'), None, BlobData(b'second')])
+        self._assert_record_crc(output.getvalue())
+
+    def test_blob_map_crc_includes_record_length(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        output = io.BytesIO()
+        writer = BlobFormatWriter(output)
+        writer.add_blob_map(
+            'blob_field', {'key': BlobData(b'value')}, AtomicType('STRING'))
+        self._assert_record_crc(output.getvalue())
+
+    def _assert_record_crc(self, record):
+        expected_crc = zlib.crc32(record[:-4]) & 0xffffffff
         actual_crc = struct.unpack('<I', record[-4:])[0]
         self.assertEqual(expected_crc, actual_crc)
 
@@ -2718,6 +4742,71 @@ class BlobEndToEndTest(unittest.TestCase):
             + struct.pack('<I', index_length)
         )
 
+    def test_blob_golden_bytes(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        source_file_path = os.path.join(self.temp_dir, "source.bin")
+        with open(source_file_path, 'wb') as source_file:
+            source_file.write(b"descriptor")
+
+        blob_file_path = os.path.join(self.temp_dir, "blob_golden.blob")
+        fields = [DataField(0, "blob", AtomicType("BLOB"))]
+        writer = BlobFormatWriter(open(blob_file_path, 'wb'))
+        writer.add_element(GenericRow([BlobData(b"inline")], fields, RowKind.INSERT))
+        writer.add_element(
+            GenericRow([Blob.from_local(source_file_path)], fields, RowKind.INSERT)
+        )
+        writer.add_element(GenericRow([None], fields, RowKind.INSERT))
+        writer.add_element(GenericRow([Blob.PLACE_HOLDER], fields, RowKind.INSERT))
+        writer.close()
+
+        with open(blob_file_path, 'rb') as blob_file:
+            self.assertEqual(
+                blob_file.read().hex(),
+                "cf114e58696e6c696e6516000000000000002960c8e9"
+                "cf114e5864657363726970746f721a000000000000003f69146b"
+                "2c0835010400000001",
+            )
+
+    def test_array_blob_golden_bytes(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        source_file_path = os.path.join(self.temp_dir, "source.bin")
+        with open(source_file_path, 'wb') as source_file:
+            source_file.write(b"descriptor")
+
+        blob_file_path = os.path.join(self.temp_dir, "array_golden.blob")
+        fields = [DataField(
+            0,
+            "blob_array",
+            ArrayType(True, AtomicType("BLOB")),
+        )]
+        writer = BlobFormatWriter(open(blob_file_path, 'wb'))
+        writer.add_element(GenericRow([[]], fields, RowKind.INSERT))
+        writer.add_element(GenericRow(
+            [[
+                BlobData(b"inline"),
+                None,
+                BlobData(b""),
+                Blob.from_local(source_file_path),
+            ]],
+            fields,
+            RowKind.INSERT,
+        ))
+        writer.add_element(GenericRow([None], fields, RowKind.INSERT))
+        writer.add_element(
+            GenericRow([Blob.ARRAY_PLACE_HOLDER], fields, RowKind.INSERT)
+        )
+        writer.close()
+
+        with open(blob_file_path, 'rb') as blob_file:
+            self.assertEqual(
+                blob_file.read().hex(),
+                "cf114e58424342410100000000000000001d000000000000009bd49157"
+                "cf114e58424342410104000000696e6c696e6564657363726970746f72"
+                "0c0d0214040000003100000000000000d08307713a2863010400000001",
+            )
+
     def test_map_blob_golden_bytes(self):
         from pypaimon.write.blob_format_writer import BlobFormatWriter
 
@@ -2939,6 +5028,49 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertEqual(len(calls[0][0]), 2)
         self.assertEqual(calls[0][1], 4)
         parallel_reader.close()
+
+    def test_map_blob_descriptor_coalesces_indexes_without_reading_values(self):
+        field = DataField(
+            0, "blob_map", MapType(True, AtomicType("STRING"), AtomicType("BLOB")))
+        value_data = b"payload" * 1024
+        key_lengths = [1, 1, 1]
+        value_lengths = [len(value_data), -1, 0]
+        payload = self._map_blob_payload(
+            b"abc", value_data, key_lengths, value_lengths)
+        prefix = b"preceding row"
+        value_start = len(prefix) + BlobRecordIterator.MAP_HEADER_SIZE + 3
+        index_start = value_start + len(value_data)
+        index_length = (len(DeltaVarintCompressor.compress(key_lengths))
+                        + len(DeltaVarintCompressor.compress(value_lengths)))
+        reads = []
+
+        class TrackingStream(io.BytesIO):
+            def read(self, size=-1):
+                start = self.tell()
+                reads.append((start, size))
+                if start < index_start and start + size > value_start:
+                    raise AssertionError("Descriptor read touched BLOB value data")
+                return super().read(size)
+
+        with TrackingStream(prefix + payload) as stream:
+            iterator = BlobRecordIterator(
+                None, "test.blob", [], [], field,
+                input_stream=stream, blob_as_descriptor=True)
+            result = iterator._read_blob_map(len(prefix), len(payload))
+            self.assertEqual(list(result), ['a', 'b', 'c'])
+            descriptor = result['a'].to_descriptor()
+            self.assertEqual((descriptor.offset, descriptor.length),
+                             (value_start, len(value_data)))
+            self.assertIsNone(result['b'])
+            self.assertEqual(result['c'].to_descriptor().length, 0)
+
+        self.assertEqual(reads, [
+            (len(prefix), BlobRecordIterator.MAP_HEADER_SIZE),
+            (len(prefix) + len(payload) - BlobRecordIterator.MAP_INDEX_LENGTHS_SIZE,
+             BlobRecordIterator.MAP_INDEX_LENGTHS_SIZE),
+            (index_start, index_length),
+            (len(prefix) + BlobRecordIterator.MAP_HEADER_SIZE, 3),
+        ])
 
     def test_map_blob_consumer_descriptors_and_flush(self):
         from pypaimon.write.blob_format_writer import BlobFormatWriter
@@ -3576,6 +5708,7 @@ class BlobParallelismTest(unittest.TestCase):
         for i in range(20):
             self.assertEqual(got[i], self.payloads[i])
 
+    @pytest.mark.python_read
     def test_blob_fallback_parallelism_end_to_end(self):
         t = self.catalog.get_table('default.bp_test')
 
@@ -3697,6 +5830,68 @@ class CoalesceRangesTest(unittest.TestCase):
             self.assertEqual(got[4], data[100:])     # length -1 => read to EOF
             self.assertIsNone(got[5])                # None offset/length => skipped
 
+    def test_coalesce_limits_from_file_io_options(self):
+        from pypaimon.common.options.config import FileIOOptions
+        self.assertEqual(1 << 20, Options({}).get(
+            FileIOOptions.READ_COALESCE_MAX_GAP).get_bytes())
+        self.assertEqual(8 << 20, Options({}).get(
+            FileIOOptions.READ_COALESCE_MAX_BLOCK).get_bytes())
+        data = bytes(range(256))
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "f.bin")
+            with open(path, "wb") as output:
+                output.write(data)
+            file_io = FileIO.get(
+                "file://" + tmp_dir,
+                Options({
+                    "file-io.read-coalesce.max-gap": "64 b",
+                    "file-io.read-coalesce.max-block": "100 b",
+                }),
+            )
+            reads = []
+            original_open = file_io.new_input_stream
+
+            def new_input_stream(file_path):
+                stream = original_open(file_path)
+
+                class TrackingStream:
+                    def read_at(self, length, offset):
+                        reads.append((offset, length))
+                        return os.pread(stream.fileno(), length, offset)
+
+                    def close(self):
+                        stream.close()
+
+                return TrackingStream()
+
+            file_io.new_input_stream = new_input_stream
+            ranges = [(path, 0, 10), (path, 60, 10), (path, 120, 10)]
+
+            self.assertEqual(
+                [data[0:10], data[60:70], data[120:130]],
+                file_io.read_ranges_coalesced(ranges, parallelism=3),
+            )
+            self.assertEqual([(0, 70), (120, 10)], sorted(reads))
+
+            reads.clear()
+            views = file_io.read_ranges_coalesced_views(ranges, parallelism=3)
+            self.assertEqual([data[0:10], data[60:70], data[120:130]],
+                             [bytes(view) for view in views])
+            self.assertEqual([(0, 70), (120, 10)], sorted(reads))
+
+            reads.clear()
+            file_io.properties.set(
+                FileIOOptions.READ_COALESCE_MAX_GAP, "0 b")
+            file_io.read_ranges_coalesced(
+                ranges, parallelism=3)
+            self.assertEqual([(0, 10), (60, 10), (120, 10)], sorted(reads))
+
+            reads.clear()
+            file_io.properties.set(
+                FileIOOptions.READ_COALESCE_MAX_GAP, "64 b")
+            file_io.read_ranges_coalesced(ranges, parallelism=3)
+            self.assertEqual([(0, 70), (120, 10)], sorted(reads))
+
     def test_read_ranges_coalesced_views(self):
         from pypaimon.common.file_io import FileIO
         data = bytes(range(256)) * 4
@@ -3704,11 +5899,13 @@ class CoalesceRangesTest(unittest.TestCase):
             path = os.path.join(tmp_dir, "f.bin")
             with open(path, 'wb') as output:
                 output.write(data)
-            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            file_io = FileIO.get(
+                f"file://{tmp_dir}",
+                Options({"file-io.read-coalesce.max-gap": "100 b"}))
             ranges = [(path, 0, 10), (path, 10, 10), None,
                       (path, 500, 20), (path, 100, -1)]
             got = file_io.read_ranges_coalesced_views(
-                ranges, parallelism=4, max_gap=100)
+                ranges, parallelism=4)
 
             self.assertIsInstance(got[0], memoryview)
             self.assertIsInstance(got[1], memoryview)
@@ -3732,7 +5929,10 @@ class CoalesceRangesTest(unittest.TestCase):
             path = os.path.join(tmp_dir, "f.bin")
             with open(path, 'wb') as output:
                 output.write(data)
-            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            file_io = FileIO.get(
+                f"file://{tmp_dir}",
+                Options({"file-io.read-coalesce.max-gap": "1000 b",
+                         "file-io.read-coalesce.max-block": "1 mb"}))
             reads = []
             original_open = file_io.new_input_stream
 
@@ -3753,8 +5953,6 @@ class CoalesceRangesTest(unittest.TestCase):
             got = file_io.read_ranges_coalesced_views(
                 [(path, 0, 10), (path, 1000, 10)],
                 parallelism=4,
-                max_gap=1000,
-                max_span=1 << 20,
             )
 
             self.assertEqual(reads, [(path, 0, 1010)])
@@ -3766,8 +5964,6 @@ class CoalesceRangesTest(unittest.TestCase):
             shared = file_io.read_ranges_coalesced_views(
                 [(path, 0, 10), (path, 1000, 10)],
                 parallelism=4,
-                max_gap=1000,
-                max_span=1 << 20,
                 max_retained_amplification=0,
             )
             self.assertEqual(reads, [(path, 0, 1010)])
@@ -3781,7 +5977,9 @@ class CoalesceRangesTest(unittest.TestCase):
             path = os.path.join(tmp_dir, "blob.bin")
             with open(path, "wb") as output:
                 output.write(data)
-            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            file_io = FileIO.get(
+                f"file://{tmp_dir}",
+                Options({"file-io.read-coalesce.max-gap": "0 b"}))
             fallbacks = []
 
             class FailingStream:
@@ -3801,8 +5999,7 @@ class CoalesceRangesTest(unittest.TestCase):
 
             self.assertEqual(
                 [data[0:4], data[16:20]],
-                file_io.read_ranges_coalesced(
-                    ranges, parallelism=2, max_gap=0),
+                file_io.read_ranges_coalesced(ranges, parallelism=2),
             )
             self.assertEqual(2, len(fallbacks))
 
@@ -3859,7 +6056,7 @@ class CoalesceRangesTest(unittest.TestCase):
         self.assertEqual(
             [b"ok"] * parallelism,
             file_io.read_ranges_coalesced(
-                ranges, parallelism=parallelism, max_gap=0),
+                ranges, parallelism=parallelism),
         )
         self.assertLessEqual(max_open_streams, parallelism)
         self.assertEqual(0, open_streams)
@@ -3906,7 +6103,6 @@ class CoalesceRangesTest(unittest.TestCase):
             file_io.read_ranges_coalesced(
                 [("blob", 0, 5), ("blob", 5, -1)],
                 parallelism=1,
-                max_gap=0,
             ),
         )
         self.assertEqual([
@@ -3921,7 +6117,8 @@ class CoalesceRangesTest(unittest.TestCase):
         from pypaimon.common.file_io import FileIO
 
         data = bytes(range(128))
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
 
         class SerialStream:
             def __init__(self):
@@ -3958,8 +6155,7 @@ class CoalesceRangesTest(unittest.TestCase):
 
         self.assertEqual(
             [data[i * 4:i * 4 + 2] for i in range(16)],
-            file_io.read_ranges_coalesced(
-                ranges, parallelism=8, max_gap=0),
+            file_io.read_ranges_coalesced(ranges, parallelism=8),
         )
         self.assertGreater(len(streams), 1)
         self.assertLessEqual(len(streams), 8)
@@ -3968,7 +6164,8 @@ class CoalesceRangesTest(unittest.TestCase):
         from pypaimon.common.file_io import FileIO
 
         data = bytes(range(256)) * 64
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         streams = []
 
         class PositionalStream:
@@ -4002,8 +6199,7 @@ class CoalesceRangesTest(unittest.TestCase):
         self.assertEqual(
             [data[offset:offset + length]
              for _, offset, length in ranges],
-            file_io.read_ranges_coalesced(
-                ranges, parallelism=64, max_gap=0),
+            file_io.read_ranges_coalesced(ranges, parallelism=64),
         )
         self.assertEqual(16, len(streams))
         self.assertTrue(all(stream.reads == 4 for stream in streams))
@@ -4014,7 +6210,8 @@ class CoalesceRangesTest(unittest.TestCase):
         from pypaimon.common.file_io import FileIO
 
         large = 8 << 20
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         streams = []
 
         class PositionalStream:
@@ -4041,8 +6238,7 @@ class CoalesceRangesTest(unittest.TestCase):
             ranges.append(("blob", offset, length))
             offset += length + 1
 
-        file_io.read_ranges_coalesced(
-            ranges, parallelism=64, max_gap=0)
+        file_io.read_ranges_coalesced(ranges, parallelism=64)
 
         self.assertEqual(16, len(streams))
         self.assertEqual(
@@ -4055,7 +6251,8 @@ class CoalesceRangesTest(unittest.TestCase):
 
         from pypaimon.common.file_io import FileIO
 
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         streams = Counter()
         lock = threading.Lock()
 
@@ -4080,8 +6277,7 @@ class CoalesceRangesTest(unittest.TestCase):
             + [("cold", index * 2, 1) for index in range(100)]
         )
 
-        result = file_io.read_ranges_coalesced(
-            ranges, parallelism=64, max_gap=0)
+        result = file_io.read_ranges_coalesced(ranges, parallelism=64)
 
         self.assertEqual([b"h"] * 9900 + [b"c"] * 100, result)
         self.assertEqual(Counter({"hot": 16, "cold": 16}), streams)
@@ -4091,7 +6287,8 @@ class CoalesceRangesTest(unittest.TestCase):
 
         from pypaimon.common.file_io import FileIO
 
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         streams = Counter()
         lock = threading.Lock()
         active_streams = 0
@@ -4128,8 +6325,7 @@ class CoalesceRangesTest(unittest.TestCase):
             + [("cold-%d" % index, 0, 1) for index in range(63)]
         )
 
-        result = file_io.read_ranges_coalesced(
-            ranges, parallelism=64, max_gap=0)
+        result = file_io.read_ranges_coalesced(ranges, parallelism=64)
 
         self.assertEqual(10063, len(result))
         self.assertEqual(16, streams["hot"])
@@ -4139,7 +6335,8 @@ class CoalesceRangesTest(unittest.TestCase):
     def test_stream_count_is_bounded_across_paths(self):
         from pypaimon.common.file_io import FileIO
 
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         lock = threading.Lock()
         open_streams = 0
         max_open_streams = 0
@@ -4172,8 +6369,7 @@ class CoalesceRangesTest(unittest.TestCase):
 
         self.assertEqual(
             [bytes([offset]) * length for _, offset, length in ranges],
-            file_io.read_ranges_coalesced(
-                ranges, parallelism=4, max_gap=0),
+            file_io.read_ranges_coalesced(ranges, parallelism=4),
         )
         self.assertLessEqual(max_open_streams, 4)
         self.assertEqual(4, total_streams)
@@ -4183,7 +6379,8 @@ class CoalesceRangesTest(unittest.TestCase):
         from pypaimon.common.file_io import FileIO
 
         data = bytes(range(128))
-        file_io = FileIO.get("file:///tmp", {})
+        file_io = FileIO.get(
+            "file:///tmp", Options({"file-io.read-coalesce.max-gap": "0 b"}))
         streams = []
 
         class CloseStream:
@@ -4209,8 +6406,7 @@ class CoalesceRangesTest(unittest.TestCase):
         ranges = [("blob", offset, 4) for offset in range(0, 64, 8)]
 
         with self.assertRaisesRegex(IOError, "first close failed"):
-            file_io.read_ranges_coalesced(
-                ranges, parallelism=4, max_gap=0)
+            file_io.read_ranges_coalesced(ranges, parallelism=4)
 
         self.assertGreater(len(streams), 1)
         self.assertTrue(all(stream.closed for stream in streams))
@@ -4242,7 +6438,6 @@ class CoalesceRangesTest(unittest.TestCase):
             file_io.read_ranges_coalesced(
                 [("close-error", 0, 2), ("read-error", 0, 2)],
                 parallelism=2,
-                max_gap=0,
             )
 
     def test_failed_stream_close_stops_before_fallback(self):
@@ -4267,7 +6462,7 @@ class CoalesceRangesTest(unittest.TestCase):
 
         with self.assertRaisesRegex(IOError, "pooled read failed"):
             file_io.read_ranges_coalesced(
-                [("blob", 0, 2)], parallelism=1, max_gap=0)
+                [("blob", 0, 2)], parallelism=1)
         self.assertEqual([], fallbacks)
 
 

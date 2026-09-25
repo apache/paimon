@@ -29,6 +29,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergCommitCallback;
 import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.iceberg.IcebergPreCommitValidation;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestFile;
@@ -88,7 +89,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
-import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.partition.PartitionExpireStrategy.createPartitionExpireStrategy;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -108,6 +108,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     protected final CatalogEnvironment catalogEnvironment;
 
     @Nullable private SegmentsCache<Path> readManifestCache;
+    @Nullable private SegmentsCache<Path> manifestSidecarCache;
     @Nullable private Cache<Path, Snapshot> snapshotCache;
 
     protected AbstractFileStore(
@@ -210,7 +211,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestCompression(),
                 pathFactory(),
                 options.manifestTargetSize().getBytes(),
-                readManifestCache);
+                readManifestCache,
+                manifestSidecarCache,
+                options);
     }
 
     @Override
@@ -302,6 +305,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                                 bucketMode(),
                                 options.deletionVectorsEnabled(),
                                 options.dataEvolutionEnabled(),
+                                options.dataEvolutionNestedFieldEnabled(),
                                 options.pkClusteringOverride(),
                                 newIndexFileHandler(),
                                 snapshotManager,
@@ -344,7 +348,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newStatsFileHandler(),
                 options.changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                 options.cleanEmptyDirectories(),
-                options.fileOperationThreadNum());
+                options.fileOperationThreadNum(),
+                options.scanManifestParallelism());
     }
 
     @Override
@@ -357,12 +362,13 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newIndexFileHandler(),
                 newStatsFileHandler(),
                 options.cleanEmptyDirectories(),
-                options.fileOperationThreadNum());
+                options.fileOperationThreadNum(),
+                options.scanManifestParallelism());
     }
 
     @Override
     public TagManager newTagManager() {
-        return new TagManager(fileIO, options.path(), DEFAULT_MAIN_BRANCH, options);
+        return new TagManager(fileIO, options.path(), options.branch(), options);
     }
 
     @Override
@@ -375,7 +381,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newIndexFileHandler(),
                 newStatsFileHandler(),
                 options.cleanEmptyDirectories(),
-                options.fileOperationThreadNum());
+                options.fileOperationThreadNum(),
+                options.scanManifestParallelism());
     }
 
     public abstract Comparator<InternalRow> newKeyComparator();
@@ -393,6 +400,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         List<CommitPreCallback> callbacks = new ArrayList<>();
         if (options.isChainTable()) {
             callbacks.add(new ChainTableCommitPreCallback(table));
+        }
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                != IcebergOptions.StorageType.DISABLED) {
+            callbacks.add(new IcebergPreCommitValidation(table));
         }
         return callbacks;
     }
@@ -604,6 +615,11 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public void setManifestCache(SegmentsCache<Path> manifestCache) {
         this.readManifestCache = manifestCache;
+    }
+
+    @Override
+    public void setManifestSidecarCache(SegmentsCache<Path> manifestSidecarCache) {
+        this.manifestSidecarCache = manifestSidecarCache;
     }
 
     @Override

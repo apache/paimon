@@ -83,8 +83,8 @@ public class IcebergRef {
         }
         IcebergRef that = (IcebergRef) o;
         return snapshotId == that.snapshotId
-                && type.equals(that.type)
-                && maxRefAgeMs == that.maxRefAgeMs;
+                && Objects.equals(type, that.type)
+                && Objects.equals(maxRefAgeMs, that.maxRefAgeMs);
     }
 
     @Override

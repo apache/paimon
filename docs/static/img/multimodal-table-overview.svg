@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="564" viewBox="0 0 900 564" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">One table, separate column storage</title>
+<desc id="desc">A logical record has metadata, an image, an embedding, and text. Normal files, managed BLOB files, and optional dedicated vector files align by row ID. Separately built indexes select row IDs for projected reads.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="898" height="562" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" font-weight="700" fill="#172b4d" text-anchor="start">One table, separate column storage</text>
+<text x="28" y="76" font-size="17" font-weight="400" fill="#526277" text-anchor="start">Store once, enrich selected columns, then retrieve matching records.</text>
+<rect x="28" y="101" width="844" height="76" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="131" font-size="20" font-weight="700" fill="#172b4d" text-anchor="start">Logical record</text>
+<text x="46" y="158" font-size="20" font-weight="400" fill="#172b4d" text-anchor="start">id  ·  category  ·  image  ·  caption  ·  embedding  ·  attributes</text>
+<path d="M450 178 L450 210" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="28" y="220" width="844" height="39" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="450" y="246" font-size="19" font-weight="700" fill="#172b4d" text-anchor="middle">ROW ID  ·  shared positions align columns across files</text>
+<rect x="28" y="279" width="268" height="116" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="311" font-size="21" font-weight="700" fill="#2463b4" text-anchor="start">Normal files</text>
+<text x="46" y="340" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Scalar, text, and Variant</text>
+<text x="46" y="365" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Parquet / ORC*</text>
+<rect x="316" y="279" width="268" height="116" rx="8" fill="#e7f5f1" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="334" y="311" font-size="21" font-weight="700" fill="#14766b" text-anchor="start">Managed BLOB files</text>
+<text x="334" y="340" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Images, audio, documents</text>
+<text x="334" y="365" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Dedicated .blob payloads</text>
+<rect x="604" y="279" width="268" height="116" rx="8" fill="#f2ecfb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="622" y="311" font-size="21" font-weight="700" fill="#7046a4" text-anchor="start">Dedicated vectors</text>
+<text x="622" y="340" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Fixed-dimension vectors</text>
+<text x="622" y="365" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Optional .vector.vortex</text>
+<text x="28" y="421" font-size="16" font-weight="400" fill="#526277" text-anchor="start">* Variant requires Parquet. Ordinary float arrays can stay in normal files.</text>
+<rect x="28" y="449" width="254" height="83" rx="8" fill="#fff3df" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="481" font-size="21" font-weight="700" fill="#9a5200" text-anchor="start">Build indexes</text>
+<text x="46" y="510" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Scalar · vector · full-text</text>
+<path d="M287 490 L328 490" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="336" y="449" width="228" height="83" rx="8" fill="#fff3df" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="354" y="481" font-size="21" font-weight="700" fill="#9a5200" text-anchor="start">Find row IDs</text>
+<text x="354" y="510" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Filter or scored search</text>
+<path d="M569 490 L610 490" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="618" y="449" width="254" height="83" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="636" y="481" font-size="21" font-weight="700" fill="#2463b4" text-anchor="start">Read columns</text>
+<text x="636" y="510" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Project only what is needed</text>
+</g>
+</svg>

@@ -19,6 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.options.Options
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate._
 import org.apache.paimon.predicate.SortValue.{NullOrdering, SortDirection}
@@ -30,6 +31,7 @@ import org.apache.spark.sql.connector.expressions
 import org.apache.spark.sql.connector.expressions.{NamedReference, SortOrder}
 import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
 import org.apache.spark.sql.connector.read._
+import org.apache.spark.sql.internal.SQLConf
 
 import scala.collection.JavaConverters._
 
@@ -64,7 +66,7 @@ class PaimonScanBuilder(val table: InnerTable)
           }
 
           val field = rowType.getField(fieldName)
-          val ref = new FieldRef(field.id(), field.name(), field.`type`())
+          val ref = new FieldRef(rowType.getFieldIndex(fieldName), field.name(), field.`type`())
 
           val nullOrdering = order.nullOrdering() match {
             case expressions.NullOrdering.NULLS_LAST => NullOrdering.NULLS_LAST
@@ -164,6 +166,11 @@ class PaimonScanBuilder(val table: InnerTable)
             pushedPartitionFilters)
         }
 
+        // Capture the effective layout in the scan's value state, so copies and query reuse
+        // cannot lose it or recompute it from a later session configuration.
+        val preserveDataGrouping = Options
+          .fromMap(actualTable.options())
+          .get(SparkConnectorOptions.SCAN_PRESERVE_DATA_GROUPING) && SQLConf.get.v2BucketingEnabled
         PaimonScan(
           actualTable,
           requiredSchema,
@@ -174,7 +181,8 @@ class PaimonScanBuilder(val table: InnerTable)
           vectorSearch,
           hybridSearch,
           fullTextSearch,
-          acceptedVariantExtractions
+          acceptedVariantExtractions,
+          preserveDataGrouping = preserveDataGrouping
         )
     }
   }

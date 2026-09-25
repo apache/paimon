@@ -18,9 +18,6 @@
 
 package org.apache.paimon.format.json;
 
-import org.apache.paimon.casting.CastExecutor;
-import org.apache.paimon.casting.CastExecutors;
-import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
@@ -215,29 +212,7 @@ public class JsonFileReader extends AbstractTextFileReader {
     private Object convertPrimitiveStringToType(
             String str, DataType dataType, JsonOptions options) {
         try {
-            switch (dataType.getTypeRoot()) {
-                case TINYINT:
-                    return Byte.parseByte(str);
-                case SMALLINT:
-                    return Short.parseShort(str);
-                case INTEGER:
-                    return Integer.parseInt(str);
-                case BIGINT:
-                    return Long.parseLong(str);
-                case FLOAT:
-                    return Float.parseFloat(str);
-                case DOUBLE:
-                    return Double.parseDouble(str);
-                case BOOLEAN:
-                    return Boolean.parseBoolean(str);
-                case CHAR:
-                case VARCHAR:
-                    return BinaryString.fromString(str);
-                default:
-                    BinaryString binaryString = BinaryString.fromString(str);
-                    CastExecutor cast = CastExecutors.resolve(DataTypes.STRING(), dataType);
-                    return cast.cast(binaryString);
-            }
+            return JsonMapKeyConverter.convert(str, dataType);
         } catch (Exception e) {
             return handleParseError(e);
         }

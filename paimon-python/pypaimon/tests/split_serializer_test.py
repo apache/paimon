@@ -16,11 +16,13 @@
 # under the License.
 
 import base64
+import struct
 import unittest
 
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.read.split_serializer import (
-    _decode_modified_utf8, _decode_str_array, deserialize_split_v1)
+    _decode_modified_utf8, _decode_str_array, _encode_modified_utf8,
+    deserialize_split_v1, serialize_split_v1)
 from pypaimon.schema.data_types import AtomicType, DataField
 
 # Hand-built BinaryArray<string> == ["id", "longcolumn12"]: hits both the inline
@@ -56,7 +58,7 @@ _GOLDEN_DATA_SPLIT_V1 = base64.b64decode(
 )
 
 # Same split serialized as an IndexedSplit (type id 3): identical DataSplit body
-# with a trailing row-ranges/scores section that the reader skips.
+# with a trailing row-ranges/scores section that must survive decoding.
 _GOLDEN_INDEXED_SPLIT_V1 = base64.b64decode(
     "U1BMSVRfVjEAAAABAAAAA/L54FRCJC4xAAAAAd7D0jAsGexmAAAACAAAAAAAAAAqAAAAHAAAAAIA"
     "AAAAAAAAAOoHAAAAAAAABwAAAAAAAAAAAAADABRkdD0yMDI2MDcwNi9idWNrZXQtMwEAAAAIAAAA"
@@ -75,6 +77,26 @@ _GOLDEN_INDEXED_SPLIT_V1 = base64.b64decode(
     "AAAMAAAAMAAAAAgAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
     "AAAAAAAAAAAAAQAAAAIAAQAJZHYvZmlsZS1iAAAAAAAAAAIAAAAAAAAACgAAAAAAAAADAAEAAAAC"
     "AAAAAAAAAAEAAAAAAAAABAAAAAAAAAALAAAAAAAAAA0BAAAAAz8AAAA+gAAAPgAAAA=="
+)
+
+
+# Java DataSplitCompatibleTest's v9 golden, also used by paimon-rust's
+# serialize_matches_datasplit_v9 test. Includes the new non-null per-column
+# sequence numbers [15, 100, 150, 200] after write_cols.
+_GOLDEN_DATA_SPLIT_V9 = base64.b64decode(
+    "3sPSMCwZ7GYAAAAJAAAAAAAAABIAAAAUAAAAAQAAAAAAAAAAYWFhYWEAAIUAAAAUAAdteSBwYXRo"
+    "AQAAACAAAAAAAAAAAAEAAAJoAAAAAAAAAABteV9maWxlhwAAEAAAAAAAAAQAAAAAAAAUAAAAsAAA"
+    "ABQAAADIAAAAYAAAAOAAAACAAAAAQAEAAA8AAAAAAAAAyAAAAAAAAAAFAAAAAAAAAAMAAAAAAAAA"
+    "GAAAAMABAABgTEpMfwEAAAsAAAAAAAAAAQIEAAAAAIMBAAAAAAAAACAAAADYAQAAGQAAAPgBAAAM"
+    "AAAAAAAAACgAAAAYAgAAKAAAAEACAAAAAAABAAAAAAAAAABtaW5fa2V5hwAAAAAAAAABAAAAAAAA"
+    "AABtYXhfa2V5hwAAAAAAAAAAAAAAABQAAAAgAAAAFAAAADgAAAAQAAAAUAAAAAAAAAEAAAAAAAAA"
+    "AG1pbl9rZXmHAAAAAAAAAAEAAAAAAAAAAG1heF9rZXmHAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAACQAAAAgAAAAJAAAAEgAAAAQAAAAcAAAAAAAAAEAAAAAAAAAAAkAAAAQAAAAbWluX3ZhbHVl"
+    "AAAAAAAAAAAAAAAAAAABAAAAAAAAAAAJAAAAEAAAAG1heF92YWx1ZQAAAAAAAAAAAAAAAQAAAAAA"
+    "AAAAAAAAAAAAAAIAAAAAAAAAZXh0cmExAIZleHRyYTIAhgMAAAAAAAAAZmllbGQxAIZmaWVsZDIA"
+    "hmZpZWxkMwCGaGRmczovLy9wYXRoL3RvL3dhcmVob3VzZQAAAAAAAAAEAAAAAAAAAGEAAAAAAACB"
+    "YgAAAAAAAIFjAAAAAAAAgWYAAAAAAACBBAAAAAAAAAAPAAAAAAAAAGQAAAAAAAAAlgAAAAAAAADI"
+    "AAAAAAAAAAEAAAABAQANZGVsZXRpb25fZmlsZQAAAAAAAABkAAAAAAAAABYAAAAAAAAAIQAA"
 )
 
 
@@ -105,6 +127,19 @@ class SplitSerializerTest(unittest.TestCase):
         self.assertEqual(
             (dv.dv_index_path, dv.offset, dv.length, dv.cardinality),
             ('dv/file-b', 2, 10, 3))
+
+    def test_streaming_java_flag_survives_decoding_and_selection(self):
+        data = bytearray(_GOLDEN_DATA_SPLIT_V1)
+        data[-2] = 1
+        split = deserialize_split_v1(bytes(data), self._partition_fields())
+        self.assertTrue(split.is_streaming)
+        selected = split.filter_file(lambda file: file.file_name == 'file-b')
+        self.assertTrue(selected.is_streaming)
+        self.assertEqual(selected.snapshot_id, split.snapshot_id)
+        indexed = IndexedSplit(selected, [])
+        self.assertTrue(indexed.is_streaming)
+        self.assertFalse(deserialize_split_v1(
+            _GOLDEN_DATA_SPLIT_V1, self._partition_fields()).is_streaming)
 
     def test_decodes_min_max_keys_with_key_fields(self):
         # Trimmed primary keys -> per-file min/max keys are decoded for PK
@@ -138,6 +173,137 @@ class SplitSerializerTest(unittest.TestCase):
         self.assertEqual(
             _decode_modified_utf8(bytes([0xED, 0xA0, 0xBD, 0xED, 0xB8, 0x80])),
             '\U0001F600')
+
+    def test_deserialize_v9_data_and_indexed_splits(self):
+        fields = [DataField(0, 's', AtomicType('STRING'))]
+        for indexed in (False, True):
+            with self.subTest(indexed=indexed):
+                if indexed:
+                    data = (_GOLDEN_INDEXED_SPLIT_V1[:28] + _GOLDEN_DATA_SPLIT_V9
+                            + struct.pack('>iqqBif', 1, 13, 14, 1, 1, 0.75))
+                else:
+                    data = _GOLDEN_DATA_SPLIT_V1[:16] + _GOLDEN_DATA_SPLIT_V9
+                split = deserialize_split_v1(data, fields, fields)
+                self.assertEqual(split.snapshot_id, 18)
+                self.assertEqual(list(split.partition.values), ['aaaaa'])
+                self.assertEqual(split.bucket, 20)
+                self.assertFalse(split.raw_convertible)
+                self.assertEqual(len(split.files), 1)
+                file = split.files[0]
+                self.assertEqual(file.file_name, 'my_file')
+                self.assertEqual(file.file_path, 'hdfs:///path/to/warehouse')
+                self.assertEqual((file.file_size, file.row_count), (1024 * 1024, 1024))
+                self.assertEqual(list(file.min_key.values), ['min_key'])
+                self.assertEqual(list(file.max_key.values), ['max_key'])
+                self.assertEqual((file.min_sequence_number, file.max_sequence_number), (15, 200))
+                self.assertEqual((file.schema_id, file.level), (5, 3))
+                self.assertEqual(file.extra_files, ['extra1', 'extra2'])
+                self.assertEqual(file.embedded_index, bytes([1, 2, 4]))
+                self.assertEqual(file.value_stats_cols, ['field1', 'field2', 'field3'])
+                self.assertEqual(file.first_row_id, 12)
+                self.assertEqual(file.write_cols, ['a', 'b', 'c', 'f'])
+                self.assertEqual(
+                    file.write_cols_sequences, [15, 100, 150, 200])
+                self.assertEqual(len(split.data_deletion_files), 1)
+                dv = split.data_deletion_files[0]
+                self.assertEqual(
+                    (dv.dv_index_path, dv.offset, dv.length, dv.cardinality),
+                    ('deletion_file', 100, 22, 33))
+                if indexed:
+                    self.assertEqual([(r.from_, r.to) for r in split.row_ranges()], [(13, 14)])
+                    self.assertEqual(split.scores(), [0.75])
+
+    def test_v9_roundtrip_is_byte_compatible_with_java(self):
+        fields = [DataField(0, 's', AtomicType('STRING'))]
+        frame = _GOLDEN_DATA_SPLIT_V1[:16] + _GOLDEN_DATA_SPLIT_V9
+
+        split = deserialize_split_v1(frame, fields, fields)
+
+        self.assertEqual(serialize_split_v1(split), frame)
+
+    def test_v8_is_upgraded_to_v9_without_losing_reader_metadata(self):
+        fields = self._partition_fields()
+        split = deserialize_split_v1(_GOLDEN_DATA_SPLIT_V1, fields)
+
+        upgraded = deserialize_split_v1(serialize_split_v1(split), fields)
+
+        self.assertEqual(upgraded.snapshot_id, split.snapshot_id)
+        self.assertEqual(upgraded.bucket_path, split.bucket_path)
+        self.assertEqual(upgraded.total_buckets, split.total_buckets)
+        self.assertEqual(
+            [file.file_path for file in upgraded.files],
+            [file.file_path for file in split.files])
+        self.assertEqual(
+            [file.max_sequence_number for file in upgraded.files], [100, 200])
+        self.assertEqual(
+            upgraded.files[0].key_stats.null_counts,
+            split.files[0].key_stats.null_counts)
+
+    def test_indexed_roundtrip_preserves_or_strips_scores_explicitly(self):
+        fields = self._partition_fields()
+        split = deserialize_split_v1(_GOLDEN_INDEXED_SPLIT_V1, fields)
+
+        with_scores = deserialize_split_v1(
+            serialize_split_v1(split), fields)
+        without_scores = deserialize_split_v1(
+            serialize_split_v1(split, include_scores=False), fields)
+
+        self.assertEqual(with_scores.scores(), [0.5, 0.25, 0.125])
+        self.assertIsNone(without_scores.scores())
+        self.assertEqual(
+            [(r.from_, r.to) for r in without_scores.row_ranges()],
+            [(1, 4), (11, 13)])
+
+    def test_disjoint_file_paths_use_per_file_external_paths(self):
+        fields = self._partition_fields()
+        split = deserialize_split_v1(_GOLDEN_DATA_SPLIT_V1, fields)
+        split.bucket_path = None
+        split.files[0].file_path = 's3://bucket-a/data/file-a'
+        split.files[1].file_path = 's3://bucket-b/data/file-b'
+
+        restored = deserialize_split_v1(serialize_split_v1(split), fields)
+
+        self.assertEqual(restored.bucket_path, '')
+        self.assertEqual(
+            [file.external_path for file in restored.files],
+            ['s3://bucket-a/data/file-a', 's3://bucket-b/data/file-b'])
+        self.assertEqual(
+            [file.file_path for file in restored.files],
+            ['s3://bucket-a/data/file-a', 's3://bucket-b/data/file-b'])
+
+    def test_modified_utf8_roundtrip_nul_bmp_and_supplementary(self):
+        value = 'a\x00\u07ff\u0800\U0001f600'
+        self.assertEqual(
+            _decode_modified_utf8(_encode_modified_utf8(value)), value)
+
+    def test_modified_utf8_roundtrip_unpaired_surrogates(self):
+        value = '\ud800x\udc00'
+        self.assertEqual(
+            _decode_modified_utf8(_encode_modified_utf8(value)), value)
+
+    def test_modified_utf8_rejects_oversized_value(self):
+        with self.assertRaisesRegex(ValueError, 'too long'):
+            _encode_modified_utf8('\u0800' * 21846)
+
+    def test_serializer_rejects_mismatched_deletion_files(self):
+        split = deserialize_split_v1(
+            _GOLDEN_DATA_SPLIT_V1, self._partition_fields())
+        split.data_deletion_files = [None]
+        with self.assertRaisesRegex(ValueError, 'does not match'):
+            serialize_split_v1(split)
+
+    def test_deserializer_rejects_trailing_bytes(self):
+        with self.assertRaisesRegex(ValueError, 'trailing bytes'):
+            deserialize_split_v1(
+                _GOLDEN_DATA_SPLIT_V1 + b'junk', self._partition_fields())
+
+    def test_unsupported_data_split_version_raises(self):
+        for version in (7, 10):
+            with self.subTest(version=version):
+                data = (_GOLDEN_DATA_SPLIT_V1[:24] + struct.pack('>i', version)
+                        + _GOLDEN_DATA_SPLIT_V1[28:])
+                with self.assertRaisesRegex(ValueError, 'unsupported DataSplit version'):
+                    deserialize_split_v1(data, self._partition_fields())
 
     def test_decode_str_array_inline_and_pointer(self):
         # Covers both element encodings: inline (<=7 bytes) and var pointer (>7).

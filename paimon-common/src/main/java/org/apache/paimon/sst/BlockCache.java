@@ -23,17 +23,14 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadable;
 import org.apache.paimon.io.cache.CacheKey;
 import org.apache.paimon.io.cache.CacheManager;
-import org.apache.paimon.io.cache.CacheManager.SegmentContainer;
 import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.utils.ExceptionUtils;
+import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.utils.IOUtils;
+
+import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
 /** Cache for block reading. */
@@ -42,13 +39,11 @@ public class BlockCache implements Closeable {
     private final Path filePath;
     private final SeekableInputStream input;
     private final CacheManager cacheManager;
-    private final Map<CacheKey, SegmentContainer> blocks;
 
     public BlockCache(Path filePath, SeekableInputStream input, CacheManager cacheManager) {
         this.filePath = filePath;
         this.input = input;
         this.cacheManager = cacheManager;
-        this.blocks = new ConcurrentHashMap<>();
     }
 
     private byte[] readFrom(long offset, int length) throws IOException {
@@ -68,51 +63,41 @@ public class BlockCache implements Closeable {
             long position, int length, Function<byte[], byte[]> decompressFunc, boolean isIndex) {
         CacheKey cacheKey = CacheKey.forPosition(filePath, position, length, isIndex);
 
-        SegmentContainer container = blocks.get(cacheKey);
-        if (container == null || container.getAccessCount() == CacheManager.REFRESH_COUNT) {
-            MemorySegment segment =
-                    cacheManager.getPage(
-                            cacheKey,
-                            key -> {
-                                byte[] bytes = readFrom(position, length);
-                                return decompressFunc.apply(bytes);
-                            },
-                            blocks::remove);
-            container = new SegmentContainer(segment);
-            blocks.put(cacheKey, container);
+        // Construct the capturing loader only on misses; hits use the shared cache directly.
+        MemorySegment cached = cacheManager.getPageIfPresent(cacheKey);
+        if (cached != null) {
+            return cached;
         }
-        return container.access();
+        return cacheManager.getPage(
+                cacheKey,
+                key -> {
+                    byte[] bytes = readFrom(position, length);
+                    return decompressFunc.apply(bytes);
+                });
+    }
+
+    /** Returns a decoded block if resident, without reading the file. */
+    @Nullable
+    public MemorySlice getBlockSliceIfPresent(long position, int length, boolean isIndex) {
+        return cacheManager.getPageSliceIfPresent(
+                CacheKey.forPosition(filePath, position, length, isIndex));
+    }
+
+    /**
+     * Reads and caches a decoded block without copying an uncompressed payload out of its buffer.
+     */
+    public MemorySlice getBlockSlice(
+            long position, int length, Function<byte[], MemorySlice> decoder, boolean isIndex) {
+        CacheKey cacheKey = CacheKey.forPosition(filePath, position, length, isIndex);
+        MemorySlice cached = cacheManager.getPageSliceIfPresent(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        return cacheManager.getPageSlice(cacheKey, key -> readFrom(position, length), decoder);
     }
 
     @Override
     public void close() throws IOException {
-        // Every page has to be handed back to the shared cache manager. Stopping at the first
-        // failure would leave the rest of this file's pages resident in a cache that is shared
-        // across readers, with nothing left holding a reference to invalidate them later.
-        Set<CacheKey> sets = new HashSet<>(blocks.keySet());
-        Throwable collected = null;
-        for (CacheKey key : sets) {
-            try {
-                cacheManager.invalidPage(key);
-            } catch (Throwable t) {
-                collected = ExceptionUtils.firstOrSuppressed(t, collected);
-            }
-        }
-        if (collected != null) {
-            rethrowAsIOException(collected);
-        }
-    }
-
-    private static void rethrowAsIOException(Throwable failure) throws IOException {
-        if (failure instanceof IOException) {
-            throw (IOException) failure;
-        }
-        if (failure instanceof Error) {
-            throw (Error) failure;
-        }
-        if (failure instanceof RuntimeException) {
-            throw (RuntimeException) failure;
-        }
-        throw new IOException(failure);
+        cacheManager.invalidFile(filePath);
     }
 }

@@ -1,10 +1,7 @@
 ---
-title: "Upsert To Partitioned"
-sidebar_position: 1
+title: "Expose Tags as Hive Partitions"
+sidebar_position: 3
 ---
-
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
 
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -25,169 +22,182 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Upsert To Partitioned
+# Expose Tags as Hive Partitions {#upsert-to-partitioned}
 
-:::warning
+Keep a non-partitioned Paimon primary-key table updated from an upstream database, while
+letting Hive batch jobs read historical views using a partition filter such as
+`WHERE dt = '2023-10-16'`.
 
-__Note:__ Only Hive Engine can be used to query these upsert-to-partitioned tables.
+Set `metastore.tag-to-partition` to the Hive partition field name. Paimon exposes tag names
+as partition values in the Hive metastore. Each partition reads a full table view at the tag's
+snapshot; it does not contain only the rows changed on that date.
+
+![Paimon snapshots become fixed tags exposed as Hive dt partitions; a preview partition reads an eligible snapshot until a real tag exists.](/img/migration-tag-to-partition.svg)
+
+:::note Query engine
+
+The partition view described here is for the Hive engine and requires the
+[Paimon Hive connector](../ecosystem/hive). Continue writing the underlying Paimon table with
+Flink. The Hive partition field is a metadata mapping; do not add it as a physical partition
+column to the Paimon table.
 
 :::
 
-The [Tag Management](../maintenance/manage-tags) will maintain the manifests and data files of the snapshot.
-A typical usage is creating tags daily, then you can maintain the historical data of each day for batch reading.
+## Choose a View
 
-When using primary key tables, a non-partitioned approach is often used to maintain updates, in order to mirror and
-synchronize tables from upstream database tables. This allows users to query the latest data. The tradition of Hive
-data warehouses is not like this. Offline data warehouses require an immutable view every day to ensure the idempotence
-of calculations. So we created a Tag mechanism to output these views.
+| View | Configuration | What Hive reads |
+| --- | --- | --- |
+| Created tag | `metastore.tag-to-partition = dt` | The snapshot referenced by the named tag. Later upserts do not change that snapshot. |
+| Preview before tag creation | Also set `metastore.tag-to-partition.preview = process-time` | The latest eligible retained snapshot for the requested period. Results can change as new snapshots arrive. |
 
-However, the traditional use of Hive data warehouses is more accustomed to using partitions to specify the query's Tag,
-and is more accustomed to using Hive computing engines.
-
-So, we introduce `'metastore.tag-to-partition'` and `'metastore.tag-to-partition.preview'` to mapping a non-partitioned
-primary key table to the partition table in Hive metastore, and mapping the partition field to the name of the Tag to be
-fully compatible with Hive.
+Tags retain the manifests and files needed to read their snapshots. Preview alone does not
+provide that retention. Use [tag creation and retention](../maintenance/manage-tags) for
+reproducible historical reads.
 
 ## Example for Tag to Partition
 
-**Step 1: Create table and tag in Flink SQL**
+### 1. Create the Paimon Table in Flink
 
-<Tabs groupId="create-table-and-tag-in-flink-sql-1">
-
-<TabItem value="flink" label="Flink">
+Configure a Hive catalog and create a non-partitioned table with an explicit primary key.
+Use a new table for this example.
 
 ```sql
 CREATE CATALOG my_hive WITH (
     'type' = 'paimon',
     'metastore' = 'hive',
-    -- 'uri' = 'thrift://<hive-metastore-host-name>:<port>', default use 'hive.metastore.uris' in HiveConf
-    -- 'hive-conf-dir' = '...', this is recommended in the kerberos environment
-    -- 'hadoop-conf-dir' = '...', this is recommended in the kerberos environment
-    -- 'warehouse' = 'hdfs:///path/to/table/store/warehouse', default use 'hive.metastore.warehouse.dir' in HiveConf
+    'uri' = 'thrift://localhost:9083',
+    'warehouse' = 'hdfs:///warehouse'
 );
 
 USE CATALOG my_hive;
+CREATE DATABASE IF NOT EXISTS mydb;
+
+SET 'execution.runtime-mode' = 'batch';
+SET 'table.dml-sync' = 'true';
 
 CREATE TABLE mydb.t (
     pk INT,
     col1 STRING,
-    col2 STRING
+    col2 STRING,
+    PRIMARY KEY (pk) NOT ENFORCED
 ) WITH (
-    'bucket' = '-1',
+    'bucket' = '2',
     'metastore.tag-to-partition' = 'dt'
 );
 
-INSERT INTO t VALUES (1, '10', '100'), (2, '20', '200');
+INSERT INTO mydb.t VALUES (1, '10', '100'), (2, '20', '200');
 
--- create tag '2023-10-16' for snapshot 1
-CALL sys.create_tag('mydb.t', '2023-10-16', 1);
+-- Pin the latest committed snapshot. This tag name is a label chosen for the example.
+CALL sys.create_tag('mydb.t', '2023-10-16');
 ```
 
-</TabItem>
+Wait for the insert to finish before creating a tag. Here, `table.dml-sync` makes the SQL
+client wait for each insert; omitting the snapshot argument selects the latest snapshot.
 
-</Tabs>
+### 2. Read the Tag in Hive
 
-**Step 2: Query table in Hive with Partition Pruning**
-
-<Tabs groupId="query-table-in-hive-with-partition-pruning-1">
-
-<TabItem value="hive" label="Hive">
+Connect Hive to the same metastore, with the Paimon Hive connector installed:
 
 ```sql
-SHOW PARTITIONS t;
-/*
-OK
-dt=2023-10-16
-*/
+SHOW PARTITIONS mydb.t;
+-- dt=2023-10-16
 
-SELECT * FROM t WHERE dt='2023-10-16';
-/*
-OK
-1 10 100 2023-10-16
-2 20 200 2023-10-16
-*/
+SELECT * FROM mydb.t WHERE dt = '2023-10-16' ORDER BY pk;
+-- pk  col1  col2  dt
+-- 1   10    100   2023-10-16
+-- 2   20    200   2023-10-16
 ```
 
-</TabItem>
+### 3. Upsert and Create Another View
 
-</Tabs>
+Back in the same Flink session, update an existing key and insert a new key:
+
+```sql
+INSERT INTO mydb.t VALUES (1, '11', '110'), (3, '30', '300');
+CALL sys.create_tag('mydb.t', '2023-10-17');
+```
+
+In Hive, the earlier tag still returns the original value for key `1`. The new tag returns
+the updated value and all rows present at the new snapshot, including unchanged key `2`:
+
+```sql
+SELECT * FROM mydb.t WHERE dt = '2023-10-16' ORDER BY pk;
+-- 1   10    100   2023-10-16
+-- 2   20    200   2023-10-16
+
+SELECT * FROM mydb.t WHERE dt = '2023-10-17' ORDER BY pk;
+-- 1   11    110   2023-10-17
+-- 2   20    200   2023-10-17
+-- 3   30    300   2023-10-17
+```
+
+Always select the tag you intend to read. A query across multiple tag partitions can return
+multiple historical versions of the same primary key.
 
 ## Example for Tag Preview
 
-The above example can only query tags that have already been created, but Paimon is a real-time data lake, and you also
-need to query the latest data. Therefore, Paimon provides a preview feature:
+Preview exposes a period before a tag has been created for it. Use it when Hive readers need
+to see data still arriving during that period.
 
-**Step 1: Create table and tag in Flink SQL**
+### 1. Enable Preview in Flink
 
-<Tabs groupId="create-table-and-tag-in-flink-sql-2">
-
-<TabItem value="flink" label="Flink">
+Using the catalog and database above, create a separate example table:
 
 ```sql
-CREATE CATALOG my_hive WITH (
-    'type' = 'paimon',
-    'metastore' = 'hive',
-    -- 'uri' = 'thrift://<hive-metastore-host-name>:<port>', default use 'hive.metastore.uris' in HiveConf
-    -- 'hive-conf-dir' = '...', this is recommended in the kerberos environment
-    -- 'hadoop-conf-dir' = '...', this is recommended in the kerberos environment
-    -- 'warehouse' = 'hdfs:///path/to/table/store/warehouse', default use 'hive.metastore.warehouse.dir' in HiveConf
-);
-
-USE CATALOG my_hive;
-
-CREATE TABLE mydb.t (
+CREATE TABLE mydb.t_preview (
     pk INT,
     col1 STRING,
-    col2 STRING
+    col2 STRING,
+    PRIMARY KEY (pk) NOT ENFORCED
 ) WITH (
-    'bucket' = '-1',
+    'bucket' = '2',
     'metastore.tag-to-partition' = 'dt',
-    -- preview tag creation mode process-time
-    -- paimon will create partitions early based on process-time
-    'metastore.tag-to-partition.preview' = 'process-time'
+    'metastore.tag-to-partition.preview' = 'process-time',
+    'tag.creation-period' = 'daily'
 );
 
-INSERT INTO t VALUES (1, '10', '100'), (2, '20', '200');
-
--- create tag '2023-10-16' for snapshot 1
-CALL sys.create_tag('mydb.t', '2023-10-16', 1);
-
--- new data in '2023-10-17'
-INSERT INTO t VALUES (3, '30', '300'), (4, '40', '400');
-
--- haven't finished writing the data for '2023-10-17' yet, so there's no need to create a tag for now
--- but the data is already visible for Hive
+INSERT INTO mydb.t_preview VALUES (1, '10', '100'), (2, '20', '200');
 ```
 
-</TabItem>
+After a commit, Paimon registers a preview partition based on processing time and the tag
+creation period. Its actual value depends on when the job runs and the configured
+`sink.process-time-zone`; inserting example data does not create a historical date partition.
 
-</Tabs>
-
-**Step 2: Query table in Hive with Partition Pruning**
-
-<Tabs groupId="query-table-in-hive-with-partition-pruning-2">
-
-<TabItem value="hive" label="Hive">
+### 2. Discover and Query the Preview in Hive
 
 ```sql
-SHOW PARTITIONS t;
-/*
-OK
-dt=2023-10-16
-dt=2023-10-17
-*/
-
-SELECT * FROM t WHERE dt='2023-10-17';
--- preview tag '2023-10-17'
-/*
-OK
-1 10 100 2023-10-17
-2 20 200 2023-10-17
-3 30 300 2023-10-17
-4 40 400 2023-10-17
-*/
+SHOW PARTITIONS mydb.t_preview;
 ```
 
-</TabItem>
+Copy the partition value returned by `SHOW PARTITIONS` into the predicate below, replacing
+`<preview-partition>`:
 
-</Tabs>
+```sql
+SELECT * FROM mydb.t_preview
+WHERE dt = '<preview-partition>'
+ORDER BY pk;
+```
+
+Without a real tag of that name, Hive resolves the preview to the latest available snapshot
+whose period is no later than the requested period, or an eligible retained tag if needed.
+It fails if no suitable snapshot or tag remains. Further commits in the same period can
+change the result. Once a tag with that name exists, reads use the tag's snapshot.
+
+## Retain Historical Views
+
+Preview does not create permanent tags. To generate daily tags while keeping the current
+period visible, configure the writing job with matching creation and preview modes:
+
+```sql
+-- Table options for a continuously written table
+'metastore.tag-to-partition' = 'dt',
+'metastore.tag-to-partition.preview' = 'process-time',
+'tag.automatic-creation' = 'process-time',
+'tag.creation-period' = 'daily',
+'tag.num-retained-max' = '90'
+```
+
+Apply these as table options when creating the table, or through `ALTER TABLE` before starting
+the writer. Choose retention for your batch workloads. Removing a tag also removes its Hive
+partition; do not expire tags still needed by downstream jobs. See
+[Manage Tags](../maintenance/manage-tags) for automatic creation, delay, and retention options.

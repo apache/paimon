@@ -31,6 +31,7 @@ from pypaimon.catalog.catalog_exception import (
     TableNotExistException
 )
 from pypaimon.catalog.database import Database
+from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options.config import CatalogOptions, JdbcCatalogOptions
@@ -38,8 +39,10 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
+from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
+from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.table import Table
 
@@ -314,7 +317,8 @@ class JdbcCatalog(Catalog):
         properties.pop(self.DATABASE_EXISTS_PROPERTY, None)
         return Database(name, properties)
 
-    def create_database(self, name: str, ignore_if_exists: bool, properties: Optional[dict] = None):
+    def create_database(self, name: str, ignore_if_exists: bool,
+                        properties: Optional[Dict[str, str]] = None) -> None:
         if self._database_exists(name):
             if not ignore_if_exists:
                 raise DatabaseAlreadyExistException(name)
@@ -327,7 +331,7 @@ class JdbcCatalog(Catalog):
         with self.connection.transaction():
             self._insert_database_properties(name, create_props)
 
-    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False) -> None:
         if not self._database_exists(name):
             if not ignore_if_not_exists:
                 raise DatabaseNotExistException(name)
@@ -352,9 +356,8 @@ class JdbcCatalog(Catalog):
                 (self.catalog_key, name)
             )
 
-    def alter_database(self, name: str, changes: list):
+    def alter_database(self, name: str, changes: List[PropertyChange]) -> None:
         self.get_database(name)
-        from pypaimon.catalog.rest.property_change import PropertyChange
         set_properties, remove_keys = PropertyChange.get_set_properties_to_remove_keys(changes)
         current = self._fetch_database_properties(name)
         with self.connection.transaction():
@@ -407,7 +410,7 @@ class JdbcCatalog(Catalog):
         )
         return FileStoreTable(self.file_io, identifier, table_path, table_schema, catalog_environment)
 
-    def create_table(self, identifier: Union[str, Identifier], schema: 'Schema', ignore_if_exists: bool):
+    def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool) -> None:
         if schema.options and schema.options.get(CoreOptions.AUTO_CREATE.key()):
             raise ValueError(f"The value of {CoreOptions.AUTO_CREATE.key()} property should be False.")
         if not isinstance(identifier, Identifier):
@@ -436,7 +439,7 @@ class JdbcCatalog(Catalog):
             self.file_io.delete_directory_quietly(table_path)
             raise
 
-    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
+    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         if not self._table_exists(identifier):
@@ -455,7 +458,8 @@ class JdbcCatalog(Catalog):
             )
         self.file_io.delete_directory_quietly(table_path)
 
-    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+    def rename_table(self, source_identifier: Union[str, Identifier],
+                     target_identifier: Union[str, Identifier]) -> None:
         if not isinstance(source_identifier, Identifier):
             source_identifier = Identifier.from_string(source_identifier)
         if not isinstance(target_identifier, Identifier):
@@ -506,7 +510,7 @@ class JdbcCatalog(Catalog):
         identifier: Union[str, Identifier],
         changes: List[SchemaChange],
         ignore_if_not_exists: bool = False
-    ):
+    ) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         if not self._table_exists(identifier):
@@ -524,7 +528,7 @@ class JdbcCatalog(Catalog):
                 )
                 self._insert_table_properties(identifier, self._collect_table_properties(table_schema))
 
-    def get_table_schema(self, identifier: Identifier):
+    def get_table_schema(self, identifier: Identifier) -> TableSchema:
         table_schema = SchemaManager(self.file_io, self.get_table_path(identifier)).latest()
         if table_schema is None:
             raise TableNotExistException(identifier)
@@ -538,7 +542,7 @@ class JdbcCatalog(Catalog):
         db_path = self.get_database_path(identifier.get_database_name())
         return f"{db_path}/{identifier.get_table_name()}"
 
-    def load_snapshot(self, identifier: Identifier):
+    def load_snapshot(self, identifier: Identifier) -> Optional[TableSnapshot]:
         raise NotImplementedError("JDBC catalog does not support load_snapshot")
 
     def commit_snapshot(

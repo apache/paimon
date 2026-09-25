@@ -52,6 +52,9 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         case o @ PaimonDynamicPartitionOverwrite(r, d) if o.resolved =>
           PaimonDynamicPartitionOverwriteCommand(r, d, o.query, o.writeOptions, o.isByName)
 
+        case a: V2WriteCommand if PaimonFormatOutputResolver.isLegacyFormatWrite(a) =>
+          PaimonFormatOutputResolver.resolve(a)
+
         case a @ PaimonV2WriteCommand(table)
             if a.query.getTagValue(PAIMON_WRITE_RESOLVED).isEmpty =>
           val options = Options.fromMap(writeOptions(a).asJava)
@@ -81,6 +84,12 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         d
 
       case SetTableLocation(ResolvedTable(_, _, _: SparkTable, _), _, _) =>
+        throw new UnsupportedOperationException(
+          "ALTER TABLE ... SET LOCATION is not supported for Paimon tables.")
+
+      // Only the table-level form. Spark's own analyzer already rejects the partition form with a
+      // structured AnalysisException, and replacing it here would be a worse error.
+      case SetTableLocation(ResolvedTable(_, _, _: PaimonFormatTable, _), None, _) =>
         throw new UnsupportedOperationException(
           "ALTER TABLE ... SET LOCATION is not supported for Paimon tables.")
 

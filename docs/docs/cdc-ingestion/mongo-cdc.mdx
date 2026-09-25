@@ -1,0 +1,252 @@
+---
+title: "MongoDB CDC"
+sidebar_position: 4
+---
+
+import ConfigTable from '@site/src/components/ConfigTable';
+import mongodbSyncTableHtml from '@site/generated/mongodb_sync_table.html';
+import mongodbOperatorHtml from '@site/generated/mongodb_operator.html';
+import mongodbFunctionsHtml from '@site/generated/mongodb_functions.html';
+import mongodbPathExampleHtml from '@site/generated/mongodb_path_example.html';
+import mongodbSyncDatabaseHtml from '@site/generated/mongodb_sync_database.html';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# MongoDB CDC {#mongo-cdc}
+
+Synchronize one MongoDB collection into a Paimon table, or selected collections into a Paimon database.
+
+See [CDC Action Configuration](./action-configuration) for command syntax, computed columns, and job settings,
+and [Schema Evolution and Type Mapping](./schema-evolution) for shared behavior.
+
+## Prerequisites {#prepare-mongodb-bundled-jar}
+
+Place these dependencies in `<FLINK_HOME>/lib/` alongside the Paimon Flink bundled jar.
+The dependency baseline for this Paimon version is Flink CDC **3.5.0**.
+
+- [flink-sql-connector-mongodb-cdc-3.5.0.jar](https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-mongodb-cdc/3.5.0/flink-sql-connector-mongodb-cdc-3.5.0.jar)
+
+## Synchronizing Tables
+
+By using [MongoDBSyncTableAction](https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/cdc/mongodb/MongoDBSyncTableAction.html) in a Flink DataStream job or directly through `flink run`, users can synchronize one collection from MongoDB into one Paimon table.
+
+### Schema and Document Identity
+
+Source fields are mapped to `STRING`; computed columns use the result type of their function.
+The action uses `_id` to identify records. Updates carry the resulting document, while delete
+events may contain only the document identity, so other document fields cannot replace `_id`
+as the record key.
+
+| `--mongodb_conf` option | Behavior |
+| --- | --- |
+| `schema.start.mode=dynamic` (default) | Infer the initial fields from the first document in the collection. The collection must contain a document when starting the table action. Add new top-level fields as they appear; nested values remain within their source fields. |
+| `schema.start.mode=specified` | Select fields with `field.name` and corresponding JSONPath expressions with `parser.path`. Include `_id` and provide one path per field, in the same order. |
+| `default.id.generation=true` | Unwrap the `$oid` representation of `_id`. Set to `false` to retain its original structure. |
+
+If the Paimon table you specify does not exist, this action will automatically create the table. Its schema will be derived from MongoDB collection.
+
+### Example 1: synchronize collection into one Paimon table
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    mongodb_sync_table \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --table test_table \
+    --mongodb_conf hosts=127.0.0.1:27017 \
+    --mongodb_conf username=root \
+    --mongodb_conf password=123456 \
+    --mongodb_conf database=source_db \
+    --mongodb_conf collection=source_table1 \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
+```
+
+### Example 2: Synchronize collection into a Paimon table according to the specified field mapping.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    mongodb_sync_table \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --table test_table \
+    --mongodb_conf hosts=127.0.0.1:27017 \
+    --mongodb_conf username=root \
+    --mongodb_conf password=123456 \
+    --mongodb_conf database=source_db \
+    --mongodb_conf collection=source_table1 \
+    --mongodb_conf schema.start.mode=specified \
+    --mongodb_conf field.name=_id,name,description \
+    --mongodb_conf 'parser.path=$._id,$.name,$.description' \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
+```
+
+### Table Action Reference
+
+Command syntax (square brackets indicate optional arguments):
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    mongodb_sync_table \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <table-name> \
+    [--partition_keys <partition_keys>] \
+    [--computed_column <'column-name=expr-name(args[, ...])'> [--computed_column ...]] \
+    [--mongodb_conf <mongodb-cdc-source-conf> [--mongodb_conf <mongodb-cdc-source-conf> ...]] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
+    [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
+```
+
+<ConfigTable html={mongodbSyncTableHtml} />
+
+## Synchronizing Databases
+
+By using [MongoDBSyncDatabaseAction](https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/cdc/mongodb/MongoDBSyncDatabaseAction.html) in a Flink DataStream job or directly through `flink run`, users can synchronize the whole MongoDB database into one Paimon database.
+
+Each collection maps to its own target table, with `_id` as the source primary key. The action
+creates missing tables from the corresponding collection's events and evolves existing schemas.
+New collections that match the configured filters can be included while the job runs.
+
+### Example 1: synchronize entire database
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    mongodb_sync_database \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --mongodb_conf hosts=127.0.0.1:27017 \
+    --mongodb_conf username=root \
+    --mongodb_conf password=123456 \
+    --mongodb_conf database=source_db \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
+```
+
+### Example 2: synchronize selected collections
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    mongodb_sync_database \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --mongodb_conf hosts=127.0.0.1:27017 \
+    --mongodb_conf username=root \
+    --mongodb_conf password=123456 \
+    --mongodb_conf database=source_db \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --including_tables 'product|user|address|order|custom'
+```
+
+### Database Action Reference
+
+Command syntax (square brackets indicate optional arguments):
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    mongodb_sync_database \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    [--table_prefix <paimon-table-prefix>] \
+    [--table_suffix <paimon-table-suffix>] \
+    [--including_tables <mongodb-table-name|name-regular-expr>] \
+    [--excluding_tables <mongodb-table-name|name-regular-expr>] \
+    [--partition_keys <partition_keys>] \
+    [--primary_keys <primary-keys>] \
+    [--mongodb_conf <mongodb-cdc-source-conf> [--mongodb_conf <mongodb-cdc-source-conf> ...]] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
+    [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
+```
+
+<ConfigTable html={mongodbSyncDatabaseHtml} />
+
+## JSONPath Reference
+
+### Operators
+
+<ConfigTable html={mongodbOperatorHtml} />
+
+### Functions
+
+A function at the end of a path receives the result of that path expression.
+
+<ConfigTable html={mongodbFunctionsHtml} />
+
+### Path Examples
+
+```json
+{
+    "store": {
+        "book": [
+            {
+                "category": "reference",
+                "author": "Nigel Rees",
+                "title": "Sayings of the Century",
+                "price": 8.95
+            },
+            {
+                "category": "fiction",
+                "author": "Evelyn Waugh",
+                "title": "Sword of Honour",
+                "price": 12.99
+            },
+            {
+                "category": "fiction",
+                "author": "Herman Melville",
+                "title": "Moby Dick",
+                "isbn": "0-553-21311-3",
+                "price": 8.99
+            },
+            {
+                "category": "fiction",
+                "author": "J. R. R. Tolkien",
+                "title": "The Lord of the Rings",
+                "isbn": "0-395-19395-8",
+                "price": 22.99
+            }
+        ],
+        "bicycle": {
+            "color": "red",
+            "price": 19.95
+        }
+    },
+    "expensive": 10
+}
+```
+
+<ConfigTable html={mongodbPathExampleHtml} />

@@ -23,6 +23,8 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
 
+import java.util.function.BiConsumer;
+
 /** Builder for a Caffeine cache. */
 public class CacheBuilder {
     private MemorySize memorySize;
@@ -37,22 +39,28 @@ public class CacheBuilder {
     }
 
     public Cache build() {
+        return build(
+                (key, value) -> {
+                    if (value != null) {
+                        value.callback.onRemoval(key);
+                    }
+                });
+    }
+
+    Cache build(BiConsumer<CacheKey, Cache.CacheValue> onRemoval) {
         return new CaffeineCache(
                 Caffeine.newBuilder()
                         .weigher(CacheBuilder::weigh)
                         .maximumWeight(memorySize.getBytes())
-                        .removalListener(this::onRemoval)
+                        .removalListener(
+                                (CacheKey key, Cache.CacheValue value, RemovalCause cause) ->
+                                        onRemoval.accept(key, value))
                         .executor(Runnable::run)
                         .build());
     }
 
-    private void onRemoval(CacheKey key, Cache.CacheValue value, RemovalCause cause) {
-        if (value != null) {
-            value.callback.onRemoval(key);
-        }
-    }
-
     private static int weigh(CacheKey cacheKey, Cache.CacheValue cacheValue) {
-        return cacheValue.segment.size();
+        // A slice can exclude a trailer while retaining the complete heap allocation.
+        return cacheValue.slice.segment().size();
     }
 }

@@ -43,6 +43,18 @@ public interface TableRead {
     /** Set {@link MetricRegistry} to table read. */
     TableRead withMetricRegistry(MetricRegistry registry);
 
+    /**
+     * Enable row-level evaluation of the complete configured filter for subsequently created
+     * readers. Without this call, filter pushdown may only prune files or row groups and can return
+     * rows that do not satisfy the filter.
+     *
+     * <p>Fields referenced by the filter are read even if they are absent from the requested read
+     * type. The filter is evaluated before the final output projection, so the returned rows retain
+     * the requested fields and their order. For tables with query authorization, the filter is
+     * evaluated after authorization and column masking.
+     *
+     * @return this read
+     */
     TableRead executeFilter();
 
     TableRead withIOManager(IOManager ioManager);

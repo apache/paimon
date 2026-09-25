@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.options.Options
 import org.apache.paimon.schema.TableSchema
 import org.apache.paimon.spark.{PaimonImplicits, PaimonMicroBatchInputPartition, PaimonMicroBatchMetadata, PaimonPartitionReaderFactory, SparkConnectorOptions}
-import org.apache.paimon.table.DataTable
+import org.apache.paimon.table.{BlobDescriptorReadUtils, DataTable}
 import org.apache.paimon.table.source.{DataSplit, OutOfRangeException, ReadBuilder}
 import org.apache.paimon.utils.DataEvolutionUtils
 
@@ -104,6 +104,13 @@ class PaimonMicroBatchStream(
   }
 
   private lazy val blobAsDescriptor: Boolean = options.get(CoreOptions.BLOB_AS_DESCRIPTOR)
+  private lazy val blobDescriptorFieldIndices =
+    BlobDescriptorReadUtils.blobDescriptorFieldIndices(
+      table,
+      readBuilder.readType(),
+      blobAsDescriptor)
+  private lazy val uriReaderFactory =
+    BlobDescriptorReadUtils.createUriReaderFactory(table, blobDescriptorFieldIndices)
 
   private[spark] lazy val schemaLoader: Function[JLong, TableSchema] = {
     val schemaManager = table.schemaManager()
@@ -127,7 +134,9 @@ class PaimonMicroBatchStream(
   private def normalizeStartOffset(start: Offset): PaimonSourceOffset = {
     val startOffset = PaimonSourceOffset(start)
     val snapshotCompleted = startOffset.snapshotCompleted
-    val resumeSnapshotId = if (snapshotCompleted) {
+    val resumeSnapshotId = if (startOffset.emptySnapshotCompleted) {
+      startOffset.snapshotId
+    } else if (snapshotCompleted) {
       startOffset.snapshotId + 1
     } else {
       startOffset.snapshotId
@@ -199,12 +208,20 @@ class PaimonMicroBatchStream(
       startOffset.json(),
       endOffset.json(),
       admittedSplits.length,
-      () => DataEvolutionUtils.collectWrittenColumnIds(admittedSplitSnapshot, schemaLoader)
+      () =>
+        DataEvolutionUtils.collectWrittenColumnIds(
+          admittedSplitSnapshot,
+          schemaId => schemaLoader.apply(schemaId)
+        )
     )
   }
 
   override def createReaderFactory(): PartitionReaderFactory = {
-    PaimonPartitionReaderFactory(readBuilder, blobAsDescriptor = blobAsDescriptor)
+    PaimonPartitionReaderFactory(
+      readBuilder,
+      blobAsDescriptor = blobAsDescriptor,
+      uriReaderFactory = uriReaderFactory,
+      blobDescriptorFieldIndices = blobDescriptorFieldIndices)
   }
 
   override def initialOffset(): Offset = {
@@ -220,6 +237,8 @@ class PaimonMicroBatchStream(
     consumerId.foreach {
       id =>
         offset.totalSplits match {
+          case Some(0L) if offset.emptySnapshotCompleted =>
+            notifyConsumerCheckpointComplete(offset.snapshotId)
           case Some(totalSplits) if offset.index >= totalSplits =>
             throw new IllegalStateException(
               s"Invalid Paimon source offset $offset: split index must be smaller than " +

@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="662" viewBox="0 0 900 662" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+  <title id="title">One updating table, multiple Hive views</title>
+  <desc id="desc">A non-partitioned Paimon primary-key table exposes tag names as Hive dt partitions. The first tag retains key 1 with value 10 and key 2 with value 20. The second tag retains the update to key 1 with value 11 and the new key 3, as well as unchanged key 2. A preview partition reads an eligible snapshot until a real tag exists; preview results can change.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/>
+    </marker>
+  </defs>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <rect x="1" y="1" width="898" height="660" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+    <text x="28" y="43" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">One updating table, multiple Hive views</text>
+    <text x="28" y="77" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Hive partitions select full table snapshots, not the rows changed that day</text>
+    <rect x="28" y="106" width="844" height="60" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+    <text x="48" y="143" font-size="22" fill="#172b4d" font-weight="700" text-anchor="start">Upserts → non-partitioned Paimon table</text>
+    <text x="848" y="143" font-size="19" fill="#526277" font-weight="400" text-anchor="end">Primary key: pk</text>
+    <text x="28" y="206" font-size="16" fill="#526277" font-weight="700" text-anchor="start">PAIMON SNAPSHOT / TAG</text>
+    <text x="520" y="206" font-size="16" fill="#526277" font-weight="700" text-anchor="start">HIVE PARTITION VIEW</text>
+    <rect x="28" y="226" width="337" height="95" rx="8" fill="#eaf2ff" stroke="#bfd2ed" stroke-width="1.5"/>
+    <text x="44" y="258" font-size="21" fill="#2463b4" font-weight="700" text-anchor="start">Tag: 2023-10-16</text>
+    <text x="44" y="291" font-size="19" fill="#172b4d" font-weight="400" text-anchor="start">pk/value: 1/10, 2/20</text>
+    <path d="M 379 273 H 504" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="520" y="226" width="352" height="95" rx="8" fill="#e8f7f2" stroke="#b8dcd2" stroke-width="1.5"/>
+    <text x="536" y="258" font-size="22" fill="#087f6e" font-weight="700" text-anchor="start">dt=2023-10-16</text>
+    <text x="536" y="291" font-size="19" fill="#172b4d" font-weight="400" text-anchor="start">Fixed at the tagged snapshot</text>
+    <rect x="28" y="350" width="337" height="95" rx="8" fill="#eaf2ff" stroke="#bfd2ed" stroke-width="1.5"/>
+    <text x="44" y="382" font-size="21" fill="#2463b4" font-weight="700" text-anchor="start">Tag: 2023-10-17</text>
+    <text x="44" y="415" font-size="19" fill="#172b4d" font-weight="400" text-anchor="start">pk/value: 1/11, 2/20, 3/30</text>
+    <path d="M 379 397 H 504" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="520" y="350" width="352" height="95" rx="8" fill="#e8f7f2" stroke="#b8dcd2" stroke-width="1.5"/>
+    <text x="536" y="382" font-size="22" fill="#087f6e" font-weight="700" text-anchor="start">dt=2023-10-17</text>
+    <text x="536" y="415" font-size="19" fill="#172b4d" font-weight="400" text-anchor="start">Fixed at the tagged snapshot</text>
+    <rect x="28" y="474" width="337" height="97" rx="8" fill="#fff7e6" stroke="#e4cb92" stroke-width="1.5" stroke-dasharray="7 5"/>
+    <text x="44" y="507" font-size="21" fill="#946200" font-weight="700" text-anchor="start">Eligible retained snapshot</text>
+    <text x="44" y="542" font-size="18" fill="#172b4d" font-weight="400" text-anchor="start">Period based on processing time</text>
+    <path d="M 379 522 H 504" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="7 5"/>
+    <rect x="520" y="474" width="352" height="97" rx="8" fill="#fff7e6" stroke="#e4cb92" stroke-width="1.5" stroke-dasharray="7 5"/>
+    <text x="536" y="507" font-size="22" fill="#946200" font-weight="700" text-anchor="start">Preview partition</text>
+    <text x="536" y="542" font-size="19" fill="#172b4d" font-weight="400" text-anchor="start">Can change until a tag exists</text>
+    <text x="28" y="610" font-size="18" fill="#526277" font-weight="400" text-anchor="start">dt is a Hive metadata field. Paimon data is not physically repartitioned by tag date.</text>
+    <text x="28" y="638" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Create and retain real tags for reproducible history; preview alone does not retain data.</text>
+  </g>
+</svg>

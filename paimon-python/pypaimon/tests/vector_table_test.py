@@ -24,6 +24,7 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.table.row.vector import Vector
 
 
@@ -69,6 +70,12 @@ class VectorClassTest(unittest.TestCase):
         v = Vector([])
         self.assertEqual(len(v), 0)
         self.assertEqual(v.to_list(), [])
+
+    def test_offset_row_legacy_positional_vector_indices(self):
+        row = OffsetRow(([1.0, 2.0],), 0, 1, None, None, {0})
+
+        self.assertEqual(row.get_vector(0).to_list(), [1.0, 2.0])
+        self.assertEqual(row._descriptor_field_indices, frozenset())
 
 
 class VectorFileDetectionTest(unittest.TestCase):
@@ -349,6 +356,7 @@ class VectorTableWriteReadTest(unittest.TestCase):
         opts = {
             'row-tracking.enabled': 'true',
             'data-evolution.enabled': 'true',
+            'data-evolution.write-cols-optimization.enabled': 'true',
             'vector.file.format': 'parquet',
         }
         s = Schema.from_pyarrow_schema(vector_schema, options=opts)
@@ -366,7 +374,21 @@ class VectorTableWriteReadTest(unittest.TestCase):
             },
             schema=vector_schema,
         ))
-        wb.new_commit().commit(w.prepare_commit())
+        initial_messages = w.prepare_commit()
+        initial_files = [
+            file for message in initial_messages for file in message.new_files
+        ]
+        normal_file = next(
+            file for file in initial_files
+            if not DataFileMeta.is_vector_file(file.file_name)
+        )
+        vector_file = next(
+            file for file in initial_files
+            if DataFileMeta.is_vector_file(file.file_name)
+        )
+        self.assertIsNone(normal_file.write_cols)
+        self.assertEqual(['embedding'], vector_file.write_cols)
+        wb.new_commit().commit(initial_messages)
         w.close()
 
         from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER

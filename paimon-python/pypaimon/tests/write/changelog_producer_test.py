@@ -17,14 +17,14 @@
 ################################################################################
 
 import glob
+import json
 import os
 import shutil
 import tempfile
 import unittest
 
 import pyarrow as pa
-
-import json
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -175,6 +175,76 @@ class ChangelogProducerTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
+    def test_input_mode_overwrite_has_no_changelog(self):
+        table_name = 'test_input_overwrite'
+        table = self._create_table(
+            table_name,
+            options={'changelog-producer': 'input', 'bucket': '1'}
+        )
+        append = table.new_batch_write_builder()
+        writer, commit = append.new_write(), append.new_commit()
+        try:
+            writer.write_arrow(self._sample_data())
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+
+        bucket_dir = os.path.join(
+            self.warehouse, 'default.db', table_name, 'dt=p1', 'bucket-0')
+        before_files = set(glob.glob(os.path.join(bucket_dir, 'changelog-*')))
+        self.assertTrue(before_files)
+
+        overwrite = table.new_batch_write_builder().overwrite()
+        writer, commit = overwrite.new_write(), overwrite.new_commit()
+        try:
+            writer.write_arrow(self._sample_data())
+            messages = writer.prepare_commit()
+            self.assertTrue(messages)
+            self.assertTrue(all(not message.changelog_files for message in messages))
+            commit.commit(messages)
+        finally:
+            writer.close()
+            commit.close()
+
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self.assertEqual(snapshot.commit_kind, 'OVERWRITE')
+        self.assertIsNone(snapshot.changelog_manifest_list)
+        self.assertEqual(
+            set(glob.glob(os.path.join(bucket_dir, 'changelog-*'))), before_files)
+
+        append = table.new_batch_write_builder()
+        writer, commit = append.new_write(), append.new_commit()
+        try:
+            writer.write_arrow(self._sample_data())
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+        self.assertIsNotNone(
+            table.snapshot_manager().get_latest_snapshot().changelog_manifest_list)
+
+    def test_overwrite_commit_discards_supplied_changelog(self):
+        table = self._create_table(
+            'test_overwrite_supplied_changelog',
+            options={'changelog-producer': 'input', 'bucket': '1'}
+        )
+        writer_builder = table.new_batch_write_builder()
+        writer = writer_builder.new_write()
+        overwrite_commit = table.new_batch_write_builder().overwrite().new_commit()
+        try:
+            writer.write_arrow(self._sample_data())
+            messages = writer.prepare_commit()
+            self.assertTrue(any(message.changelog_files for message in messages))
+            overwrite_commit.commit(messages)
+        finally:
+            writer.close()
+            overwrite_commit.close()
+
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self.assertEqual(snapshot.commit_kind, 'OVERWRITE')
+        self.assertIsNone(snapshot.changelog_manifest_list)
+
     def test_input_mode_changelog_manifest_readable(self):
         table = self._create_table(
             'test_input_readable',
@@ -263,6 +333,73 @@ class ChangelogProducerTest(unittest.TestCase):
         changelog_files_after = glob.glob(os.path.join(bucket_dir, 'changelog-*'))
         self.assertEqual(len(data_files_after), 0, "Data files should be cleaned up after abort")
         self.assertEqual(len(changelog_files_after), 0, "Changelog files should be cleaned up after abort")
+
+        table_write.close()
+        table_commit.close()
+
+    @pytest.mark.python_write
+    def test_failed_changelog_write_leaves_nothing_to_commit(self):
+        """A data file and its changelog are committed together or not at all.
+
+        The data file used to be recorded before its changelog was written, so a
+        changelog failure left the meta committed while the rows stayed buffered
+        for the retry -- and the retry then wrote a second data file covering
+        rows the first meta already claimed. Committing both metas would double
+        every row in the snapshot.
+        """
+        table = self._create_table(
+            'test_changelog_atomic',
+            options={'changelog-producer': 'input', 'bucket': '1'}
+        )
+        # Streaming write: ``BatchTableWrite`` refuses a second prepare_commit,
+        # and the retry is the whole point here.
+        write_builder = table.new_stream_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        original_write_parquet = table.file_io.write_parquet
+        state = {'failed': False}
+
+        def failing_write_parquet(path, data, **kwargs):
+            if not state['failed'] and '/changelog-' in str(path):
+                state['failed'] = True
+                raise IOError('transient storage failure')
+            return original_write_parquet(path, data, **kwargs)
+
+        table.file_io.write_parquet = failing_write_parquet
+        try:
+            table_write.write_arrow(self._sample_data())
+            with self.assertRaises(IOError):
+                table_write.prepare_commit(0)
+
+            bucket_dir = os.path.join(
+                self.warehouse, 'default.db', 'test_changelog_atomic',
+                'dt=p1', 'bucket-0')
+            self.assertEqual(glob.glob(os.path.join(bucket_dir, 'data-*')), [],
+                             "The data file must not outlive its failed changelog")
+            self.assertEqual(glob.glob(os.path.join(bucket_dir, 'changelog-*')), [],
+                             "A half-written changelog must not be left behind")
+
+            messages = table_write.prepare_commit(0)
+        finally:
+            table.file_io.write_parquet = original_write_parquet
+
+        self.assertTrue(state['failed'], "the changelog write never failed")
+        # One data file and one changelog for the 3 rows, not two of each.
+        self.assertEqual(len(glob.glob(os.path.join(bucket_dir, 'data-*'))), 1)
+        self.assertEqual(len(glob.glob(os.path.join(bucket_dir, 'changelog-*'))), 1)
+        new_files = [meta for msg in messages for meta in msg.new_files]
+        changelog_files = [meta for msg in messages for meta in msg.changelog_files]
+        self.assertEqual(len(new_files), 1)
+        self.assertEqual(len(changelog_files), 1)
+        self.assertEqual(sum(meta.row_count for meta in new_files), 3)
+
+        table_commit.commit(messages, 0)
+        read_builder = table.new_read_builder()
+        actual = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual(actual.num_rows, 3, "the retry must not duplicate rows")
+        self.assertEqual(sorted(actual.column('user_id').to_pylist()), [1, 2, 3])
 
         table_write.close()
         table_commit.close()

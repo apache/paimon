@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.SortValue;
@@ -55,10 +56,9 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
     private StartingScanner startingScanner;
     private boolean hasNext;
 
-    private Integer pushDownLimit;
+    private Long pushDownLimit;
     private TopN topN;
 
-    private final SchemaManager schemaManager;
     @Nullable private String readProtectionTagName;
 
     protected AbstractBatchTableScan(
@@ -67,10 +67,9 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
             CoreOptions options,
             SnapshotReader snapshotReader,
             TableQueryAuth queryAuth) {
-        super(schema, options, snapshotReader, queryAuth);
+        super(schema, schemaManager, options, snapshotReader, queryAuth);
 
         this.hasNext = true;
-        this.schemaManager = schemaManager;
         if (!schema.primaryKeys().isEmpty() && options.batchScanSkipLevel0()) {
             // Incremental scans read the delta or changelog files of historical snapshots, which
             // are always recorded at level 0. Skipping level 0 would drop all of their input.
@@ -98,7 +97,7 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
     }
 
     @Override
-    public InnerTableScan withLimit(int limit) {
+    public InnerTableScan withLimit(long limit) {
         // Record it; applyPushDownLimit pushes the file-store limit only when safe.
         this.pushDownLimit = limit;
         return this;
@@ -153,10 +152,20 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
 
     @Override
     public List<PartitionEntry> listPartitionEntries() {
+        // partition listing bypasses plan(), so apply the rules here too: without the row filter
+        // it would report partitions the caller cannot read, and pushing a filter on a masked
+        // column against raw partition values would drop partitions the query matches
+        applyAuthRules();
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);
         }
         return startingScanner.scanPartitions(snapshotReader);
+    }
+
+    @Override
+    public List<BinaryRow> topNPartitions(int num, int partitionFieldCount) {
+        return PartitionTopNUtils.topNFileStorePartitions(
+                listPartitionEntries(), schema.logicalPartitionType(), num, partitionFieldCount);
     }
 
     private Optional<StartingScanner.Result> applyPushDownLimit() {
@@ -187,10 +196,14 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
             OptionalLong mergedRowCount = split.mergedRowCount();
             if (mergedRowCount.isPresent()) {
                 limitedSplits.add(split);
-                scannedRowCount += mergedRowCount.getAsLong();
-                if (scannedRowCount >= pushDownLimit) {
+                long splitRowCount = mergedRowCount.getAsLong();
+                if (scannedRowCount >= pushDownLimit - splitRowCount) {
                     SnapshotReader.Plan newPlan =
-                            new PlanImpl(plan.watermark(), plan.snapshotId(), limitedSplits);
+                            new PlanImpl(
+                                    plan.watermark(),
+                                    plan.snapshotId(),
+                                    plan.snapshot(),
+                                    limitedSplits);
                     LOG.info(
                             "Limit pushdown applied successfully. Original splits: {}, Limited splits: {}, Pushdown limit: {}",
                             splits.size(),
@@ -198,6 +211,7 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
                             pushDownLimit);
                     return Optional.of(new ScannedResult(newPlan));
                 }
+                scannedRowCount += splitRowCount;
             }
         }
         return Optional.of(result);
@@ -224,6 +238,10 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
         }
 
         SortValue order = orders.get(0);
+        if (authMaskedFields.contains(order.field().name())) {
+            // the pruning below reads raw statistics; a mask may alter the ordering column
+            return Optional.empty();
+        }
         DataType type = order.field().type();
         if (!minmaxAvailable(type)) {
             return Optional.empty();
@@ -242,7 +260,8 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
 
         TopNDataSplitEvaluator evaluator = new TopNDataSplitEvaluator(schema, schemaManager);
         List<Split> topNSplits = new ArrayList<>(evaluator.evaluate(order, topN.limit(), splits));
-        SnapshotReader.Plan newPlan = new PlanImpl(plan.watermark(), plan.snapshotId(), topNSplits);
+        SnapshotReader.Plan newPlan =
+                new PlanImpl(plan.watermark(), plan.snapshotId(), plan.snapshot(), topNSplits);
         return Optional.of(new ScannedResult(newPlan));
     }
 

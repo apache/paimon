@@ -24,79 +24,97 @@ under the License.
 
 # Query Performance
 
+Start with the scan plan and the workload: which partitions and columns are filtered, whether
+rows still need merging, and whether the query is a scan, aggregate, join, or ranked search.
+
+| Symptom or query pattern | Check first | Next step |
+| --- | --- | --- |
+| MOR scan spends time merging | Overlapping sorted runs and bucket sizes | Tune [compaction](./compaction) or evaluate a different [table mode](./table-mode) |
+| Selective primary-key lookup scans too much data | Partition, bucket-key, and file key-range pruning | [Primary-key filters](#data-skipping-by-primary-key-filter) |
+| Filters on non-key columns scan many files | Whether versions must be merged before filtering | [File indexes](#data-skipping-by-file-index) or [clustering](./pk-clustering-override) |
+| Vector, text, or scalar index search | Index family and coverage of compacted data | [Primary-Key Indexes](./global-index) |
+| Large join shuffle | Fixed-bucket layout on both inputs | [Bucketed Join](#bucketed-join) |
+
 ## Table Mode
 
-The table schema has the greatest impact on query performance. See [Table Mode](./table-mode).
+[Table Mode](./table-mode) determines whether files can be read independently. MOR merges
+files with overlapping key ranges, which constrains split planning and parallelism. Bucket count
+and skew therefore matter, alongside the number of sorted runs.
 
-For Merge On Read table, the most important thing you should pay attention to is the number of buckets, which will limit
-the concurrency of reading data.
-
-For MOW (Deletion Vectors) or COW table or [Read Optimized](../concepts/system-tables#read-optimized-table) table,
-there is no limit to the concurrency of reading data, and they can also utilize some filtering conditions for non-primary-key columns.
+MOW, fully compacted COW results, and the
+[read-optimized table](../concepts/system-tables#read-optimized-table) can avoid that merge work
+and use file-based splits. Parallelism still depends on file sizes, split planning, and available
+engine resources. Resolving row versions also makes filters on non-key columns safe to apply at
+the file scan; MOR generally has to apply such filters after merging.
 
 ## Aggregate push down
 
-Table with Deletion Vectors Enabled supports aggregate push down:
+Deletion-vector tables can support metadata-based `COUNT(*)` when the planned splits expose exact
+merged row counts and the connector can push down the query. For example, with `dt` as a partition
+column:
 
 ```sql
-SELECT COUNT(*) FROM TABLE WHERE DT = '20230101';
+SELECT COUNT(*) FROM orders WHERE dt = '20230101';
 ```
 
-This query can be accelerated during compilation and returns very quickly.
+Additional row filters can require reading data. Use the engine's `EXPLAIN` output to verify the
+actual plan rather than assuming every count is answered from metadata.
 
-For Spark SQL, table with default `metadata.stats-mode` can be accelerated:
-
-```sql
-SELECT MIN(a), MAX(b) FROM TABLE WHERE DT = '20230101';
-```
-
-Min max query can be also accelerated during compilation and returns very quickly.
+Spark does **not** currently push `MIN` or `MAX` into metadata aggregation for primary-key tables.
+File statistics can describe obsolete physical rows as well as visible rows, so default
+`metadata.stats-mode` alone does not make this optimization available.
 
 ## Data Skipping By Primary Key Filter
 
-For a regular bucketed table (For example, bucket = 5), the filtering conditions of the primary key will greatly
-accelerate queries and reduce the reading of a large number of files.
+For a fixed-bucket table, equality conditions that determine the bucket key can prune buckets.
+Partition filters prune partitions, and primary-key range statistics can prune files. The default
+bucket key excludes partition columns from the primary key.
+
+A predicate on only part of a composite key does not necessarily identify a bucket. Primary-key
+sorting and key-range pruning are also affected by [PK Clustering Override](./pk-clustering-override),
+which sorts files by other columns.
 
 ## Data Skipping By File Index
 
-For full-compacted file, or for primary-key table with `'deletion-vectors.enabled'`, you can use file index, it filters
-files by indexing on the reading side.
+File indexes can narrow reads of fully compacted files or tables using deletion vectors, where
+row versions do not need to be merged across the filtered files. Paimon still applies the relevant
+row filters and deletion vectors for correctness.
 
-Define `file-index.bitmap.columns`, Data file index is an external index file and Paimon will create its
-corresponding index file for each file. If the index file is too small, it will be stored directly in the manifest,
-otherwise in the directory of the data file. Each data file corresponds to an index file, which has a separate file
-definition and can contain different types of indexes with multiple columns.
+| Index | Table option | Useful predicate pattern |
+| --- | --- | --- |
+| [Bloom filter](../concepts/spec/fileindex#index-bloomfilter) | `file-index.bloom-filter.columns` | Equality and point lookups |
+| [Bitmap](../concepts/spec/fileindex#index-bitmap) | `file-index.bitmap.columns` | Exact matches on indexed values |
+| [Range bitmap](../concepts/spec/fileindex#index-range-bitmap) | `file-index.range-bitmap.columns` | Range predicates |
 
-Different file indexes may be efficient in different scenarios. For example bloom filter may speed up query in point lookup
-scenario. Using a bitmap may consume more space but can result in greater accuracy.
+A data file can have indexes for several columns. Small index data can be embedded in metadata;
+larger index data is stored alongside the data file. Size and selectivity determine whether an
+index saves enough scan work to justify its storage and maintenance cost.
 
-* [BloomFilter](../concepts/spec/fileindex#index-bloomfilter): `file-index.bloom-filter.columns`.
-* [Bitmap](../concepts/spec/fileindex#index-bitmap): `file-index.bitmap.columns`.
-* [Range Bitmap](../concepts/spec/fileindex#index-range-bitmap): `file-index.range-bitmap.columns`.
+To add file indexes to an existing table without rewriting its data files, configure the
+`file-index.<type>.columns` options and run `rewrite_file_index`; see
+[Flink Procedures](../flink/procedures).
 
-If you want to add file index to existing table, without any rewrite, you can use `rewrite_file_index` procedure. Before
-we use the procedure, you should config appropriate configurations in target table. You can use ALTER clause to config
-`file-index.<filter-type>.columns` to the table.
-
-How to invoke: see [flink procedures](../flink/procedures)
+File indexes are separate from [Primary-Key Indexes](./global-index), whose index groups follow
+compacted data levels and support scalar predicates and ranked searches. Check that page's
+coverage rules, especially for Vector and Full Text search.
 
 ## Bucketed Join
 
-Fixed Bucketed table (e.g. bucket = 10) can be used to avoid shuffle if necessary in batch query, for example, you can
-use the following Spark SQL to read a Paimon table:
+Spark can use compatible fixed-bucket layouts to avoid a join shuffle. For example:
 
 ```sql
 SET spark.sql.sources.v2.bucketing.enabled = true;
 
-CREATE TABLE FACT_TABLE (order_id INT, f1 STRING) TBLPROPERTIES ('bucket'='10', 'primary-key' = 'order_id');
+CREATE TABLE fact_table (order_id INT, f1 STRING) USING paimon
+TBLPROPERTIES ('bucket' = '10', 'primary-key' = 'order_id');
 
-CREATE TABLE DIM_TABLE (order_id INT, f2 STRING) TBLPROPERTIES ('bucket'='10', 'primary-key' = 'order_id');
+CREATE TABLE dim_table (order_id INT, f2 STRING) USING paimon
+TBLPROPERTIES ('bucket' = '10', 'primary-key' = 'order_id');
 
-SELECT * FROM FACT_TABLE JOIN DIM_TABLE on t1.order_id = t4.order_id;
+SELECT * FROM fact_table AS fact
+JOIN dim_table AS dim ON fact.order_id = dim.order_id;
 ```
 
-The `spark.sql.sources.v2.bucketing.enabled` config is used to enable bucketing for V2 data sources. When turned on,
-Spark will recognize the specific distribution reported by a V2 data source through SupportsReportPartitioning, and
-will try to avoid shuffle if necessary.
-
-The costly join shuffle will be avoided if two tables have the same bucketing strategy and same number of buckets.
+The setting enables Spark to use partitioning reported by V2 data sources. The join keys, bucket
+keys, and bucket counts must be compatible; the same bucket count alone is not sufficient.
+Check `EXPLAIN` to confirm that Spark avoids the shuffle for the actual query.

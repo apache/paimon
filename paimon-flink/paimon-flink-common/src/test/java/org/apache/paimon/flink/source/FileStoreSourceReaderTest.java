@@ -22,6 +22,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.source.KeyValueTableRead;
@@ -62,7 +63,7 @@ public class FileStoreSourceReaderTest {
     @BeforeEach
     public void beforeEach() throws Exception {
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
         schemaManager.createTable(
                 new Schema(
                         new RowType(

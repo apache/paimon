@@ -40,6 +40,8 @@ Examples:
   "age > 18 OR (name = 'Bob' AND status = 'active')"
 """
 
+import datetime
+import decimal
 import re
 from typing import Any, Dict, List, Optional
 
@@ -114,10 +116,79 @@ def _build_field_type_map(fields: List[DataField]) -> Dict[str, Optional[str]]:
     return result
 
 
+def _cast_decimal(value_str: str, type_name: str) -> decimal.Decimal:
+    """Cast a DECIMAL literal, rescaled to the column's scale.
+
+    A DECIMAL column reads back as decimal.Decimal, and the pushed-down Arrow
+    filter binds the literal's own scale rather than the column's, so a literal
+    written at a different scale (e.g. ``50`` against a ``DECIMAL(10, 2)``
+    ``50.00``) would silently match nothing. Rescale to the column scale when the
+    value is exact there; otherwise keep it as written (it then correctly matches
+    no row). A malformed literal is re-raised as ValueError, which
+    parse_where_clause documents and the CLI relies on.
+    """
+    try:
+        value = decimal.Decimal(value_str)
+    except decimal.InvalidOperation:
+        raise ValueError(f"Invalid DECIMAL literal: {value_str!r}") from None
+
+    match = re.search(r'\(\s*(\d+)\s*,\s*(\d+)\s*\)', type_name)
+    precision = int(match.group(1)) if match else 38
+    scale = int(match.group(2)) if match else 0
+    # Quantize in a context wide enough for the column precision. The default
+    # context caps precision at 28, so a DECIMAL(38, 2) literal in integer form
+    # would raise InvalidOperation here, fall through unscaled, and then match
+    # nothing once the Arrow filter binds it at scale 0.
+    context = decimal.Context(prec=max(precision, 1))
+    try:
+        rescaled = value.quantize(decimal.Decimal(1).scaleb(-scale), context=context)
+    except decimal.InvalidOperation:
+        return value
+    return rescaled if rescaled == value else value
+
+
+def _cast_date(value_str: str) -> datetime.date:
+    """Parse a DATE literal as ``YYYY-MM-DD``.
+
+    ``datetime.date.fromisoformat`` only exists on Python 3.7+, while pypaimon
+    still declares ``python_requires >= 3.6`` and runs a 3.6 test lane, so parse
+    through ``strptime`` instead.
+    """
+    try:
+        return datetime.datetime.strptime(value_str.strip(), '%Y-%m-%d').date()
+    except ValueError:
+        raise ValueError(f"Invalid DATE literal: {value_str!r}") from None
+
+
+_TIME_PATTERN = re.compile(r'(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?')
+
+
+def _cast_time(value_str: str) -> datetime.time:
+    """Parse a TIME literal as a wall-clock ``HH:MM[:SS[.ffffff]]``.
+
+    ``datetime.time.fromisoformat`` only exists on Python 3.7+, and it also
+    accepts a UTC offset (``12:30:00+01:00``) that a Paimon TIME -- which has no
+    time zone -- cannot represent; Arrow would then compare only the wall-clock
+    part and match a value the user did not ask for. Parse a plain time here and
+    reject any offset.
+    """
+    match = _TIME_PATTERN.fullmatch(value_str.strip())
+    if match is None:
+        raise ValueError(f"Invalid TIME literal: {value_str!r}")
+    hour, minute, second, fraction = match.groups()
+    microsecond = int(fraction.ljust(6, '0')) if fraction else 0
+    try:
+        return datetime.time(int(hour), int(minute),
+                             int(second) if second else 0, microsecond)
+    except ValueError:
+        raise ValueError(f"Invalid TIME literal: {value_str!r}") from None
+
+
 def _cast_literal(value_str: str, type_name: str) -> Any:
     """Cast a literal string to the appropriate Python type based on the field type."""
     integer_types = {'TINYINT', 'SMALLINT', 'INT', 'INTEGER', 'BIGINT'}
     float_types = {'FLOAT', 'DOUBLE'}
+    decimal_types = {'DECIMAL', 'NUMERIC', 'DEC'}
 
     base_type = type_name.split('(')[0].strip()
 
@@ -125,10 +196,18 @@ def _cast_literal(value_str: str, type_name: str) -> Any:
         return int(value_str)
     if base_type in float_types:
         return float(value_str)
-    if base_type.startswith('DECIMAL') or base_type in ('DECIMAL', 'NUMERIC', 'DEC'):
-        return float(value_str)
+    if base_type in decimal_types:
+        return _cast_decimal(value_str, type_name)
     if base_type == 'BOOLEAN':
         return value_str.lower() in ('true', '1', 'yes')
+    if base_type == 'DATE':
+        # DATE/TIME columns read back as datetime.date / datetime.time; leaving the
+        # literal a string makes the arrow comparison kernel raise instead of
+        # filtering. TIMESTAMP is intentionally left out: its LOCAL TIME ZONE form
+        # reads back tz-aware and needs dedicated normalization.
+        return _cast_date(value_str)
+    if base_type == 'TIME':
+        return _cast_time(value_str)
     return value_str
 
 

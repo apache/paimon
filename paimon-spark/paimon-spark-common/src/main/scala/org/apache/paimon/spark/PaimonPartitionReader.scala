@@ -26,6 +26,7 @@ import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.util.SplitUtils
 import org.apache.paimon.table.source.{ReadBuilder, Split}
 import org.apache.paimon.types.RowType
+import org.apache.paimon.utils.{BlobDescriptorResolvingRow, UriReaderFactory}
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
@@ -41,7 +42,9 @@ case class PaimonPartitionReader(
     readBuilder: ReadBuilder,
     partition: PaimonInputPartition,
     metadataColumns: Seq[PaimonMetadataColumn],
-    blobAsDescriptor: Boolean
+    blobAsDescriptor: Boolean,
+    uriReaderFactory: UriReaderFactory,
+    blobDescriptorFieldIndices: Array[Int]
 ) extends PartitionReader[InternalRow] {
 
   private val splits: Iterator[Split] = partition.splits.toIterator
@@ -58,6 +61,8 @@ case class PaimonPartitionReader(
   private var totalReadBatchTimeMs: Long = 0L
 
   private lazy val read = readBuilder.newRead().withIOManager(ioManager)
+  private lazy val blobDescriptorResolvingRow =
+    new BlobDescriptorResolvingRow(uriReaderFactory, blobDescriptorFieldIndices)
 
   override def next(): Boolean = {
     if (currentRecordReader == null) {
@@ -73,7 +78,15 @@ case class PaimonPartitionReader(
       null
     } else {
       advanced = false
-      sparkRow.replace(currentRow)
+      sparkRow.replace(resolveBlobDescriptors(currentRow))
+    }
+  }
+
+  private def resolveBlobDescriptors(row: PaimonInternalRow): PaimonInternalRow = {
+    if (blobAsDescriptor || uriReaderFactory == null) {
+      row
+    } else {
+      blobDescriptorResolvingRow.replace(row)
     }
   }
 

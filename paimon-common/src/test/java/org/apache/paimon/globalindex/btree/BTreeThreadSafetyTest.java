@@ -106,6 +106,7 @@ public class BTreeThreadSafetyTest {
 
         Options options = new Options();
         options.set(BTreeIndexOptions.BTREE_INDEX_CACHE_SIZE, MemorySize.ofMebiBytes(8));
+        options.set(BTreeIndexOptions.BTREE_INDEX_BLOOM_FILTER_ENABLED, true);
         DataField dataField = new DataField(1, "id", new IntType());
         globalIndexer = new BTreeGlobalIndexer(dataField, options);
         keySerializer = KeySerializer.create(new IntType());
@@ -131,7 +132,7 @@ public class BTreeThreadSafetyTest {
         List<GlobalIndexIOMeta> metas = writeMultipleFiles();
 
         try (GlobalIndexReader reader =
-                globalIndexer.createReader(fileReader, metas, DATA_NUM, executor)) {
+                globalIndexer.createReader(fileReader, metas, DATA_NUM, null, executor)) {
             FieldRef ref = new FieldRef(1, "id", new IntType());
             Optional<GlobalIndexResult> result =
                     reader.visitIsNotNull(ref).get(10, TimeUnit.SECONDS);
@@ -146,7 +147,7 @@ public class BTreeThreadSafetyTest {
         List<GlobalIndexIOMeta> metas = writeMultipleFiles();
 
         try (GlobalIndexReader reader =
-                globalIndexer.createReader(fileReader, metas, DATA_NUM, executor)) {
+                globalIndexer.createReader(fileReader, metas, DATA_NUM, null, executor)) {
             FieldRef ref = new FieldRef(1, "id", new IntType());
             int numThreads = 32;
             CountDownLatch latch = new CountDownLatch(numThreads);
@@ -190,7 +191,7 @@ public class BTreeThreadSafetyTest {
         List<GlobalIndexIOMeta> metas = writeMultipleFiles();
 
         try (GlobalIndexReader reader =
-                globalIndexer.createReader(fileReader, metas, DATA_NUM, executor)) {
+                globalIndexer.createReader(fileReader, metas, DATA_NUM, null, executor)) {
             FieldRef ref = new FieldRef(1, "id", new IntType());
             int numThreads = 24;
             CountDownLatch latch = new CountDownLatch(numThreads);
@@ -277,7 +278,7 @@ public class BTreeThreadSafetyTest {
                 };
 
         try (GlobalIndexReader reader =
-                globalIndexer.createReader(countingFileReader, metas, DATA_NUM, executor)) {
+                globalIndexer.createReader(countingFileReader, metas, DATA_NUM, null, executor)) {
             FieldRef ref = new FieldRef(1, "id", new IntType());
             int numThreads = 32;
             CountDownLatch latch = new CountDownLatch(numThreads);
@@ -329,7 +330,7 @@ public class BTreeThreadSafetyTest {
                 };
 
         try (GlobalIndexReader reader =
-                globalIndexer.createReader(trackingFileReader, metas, DATA_NUM, executor)) {
+                globalIndexer.createReader(trackingFileReader, metas, DATA_NUM, null, executor)) {
             FieldRef ref = new FieldRef(1, "id", new IntType());
 
             // Query for value 5 — should only need to open the first file (keys 0-999)

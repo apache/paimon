@@ -209,10 +209,11 @@ public class ObjectTableImpl implements ReadonlyTable, ObjectTable {
     private static class ObjectRead implements InnerTableRead {
 
         private @Nullable RowType readType;
+        private @Nullable Predicate predicate;
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // TODO
+            this.predicate = predicate;
             return this;
         }
 
@@ -261,6 +262,9 @@ public class ObjectTableImpl implements ReadonlyTable, ObjectTable {
                             }
                         }
                     };
+            if (predicate != null) {
+                iterator = Iterators.filter(iterator, predicate::test);
+            }
             if (readType != null) {
                 iterator =
                         Iterators.transform(

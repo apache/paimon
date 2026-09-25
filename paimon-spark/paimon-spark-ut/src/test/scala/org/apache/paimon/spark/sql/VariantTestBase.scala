@@ -431,6 +431,51 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Variant: decimals with trailing zeros under inferred shredding") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    // 10.0 and 100.00 strip to a negative scale, which used to fail inferred-shredding writes
+    sql("""INSERT INTO T VALUES
+          | (1, parse_json('{"price":10.0,"whole":100.00}')),
+          | (2, parse_json('{"price":20.5,"whole":7}'))
+          |""".stripMargin)
+
+    checkAnswer(
+      sql(
+        "SELECT id, variant_get(v, '$.price', 'double'), variant_get(v, '$.whole', 'bigint') FROM T ORDER BY id"),
+      Seq(Row(1, 10.0, 100L), Row(2, 20.5, 7L)))
+  }
+
+  test("Paimon Variant: blank object keys under inferred shredding") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    // an empty key cannot become a shredded column and used to fail inferred-shredding writes
+    sql("""INSERT INTO T VALUES
+          | (1, parse_json('{"":1,"a":2}')),
+          | (2, parse_json('{"":3," ":4,"a":5}'))
+          |""".stripMargin)
+
+    checkAnswer(
+      sql("SELECT id, to_json(v), variant_get(v, '$.a', 'bigint') FROM T ORDER BY id"),
+      Seq(Row(1, """{"":1,"a":2}""", 2L), Row(2, """{"":3," ":4,"a":5}""", 5L))
+    )
+  }
+
+  test("Paimon Variant: keys that UTF-8 and UTF-16 order differently under inferred shredding") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    // Spark orders "\uFFE5" after the emoji (UTF-16 code units), Paimon's builder before it
+    // (UTF-8 bytes); inferred shredding used to reject one of the two orders as unsorted and
+    // fail the write. Key order is not asserted because each writer renders its own.
+    sql("""INSERT INTO T VALUES
+          | (1, parse_json('{"\uFFE5":100,"\uD83D\uDE00":"s"}')),
+          | (2, parse_json('{"\uD83D\uDE00":"t","a":2}'))
+          |""".stripMargin)
+
+    checkAnswer(
+      sql(
+        "SELECT id, variant_get(v, '$[\"\uD83D\uDE00\"]', 'string'), try_variant_get(v, '$[\"\uFFE5\"]', 'bigint'), try_variant_get(v, '$.a', 'int') FROM T ORDER BY id"),
+      Seq(Row(1, "s", 100L, null), Row(2, "t", null, 2))
+    )
+  }
+
   test("Paimon Variant: read and write variant with null value") {
     withTable("source_tbl", "target_tbl") {
       sql("CREATE TABLE source_tbl (id INT, js STRING) USING paimon")
@@ -1034,11 +1079,85 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     sql("""INSERT INTO T VALUES (1, parse_json('{"age":26,"city":"Beijing"}'))""")
 
     val df =
-      sql("SELECT id, variant_get(v, '$.age', 'int'), variant_get(v, '$.city', 'string') FROM T")
+      sql(
+        "SELECT id, try_variant_get(v, '$.age', 'int'), variant_get(v, '$.city', 'string') FROM T")
     val v = fieldByPath(scanReadSchemaOf(df), Seq("v"))
     if (variantPushDownEnabled) assertVariantStruct(v, expectedFieldCount = 2)
     else assert(isVariantType(v.dataType))
     checkAnswer(df, Seq(Row(1, 26, "Beijing")))
+  }
+
+  test("Paimon Variant pushdown: strict cast preserves conditional evaluation") {
+    assume(gteqSpark4_1)
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    sql("""INSERT INTO T VALUES
+          | (0, parse_json('{"a":"bad"}')),
+          | (1, parse_json('{"a":1}'))
+          |""".stripMargin)
+
+    val df = sql("SELECT id, IF(id = 1, variant_get(v, '$.a', 'int'), NULL) FROM T ORDER BY id")
+    assert(isVariantType(fieldByPath(scanReadSchemaOf(df), Seq("v")).dataType))
+    checkAnswer(df, Seq(Row(0, null), Row(1, 1)))
+  }
+
+  test("Paimon Variant pushdown: decimal extracted as string is the same for every layout") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    // Mixed scales make an inferred shredding schema DECIMAL(18, 2) / DECIMAL(18, 1), so the
+    // typed_value keeps trailing zeros (1.50, 0.0) that the unshredded value strips.
+    sql("""INSERT INTO T VALUES
+          | (1, parse_json('{"price":1.50,"amount":0.00}')),
+          | (2, parse_json('{"price":0.05,"amount":2.5}'))
+          |""".stripMargin)
+
+    checkAnswer(
+      sql(
+        "SELECT id, variant_get(v, '$.price', 'string'), variant_get(v, '$.amount', 'string') FROM T ORDER BY id"),
+      Seq(Row(1, "1.5", "0"), Row(2, "0.05", "2.5"))
+    )
+  }
+
+  test("Paimon Variant pushdown: out-of-range extraction is NULL rather than a wrapped value") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    sql("""INSERT INTO T VALUES
+          | (1, parse_json('{"n":99999999999,"d":1e30}')),
+          | (2, parse_json('{"n":7,"d":1.5}'))
+          |""".stripMargin)
+
+    // With pushdown the cast runs in the Paimon reader, which must agree with Spark's TRY cast.
+    checkAnswer(
+      sql(
+        "SELECT id, try_variant_get(v, '$.n', 'int'), try_variant_get(v, '$.d', 'bigint') FROM T ORDER BY id"),
+      Seq(Row(1, null, null), Row(2, 7, 1L)))
+  }
+
+  test("Paimon Variant pushdown: timestamp extraction follows the session time zone") {
+    // The test JVM runs in America/Los_Angeles; the session zone below differs from it, so a
+    // pushed-down extraction must convert with the session zone Spark hands to the scan.
+    withSparkSQLConf("spark.sql.session.timeZone" -> "Asia/Shanghai") {
+      sql("CREATE TABLE T (id INT, v VARIANT)")
+      sql("""INSERT INTO T VALUES (1, to_variant_object(named_struct(
+            |  'ts', timestamp'2023-11-15 06:13:20.5',
+            |  'ntz', timestamp_ntz'2023-11-15 06:13:20.5',
+            |  'd', date'2024-10-04')))
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("""SELECT
+              |  variant_get(v, '$.ts', 'string'),
+              |  CAST(try_variant_get(v, '$.ts', 'timestamp_ntz') AS STRING),
+              |  CAST(try_variant_get(v, '$.ts', 'date') AS STRING),
+              |  CAST(try_variant_get(v, '$.ntz', 'timestamp') AS STRING),
+              |  CAST(try_variant_get(v, '$.d', 'timestamp') AS STRING)
+              |FROM T""".stripMargin),
+        Seq(
+          Row(
+            "2023-11-15 06:13:20.5",
+            "2023-11-15 06:13:20.5",
+            "2023-11-15",
+            "2023-11-15 06:13:20.5",
+            "2024-10-04 00:00:00"))
+      )
+    }
   }
 
   test("Paimon Variant pushdown: nested variant column inside a struct") {
@@ -1046,7 +1165,7 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     sql("CREATE TABLE T (id INT, nested STRUCT<v: VARIANT, x: INT>)")
     sql("""INSERT INTO T VALUES (1, named_struct('v', parse_json('{"age":26}'), 'x', 100))""")
 
-    val df = sql("SELECT id, variant_get(nested.v, '$.age', 'int') FROM T")
+    val df = sql("SELECT id, try_variant_get(nested.v, '$.age', 'int') FROM T")
     val v = fieldByPath(scanReadSchemaOf(df), Seq("nested", "v"))
     if (variantPushDownEnabled) assertVariantStruct(v, expectedFieldCount = 1)
     else assert(isVariantType(v.dataType))
@@ -1073,7 +1192,7 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     sql("""INSERT INTO T VALUES (1, parse_json('{"a":1}'), parse_json('{"x":"hi","y":"bye"}'))""")
 
     val df = sql(
-      "SELECT variant_get(v1, '$.a', 'int'), variant_get(v2, '$.x', 'string'), variant_get(v2, '$.y', 'string') FROM T")
+      "SELECT try_variant_get(v1, '$.a', 'int'), variant_get(v2, '$.x', 'string'), variant_get(v2, '$.y', 'string') FROM T")
     val readSchema = scanReadSchemaOf(df)
     val v1 = fieldByPath(readSchema, Seq("v1"))
     val v2 = fieldByPath(readSchema, Seq("v2"))
@@ -1105,7 +1224,7 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     sql("CREATE TABLE T (id INT, v VARIANT)")
     sql("""INSERT INTO T VALUES (1, parse_json('{"age":26}'))""")
 
-    val df = sql("SELECT variant_get(v, '$.age', 'int') FROM T")
+    val df = sql("SELECT try_variant_get(v, '$.age', 'int') FROM T")
     val desc = df.queryExecution.optimizedPlan
       .collectFirst { case DataSourceV2ScanRelation(_, scan, _, _, _) => scan.description() }
       .getOrElse(fail("expected a DataSourceV2ScanRelation in the plan"))

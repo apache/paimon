@@ -1,6 +1,6 @@
 ---
 title: "Local Cache"
-sidebar_position: 8
+sidebar_position: 10
 ---
 
 import Tabs from '@theme/Tabs';
@@ -27,15 +27,22 @@ under the License.
 
 # Local Cache
 
-When reading files from remote storage (S3, OSS, HDFS, etc.), each seek+read goes over the network. Paimon provides a block-level local cache that transparently caches file reads, significantly reducing remote I/O for repeated access patterns.
+Paimon's local cache stores file blocks on disk or in memory to reduce repeated reads from
+storage such as S3, OSS, and HDFS. Configure it on the catalog that loads your tables.
 
-The cache supports two modes:
-- **Disk cache**: when `local-cache.dir` is configured, blocks are cached on local disk.
-- **Memory cache**: when `local-cache.dir` is not configured, blocks are cached in memory.
+| Mode | When it is selected | Where blocks live |
+| --- | --- | --- |
+| Memory | Cache enabled without `local-cache.dir` | Process memory |
+| Disk | Cache enabled with `local-cache.dir` | The configured local directory |
+
+Set an explicit size limit for your workload. The cache is disabled by default, and enabling it
+does not automatically cache data files: the default whitelist covers metadata and global indexes.
+
+![Cacheable reads check a local block cache. Hits return a cached block; misses fetch and cache a storage block. Other reads bypass the cache.](/img/program-api-local-cache.svg)
 
 ## Cached File Types
 
-The cache classifies files by type. By default, only `meta` and `global-index` types are cached. You can customize this via the `local-cache.whitelist` option.
+The cache classifies files by path. Set `local-cache.whitelist` to select the file types to cache.
 
 | File Type | Config Name | Examples | Default Cached |
 |-----------|-------------|----------|----------------|
@@ -45,7 +52,8 @@ The cache classifies files by type. By default, only `meta` and `global-index` t
 | DATA | data | Data files (ORC, Parquet, etc.) | No |
 | FILE_INDEX | file-index | Data-file level bloom filter, bitmap | No |
 
-All file types can be added to the whitelist. The default whitelist is `meta,global-index`.
+The default whitelist is `meta,global-index`. The mutable `LATEST` and `EARLIEST` hint files bypass
+the cache even though they are classified as metadata.
 
 ## Enable Cache
 
@@ -56,24 +64,27 @@ This is a catalog-level option. Configure it when creating the catalog:
 <TabItem value="java" label="Java">
 
 ```java
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.Table;
 
 Options options = new Options();
 options.set("warehouse", "s3://my-bucket/warehouse");
 options.set("local-cache.enabled", "true");
 // optional: use disk cache by specifying a directory
 options.set("local-cache.dir", "/tmp/paimon-cache");
-// optional: customize limits
+// Set a limit for cached blocks
 options.set("local-cache.max-size", "2gb");
 options.set("local-cache.block-size", "1mb");
 
 CatalogContext context = CatalogContext.create(options);
-Catalog catalog = CatalogFactory.createCatalog(context);
-
-// All tables from this catalog will use the cache
-Table table = catalog.getTable(Identifier.create("my_db", "my_table"));
+try (Catalog catalog = CatalogFactory.createCatalog(context)) {
+    Table table = catalog.getTable(Identifier.create("my_db", "my_table"));
+    // Read table data here; eligible file reads use the cache.
+}
 ```
 
 </TabItem>
@@ -88,14 +99,14 @@ options = {
     "local-cache.enabled": "true",
     # optional: use disk cache by specifying a directory
     "local-cache.dir": "/tmp/paimon-cache",
-    # optional: customize limits
+    # Set a limit for cached blocks
     "local-cache.max-size": "2gb",
     "local-cache.block-size": "1mb",
 }
 
 catalog = pypaimon.create_catalog(options)
 
-# All tables from this catalog will use the cache
+# Eligible file reads from tables loaded by this catalog use the cache
 table = catalog.get_table("db.my_table")
 ```
 
@@ -103,28 +114,57 @@ table = catalog.get_table("db.my_table")
 
 </Tabs>
 
+The snippets assume the catalog and table already exist and storage credentials are configured.
+The Java snippet is a method-body fragment; declare or handle the catalog exceptions as in the
+[Java setup](java-api).
+
 ## Cache Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `local-cache.enabled` | Boolean | false | Whether to enable local block cache for file reads. |
 | `local-cache.dir` | String | (none) | Directory for storing cached blocks on disk. If not configured, memory cache is used. |
-| `local-cache.max-size` | MemorySize | unlimited | Maximum total size of the cache. When exceeded, the least recently used blocks are evicted. |
+| `local-cache.max-size` | MemorySize | See below | Maximum cached block bytes per cache manager. Least recently used blocks are evicted when the limit is exceeded. |
 | `local-cache.block-size` | MemorySize | 1 mb | Block size for caching. Files are logically divided into fixed-size blocks and cached independently. |
 | `local-cache.whitelist` | String | meta,global-index | Comma-separated list of file types to cache. Supported values: `meta`, `global-index`, `bucket-index`, `data`, `file-index`. |
 
+When `local-cache.max-size` is omitted, Java has no configured size limit. PyPaimon uses a 256 MiB
+memory limit or a 10 GiB disk limit. Set the option explicitly when you want the same limit across
+clients. The limit accounts for cached block bytes, not all reader buffers or process memory.
+
 ## How It Works
 
-- Files are logically divided into fixed-size blocks (default 1 MB).
-- On the first read, blocks are downloaded from remote storage and cached locally (on disk or in memory).
-- Subsequent reads of the same block are served from the local cache, skipping remote I/O.
-- When using disk cache, cache files are keyed by remote file path and block offset, so they persist across process restarts and can be reused.
-- When the cache exceeds `max-size`, the least recently used blocks are evicted automatically.
+1. The reader requests bytes from an eligible file. The cache maps the byte range to fixed-size
+   blocks, using 1 MiB blocks by default.
+2. A hit returns the cached block. A miss reads the block from storage and adds it to the cache.
+3. Least recently used blocks are evicted when a configured limit is exceeded.
+
+A cache hit avoids fetching that block's contents again; it does not eliminate all remote metadata
+operations. In Java disk mode, opening a file still obtains its status. The disk cache identifies a
+file by path, length, and modification time, and separates entries by block size. Existing entries
+can be reused after restart when this identity matches. Memory caches do not survive process restarts.
+
+Caching applies to reads. It does not change commit semantics or replace durable table storage.
 
 ## Cache Lifecycle
 
-The cache is created and managed by the Catalog. All tables obtained from the same catalog share a single cache instance. The cache lives as long as the Catalog object is reachable — no explicit close is needed.
+### Java applications and distributed workers
 
-In distributed computing frameworks (Flink, Spark), the `FileIO` is serialized and shipped to task managers. After deserialization, the cache is **not** recreated — reads fall through directly to the remote storage. This is by design: the cache lifecycle is bound to the Catalog that created it, and a deserialized `FileIO` is no longer managed by any Catalog.
+A catalog creates the cache used by the tables it loads. After a catalog-created `FileIO` is
+serialized and deserialized on a worker, it retains its cache configuration and lazily creates or
+reuses a cache manager in that worker JVM.
 
-If you need caching on task managers, create a new Catalog with cache options enabled on each worker node.
+Deserialized wrappers with matching directory, maximum size, and block size share a JVM-local cache
+manager and its size limit. Memory entries remain isolated by the originating wrapper's namespace.
+The limit is local to that manager, not a cluster-wide budget. In disk mode the directory must be
+available and writable on each worker that uses it.
+
+Close readers and other owned resources when finished. Closing a deserialized `FileIO` releases its
+reference to the shared manager; the last reference releases the shared entry. A manually constructed
+`CachingFileIO` without serialized cache configuration cannot recreate a cache after deserialization.
+
+### PyPaimon workers
+
+PyPaimon's cache is removed when `CachingFileIO` is pickled. An unpickled copy reads directly from
+storage. Create a catalog with cache options on each Python worker when you need caching there.
+The Java worker lifecycle above does not apply to Python serialization.

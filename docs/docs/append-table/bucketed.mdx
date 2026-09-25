@@ -27,16 +27,20 @@ under the License.
 
 # Bucketed Append
 
-You can define the `bucket` and `bucket-key` to get a bucketed append table.
+A bucketed append table distributes rows using a fixed number of buckets and a bucket key. Rows with the same bucket
+key in the same partition are routed to the same bucket. This supports bucket pruning, compatible bucketed joins, and
+ordered streaming reads within a bucket. It does not deduplicate rows or create a primary key.
 
-Example to create bucketed append table:
+## Create a Bucketed Table
 
-<Tabs groupId="create-bucketed-append">
+Use a positive `bucket` count and choose `bucket-key` columns that match your query or ordering requirements.
+The following examples assume a configured Paimon catalog and create a separate table named `bucketed_table`.
 
+<Tabs groupId="engine">
 <TabItem value="flink" label="Flink">
 
 ```sql
-CREATE TABLE my_table (
+CREATE TABLE bucketed_table (
     product_id BIGINT,
     price DOUBLE,
     sales BIGINT
@@ -47,136 +51,86 @@ CREATE TABLE my_table (
 ```
 
 </TabItem>
+<TabItem value="spark" label="Spark">
 
+```sql
+CREATE TABLE bucketed_table (
+    product_id BIGINT,
+    price DOUBLE,
+    sales BIGINT
+) USING paimon
+TBLPROPERTIES (
+    'bucket' = '8',
+    'bucket-key' = 'product_id'
+);
+```
+
+</TabItem>
 </Tabs>
+
+Bucket count controls the distribution, while the bucket key determines which rows are colocated. A skewed key can
+concentrate work in a few buckets. More buckets can improve pruning for selective lookups, but can also create more
+small files for a small write workload.
 
 ## Data Skipping
 
-The primary and most significant advantage of a bucketed append table is **data skipping**. When queries contain
-equality (`=`) or `IN` filter conditions on the complete `bucket-key`, Paimon can efficiently push these predicates
-down to skip irrelevant bucket files entirely. This means a large number of files that do not match the filter are
-pruned before reading, drastically reducing I/O and accelerating queries.
-
-For a composite `bucket-key`, the query predicate must cover all bucket-key columns with finite equality or `IN`
-values to determine the target buckets.
-
-For example, if `bucket-key` is `product_id` and you query:
+When a query contains equality (`=`) or `IN` predicates on the complete `bucket-key`, Paimon can compute the candidate
+buckets and skip files in the other buckets:
 
 ```sql
-SELECT * FROM my_table WHERE product_id = 12345;
-
-SELECT * FROM my_table WHERE product_id IN (1, 2, 3);
+SELECT * FROM bucketed_table WHERE product_id = 12345;
+SELECT * FROM bucketed_table WHERE product_id IN (1, 2, 3);
 ```
 
-Paimon will only read the bucket that contains the matching `product_id` values, filtering out all other bucket files.
-This is extremely effective when the table has many buckets and you are querying a small subset of bucket-key values.
+An equality lookup reads the matching bucket. An `IN` lookup may read several buckets, and different key values can
+map to the same bucket. Rows inside the selected buckets still need to satisfy the query predicate.
+
+For a composite key such as `bucket-key = product_id,region`, the predicate must constrain **both** columns to finite
+equality or `IN` values. Filtering on only `product_id`, or using only a range predicate, does not identify a fixed
+set of buckets through this optimization.
 
 ## Bucketed Join
 
-Bucketed table can also be used to accelerate join queries by avoiding costly shuffle operations in batch processing.
-For example, you can use the following Spark SQL to read a Paimon table:
+Spark can use compatible bucket distributions to avoid a shuffle in a batch join. Enable V2 bucketing and join on the
+distribution keys:
 
 ```sql
 SET spark.sql.sources.v2.bucketing.enabled = true;
 
-CREATE TABLE FACT_TABLE (order_id INT, f1 STRING) TBLPROPERTIES ('bucket'='10', 'bucket-key' = 'order_id');
+CREATE TABLE fact_table (order_id INT, f1 STRING) USING paimon
+TBLPROPERTIES ('bucket' = '10', 'bucket-key' = 'order_id');
 
-CREATE TABLE DIM_TABLE (order_id INT, f2 STRING) TBLPROPERTIES ('bucket'='10', 'primary-key' = 'order_id');
+CREATE TABLE dim_table (order_id INT, f2 STRING) USING paimon
+TBLPROPERTIES ('bucket' = '10', 'primary-key' = 'order_id');
 
-SELECT * FROM FACT_TABLE JOIN DIM_TABLE on t1.order_id = t4.order_id;
+SELECT * FROM fact_table AS fact
+JOIN dim_table AS dim ON fact.order_id = dim.order_id;
 ```
 
-The `spark.sql.sources.v2.bucketing.enabled` config is used to enable bucketing for V2 data sources. When turned on,
-Spark will recognize the specific distribution reported by a V2 data source through SupportsReportPartitioning, and
-will try to avoid shuffle if necessary.
-
-The costly join shuffle will be avoided if two tables have the same bucketing strategy and same number of buckets.
+In this example, the fact table is an append table and the dimension table is a primary key table. They use the same
+bucket count and compatible distribution keys. Spark uses the partitioning reported by the Paimon source when planning
+the join; verify the resulting plan with `EXPLAIN` because the chosen join strategy also depends on Spark's optimizer.
 
 ## Bucketed Streaming
 
-An ordinary Append table has no strict ordering guarantees for its streaming writes and reads, but there are some cases
-where you need to define a key similar to Kafka's.
+With `bucket-append-ordered = true` (the default), a streaming reader preserves append order within the **same partition
+and bucket**. It provides neither an event-time sort nor a global order across buckets.
 
-Every record in the same bucket is ordered strictly, streaming read will transfer the record to down-stream exactly in
-the order of writing. To use this mode, you do not need to config special configurations, all the data will go into one
-bucket as a queue.
+![Two buckets in one partition preserve their own append order while readers process the buckets independently.](/img/append-bucket-order.svg)
 
-![](/img/for-queue.png)
+To use one queue within each partition, explicitly set `bucket = 1`. Omitting `bucket` selects the unaware-bucket layout,
+which has no such ordering guarantee.
 
-**Streaming Read Order**
+### Streaming Read Order
 
-For streaming reads, records are produced in the following order:
+- Within one partition and bucket, earlier appended records are read before later appended records.
+- Different buckets can be read by different tasks, so records from those buckets can interleave downstream.
+- `scan.plan-sort-partition = true` sorts planned files by partition fields. This is useful when reading the initial
+  snapshot of a partitioned table; it does not sort individual records by event time or make all downstream tasks
+  emit in one global order.
 
-* For any two records from two different partitions
-   * If `scan.plan-sort-partition` is set to true, the record with a smaller partition value will be produced first.
-   * Otherwise, the record with an earlier partition creation time will be produced first.
-* For any two records from the same partition and the same bucket, the first written record will be produced first.
-* For any two records from the same partition but two different buckets, different buckets are processed by different tasks, there is no order guarantee between them.
+Keep `bucket-append-ordered = true` when consumers rely on append order. To enable
+[incremental clustering](./incremental-clustering) on a bucketed table, set it to `false`; clustering rewrites rows in
+clustering order and gives up that append-order guarantee.
 
-**Watermark Definition**
-
-You can define watermark for reading Paimon tables:
-
-```sql
-CREATE TABLE t (
-    `user` BIGINT,
-    product STRING,
-    order_time TIMESTAMP(3),
-    WATERMARK FOR order_time AS order_time - INTERVAL '5' SECOND
-) WITH (...);
-
--- launch a bounded streaming job to read paimon_table
-SELECT window_start, window_end, COUNT(`user`) FROM TABLE(
- TUMBLE(TABLE t, DESCRIPTOR(order_time), INTERVAL '10' MINUTES)) GROUP BY window_start, window_end;
-```
-
-You can also enable [Flink Watermark alignment](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/datastream/event-time/generating_watermarks/#watermark-alignment-_beta_),
-which will make sure no sources/splits/shards/partitions increase their watermarks too far ahead of the rest:
-
-<table className="configuration table table-bordered">
-    <thead>
-        <tr>
-            <th className="text-left" style={{width: "20%"}}>Key</th>
-            <th className="text-left" style={{width: "15%"}}>Default</th>
-            <th className="text-left" style={{width: "10%"}}>Type</th>
-            <th className="text-left" style={{width: "55%"}}>Description</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td><h5>scan.watermark.alignment.group</h5></td>
-            <td style={{wordWrap: "break-word"}}>(none)</td>
-            <td>String</td>
-            <td>A group of sources to align watermarks.</td>
-        </tr>
-        <tr>
-            <td><h5>scan.watermark.alignment.max-drift</h5></td>
-            <td style={{wordWrap: "break-word"}}>(none)</td>
-            <td>Duration</td>
-            <td>Maximal drift to align watermarks, before we pause consuming from the source/task/partition.</td>
-        </tr>
-    </tbody>
-</table>
-
-**Bounded Stream**
-
-Streaming Source can also be bounded, you can specify 'scan.bounded.watermark' to define the end condition for bounded streaming mode, stream reading will end until a larger watermark snapshot is encountered.
-
-Watermark in snapshot is generated by writer, for example, you can specify a kafka source and declare the definition of watermark.
-When using this kafka source to write to Paimon table, the snapshots of Paimon table will generate the corresponding watermark,
-so that you can use the feature of bounded watermark when streaming reads of this Paimon table.
-
-```sql
-CREATE TABLE kafka_table (
-    `user` BIGINT,
-    product STRING,
-    order_time TIMESTAMP(3),
-    WATERMARK FOR order_time AS order_time - INTERVAL '5' SECOND
-) WITH ('connector' = 'kafka'...);
-
--- launch a streaming insert job
-INSERT INTO paimon_table SELECT * FROM kakfa_table;
-
--- launch a bounded streaming job to read paimon_table
-SELECT * FROM paimon_table /*+ OPTIONS('scan.bounded.watermark'='...') */;
-```
+For scan startup modes, watermarks, alignment, and bounded streaming reads, see [Streaming](./streaming).

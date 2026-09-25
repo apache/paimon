@@ -24,119 +24,128 @@ under the License.
 
 # Changelog Producer
 
-Streaming write can continuously produce the latest changes for streaming read.
+The `changelog-producer` option controls the changes available to streaming readers. It is
+separate from the [merge engine](./merge-engine/), which defines the table's logical rows, and
+from the [table mode](./table-mode), which determines how those rows are stored and read.
 
-By specifying the `changelog-producer` table property when creating the table, users can choose the pattern of changes produced from table files.
+A full changelog includes the old row needed to retract an update. For example, changing an
+amount from `4` to `5` requires a downstream sum to subtract `4` and add `5`. An upsert containing
+only `5` requires the consumer to remember the previous value.
 
-:::info
+## Choose a Producer
 
-`changelog-producer` may significantly reduce compaction performance, please do not enable it unless necessary.
+| Producer | Where old values come from | When changes are available | Use when |
+| --- | --- | --- | --- |
+| `none` (default) | Consumer state, if needed | Incremental snapshot reads | The consumer accepts upserts or can normalize them |
+| `input` | Complete changelog supplied by the source | Committed input changelog files | The upstream already supplies the required before/after records |
+| `lookup` | Lookup of existing rows during compaction | After lookup compaction is committed | The input has no before images and consumers need complete changes |
+| `full-compaction` | Difference between full-compaction results | After a full compaction is committed | Consumers can wait for periodic full compactions |
 
-:::
+The diagram follows one existing key whose value changes from `4` to `5`. `-U` is
+`UPDATE_BEFORE`, and `+U` is `UPDATE_AFTER`.
+
+![For an update from 4 to 5, none leaves old-state reconstruction to the consumer; input, lookup, and full-compaction obtain the before image at different stages.](/img/primary-key-changelog-producers.svg)
+
+Deletion-vector tables support `none`, `input`, and `lookup`; they do not support the
+`full-compaction` producer.
+
+Producing extra changelog files adds work and storage. Choose the least expensive producer that
+satisfies the consumer's contract. Check merge-engine restrictions as well:
+[Partial Update](./merge-engine/partial-update), [Aggregation](./merge-engine/aggregation), and
+[First Row](./merge-engine/first-row). [Managed BLOB storage](./blob-storage#requirements-and-limitations)
+requires `none`.
 
 ## None
 
-By default, no extra changelog producer will be applied to the writer of table. Paimon source can only see the merged changes across snapshots, like what keys are removed and what are the new values of some keys.
+With `changelog-producer = none`, the writer creates no separate full changelog. Incremental
+reads expose changes without complete before images; they are not an audit log of every input
+record. A downstream upsert sink can replace its stored value by key.
 
-However, these merged changes cannot form a complete changelog, because we can't read the old values of the keys directly from them. Merged changes require the consumers to "remember" the values of each key and to rewrite the values without seeing the old ones. Some consumers, however, need the old values to ensure correctness or efficiency.
+Flink can add a stateful normalize operator when downstream processing needs old values. The
+state and checkpoint cost depend on the number of keys and the workload. Do not remove this
+operator with `scan.remove-normalize` unless the downstream computation remains correct without
+before images.
 
-Consider a consumer which calculates the sum on some grouping keys (might not be equal to the primary keys). If the consumer only sees a new value `5`, it cannot determine what values should be added to the summing result. For example, if the old value is `4`, it should add `1` to the result. But if the old value is `6`, it should in turn subtract `1` from the result. Old values are important for these types of consumers.
-
-To conclude, `none` changelog producers are best suited for consumers such as a database system. Flink also has a 
-built-in "normalize" operator which persists the values of each key in states. As one can easily tell, this operator
-will be very costly and should be avoided. (You can force removing "normalize" operator via `'scan.remove-normalize'`.)
-
-![](/img/changelog-producer-none.png)
+[Nullable primary keys](./#nullable-primary-keys) cannot be exposed as a Flink SQL primary-key
+constraint, so Flink cannot normalize an updating stream from such a table. Use a suitable full
+changelog producer for that case.
 
 ## Input
 
-By specifying `'changelog-producer' = 'input'`, Paimon writers rely on their inputs as a source of complete changelog. All input records will be saved in separated changelog files and will be given to the consumers by Paimon sources.
+```sql
+'changelog-producer' = 'input'
+```
 
-`input` changelog producer can be used when Paimon writers' inputs are complete changelog, such as from a database CDC, or generated by Flink stateful computation.
+Paimon saves the incoming records in separate changelog files and forwards them to streaming
+readers. It does not reconstruct missing before images or convert partial input rows into the
+final merged row.
 
-![](/img/changelog-producer-input.png)
+Use this producer with a complete upstream changelog, such as suitable database CDC output or
+Flink stateful computation. Verify that the source actually supplies the old values required by
+your consumer.
 
 ## Lookup
 
-If your input can't produce a complete changelog but you still want to get rid of the costly normalized operator, you
-may consider using the `'lookup'` changelog producer.
+```sql
+'changelog-producer' = 'lookup'
+```
 
-By specifying `'changelog-producer' = 'lookup'`, Paimon will generate changelog through `'lookup'` during compaction (You can also enable [Async Compaction](./compaction#asynchronous-compaction)). By default, lookup compaction is performed before committing written data unless disabled by `write-only` property.
+Lookup compaction reads the existing value for a key, applies the incoming changes, and generates
+the resulting changelog. By default, writers wait for lookup compaction before committing, unless
+writer compaction is disabled with `write-only`. [Asynchronous Compaction](./compaction#asynchronous-compaction)
+can improve write throughput at the cost of later changelog availability.
 
-![](/img/changelog-producer-lookup.png)
+Lookup uses memory and local disk caches:
 
-Lookup will cache data on the memory and local disk, you can use the following options to tune performance:
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `lookup.cache-file-retention` | `1 h` | Retain cached files; expired files may need to be fetched and indexed again |
+| `lookup.cache-max-disk-size` | Unlimited | Bound local disk usage |
+| `lookup.cache-max-memory-size` | `256 mb` | Bound in-memory cache usage |
 
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 20%">Option</th>
-      <th class="text-left" style="width: 5%">Default</th>
-      <th class="text-left" style="width: 10%">Type</th>
-      <th class="text-left" style="width: 60%">Description</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-        <td><h5>lookup.cache-file-retention</h5></td>
-        <td style="word-wrap: break-word;">1 h</td>
-        <td>Duration</td>
-        <td>The cached files retention time for lookup. After the file expires, if there is a need for access, it will be re-read from the DFS to build an index on the local disk.</td>
-    </tr>
-    <tr>
-        <td><h5>lookup.cache-max-disk-size</h5></td>
-        <td style="word-wrap: break-word;">unlimited</td>
-        <td>MemorySize</td>
-        <td>Max disk size for lookup cache, you can use this option to limit the use of local disks.</td>
-    </tr>
-    <tr>
-        <td><h5>lookup.cache-max-memory-size</h5></td>
-        <td style="word-wrap: break-word;">256 mb</td>
-        <td>MemorySize</td>
-        <td>Max memory size for lookup cache.</td>
-    </tr>
-    </tbody>
-</table>
+In Flink, `execution.checkpointing.max-concurrent-checkpoints` can also affect throughput when
+checkpoint completion waits for compaction. Tune it with checkpoint duration and resource usage.
 
-Lookup changelog-producer supports `changelog-producer.row-deduplicate` to avoid generating -U, +U
-changelog for the same record.
-
-(Note: Please increase `'execution.checkpointing.max-concurrent-checkpoints'` Flink configuration, this is very
-important for performance).
+`lookup` is incompatible with `full-compaction.delta-commits`. For periodic full compaction with
+changelog generation, use `full-compaction` instead.
 
 ## Full Compaction
 
-You can also consider using 'full-compaction' changelog producer to generate changelog, and is more suitable for scenarios
-with large latency (For example, 30 minutes).
+```sql
+'changelog-producer' = 'full-compaction'
+```
 
-1. By specifying `'changelog-producer' = 'full-compaction'`, Paimon will compare the results between full compactions and
-produce the differences as changelog. The latency of changelog is affected by the frequency of full compactions.
-2. By specifying `full-compaction.delta-commits` table property, full compaction will be constantly triggered after delta
-commits (checkpoints). This is set to 1 by default, so each checkpoint will have a full compression and generate a
-changelog.
+Paimon compares successive full-compaction results and emits their differences. Intermediate
+updates between those results may be collapsed; this is a changelog of table-state changes,
+not a copy of every source event.
 
-Generally speaking, the cost and consumption of full compaction are high, so we recommend using `'lookup'` changelog
-producer.
+`full-compaction.delta-commits` controls the number of delta commits between synchronous full
+compactions. In Flink streaming writes with this producer, the interval defaults to one checkpoint
+when it is not explicitly configured. Increase the interval when the consumer can tolerate a
+longer delay and full compaction is too expensive.
 
-![](/img/changelog-producer-full-compaction.png)
+For example, consumers with a latency budget of tens of minutes may use periodic full compaction.
+For lower-latency generated changelogs, evaluate `lookup`.
 
-:::info
+## Filter Generated Changes
 
-Full compaction changelog producer can produce complete changelog for any type of source. However it is not as
-efficient as the input changelog producer and the latency to produce changelog might be high.
+The `lookup` and `full-compaction` producers support:
 
-:::
+| Option | Effect |
+| --- | --- |
+| `changelog-producer.row-deduplicate` | Avoid an update pair when the old and new rows are equal |
+| `changelog-producer.ignore-update-before` | Omit `UPDATE_BEFORE` (`-U`) records |
+| `changelog-producer.ignore-delete` | Omit `DELETE` (`-D`) records |
 
-Full-compaction changelog-producer supports `changelog-producer.row-deduplicate` to avoid generating -U, +U
-changelog for the same record.
+Dropping before images or deletes changes the consumer contract. Enable these filters only when
+the consumer can handle the resulting stream; downstream retracting aggregations need those
+records to remain correct.
 
 ## Changelog Merging
 
-For `input`, `lookup`, `full-compaction` 'changelog-producer'.
+For `input`, `lookup`, and `full-compaction`, short Flink checkpoint intervals combined with many
+buckets can produce numerous small changelog files.
 
-If Flink's checkpoint interval is short (for example, 30 seconds) and the number of buckets is large, each snapshot may
-produce lots of small changelog files. Too many files may put a burden on the distributed storage cluster.
-
-In order to compact small changelog files into large ones, you can set the table option `precommit-compact = true`.
-Default value of this option is false, if true, it will add a compact coordinator and worker operator after the writer
-operator, which copies changelog files into large ones.
+Set `precommit-compact = true` to merge them before commit. This adds a compaction coordinator
+and worker after the writer. The default is `false`. This file-consolidation step is distinct
+from choosing how the changelog records are generated.

@@ -18,12 +18,14 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.partition.PartitionStatistics;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -53,9 +55,9 @@ class DelegateCatalogTest {
                 Collections.singletonList(
                         new PartitionStatistics(specs.get(0), 3L, 300L, 1L, 1000L, -1));
 
-        delegating.createPartitions(IDENTIFIER, specs, true, statistics, false);
+        delegating.createPartitions(IDENTIFIER, specs, true, statistics, false, null);
 
-        verify(wrapped).createPartitions(IDENTIFIER, specs, true, statistics, false);
+        verify(wrapped).createPartitions(IDENTIFIER, specs, true, statistics, false, null);
         // Falling through to the two-argument call is how the statistics would go missing.
         verify(wrapped, never()).createPartitions(any(), anyList());
     }
@@ -67,9 +69,26 @@ class DelegateCatalogTest {
         List<Map<String, String>> specs =
                 Collections.singletonList(Collections.singletonMap("dt", "20260728"));
 
-        delegating.createPartitions(IDENTIFIER, specs, false, null, false);
+        delegating.createPartitions(IDENTIFIER, specs, false, null, false, null);
 
-        verify(wrapped).createPartitions(IDENTIFIER, specs, false, null, false);
+        verify(wrapped).createPartitions(IDENTIFIER, specs, false, null, false, null);
+    }
+
+    @Test
+    void testCreatePartitionsCarriesOptionsToTheWrappedCatalog() throws Exception {
+        Catalog wrapped = mock(Catalog.class);
+        Catalog delegating = new TestDelegateCatalog(wrapped);
+        Map<String, String> spec = Collections.singletonMap("dt", "20260728");
+        List<Map<String, String>> specs = Collections.singletonList(spec);
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PATH.key(), "file:/archive/dt=20260728");
+        options.put("owner", "data-platform");
+        List<Map<String, String>> partitionOptions = Collections.singletonList(options);
+
+        delegating.createPartitions(IDENTIFIER, specs, true, null, false, partitionOptions);
+
+        verify(wrapped).createPartitions(IDENTIFIER, specs, true, null, false, partitionOptions);
+        verify(wrapped, never()).createPartitions(IDENTIFIER, specs, true, null, false, null);
     }
 
     /** {@link DelegateCatalog} forwards every operation; these tests never rebuild one. */

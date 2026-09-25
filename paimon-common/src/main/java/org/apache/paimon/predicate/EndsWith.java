@@ -55,7 +55,7 @@ public class EndsWith extends LeafBinaryFunction {
 
     @Override
     public Optional<LeafFunction> negate() {
-        return Optional.empty();
+        return Optional.of(NotEndsWith.INSTANCE);
     }
 
     @Override

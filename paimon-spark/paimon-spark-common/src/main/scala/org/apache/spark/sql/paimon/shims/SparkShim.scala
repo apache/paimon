@@ -265,6 +265,8 @@ trait SparkShim {
 
   def toPaimonVariant(array: ArrayData, pos: Int): Variant
 
+  def toSparkVariant(variant: Variant): Object
+
   def isSparkVariantType(dataType: org.apache.spark.sql.types.DataType): Boolean
 
   def SparkVariantType(): org.apache.spark.sql.types.DataType

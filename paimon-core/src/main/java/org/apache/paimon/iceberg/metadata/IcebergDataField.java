@@ -186,16 +186,21 @@ public class IcebergDataField {
                 return String.format(
                         "decimal(%d, %d)", decimalType.getPrecision(), decimalType.getScale());
             case TIMESTAMP_WITHOUT_TIME_ZONE:
+                // Nanoseconds name the Iceberg v3 type. Whether a table may publish one is decided
+                // by SchemaValidation#validateIcebergTimestampPrecisions, which knows the mirror is
+                // enabled and writes INT96.
                 int timestampPrecision = ((TimestampType) dataType).getPrecision();
                 Preconditions.checkArgument(
                         timestampPrecision >= 3 && timestampPrecision <= 9,
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9.");
+                        "Paimon Iceberg compatibility only supports timestamp types with a "
+                                + "precision from 3 to 9.");
                 return timestampPrecision >= 7 ? "timestamp_ns" : "timestamp";
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 int timestampLtzPrecision = ((LocalZonedTimestampType) dataType).getPrecision();
                 Preconditions.checkArgument(
                         timestampLtzPrecision >= 3 && timestampLtzPrecision <= 9,
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9.");
+                        "Paimon Iceberg compatibility only supports timestamp types with a "
+                                + "precision from 3 to 9.");
                 return timestampLtzPrecision >= 7 ? "timestamptz_ns" : "timestamptz";
             case VARIANT:
                 return "variant";

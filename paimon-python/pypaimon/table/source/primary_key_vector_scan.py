@@ -17,15 +17,18 @@
 
 from dataclasses import dataclass
 
-from pypaimon.common.options.options import Options
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourceMeta
+from pypaimon.index.pk.primary_key_index_source_policy import (
+    should_read as _should_read_source)
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split import DataSplit
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+from pypaimon.table.source.global_index_live_row_filter import table_at_snapshot
 from pypaimon.table.source.vector_search_scan import VectorSearchScan, VectorSearchScanPlan
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
@@ -52,24 +55,11 @@ class PrimaryKeyVectorScan(VectorSearchScan):
         self._index_type = index_type
 
     def scan(self):
-        snapshot = TimeTravelUtil.try_travel_to_snapshot(
-            Options(self._table.table_schema.options), self._table.tag_manager(),
-            self._table.snapshot_manager())
-        if snapshot is None:
-            snapshot = self._table.snapshot_manager().get_latest_snapshot()
+        snapshot = TimeTravelUtil.resolve_snapshot(self._table)
         if snapshot is None:
             return PrimaryKeyVectorScanPlan(0, [])
 
-        pin_options = {
-            CoreOptions.SCAN_MODE.key(): "from-snapshot",
-            CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot.id)}
-        for option in (CoreOptions.SCAN_TAG_NAME,
-                       CoreOptions.SCAN_WATERMARK,
-                       CoreOptions.SCAN_TIMESTAMP,
-                       CoreOptions.SCAN_TIMESTAMP_MILLIS):
-            if option.key() in self._table.table_schema.options:
-                pin_options[option.key()] = None
-        scan_table = self._table.copy(pin_options)
+        scan_table = table_at_snapshot(self._table, snapshot)
         builder = scan_table.new_read_builder()
         if self._partition_filter is not None:
             builder = builder.with_partition_filter(self._partition_filter)
@@ -185,11 +175,6 @@ def _bucket_splits(source_splits, entries):
             split, tuple(current), tuple(name for name in active if name not in covered),
             dict(ranges_by_bucket.get(key, {}))))
     return result
-
-
-def _should_read_source(data_file):
-    # FileSource.COMPACT = 1. Match Java PrimaryKeyIndexSourcePolicy.
-    return data_file.file_source == 1 and data_file.level > 0
 
 
 def _residual_row_ranges(table, predicate, split, candidate_ranges):

@@ -361,6 +361,160 @@ public class VortexPredicateConverterTest {
         assertEquals(BinaryString.fromString("hello"), rows.get(0).getString(2));
     }
 
+    @Test
+    public void testDateSemantic(@TempDir java.nio.file.Path tempDir) throws Exception {
+        // f_date >= 20 (epoch day) should return rows with f_date=20,30
+        RowType dateRowType = RowType.builder().field("f_date", DataTypes.DATE()).build();
+        PredicateBuilder dateBuilder = new PredicateBuilder(dateRowType);
+        List<InternalRow> rows =
+                roundTrip(
+                        tempDir,
+                        dateRowType,
+                        new GenericRow[] {GenericRow.of(10), GenericRow.of(20), GenericRow.of(30)},
+                        Collections.singletonList(dateBuilder.greaterOrEqual(0, 20)));
+        assertEquals(2, rows.size());
+        assertEquals(20, rows.get(0).getInt(0));
+        assertEquals(30, rows.get(1).getInt(0));
+    }
+
+    @Test
+    public void testTimestampSecondsPrecisionSemantic(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        // f_ts >= 2000s should return rows with f_ts=2000s,3000s
+        RowType tsRowType = RowType.builder().field("f_ts", DataTypes.TIMESTAMP(0)).build();
+        PredicateBuilder tsBuilder = new PredicateBuilder(tsRowType);
+        List<InternalRow> rows =
+                roundTrip(
+                        tempDir,
+                        tsRowType,
+                        new GenericRow[] {
+                            GenericRow.of(Timestamp.fromEpochMillis(1_000_000L)),
+                            GenericRow.of(Timestamp.fromEpochMillis(2_000_000L)),
+                            GenericRow.of(Timestamp.fromEpochMillis(3_000_000L))
+                        },
+                        Collections.singletonList(
+                                tsBuilder.greaterOrEqual(
+                                        0, Timestamp.fromEpochMillis(2_000_000L))));
+        assertEquals(2, rows.size());
+        assertEquals(2_000_000L, rows.get(0).getTimestamp(0, 0).getMillisecond());
+        assertEquals(3_000_000L, rows.get(1).getTimestamp(0, 0).getMillisecond());
+    }
+
+    @Test
+    public void testTimestampLtzSecondsPrecisionSemantic(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        // f_ts_ltz == 2000s should return only the row with f_ts_ltz=2000s
+        RowType tsRowType =
+                RowType.builder()
+                        .field("f_ts_ltz", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(0))
+                        .build();
+        PredicateBuilder tsBuilder = new PredicateBuilder(tsRowType);
+        List<InternalRow> rows =
+                roundTrip(
+                        tempDir,
+                        tsRowType,
+                        new GenericRow[] {
+                            GenericRow.of(Timestamp.fromEpochMillis(1_000_000L)),
+                            GenericRow.of(Timestamp.fromEpochMillis(2_000_000L)),
+                            GenericRow.of(Timestamp.fromEpochMillis(3_000_000L))
+                        },
+                        Collections.singletonList(
+                                tsBuilder.equal(0, Timestamp.fromEpochMillis(2_000_000L))));
+        assertEquals(1, rows.size());
+        assertEquals(2_000_000L, rows.get(0).getTimestamp(0, 0).getMillisecond());
+    }
+
+    @Test
+    public void testTimestampSecondsUnrepresentableLiteralNotPushed(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        // The literal carries millisecond precision while the column is stored in seconds. No
+        // rounding direction answers every operator, so the leaf is not pushed and the reader
+        // returns every row for the engine to filter. Rounding down to 1s used to drop the
+        // 1000ms row from "< 1500ms" and the 1000ms row from "!= 1500ms".
+        RowType tsRowType = RowType.builder().field("f_ts", DataTypes.TIMESTAMP(0)).build();
+        PredicateBuilder tsBuilder = new PredicateBuilder(tsRowType);
+        GenericRow[] data = {
+            GenericRow.of(Timestamp.fromEpochMillis(1_000L)),
+            GenericRow.of(Timestamp.fromEpochMillis(2_000L)),
+            GenericRow.of(Timestamp.fromEpochMillis(3_000L))
+        };
+
+        assertEquals(
+                3,
+                roundTrip(
+                                tempDir,
+                                tsRowType,
+                                data,
+                                Collections.singletonList(
+                                        tsBuilder.lessThan(0, Timestamp.fromEpochMillis(1_500L))))
+                        .size());
+        assertEquals(
+                3,
+                roundTrip(
+                                tempDir,
+                                tsRowType,
+                                data,
+                                Collections.singletonList(
+                                        tsBuilder.notEqual(0, Timestamp.fromEpochMillis(1_500L))))
+                        .size());
+    }
+
+    @Test
+    public void testTimestampSecondsPreEpochLiteralNotPushed(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        // integer division truncates toward zero, so -500ms became -0s and dropped the epoch row
+        RowType tsRowType = RowType.builder().field("f_ts", DataTypes.TIMESTAMP(0)).build();
+        PredicateBuilder tsBuilder = new PredicateBuilder(tsRowType);
+        List<InternalRow> rows =
+                roundTrip(
+                        tempDir,
+                        tsRowType,
+                        new GenericRow[] {GenericRow.of(Timestamp.fromEpochMillis(0L))},
+                        Collections.singletonList(
+                                tsBuilder.greaterThan(0, Timestamp.fromEpochMillis(-500L))));
+        assertEquals(1, rows.size());
+        assertEquals(0L, rows.get(0).getTimestamp(0, 0).getMillisecond());
+    }
+
+    @Test
+    public void testTimestampMillisSubMillisecondLiteralNotPushed(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        // a TIMESTAMP(3) column is stored in milliseconds, so the sub millisecond part of the
+        // literal was silently discarded and the 1500ms row was dropped
+        RowType tsRowType = RowType.builder().field("f_ts", DataTypes.TIMESTAMP(3)).build();
+        PredicateBuilder tsBuilder = new PredicateBuilder(tsRowType);
+        List<InternalRow> rows =
+                roundTrip(
+                        tempDir,
+                        tsRowType,
+                        new GenericRow[] {GenericRow.of(Timestamp.fromEpochMillis(1_500L))},
+                        Collections.singletonList(
+                                tsBuilder.lessThan(0, Timestamp.fromMicros(1_500_500L))));
+        assertEquals(1, rows.size());
+        assertEquals(1_500L, rows.get(0).getTimestamp(0, 0).getMillisecond());
+    }
+
+    @Test
+    public void testTimestampNanosOverflowingLiteralNotPushed(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        // epoch millis times 1_000_000 overflows int64 nanoseconds beyond 2262-04-11, and the
+        // wrapped bound landed before the epoch, so "< 9999-12-31" dropped the epoch row
+        RowType tsRowType = RowType.builder().field("f_ts", DataTypes.TIMESTAMP(9)).build();
+        PredicateBuilder tsBuilder = new PredicateBuilder(tsRowType);
+        List<Predicate> predicates =
+                Collections.singletonList(
+                        tsBuilder.lessThan(0, Timestamp.fromEpochMillis(253402214400000L)));
+        assertNull(VortexPredicateConverter.toVortexExpression(predicates));
+        List<InternalRow> rows =
+                roundTrip(
+                        tempDir,
+                        tsRowType,
+                        new GenericRow[] {GenericRow.of(Timestamp.fromEpochMillis(0L))},
+                        predicates);
+        assertEquals(1, rows.size());
+        assertEquals(0L, rows.get(0).getTimestamp(0, 0).getMillisecond());
+    }
+
     private List<InternalRow> roundTrip(
             java.nio.file.Path tempDir,
             RowType rowType,

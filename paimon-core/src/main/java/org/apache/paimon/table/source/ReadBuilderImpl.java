@@ -58,7 +58,9 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     private Predicate filter;
 
+    // Keep the legacy field for Java serialization compatibility.
     private Integer limit = null;
+    private Long longLimit = null;
     private TopN topN = null;
 
     private Integer shardIndexOfThisSubtask;
@@ -137,6 +139,14 @@ public class ReadBuilderImpl implements ReadBuilder {
     @Override
     public ReadBuilder withLimit(int limit) {
         this.limit = limit;
+        this.longLimit = (long) limit;
+        return this;
+    }
+
+    @Override
+    public ReadBuilder withLimit(long limit) {
+        this.longLimit = limit;
+        this.limit = limit >= Integer.MIN_VALUE && limit <= Integer.MAX_VALUE ? (int) limit : null;
         return this;
     }
 
@@ -189,6 +199,7 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public TableScan newScan() {
+        Long limit = effectiveLimit();
         InnerTableScan tableScan = configureScan(table.newScan());
         if (limit != null) {
             tableScan.withLimit(limit);
@@ -240,18 +251,20 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public TableRead newRead() {
+        Long limit = effectiveLimit();
         InnerTableRead read = table.newRead().withFilter(filter);
         if (readType != null) {
             read.withReadType(readType);
         }
         if (queryAuthEnabled) {
-            // Skip TopN (engine re-applies it); apply the limit after auth only without a TopN,
-            // else an unordered limit could drop sorted rows.
+            // the reader does not evaluate the query filter on an auth-enabled table, so
+            // capping the rows here would cut away rows that actually match
             if (topN == null && limit != null) {
-                return new LimitTableRead(read, limit);
+                return new LimitTableRead(read, limit, filter != null);
             }
             return read;
         }
+
         if (topN != null) {
             read.withTopN(topN);
         }
@@ -259,6 +272,11 @@ public class ReadBuilderImpl implements ReadBuilder {
             read.withLimit(limit);
         }
         return read;
+    }
+
+    @Nullable
+    private Long effectiveLimit() {
+        return longLimit != null ? longLimit : limit == null ? null : limit.longValue();
     }
 
     @Override
@@ -290,11 +308,16 @@ public class ReadBuilderImpl implements ReadBuilder {
     private static class LimitTableRead implements TableRead {
 
         private final TableRead delegate;
-        private final int limit;
+        private final long limit;
+        // with a filter the reader only evaluates it once executeFilter() is requested;
+        // otherwise the engine does, after this limit, so capping here would drop matches
+        private final boolean filterPresent;
+        private boolean filterExecutedByReader = false;
 
-        private LimitTableRead(TableRead delegate, int limit) {
+        private LimitTableRead(TableRead delegate, long limit, boolean filterPresent) {
             this.delegate = delegate;
             this.limit = limit;
+            this.filterPresent = filterPresent;
         }
 
         @Override
@@ -306,6 +329,7 @@ public class ReadBuilderImpl implements ReadBuilder {
         @Override
         public TableRead executeFilter() {
             delegate.executeFilter();
+            this.filterExecutedByReader = true;
             return this;
         }
 
@@ -338,10 +362,13 @@ public class ReadBuilderImpl implements ReadBuilder {
         }
 
         private RecordReader<InternalRow> limit(RecordReader<InternalRow> reader) {
+            if (filterPresent && !filterExecutedByReader) {
+                return reader;
+            }
             // Stop reading once the limit is reached (return EOF), rather than filtering and
             // draining the rest of the data.
             return new RecordReader<InternalRow>() {
-                private int count;
+                private long count;
 
                 @Nullable
                 @Override

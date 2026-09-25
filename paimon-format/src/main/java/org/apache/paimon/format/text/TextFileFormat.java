@@ -66,7 +66,7 @@ public class TextFileFormat extends FileFormat {
     @Override
     public void validateDataFields(RowType rowType) {
         if (rowType.getFieldCount() != 1
-                && !rowType.getFieldTypes().get(0).equals(DataTypes.STRING())) {
+                || !rowType.getFieldTypes().get(0).equals(DataTypes.STRING())) {
             throw new IllegalArgumentException("Text format only supports a single string column");
         }
     }

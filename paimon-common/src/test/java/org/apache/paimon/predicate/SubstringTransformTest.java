@@ -85,6 +85,39 @@ class SubstringTransformTest {
     }
 
     @Test
+    public void testSqlPositionSemantics() {
+        List<Object> inputs = new ArrayList<>();
+        inputs.add(BinaryString.fromString("abcdef"));
+        inputs.add(1);
+        inputs.add(2);
+
+        for (Object[] spec :
+                new Object[][] {
+                    {0, 2, "ab"},
+                    {1, 2, "ab"},
+                    {-2, 2, "ef"},
+                    {-2, 9, "ef"},
+                    {-9, 2, ""},
+                    {2, 0, ""},
+                    {2, -1, ""},
+                    {9, 2, ""},
+                    {-9, 5, "ab"}
+                }) {
+            inputs.set(1, spec[0]);
+            inputs.set(2, spec[1]);
+            assertThat(new SubstringTransform(inputs).transform(GenericRow.of()))
+                    .isEqualTo(BinaryString.fromString((String) spec[2]));
+        }
+
+        inputs.remove(2);
+        for (Object[] spec : new Object[][] {{0, "abcdef"}, {-2, "ef"}, {9, ""}, {-9, "abcdef"}}) {
+            inputs.set(1, spec[0]);
+            assertThat(new SubstringTransform(inputs).transform(GenericRow.of()))
+                    .isEqualTo(BinaryString.fromString((String) spec[1]));
+        }
+    }
+
+    @Test
     public void testSubstringWithSupplementaryCharacter() {
         SubstringTransform transform =
                 new SubstringTransform(Arrays.asList(BinaryString.fromString("A😀B"), 2, 1));

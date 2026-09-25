@@ -155,13 +155,14 @@ class RowIdConflictRewriter:
     def _is_rewrite_candidate(
             self, entry, current_exact_ranges, next_row_id):
         file = entry.file
+        write_cols = self._partial_file_write_cols(file)
         return (
             self._is_normal_row_id_file(file)
             and file.first_row_id < next_row_id
-            and bool(file.write_cols)
+            and bool(write_cols)
             and not any(
                 SpecialFields.is_system_field(name)
-                for name in file.write_cols
+                for name in write_cols
             )
             and self._range_key(entry) not in current_exact_ranges
         )
@@ -209,16 +210,25 @@ class RowIdConflictRewriter:
                     break
         return list(affected.values())
 
-    @staticmethod
-    def _group_by_write_columns(candidates):
+    def _group_by_write_columns(self, candidates):
         groups = {}
         for entry in candidates:
-            key = tuple(entry.file.write_cols)
+            key = tuple(self._partial_file_write_cols(entry.file))
             groups.setdefault(key, []).append(entry)
         return [
             (list(columns), entries)
             for columns, entries in groups.items()
         ]
+
+    def _partial_file_write_cols(self, file):
+        schema = (
+            self.table.table_schema
+            if file.schema_id == self.table.table_schema.id
+            else self.table.schema_manager.get_schema(file.schema_id)
+        )
+        if schema is None:
+            raise RuntimeError(f"Schema {file.schema_id} not found")
+        return schema.partial_file_write_cols(file.write_cols)
 
     def _read_staged_update(self, entry, column_names):
         read_fields = [self.table.field_dict[name] for name in column_names]

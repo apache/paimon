@@ -302,6 +302,98 @@ public class FormatReaderMappingTest {
     }
 
     @Test
+    public void testAddedNestedLeafReadsSiblingAsNullabilityAnchor() throws Exception {
+        DataField dataField =
+                DataTypes.FIELD(
+                        1, "payload", DataTypes.ROW(DataTypes.FIELD(2, "x", DataTypes.INT())));
+        DataField expectedField =
+                DataTypes.FIELD(
+                        1, "payload", DataTypes.ROW(DataTypes.FIELD(3, "y", DataTypes.INT())));
+
+        List<DataField> readFields =
+                invokeNestedDataFields(
+                        Collections.singletonList(dataField),
+                        Collections.singletonList(expectedField),
+                        Collections.emptySet());
+
+        Assertions.assertThat(readFields).containsExactly(dataField);
+        IndexCastMapping mapping =
+                SchemaEvolutionUtil.createIndexCastMapping(
+                        Collections.singletonList(expectedField), readFields);
+        InternalRow evolved =
+                mapping.getCastMapping()[0].getFieldOrNull(GenericRow.of(GenericRow.of(10)));
+        Assertions.assertThat(evolved).isNotNull();
+        Assertions.assertThat(evolved.isNullAt(0)).isTrue();
+        Object nullParent =
+                mapping.getCastMapping()[0].getFieldOrNull(GenericRow.of((Object) null));
+        Assertions.assertThat(nullParent).isNull();
+    }
+
+    @Test
+    public void testDeepAddedNestedLeafReadsSiblingAsNullabilityAnchor() throws Exception {
+        DataField dataField =
+                DataTypes.FIELD(
+                        1,
+                        "payload",
+                        DataTypes.ROW(
+                                DataTypes.FIELD(
+                                        2,
+                                        "sub",
+                                        DataTypes.ROW(
+                                                DataTypes.FIELD(3, "existing", DataTypes.INT())))));
+        DataField expectedField =
+                DataTypes.FIELD(
+                        1,
+                        "payload",
+                        DataTypes.ROW(
+                                DataTypes.FIELD(
+                                        2,
+                                        "sub",
+                                        DataTypes.ROW(
+                                                DataTypes.FIELD(4, "added", DataTypes.INT())))));
+
+        List<DataField> readFields =
+                invokeNestedDataFields(
+                        Collections.singletonList(dataField),
+                        Collections.singletonList(expectedField),
+                        Collections.emptySet());
+
+        Assertions.assertThat(readFields).containsExactly(dataField);
+        IndexCastMapping mapping =
+                SchemaEvolutionUtil.createIndexCastMapping(
+                        Collections.singletonList(expectedField), readFields);
+        InternalRow evolved =
+                mapping.getCastMapping()[0].getFieldOrNull(
+                        GenericRow.of(GenericRow.of(GenericRow.of(10))));
+        Assertions.assertThat(evolved).isNotNull();
+        InternalRow evolvedSub = evolved.getRow(0, 1);
+        Assertions.assertThat(evolvedSub).isNotNull();
+        Assertions.assertThat(evolvedSub.isNullAt(0)).isTrue();
+        InternalRow nullSub =
+                mapping.getCastMapping()[0].getFieldOrNull(
+                        GenericRow.of(GenericRow.of((Object) null)));
+        Assertions.assertThat(nullSub).isNotNull();
+        Assertions.assertThat(nullSub.isNullAt(0)).isTrue();
+    }
+
+    @Test
+    public void testAddedNestedLeafDoesNotReadSiblingWhenNestedFieldDisabled() throws Exception {
+        DataField dataField =
+                DataTypes.FIELD(
+                        1, "payload", DataTypes.ROW(DataTypes.FIELD(2, "x", DataTypes.INT())));
+        DataField expectedField =
+                DataTypes.FIELD(
+                        1, "payload", DataTypes.ROW(DataTypes.FIELD(3, "y", DataTypes.INT())));
+
+        Assertions.assertThat(
+                        invokeDataFields(
+                                Collections.singletonList(dataField),
+                                Collections.singletonList(expectedField),
+                                Collections.emptySet()))
+                .isEmpty();
+    }
+
+    @Test
     public void testRejectSelectedKeysDataFieldWithNonMapType() {
         DataField dataField = DataTypes.FIELD(2, "attrs", DataTypes.BIGINT());
         DataField expectedField = selectedKeysField(2, "attrs", DataTypes.BIGINT());
@@ -336,6 +428,23 @@ public class FormatReaderMappingTest {
         method.setAccessible(true);
         return (List<DataField>)
                 method.invoke(builder, allDataFields, expectedFields, selectedKeysFieldIds);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<DataField> invokeNestedDataFields(
+            List<DataField> allDataFields,
+            List<DataField> expectedFields,
+            Set<Integer> selectedKeysFieldIds)
+            throws Exception {
+        FormatReaderMapping.Builder builder =
+                new FormatReaderMapping.Builder(
+                        null, Collections.emptyList(), null, null, null, null);
+        Method method =
+                FormatReaderMapping.Builder.class.getDeclaredMethod(
+                        "readDataFields", List.class, List.class, Set.class, boolean.class);
+        method.setAccessible(true);
+        return (List<DataField>)
+                method.invoke(builder, allDataFields, expectedFields, selectedKeysFieldIds, true);
     }
 
     @SuppressWarnings("unchecked")

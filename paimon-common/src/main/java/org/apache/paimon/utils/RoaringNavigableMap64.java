@@ -59,6 +59,20 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         return roaring64NavigableMap.contains(x);
     }
 
+    /** Returns whether this bitmap contains a value in {@code [fromInclusive, toExclusive)}. */
+    public boolean intersects(long fromInclusive, long toExclusive) {
+        Preconditions.checkArgument(
+                fromInclusive >= 0 && toExclusive >= fromInclusive,
+                "Invalid non-negative bitmap range [%s, %s).",
+                fromInclusive,
+                toExclusive);
+        if (fromInclusive == toExclusive || roaring64NavigableMap.isEmpty()) {
+            return false;
+        }
+        long before = fromInclusive == 0 ? 0 : roaring64NavigableMap.rankLong(fromInclusive - 1);
+        return roaring64NavigableMap.rankLong(toExclusive - 1) > before;
+    }
+
     public void add(long x) {
         roaring64NavigableMap.add(x);
     }
@@ -93,6 +107,18 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
 
     public Iterator<Long> iterator() {
         return roaring64NavigableMap.iterator();
+    }
+
+    /** Returns at most the first {@code maxValues} values without boxing them. */
+    public long[] toArray(int maxValues) {
+        Preconditions.checkArgument(maxValues >= 0, "Max value count must not be negative.");
+        int resultLength = (int) Math.min(getLongCardinality(), (long) maxValues);
+        long[] result = new long[resultLength];
+        LongIterator iterator = roaring64NavigableMap.getLongIterator();
+        for (int i = 0; i < resultLength; i++) {
+            result[i] = iterator.next();
+        }
+        return result;
     }
 
     public static RoaringNavigableMap64 and(RoaringNavigableMap64 x1, RoaringNavigableMap64 x2) {
@@ -135,7 +161,18 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
     }
 
     public void deserialize(byte[] rbmBytes) throws IOException {
-        try (ByteArrayInputStream bis = new ByteArrayInputStream(rbmBytes);
+        deserialize(rbmBytes, 0, rbmBytes.length);
+    }
+
+    /** Deserializes a bitmap from a region of the given byte array without copying that region. */
+    public void deserialize(byte[] rbmBytes, int offset, int length) throws IOException {
+        Preconditions.checkArgument(
+                offset >= 0 && length >= 0 && offset <= rbmBytes.length - length,
+                "Invalid bitmap byte range [%s, %s) for array length %s.",
+                offset,
+                (long) offset + length,
+                rbmBytes.length);
+        try (ByteArrayInputStream bis = new ByteArrayInputStream(rbmBytes, offset, length);
                 DataInputStream dis = new DataInputStream(bis)) {
             roaring64NavigableMap.deserializePortable(dis);
         }
@@ -172,13 +209,21 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
             previous = current;
             samples++;
         }
+        // A high hit ratio can still mean many short runs (for example nine hits followed
+        // by one gap). Repeated select calls are expensive for those; use the iterator.
         return consecutive * 4 >= samples * 3
-                && isNextAt(cardinality / 2)
-                && isNextAt(cardinality - 2);
+                && hasLongRunAt(cardinality / 2)
+                && hasLongRunAt(cardinality - 2 * RANGE_LIST_SELECT_SAMPLE_SIZE - 1);
     }
 
-    private boolean isNextAt(long index) {
-        return isNext(roaring64NavigableMap.select(index), roaring64NavigableMap.select(index + 1));
+    private boolean hasLongRunAt(long index) {
+        // Probe both halves so an isolated gap in a long run does not force a linear scan.
+        long middle = index + RANGE_LIST_SELECT_SAMPLE_SIZE;
+        return isContiguous(roaring64NavigableMap.select(index), index, middle)
+                || isContiguous(
+                        roaring64NavigableMap.select(middle),
+                        middle,
+                        middle + RANGE_LIST_SELECT_SAMPLE_SIZE);
     }
 
     private List<Range> toRangeListByIterator() {

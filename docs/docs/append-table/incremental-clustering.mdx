@@ -1,6 +1,6 @@
 ---
 title: "Incremental Clustering"
-sidebar_position: 2
+sidebar_position: 4
 ---
 
 import Tabs from '@theme/Tabs';
@@ -27,268 +27,275 @@ under the License.
 
 # Incremental Clustering
 
-Paimon currently supports ordering append tables using SFC (Space-Filling Curve)(see [sort compact](../maintenance/dedicated-compaction#sort-compact) for more info). 
-The resulting data layout typically delivers better performance for queries that target clustering keys. 
-However, with the current SortCompaction, even when neither the data nor the clustering keys have changed, 
-each run still rewrites the entire dataset, which is extremely costly. 
+Incremental clustering improves the data layout of append tables by sorting selected files on frequently filtered
+columns. Compared with repeatedly sorting an entire partition, it can reduce the amount of data rewritten while
+improving [file-statistics pruning](./query-performance#file-statistics-and-clustering). A run may select no files when
+its compaction criteria are not met. Full mode considers all runs in the selected scope, but can skip work that is
+already clustered; see [file selection](#implement).
 
-To address this, Paimon introduced a more flexible, incremental clustering mechanism—Incremental Clustering. 
-On each run, it selects only a specific subset of files to cluster, avoiding a full rewrite. This enables low-cost, 
-sort-based optimization of the data layout and improves query performance. In addition, with Incremental Clustering, 
-you can adjust clustering keys without rewriting existing data, the layout evolves dynamically as cluster runs and 
-gradually converges to an optimal state, significantly reducing the decision-making complexity around data layout.
+Clustering also merges small files, respecting `target-file-size`. It changes the physical layout, not the rows returned
+by a query, and does not replace SQL `ORDER BY`.
 
+## Requirements
 
-Incremental Clustering supports:
-- Support incremental clustering; minimizing write amplification as possible.
-- Support small-file compaction; during rewrites, respect target-file-size.
-- Support changing clustering keys; newly ingested data is clustered according to the latest clustering keys.
-- Provide a full mode; when selected, the entire dataset will be reclustered.
+| Requirement | Unaware-bucket append (`bucket = -1`) | Bucketed append (`bucket > 0`) |
+| --- | --- | --- |
+| Primary key | Must not be defined. | Must not be defined. |
+| Enable clustering | `clustering.incremental = true` and nonempty `clustering.columns`. | Same. |
+| Append ordering | No bucket-order guarantee. | Must set `bucket-append-ordered = false`. |
+| Deletion vectors | Supported. | Must remain disabled. |
+| Compaction execution | Schedule explicit clustering jobs; the Flink sink's normal background compaction is disabled. | Writer compaction and dedicated compact jobs use the bucket clustering path. |
+| Global/local sort mode | Configurable for batch clustering jobs. | Clustering is performed within each partition and bucket; the global/local option does not select this path. |
+| Historical-partition auto-clustering | Supported. | `clustering.history-partition.*` does not apply. |
 
-Incremental Clustering is supported for append tables in both unaware-bucket mode (`bucket = -1`) and
-bucketed mode (`bucket > 0`). For bucketed append tables, additional requirements apply because
-clustering gives up the ordered append guarantee within buckets.
+Data Evolution tables cannot enable incremental clustering. If streaming consumers require ordered append reads from a
+bucketed table, keep that ordering and do not enable clustering.
 
 ## Enable Incremental Clustering
 
-To enable Incremental Clustering, the following configuration needs to be set for the table:
-<table className="table table-bordered">
-    <thead>
-    <tr>
-      <th className="text-left" style={{width: "20%"}}>Option</th>
-      <th className="text-left" style={{width: "10%"}}>Value</th>
-      <th className="text-left" style={{width: "5%"}}>Required</th>
-      <th className="text-left" style={{width: "10%"}}>Type</th>
-      <th className="text-left" style={{width: "55%"}}>Description</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><h5>clustering.incremental</h5></td>
-      <td>true</td>
-      <td style={{wordWrap: "break-word"}}>Yes</td>
-      <td>Boolean</td>
-      <td>Must be set to true to enable incremental clustering. Default is false.</td>
-    </tr>
-    <tr>
-      <td><h5>clustering.columns</h5></td>
-      <td>'clustering-columns'</td>
-      <td style={{wordWrap: "break-word"}}>Yes</td>
-      <td>String</td>
-      <td>The clustering columns, in the format 'columnName1,columnName2'. It is not recommended to use partition keys as clustering keys.</td>
-    </tr>
-    <tr>
-      <td><h5>clustering.strategy</h5></td>
-      <td>'zorder' or 'hilbert' or 'order'</td>
-      <td style={{wordWrap: "break-word"}}>No</td>
-      <td>String</td>
-      <td>The ordering algorithm used for clustering. If not set, It'll decided from the number of clustering columns. 'order' is used for 1 column, 'zorder' for less than 5 columns, and 'hilbert' for 5 or more columns.</td>
-    </tr>
-    <tr>
-      <td><h5>clustering.incremental.mode</h5></td>
-      <td>'global-sort' or 'local-sort'</td>
-      <td style={{wordWrap: "break-word"}}>No</td>
-      <td>Enum</td>
-      <td>The sort mode for incremental clustering compaction. Default is <code>global-sort</code>. <code>global-sort</code> performs a global range shuffle across tasks before local sorting, output files are globally ordered by the clustering columns at the cost of network shuffling. <code>local-sort</code> skips the global shuffle and sorts rows only within each compaction task independently, each output file is internally ordered but there is no global ordering across files, this mode is cheaper and sufficient for per-file Parquet lookup optimizations.</td>
-    </tr>
-    </tbody>
+Set the clustering keys on the table using the DDL for its layout. Choose the tab for your engine.
 
-</table>
+### Unaware-Bucket Table
 
-For bucketed append tables (`bucket > 0`), you must also set the following option:
+For `my_table` from the [overview](./), enable clustering and specify the columns:
 
-<table className="table table-bordered">
-    <thead>
-    <tr>
-      <th className="text-left" style={{width: "20%"}}>Option</th>
-      <th className="text-left" style={{width: "10%"}}>Value</th>
-      <th className="text-left" style={{width: "5%"}}>Required</th>
-      <th className="text-left" style={{width: "10%"}}>Type</th>
-      <th className="text-left" style={{width: "55%"}}>Description</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><h5>bucket-append-ordered</h5></td>
-      <td>false</td>
-      <td style={{wordWrap: "break-word"}}>Yes</td>
-      <td>Boolean</td>
-      <td>Must be set to false for bucketed append tables with incremental clustering.</td>
-    </tr>
-    </tbody>
-
-</table>
-
-Bucketed append tables with Incremental Clustering do not support `deletion-vectors.enabled = true`.
-
-Example:
+<Tabs groupId="engine">
+<TabItem value="flink" label="Flink">
 
 ```sql
-ALTER TABLE T SET (
-    'bucket-append-ordered' = 'false',
+ALTER TABLE my_table SET (
     'clustering.incremental' = 'true',
-    'clustering.columns' = 'event_time,user_id',
-    'clustering.strategy' = 'zorder'
+    'clustering.columns' = 'product_id,price'
 );
 ```
 
-Once Incremental Clustering for a table is enabled, you can run Incremental Clustering in batch mode periodically 
-to continuously optimizes data layout of the table and deliver better query performance.
-
-**Note**: Since common compaction also rewrites files, it may disrupt the ordered data layout built by Incremental Clustering. 
-Therefore, when Incremental Clustering is enabled, the table no longer supports write-time compaction or dedicated compaction; 
-clustering and small-file merging must be performed exclusively via Incremental Clustering runs.
-
-## Run Incremental Clustering
-:::info
-
-The following examples submit batch compact jobs. They are the recommended way to run Incremental Clustering explicitly.
-
-:::
-
-To run a Incremental Clustering job, follow these instructions. 
-
-You don't need to specify any clustering-related parameters when running Incremental Clustering,
-these options are already defined as table options. If you need to change clustering settings, please update the corresponding table options.
-
-<Tabs groupId="incremental-clustering">
-
-<TabItem value="spark-sql" label="Spark SQL">
-
-Run the following sql:
+</TabItem>
+<TabItem value="spark" label="Spark">
 
 ```sql
---set the write parallelism, if too big, may generate a large number of small files.
-SET spark.sql.shuffle.partitions=10;
-
--- run incremental clustering
-CALL sys.compact(table => 'T')
-
--- run incremental clustering with full mode, this will recluster all data
-CALL sys.compact(table => 'T', compact_strategy => 'full')
-
--- run incremental clustering with global-sort mode (default)
--- performs a global range shuffle across tasks, output files are globally ordered
-CALL sys.compact(table => 'T', options => 'clustering.incremental.mode=global-sort')
-
--- run incremental clustering with local-sort mode
--- sorts rows only within each task, no global shuffle, cheaper and sufficient for Parquet lookup optimizations
-CALL sys.compact(table => 'T', options => 'clustering.incremental.mode=local-sort')
+ALTER TABLE my_table SET TBLPROPERTIES (
+    'clustering.incremental' = 'true',
+    'clustering.columns' = 'product_id,price'
+);
 ```
 
 </TabItem>
+</Tabs>
 
-<TabItem value="flink-action" label="Flink Action">
+### Bucketed Table
 
-Run the following command to submit a incremental clustering job for the table.
+For `bucketed_table` from [Bucketed append](./bucketed#create-a-bucketed-table), disable append ordering in the **same**
+statement that enables clustering. Keep deletion vectors disabled. This explicitly opts out of
+[ordered streaming reads](./bucketed#bucketed-streaming).
+
+<Tabs groupId="engine">
+<TabItem value="flink" label="Flink">
+
+```sql
+ALTER TABLE bucketed_table SET (
+    'bucket-append-ordered' = 'false',
+    'clustering.incremental' = 'true',
+    'clustering.columns' = 'product_id,price'
+);
+```
+
+</TabItem>
+<TabItem value="spark" label="Spark">
+
+```sql
+ALTER TABLE bucketed_table SET TBLPROPERTIES (
+    'bucket-append-ordered' = 'false',
+    'clustering.incremental' = 'true',
+    'clustering.columns' = 'product_id,price'
+);
+```
+
+</TabItem>
+</Tabs>
+
+### Clustering Options
+
+| Option | Default | How to use it |
+| --- | --- | --- |
+| `clustering.incremental` | `false` | Set to `true` to enable incremental clustering. |
+| `clustering.columns` | Not set | Comma-separated columns, such as `product_id,price`. Prefer frequently filtered data columns over partition columns. |
+| `clustering.strategy` | `auto` | `order`, `zorder`, or `hilbert`. Automatic selection uses `order` for one column, `zorder` for two to four, and `hilbert` for five or more. |
+| `clustering.incremental.mode` | `global-sort` | Sort execution mode for unaware-bucket batch clustering; see below. |
+
+## Choose a Sort Mode
+
+For unaware-bucket tables, the mode controls how the **selected files in each partition** are sorted:
+
+| Mode | Execution | Tradeoff |
+| --- | --- | --- |
+| `global-sort` | Range-shuffles rows across tasks, then sorts within tasks using the configured clustering strategy. | Coordinates the layout across the selected output files, at the cost of a network shuffle. |
+| `local-sort` | Sorts rows independently within each compaction task, without the global range shuffle. | Less shuffle work; ranges in files produced by different tasks can overlap. Useful when ordering within files is sufficient, such as for Parquet lookup optimizations. |
+
+Here, “global” refers to the selected clustering work within a partition. It does not imply that all existing files or
+all table partitions become globally ordered after an incremental run.
+
+## Run Incremental Clustering
+
+Run explicit compact jobs in batch mode. Table options supply the clustering columns and strategy. The examples below
+show routine incremental selection (`minor`) and full clustering (`full`) of the selected table or partition scope.
+
+<Tabs groupId="engine">
+<TabItem value="spark" label="Spark SQL">
+
+```sql
+-- Choose parallelism for the workload; too many tasks can produce small files.
+SET spark.sql.shuffle.partitions = 10;
+
+-- Select files using the incremental compaction strategy.
+CALL sys.compact(table => 'my_table', compact_strategy => 'minor');
+
+-- Alternatively, request full clustering; already-clustered runs can be skipped.
+CALL sys.compact(table => 'my_table', compact_strategy => 'full');
+```
+
+With historical-partition auto-clustering disabled (the default), use `partitions` to limit the work to one partition
+of `my_table`:
+
+```sql
+CALL sys.compact(
+    table => 'my_table',
+    partitions => 'dt=2026-09-10',
+    compact_strategy => 'full'
+);
+```
+
+Alternatively, `where` accepts a predicate on partition columns. Do not combine `partitions` and `where` in one call.
+
+On unaware-bucket tables, [historical-partition auto-clustering](#auto-clustering-for-historical-partition) can add full
+clustering of partitions outside either filter, so these arguments are not a hard job boundary when that feature is
+enabled.
+
+For the unpartitioned `bucketed_table` example, change the table name and omit the partition filter.
+
+For an unaware-bucket table, you can override the sort mode for one invocation:
+
+```sql
+CALL sys.compact(
+    table => 'my_table',
+    compact_strategy => 'minor',
+    options => 'clustering.incremental.mode=local-sort'
+);
+```
+
+</TabItem>
+<TabItem value="flink" label="Flink Action">
 
 ```bash
 <FLINK_HOME>/bin/flink run \
+    -Dexecution.runtime-mode=batch \
     /path/to/paimon-flink-action-@@VERSION@@.jar \
     compact \
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table <table-name> \
-    [--compact_strategy <minor / full>] \
-    [--table_conf <table_conf>] \
-    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
-```
-
-Example: run incremental clustering with global-sort mode (default), output files are globally ordered across all tasks.
-
-```bash
-<FLINK_HOME>/bin/flink run \
-    /path/to/paimon-flink-action-@@VERSION@@.jar \
-    compact \
-    --warehouse s3:///path/to/warehouse \
-    --database test_db \
-    --table test_table \
-    --table_conf sink.parallelism=2 \
-    --table_conf clustering.incremental.mode=global-sort \
     --compact_strategy minor \
-    --catalog_conf s3.endpoint=https://****.com \
-    --catalog_conf s3.access-key=***** \
-    --catalog_conf s3.secret-key=*****
+    --table_conf sink.parallelism=2
 ```
 
-Example: run incremental clustering with local-sort mode, sorts rows only within each task without global shuffle, cheaper and sufficient for Parquet lookup optimizations.
+Replace the placeholders with your installation and table details. Use `--compact_strategy full` for full clustering.
+For the partitioned `my_table` example, add `--partition dt=2026-09-10` to select that partition. This limits the whole
+job when [historical-partition auto-clustering](#auto-clustering-for-historical-partition) is disabled; when enabled,
+the job can also fully cluster eligible historical partitions outside the requested partition.
+For an unaware-bucket table, add `--table_conf clustering.incremental.mode=local-sort` to override the default sort mode.
+Add `--catalog_conf key=value` arguments as required by your catalog and storage.
 
-```bash
-<FLINK_HOME>/bin/flink run \
-    /path/to/paimon-flink-action-@@VERSION@@.jar \
-    compact \
-    --warehouse s3:///path/to/warehouse \
-    --database test_db \
-    --table test_table \
-    --table_conf sink.parallelism=2 \
-    --table_conf clustering.incremental.mode=local-sort \
-    --compact_strategy minor \
-    --catalog_conf s3.endpoint=https://****.com \
-    --catalog_conf s3.access-key=***** \
-    --catalog_conf s3.secret-key=*****
-```
-* `--compact_strategy` Determines how to pick files to be cluster, the default is `minor`.
-    * `full` : All files will be selected for clustered.
-    * `minor` : Pick the set of files that need to be clustered based on specified conditions.
-
-Note: write parallelism is set by `sink.parallelism`, if too big, may generate a large number of small files.
-
-You can use `-D execution.runtime-mode=batch` or `-yD execution.runtime-mode=batch` (for the ON-YARN scenario) to use batch mode.
+`sink.parallelism` controls the Flink action's sink parallelism. Size it for the amount of selected data rather than
+using a large value for every run.
 
 </TabItem>
-
 </Tabs>
 
-## Auto-Clustering For Historical Partition
-:::info
+The `compact` entry points route to the appropriate clustering implementation when clustering is enabled. On
+unaware-bucket tables, use these jobs for recurring small-file merging and layout maintenance. On bucketed tables,
+writer compaction can also perform incremental clustering; set `write-only = true` on ingestion if that work should
+be performed only by dedicated jobs.
 
-Auto-clustering for historical partitions currently applies only to unaware-bucket append tables (`bucket = -1`).
-Bucketed append clustering does not use the `clustering.history-partition.*` table options.
+## Verify the Result
 
-:::
+Inspect the files before and after a clustering job. For example, in Spark SQL:
 
-While performing incremental clustering on recently active partitions, Paimon can automatically detect historical and 
-inactive partitions and evaluate whether their data layout has reached an optimal state. 
-For those historical partitions that have not yet achieved optimal layout, Paimon will also perform full clustering on them 
-during the same operation, thereby improving their query performance.
+```sql
+SELECT `partition`, bucket, level,
+       COUNT(*) AS file_count,
+       SUM(file_size_in_bytes) AS total_bytes
+FROM `my_table$files`
+GROUP BY `partition`, bucket, level
+ORDER BY `partition`, bucket, level;
 
-To enable auto-clustering for historical partitions, the following configuration needs to be set for the table:
-<table className="table table-bordered">
-    <thead>
-    <tr>
-      <th className="text-left" style={{width: "20%"}}>Option</th>
-      <th className="text-left" style={{width: "10%"}}>Value</th>
-      <th className="text-left" style={{width: "5%"}}>Required</th>
-      <th className="text-left" style={{width: "10%"}}>Type</th>
-      <th className="text-left" style={{width: "55%"}}>Description</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><h5>clustering.history-partition.idle-to-full-sort</h5></td>
-      <td>3d</td>
-      <td style={{wordWrap: "break-word"}}>Yes</td>
-      <td>Duration</td>
-      <td>The duration after which a partition without new updates is considered a historical partition. Default is null.</td>
-    </tr>
-    <tr>
-      <td><h5>clustering.history-partition.limit</h5></td>
-      <td>5</td>
-      <td style={{wordWrap: "break-word"}}>Yes</td>
-      <td>Integer</td>
-      <td>The limit of history partition number for automatically performing full clustering. Default value is 5.</td>
-    </tr>
-    </tbody>
+SELECT snapshot_id, commit_kind, commit_time
+FROM `my_table$snapshots`
+ORDER BY snapshot_id DESC
+LIMIT 10;
+```
 
-</table>
+The [files system table](../concepts/system-tables#files-table) shows the current physical layout. Compare file counts,
+sizes, and levels in the partitions and buckets selected by the job. The snapshots table helps identify commits around
+the job's execution time; concurrent ingestion can also create snapshots. A successful job may leave the files unchanged
+when the planner selects no work, including the [full-mode skip cases](#implement).
 
+To inspect pruning potential, query `file_path`, `min_value_stats`, and `max_value_stats` from `my_table$files` and compare
+the ranges for your filter columns. Then run a representative query and compare scan metrics such as files or bytes
+read. Higher levels or fewer files alone do not establish that a query reads less data. Keep the data and query
+comparable when measuring the effect, especially if ingestion continues during maintenance.
 
-## Implement
-To balance write amplification and sorting effectiveness, Paimon leverages the LSM Tree notion of levels to stratify data files 
-and uses the Universal Compaction strategy to select files for clustering.
-- Newly written data lands in level-0; files in level-0 are unclustered.
-- All files in level-i are produced by sorting within the same sorting set.
-- By analogy with Universal Compaction: in level-0, each file is a sorted run; in level-i, all files together constitute a single sorted run. During clustering, the sorted run is the basic unit of work.
+## Change Clustering Keys
 
-By introducing more levels, we can control the amount of data processed in each clustering run. 
-Data at higher levels is more stably clustered and less likely to be rewritten, thereby mitigating write amplification while maintaining good sorting effectiveness.
+Update `clustering.columns` and, if needed, `clustering.strategy` using the same `ALTER TABLE` syntax as above. Changing
+the options does not immediately rewrite existing data. Subsequent clustering uses the new settings for selected files.
+After changing the clustering columns, use `compact_strategy = full` to apply them across the selected scope.
+Changing only `clustering.strategy` does not force an already-clustered run to be rewritten: the full-mode skip check
+compares the clustering columns, not the sorting strategy.
+
+## Auto-Clustering for Historical Partitions {#auto-clustering-for-historical-partition}
+
+For partitioned unaware-bucket tables, a clustering run can also select inactive historical partitions **outside the
+requested partition predicate** for full clustering. This additional selection requires both a configured idle duration
+and an explicit partition predicate: Spark's `partitions` or `where`, or Flink's `--partition`.
+
+Without an explicit partition predicate, the historical auto-full path is inactive. For example, setting the idle
+duration does not activate it for the unscoped `minor` call above; that call still uses normal incremental selection
+across the table. Auto-clustering happens within a submitted job; configuring the options does not start a scheduler.
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `clustering.history-partition.idle-to-full-sort` | Not set (disabled) | How long a partition must have no new updates before it is considered historical. |
+| `clustering.history-partition.limit` | `5` | Maximum number of additional historical partitions selected outside the requested partition predicate in a run. |
+
+For example, in Flink SQL:
+
+```sql
+ALTER TABLE my_table SET (
+    'clustering.history-partition.idle-to-full-sort' = '3 d',
+    'clustering.history-partition.limit' = '5'
+);
+```
+
+With these options, a job requesting `dt=2026-09-10` can also fully cluster up to five eligible historical partitions
+outside that date. The additional partitions use full clustering even if the requested partitions use
+`compact_strategy = minor`. The planner evaluates their eligibility and whether a full rewrite is needed.
+
+To keep the entire job within the requested partitions, leave `clustering.history-partition.idle-to-full-sort` unset,
+or remove it from the table options before submitting the job. The partition limit controls the additional historical
+work, not the number of explicitly requested partitions. These options do not apply to bucketed append tables.
+
+## How File Selection Works {#implement}
+
+Incremental clustering organizes files into levels and uses a universal compaction strategy to select sorted runs.
+Normally, newly appended files enter level 0. At level 0, each file is treated as its own run; at a higher level, the
+files produced by a clustering set are treated as one run.
+
+![Incremental clustering selects new files and an eligible existing run, rewrites that set, and keeps an unselected higher-level run.](/img/append-incremental-clustering.svg)
+
+The planner balances the number and relative sizes of runs against write amplification. A run rewrites only the
+selected set, so higher-level files can remain untouched. The levels in the diagram are illustrative; the selected
+files and output level depend on the planner.
+
+Full mode selects all runs in a compaction unit unless there is no data, or the unit already contains a single run at
+the highest level with the same clustering columns. In those cases, no rewrite is needed by the planner. This check
+applies per partition for unaware-bucket tables and per partition and bucket for bucketed tables, so a full job can
+rewrite some units while leaving others unchanged.

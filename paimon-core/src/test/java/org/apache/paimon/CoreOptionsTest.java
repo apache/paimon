@@ -30,6 +30,56 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class CoreOptionsTest {
 
     @Test
+    void testCommitLastSafeSnapshotAndStrictMode() {
+        Options options = new Options();
+        CoreOptions core = new CoreOptions(options);
+        assertThat(core.commitLastSafeSnapshot()).isEmpty();
+        assertThat(core.commitStrictModeEnabled()).isTrue();
+
+        options.setString("commit.strict-mode.last-safe-snapshot", "7");
+        assertThat(core.commitLastSafeSnapshot()).contains(7L);
+        assertThat(core.commitStrictModeEnabled()).isTrue();
+
+        options.set(CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT, 11L);
+        assertThat(core.commitLastSafeSnapshot()).contains(11L);
+
+        options.set(CoreOptions.COMMIT_STRICT_MODE_ENABLED, false);
+        assertThat(core.commitStrictModeEnabled()).isFalse();
+        assertThat(core.commitLastSafeSnapshot()).contains(11L);
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    void testLegacyCommitLastSafeSnapshotApi() {
+        Options options = new Options();
+        options.set(CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT, 7L);
+        CoreOptions core = new CoreOptions(options);
+        assertThat(core.commitLastSafeSnapshot()).contains(7L);
+        assertThat(core.commitStrictModeLastSafeSnapshot()).contains(7L);
+
+        options.set(CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT, 11L);
+        assertThat(core.commitStrictModeLastSafeSnapshot()).contains(11L);
+    }
+
+    @Test
+    void testManifestSidecarDefaultsToManifestSort() {
+        assertThat(CoreOptions.MANIFEST_SIDECAR_ENABLED.defaultValue()).isNull();
+        for (Boolean sort : new Boolean[] {null, false, true}) {
+            for (Boolean configured : new Boolean[] {null, false, true}) {
+                Options options = new Options();
+                if (sort != null) {
+                    options.set(CoreOptions.MANIFEST_SORT_ENABLED, sort);
+                }
+                if (configured != null) {
+                    options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, configured);
+                }
+                assertThat(new CoreOptions(options).manifestSidecarEnabled())
+                        .isEqualTo(configured == null ? Boolean.TRUE.equals(sort) : configured);
+            }
+        }
+    }
+
+    @Test
     public void testDefaultStartupMode() {
         Options conf = new Options();
         assertThat(conf.get(CoreOptions.SCAN_MODE)).isEqualTo(CoreOptions.StartupMode.DEFAULT);
@@ -271,6 +321,20 @@ public class CoreOptionsTest {
     }
 
     @Test
+    public void testVideoFrameFieldIsRecognizedAsBlobField() {
+        Options options = new Options();
+        options.set(CoreOptions.BLOB_FIELD, "image");
+        options.set(CoreOptions.VIDEO_FRAME_FIELD, "camera_a, camera_b");
+
+        assertThat(CoreOptions.blobField(options.toMap()))
+                .containsExactly("image", "camera_a", "camera_b");
+        assertThat(new CoreOptions(options).videoFrameFields())
+                .containsExactly("camera_a", "camera_b");
+        assertThatThrownBy(() -> new CoreOptions(options).videoFrameField())
+                .hasMessageContaining("use videoFrameFields()");
+    }
+
+    @Test
     public void testLocalKvDbBlockSize() {
         Options conf = new Options();
         assertThat(new CoreOptions(conf).localKvDbBlockSize()).isEqualTo(4 * 1024);
@@ -287,5 +351,55 @@ public class CoreOptionsTest {
         assertThatThrownBy(() -> new CoreOptions(conf).localKvDbBlockSize())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("local-kv-db.block-size");
+    }
+
+    @Test
+    public void testFormatTableCommitCleanupThreadNumDefaultsTo64AndAcceptsBounds() {
+        Options conf = new Options();
+        assertThat(new CoreOptions(conf).formatTableCommitCleanupThreadNum()).isEqualTo(64);
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, 1);
+        assertThat(new CoreOptions(conf).formatTableCommitCleanupThreadNum()).isEqualTo(1);
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, 64);
+        assertThat(new CoreOptions(conf).formatTableCommitCleanupThreadNum()).isEqualTo(64);
+    }
+
+    @Test
+    public void testFormatTableCommitCleanupThreadNumRejectsValuesOutsideSupportedRange() {
+        for (int invalid : new int[] {0, -1, 65}) {
+            Options conf = new Options();
+            conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, invalid);
+            assertThatThrownBy(() -> new CoreOptions(conf).formatTableCommitCleanupThreadNum())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("format-table.commit.cleanup-thread-num")
+                    .hasMessageContaining("1")
+                    .hasMessageContaining("64");
+        }
+    }
+
+    @Test
+    public void testFormatTableCommitPublishThreadNumDefaultsTo64AndAcceptsBounds() {
+        Options conf = new Options();
+        assertThat(new CoreOptions(conf).formatTableCommitPublishThreadNum()).isEqualTo(64);
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM, 1);
+        assertThat(new CoreOptions(conf).formatTableCommitPublishThreadNum()).isEqualTo(1);
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM, 64);
+        assertThat(new CoreOptions(conf).formatTableCommitPublishThreadNum()).isEqualTo(64);
+    }
+
+    @Test
+    public void testFormatTableCommitPublishThreadNumRejectsValuesOutsideSupportedRange() {
+        for (int invalid : new int[] {0, -1, 65}) {
+            Options conf = new Options();
+            conf.set(CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM, invalid);
+            assertThatThrownBy(() -> new CoreOptions(conf).formatTableCommitPublishThreadNum())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("format-table.commit.publish-thread-num")
+                    .hasMessageContaining("1")
+                    .hasMessageContaining("64");
+        }
     }
 }

@@ -41,6 +41,11 @@ class FileStoreWrite:
 
     def __init__(self, table, commit_user):
         from pypaimon.table.file_store_table import FileStoreTable
+        from pypaimon.read.merge_engine_support import check_sequence_field_supported
+
+        # TableWrite constructs this before the row-key extractor, whose
+        # dynamic bucket index must not retain hashes for rejected writes.
+        check_sequence_field_supported(table)
 
         self.table: FileStoreTable = table
         self.data_writers: Dict[Tuple, DataWriter] = {}
@@ -48,6 +53,7 @@ class FileStoreWrite:
         self.max_seq_numbers: dict = {}
         self.write_cols = None
         self.blob_consumer = None
+        self.blob_uri_reader_factory = None
         self.commit_identifier = 0
         self.options = CoreOptions.copy(table.options)
         self.changelog_producer = self.options.changelog_producer()
@@ -110,6 +116,11 @@ class FileStoreWrite:
         )
         writer.write(data.to_batches()[0])
 
+    def roll_before_group_if_needed(self, row_count: int):
+        for writer in self.data_writers.values():
+            if isinstance(writer, DedicatedFormatWriter):
+                writer.roll_before_group_if_needed(row_count)
+
     def _check_runtime_bucket(self, partition, bucket, total_buckets):
         if total_buckets is None:
             return
@@ -168,6 +179,7 @@ class FileStoreWrite:
                 write_cols=self.write_cols,
                 blob_consumer=self.blob_consumer,
                 changelog_producer=self.changelog_producer,
+                blob_uri_reader_factory=self.blob_uri_reader_factory,
             )
         elif self._has_vector_columns() and options.with_vector_format():
             return DataVectorWriter(

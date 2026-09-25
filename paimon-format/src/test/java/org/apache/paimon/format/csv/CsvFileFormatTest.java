@@ -34,6 +34,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataTypes;
@@ -48,12 +49,14 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link CsvFileFormat}. */
@@ -212,7 +215,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                         GenericRow.of(1, BinaryString.fromString("Alice")),
                         GenericRow.of(2, BinaryString.fromString("Bob")));
 
-        for (String fallbackKey : new String[] {"field-delimiter", "seq", "delimiter"}) {
+        for (String fallbackKey : new String[] {"field-delimiter", "seq", "delimiter", "sep"}) {
             Options options = new Options();
             options.set(fallbackKey, ";");
 
@@ -464,16 +467,16 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
 
         String[] nullLiterals = {"", "NULL", "null"};
 
-        // Create test data with null values
-        List<InternalRow> testData =
-                Arrays.asList(
-                        GenericRow.of(1, BinaryString.fromString("Alice"), null),
-                        GenericRow.of(2, null, 100),
-                        GenericRow.of(3, BinaryString.fromString("Charlie"), 300));
-
         for (String nullLiteral : nullLiterals) {
             Options options = new Options();
             options.set(CsvOptions.NULL_LITERAL, nullLiteral);
+
+            List<InternalRow> testData =
+                    Arrays.asList(
+                            GenericRow.of(1, BinaryString.fromString("Alice"), null),
+                            GenericRow.of(2, null, 100),
+                            GenericRow.of(3, BinaryString.fromString("Charlie"), 300),
+                            GenericRow.of(4, BinaryString.fromString(nullLiteral), 400));
 
             List<InternalRow> result =
                     writeThenRead(
@@ -484,7 +487,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                             "test_null_literal_" + nullLiteral.hashCode());
 
             // Verify results
-            assertThat(result).hasSize(3);
+            assertThat(result).hasSize(4);
             assertThat(result.get(0).getInt(0)).isEqualTo(1);
             assertThat(result.get(0).getString(1).toString()).isEqualTo("Alice");
             assertThat(result.get(0).isNullAt(2)).isTrue();
@@ -494,6 +497,9 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
             assertThat(result.get(2).getInt(0)).isEqualTo(3);
             assertThat(result.get(2).getString(1).toString()).isEqualTo("Charlie");
             assertThat(result.get(2).getInt(2)).isEqualTo(300);
+            assertThat(result.get(3).getInt(0)).isEqualTo(4);
+            assertThat(result.get(3).getString(1).toString()).isEqualTo(nullLiteral);
+            assertThat(result.get(3).getInt(2)).isEqualTo(400);
         }
     }
 
@@ -634,6 +640,44 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
         assertThat(permissiveResult.get(3).getInt(0)).isEqualTo(4);
         assertThat(permissiveResult.get(3).getString(1).toString()).isEqualTo("Jack\"o\"n");
         assertThat(permissiveResult.get(3).getDouble(2)).isEqualTo(400.81);
+    }
+
+    @Test
+    public void testCsvPermissiveKeepsFieldsAfterMalformed() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING(), DataTypes.DOUBLE());
+        Options options = new Options();
+        options.set(CsvOptions.MODE, CsvOptions.Mode.PERMISSIVE);
+        FileFormat format =
+                new CsvFileFormatFactory().create(new FormatContext(options, 1024, 1024));
+        Path testFile = new Path(parent, "permissive_first_" + UUID.randomUUID() + ".csv");
+
+        // Malformed field in the first position: PERMISSIVE must null only the
+        // offending field and keep the valid fields after it.
+        fileIO.writeFile(testFile, "x,Alice,1.5\n3,Carol,3.5", false);
+        List<InternalRow> result = read(format, rowType, rowType, testFile);
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).isNullAt(0)).isTrue();
+        assertThat(result.get(0).getString(1)).isEqualTo(fromString("Alice"));
+        assertThat(result.get(0).getDouble(2)).isEqualTo(1.5);
+        assertThat(result.get(1).getInt(0)).isEqualTo(3);
+        assertThat(result.get(1).getString(1)).isEqualTo(fromString("Carol"));
+        assertThat(result.get(1).getDouble(2)).isEqualTo(3.5);
+
+        // PERMISSIVE is the default mode, so this format is built without setting csv.mode.
+        // Covers a malformed field in the middle and two malformed fields in one row.
+        RowType midRowType = DataTypes.ROW(DataTypes.INT(), DataTypes.DOUBLE(), DataTypes.STRING());
+        FileFormat defaultFormat =
+                new CsvFileFormatFactory().create(new FormatContext(new Options(), 1024, 1024));
+        Path midFile = new Path(parent, "permissive_middle_" + UUID.randomUUID() + ".csv");
+        fileIO.writeFile(midFile, "1,oops,world\ny,bad,keep", false);
+        List<InternalRow> midResult = read(defaultFormat, midRowType, midRowType, midFile);
+        assertThat(midResult).hasSize(2);
+        assertThat(midResult.get(0).getInt(0)).isEqualTo(1);
+        assertThat(midResult.get(0).isNullAt(1)).isTrue();
+        assertThat(midResult.get(0).getString(2)).isEqualTo(fromString("world"));
+        assertThat(midResult.get(1).isNullAt(0)).isTrue();
+        assertThat(midResult.get(1).isNullAt(1)).isTrue();
+        assertThat(midResult.get(1).getString(2)).isEqualTo(fromString("keep"));
     }
 
     @Test
@@ -853,6 +897,52 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
         }
     }
 
+    @Test
+    public void testValueContainingRowSeparatorIsRejected() throws IOException {
+        // Quoting cannot rescue an embedded row separator: the line readers split on it without
+        // tracking quotes, and a split boundary may fall inside the value, so the row used to come
+        // back as two rows with NULLs and COUNT(*) changed.
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING());
+        for (String value : Arrays.asList("hello\nworld", "hello\rworld")) {
+            List<InternalRow> row =
+                    Collections.singletonList(GenericRow.of(1, BinaryString.fromString(value)));
+            assertThatThrownBy(
+                            () ->
+                                    writeThenRead(
+                                            new Options(), rowType, rowType, row, "row_separator"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("f1");
+        }
+
+        // The configured line delimiter is a separator too, even when it is not CR or LF.
+        Options customLine = new Options();
+        customLine.set(CsvOptions.LINE_DELIMITER, "|||");
+        List<InternalRow> pipes =
+                Collections.singletonList(GenericRow.of(1, BinaryString.fromString("a|||b")));
+        assertThatThrownBy(
+                        () -> writeThenRead(customLine, rowType, rowType, pipes, "row_separator"))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        // A value that merely begins a delimiter match must still round-trip: CustomLineReader is
+        // leftmost-match, so the delimiter appended after the row would otherwise complete a match
+        // started by the value's own trailing bytes.
+        List<InternalRow> onePipe =
+                Collections.singletonList(GenericRow.of(1, BinaryString.fromString("x|")));
+        List<InternalRow> readBack =
+                writeThenRead(customLine, rowType, rowType, onePipe, "row_separator");
+        assertThat(readBack).hasSize(1);
+        assertThat(readBack.get(0).getString(1).toString()).isEqualTo("x|");
+
+        // Under a custom delimiter a line break is an ordinary byte, which is the documented way
+        // to carry one inside a value; it must not be rejected.
+        List<InternalRow> withBreak =
+                Collections.singletonList(GenericRow.of(1, BinaryString.fromString("a\nb")));
+        List<InternalRow> breakReadBack =
+                writeThenRead(customLine, rowType, rowType, withBreak, "row_separator");
+        assertThat(breakReadBack).hasSize(1);
+        assertThat(breakReadBack.get(0).getString(1).toString()).isEqualTo("a\nb");
+    }
+
     private List<InternalRow> writeThenRead(
             Options options,
             RowType fullRowType,
@@ -864,6 +954,30 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                 new CsvFileFormatFactory().create(new FormatContext(options, 1024, 1024));
         Path testFile = write(format, fullRowType, testData, testPrefix);
         return read(format, fullRowType, rowType, testFile);
+    }
+
+    @Test
+    public void testSingleCharacterOptionsAreEnforced() {
+        // The writer emits the whole option string while CsvParser keeps only charAt(0), so a
+        // multi-character value silently wrote one delimiter and read back another.
+        for (ConfigOption<String> option :
+                Arrays.asList(
+                        CsvOptions.FIELD_DELIMITER,
+                        CsvOptions.QUOTE_CHARACTER,
+                        CsvOptions.ESCAPE_CHARACTER)) {
+            for (String bad : Arrays.asList("ab", "")) {
+                Options options = new Options();
+                options.set(option, bad);
+                assertThatThrownBy(() -> new CsvOptions(options))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining(option.key());
+            }
+        }
+
+        // A multi-character line delimiter stays supported; CustomLineReader matches all of it.
+        Options multiCharLine = new Options();
+        multiCharLine.set(CsvOptions.LINE_DELIMITER, "|||");
+        assertThatCode(() -> new CsvOptions(multiCharLine)).doesNotThrowAnyException();
     }
 
     /** Writes the given data to a new CSV file and returns its path. */

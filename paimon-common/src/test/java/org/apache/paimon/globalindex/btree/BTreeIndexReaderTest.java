@@ -18,17 +18,23 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
+import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -54,7 +60,90 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
                 fileReader,
                 Collections.singletonList(written),
                 dataNum,
+                null,
                 newDirectExecutorService());
+    }
+
+    @TestTemplate
+    public void testLocalRowRanges() throws Exception {
+        for (int index = dataNum - 100; index < dataNum; index++) {
+            data.get(index).setLeft(null);
+        }
+        GlobalIndexIOMeta written = writeData(data);
+        FieldRef field = new FieldRef(1, "testField", dataType);
+        Object literal = data.get(dataNum / 2).getKey();
+        List<Range> ranges = Arrays.asList(new Range(2, 8), new Range(30, 50));
+        RoaringNavigableMap64 allowed = GlobalIndexResult.fromRanges(ranges).results();
+        try (GlobalIndexReader full =
+                        globalIndexer.createReader(
+                                fileReader,
+                                Collections.singletonList(written),
+                                dataNum,
+                                null,
+                                newDirectExecutorService());
+                GlobalIndexReader local =
+                        globalIndexer.createReader(
+                                fileReader,
+                                Collections.singletonList(written),
+                                dataNum,
+                                ranges,
+                                newDirectExecutorService())) {
+            assertThat(local.visitIsNull(field).join().get().results())
+                    .containsExactlyElementsOf(
+                            RoaringNavigableMap64.and(
+                                    allowed, full.visitIsNull(field).join().get().results()));
+            assertThat(local.visitEqual(field, literal).join().get().results())
+                    .containsExactlyElementsOf(
+                            RoaringNavigableMap64.and(
+                                    allowed,
+                                    full.visitEqual(field, literal).join().get().results()));
+            assertThat(
+                            local.visitBetween(
+                                            field,
+                                            data.get(0).getKey(),
+                                            data.get(dataNum - 101).getKey())
+                                    .join()
+                                    .get()
+                                    .results())
+                    .containsExactlyElementsOf(
+                            RoaringNavigableMap64.and(
+                                    allowed,
+                                    full.visitBetween(
+                                                    field,
+                                                    data.get(0).getKey(),
+                                                    data.get(dataNum - 101).getKey())
+                                            .join()
+                                            .get()
+                                            .results()));
+            assertThat(
+                            RoaringNavigableMap64.and(
+                                    allowed,
+                                    local.visitNotEqual(field, literal).join().get().results()))
+                    .containsExactlyElementsOf(
+                            RoaringNavigableMap64.and(
+                                    allowed,
+                                    full.visitNotEqual(field, literal).join().get().results()));
+            assertThat(
+                            RoaringNavigableMap64.and(
+                                    allowed,
+                                    local.visitNotIn(field, Collections.singletonList(literal))
+                                            .join()
+                                            .get()
+                                            .results()))
+                    .containsExactlyElementsOf(
+                            RoaringNavigableMap64.and(
+                                    allowed,
+                                    full.visitNotIn(field, Collections.singletonList(literal))
+                                            .join()
+                                            .get()
+                                            .results()));
+            assertThat(
+                            RoaringNavigableMap64.and(
+                                    allowed, local.visitIsNotNull(field).join().get().results()))
+                    .containsExactlyElementsOf(
+                            RoaringNavigableMap64.and(
+                                    allowed, full.visitIsNotNull(field).join().get().results()));
+        }
     }
 
     @TestTemplate
@@ -134,14 +223,65 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
     }
 
     @TestTemplate
-    public void testTopNOnlyDeserializesRemainingRowIds() {
+    public void testVersion1TopNOnlyDeserializesRemainingRowIds() throws Exception {
         MemorySliceOutput output = new MemorySliceOutput(16);
         output.writeVarLenInt(3);
         output.writeVarLenLong(10);
         output.writeVarLenLong(20);
 
-        assertThat(BTreeIndexReader.deserializeRowIds(output.toSlice(), 2))
+        assertThat(BTreeIndexReader.deserializeVersion1RowIds(output.toSlice(), 2))
                 .containsExactly(10L, 20L);
+    }
+
+    @TestTemplate
+    public void testReadsVersion1File() throws Exception {
+        assertReadsConfiguredFileVersion(BTreeFileFooter.VERSION_1);
+    }
+
+    @TestTemplate
+    public void testReadsVersion2File() throws Exception {
+        options.set(BTreeIndexOptions.BTREE_INDEX_FILE_VERSION, BTreeFileFooter.VERSION_2);
+        options.set(BTreeIndexOptions.BTREE_INDEX_COMPRESSION, "lz4");
+        assertReadsConfiguredFileVersion(BTreeFileFooter.VERSION_2);
+    }
+
+    private void assertReadsConfiguredFileVersion(int expectedFileVersion) throws Exception {
+        GlobalIndexIOMeta written = writeData(data);
+        assertFileVersion(written, expectedFileVersion);
+
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        Object literal = data.get(dataNum / 2).getKey();
+        Object from = data.get(dataNum / 3).getKey();
+        Object to = data.get(dataNum * 2 / 3).getKey();
+
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(
+                        fileReader,
+                        Collections.singletonList(written),
+                        dataNum,
+                        null,
+                        newDirectExecutorService())) {
+            assertResult(
+                    reader.visitEqual(ref, literal).join().get(),
+                    filter(value -> comparator.compare(value, literal) == 0));
+            assertResult(
+                    reader.visitBetween(ref, from, to).join().get(),
+                    filter(
+                            value ->
+                                    comparator.compare(value, from) >= 0
+                                            && comparator.compare(value, to) <= 0));
+        }
+    }
+
+    private void assertFileVersion(GlobalIndexIOMeta written, int expectedFileVersion)
+            throws Exception {
+        byte[] footerBytes = new byte[BTreeFileFooter.ENCODED_LENGTH];
+        try (SeekableInputStream input = fileReader.getInputStream(written)) {
+            input.seek(written.fileSize() - BTreeFileFooter.ENCODED_LENGTH);
+            IOUtils.readFully(input, footerBytes);
+        }
+        assertThat(BTreeFileFooter.readFooter(MemorySlice.wrap(footerBytes).toInput()).getVersion())
+                .isEqualTo(expectedFileVersion);
     }
 
     private Object[] valuesByRowId() {

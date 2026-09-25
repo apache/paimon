@@ -25,6 +25,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -104,7 +105,7 @@ public abstract class CommitterTestBase {
         conf.setString("bucket", "1");
         conf.setString("bucket-key", "a");
         setOptions.accept(conf);
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), tablePath);
         schemaManager.createTable(
                 new Schema(
                         ROW_TYPE.getFields(),

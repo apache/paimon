@@ -18,8 +18,11 @@
 
 package org.apache.paimon.data.variant;
 
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.types.DataType;
 
+import java.nio.ByteBuffer;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 
@@ -41,11 +44,39 @@ public interface Variant {
 
     String VALUE = "value";
 
+    /** Creates a Variant from the value and metadata fields in a physical Variant row. */
+    static Variant fromRow(InternalRow row) {
+        if (row instanceof ColumnarRow) {
+            ColumnarRow columnarRow = (ColumnarRow) row;
+            return new GenericVariant(
+                    columnarRow.getBinaryBuffer(0), columnarRow.getBinaryBuffer(1));
+        }
+        return new GenericVariant(row.getBinary(0), row.getBinary(1));
+    }
+
     /** Returns the variant metadata. */
     byte[] metadata();
 
+    /**
+     * Returns a view of the serialized metadata without requiring a copy.
+     *
+     * <p>The bytes are between the returned buffer's position and limit. The buffer and its backing
+     * storage may be reused by the reader, so callers that retain the bytes must copy them.
+     * Implementations should return a new buffer view on each call.
+     */
+    ByteBuffer metadataBuffer();
+
     /** Returns the variant value. */
     byte[] value();
+
+    /**
+     * Returns a view of the serialized value without requiring a copy.
+     *
+     * <p>The bytes are between the returned buffer's position and limit. The buffer and its backing
+     * storage may be reused by the reader, so callers that retain the bytes must copy them.
+     * Implementations should return a new buffer view on each call.
+     */
+    ByteBuffer valueBuffer();
 
     /** Parses the variant to json. */
     default String toJson() {

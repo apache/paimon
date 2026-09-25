@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="476" viewBox="0 0 900 476" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">One Variant column, two physical layouts</title>
+<desc id="desc">Plain Variant stores binary value and metadata. Shredded Variant adds typed subcolumns for selected paths and keeps overflow value bytes for other fields or incompatible types. Both reconstruct the same logical Variant; projected reads benefit when the engine pushes path extraction into the scan.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="898" height="474" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" font-weight="700" fill="#172b4d" text-anchor="start">One Variant column, two physical layouts</text>
+<text x="28" y="76" font-size="17" font-weight="400" fill="#526277" text-anchor="start">Shredding changes the Parquet layout, not the logical table schema.</text>
+<rect x="28" y="109" width="844" height="58" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="144" font-size="20" font-weight="400" fill="#172b4d" text-anchor="start">payload VARIANT:  {&quot;age&quot;: 42, &quot;city&quot;: &quot;Hangzhou&quot;, &quot;extra&quot;: ...}</text>
+<path d="M238 175 L238 208" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M662 175 L662 208" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="28" y="219" width="402" height="158" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="251" font-size="21" font-weight="700" fill="#2463b4" text-anchor="start">Plain Variant</text>
+<text x="46" y="280" font-size="18" font-weight="400" fill="#526277" text-anchor="start">metadata: key dictionary</text>
+<text x="46" y="305" font-size="18" font-weight="400" fill="#526277" text-anchor="start">value: binary document</text>
+<text x="46" y="330" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Extract paths from the binary value.</text>
+<rect x="450" y="219" width="422" height="158" rx="8" fill="#f2ecfb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="468" y="251" font-size="21" font-weight="700" fill="#7046a4" text-anchor="start">Shredded Variant</text>
+<text x="468" y="280" font-size="18" font-weight="400" fill="#526277" text-anchor="start">metadata + overflow value</text>
+<text x="468" y="305" font-size="18" font-weight="400" fill="#526277" text-anchor="start">typed_value: age INT, city STRING</text>
+<text x="468" y="330" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Read typed leaves for pushed paths.</text>
+<text x="28" y="417" font-size="17" font-weight="400" fill="#172b4d" text-anchor="start">Other fields and incompatible values stay in overflow bytes. Full reads reconstruct all values.</text>
+<text x="28" y="445" font-size="17" font-weight="400" fill="#526277" text-anchor="start">A table can contain both layouts; only new files use changed shredding settings.</text>
+</g>
+</svg>

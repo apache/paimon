@@ -21,6 +21,7 @@ Module to write a Paimon table from a Ray Dataset, by using the Ray Datasink API
 
 import logging
 import traceback
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional
 
 from ray.data.datasource.datasink import Datasink
@@ -30,6 +31,8 @@ from ray.data.block import BlockAccessor, Block
 from ray.data._internal.execution.interfaces import TaskContext
 import pyarrow as pa
 
+from pypaimon.write.commit_callback import CommitCallback
+
 if TYPE_CHECKING:
     from pypaimon.table.table import Table
     from pypaimon.write.write_builder import WriteBuilder
@@ -38,16 +41,43 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _cast_binary_to_table_schema(table: pa.Table, target_schema: pa.Schema) -> pa.Table:
-    """Cast binary to large_binary for BLOB fields.
+@dataclass(frozen=True)
+class PaimonWriteResult:
+    """Metadata reported by the exact coordinator commit."""
 
-    When map_batches returns Python dicts, PyArrow infers bytes as binary,
-    losing the original large_binary (BLOB) type. Cast back before writing.
+    row_count: int
+    snapshot_id: int
+
+
+class _SnapshotIdRecorder(CommitCallback):
+
+    def __init__(self):
+        self.snapshot_id = None
+
+    def call(self, context):
+        self.snapshot_id = context.snapshot.id
+
+
+class _TaskCommitMessages(list):
+    """Commit messages plus the logical rows written by one Ray task."""
+
+    def __init__(self, messages=(), row_count=0):
+        super().__init__(messages)
+        self.row_count = row_count
+
+
+def _cast_binary_to_table_schema(table: pa.Table, target_schema: pa.Schema) -> pa.Table:
+    """Restore binary layouts using the table's BYTES/BLOB contract.
+
+    Python dict inference loses BLOB's large_binary layout, while Ray block
+    promotion may widen BYTES. Neither transformation changes the table type.
     """
     cast_indices = []
     for i, field in enumerate(table.schema):
         target_field = target_schema.field(field.name) if field.name in target_schema.names else None
-        if target_field and pa.types.is_binary(field.type) and pa.types.is_large_binary(target_field.type):
+        if (target_field and field.type != target_field.type
+                and all(pa.types.is_binary(t) or pa.types.is_large_binary(t)
+                        for t in (field.type, target_field.type))):
             cast_indices.append(i)
 
     if not cast_indices:
@@ -55,10 +85,10 @@ def _cast_binary_to_table_schema(table: pa.Table, target_schema: pa.Schema) -> p
 
     columns = table.columns
     for i in cast_indices:
-        columns[i] = columns[i].cast(pa.large_binary())
+        columns[i] = columns[i].cast(target_schema.field(table.schema[i].name).type, safe=True)
     fields = [target_schema.field(f.name) if i in cast_indices else f
               for i, f in enumerate(table.schema)]
-    return pa.table(columns, schema=pa.schema(fields))
+    return pa.table(columns, schema=pa.schema(fields, metadata=table.schema.metadata))
 
 # Python 3.8 / Ray 2.10: Datasink is not subscriptable at runtime
 try:
@@ -82,6 +112,7 @@ class PaimonDatasink(_DatasinkBase):
         self._postpone_bucket_plan = postpone_bucket_plan
         self._table_name = table.identifier.get_full_name()
         self._writer_builder: Optional["WriteBuilder"] = None
+        self.commit_result: Optional[PaimonWriteResult] = None
 
     def _is_overwrite(self) -> bool:
         return self.overwrite or self.static_partition is not None
@@ -115,6 +146,7 @@ class PaimonDatasink(_DatasinkBase):
         ctx: TaskContext,
     ) -> List["CommitMessage"]:
         commit_messages_list: List["CommitMessage"] = []
+        row_count = 0
         table_write = None
 
         try:
@@ -139,6 +171,7 @@ class PaimonDatasink(_DatasinkBase):
 
                 if block_arrow.num_rows == 0:
                     continue
+                row_count += block_arrow.num_rows
 
                 block_arrow = _cast_binary_to_table_schema(block_arrow, target_pa_schema)
 
@@ -149,7 +182,7 @@ class PaimonDatasink(_DatasinkBase):
 
             table_write.close()
             table_write = None
-            return commit_messages_list
+            return _TaskCommitMessages(commit_messages_list, row_count)
         except Exception:
             if table_write is not None:
                 try:
@@ -173,6 +206,15 @@ class PaimonDatasink(_DatasinkBase):
             f"Unexpected write_result type {type(write_result).__name__}: "
             "expected object with .write_returns or list of commit message "
             "lists. Refusing to proceed to avoid silent data loss."
+        )
+
+    @staticmethod
+    def _extract_row_count(write_result: Any, write_returns) -> int:
+        if hasattr(write_result, "num_rows"):
+            return int(write_result.num_rows)
+        return sum(
+            int(getattr(messages, "row_count", 0))
+            for messages in write_returns
         )
 
     def on_write_complete(
@@ -205,7 +247,15 @@ class PaimonDatasink(_DatasinkBase):
             )
 
             table_commit = self._writer_builder.new_commit()
+            recorder = _SnapshotIdRecorder()
+            table_commit.add_commit_callback(recorder)
             table_commit.commit(non_empty_messages)
+            if recorder.snapshot_id is not None:
+                self.commit_result = PaimonWriteResult(
+                    row_count=self._extract_row_count(
+                        write_result, write_returns),
+                    snapshot_id=recorder.snapshot_id,
+                )
 
             logger.info(f"Successfully committed write job for table {self._table_name}")
         except Exception as e:
@@ -243,7 +293,7 @@ def write_paimon_dataset(
     ray_remote_args: Optional[Dict[str, Any]] = None,
     hash_fixed_precluster: str = "auto",
     postpone_bucket_planner=None,
-) -> None:
+) -> Optional[PaimonWriteResult]:
     """Write a Ray Dataset through the safe path for the table's bucket mode."""
     from pypaimon.ray.shuffle import (
         HASH_FIXED_PRECLUSTER_MAP_GROUPS,
@@ -294,7 +344,7 @@ def write_paimon_dataset(
                     overwrite or static_partition is not None
                 ),
             )
-        _write_postpone_primary_key_blocks(
+        return _write_postpone_primary_key_blocks(
             dataset,
             table,
             overwrite=overwrite,
@@ -304,14 +354,13 @@ def write_paimon_dataset(
             bucket_extractor=PostponeFixedBucketRowKeyExtractor(table, plan),
             postpone_bucket_plan=plan,
         )
-        return
 
     if (
         hash_fixed_precluster == HASH_FIXED_PRECLUSTER_MAP_GROUPS
         and table.bucket_mode() == BucketMode.HASH_FIXED
         and getattr(table, "is_primary_key_table", False)
     ):
-        _write_primary_key_groups(
+        return _write_primary_key_groups(
             dataset,
             table,
             overwrite=overwrite,
@@ -319,18 +368,19 @@ def write_paimon_dataset(
             concurrency=concurrency,
             ray_remote_args=ray_remote_args,
         )
-        return
 
     dataset = maybe_apply_repartition(dataset, table, hash_fixed_precluster)
+    datasink = PaimonDatasink(
+        table,
+        overwrite=overwrite,
+        static_partition=static_partition,
+    )
     dataset.write_datasink(
-        PaimonDatasink(
-            table,
-            overwrite=overwrite,
-            static_partition=static_partition,
-        ),
+        datasink,
         concurrency=concurrency,
         ray_remote_args=ray_remote_args,
     )
+    return datasink.commit_result
 
 
 def _write_postpone_primary_key_blocks(
@@ -343,11 +393,10 @@ def _write_postpone_primary_key_blocks(
     ray_remote_args: Optional[Dict[str, Any]],
     bucket_extractor,
     postpone_bucket_plan,
-) -> None:
+) -> Optional[PaimonWriteResult]:
     import pickle
 
     from pypaimon.ray.shuffle import (
-        _coerce_large_string_types,
         _sort_by_partition_bucket_primary_key,
     )
 
@@ -367,9 +416,7 @@ def _write_postpone_primary_key_blocks(
                 error_col: pa.array([], type=pa.string()),
             })
 
-        rows = _coerce_large_string_types(
-            batch.drop_columns(routing_columns)
-        )
+        rows = batch.drop_columns(routing_columns)
         worker_sink = PaimonDatasink(
             captured_table,
             overwrite=overwrite,
@@ -405,7 +452,7 @@ def _write_postpone_primary_key_blocks(
         static_partition=static_partition,
     )
     coordinator.on_write_start()
-    _consume_write_results(
+    return _consume_write_results(
         results, coordinator, message_col, error_col
     )
 
@@ -435,7 +482,7 @@ def _consume_write_results(
     coordinator,
     message_col,
     error_col=None,
-) -> None:
+) -> Optional[PaimonWriteResult]:
     import pickle
 
     write_returns = []
@@ -459,6 +506,7 @@ def _consume_write_results(
                 )
             )
         coordinator.on_write_complete(write_returns)
+        return coordinator.commit_result
     except Exception as error:
         coordinator.on_write_failed(error)
         raise
@@ -517,11 +565,10 @@ def _write_primary_key_groups(
     ray_remote_args: Optional[Dict[str, Any]],
     bucket_extractor=None,
     postpone_bucket_plan=None,
-) -> None:
+) -> Optional[PaimonWriteResult]:
     import pickle
 
     from pypaimon.ray.shuffle import (
-        _coerce_large_string_types,
         _group_by_partition_bucket,
     )
 
@@ -541,9 +588,7 @@ def _write_primary_key_groups(
                 error_col: pa.array([], type=pa.string()),
             })
 
-        rows = _coerce_large_string_types(
-            group.drop_columns([bucket_col])
-        )
+        rows = group.drop_columns([bucket_col])
         worker_sink = PaimonDatasink(
             captured_table,
             overwrite=overwrite,
@@ -577,6 +622,6 @@ def _write_primary_key_groups(
         static_partition=static_partition,
     )
     coordinator.on_write_start()
-    _consume_write_results(
+    return _consume_write_results(
         messages, coordinator, message_col, error_col
     )

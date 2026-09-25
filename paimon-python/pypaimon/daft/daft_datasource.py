@@ -365,6 +365,14 @@ class _PaimonPKSplitTask(DataSourceTask):
         for batch in iter(reader.read_next_batch, None):
             if self._output_columns is not None:
                 batch = batch.select(self._output_columns)
+            if batch.num_columns == 0:
+                # Daft cannot build a record batch without arrays, so carry the row
+                # count in a placeholder column and project it away.
+                rows = pa.RecordBatch.from_pydict(
+                    {"__rows": pa.nulls(batch.num_rows, pa.int8())})
+                yield RecordBatch.from_arrow_record_batches(
+                    [rows], rows.schema).eval_expression_list([])
+                continue
             if has_blob_columns:
                 batch = _convert_blob_columns(
                     batch,
@@ -488,12 +496,14 @@ def _blob_native_covering_files(
     task_columns: list[str],
     blob_column_names: set[str],
     partition_keys: list[str],
+    schema_loader=None,
 ) -> list[DataFileMeta] | None:
     """Return the parquet files that can serve a blob-table split via Daft's
     native reader, or ``None`` if the split must use the pypaimon fallback.
 
     A blob table stores each column bunch in its own file: scalar columns in
-    parquet, BLOB / ARRAY<BLOB> / MAP<X, BLOB> columns in ``.blob`` files, vector columns in
+    parquet, BLOB / ARRAY<BLOB> / MAP<X, BLOB> columns in ``.blob`` or
+    ``.video`` files, vector columns in
     ``.vector`` files, aligned by row id. Reading the base parquet files
     natively is only correct when every projected data column lives in parquet
     files that each fully cover the projection over disjoint row-id ranges --
@@ -510,9 +520,15 @@ def _blob_native_covering_files(
     covering: list[DataFileMeta] = []
     for f in files:
         name = f.file_name
-        write_cols = set(f.write_cols or [])
+        if f.write_cols is None and schema_loader is not None:
+            file_schema = schema_loader(f.schema_id)
+            write_cols = {
+                field.name for field in file_schema.data_file_fields(None)
+            }
+        else:
+            write_cols = set(f.write_cols or [])
         carried = write_cols & projected
-        if name.endswith(".blob") or ".vector." in name:
+        if name.endswith((".blob", ".video")) or ".vector." in name:
             if carried:
                 return None  # a projected column lives in a blob/vector bunch
             continue
@@ -761,7 +777,8 @@ class PaimonDataSource(DataSource):
                 split.files
                 if routing.use_native_reader
                 else self._blob_table_native_files(
-                    split.files, read_pushdowns.task_columns, has_deletion_vectors
+                    split.files, read_pushdowns.task_columns, has_deletion_vectors,
+                    has_auth,
                 )
             )
             if native_files is not None and self._has_incompatible_file_schema(
@@ -855,6 +872,7 @@ class PaimonDataSource(DataSource):
                     getattr(split, "data_files", None) or [],
                     read_pushdowns.task_columns,
                     split.has_deletion_vectors,
+                    paimon_scan.has_auth,
                 )
             )
             candidate_files = (
@@ -991,15 +1009,19 @@ class PaimonDataSource(DataSource):
         files: list[DataFileMeta],
         task_columns: list[str] | None,
         has_deletion_vectors: bool,
+        has_auth: bool,
     ) -> list[DataFileMeta] | None:
         """Files of a blob-table split that can be read via the native parquet
         reader because no BLOB column is projected, or ``None`` to keep the
         pypaimon fallback. Only applies to non-PK parquet blob tables without
-        deletion vectors and with an explicit projection."""
+        deletion vectors, without query authorization, and with an explicit
+        projection. A blob table never reaches ``use_native_reader``, so this is
+        where authorization has to stop the native reader."""
         if (
             not self._has_blob_columns
             or not self._is_parquet
             or has_deletion_vectors
+            or has_auth
             or self._table.is_primary_key_table
             or task_columns is None
         ):
@@ -1010,7 +1032,15 @@ class PaimonDataSource(DataSource):
             | self._map_blob_column_names
         )
         return _blob_native_covering_files(
-            files, task_columns, blob_column_names, self._table.partition_keys
+            files,
+            task_columns,
+            blob_column_names,
+            self._table.partition_keys,
+            lambda schema_id: (
+                self._table.table_schema
+                if schema_id == self._table.table_schema.id
+                else self._table.schema_manager.get_schema(schema_id)
+            ),
         )
 
     @staticmethod

@@ -34,8 +34,8 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -232,7 +232,8 @@ class RawFileSplitReadTest {
                         .options(options.toMap())
                         .build();
         TableSchema tableSchema =
-                SchemaUtils.forceCommit(new SchemaManager(LocalFileIO.create(), tablePath), schema);
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath), schema);
         FileStoreTable table =
                 FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
 

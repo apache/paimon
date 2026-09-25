@@ -18,7 +18,7 @@
 
 package org.apache.paimon.io.cache;
 
-import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySlice;
 
 import javax.annotation.Nullable;
 
@@ -27,10 +27,17 @@ import java.util.function.Function;
 
 /** Cache interface in Paimon. */
 public interface Cache {
+
+    /** Looks up an entry without loading it, recording an access according to the cache policy. */
+    @Nullable
+    CacheValue getIfPresent(CacheKey key);
+
     @Nullable
     CacheValue get(CacheKey key, Function<CacheKey, CacheValue> supplier);
 
     void put(CacheKey key, CacheValue value);
+
+    boolean contains(CacheKey key);
 
     void invalidate(CacheKey key);
 
@@ -41,11 +48,11 @@ public interface Cache {
     /** Value for cache. */
     class CacheValue {
 
-        final MemorySegment segment;
+        final MemorySlice slice;
         final CacheCallback callback;
 
-        CacheValue(MemorySegment segment, CacheCallback callback) {
-            this.segment = segment;
+        CacheValue(MemorySlice slice, CacheCallback callback) {
+            this.slice = slice;
             this.callback = callback;
         }
     }

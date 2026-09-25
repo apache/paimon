@@ -21,8 +21,19 @@ from typing import Callable, List, Optional
 
 import fastavro
 
+try:
+    from fastavro._read import (read_bytes as _read_bytes,
+                                read_long as _read_long,
+                                read_record as _read_record,
+                                skip_record as _skip_record)
+except ImportError:  # pragma: no cover - supported fastavro versions provide these
+    _read_bytes = _read_long = _read_record = _skip_record = None
+
 from datetime import datetime
 
+from pypaimon.manifest.manifest_sidecar import (
+    Query, read_sidecar, read_selected_bytes,
+)
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
                                                      ManifestEntry)
@@ -32,6 +43,69 @@ from pypaimon.table.row.generic_row import (GenericRow,
                                             GenericRowDeserializer,
                                             GenericRowSerializer)
 from pypaimon.table.row.binary_row import BinaryRow
+
+
+_MANIFEST_FIELD_NAMES = (
+    '_VERSION', '_KIND', '_PARTITION', '_BUCKET', '_TOTAL_BUCKETS', '_FILE')
+_MANIFEST_PREFIX_TYPES = ('int', 'int', 'bytes', 'int', 'int')
+
+
+def _read_manifest_records(buffer, early_entry_filter, partition_filter,
+                           partition_fields):
+    """Yield manifest records, skipping ``_FILE`` before decoding when possible."""
+    if ((early_entry_filter is None and partition_filter is None)
+            or _read_record is None):
+        for record in fastavro.reader(buffer):
+            yield record, None, False
+        return
+
+    blocks = fastavro.block_reader(buffer)
+    schema = blocks.writer_schema
+    fields = schema.get('fields', []) if isinstance(schema, dict) else []
+    if (tuple(field.get('name') for field in fields) != _MANIFEST_FIELD_NAMES
+            or tuple(field.get('type') for field in fields[:5])
+            != _MANIFEST_PREFIX_TYPES
+            or not isinstance(fields[5].get('type'), dict)
+            or fields[5]['type'].get('type') != 'record'):
+        # Avro values follow writer field order. Keep the generic reader for
+        # reordered fields or a top-level union, as written by Rust.
+        buffer.seek(0)
+        for record in fastavro.reader(buffer):
+            yield record, None, False
+        return
+
+    file_schema = fields[5]['type']
+    named_schemas = getattr(blocks, '_named_schemas', {})
+
+    for block in blocks:
+        stream = block.bytes_
+        for _ in range(block.num_records):
+            version = _read_long(stream)
+            kind = _read_long(stream)
+            partition_bytes = _read_bytes(stream)
+            bucket = _read_long(stream)
+            total_buckets = _read_long(stream)
+            if (early_entry_filter is not None
+                    and not early_entry_filter(bucket, total_buckets)):
+                _skip_record(stream, file_schema, named_schemas)
+                continue
+
+            partition = None
+            if partition_filter is not None:
+                partition = GenericRowDeserializer.from_bytes(
+                    partition_bytes, partition_fields)
+                if not partition_filter.test(partition):
+                    _skip_record(stream, file_schema, named_schemas)
+                    continue
+
+            yield {
+                '_VERSION': version,
+                '_KIND': kind,
+                '_PARTITION': partition_bytes,
+                '_BUCKET': bucket,
+                '_TOTAL_BUCKETS': total_buckets,
+                '_FILE': _read_record(stream, file_schema, named_schemas),
+            }, partition, True
 
 
 class ManifestFileManager:
@@ -57,13 +131,27 @@ class ManifestFileManager:
                               early_entry_filter: Optional[Callable[[int, int], bool]] = None,
                               early_record_filter: Optional[Callable[[dict], bool]] = None,
                               partition_filter=None,
+                              row_ranges=None,
                               ) -> List[ManifestEntry]:
 
-        def _process_single_manifest(manifest_file: ManifestFileMeta) -> List[ManifestEntry]:
-            return self.read(manifest_file.file_name, manifest_entry_filter, drop_stats,
-                             early_entry_filter=early_entry_filter,
-                             early_record_filter=early_record_filter,
-                             partition_filter=partition_filter)
+        enabled = self.table.options.manifest_sidecar_enabled()
+        query = Query(row_ranges) if enabled and row_ranges is not None else None
+
+        def _process_single_manifest(manifest_file: ManifestFileMeta):
+            path = f"{self.manifest_path}/{manifest_file.file_name}"
+            selected = None
+            if enabled and (
+                    query is not None or partition_filter is not None or early_entry_filter is not None):
+                selected = read_sidecar(self.file_io, path, manifest_file, query,
+                                        partition_filter, self.partition_keys_fields, early_entry_filter)
+                if selected is not None and not selected.blocks:
+                    return []
+            return self.read(
+                manifest_file.file_name, manifest_entry_filter, drop_stats,
+                early_entry_filter=early_entry_filter,
+                early_record_filter=early_record_filter,
+                partition_filter=partition_filter,
+                selected_blocks=selected)
 
         def _entry_identifier(e: ManifestEntry) -> tuple:
             return (
@@ -78,14 +166,23 @@ class ManifestFileManager:
 
         deleted_entry_keys = set()
         added_entries = []
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_results = executor.map(_process_single_manifest, manifest_files)
-            for entries in future_results:
-                for entry in entries:
-                    if entry.kind == 0:  # ADD
-                        added_entries.append(entry)
-                    else:  # DELETE
-                        deleted_entry_keys.add(_entry_identifier(entry))
+
+        def _collect(entries):
+            for entry in entries:
+                if entry.kind == 0:  # ADD
+                    added_entries.append(entry)
+                else:  # DELETE
+                    deleted_entry_keys.add(_entry_identifier(entry))
+
+        if len(manifest_files) == 1:
+            # Avoid executor overhead and keep native block decoding on the
+            # caller thread for the common single-manifest case.
+            _collect(_process_single_manifest(manifest_files[0]))
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for entries in executor.map(
+                        _process_single_manifest, manifest_files):
+                    _collect(entries)
 
         final_entries = [
             entry for entry in added_entries
@@ -97,6 +194,7 @@ class ManifestFileManager:
              early_entry_filter: Optional[Callable[[int, int], bool]] = None,
              early_record_filter: Optional[Callable[[dict], bool]] = None,
              partition_filter=None,
+             selected_blocks=None,
              ) -> List[ManifestEntry]:
         """
         early_entry_filter: ``(bucket, total_buckets) -> bool``, skip before deserializing _FILE.
@@ -110,13 +208,18 @@ class ManifestFileManager:
         manifest_file_path = f"{self.manifest_path}/{manifest_file_name}"
 
         entries = []
-        with self.file_io.new_input_stream(manifest_file_path) as input_stream:
-            avro_bytes = input_stream.read()
+        if selected_blocks is not None:
+            avro_bytes = read_selected_bytes(self.file_io, manifest_file_path, selected_blocks)
+        else:
+            with self.file_io.new_input_stream(manifest_file_path) as input_stream:
+                avro_bytes = input_stream.read()
         buffer = BytesIO(avro_bytes)
-        reader = fastavro.reader(buffer)
+        records = _read_manifest_records(
+            buffer, early_entry_filter, partition_filter,
+            self.partition_keys_fields)
 
-        for record in reader:
-            if early_entry_filter is not None:
+        for record, partition, prefix_filtered in records:
+            if not prefix_filtered and early_entry_filter is not None:
                 try:
                     bucket = record['_BUCKET']
                     total_buckets = record['_TOTAL_BUCKETS']
@@ -127,8 +230,7 @@ class ManifestFileManager:
                         continue
             if early_record_filter is not None and not early_record_filter(record):
                 continue
-            partition = None
-            if partition_filter is not None:
+            if partition_filter is not None and partition is None:
                 partition = GenericRowDeserializer.from_bytes(
                     record['_PARTITION'], self.partition_keys_fields)
                 if not partition_filter.test(partition):
@@ -143,10 +245,10 @@ class ManifestFileManager:
 
             schema_id = file_dict['_SCHEMA_ID']
             if schema_id == self.table.table_schema.id:
-                schema_fields = self.table.table_schema.fields
+                file_schema = self.table.table_schema
             else:
-                schema_fields = self.table.schema_manager.get_schema(schema_id).fields
-            fields = self._get_value_stats_fields(file_dict, schema_fields)
+                file_schema = self.table.schema_manager.get_schema(schema_id)
+            fields = self._get_value_stats_fields(file_dict, file_schema)
             value_dict = dict(file_dict['_VALUE_STATS'])
             value_stats = SimpleStats(
                 min_values=BinaryRow(value_dict['_MIN_VALUES'], fields),
@@ -190,6 +292,8 @@ class ManifestFileManager:
                 external_path=file_dict.get('_EXTERNAL_PATH'),
                 first_row_id=file_dict['_FIRST_ROW_ID'] if '_FIRST_ROW_ID' in file_dict else None,
                 write_cols=file_dict['_WRITE_COLS'] if '_WRITE_COLS' in file_dict else None,
+                write_cols_sequences=file_dict.get(
+                    '_WRITE_COLS_SEQUENCES'),
             )
             if partition is None:
                 partition = GenericRowDeserializer.from_bytes(
@@ -208,11 +312,23 @@ class ManifestFileManager:
             entries.append(entry)
         return entries
 
-    def _get_value_stats_fields(self, file_dict: dict, schema_fields: list) -> List:
+    def _get_value_stats_fields(self, file_dict: dict, file_schema) -> List:
+        # Keep accepting a field list for the focused unit tests and older
+        # internal callers. Manifest reads pass TableSchema so compact
+        # write-column metadata can be resolved from the historical schema.
+        schema_fields = (
+            file_schema.fields
+            if hasattr(file_schema, 'fields')
+            else file_schema
+        )
         if file_dict['_VALUE_STATS_COLS'] is None:
             if '_WRITE_COLS' in file_dict:
                 if file_dict['_WRITE_COLS'] is None:
-                    fields = schema_fields
+                    fields = (
+                        file_schema.data_file_fields(None)
+                        if hasattr(file_schema, 'data_file_fields')
+                        else schema_fields
+                    )
                 else:
                     read_fields = file_dict['_WRITE_COLS']
                     # writeCols may contain metadata fields (e.g. _ROW_ID, _SEQUENCE_NUMBER)
@@ -224,7 +340,8 @@ class ManifestFileManager:
         elif not file_dict['_VALUE_STATS_COLS']:
             fields = []
         else:
-            fields = [self.table.field_dict[col] for col in file_dict['_VALUE_STATS_COLS']]
+            data_field_dict = {f.name: f for f in schema_fields}
+            fields = [data_field_dict[col] for col in file_dict['_VALUE_STATS_COLS']]
         return fields
 
     def write(self, file_name, entries: List[ManifestEntry]):
@@ -317,6 +434,8 @@ class ManifestFileManager:
                 "_EXTERNAL_PATH": entry.file.external_path,
                 "_FIRST_ROW_ID": entry.file.first_row_id,
                 "_WRITE_COLS": entry.file.write_cols,
+                "_WRITE_COLS_SEQUENCES": (
+                    entry.file.write_cols_sequences),
             }
         }
 
@@ -345,6 +464,13 @@ class ManifestFileManager:
             schema_id = entry.file.schema_id if schema_id is None else max(schema_id, entry.file.schema_id)
         if schema_id is None:
             schema_id = self.table.table_schema.id
+
+        # Rescaling can mix bucket counts in one manifest. Only a common,
+        # positive count is safe for predicate-driven manifest pruning.
+        total_buckets = entries[0].total_buckets if entries else None
+        if total_buckets is not None and (
+                total_buckets <= 0 or any(e.total_buckets != total_buckets for e in entries)):
+            total_buckets = None
 
         partition_columns = list(zip(*(entry.partition.values for entry in entries))) if entries else []
         partition_null_counts = [sum(1 for value in col if value is None) for col in partition_columns]
@@ -388,6 +514,11 @@ class ManifestFileManager:
                 null_counts=partition_null_counts,
             ),
             schema_id=schema_id,
+            min_bucket=min((e.bucket for e in entries), default=None),
+            max_bucket=max((e.bucket for e in entries), default=None),
+            min_level=min((e.file.level for e in entries), default=None),
+            max_level=max((e.file.level for e in entries), default=None),
             min_row_id=min_row_id,
             max_row_id=max_row_id,
+            total_buckets=total_buckets,
         )

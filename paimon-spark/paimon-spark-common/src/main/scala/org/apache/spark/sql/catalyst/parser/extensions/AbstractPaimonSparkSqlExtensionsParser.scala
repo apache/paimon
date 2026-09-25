@@ -71,6 +71,7 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
     PaimonSqlExtensionsParser.TAG,
     PaimonSqlExtensionsParser.TRUE,
     PaimonSqlExtensionsParser.FALSE,
+    PaimonSqlExtensionsParser.ARRAY,
     PaimonSqlExtensionsParser.MAP,
     PaimonSqlExtensionsParser.COPY,
     PaimonSqlExtensionsParser.INTO,

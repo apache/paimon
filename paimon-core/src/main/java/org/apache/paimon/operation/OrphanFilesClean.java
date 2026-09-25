@@ -61,6 +61,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
+import static org.apache.paimon.append.dataevolution.SerializationAssignment.planFile;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.ChangelogManager.CHANGELOG_PREFIX;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
@@ -309,6 +310,11 @@ public abstract class OrphanFilesClean implements Serializable {
         // collect manifests
         for (ManifestFileMeta manifest : manifestFileMetas) {
             usedFileWithFlagConsumer.accept(Pair.of(manifest.fileName(), true));
+            if (manifest.extraFiles() != null) {
+                for (String extraFile : manifest.extraFiles()) {
+                    usedFileWithFlagConsumer.accept(Pair.of(extraFile, false));
+                }
+            }
         }
 
         // index files
@@ -322,6 +328,11 @@ public abstract class OrphanFilesClean implements Serializable {
                     .map(IndexManifestEntry::indexFile)
                     .map(IndexFileMeta::fileName)
                     .forEach(name -> usedFileWithFlagConsumer.accept(Pair.of(name, false)));
+        }
+
+        String reassignPlan = planFile(snapshot);
+        if (reassignPlan != null) {
+            usedFileWithFlagConsumer.accept(Pair.of(reassignPlan, false));
         }
 
         // statistic file

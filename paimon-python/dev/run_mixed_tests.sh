@@ -111,6 +111,7 @@ run_batched_java_write_tests() {
     core_tests="${core_tests}+testBlobWriteAlterCompact"
     core_tests="${core_tests}+testJavaWriteArrayBlobTable"
     core_tests="${core_tests}+testJavaWriteMapBlobTable"
+    core_tests="${core_tests}+testJavaWriteSharedShreddingMapTable"
     core_tests="${core_tests}+testDataEvolutionWrite"
     core_tests="${core_tests}+testJavaWriteRowAppendTable"
     if [[ "$PYTHON_MINOR" -ge 7 ]]; then
@@ -243,7 +244,7 @@ run_python_write_test() {
 
     # Run the parameterized Python test method for writing data (pk table, includes bucket num assertion)
     echo "Running Python test for JavaPyReadWriteTest (test_py_write_read_pk_table)..."
-    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_py_write_read_pk_table or test_py_write_dynamic_bucket_hash_index" -v; then
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_py_write_read_pk_table or test_py_write_dynamic_bucket_hash_index or test_py_write_floating_sequence" -v; then
         echo -e "${GREEN}✓ Python write test completed successfully${NC}"
         return 0
     else
@@ -262,7 +263,7 @@ run_java_read_test() {
     echo "Running Maven test for JavaPyE2ETest.testReadPkTable (Java Read Parquet/Orc/Avro)..."
     echo "Note: Maven may download dependencies on first run, this may take a while..."
     local parquet_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testReadPkTable+testReadPythonDynamicBucketHashIndex -pl paimon-core -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testReadPkTable+testReadPythonDynamicBucketHashIndex+testReadPythonFloatingSequence -pl paimon-core -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
         echo -e "${GREEN}✓ Java read Parquet/Orc/Avro test completed successfully${NC}"
     else
         echo -e "${RED}✗ Java read Parquet/Orc/Avro test failed${NC}"
@@ -660,14 +661,14 @@ ensure_paimon_vindex() {
     fi
 
     echo "Installing Python paimon-vindex dependency..."
-    if python -m pip install 'paimon-vindex==0.4.0'; then
+    if python -m pip install 'paimon-vindex==0.5.0'; then
         return 0
     fi
 
     echo -e "${YELLOW}Direct pip install failed; installing paimon-vindex into a temporary target directory...${NC}"
     local target_dir="${TMPDIR:-/tmp}/paimon-vindex-site"
     rm -rf "$target_dir"
-    if python -m pip install --target "$target_dir" 'paimon-vindex==0.4.0'; then
+    if python -m pip install --target "$target_dir" 'paimon-vindex==0.5.0'; then
         export PYTHONPATH="$target_dir:${PYTHONPATH:-}"
         return 0
     fi
@@ -675,7 +676,7 @@ ensure_paimon_vindex() {
     if python -c "import numpy" >/dev/null 2>&1; then
         echo -e "${YELLOW}Dependency install failed but numpy is already available; retrying paimon-vindex without dependencies...${NC}"
         rm -rf "$target_dir"
-        if python -m pip install --target "$target_dir" --no-deps 'paimon-vindex==0.4.0'; then
+        if python -m pip install --target "$target_dir" --no-deps 'paimon-vindex==0.5.0'; then
             export PYTHONPATH="$target_dir:${PYTHONPATH:-}"
             return 0
         fi
@@ -1011,6 +1012,44 @@ run_map_blob_interop_test() {
     echo -e "${GREEN}✓ Java MAP<K, BLOB> read test completed successfully${NC}"
 }
 
+run_shared_shredding_map_test() {
+    echo -e "${YELLOW}=== Running shared-shredding MAP Test (Java Write → Python Read) ===${NC}"
+
+    if ! skip_batched_java_write; then
+        cd "$PROJECT_ROOT"
+        echo "Running Maven test for JavaPyE2ETest.testJavaWriteSharedShreddingMapTable..."
+        if ! mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteSharedShreddingMapTable -pl paimon-core -q -Drun.e2e.tests=true; then
+            echo -e "${RED}✗ Java shared-shredding MAP write test failed${NC}"
+            return 1
+        fi
+        echo -e "${GREEN}✓ Java shared-shredding MAP write test completed successfully${NC}"
+    fi
+
+    cd "$PAIMON_PYTHON_DIR"
+    echo "Running Python shared-shredding MAP read test..."
+    if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest \
+        -k "test_read_shared_shredding_map_written_by_java or test_read_selected_shared_shredding_keys_written_by_java" -v; then
+        echo -e "${RED}✗ Python shared-shredding MAP read test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Python shared-shredding MAP read test completed successfully${NC}"
+
+    echo "Running Python shared-shredding MAP write test..."
+    if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_write_shared_shredding_map_for_java -v; then
+        echo -e "${RED}✗ Python shared-shredding MAP write test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Python shared-shredding MAP write test completed successfully${NC}"
+
+    cd "$PROJECT_ROOT"
+    echo "Running Maven test for JavaPyE2ETest.testJavaReadSharedShreddingMapTable..."
+    if ! mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaReadSharedShreddingMapTable -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${RED}✗ Java shared-shredding MAP read test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Java shared-shredding MAP read test completed successfully${NC}"
+}
+
 # Function to run VARIANT test (Java write, Python read)
 run_java_variant_write_py_read_test() {
     echo -e "${YELLOW}=== Running VARIANT Test (Java Write, Python Read) ===${NC}"
@@ -1129,6 +1168,7 @@ main() {
     local blob_alter_compact_result=0
     local array_blob_interop_result=0
     local map_blob_interop_result=0
+    local shared_shredding_map_result=0
     local data_evolution_result=0
     local data_evolution_deletion_vector_result=0
     local data_evolution_py_write_result=0
@@ -1373,6 +1413,12 @@ main() {
 
     echo ""
 
+    if ! run_shared_shredding_map_test; then
+        shared_shredding_map_result=1
+    fi
+
+    echo ""
+
     # Run data evolution test (Java write, Python read). Lance variant skips
     # itself on <3.8 (get_file_format_params + gated Java lance read).
     if ! run_data_evolution_test; then
@@ -1573,6 +1619,12 @@ main() {
         echo -e "${RED}✗ MAP<K, BLOB> Interoperability Test (Java ↔ Python): FAILED${NC}"
     fi
 
+    if [[ $shared_shredding_map_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ Shared-shredding MAP Test (Java Write → Python Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ Shared-shredding MAP Test (Java Write → Python Read): FAILED${NC}"
+    fi
+
     if [[ $data_evolution_result -eq 0 ]]; then
         echo -e "${GREEN}✓ Data Evolution Test (Java Write, Python Read): PASSED${NC}"
     else
@@ -1614,7 +1666,7 @@ main() {
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $btree_raw_fallback_result -eq 0 && $bitmap_index_result -eq 0 && $compressed_global_index_result -eq 0 && $compressed_text_result -eq 0 && $native_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $vindex_vector_result -eq 0 && $vindex_vector_raw_fallback_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $array_blob_interop_result -eq 0 && $map_blob_interop_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_deletion_vector_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $btree_raw_fallback_result -eq 0 && $bitmap_index_result -eq 0 && $compressed_global_index_result -eq 0 && $compressed_text_result -eq 0 && $native_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $vindex_vector_result -eq 0 && $vindex_vector_raw_fallback_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $array_blob_interop_result -eq 0 && $map_blob_interop_result -eq 0 && $shared_shredding_map_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_deletion_vector_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else

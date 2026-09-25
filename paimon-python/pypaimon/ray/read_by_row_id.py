@@ -30,11 +30,14 @@ from pypaimon.ray.data_evolution_merge_into import (
     _normalize_source,
     _reraise_inner,
     _require_ray_join,
-    _resolve_num_partitions,
 )
 from pypaimon.ray.data_evolution_merge_join import (
     _read_output_schema,
     distributed_read_by_row_id,
+)
+from pypaimon.ray.partitioning import (
+    _estimate_dataset_num_rows,
+    _estimate_dataset_size_bytes,
 )
 
 __all__ = ["read_by_row_id"]
@@ -104,8 +107,6 @@ def read_by_row_id(
     if not projection:
         raise ValueError("projection must be non-empty.")
     projection = list(dict.fromkeys(projection))
-    num_partitions = _resolve_num_partitions(num_partitions)
-
     table = CatalogFactory.create(catalog_options).get_table(target)
     if not table.options.data_evolution_enabled():
         raise ValueError(
@@ -141,6 +142,13 @@ def read_by_row_id(
             "read_by_row_id does not accept a table-name source; pass a ray.data."
             "Dataset / pyarrow.Table / pandas.DataFrame carrying the target row ids.")
     source_ds = _normalize_source(row_ids, catalog_options)
+    estimated_size_bytes = None
+    estimated_num_rows = None
+    data_context = None
+    if num_partitions is None:
+        estimated_size_bytes = _estimate_dataset_size_bytes(source_ds)
+        estimated_num_rows = _estimate_dataset_num_rows(source_ds)
+        data_context = getattr(source_ds, "context", None)
     # Only check now if the schema is free; fetching it would execute a lazy source.
     known_schema = source_ds.schema(fetch_if_missing=False)
     if known_schema is not None and src_rid_col not in set(known_schema.names):
@@ -161,6 +169,10 @@ def read_by_row_id(
         from pypaimon.common.options.core_options import CoreOptions
         from pypaimon.common.options.options import Options
         base_schema = table.schema_manager.get_schema(base.schema_id)
+        if table.table_schema.id != base_schema.id:
+            raise ValueError(
+                "The time-travel schema changed while resolving the read snapshot; "
+                "retry read_by_row_id.")
         if not CoreOptions(Options(base_schema.options)).row_tracking_enabled():
             raise ValueError(
                 f"the resolved snapshot ({base.id}) predates row-tracking; read_by_row_id needs it.")
@@ -171,20 +183,17 @@ def read_by_row_id(
             raise ValueError(
                 f"target '{target}' has no rows; every _ROW_ID in the source is foreign.")
         return _empty_result(table, read_cols)
-    # base captures the resolved snapshot; reduce any time-travel key to a plain snapshot-id
-    # so the planner's own snapshot-id pin does not read as a second, conflicting one.
-    from pypaimon.common.options.core_options import CoreOptions
-    present = [k for k in SCAN_KEYS if table.options.options.contains_key(k)]
-    if present:
-        overrides = {k: None for k in present}
-        overrides[CoreOptions.SCAN_SNAPSHOT_ID.key()] = str(base.id)
-        table = table.copy(overrides)
+    # Carry the resolved metadata into planning and workers: a tag can retain its
+    # snapshot after the main snapshot file expires, or move before lazy execution.
+    table = table._copy_with_snapshot(base)
     try:
         result = distributed_read_by_row_id(
             rid_ds, table, projection,
             num_partitions=num_partitions,
             ray_remote_args=ray_remote_args,
-            base_snapshot_id=base.id,
+            estimated_size_bytes=estimated_size_bytes,
+            estimated_num_rows=estimated_num_rows,
+            data_context=data_context,
         )
     except Exception as e:
         _reraise_inner(e)

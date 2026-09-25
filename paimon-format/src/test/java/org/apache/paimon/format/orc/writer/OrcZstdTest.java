@@ -39,6 +39,7 @@ import org.apache.orc.CompressionCodec;
 import org.apache.orc.CompressionKind;
 import org.apache.orc.OrcFile;
 import org.apache.orc.Reader;
+import org.apache.orc.impl.OrcCodecPool;
 import org.apache.orc.impl.ZstdCodec;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -58,6 +59,9 @@ class OrcZstdTest {
 
     @Test
     void testWriteOrcWithZstd(@TempDir java.nio.file.Path tempDir) throws IOException {
+        CompressionCodec zstdCodec = OrcCodecPool.getCodec(CompressionKind.ZSTD);
+        int originalHashCode = zstdCodec.getDefaultOptions().hashCode();
+
         Options options = new Options();
         options.set("orc.compress", "zstd");
         options.set("orc.stripe.size", "31457280");
@@ -90,6 +94,7 @@ class OrcZstdTest {
         FormatWriter formatWriter = writerFactory.create(out, "zstd");
 
         Assertions.assertThat(formatWriter).isInstanceOf(OrcBulkWriter.class);
+        Assertions.assertThat(zstdCodec.getDefaultOptions().hashCode()).isEqualTo(originalHashCode);
 
         Options optionsWithLowLevel = new Options();
         optionsWithLowLevel.set("orc.compress", "zstd");

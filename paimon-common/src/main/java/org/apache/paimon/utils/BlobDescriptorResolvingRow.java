@@ -1,0 +1,394 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.utils;
+
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobArrayPlaceholder;
+import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobMapPlaceholder;
+import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.types.RowKind;
+
+import javax.annotation.Nullable;
+
+import java.util.BitSet;
+
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
+
+/** Reattaches a descriptor reader to BLOBs in a row. */
+public class BlobDescriptorResolvingRow implements InternalRow {
+
+    private InternalRow wrapped;
+    private final UriReaderFactory uriReaderFactory;
+    @Nullable private final BitSet blobDescriptorFieldIndices;
+
+    public BlobDescriptorResolvingRow(
+            UriReaderFactory uriReaderFactory, @Nullable int[] blobDescriptorFieldIndices) {
+        this(null, uriReaderFactory, blobDescriptorFieldIndices);
+    }
+
+    public BlobDescriptorResolvingRow(InternalRow wrapped, UriReaderFactory uriReaderFactory) {
+        this(wrapped, uriReaderFactory, null);
+    }
+
+    public BlobDescriptorResolvingRow(
+            InternalRow wrapped,
+            UriReaderFactory uriReaderFactory,
+            @Nullable int[] blobDescriptorFieldIndices) {
+        this.wrapped = wrapped;
+        this.uriReaderFactory =
+                checkNotNull(uriReaderFactory, "UriReaderFactory must not be null.");
+        this.blobDescriptorFieldIndices = toBitSet(blobDescriptorFieldIndices);
+    }
+
+    public BlobDescriptorResolvingRow replace(InternalRow row) {
+        this.wrapped = row;
+        return this;
+    }
+
+    @Override
+    public int getFieldCount() {
+        return wrapped.getFieldCount();
+    }
+
+    @Override
+    public RowKind getRowKind() {
+        return wrapped.getRowKind();
+    }
+
+    @Override
+    public void setRowKind(RowKind kind) {
+        wrapped.setRowKind(kind);
+    }
+
+    @Override
+    public boolean isNullAt(int pos) {
+        return wrapped.isNullAt(pos);
+    }
+
+    @Override
+    public boolean getBoolean(int pos) {
+        return wrapped.getBoolean(pos);
+    }
+
+    @Override
+    public byte getByte(int pos) {
+        return wrapped.getByte(pos);
+    }
+
+    @Override
+    public short getShort(int pos) {
+        return wrapped.getShort(pos);
+    }
+
+    @Override
+    public int getInt(int pos) {
+        return wrapped.getInt(pos);
+    }
+
+    @Override
+    public long getLong(int pos) {
+        return wrapped.getLong(pos);
+    }
+
+    @Override
+    public float getFloat(int pos) {
+        return wrapped.getFloat(pos);
+    }
+
+    @Override
+    public double getDouble(int pos) {
+        return wrapped.getDouble(pos);
+    }
+
+    @Override
+    public BinaryString getString(int pos) {
+        return wrapped.getString(pos);
+    }
+
+    @Override
+    public Decimal getDecimal(int pos, int precision, int scale) {
+        return wrapped.getDecimal(pos, precision, scale);
+    }
+
+    @Override
+    public Timestamp getTimestamp(int pos, int precision) {
+        return wrapped.getTimestamp(pos, precision);
+    }
+
+    @Override
+    public byte[] getBinary(int pos) {
+        return wrapped.getBinary(pos);
+    }
+
+    @Override
+    public Variant getVariant(int pos) {
+        return wrapped.getVariant(pos);
+    }
+
+    @Override
+    public Blob getBlob(int pos) {
+        Blob blob = wrapped.getBlob(pos);
+        return shouldResolve(pos) ? withReader(blob, uriReaderFactory) : blob;
+    }
+
+    private boolean shouldResolve(int pos) {
+        return blobDescriptorFieldIndices == null || blobDescriptorFieldIndices.get(pos);
+    }
+
+    @Nullable
+    private static BitSet toBitSet(@Nullable int[] blobDescriptorFieldIndices) {
+        if (blobDescriptorFieldIndices == null) {
+            return null;
+        }
+
+        BitSet bitSet = new BitSet();
+        for (int blobDescriptorFieldIndex : blobDescriptorFieldIndices) {
+            bitSet.set(blobDescriptorFieldIndex);
+        }
+        return bitSet;
+    }
+
+    private static Blob withReader(@Nullable Blob blob, UriReaderFactory uriReaderFactory) {
+        if (!(blob instanceof BlobRef)) {
+            return blob;
+        }
+
+        BlobDescriptor descriptor = blob.toDescriptor();
+        return Blob.fromDescriptor(uriReaderFactory.create(descriptor.uri()), descriptor);
+    }
+
+    @Override
+    public InternalArray getArray(int pos) {
+        InternalArray array = wrapped.getArray(pos);
+        return shouldResolve(pos) ? withReader(array, uriReaderFactory) : array;
+    }
+
+    @Override
+    public InternalVector getVector(int pos) {
+        return wrapped.getVector(pos);
+    }
+
+    @Override
+    public InternalMap getMap(int pos) {
+        InternalMap map = wrapped.getMap(pos);
+        return shouldResolve(pos) ? withReader(map, uriReaderFactory) : map;
+    }
+
+    @Override
+    public InternalRow getRow(int pos, int numFields) {
+        InternalRow row = wrapped.getRow(pos, numFields);
+        return row == null || !shouldResolve(pos)
+                ? row
+                : new BlobDescriptorResolvingRow(row, uriReaderFactory);
+    }
+
+    private static InternalArray withReader(
+            @Nullable InternalArray array, UriReaderFactory uriReaderFactory) {
+        if (array == null || array == BlobArrayPlaceholder.INSTANCE) {
+            return array;
+        }
+        return new BlobDescriptorResolvingArray(array, uriReaderFactory);
+    }
+
+    private static InternalMap withReader(
+            @Nullable InternalMap map, UriReaderFactory uriReaderFactory) {
+        if (map == null || map == BlobMapPlaceholder.INSTANCE) {
+            return map;
+        }
+        return new BlobDescriptorResolvingMap(map, uriReaderFactory);
+    }
+
+    private static final class BlobDescriptorResolvingArray implements InternalArray {
+
+        private final InternalArray wrapped;
+        private final UriReaderFactory uriReaderFactory;
+
+        private BlobDescriptorResolvingArray(
+                InternalArray wrapped, UriReaderFactory uriReaderFactory) {
+            this.wrapped = wrapped;
+            this.uriReaderFactory = uriReaderFactory;
+        }
+
+        @Override
+        public int size() {
+            return wrapped.size();
+        }
+
+        @Override
+        public boolean isNullAt(int pos) {
+            return wrapped.isNullAt(pos);
+        }
+
+        @Override
+        public boolean getBoolean(int pos) {
+            return wrapped.getBoolean(pos);
+        }
+
+        @Override
+        public byte getByte(int pos) {
+            return wrapped.getByte(pos);
+        }
+
+        @Override
+        public short getShort(int pos) {
+            return wrapped.getShort(pos);
+        }
+
+        @Override
+        public int getInt(int pos) {
+            return wrapped.getInt(pos);
+        }
+
+        @Override
+        public long getLong(int pos) {
+            return wrapped.getLong(pos);
+        }
+
+        @Override
+        public float getFloat(int pos) {
+            return wrapped.getFloat(pos);
+        }
+
+        @Override
+        public double getDouble(int pos) {
+            return wrapped.getDouble(pos);
+        }
+
+        @Override
+        public BinaryString getString(int pos) {
+            return wrapped.getString(pos);
+        }
+
+        @Override
+        public Decimal getDecimal(int pos, int precision, int scale) {
+            return wrapped.getDecimal(pos, precision, scale);
+        }
+
+        @Override
+        public Timestamp getTimestamp(int pos, int precision) {
+            return wrapped.getTimestamp(pos, precision);
+        }
+
+        @Override
+        public byte[] getBinary(int pos) {
+            return wrapped.getBinary(pos);
+        }
+
+        @Override
+        public Variant getVariant(int pos) {
+            return wrapped.getVariant(pos);
+        }
+
+        @Override
+        public Blob getBlob(int pos) {
+            return withReader(wrapped.getBlob(pos), uriReaderFactory);
+        }
+
+        @Override
+        public InternalArray getArray(int pos) {
+            return withReader(wrapped.getArray(pos), uriReaderFactory);
+        }
+
+        @Override
+        public InternalVector getVector(int pos) {
+            return wrapped.getVector(pos);
+        }
+
+        @Override
+        public InternalMap getMap(int pos) {
+            return withReader(wrapped.getMap(pos), uriReaderFactory);
+        }
+
+        @Override
+        public InternalRow getRow(int pos, int numFields) {
+            InternalRow row = wrapped.getRow(pos, numFields);
+            return row == null ? null : new BlobDescriptorResolvingRow(row, uriReaderFactory);
+        }
+
+        @Override
+        public boolean[] toBooleanArray() {
+            return wrapped.toBooleanArray();
+        }
+
+        @Override
+        public byte[] toByteArray() {
+            return wrapped.toByteArray();
+        }
+
+        @Override
+        public short[] toShortArray() {
+            return wrapped.toShortArray();
+        }
+
+        @Override
+        public int[] toIntArray() {
+            return wrapped.toIntArray();
+        }
+
+        @Override
+        public long[] toLongArray() {
+            return wrapped.toLongArray();
+        }
+
+        @Override
+        public float[] toFloatArray() {
+            return wrapped.toFloatArray();
+        }
+
+        @Override
+        public double[] toDoubleArray() {
+            return wrapped.toDoubleArray();
+        }
+    }
+
+    private static final class BlobDescriptorResolvingMap implements InternalMap {
+
+        private final InternalMap wrapped;
+        private final UriReaderFactory uriReaderFactory;
+
+        private BlobDescriptorResolvingMap(InternalMap wrapped, UriReaderFactory uriReaderFactory) {
+            this.wrapped = wrapped;
+            this.uriReaderFactory = uriReaderFactory;
+        }
+
+        @Override
+        public int size() {
+            return wrapped.size();
+        }
+
+        @Override
+        public InternalArray keyArray() {
+            return withReader(wrapped.keyArray(), uriReaderFactory);
+        }
+
+        @Override
+        public InternalArray valueArray() {
+            return withReader(wrapped.valueArray(), uriReaderFactory);
+        }
+    }
+}

@@ -21,6 +21,7 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
@@ -31,8 +32,8 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -316,6 +317,173 @@ public class TableWriteTest {
         write.close();
     }
 
+    @Test
+    public void testDeduplicateDeleteWithPrimaryKeyOnly() throws Exception {
+        FileStoreTable table = createNotNullFileStoreTable(new Options());
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 1, 10L));
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        assertThatThrownBy(() -> write.write(GenericRow.ofKind(RowKind.DELETE, 1, null, null)))
+                .hasMessageContaining("non-null column(k)");
+        assertThatThrownBy(() -> write.write(GenericRow.of(1, 1, null)))
+                .hasMessageContaining("non-null column(v)");
+        assertThatThrownBy(() -> write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, null)))
+                .hasMessageContaining("non-null column(v)");
+        assertThatThrownBy(() -> write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, null)))
+                .hasMessageContaining("non-null column(v)");
+
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, null));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        assertThat(readRows(table)).isEmpty();
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testLookupDeleteWithPrimaryKeyOnly() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);
+        options.set(CoreOptions.LOOKUP_MERGE_RECORDS_THRESHOLD, 1);
+        FileStoreTable table = createNotNullFileStoreTable(options);
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(
+                                new IOManagerImpl(
+                                        tempDir.resolve(UUID.randomUUID().toString()).toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 1, 10L));
+        commit.commit(0, write.prepareCommit(false, 0));
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, null));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        assertThat(readRows(table)).isEmpty();
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testPartialUpdateDeleteRequiresNonKeyFields() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
+        FileStoreTable table = createNotNullFileStoreTable(options);
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+
+        assertThatThrownBy(() -> write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, null)))
+                .hasMessageContaining("non-null column(v)");
+
+        write.close();
+    }
+
+    @Test
+    public void testDeleteRequiresSequenceField() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.SEQUENCE_FIELD, "seq");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.BIGINT().notNull()
+                        },
+                        new String[] {"pt", "k", "seq", "v"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "k"),
+                        options);
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 1, 10, 100L));
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        assertThatThrownBy(() -> write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, null, null)))
+                .hasMessageContaining("non-null column(seq)");
+
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 9, null));
+        commit.commit(1, write.prepareCommit(false, 1));
+        List<InternalRow> rows = readRows(table);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getInt(2)).isEqualTo(10);
+        assertThat(rows.get(0).getLong(3)).isEqualTo(100L);
+
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 11, null));
+        commit.commit(2, write.prepareCommit(false, 2));
+        assertThat(readRows(table)).isEmpty();
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testGeneratedDeleteWithPrimaryKeyOnly() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.ROWKIND_FIELD, "kind");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.BIGINT().notNull(),
+                            DataTypes.STRING().notNull()
+                        },
+                        new String[] {"pt", "k", "v", "kind"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "k"),
+                        options);
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 1, 10L, BinaryString.fromString("+I")));
+        commit.commit(0, write.prepareCommit(false, 0));
+        assertThatThrownBy(
+                        () -> write.write(GenericRow.of(1, 1, null, BinaryString.fromString("-U"))))
+                .hasMessageContaining("non-null column(v)");
+        assertThatThrownBy(
+                        () -> write.write(GenericRow.of(1, 1, null, BinaryString.fromString("+U"))))
+                .hasMessageContaining("non-null column(v)");
+        write.write(GenericRow.of(1, 1, null, BinaryString.fromString("-D")));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        assertThat(readRows(table)).isEmpty();
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testCrossPartitionDeleteRequiresPartitionField() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.BIGINT().notNull()
+                        },
+                        new String[] {"pt", "k", "v"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.singletonList("pt"),
+                        Collections.singletonList("k"),
+                        new Options());
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+
+        assertThatThrownBy(() -> write.write(GenericRow.ofKind(RowKind.DELETE, null, 1, null)))
+                .hasMessageContaining("non-null column(pt)");
+
+        write.close();
+    }
+
     private BinaryRow partition(int x) {
         BinaryRow partition = new BinaryRow(1);
         BinaryRowWriter writer = new BinaryRowWriter(partition);
@@ -335,10 +503,52 @@ public class TableWriteTest {
         return actual;
     }
 
+    private List<InternalRow> readRows(FileStoreTable table) throws Exception {
+        List<InternalRow> rows = new ArrayList<>();
+        TableScan.Plan plan = table.newScan().plan();
+        try (RecordReaderIterator<InternalRow> iterator =
+                new RecordReaderIterator<>(table.newRead().createReader(plan))) {
+            while (iterator.hasNext()) {
+                rows.add(iterator.next());
+            }
+        }
+        return rows;
+    }
+
+    private FileStoreTable createNotNullFileStoreTable(Options options) throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.BIGINT().notNull()
+                        },
+                        new String[] {"pt", "k", "v"});
+        return createFileStoreTable(
+                rowType, Collections.singletonList("pt"), Arrays.asList("pt", "k"), options);
+    }
+
+    private FileStoreTable createFileStoreTable(
+            RowType rowType, List<String> partitionKeys, List<String> primaryKeys, Options options)
+            throws Exception {
+        options.set(CoreOptions.BUCKET, 1);
+        Path path = new Path(tempDir.resolve(UUID.randomUUID().toString()).toUri());
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(LocalFileIO.create(), path),
+                        new Schema(
+                                rowType.getFields(),
+                                partitionKeys,
+                                primaryKeys,
+                                options.toMap(),
+                                ""));
+        return FileStoreTableFactory.create(LocalFileIO.create(), path, tableSchema);
+    }
+
     private FileStoreTable createFileStoreTable(Options conf) throws Exception {
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 ROW_TYPE.getFields(),
                                 Collections.singletonList("pt"),

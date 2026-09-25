@@ -61,6 +61,7 @@ class SchemaEvolutionReadTest(unittest.TestCase):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     @pytest.mark.python_plan
+    @pytest.mark.python_write
     def test_schema_evolution(self):
         # schema 0
         pa_schema = pa.schema([
@@ -132,6 +133,7 @@ class SchemaEvolutionReadTest(unittest.TestCase):
         self.assertEqual(expected, actual)
 
     @pytest.mark.python_plan
+    @pytest.mark.python_write
     def test_schema_evolution_type(self):
         # schema 0
         pa_schema = pa.schema([
@@ -247,12 +249,11 @@ class SchemaEvolutionReadTest(unittest.TestCase):
             # CastExecutors), so 1.2/2.8 read back as 1/2.
             ("double_to_int", pa.float64(), pa.int32(), 'INT',
              [1.2, 2.8], [1, 2], [3, 4]),
-            # Lossy DECIMAL scale-down: (10,4) -> (10,2) truncates the extra
-            # scale rather than raising.
+            # Java's DECIMAL cast rounds half-up when reducing scale.
             ("decimal_scale_down",
              pa.decimal128(10, 4), pa.decimal128(10, 2), 'DECIMAL(10, 2)',
-             [decimal.Decimal('1.2345'), decimal.Decimal('4.5678')],
-             [decimal.Decimal('1.23'), decimal.Decimal('4.56')],
+             [decimal.Decimal('1.2345'), decimal.Decimal('-4.5650')],
+             [decimal.Decimal('1.23'), decimal.Decimal('-4.57')],
              [decimal.Decimal('7.89'), decimal.Decimal('0.12')]),
         ]
 
@@ -307,16 +308,20 @@ class SchemaEvolutionReadTest(unittest.TestCase):
         # Reading ONLY old-schema files after a lossy type change (no
         # newer-schema file in the splits). The output type must equal the
         # current read schema regardless of which files the read spans, and the
-        # conversion must truncate to match Java CastExecutors rather than
-        # raise. (A previous fix that relied on pyarrow's safe cast crashed
-        # here on lossy evolutions.)
+        # DECIMAL scale reduction rounds half-up, while DOUBLE -> INT still
+        # truncates. Neither conversion should raise on these old-file reads.
         import decimal
 
         cases = [
             ("scale_down",
              pa.decimal128(10, 4), pa.decimal128(10, 2), 'DECIMAL(10, 2)',
-             [decimal.Decimal('1.2345'), decimal.Decimal('4.5678')],
-             [decimal.Decimal('1.23'), decimal.Decimal('4.56')]),
+             [decimal.Decimal('4.5678'), decimal.Decimal('-4.5650')],
+             [decimal.Decimal('4.57'), decimal.Decimal('-4.57')]),
+            ("scale_and_precision_down",
+             pa.decimal128(6, 3), pa.decimal128(3, 2), 'DECIMAL(3, 2)',
+             [decimal.Decimal('9.994'), decimal.Decimal('9.995'),
+              decimal.Decimal('-9.995'), decimal.Decimal('999.999')],
+             [decimal.Decimal('9.99'), None, None, None]),
             ("double_to_int", pa.float64(), pa.int32(), 'INT',
              [1.2, 2.8], [1, 2]),
         ]
@@ -336,7 +341,8 @@ class SchemaEvolutionReadTest(unittest.TestCase):
                 table_write = write_builder.new_write()
                 table_commit = write_builder.new_commit()
                 table_write.write_arrow(pa.Table.from_pydict(
-                    {'k': [1, 2], 'v': write_vals}, schema=old_schema))
+                    {'k': list(range(1, len(write_vals) + 1)), 'v': write_vals},
+                    schema=old_schema))
                 table_commit.commit(table_write.prepare_commit())
                 table_write.close()
                 table_commit.close()
@@ -353,7 +359,8 @@ class SchemaEvolutionReadTest(unittest.TestCase):
                 actual = read_builder.new_read().to_arrow(
                     self._scan_table(read_builder))
                 expected = pa.Table.from_pydict(
-                    {'k': [1, 2], 'v': read_vals}, schema=new_schema)
+                    {'k': list(range(1, len(read_vals) + 1)), 'v': read_vals},
+                    schema=new_schema)
                 self.assertEqual(expected, actual)
 
     def test_schema_evolution_with_scan_filter(self):
@@ -423,6 +430,7 @@ class SchemaEvolutionReadTest(unittest.TestCase):
         self.assertEqual(1, len(entries))  # verify scan filter success for schema evolution
 
     @pytest.mark.python_plan
+    @pytest.mark.python_write
     def test_schema_evolution_with_read_filter(self):
         # schema 0
         pa_schema = pa.schema([
@@ -519,11 +527,9 @@ class SchemaEvolutionReadTest(unittest.TestCase):
 
         table_read = read_builder.new_read()
         actual = table_read.to_arrow(splits)
+        # Old files supply NULL for behavior; NULL = 'g' cannot pass AND.
         expected = pa.Table.from_pydict({
-            'user_id': [1, 2, 4, 3, 7],
-            'item_id': [1001, 1002, 1004, 1003, 1007],
-            'dt': ["p1", "p1", "p1", "p2", "p2"],
-            'behavior': [None, None, None, None, "g"],
+            'user_id': [7], 'item_id': [1007], 'dt': ["p2"], 'behavior': ["g"],
         }, schema=pa_schema)
         self.assertEqual(expected, actual)
 
@@ -873,3 +879,50 @@ class SchemaEvolutionReadTest(unittest.TestCase):
     def _scan_table(self, read_builder):
         splits = read_builder.new_scan().plan().splits()
         return splits
+
+
+@pytest.mark.parametrize('file_format', ['parquet', 'avro'])
+@pytest.mark.parametrize('evolution', ['rename', 'readd'])
+def test_cross_schema_filter_runs_after_field_id_mapping(tmp_path, file_format, evolution):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('k', pa.int64()), ('v', pa.string())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(
+        schema, options={'file.format': file_format}), False)
+
+    def write(table, values):
+        builder = table.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        try:
+            writer.write_arrow(pa.Table.from_pylist(values))
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+
+    write(catalog.get_table('default.t'), [{'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}])
+    if evolution == 'rename':
+        catalog.alter_table('default.t', [SchemaChange.rename_column('v', 'renamed')], False)
+        latest_rows = [{'k': 3, 'renamed': 'c'}, {'k': 4, 'renamed': 'b'}]
+    else:
+        catalog.alter_table('default.t', [SchemaChange.drop_column('v')], False)
+        catalog.alter_table('default.t', [SchemaChange.add_column('v', AtomicType('STRING'))], False)
+        latest_rows = [{'k': 3, 'v': 'b'}, {'k': 4, 'v': None}]
+    table = catalog.get_table('default.t').copy({'scan.native-plan.enabled': 'false'})
+    write(table, latest_rows)
+    # Read an unfiltered plan so manifest statistics cannot hide a reader bug.
+    splits = table.new_read_builder().new_scan().plan().splits()
+    pb = table.new_read_builder().new_predicate_builder()
+    cases = ([(pb.equal('renamed', 'b'), [2, 4]), (pb.equal('renamed', 'missing'), [])]
+             if evolution == 'rename' else [(pb.is_null('v'), [1, 2, 4]), (pb.equal('v', 'b'), [3])])
+    for predicate, expected in cases:
+        for limit in (None, 1):
+            builder = table.new_read_builder().with_filter(predicate).with_projection(['k'])
+            if limit is not None:
+                builder.with_limit(limit)
+            actual = builder.new_read().to_arrow(splits, parallelism=1).column('k').to_pylist()
+            if limit is None:
+                assert sorted(actual) == expected
+            else:
+                assert len(actual) == min(1, len(expected))
+                assert all(key in expected for key in actual)

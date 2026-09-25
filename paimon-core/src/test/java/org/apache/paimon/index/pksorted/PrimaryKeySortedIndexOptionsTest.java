@@ -61,8 +61,27 @@ class PrimaryKeySortedIndexOptionsTest {
     }
 
     @Test
+    void testResolvesFMIndexColumnsAndOptions() {
+        Map<String, String> values = new HashMap<>();
+        values.put("pk-fm.index.columns", " content,  description ");
+        values.put(
+                "fields.content.pk-fm.index.options",
+                "{\"partition-row-count\":\"2000\",\"fm-index.sa-sample-rate\":\"16\"}");
+
+        CoreOptions coreOptions = new CoreOptions(values);
+        Options options = coreOptions.primaryKeyFMIndexOptions("content");
+
+        assertThat(coreOptions.primaryKeyFMIndexEnabled()).isTrue();
+        assertThat(coreOptions.primaryKeyFMIndexColumns())
+                .containsExactly("content", "description");
+        assertThat(options.get("fm-index.partition-row-count")).isEqualTo("2000");
+        assertThat(options.get("fm-index.sa-sample-rate")).isEqualTo("16");
+    }
+
+    @Test
     void testResolvesBTreeIndexAndSortOptions() {
         Map<String, String> values = new HashMap<>();
+        values.put("sorted-index.records-per-file", "20");
         values.put("sorted-index.records-per-range", "10");
         values.put("write-buffer-size", "8 mb");
         values.put("page-size", "32 kb");
@@ -79,6 +98,7 @@ class PrimaryKeySortedIndexOptionsTest {
         assertThat(options.get("local-sort.max-num-file-handles")).isEqualTo("16");
         assertThat(options.get("spill-compression")).isEqualTo("lz4");
         assertThat(options.get("write-buffer-spill.max-disk-size")).isEqualTo("1 gb");
+        assertThat(options.get("sorted-index.records-per-file")).isNull();
         assertThat(options.get("sorted-index.records-per-range")).isNull();
     }
 

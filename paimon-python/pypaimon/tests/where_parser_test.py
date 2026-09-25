@@ -15,8 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import datetime
+import decimal
+import os
+import shutil
+import tempfile
 import unittest
 
+import pyarrow as pa
+
+from pypaimon import CatalogFactory, Schema
 from pypaimon.common.where_parser import parse_where_clause, _tokenize, _cast_literal
 from pypaimon.schema.data_types import ArrayType, AtomicType, DataField
 
@@ -83,7 +91,43 @@ class WhereParserCastLiteralTest(unittest.TestCase):
         self.assertAlmostEqual(_cast_literal('3.14', 'DOUBLE'), 3.14)
 
     def test_cast_decimal(self):
-        self.assertAlmostEqual(_cast_literal('99.99', 'DECIMAL(10,2)'), 99.99)
+        # A DECIMAL literal must stay exact (decimal.Decimal); a float would never
+        # compare equal to the Decimal a DECIMAL column reads back as.
+        value = _cast_literal('99.99', 'DECIMAL(10,2)')
+        self.assertIsInstance(value, decimal.Decimal)
+        self.assertEqual(value, decimal.Decimal('99.99'))
+
+    def test_cast_decimal_high_precision_rescales(self):
+        # A DECIMAL(38, 2) literal in integer form exceeds the default decimal
+        # context (precision 28); without a column-wide context the rescale would
+        # be dropped and the literal would bind at scale 0.
+        value = _cast_literal('123456789012345678901234567890123456',
+                              'DECIMAL(38, 2)')
+        self.assertEqual(value.as_tuple().exponent, -2)
+        self.assertEqual(
+            value, decimal.Decimal('123456789012345678901234567890123456.00'))
+
+    def test_cast_date(self):
+        value = _cast_literal('2024-01-01', 'DATE')
+        self.assertEqual(value, datetime.date(2024, 1, 1))
+
+    def test_cast_time(self):
+        value = _cast_literal('12:30:00', 'TIME(0)')
+        self.assertEqual(value, datetime.time(12, 30, 0))
+
+    def test_cast_time_with_fraction(self):
+        value = _cast_literal('12:30:00.5', 'TIME(3)')
+        self.assertEqual(value, datetime.time(12, 30, 0, 500000))
+
+    def test_cast_time_rejects_offset(self):
+        # A Paimon TIME has no time zone; an offset-bearing literal must not
+        # silently drop the offset and match the wall-clock value.
+        with self.assertRaises(ValueError):
+            _cast_literal('12:30:00+01:00', 'TIME(0)')
+
+    def test_cast_time_rejects_malformed(self):
+        with self.assertRaises(ValueError):
+            _cast_literal('25:00:00', 'TIME(0)')
 
     def test_cast_boolean(self):
         self.assertTrue(_cast_literal('true', 'BOOLEAN'))
@@ -398,6 +442,90 @@ class WhereParserParseTest(unittest.TestCase):
             parse_where_clause("tags = 'foo'", fields_with_array)
         self.assertIn("non-atomic type", str(context.exception))
         self.assertIn("tags", str(context.exception))
+
+
+class WhereParserScanTest(unittest.TestCase):
+    """End-to-end: a WHERE clause on DECIMAL/DATE/TIME columns returns the row."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = tempfile.mkdtemp()
+        cls.catalog = CatalogFactory.create(
+            {'warehouse': os.path.join(cls.tempdir, 'warehouse')})
+        cls.catalog.create_database('default', False)
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('price', pa.decimal128(10, 2)),
+            ('big', pa.decimal128(38, 2)),
+            ('d', pa.date32()),
+            ('t', pa.time32('ms')),
+        ])
+        cls.catalog.create_table(
+            'default.where_literal_types', Schema.from_pyarrow_schema(pa_schema), False)
+        cls.table = cls.catalog.get_table('default.where_literal_types')
+        data = pa.table({
+            'id': pa.array([1, 2], pa.int32()),
+            'price': pa.array(
+                [decimal.Decimal('99.99'), decimal.Decimal('50.00')], pa.decimal128(10, 2)),
+            'big': pa.array(
+                [decimal.Decimal('123456789012345678901234567890123456.00'),
+                 decimal.Decimal('1.00')], pa.decimal128(38, 2)),
+            'd': pa.array(
+                [datetime.date(2024, 1, 1), datetime.date(2020, 1, 1)], pa.date32()),
+            't': pa.array(
+                [datetime.time(12, 30, 0), datetime.time(1, 0, 0)], pa.time32('ms')),
+        })
+        wb = cls.table.new_batch_write_builder()
+        writer = wb.new_write()
+        commit = wb.new_commit()
+        writer.write_arrow(data)
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tempdir, ignore_errors=True)
+
+    def _scan_ids(self, where):
+        predicate = parse_where_clause(where, self.table.table_schema.fields)
+        read_builder = self.table.new_read_builder().with_filter(predicate)
+        splits = read_builder.new_scan().plan().splits()
+        return read_builder.new_read().to_arrow(splits).column('id').to_pylist()
+
+    def test_decimal_equality_returns_matching_row(self):
+        # DECIMAL(10,2) reads back as Decimal; the old float literal dropped the row.
+        self.assertEqual(self._scan_ids("price = 99.99"), [1])
+
+    def test_decimal_literal_rescaled_to_column_scale(self):
+        # The pushed-down filter binds the literal's own scale, so an integer or
+        # trailing-zero literal must be rescaled to the column scale to match.
+        self.assertEqual(self._scan_ids("price = 50"), [2])
+        self.assertEqual(self._scan_ids("price = 99.990"), [1])
+
+    def test_decimal_literal_finer_than_column_matches_nothing(self):
+        # A literal too precise for the column (99.999 on DECIMAL(10,2)) cannot equal
+        # any stored value; it must return no rows rather than round into a match.
+        self.assertEqual(self._scan_ids("price = 99.999"), [])
+
+    def test_high_precision_decimal_integer_literal_matches(self):
+        # A DECIMAL(38, 2) integer-form literal exceeds the default decimal
+        # context; it must still rescale and match the stored scale-2 value.
+        self.assertEqual(
+            self._scan_ids("big = 123456789012345678901234567890123456"), [1])
+
+    def test_malformed_decimal_raises_value_error(self):
+        # parse_where_clause documents ValueError; a bad decimal must not leak
+        # decimal.InvalidOperation past the CLI's `except ValueError`.
+        with self.assertRaises(ValueError):
+            parse_where_clause("price = abc", self.table.table_schema.fields)
+
+    def test_date_equality_returns_matching_row(self):
+        # DATE literal left as str raised in the arrow comparison kernel.
+        self.assertEqual(self._scan_ids("d = '2024-01-01'"), [1])
+
+    def test_time_equality_returns_matching_row(self):
+        self.assertEqual(self._scan_ids("t = '12:30:00'"), [1])
 
 
 if __name__ == '__main__':

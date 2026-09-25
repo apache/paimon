@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 class FileType(Enum):
     """Classification of Paimon files.
 
-    - META: snapshot, schema, manifest, statistics, tag, changelog metadata,
+    - META: snapshot, schema, manifest, manifest sidecar, statistics, tag, changelog metadata,
             hint files, _SUCCESS, consumer, service files
     - DATA: data files and any unrecognized files (default)
     - BUCKET_INDEX: bucket level index files (Hash, DV)
@@ -67,7 +67,7 @@ class FileType(Enum):
                 return FileType.GLOBAL_INDEX
             return FileType.FILE_INDEX
 
-        if "manifest" in name:
+        if "manifest" in name or name.endswith(".avro.sidecar"):
             return FileType.META
 
         if name.startswith("index-"):

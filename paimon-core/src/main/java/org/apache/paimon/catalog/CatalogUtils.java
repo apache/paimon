@@ -32,6 +32,7 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
@@ -61,6 +62,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -168,6 +170,8 @@ public class CatalogUtils {
         if (tableType.equals(TableType.FORMAT_TABLE)) {
             validateFormatTableOptions(options, dataTokenEnabled);
         }
+        SchemaValidation.validateQueryAuthTableType(
+                tableType, options.get(CoreOptions.QUERY_AUTH_ENABLED));
         for (DataField field : schema.fields()) {
             validateDefaultValue(field.type(), field.defaultValue());
         }
@@ -405,7 +409,7 @@ public class CatalogUtils {
 
     private static Table createGlobalSystemTable(String tableName, Catalog catalog)
             throws Catalog.TableNotExistException {
-        switch (tableName.toLowerCase()) {
+        switch (tableName.toLowerCase(Locale.ROOT)) {
             case ALL_TABLE_OPTIONS:
                 List<Table> tables = listAllTables(catalog);
                 Map<Identifier, Map<String, String>> allOptions = new HashMap<>();

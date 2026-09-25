@@ -49,6 +49,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -74,8 +75,7 @@ public class FileIndexProcessor {
         this.fileIO = table.fileIO();
         this.pathFactory = table.store().pathFactory();
         this.pathFactories = new DataFilePathFactories(pathFactory);
-        this.schemaInfoCache =
-                new SchemaCache(fileIndexOptions, new SchemaManager(fileIO, table.location()));
+        this.schemaInfoCache = new SchemaCache(fileIndexOptions, table.schemaManager());
         this.sizeInMeta = table.coreOptions().fileIndexInManifestThreshold();
     }
 
@@ -136,9 +136,14 @@ public class FileIndexProcessor {
                         fileIndexOptions,
                         schemaInfo.colNameMapping);
         if (dataFileIndexWriter != null) {
+            // projectedIndexCols index into the file schema. withProjection would re-interpret
+            // them against the current table schema, so a schema change that shifts columns (drop
+            // a middle column, add another) would read the wrong column and rebuild the index over
+            // it. Read with the same file-schema projection the writer above uses.
+            RowType indexReadType = schemaInfo.fileSchema.project(schemaInfo.projectedIndexCols);
             try (RecordReader<InternalRow> reader =
                     table.newReadBuilder()
-                            .withProjection(schemaInfo.projectedIndexCols)
+                            .withReadType(indexReadType)
                             .newRead()
                             .createReader(
                                     DataSplit.builder()
@@ -212,7 +217,9 @@ public class FileIndexProcessor {
                                 : createIndexNameMapping(
                                         currentSchema.fields(), fileSchema.getFields());
 
-                List<String> projectedColNames = new ArrayList<>();
+                // several nested columns can share one top level map column, and the projection
+                // must not repeat it: RowType rejects duplicate field names
+                Set<String> projectedColNames = new LinkedHashSet<>();
                 Set<String> projectedColFullNames = new HashSet<>();
                 Map<String, Set<String>> projectedIndexTypes = new HashMap<>();
                 for (Map.Entry<FileIndexOptions.Column, Map<String, Options>> entry :

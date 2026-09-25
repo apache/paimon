@@ -132,6 +132,9 @@ public class BlobDescriptor implements Serializable {
         if (bytes == null || bytes.length < Byte.BYTES) {
             throw invalidPayload("too short");
         }
+        if (VideoFrameDescriptor.isVideoFrameDescriptor(bytes)) {
+            return VideoFrameDescriptor.deserialize(bytes);
+        }
 
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
         buffer.order(ByteOrder.LITTLE_ENDIAN);
@@ -190,6 +193,9 @@ public class BlobDescriptor implements Serializable {
     }
 
     public static boolean isBlobDescriptor(byte[] bytes) {
+        if (bytes == null) {
+            return false;
+        }
         if (bytes.length < 9) {
             return false;
         }
@@ -201,5 +207,10 @@ public class BlobDescriptor implements Serializable {
             return false;
         }
         return MAGIC == buffer.getLong();
+    }
+
+    /** Returns whether the bytes encode any descriptor type understood by this version. */
+    public static boolean isSerializedDescriptor(byte[] bytes) {
+        return isBlobDescriptor(bytes) || VideoFrameDescriptor.isVideoFrameDescriptor(bytes);
     }
 }

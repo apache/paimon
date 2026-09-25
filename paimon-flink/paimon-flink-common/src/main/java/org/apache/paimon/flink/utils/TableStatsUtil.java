@@ -212,17 +212,23 @@ public class TableStatsUtil {
                         null,
                         null);
             } else if (typeRoot.equals(DataTypeRoot.DECIMAL)) {
-                BigDecimal max = BigDecimal.valueOf(doubleColumnStatsData.getMax());
-                BigDecimal min = BigDecimal.valueOf(doubleColumnStatsData.getMin());
+                BigDecimal max =
+                        doubleColumnStatsData.getMax() == null
+                                ? null
+                                : BigDecimal.valueOf(doubleColumnStatsData.getMax());
+                BigDecimal min =
+                        doubleColumnStatsData.getMin() == null
+                                ? null
+                                : BigDecimal.valueOf(doubleColumnStatsData.getMin());
                 return ColStats.newColStats(
                         field.id(),
                         null != doubleColumnStatsData.getNdv()
                                 ? doubleColumnStatsData.getNdv()
                                 : null,
-                        null != doubleColumnStatsData.getMin()
+                        min != null
                                 ? Decimal.fromBigDecimal(min, min.precision(), min.scale())
                                 : null,
-                        null != doubleColumnStatsData.getMax()
+                        max != null
                                 ? Decimal.fromBigDecimal(max, max.precision(), max.scale())
                                 : null,
                         null != doubleColumnStatsData.getNullCount()

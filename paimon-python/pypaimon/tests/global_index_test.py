@@ -319,6 +319,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
 
         predicate = Predicate(method="equal", index=0, field="id", literals=[1])
         scanner = FileScanner.__new__(FileScanner)
+        scanner.is_streaming = False
         scanner.predicate = predicate
         scanner.partition_key_predicate = None
         scanner.table = _Table()
@@ -356,6 +357,8 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         )
 
         scanner = FileScanner.__new__(FileScanner)
+        scanner.idx_of_this_subtask = None
+        scanner.start_pos_of_this_subtask = None
         scanner.manifest_scanner = unittest.mock.MagicMock(
             return_value=([], unittest.mock.Mock(id=3)))
         scanner._global_index_result = None
@@ -393,6 +396,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             options = _Options()
 
         scanner = FileScanner.__new__(FileScanner)
+        scanner.is_streaming = False
         scanner.predicate = Predicate(
             method="equal", index=0, field="id", literals=[1])
         scanner.partition_key_predicate = None
@@ -409,6 +413,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             result = scanner._eval_global_index(snapshot=object())
 
         self.assertIsNone(result)
+        fake_scanner.scan_with_coverage.assert_called_once_with(scanner.predicate)
 
 
 class PlanSnapshotFetchRegressionTest(

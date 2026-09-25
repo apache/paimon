@@ -152,7 +152,7 @@ public class OSSFileIOTest {
     }
 
     @Test
-    public void testCreateBlobPresignedUrlUsesPublicEndpointWithoutChangingPath() throws Exception {
+    public void testCreateBlobPresignedUrlPreservesInternalEndpoint() throws Exception {
         OSSClient client = mock(OSSClient.class);
         BlobDescriptor descriptor =
                 new BlobDescriptor("oss://bucket/table/-internal.aliyuncs.com/source.blob", 0, 1);
@@ -176,7 +176,7 @@ public class OSSFileIOTest {
                                         descriptor,
                                         Duration.ofMinutes(5)));
 
-        assertThat(url.getHost()).isEqualTo("bucket.oss-cn-hangzhou.aliyuncs.com");
+        assertThat(url.getHost()).isEqualTo("bucket.oss-cn-hangzhou-internal.aliyuncs.com");
         assertThat(url.getPath())
                 .isEqualTo(
                         "/table/-internal.aliyuncs.com/_bloburl_"
@@ -316,7 +316,13 @@ public class OSSFileIOTest {
     }
 
     @Test
-    public void testCreateBlobPresignedUrlRejectsInvalidTarget() {
+    public void testCreateBlobPresignedUrlRejectsInvalidTarget() throws Exception {
+        assertInvalidPresignedUrl(
+                "https://oss-cn-hangzhou-internal.aliyuncs.com",
+                "https://bucket.oss-cn-hangzhou.aliyuncs.com/table/_bloburl_"
+                        + sha256Hex(
+                                new BlobDescriptor("oss://bucket/table/source.blob", 0, 1)
+                                        .serialize()));
         assertInvalidPresignedUrl(
                 "https://oss-cn-hangzhou.aliyuncs.com",
                 "http://bucket.oss-cn-hangzhou.aliyuncs.com/table/_bloburl_hash");

@@ -85,13 +85,14 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final boolean fileIndexReadEnabled;
     private final boolean rowTrackingEnabled;
+    private final boolean nestedFieldEnabled;
     private final boolean ignoreCorruptFiles;
     private final boolean ignoreLostFiles;
 
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
     @Nullable private TopN topN;
-    @Nullable private Integer limit;
+    @Nullable private Long limit;
     @Nullable private ReadBatchSizer readBatchSizer;
 
     public RawFileSplitRead(
@@ -112,6 +113,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         this.ignoreCorruptFiles = coreOptions.scanIgnoreCorruptFile();
         this.ignoreLostFiles = coreOptions.scanIgnoreLostFile();
         this.rowTrackingEnabled = coreOptions.rowTrackingEnabled();
+        this.nestedFieldEnabled = coreOptions.dataEvolutionNestedFieldEnabled();
         this.readRowType = rowType;
     }
 
@@ -149,7 +151,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public SplitRead<InternalRow> withLimit(@Nullable Integer limit) {
+    public SplitRead<InternalRow> withLimit(@Nullable Long limit) {
         this.limit = limit;
         return this;
     }
@@ -208,7 +210,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
         RowType outputRowType = readRowType;
         Builder formatReaderMappingBuilder =
-                createFormatReaderMappingBuilder(outputRowType, topN, limit);
+                createFormatReaderMappingBuilder(outputRowType, topN, intLimit(limit));
 
         for (DataFileMeta file : files) {
             suppliers.add(
@@ -271,7 +273,13 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                 },
                 filters,
                 pushDownTopN,
-                pushDownLimit);
+                pushDownLimit,
+                nestedFieldEnabled);
+    }
+
+    @Nullable
+    private static Integer intLimit(@Nullable Long limit) {
+        return limit != null && limit <= Integer.MAX_VALUE ? limit.intValue() : null;
     }
 
     private ReaderSupplier<InternalRow> createFileReader(
