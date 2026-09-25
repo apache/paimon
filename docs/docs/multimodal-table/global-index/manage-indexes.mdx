@@ -463,6 +463,4 @@ These table options affect global index build and read behavior:
 | `visibility-callback.timeout` | `30 min` | Maximum wait time for visibility callback. |
 
 The reader-side query option applies to supported scalar indexes on data evolution tables. It is
-evaluated by the core scan, including scans used by Spark. Flink's
-`scan.dedicated-split-generation` mode evaluates the index in the dedicated split-generation task
-instead of data readers, even when `global-index.query-in-reader.enabled` is true.
+evaluated by the core scan, including scans used by Flink and Spark.

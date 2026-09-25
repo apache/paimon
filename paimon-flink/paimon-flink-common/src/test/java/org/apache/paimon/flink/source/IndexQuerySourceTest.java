@@ -119,7 +119,7 @@ public class IndexQuerySourceTest extends DataEvolutionTestBase {
                 transformation.getSource().createReader(mock(SourceReaderContext.class))) {
             assertThat(reader.pollNext(output)).isEqualTo(InputStatus.END_OF_INPUT);
         }
-        assertThat(splits).isNotEmpty().allMatch(IndexedSplit.class::isInstance);
+        assertThat(splits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
         assertThat(enabled.options())
                 .containsEntry(CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED.key(), "true");
     }

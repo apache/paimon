@@ -224,24 +224,6 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
     }
 
     @Test
-    public void testDistributedIndexDoesNotCreateReadProtectionTagByDefault() throws Exception {
-        write(100);
-        createIndex("btree", "f1");
-        FileStoreTable table =
-                getTableDefault()
-                        .copy(
-                                Collections.singletonMap(
-                                        CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED.key(),
-                                        "true"));
-        Predicate predicate = new PredicateBuilder(table.rowType()).equal(1, str("a50"));
-        assertThat(table.coreOptions().scanPlanAutoTagTimeRetained()).isNull();
-        DataEvolutionBatchScan scan =
-                (DataEvolutionBatchScan) table.newReadBuilder().withFilter(predicate).newScan();
-        assertThat(scan.plan().splits()).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
-        assertThat(scan.readProtectionTagName()).isNull();
-    }
-
-    @Test
     public void testPlanSelectsDistributedIndex() throws Exception {
         write(100);
         createIndex("btree", "f1");
@@ -593,7 +575,6 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
         DataEvolutionBatchScan scan = (DataEvolutionBatchScan) read.newScan();
         List<Split> splits = scan.plan().splits();
         assertThat(splits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
-        assertThat(scan.readProtectionTagName()).isNull();
 
         for (IndexFileMeta file : indexFiles(table)) {
             table.fileIO()
