@@ -22,8 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.globalindex.IndexQuerySplit;
 import org.apache.paimon.globalindex.IndexedSplit;
-import org.apache.paimon.globalindex.LazyIndexedSplit;
 import org.apache.paimon.reader.EmptyRecordReader;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
@@ -77,14 +77,14 @@ public class DataEvolutionTableRead extends AppendTableRead {
         QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
         final Split dataSplit;
         boolean filterOnRead = executeFilter;
-        if (queryAuthContext.split() instanceof LazyIndexedSplit) {
+        if (queryAuthContext.split() instanceof IndexQuerySplit) {
             if (fileIO == null) {
-                throw new IllegalStateException("FileIO is required for lazy index evaluation.");
+                throw new IllegalStateException("FileIO is required for index query evaluation.");
             }
-            LazyIndexedSplit lazySplit = (LazyIndexedSplit) queryAuthContext.split();
+            IndexQuerySplit indexQuerySplit = (IndexQuerySplit) queryAuthContext.split();
             Split selectedSplit;
             try {
-                IndexedSplit indexedSplit = lazySplit.evaluate(fileIO);
+                IndexedSplit indexedSplit = indexQuerySplit.evaluate(fileIO);
                 if (indexedSplit.rowRanges().isEmpty()) {
                     return new EmptyRecordReader<>();
                 }
@@ -104,7 +104,7 @@ public class DataEvolutionTableRead extends AppendTableRead {
                     throw new IOException(
                             "Cannot scan a split without its index and query filter", e);
                 }
-                selectedSplit = lazySplit.dataSplit();
+                selectedSplit = indexQuerySplit.dataSplit();
                 filterOnRead = true;
             }
             dataSplit = selectedSplit;

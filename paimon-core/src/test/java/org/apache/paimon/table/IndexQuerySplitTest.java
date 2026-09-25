@@ -33,8 +33,8 @@ import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.IndexQuerySplit;
 import org.apache.paimon.globalindex.IndexedSplit;
-import org.apache.paimon.globalindex.LazyIndexedSplit;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.fmindex.FMGlobalIndexOptions;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
@@ -102,7 +102,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 /** End-to-end tests of deferred index plans, data reads and recovery. */
-public class LazyIndexedSplitTest extends DataEvolutionTestBase {
+public class IndexQuerySplitTest extends DataEvolutionTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"btree", "bitmap"})
@@ -221,7 +221,7 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
     private FileStoreTable distributedTable(FileStoreTable table) {
         return table.copy(
                 Collections.singletonMap(
-                        CoreOptions.SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED.key(), "true"));
+                        CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED.key(), "true"));
     }
 
     @Test
@@ -232,13 +232,13 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
                 getTableDefault()
                         .copy(
                                 Collections.singletonMap(
-                                        CoreOptions.SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED.key(),
+                                        CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED.key(),
                                         "true"));
         Predicate predicate = new PredicateBuilder(table.rowType()).equal(1, str("a50"));
         assertThat(table.coreOptions().scanPlanAutoTagTimeRetained()).isNull();
         DataEvolutionBatchScan scan =
                 (DataEvolutionBatchScan) table.newReadBuilder().withFilter(predicate).newScan();
-        assertThat(scan.plan().splits()).isNotEmpty().allMatch(LazyIndexedSplit.class::isInstance);
+        assertThat(scan.plan().splits()).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
         assertThat(table.tagManager().tagExists(scan.readProtectionTagName())).isTrue();
         assertThat(table.tagManager().getOrThrow(scan.readProtectionTagName()).getTagTimeRetained())
                 .isEqualTo(Duration.ofDays(1));
@@ -256,7 +256,7 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
         FileStoreTable enabled = distributedTable(table);
         ReadBuilder read = enabled.newReadBuilder().withFilter(predicate);
         List<Split> splits = read.newScan().plan().splits();
-        assertThat(splits).isNotEmpty().allMatch(LazyIndexedSplit.class::isInstance);
+        assertThat(splits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
         assertThat(read(read, splits)).containsExactly(50);
         assertThat(enabled.newScan().plan().splits())
                 .isNotEmpty()
@@ -305,13 +305,13 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
                                     CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), mode));
             for (Predicate predicate : predicates) {
                 ReadBuilder read = configured.newReadBuilder().withFilter(predicate);
-                TableScan.Plan lazy =
+                TableScan.Plan indexQueryPlan =
                         distributedTable(configured)
                                 .newReadBuilder()
                                 .withFilter(predicate)
                                 .newScan()
                                 .plan();
-                List<Integer> actual = read(read, lazy.splits());
+                List<Integer> actual = read(read, indexQueryPlan.splits());
                 assertThat(actual)
                         .as("%s / %s / %s", indexType, mode, predicate)
                         .containsExactlyInAnyOrderElementsOf(
@@ -334,9 +334,9 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
         ReadBuilder read =
                 distributedTable(table).newReadBuilder().withFilter(b.startsWith(1, str("a")));
         List<Split> splits = read.newScan().plan().splits();
-        assertThat(splits).hasSize(2).allMatch(split -> split instanceof LazyIndexedSplit);
+        assertThat(splits).hasSize(2).allMatch(split -> split instanceof IndexQuerySplit);
         // The first range still has both files needed for column merging.
-        assertThat(((LazyIndexedSplit) splits.get(0)).dataSplit().dataFiles()).hasSize(2);
+        assertThat(((IndexQuerySplit) splits.get(0)).dataSplit().dataFiles()).hasSize(2);
         assertThat(read(read, splits)).hasSize(200);
     }
 
@@ -386,7 +386,7 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
         assertThat(opens).hasValue(0);
         List<Split> restored = new ArrayList<>();
         for (Split split : splits) {
-            assertThat(split).isInstanceOf(LazyIndexedSplit.class);
+            assertThat(split).isInstanceOf(IndexQuerySplit.class);
             Split binary = SplitSerializer.deserialize(SplitSerializer.serialize(split));
             assertThat(binary).isEqualTo(split);
             Split java =
@@ -430,7 +430,7 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
         FileStoreTable original = getTableDefault();
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.QUERY_AUTH_ENABLED.key(), "true");
-        options.put(CoreOptions.SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED.key(), "true");
+        options.put(CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED.key(), "true");
         options.put(CoreOptions.SCAN_PLAN_AUTO_TAG_FOR_READ_TIME_RETAINED.key(), "1 h");
         PredicateBuilder b = new PredicateBuilder(original.rowType());
         TableQueryAuthResult auth =
@@ -511,10 +511,10 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
                             .newScan()
                             .plan()
                             .splits();
-            assertThat(splits).allMatch(LazyIndexedSplit.class::isInstance);
+            assertThat(splits).allMatch(IndexQuerySplit.class::isInstance);
             List<Range> candidates = new ArrayList<>();
             for (Split split : splits) {
-                candidates.addAll(((LazyIndexedSplit) split).evaluate(table.fileIO()).rowRanges());
+                candidates.addAll(((IndexQuerySplit) split).evaluate(table.fileIO()).rowRanges());
             }
             if (predicate == predicates.get(2)) {
                 assertThat(candidates).isEmpty();
@@ -571,10 +571,10 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
         table = table.copy(Collections.singletonMap(budgetKey, min + " b"));
         Predicate predicate = new PredicateBuilder(table.rowType()).contains(1, str("5"));
         ReadBuilder read = table.newReadBuilder().withFilter(predicate);
-        ReadBuilder lazyRead = distributedTable(table).newReadBuilder().withFilter(predicate);
-        List<Split> splits = lazyRead.newScan().plan().splits();
+        ReadBuilder indexQueryRead = distributedTable(table).newReadBuilder().withFilter(predicate);
+        List<Split> splits = indexQueryRead.newScan().plan().splits();
         assertThat(splits).allMatch(split -> split instanceof DataSplit);
-        assertThat(read(lazyRead, splits))
+        assertThat(read(indexQueryRead, splits))
                 .containsExactlyElementsOf(read(read, read.newScan().plan().splits()));
     }
 
@@ -595,7 +595,7 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
                         .withReadType(table.rowType().project(new int[] {0}));
         DataEvolutionBatchScan scan = (DataEvolutionBatchScan) read.newScan();
         List<Split> splits = scan.plan().splits();
-        assertThat(splits).isNotEmpty().allMatch(LazyIndexedSplit.class::isInstance);
+        assertThat(splits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
         assertThat(scan.readProtectionTagName()).isNotNull();
         assertThat(table.tagManager().tagExists(scan.readProtectionTagName())).isTrue();
 
@@ -622,14 +622,14 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
         createIndex("btree", "f1");
         FileStoreTable table = getTableDefault();
         long snapshotId = table.latestSnapshot().get().id();
-        table.createTag("lazy-read", snapshotId);
+        table.createTag("index-query-read", snapshotId);
         appendRows(100, 200);
         table.snapshotManager().deleteSnapshot(snapshotId);
         table =
                 distributedTable(getTableDefault())
                         .copy(
                                 Collections.singletonMap(
-                                        CoreOptions.SCAN_TAG_NAME.key(), "lazy-read"));
+                                        CoreOptions.SCAN_TAG_NAME.key(), "index-query-read"));
         ReadBuilder read =
                 table.newReadBuilder()
                         .withFilter(new PredicateBuilder(table.rowType()).startsWith(1, str("a")));
@@ -637,8 +637,8 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
         assertThat(splits)
                 .allMatch(
                         split ->
-                                split instanceof LazyIndexedSplit
-                                        && ((LazyIndexedSplit) split).dataSplit().snapshotId()
+                                split instanceof IndexQuerySplit
+                                        && ((IndexQuerySplit) split).dataSplit().snapshotId()
                                                 == snapshotId);
         assertThat(read(read, splits))
                 .containsExactlyElementsOf(
@@ -653,7 +653,7 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
                         invocation -> {
                             SnapshotReader.Plan plan =
                                     (SnapshotReader.Plan) invocation.callRealMethod();
-                            taggedTable.replaceTag("lazy-read", latestSnapshotId, null);
+                            taggedTable.replaceTag("index-query-read", latestSnapshotId, null);
                             return plan;
                         })
                 .when(snapshotReader)
@@ -701,7 +701,7 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
         ReadBuilder read =
                 table.newReadBuilder()
                         .withFilter(new PredicateBuilder(table.rowType()).equal(2, str("p")));
-        ReadBuilder lazyRead =
+        ReadBuilder indexQueryRead =
                 distributedTable(table)
                         .newReadBuilder()
                         .withFilter(new PredicateBuilder(table.rowType()).equal(2, str("p")));
@@ -713,20 +713,20 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
                             SortValue.NullOrdering.NULLS_FIRST,
                             1);
             read.withTopN(order);
-            lazyRead.withTopN(order);
+            indexQueryRead.withTopN(order);
         } else {
             read.withLimit(1);
-            lazyRead.withLimit(1);
+            indexQueryRead.withLimit(1);
         }
         List<Integer> expected = read(read, read.newScan().plan().splits());
         // The current TopN path ranks f0, whose index is absent, and falls back to data TopN.
         assertThat(expected).containsExactly(topN ? 0 : 1);
-        assertThat(read(lazyRead, lazyRead.newScan().plan().splits()))
+        assertThat(read(indexQueryRead, indexQueryRead.newScan().plan().splits()))
                 .containsExactlyElementsOf(expected);
     }
 
     @Test
-    public void testLazyIndexCandidatesStillApplyDeletionVectors() throws Exception {
+    public void testIndexQueryCandidatesStillApplyDeletionVectors() throws Exception {
         Schema schema = schemaDefault();
         Map<String, String> options = new HashMap<>(schema.options());
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
@@ -780,7 +780,7 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
                                 new PredicateBuilder(table.rowType())
                                         .in(1, Arrays.asList(str("a50"), str("a51"))));
         List<Split> splits = read.newScan().plan().splits();
-        assertThat(splits).allMatch(split -> split instanceof LazyIndexedSplit);
+        assertThat(splits).allMatch(split -> split instanceof IndexQuerySplit);
         assertThat(read(read, splits)).containsExactly(51);
     }
 
@@ -852,7 +852,7 @@ public class LazyIndexedSplitTest extends DataEvolutionTestBase {
 
         createIndex("btree", "f2");
         List<Split> splits = read.newScan().plan().splits();
-        assertThat(splits).isNotEmpty().allMatch(LazyIndexedSplit.class::isInstance);
+        assertThat(splits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
         assertThat(read(read, splits)).containsExactly(15, 51);
 
         ReadBuilder orRead =

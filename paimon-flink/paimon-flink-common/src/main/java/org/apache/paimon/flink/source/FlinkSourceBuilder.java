@@ -203,10 +203,10 @@ public class FlinkSourceBuilder {
     private ReadBuilder createReadBuilder(@Nullable org.apache.paimon.types.RowType readType) {
         Table readTable =
                 conf.get(FlinkConnectorOptions.SCAN_DEDICATED_SPLIT_GENERATION)
-                                && conf.get(CoreOptions.SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED)
+                                && conf.get(CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED)
                         ? table.copy(
                                 Collections.singletonMap(
-                                        CoreOptions.SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED.key(),
+                                        CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED.key(),
                                         "false"))
                         : table;
         ReadBuilder readBuilder = readTable.newReadBuilder();

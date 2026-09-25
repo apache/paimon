@@ -144,7 +144,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
     }
 
-    /** Groups metadata for both eager readers and lazy plans, without opening index files. */
+    /** Groups metadata for both planning-time readers and reader-side query plans. */
     static Map<Integer, List<IndexMetaFileGroup>> groupIndexFiles(
             Collection<IndexFileMeta> indexFiles) {
         Map<Integer, IndexMetaFileGroup> primaryGroups = new HashMap<>();

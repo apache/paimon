@@ -294,8 +294,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
     public Plan plan() {
         return table.coreOptions()
                         .toConfiguration()
-                        .get(CoreOptions.SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED)
-                ? planWithLazyIndex()
+                        .get(CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED)
+                ? planWithIndexQuery()
                 : planEager();
     }
 
@@ -340,7 +340,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
     }
 
     /** Plan complete data splits while deferring supported scalar index evaluation to readers. */
-    private Plan planWithLazyIndex() {
+    private Plan planWithIndexQuery() {
         if (queryAuthEnabled()
                 || filter == null
                 // Partition-only scans may apply LIMIT/TopN before deferred index filtering.
@@ -364,7 +364,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
         }
         // Auth wrapping may replace the plan, but preserves the snapshot ID in each data split.
         long snapshotId = dataSplit(splits.get(0)).snapshotId();
-        Snapshot snapshot = snapshotForLazyIndex(snapshotId);
+        Snapshot snapshot = snapshotForIndexQuery(snapshotId);
         PartitionPredicate partitionFilter =
                 batchScan.snapshotReader().manifestsReader().partitionFilter();
         List<IndexFileMeta> indexFiles =
@@ -379,15 +379,15 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (indexFiles.isEmpty()) {
             return dataPlan;
         }
-        GlobalIndexScanPlan indexPlan =
-                GlobalIndexScanPlan.create(
+        GlobalIndexQueryPlan indexPlan =
+                GlobalIndexQueryPlan.create(
                         table.rowType(),
                         indexFilter,
                         indexFiles,
                         table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions().toConfiguration());
         if (indexPlan == null) {
-            return GlobalIndexScanPlan.hasSupportedIndex(indexFiles)
+            return GlobalIndexQueryPlan.hasSupportedIndex(indexFiles)
                     ? dataPlan
                     : planEagerIndex(dataPlan, snapshot, partitionFilter, indexFiles, indexFilter);
         }
@@ -411,21 +411,21 @@ public class DataEvolutionBatchScan implements DataTableScan {
                                                         .map(DataEvolutionBatchScan::dataSplit)
                                                         .collect(Collectors.toList()))
                                         : Collections.emptyList());
-        List<Split> lazySplits = new ArrayList<>();
+        List<Split> indexQuerySplits = new ArrayList<>();
         for (Split split : splits) {
             DataSplit dataSplit = dataSplit(split);
             List<Range> ranges =
                     GlobalIndexBuilderUtils.calcRowRanges(Collections.singletonList(dataSplit));
-            GlobalIndexScanPlan splitPlan = indexPlan.forRanges(ranges);
+            GlobalIndexQueryPlan splitPlan = indexPlan.forRanges(ranges);
             List<Range> splitUnindexed = Range.and(unindexed, ranges);
             if (splitPlan.isEmpty() && splitUnindexed.isEmpty()) {
                 continue;
             }
-            Split lazySplit =
-                    new LazyIndexedSplit(dataSplit, splitPlan, table.options(), splitUnindexed);
-            lazySplits.add(withAuth(split, lazySplit));
+            Split indexQuerySplit =
+                    new IndexQuerySplit(dataSplit, splitPlan, table.options(), splitUnindexed);
+            indexQuerySplits.add(withAuth(split, indexQuerySplit));
         }
-        return () -> lazySplits;
+        return () -> indexQuerySplits;
     }
 
     @Override
@@ -434,7 +434,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return batchScan.readProtectionTagName();
     }
 
-    private Snapshot snapshotForLazyIndex(long snapshotId) {
+    private Snapshot snapshotForIndexQuery(long snapshotId) {
         try {
             return table.snapshotManager().tryGetSnapshot(snapshotId);
         } catch (FileNotFoundException e) {

@@ -27,8 +27,8 @@ import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
 import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
+import org.apache.paimon.globalindex.IndexQuerySplit;
 import org.apache.paimon.globalindex.IndexedSplit;
-import org.apache.paimon.globalindex.LazyIndexedSplit;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
 import org.apache.paimon.predicate.Predicate;
@@ -73,8 +73,8 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-/** Tests lazy index selection, assignment and reader position recovery in the Flink source. */
-public class LazyIndexSourceTest extends DataEvolutionTestBase {
+/** Tests reader-side index queries, assignment and position recovery in the Flink source. */
+public class IndexQuerySourceTest extends DataEvolutionTestBase {
 
     @Test
     @SuppressWarnings("unchecked")
@@ -83,19 +83,19 @@ public class LazyIndexSourceTest extends DataEvolutionTestBase {
         assertThat(plan(table, FlinkConnectorOptions.SplitAssignMode.FAIR).get(0).split())
                 .isInstanceOf(IndexedSplit.class);
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED.key(), "true");
+        options.put(CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED.key(), "true");
         for (FlinkConnectorOptions.SplitAssignMode mode :
                 FlinkConnectorOptions.SplitAssignMode.values()) {
             assertThat(plan(table.copy(options), mode).get(0).split())
-                    .isInstanceOf(LazyIndexedSplit.class);
+                    .isInstanceOf(IndexQuerySplit.class);
         }
-        options.put(CoreOptions.SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED.key(), "false");
+        options.put(CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED.key(), "false");
         assertThat(
                         plan(table.copy(options), FlinkConnectorOptions.SplitAssignMode.FAIR)
                                 .get(0)
                                 .split())
                 .isInstanceOf(IndexedSplit.class);
-        options.put(CoreOptions.SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED.key(), "true");
+        options.put(CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED.key(), "true");
         options.put("scan.dedicated-split-generation", "true");
         FileStoreTable enabled = table.copy(options);
         DataStream<RowData> stream =
@@ -121,11 +121,11 @@ public class LazyIndexSourceTest extends DataEvolutionTestBase {
         }
         assertThat(splits).isNotEmpty().allMatch(IndexedSplit.class::isInstance);
         assertThat(enabled.options())
-                .containsEntry(CoreOptions.SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED.key(), "true");
+                .containsEntry(CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED.key(), "true");
     }
 
     @Test
-    public void testReaderRestoresOriginalLazySplitAndPosition() throws Exception {
+    public void testReaderRestoresIndexQuerySplitAndPosition() throws Exception {
         FileStoreTable table = distributedTable(indexedTable());
         FileStoreSourceSplit split = plan(table, FlinkConnectorOptions.SplitAssignMode.FAIR).get(0);
         List<Integer> complete = readSplit(readBuilder(table).newRead().executeFilter(), split);
@@ -135,19 +135,21 @@ public class LazyIndexSourceTest extends DataEvolutionTestBase {
         FileStoreSourceSplit restored =
                 serializer.deserialize(serializer.getVersion(), serializer.serialize(checkpoint));
         assertThat(restored).isEqualTo(checkpoint);
-        assertThat(restored.split()).isInstanceOf(LazyIndexedSplit.class);
+        assertThat(restored.split()).isInstanceOf(IndexQuerySplit.class);
         assertThat(readSplit(readBuilder(table).newRead().executeFilter(), restored))
                 .containsExactlyElementsOf(complete.subList(7, complete.size()));
     }
 
     @Test
-    public void testWrappedLazySplitSupportsPartitionFiltering() throws Exception {
+    public void testWrappedIndexQuerySplitSupportsPartitionFiltering() throws Exception {
         FileStoreTable table = distributedTable(indexedTable());
-        FileStoreSourceSplit lazy = plan(table, FlinkConnectorOptions.SplitAssignMode.FAIR).get(0);
+        FileStoreSourceSplit indexQuery =
+                plan(table, FlinkConnectorOptions.SplitAssignMode.FAIR).get(0);
         FileStoreSourceSplit wrapped =
                 new FileStoreSourceSplit(
-                        lazy.splitId(),
-                        new QueryAuthSplit(lazy.split(), new TableQueryAuthResult(null, null)));
+                        indexQuery.splitId(),
+                        new QueryAuthSplit(
+                                indexQuery.split(), new TableQueryAuthResult(null, null)));
         DynamicFilteringData filtering = mock(DynamicFilteringData.class);
         when(filtering.contains(any(RowData.class))).thenReturn(true);
         DynamicPartitionFilteringInfo filteringInfo =
@@ -169,7 +171,7 @@ public class LazyIndexSourceTest extends DataEvolutionTestBase {
     private FileStoreTable distributedTable(FileStoreTable table) {
         return table.copy(
                 Collections.singletonMap(
-                        CoreOptions.SCAN_INDEX_DISTRIBUTED_QUERY_ENABLED.key(), "true"));
+                        CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED.key(), "true"));
     }
 
     private FileStoreTable indexedTable() throws Exception {
