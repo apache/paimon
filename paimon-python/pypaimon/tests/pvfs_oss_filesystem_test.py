@@ -25,10 +25,11 @@ end-to-end behavior of those backends is covered separately by the (DLF-gated)
 """
 
 import unittest
+from datetime import timedelta
 from unittest import mock
 
 from pypaimon.common.options import Options
-from pypaimon.common.options.config import OssOptions
+from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.filesystem import pvfs as pvfs_module
 from pypaimon.filesystem.pvfs import (
     PaimonRealStorage,
@@ -313,3 +314,13 @@ class CloseStaleFilesystemOnRefreshTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PVFSTokenWindowTest(unittest.TestCase):
+
+    def test_negative_window_is_rejected_at_construction(self):
+        # a typed negative timedelta bypasses the duration parser; PVFS must not start with it,
+        # otherwise need_refresh() keeps an expired credential in use
+        with self.assertRaises(ValueError) as raised:
+            _make_pvfs({CatalogOptions.DATA_TOKEN_EXPIRATION_SAFE_TIME.key(): timedelta(minutes=-1)})
+        self.assertIn(CatalogOptions.DATA_TOKEN_EXPIRATION_SAFE_TIME.key(), str(raised.exception))

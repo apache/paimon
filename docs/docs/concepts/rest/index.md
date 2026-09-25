@@ -41,6 +41,8 @@ Compute engines use the client to discover tables and perform catalog operations
 2. The service authenticates requests and handles database, table, and other supported metadata operations.
 3. The client obtains table metadata and accesses files through the configured filesystem or object store.
    When supported and enabled, the service can provide temporary data-access credentials.
+   The client requests a new credential when less than `data-token.expiration-safe-time`
+   (default 5 minutes) of its lifetime remains.
 
 The catalog service does not need to proxy the contents of every data file. Catalog API access
 and storage access are separate parts of the connection. Server capabilities determine which
