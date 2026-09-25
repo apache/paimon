@@ -79,7 +79,61 @@ under the License.
             </exclusions>
         </dependency>
 
+        <!--
+        Only used by the ZooKeeper catalog lock (org.apache.paimon.zookeeper), engaged via
+        lock.type=zookeeper. Provided scope: consumers who don't use that lock type never need
+        Curator/ZooKeeper on their runtime classpath, and consumers who do (e.g. inside a Flink
+        job) commonly already carry a (possibly shaded) Curator themselves.
+
+        A direct org.apache.zookeeper:zookeeper dependency is declared explicitly (rather than
+        left to transitive resolution) because hadoop-common above pulls in curator-client
+        2.7.1/zookeeper 3.4.6, and Maven's nearest-declaration-wins mediation would otherwise let
+        that ancient, incompatible pair win over what curator-recipes actually needs.
+        -->
+        <dependency>
+            <groupId>org.apache.curator</groupId>
+            <artifactId>curator-recipes</artifactId>
+            <version>${curator.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.zookeeper</groupId>
+            <artifactId>zookeeper</artifactId>
+            <version>${zookeeper.version}</version>
+            <scope>provided</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-log4j12</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>log4j</groupId>
+                    <artifactId>log4j</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!--
+        Same nearest-declaration-wins concern as zookeeper above: hadoop-common pulls in
+        curator-client 2.7.1 at a shallower depth than curator-recipes's own transitive
+        curator-client, so it would otherwise win and mismatch curator-recipes/curator-framework.
+        -->
+        <dependency>
+            <groupId>org.apache.curator</groupId>
+            <artifactId>curator-client</artifactId>
+            <version>${curator.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
         <!-- test dependencies -->
+
+        <dependency>
+            <groupId>org.apache.curator</groupId>
+            <artifactId>curator-test</artifactId>
+            <version>${curator.version}</version>
+            <scope>test</scope>
+        </dependency>
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
