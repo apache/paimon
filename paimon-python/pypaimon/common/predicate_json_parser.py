@@ -151,6 +151,29 @@ def _apply_predicate_transform(transform: dict, batch: pa.RecordBatch,
 
     elif name in _DATE_EXTRACT:
         return _date_extract(name, transform["fieldRef"], batch)
+    elif name == "LENGTH":
+        _check_string_input("LENGTH input", transform["inputs"][0], batch)
+        source = _resolve_transform_input(transform["inputs"][0], batch)
+        return pa.array(
+            [None if v is None else len(v) for v in source.to_pylist()],
+            type=pa.int32())
+
+    elif name == "BIT_LENGTH":
+        _check_string_input("BIT_LENGTH input", transform["inputs"][0], batch)
+        source = _resolve_transform_input(transform["inputs"][0], batch)
+        return pa.array(
+            [None if v is None else len(v.encode("utf-8")) * 8
+             for v in source.to_pylist()],
+            type=pa.int32())
+
+    elif name == "TRANSLATE":
+        return _translate(transform["inputs"], batch)
+
+    elif name == "OVERLAY":
+        return _overlay(transform["inputs"], batch)
+
+    elif name == "PAD":
+        return _pad(transform["inputs"], transform.get("direction"), batch)
 
     raise ValueError(f"Unknown transform type: {name}")
 
@@ -382,6 +405,111 @@ def _resolve_transform_input(inp, batch: pa.RecordBatch) -> pa.Array:
     elif inp is None:
         return pa.nulls(len(batch), type=pa.string())
     return pa.array([str(inp)] * len(batch), type=pa.string())
+
+
+# PLACEHOLDER_STR_TRANSFORMS_3
+
+
+def _pad(inputs, direction, batch: pa.RecordBatch) -> pa.Array:
+    if not isinstance(inputs, list) or len(inputs) != 3:
+        raise ValueError(f"PAD takes 3 inputs, got {inputs!r}")
+    if direction not in ("LEFT", "RIGHT"):
+        raise ValueError(f"PAD direction must be LEFT or RIGHT: {direction!r}")
+    _check_string_input("PAD input", inputs[0], batch)
+    _check_string_input("PAD string", inputs[2], batch)
+    source = _resolve_transform_input(inputs[0], batch)
+    pad = _resolve_transform_input(inputs[2], batch)
+    lengths = _Positions(inputs[1], batch)
+    src_list = source.to_pylist()
+    pad_list = pad.to_pylist()
+    result = []
+    for i in range(len(source)):
+        value = src_list[i]
+        pad_str = pad_list[i]
+        raw_len = lengths.value(i)
+        if value is None or raw_len is None or pad_str is None:
+            result.append(None)
+            continue
+        result.append(_pad_one(value, _int_position(raw_len), pad_str, direction))
+    return pa.array(result, type=pa.string())
+
+
+def _pad_one(source, length, pad, direction):
+    needed = length - len(source)
+    if needed <= 0 or pad == "":
+        # Truncate to the first `length` characters (empty for a non-positive length).
+        return source[:length] if length > 0 else ""
+    pad_chars = len(pad)
+    padding = pad * (needed // pad_chars) + pad[:needed % pad_chars]
+    return padding + source if direction == "LEFT" else source + padding
+
+
+def _translate(inputs, batch: pa.RecordBatch) -> pa.Array:
+    if not isinstance(inputs, list) or len(inputs) != 3:
+        raise ValueError(f"TRANSLATE takes 3 inputs, got {inputs!r}")
+    _check_string_input("TRANSLATE source", inputs[0], batch)
+    _check_string_input("TRANSLATE matching", inputs[1], batch)
+    _check_string_input("TRANSLATE replacement", inputs[2], batch)
+    source = _resolve_transform_input(inputs[0], batch)
+    matching = _resolve_transform_input(inputs[1], batch)
+    replacement = _resolve_transform_input(inputs[2], batch)
+    result = []
+    for src, mat, rep in zip(source.to_pylist(), matching.to_pylist(),
+                             replacement.to_pylist()):
+        result.append(_translate_one(src, mat, rep))
+    return pa.array(result, type=pa.string())
+
+
+def _translate_one(source, matching, replacement):
+    if source is None or matching is None or replacement is None:
+        return None
+    # First mapping wins per source character; a replacement code point of 0
+    # (or a missing one) deletes the character, mirroring Java's TranslateTransform.
+    dictionary = {}
+    for i, ch in enumerate(matching):
+        if ch not in dictionary:
+            mapped = replacement[i] if i < len(replacement) else None
+            dictionary[ch] = mapped if (mapped is not None and ord(mapped) != 0) else None
+    out = []
+    for ch in source:
+        if ch not in dictionary:
+            out.append(ch)
+        elif dictionary[ch] is not None:
+            out.append(dictionary[ch])
+    return "".join(out)
+
+
+def _overlay(inputs, batch: pa.RecordBatch) -> pa.Array:
+    if not isinstance(inputs, list) or len(inputs) not in (3, 4):
+        raise ValueError(f"OVERLAY takes 3 or 4 inputs, got {inputs!r}")
+    _check_string_input("OVERLAY input", inputs[0], batch)
+    _check_string_input("OVERLAY replacement", inputs[1], batch)
+    source = _resolve_transform_input(inputs[0], batch)
+    replacement = _resolve_transform_input(inputs[1], batch)
+    positions = _Positions(inputs[2], batch)
+    has_length = len(inputs) == 4
+    lengths = _Positions(inputs[3], batch) if has_length else None
+    src_list = source.to_pylist()
+    repl_list = replacement.to_pylist()
+    result = []
+    for i in range(len(source)):
+        value = src_list[i]
+        repl = repl_list[i]
+        raw_pos = positions.value(i)
+        # SQL null propagation: any null argument yields a null result
+        if value is None or repl is None or raw_pos is None:
+            result.append(None)
+            continue
+        if has_length and lengths.value(i) is None:
+            result.append(None)
+            continue
+        pos = _int_position(raw_pos)
+        length = _int_position(lengths.value(i)) if has_length else None
+        replaced = len(repl) if (length is None or length < 0) else length
+        head = _substring_sql(value, 1, pos - 1)
+        tail = _substring_sql(value, pos + replaced, _INT_MAX)
+        result.append(head + repl + tail)
+    return pa.array(result, type=pa.string())
 
 
 def _concat_ws(sep: pa.Array, value_arrays: list) -> pa.Array:
