@@ -71,6 +71,33 @@ frames.add_videos([
 ])
 ```
 
+To encode an ordered sequence of image bytes or Pillow images before storing
+it, use Python 3.10 or newer, install the optional video dependencies, and call
+`add_images_as_video`:
+
+```shell
+pip install 'pypaimon[video]'
+```
+
+```python
+frames.add_images_as_video(
+    image_frames,
+    episode_44_rows,
+    fps=30,
+    codec="libx264",
+    pixel_format="yuv420p",
+    gop_size=2,
+    codec_options={"crf": "18", "preset": "fast"},
+)
+```
+
+The image and row counts must match, and every image must have the same
+dimensions. The container is MP4; codec-specific options are passed to PyAV.
+Encoding may be lossy and the original image payloads are not retained. A
+smaller GOP improves random frame access but usually increases file size.
+After encoding, Paimon copies the MP4 bytes into `.video` storage without
+transcoding them again.
+
 Each item may also be `(video, frame_rows, first_frame)`. Frame ordinals are
 generated consecutively from `first_frame`. If application semantics require
 PTS, wall-clock time, or a non-unit sampling map, retain that value in a normal
