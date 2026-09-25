@@ -928,6 +928,33 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon DDL: write a date from before the Gregorian cutover") {
+    Seq(true, false).foreach {
+      datetimeJava8APIEnabled =>
+        withSparkSQLConf("spark.sql.datetime.java8API.enabled" -> datetimeJava8APIEnabled.toString) {
+          withTable("paimon_tbl") {
+            sql("CREATE TABLE paimon_tbl (id INT, dt DATE) USING paimon")
+            sql("INSERT INTO paimon_tbl VALUES (1, date'1000-01-01')")
+            sql("INSERT INTO paimon_tbl VALUES (2, date'1582-10-04')")
+            sql("INSERT INTO paimon_tbl VALUES (3, date'1582-10-15')")
+            sql("INSERT INTO paimon_tbl VALUES (4, date'1970-01-01')")
+
+            checkAnswer(
+              sql("SELECT id, cast(dt as string) FROM paimon_tbl ORDER BY id"),
+              Row(1, "1000-01-01") :: Row(2, "1582-10-04") :: Row(3, "1582-10-15") ::
+                Row(4, "1970-01-01") :: Nil
+            )
+
+            checkAnswer(sql("SELECT id FROM paimon_tbl WHERE dt = date'1582-10-04'"), Row(2) :: Nil)
+
+            checkAnswer(
+              sql("SELECT id FROM paimon_tbl WHERE dt < date'1582-10-15' ORDER BY id"),
+              Row(1) :: Row(2) :: Nil)
+          }
+        }
+    }
+  }
+
   test("Paimon DDL: select table with timestamp and timestamp_ntz with filter") {
     Seq(true, false).foreach {
       datetimeJava8APIEnabled =>
