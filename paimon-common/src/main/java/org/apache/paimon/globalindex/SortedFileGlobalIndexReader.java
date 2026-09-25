@@ -35,7 +35,6 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -51,7 +50,6 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
 
     private final SortedFileMetaSelector fileSelector;
     private final List<GlobalIndexIOMeta> files;
-    private final long fallbackScanMaxSize;
     private final Map<Path, R> readerCache;
     private final ExecutorService executor;
     private final long totalRowCount;
@@ -66,9 +64,8 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
             throw new IllegalArgumentException(
                     "Total row count must be non-negative, but was " + totalRowCount + ".");
         }
-        this.fileSelector = new SortedFileMetaSelector(files, keySerializer);
+        this.fileSelector = new SortedFileIndexPlanner(files, keySerializer, fallbackScanMaxSize);
         this.files = new ArrayList<>(files);
-        this.fallbackScanMaxSize = fallbackScanMaxSize;
         this.readerCache = new ConcurrentHashMap<>();
         this.executor = executor;
         this.totalRowCount = totalRowCount;
@@ -87,9 +84,6 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
             FieldRef fieldRef, Object literal) {
-        if (!fieldRef.type().is(DataTypeFamily.CHARACTER_STRING) || literal == null) {
-            return unsupported();
-        }
         return visitParallel(
                 () -> fileSelector.visitStartsWith(fieldRef, literal),
                 reader -> visitStartsWith(reader, literal));
@@ -98,10 +92,7 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitEndsWith(
             FieldRef fieldRef, Object literal) {
-        if (!canFallbackStringScan(fieldRef, literal)) {
-            return unsupported();
-        }
-        return visitFallbackParallel(
+        return visitParallel(
                 () -> fileSelector.visitEndsWith(fieldRef, literal),
                 reader -> visitEndsWith(reader, literal));
     }
@@ -109,10 +100,7 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
             FieldRef fieldRef, Object literal) {
-        if (!canFallbackStringScan(fieldRef, literal)) {
-            return unsupported();
-        }
-        return visitFallbackParallel(
+        return visitParallel(
                 () -> fileSelector.visitContains(fieldRef, literal),
                 reader -> visitContains(reader, literal));
     }
@@ -127,10 +115,7 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
         Optional<Pair<LeafBinaryFunction, Object>> optimized =
                 LikeOptimization.tryOptimize(literal);
         if (!optimized.isPresent()) {
-            if (!canFallbackStringScan(fieldRef, literal)) {
-                return unsupported();
-            }
-            return visitFallbackParallel(
+            return visitParallel(
                     () -> fileSelector.visitLike(fieldRef, literal),
                     reader -> visitLike(reader, fieldRef, literal));
         }
@@ -155,10 +140,7 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
             FieldRef fieldRef, Object literal) {
-        if (!canFallbackScan(literal)) {
-            return unsupported();
-        }
-        return visitFallbackParallel(
+        return visitParallel(
                 () -> fileSelector.visitLessThan(fieldRef, literal),
                 reader -> visitLessThan(reader, literal));
     }
@@ -166,10 +148,7 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
             FieldRef fieldRef, Object literal) {
-        if (!canFallbackScan(literal)) {
-            return unsupported();
-        }
-        return visitFallbackParallel(
+        return visitParallel(
                 () -> fileSelector.visitGreaterOrEqual(fieldRef, literal),
                 reader -> visitGreaterOrEqual(reader, literal));
     }
@@ -186,10 +165,7 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
             FieldRef fieldRef, Object literal) {
-        if (!canFallbackScan(literal)) {
-            return unsupported();
-        }
-        return visitFallbackParallel(
+        return visitParallel(
                 () -> fileSelector.visitLessOrEqual(fieldRef, literal),
                 reader -> visitLessOrEqual(reader, literal));
     }
@@ -205,10 +181,7 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
             FieldRef fieldRef, Object literal) {
-        if (!canFallbackScan(literal)) {
-            return unsupported();
-        }
-        return visitFallbackParallel(
+        return visitParallel(
                 () -> fileSelector.visitGreaterThan(fieldRef, literal),
                 reader -> visitGreaterThan(reader, literal));
     }
@@ -245,24 +218,14 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
             Object from,
             Object to,
             Function<R, Optional<GlobalIndexResult>> visitor) {
-        if (!canFallbackScan(from) || to == null) {
-            return unsupported();
-        }
-        return visitFallbackParallel(() -> fileSelector.visitBetween(fieldRef, from, to), visitor);
+        return visitParallel(() -> fileSelector.visitBetween(fieldRef, from, to), visitor);
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitNotBetween(
             FieldRef fieldRef, Object from, Object to) {
-        if (!canFallbackScan(from) || to == null) {
-            return unsupported();
-        }
-        return visitFallbackParallel(
-                () ->
-                        fileSelector.visitOr(
-                                Arrays.asList(
-                                        fileSelector.visitLessThan(fieldRef, from),
-                                        fileSelector.visitGreaterThan(fieldRef, to))),
+        return visitParallel(
+                () -> fileSelector.visitNotBetween(fieldRef, from, to),
                 reader -> visitNotBetween(reader, from, to));
     }
 
@@ -331,33 +294,6 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
         }
     }
 
-    private boolean canFallbackStringScan(FieldRef fieldRef, Object literal) {
-        return fallbackScanMaxSize > 0
-                && fieldRef.type().is(DataTypeFamily.CHARACTER_STRING)
-                && literal != null;
-    }
-
-    private boolean canFallbackScan(Object literal) {
-        return fallbackScanMaxSize > 0 && literal != null;
-    }
-
-    private static boolean fallbackScanEnabled(List<GlobalIndexIOMeta> files, long maxSize) {
-        if (maxSize <= 0) {
-            return false;
-        }
-        long totalSize = 0;
-        for (GlobalIndexIOMeta file : files) {
-            if (Long.MAX_VALUE - totalSize < file.fileSize()) {
-                return false;
-            }
-            totalSize += file.fileSize();
-            if (totalSize > maxSize) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     private CompletableFuture<Optional<GlobalIndexResult>> unsupported() {
         return CompletableFuture.completedFuture(Optional.empty());
     }
@@ -389,23 +325,6 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
             Supplier<Optional<List<GlobalIndexIOMeta>>> selector,
             Function<R, Optional<GlobalIndexResult>> visitor) {
         return visitSelectedFiles(selector.get(), visitor);
-    }
-
-    private CompletableFuture<Optional<GlobalIndexResult>> visitFallbackParallel(
-            Supplier<Optional<List<GlobalIndexIOMeta>>> selector,
-            Function<R, Optional<GlobalIndexResult>> visitor) {
-        Optional<List<GlobalIndexIOMeta>> selectedOpt = selector.get();
-        if (!selectedOpt.isPresent()) {
-            return CompletableFuture.completedFuture(Optional.empty());
-        }
-        List<GlobalIndexIOMeta> selected = selectedOpt.get();
-        if (selected.isEmpty()) {
-            return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
-        }
-        if (!fallbackScanEnabled(selected, fallbackScanMaxSize)) {
-            return unsupported();
-        }
-        return visitSelectedFiles(selectedOpt, visitor);
     }
 
     private CompletableFuture<Optional<GlobalIndexResult>> visitSelectedFiles(
