@@ -21,6 +21,7 @@ import tempfile
 import unittest
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.table.row.generic_row import GenericRowDeserializer
@@ -88,9 +89,17 @@ class MetadataStatsModeUnitTest(unittest.TestCase):
 
 
 # placeholder-e2e
+@pytest.mark.python_write
 class MetadataStatsModeE2ETest(unittest.TestCase):
     """End to end: metadata.stats-mode must control the value stats pypaimon
-    records in the manifest, so a Paimon/Spark/Flink reader can data-skip."""
+    records in the manifest, so a Paimon/Spark/Flink reader can data-skip.
+
+    Marked ``python_write``: metadata.stats-mode shapes the *Python* writer's
+    value stats. The native writer does not implement the option (it records
+    full value stats, i.e. value_stats_cols=None), which is a safe superset
+    but not what these assertions pin down -- so keep them on the Python
+    writer lane rather than the Rust one the Native CI job forces on.
+    """
 
     @classmethod
     def setUpClass(cls):
