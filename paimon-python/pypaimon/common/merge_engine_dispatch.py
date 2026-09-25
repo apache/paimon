@@ -27,6 +27,7 @@ module is the single source of truth so the two sides cannot drift.
 from typing import List, Optional
 
 from pypaimon.common.options.core_options import MergeEngine
+from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.read.reader.deduplicate_merge_function import \
     DeduplicateMergeFunction
 from pypaimon.read.reader.first_row_merge_function import \
@@ -52,10 +53,10 @@ _FIELD_SEQUENCE_GROUP_SUFFIX = ".sequence-group"
 _FIELD_AGGREGATE_FUNCTION_SUFFIX = ".aggregate-function"
 _DEFAULT_AGGREGATE_FUNCTION_KEY = "fields.default-aggregate-function"
 
-# Mirror ``CoreOptions.ignore_delete()``: any of these keys, if set to
-# ``"true"``, opts the engine into silently dropping
-# DELETE/UPDATE_BEFORE records. Kept as a raw-option lookup here so the
-# dispatch stays table-agnostic.
+# Mirror ``CoreOptions.ignore_delete()``: any of these keys, if set to a
+# canonical-true value (``true`` / ``1`` / ``yes`` / ``on``), opts the
+# engine into silently dropping DELETE/UPDATE_BEFORE records. Kept as a
+# raw-option lookup here so the dispatch stays table-agnostic.
 _IGNORE_DELETE_KEYS = (
     "ignore-delete",
     "first-row.ignore-delete",
@@ -151,18 +152,17 @@ def partial_update_unsupported_options(raw_options: dict):
 
 
 def _option_is_truthy(raw):
-    """Strict ``"true"`` boolean parsing for table-option strings.
+    """Canonical boolean parsing for table-option strings.
 
-    A string is truthy iff it equals ``"true"`` (case-insensitive).
-    ``"yes"``, ``"on"``, ``"1"`` and similar Python-truthy strings are
-    treated as falsey, matching the table-option parser used elsewhere
-    in Paimon so an option string the rest of the toolchain treats as
-    ``false`` is not silently elevated to ``true`` here.
+    Delegates to ``OptionsUtils.convert_to_boolean`` -- the same parser
+    behind ``CoreOptions.ignore_delete()`` -- so ``true`` / ``1`` / ``yes``
+    / ``on`` are all true and ``false`` / ``0`` / ``no`` / ``off`` false
+    (case-insensitive). ``None`` (option unset) is false. Using the shared
+    parser instead of a second one keeps a value the rest of the toolchain
+    treats as ``true`` (e.g. ``ignore-delete=yes``) from being silently
+    downgraded here -- which previously built the merge function with
+    ``ignore_delete=False`` and made the first retract raise.
     """
     if raw is None:
         return False
-    if isinstance(raw, bool):
-        return raw
-    if isinstance(raw, str):
-        return raw.strip().lower() == "true"
-    return False
+    return OptionsUtils.convert_to_boolean(raw)
