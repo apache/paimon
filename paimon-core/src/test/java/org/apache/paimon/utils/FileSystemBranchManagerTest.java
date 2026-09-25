@@ -29,7 +29,9 @@ import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.Mockito;
 
+import java.io.IOException;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -71,6 +73,26 @@ class FileSystemBranchManagerTest {
         branchManager =
                 new FileSystemBranchManager(
                         fileIO, tablePath, snapshotManager, tagManager, schemaManager, null);
+    }
+
+    @Test
+    void testDropBranchFailsWhenDeleteFails() throws Exception {
+        branchManager.createBranch("b1", false);
+        assertThat(branchManager.branchExists("b1")).isTrue();
+
+        FileIO spyIO = Mockito.spy(fileIO);
+        Mockito.doThrow(new IOException("delete failed"))
+                .when(spyIO)
+                .delete(branchManager.branchPath("b1"), true);
+        FileSystemBranchManager failing =
+                new FileSystemBranchManager(
+                        spyIO, tablePath, snapshotManager, tagManager, schemaManager, null);
+
+        // the drop DDL must fail loudly: the branch directory and its data still exist
+        assertThatThrownBy(() -> failing.dropBranch("b1"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Exception occurs when deleting branch 'b1'");
+        assertThat(branchManager.branchExists("b1")).isTrue();
     }
 
     @Test

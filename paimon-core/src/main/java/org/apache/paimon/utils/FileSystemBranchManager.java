@@ -30,9 +30,6 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.tag.Tag;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -47,8 +44,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link BranchManager} implementation to manage branches via file system. */
 public class FileSystemBranchManager implements BranchManager {
-
-    private static final Logger LOG = LoggerFactory.getLogger(FileSystemBranchManager.class);
 
     private final FileIO fileIO;
     private final Path tablePath;
@@ -151,10 +146,10 @@ public class FileSystemBranchManager implements BranchManager {
             // Delete branch directory
             fileIO.delete(branchPath(branchName), true);
         } catch (IOException e) {
-            LOG.info(
+            throw new RuntimeException(
                     String.format(
-                            "Deleting the branch failed due to an exception in deleting the directory %s. Please try again.",
-                            BranchManager.branchPath(tablePath, branchName)),
+                            "Exception occurs when deleting branch '%s' (directory in %s).",
+                            branchName, BranchManager.branchPath(tablePath, branchName)),
                     e);
         }
     }
