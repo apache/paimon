@@ -388,12 +388,9 @@ public class DataEvolutionBatchScan implements DataTableScan {
                         table.rowType(),
                         indexFilter,
                         indexFiles,
-                        table.store().pathFactory().globalIndexFileFactory(),
-                        table.coreOptions().toConfiguration());
+                        table.store().pathFactory().globalIndexFileFactory());
         if (indexPlan == null) {
-            return GlobalIndexQueryPlan.hasSupportedIndex(indexFiles)
-                    ? dataPlan
-                    : planEagerIndex(dataPlan, snapshot, partitionFilter, indexFiles, indexFilter);
+            return planEagerIndex(dataPlan, snapshot, partitionFilter, indexFiles, indexFilter);
         }
         List<Range> unindexed =
                 new DataEvolutionGlobalIndexCoverage(

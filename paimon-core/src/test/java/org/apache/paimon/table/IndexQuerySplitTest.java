@@ -105,7 +105,7 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"btree", "bitmap"})
-    public void testPrunesEmptyIndexPlanWithoutDataStats(String indexType) throws Exception {
+    public void testEmptyIndexResultWithoutDataStats(String indexType) throws Exception {
         Schema schema = schemaDefault();
         Map<String, String> options = new HashMap<>(schema.options());
         options.put(CoreOptions.METADATA_STATS_MODE.key(), "none");
@@ -132,8 +132,10 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
                                 .plan()
                                 .splits())
                 .isNotEmpty();
-        assertThat(table.newReadBuilder().withFilter(predicate).newScan().plan().splits())
-                .isEmpty();
+        ReadBuilder read = table.newReadBuilder().withFilter(predicate);
+        List<Split> splits = read.newScan().plan().splits();
+        assertThat(splits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
+        assertThat(read(read, splits)).isEmpty();
     }
 
     @ParameterizedTest
@@ -524,7 +526,7 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"btree", "bitmap"})
-    public void testBudgetIsCheckedAcrossOriginalGroups(String indexType) throws Exception {
+    public void testBudgetFailureIsDeferredToReader(String indexType) throws Exception {
         write(10);
         appendRows(10, 1000);
         FileStoreTable table = smallSplits(getTableDefault());
@@ -552,9 +554,9 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
         ReadBuilder read = table.newReadBuilder().withFilter(predicate);
         ReadBuilder indexQueryRead = distributedTable(table).newReadBuilder().withFilter(predicate);
         List<Split> splits = indexQueryRead.newScan().plan().splits();
-        assertThat(splits).allMatch(split -> split instanceof DataSplit);
-        assertThat(read(indexQueryRead, splits))
-                .containsExactlyElementsOf(read(read, read.newScan().plan().splits()));
+        assertThat(splits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
+        assertThat(read(read, read.newScan().plan().splits())).isNotEmpty();
+        assertThatThrownBy(() -> read(indexQueryRead, splits)).isInstanceOf(IOException.class);
     }
 
     @ParameterizedTest
@@ -828,15 +830,9 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
                         b.contains(1, str("1")),
                         b.startsWith(2, str("b")));
         ReadBuilder read = table.newReadBuilder().withFilter(predicate);
-        List<Split> eagerSplits = read.newScan().plan().splits();
-        assertThat(eagerSplits).isNotEmpty().allMatch(IndexedSplit.class::isInstance);
-        assertThat(
-                        eagerSplits.stream()
-                                .map(IndexedSplit.class::cast)
-                                .flatMap(split -> split.rowRanges().stream())
-                                .collect(Collectors.toList()))
-                .containsExactly(new Range(15, 15), new Range(51, 51));
-        assertThat(read(read, eagerSplits)).containsExactly(15, 51);
+        List<Split> fmSplits = read.newScan().plan().splits();
+        assertThat(fmSplits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
+        assertThat(read(read, fmSplits)).containsExactly(15, 51);
 
         createIndex("btree", "f2");
         List<Split> splits = read.newScan().plan().splits();
@@ -849,7 +845,7 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
                                 PredicateBuilder.or(
                                         b.contains(1, str("5")), b.equal(2, str("b10"))));
         List<Split> orSplits = orRead.newScan().plan().splits();
-        assertThat(orSplits).isNotEmpty().allMatch(DataSplit.class::isInstance);
+        assertThat(orSplits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
         assertThat(read(orRead, orSplits)).contains(5, 10, 15, 55, 95).hasSize(20);
     }
 

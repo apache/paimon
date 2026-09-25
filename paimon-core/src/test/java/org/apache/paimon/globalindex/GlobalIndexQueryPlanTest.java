@@ -30,7 +30,6 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
@@ -56,6 +55,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -67,7 +67,6 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 
-import static org.apache.paimon.globalindex.btree.BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -88,31 +87,16 @@ class GlobalIndexQueryPlanTest {
 
     @ParameterizedTest
     @CsvSource({"false,false", "true,true"})
-    void testBoundedRangeUsesIntersectedFilesAndSingleScan(
-            boolean lowerInclusive, boolean upperInclusive) throws Exception {
+    void testBoundedRangeUsesSingleScan(boolean lowerInclusive, boolean upperInclusive)
+            throws Exception {
         RowType rowType = RowType.of(DataTypes.INT());
         PredicateBuilder builder = new PredicateBuilder(rowType);
         Predicate lower = lowerInclusive ? builder.greaterOrEqual(0, 5) : builder.greaterThan(0, 5);
         Predicate upper = upperInclusive ? builder.lessOrEqual(0, 9) : builder.lessThan(0, 9);
         Predicate range = new CompoundPredicate(And.INSTANCE, Arrays.asList(upper, lower));
-        KeySerializer serializer = KeySerializer.create(DataTypes.INT());
         List<IndexFileMeta> files = new ArrayList<>();
         for (int firstKey = 0; firstKey < 15; firstKey += 5) {
-            byte[] first = serializer.serialize(firstKey);
-            byte[] last = serializer.serialize(firstKey + 4);
-            files.add(
-                    new IndexFileMeta(
-                            "btree",
-                            "index-" + firstKey,
-                            80,
-                            100,
-                            new GlobalIndexMeta(
-                                    0,
-                                    99,
-                                    0,
-                                    null,
-                                    new SortedIndexFileMeta(first, last, false).serialize()),
-                            null));
+            files.add(indexFile("btree", "index-" + firstKey, 0, 99, 0, null));
         }
         IndexPathFactory paths = mock(IndexPathFactory.class);
         when(paths.toPath(any(IndexFileMeta.class)))
@@ -120,9 +104,7 @@ class GlobalIndexQueryPlanTest {
                         invocation ->
                                 new Path(invocation.<IndexFileMeta>getArgument(0).fileName()));
         Options options = new Options();
-        options.set(BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE, MemorySize.ofBytes(80));
-        GlobalIndexQueryPlan plan =
-                GlobalIndexQueryPlan.create(rowType, range, files, paths, options);
+        GlobalIndexQueryPlan plan = GlobalIndexQueryPlan.create(rowType, range, files, paths);
         assertThat(plan).isNotNull();
         IndexQuerySplit split =
                 new IndexQuerySplit(dataSplit(), plan, options.toMap(), Collections.emptyList());
@@ -151,25 +133,17 @@ class GlobalIndexQueryPlanTest {
             verify(indexer)
                     .createReader(
                             any(),
-                            argThat(
-                                    selected ->
-                                            selected.size() == 1
-                                                    && selected.get(0)
-                                                            .filePath()
-                                                            .equals(new Path("index-5"))),
+                            argThat(selected -> selected.size() == 3),
                             eq(100L),
                             anyList(),
                             any());
             verify(reader).visitRange(any(), eq(5), eq(9), eq(lowerInclusive), eq(upperInclusive));
         }
 
-        options.set(BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE, MemorySize.ofBytes(79));
-        assertThat(GlobalIndexQueryPlan.create(rowType, range, files, paths, options)).isNull();
-        options.set(BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE, MemorySize.ofBytes(80));
         assertThat(
                         GlobalIndexQueryPlan.create(
-                                rowType, PredicateBuilder.or(lower, upper), files, paths, options))
-                .isNull();
+                                rowType, PredicateBuilder.or(lower, upper), files, paths))
+                .isNotNull();
     }
 
     @ParameterizedTest
@@ -226,8 +200,7 @@ class GlobalIndexQueryPlanTest {
                 Arrays.asList(b.isNotNull(0), b.notEqual(0, 1), b.notIn(0, Arrays.asList(1, 3)));
         for (int i = 0; i < predicates.size(); i++) {
             GlobalIndexQueryPlan plan =
-                    GlobalIndexQueryPlan.create(
-                            rowType, predicates.get(i), files, paths, new Options());
+                    GlobalIndexQueryPlan.create(rowType, predicates.get(i), files, paths);
             List<Range> ranges = Collections.singletonList(new Range(100, 102));
             assertThat(plan).isNotNull();
             assertThat(plan.evaluate(fileIO, new Options(), ranges).results().toRangeList())
@@ -321,16 +294,39 @@ class GlobalIndexQueryPlanTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"btree", "bitmap"})
-    void testIsNaNDoesNotFailPlanning(String indexType) {
+    void testUnsupportedPredicateFailsAtRuntime(String indexType) {
         RowType rowType = RowType.of(DataTypes.DOUBLE());
         PredicateBuilder builder = new PredicateBuilder(rowType);
         Predicate isNaN = builder.isNaN(0);
         Predicate equal = builder.equal(0, 1.0);
-        assertThat(create(indexType, rowType, isNaN, 1.0)).isNull();
-        assertThat(create(indexType, rowType, PredicateBuilder.or(isNaN, equal), 1.0)).isNull();
+        GlobalIndexQueryPlan unsupported = create(indexType, rowType, isNaN, 1.0);
+        assertThat(unsupported).isNotNull();
+        assertThat(create(indexType, rowType, PredicateBuilder.or(isNaN, equal), 1.0)).isNotNull();
         GlobalIndexQueryPlan and =
                 create(indexType, rowType, PredicateBuilder.and(isNaN, equal), 1.0);
         assertThat(and).isNotNull();
+
+        GlobalIndexReader reader = mock(GlobalIndexReader.class);
+        when(reader.visitIsNaN(any()))
+                .thenReturn(CompletableFuture.completedFuture(Optional.empty()));
+        GlobalIndexer indexer = mock(GlobalIndexer.class);
+        when(indexer.createReader(any(), anyList(), anyLong(), anyList(), any()))
+                .thenReturn(reader);
+        GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
+        when(factory.create(any(DataField.class), anyList(), any(Options.class)))
+                .thenReturn(indexer);
+        try (MockedStatic<GlobalIndexerFactoryUtils> factories =
+                mockStatic(GlobalIndexerFactoryUtils.class)) {
+            factories.when(() -> GlobalIndexerFactoryUtils.load(indexType)).thenReturn(factory);
+            assertThatThrownBy(
+                            () ->
+                                    unsupported.evaluate(
+                                            mock(FileIO.class),
+                                            new Options(),
+                                            Collections.singletonList(new Range(0, 0))))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("does not support predicate");
+        }
     }
 
     private DataSplit dataSplit() {
@@ -545,7 +541,7 @@ class GlobalIndexQueryPlanTest {
     }
 
     @Test
-    void testUnsupportedIndexGroupDoesNotDisableIndependentAndBranch() {
+    void testPlansAvailableIndexesWithoutTypeChecks() throws Exception {
         RowType rowType = RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.INT());
         PredicateBuilder builder = new PredicateBuilder(rowType);
         byte[] key = KeySerializer.create(DataTypes.INT()).serialize(1);
@@ -562,7 +558,7 @@ class GlobalIndexQueryPlanTest {
                                 null,
                                 new SortedIndexFileMeta(key, key, false).serialize()),
                         null);
-        IndexFileMeta multiColumn = indexFile("btree", "multi", 0, 99, 1, new int[] {2});
+        IndexFileMeta multiColumn = indexFile("custom-index", "multi", 0, 99, 1, new int[] {2});
         IndexPathFactory paths = mock(IndexPathFactory.class);
         when(paths.toPath(any(IndexFileMeta.class))).thenReturn(new Path("index"));
         List<IndexFileMeta> files = Arrays.asList(supported, multiColumn);
@@ -574,26 +570,27 @@ class GlobalIndexQueryPlanTest {
                         rowType,
                         PredicateBuilder.and(supportedLeaf, unsupportedLeaf),
                         files,
-                        paths,
-                        new Options());
+                        paths);
         assertThat(andPlan).isNotNull();
-        assertThat(andPlan.contributingFieldIds(rowType)).containsExactly(0);
+        assertThat(andPlan.contributingFieldIds(rowType)).containsExactlyInAnyOrder(0, 1);
+        IndexQuerySplit split =
+                new IndexQuerySplit(
+                        dataSplit(), andPlan, Collections.emptyMap(), Collections.emptyList());
+        assertThat(SplitSerializer.deserialize(SplitSerializer.serialize(split))).isEqualTo(split);
         assertThat(
                         GlobalIndexQueryPlan.create(
                                 rowType,
                                 PredicateBuilder.or(supportedLeaf, unsupportedLeaf),
                                 files,
-                                paths,
-                                new Options()))
-                .isNull();
+                                paths))
+                .isNotNull();
         assertThat(
                         GlobalIndexQueryPlan.create(
                                 rowType,
                                 supportedLeaf,
                                 Arrays.asList(supported, indexFile("fm", "fm", 0, 99, 0, null)),
-                                paths,
-                                new Options()))
-                .isNull();
+                                paths))
+                .isNotNull();
     }
 
     private IndexFileMeta indexFile(
@@ -651,6 +648,6 @@ class GlobalIndexQueryPlanTest {
                     }
                 };
         return GlobalIndexQueryPlan.create(
-                rowType, predicate, Collections.singletonList(file), paths, new Options());
+                rowType, predicate, Collections.singletonList(file), paths);
     }
 }

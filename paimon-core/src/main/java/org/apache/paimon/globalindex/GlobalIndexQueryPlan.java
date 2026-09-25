@@ -26,29 +26,14 @@ import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.Between;
+import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.Contains;
-import org.apache.paimon.predicate.EndsWith;
-import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.GreaterOrEqual;
-import org.apache.paimon.predicate.GreaterThan;
-import org.apache.paimon.predicate.In;
-import org.apache.paimon.predicate.IsNotNull;
-import org.apache.paimon.predicate.IsNull;
-import org.apache.paimon.predicate.LeafFunction;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LessOrEqual;
-import org.apache.paimon.predicate.LessThan;
-import org.apache.paimon.predicate.Like;
-import org.apache.paimon.predicate.NotBetween;
-import org.apache.paimon.predicate.NotEqual;
-import org.apache.paimon.predicate.NotIn;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.predicate.StartsWith;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
@@ -75,8 +60,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
-import static org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexOptions.BITMAP_INDEX_FALLBACK_SCAN_MAX_SIZE;
-import static org.apache.paimon.globalindex.btree.BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE;
+import static org.apache.paimon.predicate.PredicateVisitor.collectFieldIds;
 import static org.apache.paimon.utils.SerializationUtils.deserializedBytes;
 import static org.apache.paimon.utils.SerializationUtils.serializeBytes;
 
@@ -84,25 +68,25 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBytes;
  * A scalar index query to evaluate for one data split, represented as leaf predicates combined with
  * AND/OR.
  *
- * <p>Planning fixes predicate support and scan budgets from metadata without opening index files.
- * Each data split receives the overlapping groups; its reader executes the plan to obtain row IDs.
+ * <p>Each data split receives the overlapping index groups; its reader executes the predicate to
+ * obtain row IDs.
  */
 class GlobalIndexQueryPlan {
 
-    /** The query for a leaf node; null for an AND/OR node. */
-    @Nullable private final LeafPredicate predicate;
+    /** A leaf or paired range query; null for an AND/OR node. */
+    @Nullable private final Predicate predicate;
 
     /** For compound nodes, true means OR and false means AND; ignored for leaves. */
     private final boolean union;
 
-    /** Supported child plans of a compound node; empty for leaves. */
+    /** Indexed child plans of a compound node; empty for leaves. */
     private final List<GlobalIndexQueryPlan> children;
 
-    /** A leaf's selected index groups. An empty list means no matches, not unsupported. */
+    /** A query's index groups; empty when none overlap this data split. */
     private final List<IndexGroup> groups;
 
     private GlobalIndexQueryPlan(
-            @Nullable LeafPredicate predicate,
+            @Nullable Predicate predicate,
             boolean union,
             List<GlobalIndexQueryPlan> children,
             List<IndexGroup> groups) {
@@ -112,51 +96,29 @@ class GlobalIndexQueryPlan {
         this.groups = groups;
     }
 
-    static boolean hasSupportedIndex(List<IndexFileMeta> files) {
-        return files.stream()
-                .anyMatch(
-                        file ->
-                                supportsIndex(
-                                        file.indexType(),
-                                        file.globalIndexMeta().getIndexedFieldIds().size()));
-    }
-
-    private static boolean supportsIndex(String type, int fieldCount) {
-        return "es-index".equals(type)
-                || (("btree".equals(type) || "bitmap".equals(type)) && fieldCount == 1);
-    }
-
     @Nullable
     static GlobalIndexQueryPlan create(
             RowType rowType,
             Predicate predicate,
             List<IndexFileMeta> files,
-            IndexPathFactory pathFactory,
-            Options options) {
+            IndexPathFactory pathFactory) {
         Map<Integer, List<IndexMetaFileGroup>> groupsByField =
                 DataEvolutionGlobalIndexScanner.groupIndexFiles(files);
-        Map<IndexMetaFileGroup, List<IndexGroup>> converted = new LinkedHashMap<>();
         Map<Integer, List<IndexGroup>> groups = new LinkedHashMap<>();
         groupsByField.forEach(
                 (fieldId, fieldGroups) -> {
                     List<IndexGroup> indexGroups = new ArrayList<>();
                     for (IndexMetaFileGroup group : fieldGroups) {
-                        indexGroups.addAll(
-                                converted.computeIfAbsent(
-                                        group,
-                                        key -> IndexGroup.fromMetadata(key, rowType, pathFactory)));
+                        indexGroups.addAll(IndexGroup.fromMetadata(group, rowType, pathFactory));
                     }
                     groups.put(fieldId, indexGroups);
                 });
-        return createPredicatePlan(predicate, rowType, groups, options);
+        return createPredicatePlan(predicate, rowType, groups);
     }
 
     @Nullable
     private static GlobalIndexQueryPlan createPredicatePlan(
-            Predicate predicate,
-            RowType rowType,
-            Map<Integer, List<IndexGroup>> groups,
-            Options options) {
+            Predicate predicate, RowType rowType, Map<Integer, List<IndexGroup>> groups) {
         if (predicate instanceof LeafPredicate) {
             LeafPredicate leaf = (LeafPredicate) predicate;
             Optional<FieldRef> field = leaf.fieldRefOptional();
@@ -167,44 +129,7 @@ class GlobalIndexQueryPlan {
             if (fieldGroups == null) {
                 return null;
             }
-            List<IndexGroup> selectedGroups = new ArrayList<>();
-            for (IndexGroup group : fieldGroups) {
-                if (!supportsIndex(group.type, group.extraFields.size() + 1)) {
-                    return null;
-                }
-                if ("es-index".equals(group.type)) {
-                    if (!supportsESPredicate(leaf.function())) {
-                        return null;
-                    }
-                    selectedGroups.add(group);
-                    continue;
-                }
-                long budget =
-                        options.get(
-                                        "btree".equals(group.type)
-                                                ? BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE
-                                                : BITMAP_INDEX_FALLBACK_SCAN_MAX_SIZE)
-                                .getBytes();
-                SortedFileIndexPlanner planner =
-                        new SortedFileIndexPlanner(
-                                group.files, KeySerializer.create(group.field.type()), budget);
-                Optional<List<GlobalIndexIOMeta>> selected =
-                        leaf.function().visit(planner, field.get(), leaf.literals());
-                // UnionGlobalIndexReader requires every original group to support the leaf.
-                if (!selected.isPresent()) {
-                    return null;
-                }
-                if (!selected.get().isEmpty()) {
-                    selectedGroups.add(
-                            new IndexGroup(
-                                    group.type,
-                                    group.field,
-                                    group.extraFields,
-                                    group.range,
-                                    selected.get()));
-                }
-            }
-            return new GlobalIndexQueryPlan(leaf, false, Collections.emptyList(), selectedGroups);
+            return new GlobalIndexQueryPlan(leaf, false, Collections.emptyList(), fieldGroups);
         }
         CompoundPredicate compound = (CompoundPredicate) predicate;
         boolean union = compound.function() instanceof Or;
@@ -228,40 +153,22 @@ class GlobalIndexQueryPlan {
                     }
                     LeafPredicate lower = GlobalIndexEvaluator.isLowerBound(first) ? first : second;
                     LeafPredicate upper = GlobalIndexEvaluator.isLowerBound(first) ? second : first;
-                    GlobalIndexQueryPlan between =
-                            createPredicatePlan(
-                                    new PredicateBuilder(rowType)
-                                            .between(
-                                                    lower.fieldRefOptional().get().index(),
-                                                    lower.literals().get(0),
-                                                    upper.literals().get(0)),
-                                    rowType,
-                                    groups,
-                                    options);
-                    if (between != null) {
+                    GlobalIndexQueryPlan lowerPlan = createPredicatePlan(lower, rowType, groups);
+                    if (lowerPlan != null) {
                         plan =
                                 new GlobalIndexQueryPlan(
-                                        null,
+                                        new CompoundPredicate(
+                                                And.INSTANCE, Arrays.asList(lower, upper)),
                                         false,
-                                        Arrays.asList(
-                                                new GlobalIndexQueryPlan(
-                                                        lower,
-                                                        false,
-                                                        Collections.emptyList(),
-                                                        between.groups),
-                                                new GlobalIndexQueryPlan(
-                                                        upper,
-                                                        false,
-                                                        Collections.emptyList(),
-                                                        between.groups)),
-                                        Collections.emptyList());
+                                        Collections.emptyList(),
+                                        lowerPlan.groups);
                         predicates.remove(j);
                         break;
                     }
                 }
             }
             if (plan == null) {
-                plan = createPredicatePlan(child, rowType, groups, options);
+                plan = createPredicatePlan(child, rowType, groups);
             }
             if (plan == null) {
                 if (union) {
@@ -274,26 +181,6 @@ class GlobalIndexQueryPlan {
         return children.isEmpty()
                 ? null
                 : new GlobalIndexQueryPlan(null, union, children, Collections.emptyList());
-    }
-
-    private static boolean supportsESPredicate(LeafFunction function) {
-        // ES scalar visitors return matches or conservative candidates for every indexed field.
-        return function instanceof Equal
-                || function instanceof NotEqual
-                || function instanceof LessThan
-                || function instanceof LessOrEqual
-                || function instanceof GreaterThan
-                || function instanceof GreaterOrEqual
-                || function instanceof Between
-                || function instanceof NotBetween
-                || function instanceof In
-                || function instanceof NotIn
-                || function instanceof StartsWith
-                || function instanceof EndsWith
-                || function instanceof Contains
-                || function instanceof Like
-                || function instanceof IsNull
-                || function instanceof IsNotNull;
     }
 
     boolean isEmpty() {
@@ -309,7 +196,7 @@ class GlobalIndexQueryPlan {
     Set<Integer> contributingFieldIds(RowType rowType) {
         Set<Integer> fields = new HashSet<>();
         if (predicate != null) {
-            fields.add(rowType.getField(predicate.fieldRefOptional().get().name()).id());
+            fields.addAll(collectFieldIds(rowType, predicate));
         } else {
             for (GlobalIndexQueryPlan child : children) {
                 fields.addAll(child.contributingFieldIds(rowType));
@@ -318,7 +205,7 @@ class GlobalIndexQueryPlan {
         return fields;
     }
 
-    /** Keep the original offsets and budget decisions while removing unrelated groups. */
+    /** Keep original row-ID offsets while removing groups unrelated to this data split. */
     GlobalIndexQueryPlan forRanges(List<Range> ranges) {
         List<IndexGroup> selected = new ArrayList<>();
         for (IndexGroup group : groups) {
@@ -337,7 +224,7 @@ class GlobalIndexQueryPlan {
         for (GlobalIndexQueryPlan child : children) {
             selectedChildren.add(child.forRanges(ranges));
         }
-        // A supported leaf without a local group remains an empty result, not unsupported.
+        // A query without a local group evaluates to an empty result.
         return new GlobalIndexQueryPlan(predicate, union, selectedChildren, selected);
     }
 
@@ -351,42 +238,7 @@ class GlobalIndexQueryPlan {
     private GlobalIndexResult evaluateWithExecutor(
             FileIO fileIO, Options options, List<Range> ranges, ExecutorService executor)
             throws IOException {
-        GlobalIndexQueryPlan leaf = this;
-        Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> query = null;
-        if (predicate == null && !union && children.size() == 2) {
-            GlobalIndexQueryPlan first = children.get(0);
-            GlobalIndexQueryPlan second = children.get(1);
-            if (first.predicate != null
-                    && second.predicate != null
-                    && first.groups.equals(second.groups)
-                    && GlobalIndexEvaluator.isRangeBound(first.predicate)
-                    && GlobalIndexEvaluator.isRangeBound(second.predicate)
-                    && GlobalIndexEvaluator.isLowerBound(first.predicate)
-                            != GlobalIndexEvaluator.isLowerBound(second.predicate)
-                    && first.predicate
-                            .fieldRefOptional()
-                            .equals(second.predicate.fieldRefOptional())) {
-                LeafPredicate lower =
-                        GlobalIndexEvaluator.isLowerBound(first.predicate)
-                                ? first.predicate
-                                : second.predicate;
-                LeafPredicate upper =
-                        GlobalIndexEvaluator.isLowerBound(first.predicate)
-                                ? second.predicate
-                                : first.predicate;
-                FieldRef field = lower.fieldRefOptional().get();
-                leaf = first;
-                query =
-                        reader ->
-                                reader.visitRange(
-                                        field,
-                                        lower.literals().get(0),
-                                        upper.literals().get(0),
-                                        lower.function() instanceof GreaterOrEqual,
-                                        upper.function() instanceof LessOrEqual);
-            }
-        }
-        if (predicate == null && query == null) {
+        if (predicate == null) {
             GlobalIndexResult result = null;
             for (GlobalIndexQueryPlan child : children) {
                 GlobalIndexResult matches =
@@ -396,18 +248,10 @@ class GlobalIndexQueryPlan {
             }
             return result == null ? GlobalIndexResult.createEmpty() : result;
         }
-        if (query == null) {
-            query =
-                    reader ->
-                            predicate
-                                    .function()
-                                    .visit(
-                                            reader,
-                                            predicate.fieldRefOptional().get(),
-                                            predicate.literals());
-        }
+        Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> query =
+                predicateQuery();
         GlobalIndexResult result = GlobalIndexResult.createEmpty();
-        for (IndexGroup group : leaf.groups) {
+        for (IndexGroup group : groups) {
             GlobalIndexResult splitRows = localSplitRows(ranges, group.range);
             if (splitRows.results().isEmpty()) {
                 continue;
@@ -424,9 +268,7 @@ class GlobalIndexQueryPlan {
                             executor)) {
                 Optional<GlobalIndexResult> matches = query.apply(reader).get();
                 if (!matches.isPresent()) {
-                    throw new IOException(
-                            "Index predicate became unsupported after planning: "
-                                    + (predicate != null ? predicate : children));
+                    throw new IOException("Index reader does not support predicate: " + predicate);
                 }
                 // Clip in index-local coordinates before offset() iterates the retained rows.
                 result = result.or(splitRows.and(matches.get()).offset(group.range.from));
@@ -438,6 +280,26 @@ class GlobalIndexQueryPlan {
             }
         }
         return result;
+    }
+
+    private Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>>
+            predicateQuery() {
+        if (predicate instanceof LeafPredicate) {
+            LeafPredicate leaf = (LeafPredicate) predicate;
+            return reader ->
+                    leaf.function().visit(reader, leaf.fieldRefOptional().get(), leaf.literals());
+        }
+        List<Predicate> bounds = ((CompoundPredicate) predicate).children();
+        LeafPredicate lower = (LeafPredicate) bounds.get(0);
+        LeafPredicate upper = (LeafPredicate) bounds.get(1);
+        FieldRef field = lower.fieldRefOptional().get();
+        return reader ->
+                reader.visitRange(
+                        field,
+                        lower.literals().get(0),
+                        upper.literals().get(0),
+                        lower.function() instanceof GreaterOrEqual,
+                        upper.function() instanceof LessOrEqual);
     }
 
     private static GlobalIndexResult localSplitRows(List<Range> ranges, Range groupRange) {
@@ -471,7 +333,10 @@ class GlobalIndexQueryPlan {
                     writeString(out, file.filePath().toString());
                     out.writeLong(file.fileSize());
                     out.writeLong(file.rowCount());
-                    serializeBytes(out, file.metadata());
+                    out.writeBoolean(file.metadata() != null);
+                    if (file.metadata() != null) {
+                        serializeBytes(out, file.metadata());
+                    }
                 }
             }
         } else {
@@ -493,8 +358,9 @@ class GlobalIndexQueryPlan {
             } catch (ClassNotFoundException e) {
                 throw new IOException("Failed to deserialize index query predicate", e);
             }
-            if (!(predicate instanceof LeafPredicate)) {
-                throw new IOException("Expected a leaf index predicate");
+            if (!(predicate instanceof LeafPredicate)
+                    && !(predicate instanceof CompoundPredicate)) {
+                throw new IOException("Expected an index predicate");
             }
             List<IndexGroup> groups = new ArrayList<>();
             int size = in.readInt();
@@ -513,13 +379,12 @@ class GlobalIndexQueryPlan {
                     Path path = new Path(readString(in));
                     long fileSize = in.readLong();
                     long rowCount = in.readLong();
-                    files.add(
-                            new GlobalIndexIOMeta(path, fileSize, rowCount, deserializedBytes(in)));
+                    byte[] metadata = in.readBoolean() ? deserializedBytes(in) : null;
+                    files.add(new GlobalIndexIOMeta(path, fileSize, rowCount, metadata));
                 }
                 groups.add(new IndexGroup(indexType, field, extraFields, range, files));
             }
-            return new GlobalIndexQueryPlan(
-                    (LeafPredicate) predicate, false, Collections.emptyList(), groups);
+            return new GlobalIndexQueryPlan(predicate, false, Collections.emptyList(), groups);
         }
         if (type != 1 && type != 2) {
             throw new IOException("Unknown index plan node: " + type);
@@ -574,7 +439,7 @@ class GlobalIndexQueryPlan {
         /** Original global row-ID range; its start is the offset for index-relative row IDs. */
         private final Range range;
 
-        /** Selected file paths and metadata; contains no query results or open readers. */
+        /** File paths and metadata; contains no query results or open readers. */
         private final List<GlobalIndexIOMeta> files;
 
         private IndexGroup(
