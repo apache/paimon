@@ -217,6 +217,11 @@ def read_requirements():
 
 install_requires = read_requirements()
 
+VIDEO_DEPENDENCIES = [
+    'av>=12,<19; python_version>="3.10"',
+    'Pillow; python_version>="3.10"',
+]
+
 LEROBOT_DEPENDENCIES = [
     # datasets 4.1+ may select PyArrow 21+, while PyPaimon currently
     # supports PyArrow <20. Pandas 2.2.2+ supports NumPy 2.x selected
@@ -249,6 +254,7 @@ setup(
         ],
     },
     extras_require={
+        'video': VIDEO_DEPENDENCIES,
         'hdf5': [
             # HDF5 loading is explicitly guarded and documented as Python 3.8+.
             'h5py>=3,<4; python_version>="3.8"',
