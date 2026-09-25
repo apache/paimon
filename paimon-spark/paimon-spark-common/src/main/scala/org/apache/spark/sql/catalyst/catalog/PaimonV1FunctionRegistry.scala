@@ -159,12 +159,33 @@ case class PaimonV1FunctionRegistry(session: SparkSession) extends SQLConfHelper
       throw new IllegalArgumentException(s"Cannot load class: $className")
     }
     val clazz = PaimonUtils.classForName(className)
-    val name = func.identifier.unquotedString
+    // Drop the catalog for the *name* handed to the expression builder, even though the registry
+    // key keeps it (see `qualifyIdentifier`). This string becomes the built expression's
+    // user-facing function name in every case — the Hive wrappers set `prettyName = name`,
+    // `ScalaUDAF` takes it as `udafName` and exposes it as `name`/`nodeName` — and for a scalar
+    // or aggregate result an unaliased projection derives its column name from that name, via
+    // `Alias(e, toPrettySQL(e))`. So keeping the catalog here would silently rename the default
+    // column name of `SELECT udf(...)` from `db.udf(...)` to `catalog.db.udf(...)`.
+    val name = func.identifier.copy(catalog = None).unquotedString
     (input) => functionExpressionBuilder.makeExpression(name, clazz, input)
   }
 
   private def qualifyIdentifier(ident: FunctionIdentifier): FunctionIdentifier = {
-    FunctionIdentifier(funcName = format(ident.funcName), database = ident.database)
+    // Carry the catalog through. Spark 4.2's `SimpleFunctionRegistryBase.normalizeFuncName` asserts
+    // the identifier is fully qualified (3-part), so dropping it fails with
+    // "Function identifier must be fully qualified". Callers already supply all three parts (see
+    // `PaimonFunctionLookup.CatalogAndFunctionIdentifier`), and keeping the catalog is also more
+    // correct on older versions: two identically named functions in different catalogs would
+    // otherwise collide in the registry. Upstream's own `SessionCatalog.qualifyIdentifier` does
+    // the same.
+    //
+    // Note this identifier is also stamped into the `CatalogFunction` that builds the expression,
+    // so `makeFunctionBuilder` strips the catalog back off for the builder name — that string is
+    // user-visible as a column name.
+    FunctionIdentifier(
+      funcName = format(ident.funcName),
+      database = ident.database,
+      catalog = ident.catalog)
   }
 
   protected def format(name: String): String = {
