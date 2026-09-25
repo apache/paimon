@@ -56,6 +56,12 @@ class WriteBuilder(ABC):
     def _native_write(self, static_partition=None, stream=False):
         if not self.table.options.native_write_enabled():
             return None
+        # data-file.path-directory relocates data files under a sub-directory
+        # that the native writer does not honor (it writes at the bucket
+        # root). Use the Python writer, which resolves the directory, so
+        # write / read / plan / commit stay consistent for this option.
+        if self.table.options.data_file_path_directory() is not None:
+            return None
         try:
             from pypaimon.write.native_write import create_native_write
             return create_native_write(self.table, self.commit_user,

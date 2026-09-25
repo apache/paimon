@@ -63,6 +63,16 @@ class DataFilePathDirectoryTest(unittest.TestCase):
                         os.path.join(dirpath, name), root))
         return found
 
+    def _create_with_options(self, identifier, options):
+        self.catalog.create_table(
+            identifier,
+            Schema(fields=Schema.from_pyarrow_schema(pa.schema([
+                ("id", pa.int32()), ("v", pa.string())])).fields,
+                options=options),
+            False,
+        )
+        return self.catalog.get_table(identifier)
+
     def test_data_files_written_under_configured_directory(self):
         self.catalog.create_table(
             "db.t",
@@ -117,6 +127,49 @@ class DataFilePathDirectoryTest(unittest.TestCase):
         splits = scan.plan().splits()
         result = table.new_read_builder().new_read().to_arrow(splits)
         self.assertEqual(sorted(result.column("id").to_pylist()), [1, 2, 3])
+
+    def test_native_write_falls_back_when_directory_configured(self):
+        # write.native.enabled + data-file.path-directory: the write builder
+        # must return the Python writer (native probe returns None) so the
+        # relocated directory is honored; the native writer writes at the root.
+        # Patch the native constructor so the guard, not a missing runtime, is
+        # what forces the fallback (without the guard this returns the sentinel).
+        table = self._create_with_options(
+            "db.t_native_write",
+            {"data-file.path-directory": "data",
+             "write.native.enabled": "true"})
+        with mock.patch(
+                "pypaimon.write.native_write.create_native_write",
+                return_value=object()):
+            self.assertIsNone(table.new_batch_write_builder()._native_write())
+
+    def test_native_read_falls_back_when_directory_configured(self):
+        # read.native.enabled + data-file.path-directory: the native read
+        # probe short-circuits to the Python reader before loading the Rust
+        # runtime, so the relocated files are resolved.
+        table = self._create_with_options(
+            "db.t_native_read",
+            {"data-file.path-directory": "data",
+             "read.native.enabled": "true"})
+        self._write("db.t_native_read")
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        self.assertIsNone(rb.new_read()._try_native_batches(
+            splits, pa.schema([("id", pa.int32()), ("v", pa.string())])))
+
+    def test_native_commit_falls_back_when_directory_configured(self):
+        # commit.native.enabled + data-file.path-directory: the native commit
+        # probe returns None so the Python committer records the relocated
+        # paths.
+        table = self._create_with_options(
+            "db.t_native_commit",
+            {"data-file.path-directory": "data",
+             "commit.native.enabled": "true"})
+        commit = table.new_batch_write_builder().new_commit()
+        try:
+            self.assertIsNone(commit._prepare_native_commit([]))
+        finally:
+            commit.close()
 
     def test_default_keeps_data_files_at_bucket_root(self):
         self.catalog.create_table(
