@@ -41,6 +41,11 @@ class FileStoreWrite:
 
     def __init__(self, table, commit_user):
         from pypaimon.table.file_store_table import FileStoreTable
+        from pypaimon.read.merge_engine_support import check_sequence_field_supported
+
+        # TableWrite constructs this before the row-key extractor, whose
+        # dynamic bucket index must not retain hashes for rejected writes.
+        check_sequence_field_supported(table)
 
         self.table: FileStoreTable = table
         self.data_writers: Dict[Tuple, DataWriter] = {}
