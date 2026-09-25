@@ -79,7 +79,6 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -225,7 +224,7 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
     }
 
     @Test
-    public void testDistributedIndexDefaultsReadProtectionTagToOneDay() throws Exception {
+    public void testDistributedIndexDoesNotCreateReadProtectionTagByDefault() throws Exception {
         write(100);
         createIndex("btree", "f1");
         FileStoreTable table =
@@ -239,9 +238,7 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
         DataEvolutionBatchScan scan =
                 (DataEvolutionBatchScan) table.newReadBuilder().withFilter(predicate).newScan();
         assertThat(scan.plan().splits()).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
-        assertThat(table.tagManager().tagExists(scan.readProtectionTagName())).isTrue();
-        assertThat(table.tagManager().getOrThrow(scan.readProtectionTagName()).getTagTimeRetained())
-                .isEqualTo(Duration.ofDays(1));
+        assertThat(scan.readProtectionTagName()).isNull();
     }
 
     @Test
@@ -596,8 +593,7 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
         DataEvolutionBatchScan scan = (DataEvolutionBatchScan) read.newScan();
         List<Split> splits = scan.plan().splits();
         assertThat(splits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
-        assertThat(scan.readProtectionTagName()).isNotNull();
-        assertThat(table.tagManager().tagExists(scan.readProtectionTagName())).isTrue();
+        assertThat(scan.readProtectionTagName()).isNull();
 
         for (IndexFileMeta file : indexFiles(table)) {
             table.fileIO()

@@ -62,7 +62,6 @@ import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -390,10 +389,6 @@ public class DataEvolutionBatchScan implements DataTableScan {
             return GlobalIndexQueryPlan.hasSupportedIndex(indexFiles)
                     ? dataPlan
                     : planEagerIndex(dataPlan, snapshot, partitionFilter, indexFiles, indexFilter);
-        }
-        if (table.coreOptions().scanPlanAutoTagTimeRetained() == null
-                && !(batchScan.getStartingScanner() instanceof StaticFromTagStartingScanner)) {
-            batchScan.createReadProtectionTag(snapshotId, Duration.ofDays(1));
         }
         List<Range> unindexed =
                 new DataEvolutionGlobalIndexCoverage(
