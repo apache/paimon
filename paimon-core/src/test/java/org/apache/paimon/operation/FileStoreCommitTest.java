@@ -52,6 +52,7 @@ import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -89,6 +90,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -102,6 +104,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -1466,6 +1469,80 @@ public class FileStoreCommitTest {
                                 .mapToLong(ManifestFileMeta::numDeletedFiles)
                                 .sum())
                 .isEqualTo(0);
+    }
+
+    @Test
+    public void testManifestCompactCleansUpFailedAttempt() throws Exception {
+        TestFileStore store = createStore(false);
+
+        List<KeyValue> keyValues = generateDataList(1);
+        BinaryRow partition = gen.getPartition(keyValues.get(0));
+        store.commitData(keyValues, s -> partition, kv -> 0);
+        store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap());
+        store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap());
+
+        java.nio.file.Path manifestDir = java.nio.file.Paths.get(tempDir.toString(), "manifest");
+        java.util.Set<String> before = listFileNames(manifestDir);
+
+        // wrap the snapshot commit so the first compact attempt loses the CAS race, like a
+        // concurrent writer would cause; the retry then succeeds
+        FileStoreCommitImpl commit = store.newCommit();
+        java.lang.reflect.Field field =
+                FileStoreCommitImpl.class.getDeclaredField("snapshotCommit");
+        field.setAccessible(true);
+        SnapshotCommit original = (SnapshotCommit) field.get(commit);
+        AtomicInteger attempts = new AtomicInteger();
+        field.set(
+                commit,
+                (SnapshotCommit)
+                        new SnapshotCommit() {
+                            @Override
+                            public boolean commit(
+                                    String expUuid,
+                                    Snapshot snapshot,
+                                    String branch,
+                                    List<PartitionStatistics> statistics)
+                                    throws Exception {
+                                if (attempts.getAndIncrement() == 0) {
+                                    return false;
+                                }
+                                return original.commit(expUuid, snapshot, branch, statistics);
+                            }
+
+                            @Override
+                            public void close() throws Exception {
+                                original.close();
+                            }
+                        });
+
+        commit.compactManifest();
+
+        // every file created during the call must be referenced by the resulting snapshot —
+        // the failed attempt's merged manifests and manifest lists must not survive as orphans
+        Snapshot latest = store.snapshotManager().latestSnapshot();
+        java.util.Set<String> referenced = new java.util.HashSet<>();
+        referenced.add(latest.baseManifestList());
+        referenced.add(latest.deltaManifestList());
+        store.manifestListFactory()
+                .create()
+                .readDataManifests(latest)
+                .forEach(m -> referenced.add(m.fileName()));
+
+        java.util.Set<String> created = new java.util.HashSet<>(listFileNames(manifestDir));
+        created.removeAll(before);
+        assertThat(created).isNotEmpty();
+        assertThat(referenced).containsAll(created);
+    }
+
+    private static java.util.Set<String> listFileNames(java.nio.file.Path dir) throws IOException {
+        java.util.Set<String> names = new java.util.HashSet<>();
+        if (!java.nio.file.Files.exists(dir)) {
+            return names;
+        }
+        try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.list(dir)) {
+            files.forEach(f -> names.add(f.getFileName().toString()));
+        }
+        return names;
     }
 
     @Test

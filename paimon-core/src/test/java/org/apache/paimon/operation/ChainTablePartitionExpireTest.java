@@ -638,6 +638,48 @@ public class ChainTablePartitionExpireTest {
     }
 
     @Test
+    public void testVetoedRollbackLeavesNoManifestOrphans() throws Exception {
+        Path tablePath = tablePath("rollback_veto_no_orphans");
+        createChainTable(tablePath, true);
+
+        FileStoreTable snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
+        writeGrouped(snapshotTable, "US", "20250101", "v1");
+        writeGrouped(snapshotTable, "CN", "20250301", "v2");
+        writeGrouped(loadTable(tablePath).switchToBranch("delta"), "CN", "20250315", "v3");
+
+        java.nio.file.Path manifestDir =
+                java.nio.file.Paths.get(tempDir.toString(), "rollback_veto_no_orphans", "manifest");
+        java.util.Set<String> before = new java.util.HashSet<>();
+        try (java.util.stream.Stream<java.nio.file.Path> files =
+                java.nio.file.Files.list(manifestDir)) {
+            files.forEach(f -> before.add(f.getFileName().toString()));
+        }
+
+        FileStoreTable snapshotBranch = loadTable(tablePath).switchToBranch("snapshot");
+        Snapshot target = snapshotBranch.snapshotManager().snapshot(1);
+        String protectionTag = "rollback-to-as-latest-" + target.id() + "-" + UUID.randomUUID();
+        snapshotBranch
+                .tagManager()
+                .createTag(target, protectionTag, null, Collections.emptyList(), false);
+        try (TableCommitImpl commit = snapshotBranch.newCommit(commitUser)) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.rollbackToAsLatest(
+                                            snapshotBranch.tagManager().getOrThrow(protectionTag)))
+                    .hasMessageContaining("Snapshot partition cannot be dropped");
+        }
+
+        // the aborted rollback wrote its manifests before the veto; they must be cleaned up
+        java.util.Set<String> after = new java.util.HashSet<>();
+        try (java.util.stream.Stream<java.nio.file.Path> files =
+                java.nio.file.Files.list(manifestDir)) {
+            files.forEach(f -> after.add(f.getFileName().toString()));
+        }
+        after.removeAll(before);
+        assertThat(after).isEmpty();
+    }
+
+    @Test
     public void testRollbackRejectedWhenBatchDroppingBaselinesOfDelta() throws Exception {
         Path tablePath = tablePath("rollback_reject_batch_baseline");
         createChainTable(tablePath, true);
