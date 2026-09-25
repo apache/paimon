@@ -25,6 +25,7 @@ still applies them while reading, so pushdown remains an optimization.
 import json
 import os
 from threading import Lock
+from types import SimpleNamespace
 from typing import List, Optional, Tuple
 
 from packaging.version import InvalidVersion, Version
@@ -283,9 +284,7 @@ class _NativeRestTableCache:
     """One native environment per Python environment, never sent to workers."""
 
     def __init__(self):
-        self.pid = os.getpid()
-        self.lock = Lock()
-        self.entry = None
+        self._states = {}
 
     def __getstate__(self):
         return {}
@@ -296,15 +295,20 @@ class _NativeRestTableCache:
     def get(self, response, database, table, options):
         from pypaimon_rust.datafusion import Table
 
-        if self.pid != os.getpid():
-            self.__init__()
+        pid = os.getpid()
+        # Publish a complete state atomically; never touch an inherited lock.
+        states = self._states
+        state = states.get(pid)
+        if state is None:
+            state = states.setdefault(pid, SimpleNamespace(lock=Lock(), entry=None))
+            self._states = {pid: state}
         key = (response, database, table, tuple(sorted(options.items())))
-        with self.lock:
-            if self.entry is None or self.entry[0] != key:
+        with state.lock:
+            if state.entry is None or state.entry[0] != key:
                 native_table = Table.from_rest_response(
                     response, database=database, table=table, rest_options=options)
-                self.entry = (key, native_table)
-            return self.entry[1]
+                state.entry = (key, native_table)
+            return state.entry[1]
 
 
 def _native_read_builder(table):

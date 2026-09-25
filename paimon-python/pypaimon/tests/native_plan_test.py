@@ -904,10 +904,10 @@ class NativePlanTest(unittest.TestCase):
                 self.assertIsNot(replacement, original)
                 original = replacement
             restored = pickle.loads(pickle.dumps(cache))
-            self.assertIsNone(restored.entry)
+            self.assertEqual(restored._states, {})
             self.assertIsNot(restored.get(response, db, table, options), original)
-            cache.pid = -1
-            self.assertIsNot(cache.get(response, db, table, options), original)
+            with patch('pypaimon.read.native_plan.os.getpid', return_value=-1):
+                self.assertIsNot(cache.get(response, db, table, options), original)
 
     def test_native_rest_cache_lifetime_and_concurrent_access(self):
         import gc
@@ -934,6 +934,78 @@ class NativePlanTest(unittest.TestCase):
             del cache
             gc.collect()
             self.assertIsNone(reference())
+
+    def test_native_rest_cache_concurrent_first_access_after_fork(self):
+        import multiprocessing
+        import os
+        from threading import Event, Lock, Thread, current_thread
+        from pypaimon.read.native_plan import _NativeRestTableCache
+
+        if 'fork' not in multiprocessing.get_all_start_methods():
+            self.skipTest('fork required')
+        context = multiprocessing.get_context('fork')
+        fake_df = ModuleType('pypaimon_rust.datafusion')
+        fake_df.Table = Mock()
+        fake_df.Table.from_rest_response.side_effect = lambda *args, **kwargs: object()
+        cache = _NativeRestTableCache()
+        held, release = Event(), Event()
+
+        def hold_parent_lock():
+            with cache._states[os.getpid()].lock:
+                held.set()
+                release.wait()
+
+        def child(connection):
+            creating, resume = Event(), Event()
+            results = []
+            fake_df.Table.from_rest_response.reset_mock()
+
+            def new_lock():
+                if current_thread().name == 'first':
+                    creating.set()
+                    assert resume.wait(5)
+                return Lock()
+
+            def access():
+                results.append(cache.get('response', 'db', 't', {}))
+
+            with patch('pypaimon.read.native_plan.Lock', side_effect=new_lock):
+                first = Thread(target=access, name='first', daemon=True)
+                second = Thread(target=access, name='second', daemon=True)
+                first.start()
+                assert creating.wait(5)
+                second.start()
+                second.join(2)
+                second_completed = not second.is_alive()
+                resume.set()
+                first.join(2)
+                connection.send((second_completed, not first.is_alive(),
+                                 len(results) == 2 and results[0] is results[1],
+                                 fake_df.Table.from_rest_response.call_count))
+            connection.close()
+
+        with patch.dict(sys.modules, {'pypaimon_rust.datafusion': fake_df}):
+            cache.get('response', 'db', 't', {})
+            holder = Thread(target=hold_parent_lock, daemon=True)
+            holder.start()
+            self.assertTrue(held.wait(5))
+            receiving, sending = context.Pipe(duplex=False)
+            process = context.Process(target=child, args=(sending,))
+            try:
+                process.start()
+                sending.close()
+                self.assertTrue(receiving.poll(10), 'child deadlocked on inherited lock')
+                self.assertEqual(receiving.recv(), (True, True, True, 1))
+                process.join(5)
+                self.assertEqual(process.exitcode, 0)
+            finally:
+                if process.is_alive():
+                    process.terminate()
+                    process.join(5)
+                receiving.close()
+                sending.close()
+                release.set()
+                holder.join(5)
 
     def test_native_rest_cache_retries_failed_construction(self):
         from pypaimon.read.native_plan import _NativeRestTableCache
