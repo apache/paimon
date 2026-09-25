@@ -122,11 +122,281 @@ public class DataEvolutionFileStoreScanTest {
                         readType,
                         Collections.emptySet(),
                         false,
-                        entry -> fileFieldIds(schemas.get(entry.file().schemaId()), entry.file()));
+                        entry -> fileFieldIds(schemas.get(entry.file().schemaId()), entry.file()),
+                        null);
 
         assertThat(pruned)
                 .extracting(e -> e.file().fileName())
                 .containsExactly("data-older.parquet");
+    }
+
+    @Test
+    public void testReadTypePruningKeepsAnchorWhenOnlyDedicatedFilesRemain() {
+        // SELECT only a blob column: the anchor normal file does not write it, so without
+        // this fix the kept list would hold the blob file alone and the reader would derive
+        // the logical row range from the blob file's sub-range, dropping the rows outside
+        Schema schema = createSchema("v", "b");
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        schemas.put(0L, tableSchema);
+
+        // anchor normal file covers the whole group range [0, 9] but does not write "b"
+        ManifestEntry anchorFile =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-anchor.parquet",
+                        0L,
+                        new String[] {"v"},
+                        new String[] {"v"},
+                        null,
+                        1L,
+                        0L,
+                        10L);
+        // blob file covers only row ids [0, 2]
+        ManifestEntry blob =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-b-0.blob",
+                        0L,
+                        new String[] {"b"},
+                        new String[] {"b"},
+                        null,
+                        5L,
+                        0L,
+                        3L);
+
+        RowType readType = DataTypes.ROW(DataTypes.FIELD(1, "b", DataTypes.STRING()));
+
+        List<ManifestEntry> pruned =
+                DataEvolutionFileStoreScan.pruneByReadType(
+                        Arrays.asList(anchorFile, blob),
+                        readType,
+                        Collections.emptySet(),
+                        false,
+                        entry -> fileFieldIds(schemas.get(entry.file().schemaId()), entry.file()),
+                        null);
+
+        assertThat(pruned)
+                .extracting(e -> e.file().fileName())
+                .containsExactlyInAnyOrder("data-b-0.blob", "data-anchor.parquet");
+    }
+
+    @Test
+    public void testReadTypePruningKeepsAnchorOnlyWhenNoNormalFileRemains() {
+        // projection references the blob column and a normal column that a newer full-range
+        // normal file writes: kept already contains a normal file, so the anchor must not
+        // be pulled in just because the group has dedicated files
+        Schema schema = createSchema("u", "v", "b");
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        schemas.put(0L, tableSchema);
+
+        // anchor writes only "u", which the query does not reference
+        ManifestEntry anchorFile =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-anchor.parquet",
+                        0L,
+                        new String[] {"u"},
+                        new String[] {"u"},
+                        null,
+                        1L,
+                        0L,
+                        10L);
+        ManifestEntry newer =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-newer.parquet",
+                        0L,
+                        new String[] {"v"},
+                        new String[] {"v"},
+                        null,
+                        5L,
+                        0L,
+                        10L);
+        ManifestEntry blob =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-b-0.blob",
+                        0L,
+                        new String[] {"b"},
+                        new String[] {"b"},
+                        null,
+                        5L,
+                        0L,
+                        3L);
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(1, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(2, "b", DataTypes.INT()));
+
+        List<ManifestEntry> pruned =
+                DataEvolutionFileStoreScan.pruneByReadType(
+                        Arrays.asList(anchorFile, newer, blob),
+                        readType,
+                        Collections.emptySet(),
+                        false,
+                        entry -> fileFieldIds(schemas.get(entry.file().schemaId()), entry.file()),
+                        null);
+
+        assertThat(pruned)
+                .extracting(e -> e.file().fileName())
+                .containsExactlyInAnyOrder("data-newer.parquet", "data-b-0.blob");
+    }
+
+    @Test
+    public void testReadTypePruningSkipsAnchorWhenDedicatedFilesCoverRequestedRanges() {
+        // Row-range pushdown requests [5, 5] and [9, 9]; the kept blob files already cover both, so
+        // the reader can derive the requested rows from them and the anchor would only read extra.
+        Schema schema = createSchema("v", "b");
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        schemas.put(0L, tableSchema);
+
+        ManifestEntry anchorFile =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-anchor.parquet",
+                        0L,
+                        new String[] {"v"},
+                        new String[] {"v"},
+                        null,
+                        1L,
+                        0L,
+                        10L);
+        ManifestEntry blob5 =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-b-5.blob",
+                        0L,
+                        new String[] {"b"},
+                        new String[] {"b"},
+                        null,
+                        5L,
+                        5L,
+                        1L);
+        ManifestEntry blob9 =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-b-9.blob",
+                        0L,
+                        new String[] {"b"},
+                        new String[] {"b"},
+                        null,
+                        5L,
+                        9L,
+                        1L);
+        RowType readType = DataTypes.ROW(DataTypes.FIELD(1, "b", DataTypes.STRING()));
+        RowRangeIndex rowRangeIndex =
+                RowRangeIndex.create(Arrays.asList(new Range(5, 5), new Range(9, 9)));
+
+        List<ManifestEntry> pruned =
+                DataEvolutionFileStoreScan.pruneByReadType(
+                        Arrays.asList(anchorFile, blob5, blob9),
+                        readType,
+                        Collections.emptySet(),
+                        false,
+                        entry -> fileFieldIds(schemas.get(entry.file().schemaId()), entry.file()),
+                        rowRangeIndex);
+
+        assertThat(pruned)
+                .extracting(e -> e.file().fileName())
+                .containsExactlyInAnyOrder("data-b-5.blob", "data-b-9.blob");
+    }
+
+    @Test
+    public void testReadTypePruningKeepsAnchorWhenDedicatedFilesMissRequestedRanges() {
+        // Row-range pushdown requests [5, 5] and [9, 9], but the blob column is backfilled only for
+        // row 5; row 9 has no blob file. Without the anchor the reader would derive the range from
+        // the blob's [5, 5] and drop the requested row 9.
+        Schema schema = createSchema("v", "b");
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        schemas.put(0L, tableSchema);
+
+        ManifestEntry anchorFile =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-anchor.parquet",
+                        0L,
+                        new String[] {"v"},
+                        new String[] {"v"},
+                        null,
+                        1L,
+                        0L,
+                        10L);
+        ManifestEntry blob5 =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-b-5.blob",
+                        0L,
+                        new String[] {"b"},
+                        new String[] {"b"},
+                        null,
+                        5L,
+                        5L,
+                        1L);
+        RowType readType = DataTypes.ROW(DataTypes.FIELD(1, "b", DataTypes.STRING()));
+        RowRangeIndex rowRangeIndex =
+                RowRangeIndex.create(Arrays.asList(new Range(5, 5), new Range(9, 9)));
+
+        List<ManifestEntry> pruned =
+                DataEvolutionFileStoreScan.pruneByReadType(
+                        Arrays.asList(anchorFile, blob5),
+                        readType,
+                        Collections.emptySet(),
+                        false,
+                        entry -> fileFieldIds(schemas.get(entry.file().schemaId()), entry.file()),
+                        rowRangeIndex);
+
+        assertThat(pruned)
+                .extracting(e -> e.file().fileName())
+                .containsExactlyInAnyOrder("data-b-5.blob", "data-anchor.parquet");
+    }
+
+    @Test
+    public void testReadTypePruningKeepsAnchorForMultiColumnBlobs() {
+        // SELECT two blob columns covering different sub-ranges: b1 over [0, 6] and b2 over [3, 9].
+        // Their union spans the whole group, but each column is read as its own field bunch, so
+        // coverage is judged per column and the anchor is kept for b1's gap at [7, 9].
+        Schema schema = createSchema("v", "b1", "b2");
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        schemas.put(0L, tableSchema);
+
+        ManifestEntry anchorFile =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-anchor.parquet",
+                        0L,
+                        new String[] {"v"},
+                        new String[] {"v"},
+                        null,
+                        1L,
+                        0L,
+                        10L);
+        ManifestEntry b1 =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-b1-0.blob",
+                        0L,
+                        new String[] {"b1"},
+                        new String[] {"b1"},
+                        null,
+                        5L,
+                        0L,
+                        7L);
+        ManifestEntry b2 =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-b2-3.blob",
+                        0L,
+                        new String[] {"b2"},
+                        new String[] {"b2"},
+                        null,
+                        5L,
+                        3L,
+                        7L);
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(1, "b1", DataTypes.STRING()),
+                        DataTypes.FIELD(2, "b2", DataTypes.STRING()));
+
+        List<ManifestEntry> pruned =
+                DataEvolutionFileStoreScan.pruneByReadType(
+                        Arrays.asList(anchorFile, b1, b2),
+                        readType,
+                        Collections.emptySet(),
+                        false,
+                        entry -> fileFieldIds(schemas.get(entry.file().schemaId()), entry.file()),
+                        null);
+
+        assertThat(pruned)
+                .extracting(e -> e.file().fileName())
+                .containsExactlyInAnyOrder(
+                        "data-b1-0.blob", "data-b2-3.blob", "data-anchor.parquet");
     }
 
     @Test

@@ -45,6 +45,10 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -180,6 +184,78 @@ public class BlobUpdateTest extends TableTestBase {
         assertThat(actual.size()).isEqualTo(2);
         assertThat(actual.get(0)).isEqualTo(originalBlobs.get(5));
         assertThat(actual.get(1)).isEqualTo(updated9);
+    }
+
+    @Test
+    public void testProjectBlobColumnBackfilledForSubRangeKeepsAllRows() throws Exception {
+        // A data-evolution table whose blob column is backfilled for only a sub-range of a group:
+        // the normal file writes f0/f1 over row ids [0, 9], while the blob file writes f2 over
+        // only [0, 4]. Projecting f2 alone (no filter, no row-range pushdown) keeps just the blob
+        // file, which spans [0, 4]; without the anchor the reader derives the group range from that
+        // sub-range and drops rows [5, 9]. See #9965.
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        RowType normalType = table.rowType().project(Arrays.asList("f0", "f1"));
+        RowType blobType = table.rowType().project(Collections.singletonList("f2"));
+
+        // normal file writes f0/f1 over row ids [0, 9]
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(normalType)) {
+            for (int i = 0; i < 10; i++) {
+                write.write(GenericRow.of(i, BinaryString.fromString("row-" + i)));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(write.prepareCommit());
+        }
+
+        // blob file writes f2 for only the first five rows [0, 4]
+        long firstRowId = getTableDefault().snapshotManager().latestSnapshot().nextRowId() - 10;
+        List<byte[]> blobs = new ArrayList<>();
+        builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(blobType)) {
+            for (int i = 0; i < 5; i++) {
+                byte[] bytes = ("blob-" + i).getBytes();
+                blobs.add(bytes);
+                write.write(GenericRow.of(new BlobData(bytes)));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write.prepareCommit();
+            reassignFirstRowId(commitables, firstRowId);
+            commit.commit(commitables);
+        }
+
+        FileStoreTable readTable = getTableDefault();
+        assertBlobFileRowIdRanges(readTable, Collections.singletonList(new Range(0L, 4L)));
+
+        ReadBuilder readBuilder =
+                readTable
+                        .newReadBuilder()
+                        .withReadType(readTable.rowType().project(Collections.singletonList("f2")));
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+
+        List<byte[]> actual = new ArrayList<>();
+        reader.forEachRemaining(
+                row -> actual.add(row.isNullAt(0) ? null : row.getBlob(0).toData()));
+
+        assertThat(actual.size()).isEqualTo(10);
+        for (int i = 0; i < 5; i++) {
+            assertThat(actual.get(i)).isEqualTo(blobs.get(i));
+        }
+        for (int i = 5; i < 10; i++) {
+            assertThat(actual.get(i)).isNull();
+        }
+    }
+
+    private void reassignFirstRowId(List<CommitMessage> commitables, long firstRowId) {
+        for (CommitMessage message : commitables) {
+            CommitMessageImpl impl = (CommitMessageImpl) message;
+            List<DataFileMeta> newFiles = new ArrayList<>(impl.newFilesIncrement().newFiles());
+            impl.newFilesIncrement().newFiles().clear();
+            for (DataFileMeta file : newFiles) {
+                impl.newFilesIncrement().newFiles().add(file.assignFirstRowId(firstRowId));
+            }
+        }
     }
 
     /**
