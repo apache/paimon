@@ -501,6 +501,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     protected WriterContainer<T> getWriterWrapper(BinaryRow partition, int bucket) {
+        requirePartitionBucketCount(partition);
         Map<Integer, WriterContainer<T>> buckets = getWriterContainers(partition);
         return buckets.computeIfAbsent(
                 bucket, k -> createWriterContainer(partition.copy(), bucket));
@@ -531,7 +532,19 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     public WriterContainer<T> createWriterContainer(BinaryRow partition, int bucket) {
+        requirePartitionBucketCount(partition);
         return createWriterContainer(partition, bucket, numBuckets, !ignoreNumBucketCheck, false);
+    }
+
+    private void requirePartitionBucketCount(BinaryRow partition) {
+        if (partitionType.getFieldCount() > 0 && options.bucketPerPartitionCountEnabled()) {
+            throw new UnsupportedOperationException(
+                    "Writing partition "
+                            + partition
+                            + " with per-partition bucket counts requires the partition-level "
+                            + "total bucket count. Use write(partition, bucket, totalBuckets, data) "
+                            + "instead.");
+        }
     }
 
     private WriterContainer<T> createWriterContainer(
