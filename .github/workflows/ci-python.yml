@@ -147,7 +147,7 @@ jobs:
               python -c "import rosbags; print('rosbags installed')"
             fi
             if [[ "${{ matrix.python-version }}" == "3.10" ]]; then
-              python -m pip install './paimon-python[lerobot]'
+              python -m pip install './paimon-python[lerobot,video]'
               python -c "import datasets, lerobot; print('datasets', datasets.__version__, 'lerobot', lerobot.__version__)"
             fi
 
