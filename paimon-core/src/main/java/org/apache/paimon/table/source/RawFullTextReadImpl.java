@@ -35,6 +35,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.index.pkfulltext.PkFullTextIndexFile;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -204,12 +205,8 @@ class RawFullTextReadImpl {
         Map<String, RawFullTextIndex> rawIndexes = new HashMap<>();
         long rowRangeStart = rawRowRanges.get(0).from;
         long rowRangeEnd = rawRowRanges.get(rawRowRanges.size() - 1).to;
-        String fallbackIndexType = firstIndexType(splitsByColumn);
         String column = textColumn.name();
-        String indexType = indexType(column, splitsByColumn);
-        if (indexType == null) {
-            indexType = checkNotNull(fallbackIndexType);
-        }
+        String indexType = resolveRawIndexType(column, splitsByColumn);
         GlobalIndexer globalIndexer =
                 GlobalIndexerFactoryUtils.load(indexType).create(textColumn, rawSearchOptions());
         try {
@@ -235,6 +232,22 @@ class RawFullTextReadImpl {
                     "Failed to create raw full-text index writer for column: " + column, e);
         }
         return rawIndexes;
+    }
+
+    /** The type of the temporary raw index, resolved like the persistent index's type. */
+    static String resolveRawIndexType(
+            String column, Map<String, List<IndexFullTextSearchSplit>> splitsByColumn) {
+        String indexType = indexType(column, splitsByColumn);
+        if (indexType == null) {
+            indexType = firstIndexType(splitsByColumn);
+        }
+        if (indexType == null) {
+            // No full-text index file exists at all, so no split can name the
+            // implementation: full text has the fixed 'full-text' implementation (the
+            // module must be on the reader classpath anyway, like for indexed reads).
+            indexType = PkFullTextIndexFile.INDEX_TYPE;
+        }
+        return indexType;
     }
 
     @Nullable

@@ -37,6 +37,7 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
+import org.apache.paimon.index.pkfulltext.PkFullTextIndexFile;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
@@ -71,7 +72,9 @@ import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.table.source.DeletionVectorTestUtils.commitDeletionVectors;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -201,6 +204,90 @@ public class FullTextSearchBuilderTest extends TableTestBase {
 
         GlobalIndexResult result = builder.newFullTextRead().read(plan);
         assertThat(result.results()).containsExactlyInAnyOrder(0L, 1L, 2L, 3L);
+    }
+
+    @Test
+    public void testFullTextWithoutIndexFilesScansRawDataInFullMode() throws Exception {
+        Identifier identifier = identifier("full_text_no_index_files");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(TEXT_FIELD_NAME, DataTypes.STRING())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE.key(), "full")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = getTable(identifier);
+
+        // no index has ever been built: every row is unindexed, and FULL mode promises to
+        // scan the raw data — it must not silently return an empty plan
+        writeDocuments(table, new String[] {"keyword here", "no match"});
+
+        FullTextSearchBuilder builder =
+                table.newFullTextSearchBuilder()
+                        .withQuery(TEXT_FIELD_NAME, matchQuery("keyword"))
+                        .withLimit(2);
+        FullTextScan.Plan plan = builder.newFullTextScan().scan();
+        assertThat(plan.splits()).anyMatch(RawFullTextSearchSplit.class::isInstance);
+
+        // with no index file to name the implementation, the temporary raw index uses
+        // the fixed 'full-text' implementation; splits without files do not change that
+        assertThat(RawFullTextReadImpl.resolveRawIndexType(TEXT_FIELD_NAME, Collections.emptyMap()))
+                .isEqualTo(PkFullTextIndexFile.INDEX_TYPE);
+        Map<String, List<IndexFullTextSearchSplit>> emptySplits = new HashMap<>();
+        emptySplits.put(
+                TEXT_FIELD_NAME,
+                Collections.singletonList(
+                        new IndexFullTextSearchSplit(
+                                TEXT_FIELD_NAME, 0, 10, Collections.emptyList())));
+        assertThat(RawFullTextReadImpl.resolveRawIndexType(TEXT_FIELD_NAME, emptySplits))
+                .isEqualTo(PkFullTextIndexFile.INDEX_TYPE);
+        Map<String, List<IndexFullTextSearchSplit>> otherColumnSplits = new HashMap<>();
+        otherColumnSplits.put(
+                "other",
+                Collections.singletonList(
+                        new IndexFullTextSearchSplit("other", 0, 10, Collections.emptyList())));
+        assertThat(RawFullTextReadImpl.resolveRawIndexType(TEXT_FIELD_NAME, otherColumnSplits))
+                .isEqualTo(PkFullTextIndexFile.INDEX_TYPE);
+
+        // DETAIL mode also recovers: its raw split covers the data files' ranges
+        FileStoreTable detailTable =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE.key(), "detail"));
+        FullTextScan.Plan detailPlan =
+                detailTable
+                        .newFullTextSearchBuilder()
+                        .withQuery(TEXT_FIELD_NAME, matchQuery("keyword"))
+                        .withLimit(2)
+                        .newFullTextScan()
+                        .scan();
+        assertThat(detailPlan.splits()).anyMatch(RawFullTextSearchSplit.class::isInstance);
+
+        // FAST mode stays index-only: with zero index files its plan is empty
+        Identifier fastIdentifier = identifier("full_text_no_index_files_fast");
+        Schema fastSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(TEXT_FIELD_NAME, DataTypes.STRING())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build();
+        catalog.createTable(fastIdentifier, fastSchema, false);
+        FileStoreTable fastTable = getTable(fastIdentifier);
+        writeDocuments(fastTable, new String[] {"keyword here"});
+
+        FullTextScan.Plan fastPlan =
+                fastTable
+                        .newFullTextSearchBuilder()
+                        .withQuery(TEXT_FIELD_NAME, matchQuery("keyword"))
+                        .withLimit(2)
+                        .newFullTextScan()
+                        .scan();
+        assertThat(fastPlan.splits()).noneMatch(RawFullTextSearchSplit.class::isInstance);
     }
 
     @Test

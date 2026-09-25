@@ -166,18 +166,19 @@ public class DataEvolutionFullTextScan implements FullTextScan {
                                     Collections.singletonList(selection.fileRange))));
         }
 
-        if (!fullTextIndexFiles.isEmpty()) {
-            List<Range> rawRowRanges =
-                    new DataEvolutionGlobalIndexCoverage(
-                                    table,
-                                    snapshot,
-                                    partitionFilter,
-                                    fullTextIndexFiles,
-                                    table.coreOptions().fullTextIndexSearchMode())
-                            .unindexedRanges(textColumnIds, null);
-            if (!rawRowRanges.isEmpty()) {
-                splits.add(new RawFullTextSearchSplit(rawRowRanges));
-            }
+        // With no full-text index file at all, every row is unindexed: FULL and DETAIL
+        // modes must still scan the raw data instead of silently returning nothing (FAST
+        // mode stays index-only — unindexedRanges returns empty there).
+        List<Range> rawRowRanges =
+                new DataEvolutionGlobalIndexCoverage(
+                                table,
+                                snapshot,
+                                partitionFilter,
+                                fullTextIndexFiles,
+                                table.coreOptions().fullTextIndexSearchMode())
+                        .unindexedRanges(textColumnIds, null);
+        if (!rawRowRanges.isEmpty()) {
+            splits.add(new RawFullTextSearchSplit(rawRowRanges));
         }
 
         @Nullable Snapshot planSnapshot = snapshot;
