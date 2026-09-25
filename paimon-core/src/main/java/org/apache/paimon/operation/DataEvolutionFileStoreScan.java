@@ -287,11 +287,9 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             kept.add(anchor);
         }
         // Blob and vector-store files may each cover only a sub-range of their group. If the kept
-        // files are all dedicated files that together do not cover the requested rows (the whole
-        // group when there is no row-range pushdown), the reader would derive the range from those
-        // sub-ranges and drop the rows outside them, so keep the full-range anchor. When they
-        // already cover the requested rows, the anchor is unnecessary and would only read an extra
-        // file.
+        // files are all dedicated files that do not cover the requested rows (the whole group when
+        // there is no row-range pushdown), the reader would derive the range from those sub-ranges
+        // and drop the rows outside them, so keep the full-range anchor.
         if (anchor == null
                 && !kept.isEmpty()
                 && kept.stream()
@@ -305,7 +303,16 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                     rowRangeIndex == null
                             ? Collections.singletonList(fullRange)
                             : rowRangeIndex.intersectedRanges(fullRange.from, fullRange.to);
-            if (!coversRanges(kept, requested)) {
+            // Coverage must hold per projected column: each column is read as its own field bunch,
+            // so one column's files filling another column's gap does not make that column
+            // readable. Keep the anchor when any column's files leave a requested row uncovered.
+            boolean everyColumnCovered =
+                    kept.stream()
+                            .collect(Collectors.groupingBy(e -> e.file().writeCols()))
+                            .values()
+                            .stream()
+                            .allMatch(files -> coversRanges(files, requested));
+            if (!everyColumnCovered) {
                 kept.add(fullRangeAnchor);
             }
         }

@@ -341,6 +341,65 @@ public class DataEvolutionFileStoreScanTest {
     }
 
     @Test
+    public void testReadTypePruningKeepsAnchorForMultiColumnBlobs() {
+        // SELECT two blob columns covering different sub-ranges: b1 over [0, 6] and b2 over [3, 9].
+        // Their union spans the whole group, but each column is read as its own field bunch, so
+        // coverage is judged per column and the anchor is kept for b1's gap at [7, 9].
+        Schema schema = createSchema("v", "b1", "b2");
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        schemas.put(0L, tableSchema);
+
+        ManifestEntry anchorFile =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-anchor.parquet",
+                        0L,
+                        new String[] {"v"},
+                        new String[] {"v"},
+                        null,
+                        1L,
+                        0L,
+                        10L);
+        ManifestEntry b1 =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-b1-0.blob",
+                        0L,
+                        new String[] {"b1"},
+                        new String[] {"b1"},
+                        null,
+                        5L,
+                        0L,
+                        7L);
+        ManifestEntry b2 =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-b2-3.blob",
+                        0L,
+                        new String[] {"b2"},
+                        new String[] {"b2"},
+                        null,
+                        5L,
+                        3L,
+                        7L);
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(1, "b1", DataTypes.STRING()),
+                        DataTypes.FIELD(2, "b2", DataTypes.STRING()));
+
+        List<ManifestEntry> pruned =
+                DataEvolutionFileStoreScan.pruneByReadType(
+                        Arrays.asList(anchorFile, b1, b2),
+                        readType,
+                        Collections.emptySet(),
+                        false,
+                        entry -> fileFieldIds(schemas.get(entry.file().schemaId()), entry.file()),
+                        null);
+
+        assertThat(pruned)
+                .extracting(e -> e.file().fileName())
+                .containsExactlyInAnyOrder(
+                        "data-b1-0.blob", "data-b2-3.blob", "data-anchor.parquet");
+    }
+
+    @Test
     public void testEvolutionStatsSingleFile() {
         Schema schema = createSchema("f0", "f1");
         TableSchema tableSchema = TableSchema.create(0L, schema);
