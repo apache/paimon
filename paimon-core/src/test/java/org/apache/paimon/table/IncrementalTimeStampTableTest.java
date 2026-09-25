@@ -25,6 +25,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Pair;
@@ -45,6 +46,50 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link CoreOptions#INCREMENTAL_BETWEEN_TIMESTAMP}. */
 public class IncrementalTimeStampTableTest extends TableTestBase {
+
+    @Test
+    public void testDiffFromBeforeEarliestRetainedSnapshot() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("k", DataTypes.INT())
+                        .column("v", DataTypes.INT())
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        write(table, GenericRow.of(1, 1));
+        write(table, GenericRow.of(2, 2));
+        write(table, GenericRow.of(3, 3));
+
+        // expire snapshot 1 so the earliest retained snapshot is no longer the first one
+        ExpireConfig expireConfig =
+                ExpireConfig.builder().snapshotRetainMin(1).snapshotRetainMax(2).build();
+        ((ExpireSnapshotsImpl) table.newExpireSnapshots().config(expireConfig)).expire();
+
+        SnapshotManager snapshotManager =
+                newSnapshotManager(
+                        LocalFileIO.create(),
+                        new Path(String.format("%s/%s.db/%s", warehouse, database, "T")));
+        assertThat(snapshotManager.earliestSnapshot().id())
+                .isGreaterThan(Snapshot.FIRST_SNAPSHOT_ID);
+
+        // the start timestamp predates every retained snapshot: the "before" state is
+        // unknown/expired, so every row live at the end belongs in the diff — rows
+        // created at or before the earliest retained snapshot must not vanish
+        long startTimestamp = 1L;
+        long endTimestamp = snapshotManager.latestSnapshot().timeMillis();
+
+        assertThat(
+                        read(
+                                table,
+                                Pair.of(
+                                        INCREMENTAL_BETWEEN_TIMESTAMP,
+                                        String.format("%s,%s", startTimestamp, endTimestamp)),
+                                Pair.of(INCREMENTAL_BETWEEN_SCAN_MODE, "diff")))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 1), GenericRow.of(2, 2), GenericRow.of(3, 3));
+    }
 
     @Test
     public void testDiffFromBeforeFirstSnapshot() throws Exception {
