@@ -45,6 +45,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.filesystem.caching_file_io import CachingFileIO
 from pypaimon.common.identifier import Identifier
+from pypaimon.common.json_util import JSON
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.table_schema import TableSchema
@@ -672,7 +673,8 @@ class RESTCatalog(Catalog):
         return TableMetadata(
             schema=schema.copy(options),
             is_external=response.get_is_external(),
-            uuid=response.get_id()
+            uuid=response.get_id(),
+            rest_table_response=JSON.to_json(response)
         )
 
     def file_io_from_options(self, table_path: str) -> FileIO:
@@ -718,7 +720,8 @@ class RESTCatalog(Catalog):
             identifier=identifier,
             uuid=metadata.uuid,
             catalog_loader=self.catalog_loader(),
-            supports_version_management=True  # REST catalogs support version management
+            supports_version_management=True,
+            rest_table_response=getattr(metadata, 'rest_table_response', None)
         )
         # Use the path from server response directly (do not trim scheme)
         table_path = schema.options.get(CoreOptions.PATH.key())

@@ -174,7 +174,7 @@ public class DataEvolutionFullTextScan implements FullTextScan {
                                     partitionFilter,
                                     fullTextIndexFiles,
                                     table.coreOptions().fullTextIndexSearchMode())
-                            .unindexedRanges(textColumnIds);
+                            .unindexedRanges(textColumnIds, null);
             if (!rawRowRanges.isEmpty()) {
                 splits.add(new RawFullTextSearchSplit(rawRowRanges));
             }

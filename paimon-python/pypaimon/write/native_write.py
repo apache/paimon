@@ -16,36 +16,61 @@
 
 """Optional Rust data writer behind PyPaimon's batch and stream builders."""
 
+from importlib import import_module
+
 import pyarrow as pa
 
-from pypaimon.read.native_plan import native_method_available
-from pypaimon.schema.arrow_schema import normalize_arrow_strings
+from pypaimon.common.options.core_options import CoreOptions, MergeEngine
+from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
+from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 from pypaimon.write.commit_message_serializer import deserialize_commit_message
 from pypaimon.write.native_commit import create_native_write_table
 from pypaimon.write.row_utils import row_to_named_values, row_values_to_arrow_table
 
 
 def native_write_available() -> bool:
-    """Check every binding entry point used by the writer bridge."""
-    return all(native_method_available(type_name, method) for type_name, method in (
-        ('Table', 'from_resolved_schema'),
-        ('BatchWriteBuilder', '_with_commit_user'),
-        ('BatchWriteBuilder', 'with_overwrite'),
-        ('BatchTableWrite', 'write_arrow'),
-        ('BatchTableWrite', 'prepare_commit'),
-        ('StreamWriteBuilder', 'with_commit_user'),
-        ('StreamTableWrite', 'write_arrow'),
-        ('StreamTableWrite', 'prepare_commit'),
-        ('CommitMessage', 'serialize'),
-    ))
+    """Whether the optional Rust bindings are installed."""
+    try:
+        import_module('pypaimon_rust.datafusion')
+    except ImportError:
+        return False
+    return True
 
 
 def create_native_write(table, commit_user, static_partition=None, stream=False):
     """Return a native writer if the table can use the filesystem write path."""
+    schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+    sequence_fields = table.options.sequence_field()
+    if table.is_primary_key_table and sequence_fields:
+        # The native writer currently sorts sequence fields ascending and
+        # does not implement Java's NaN/signed-zero ordering.
+        if (not table.options.sequence_field_sort_order_is_ascending()
+                or any(pa.types.is_floating(schema.field(name).type) for name in sequence_fields)):
+            return None
+    partition_types = [schema.field(name).type for name in table.partition_keys]
     if (not native_write_available()
             or table.options.data_evolution_enabled()
+            or table.options.data_file_external_paths()
+            or table.bucket_mode() not in (BucketMode.HASH_FIXED,
+                                           BucketMode.BUCKET_UNAWARE)
+            or table.options.merge_engine() in (MergeEngine.FIRST_ROW,
+                                                MergeEngine.PARTIAL_UPDATE,
+                                                MergeEngine.AGGREGATE)
+            # Rust currently omits value stats for primary-key files.
+            or (table.is_primary_key_table and table.options.metadata_stats_enabled())
+            or table.options.target_file_row_num()
+            != CoreOptions.TARGET_FILE_ROW_NUM.default_value()
+            or table.options.changelog_file_format() not in (None, 'parquet')
             or table.options.file_format() != 'parquet'
+            # Rust validates nested Arrow child names strictly; PyPaimon accepts
+            # equivalent layouts such as list<item> and list<element>.
+            or any(pa.types.is_nested(field.type)
+                   or pa.types.is_fixed_size_binary(field.type) for field in schema)
+            # Rust cannot encode these partition keys yet.
+            or any(pa.types.is_binary(type_) or pa.types.is_large_binary(type_)
+                   or pa.types.is_floating(type_) for type_ in partition_types)
             or any(is_blob_file_field(field) for field in table.table_schema.fields)):
         return None
     native_table = create_native_write_table(table)
@@ -77,6 +102,7 @@ class NativeTableWrite:
         self._native_writer = native_writer
         self._python_writer = None
         self._written = False
+        self._schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
 
     def _switch_to_python(self):
         if self._python_writer is not None:
@@ -110,6 +136,15 @@ class NativeTableWrite:
     def write_arrow_batch(self, data):
         if self._python_writer is not None:
             return self._python_writer.write_arrow_batch(data)
+        if not arrow_schemas_compatible(
+                data.schema, self._schema, check_top_level_nullability=False,
+                allow_binary_compatibility=True):
+            raise ValueError(
+                "Input schema isn't consistent with table schema and write cols. "
+                f"Input schema is: {data.schema} Table schema is: {self._schema} "
+                "Write cols is: None")
+        if any(pa.types.is_fixed_size_binary(field.type) for field in data.schema):
+            return self._switch_to_python().write_arrow_batch(data)
         data = normalize_arrow_strings(data)
         if data.num_rows:
             # A failed native write may already have produced files. Never
@@ -144,9 +179,14 @@ class NativeTableWrite:
             if commit_identifier is not None:
                 raise TypeError('BatchTableWrite.prepare_commit accepts no identifier')
             messages = self._native_writer.prepare_commit()
-        return [deserialize_commit_message(
+        decoded = [deserialize_commit_message(
             message.serialize(), self.table.partition_keys_fields,
             self.table.trimmed_primary_keys_fields) for message in messages]
+        for message in decoded:
+            for file in message.new_files + message.changelog_files:
+                file.file_path = file.external_path or canonical_data_file_path(
+                    self.table, message.partition, message.bucket, file.file_name)
+        return decoded
 
     def close(self):
         if self._python_writer is not None:

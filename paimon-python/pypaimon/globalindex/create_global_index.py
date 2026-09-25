@@ -28,6 +28,7 @@ import pyarrow.compute as pc
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
+from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.btree.btree_index_writer import (
     BTREE_IDENTIFIER,
     BTreeIndexWriter,
@@ -160,7 +161,7 @@ class GlobalIndexBuilder:
 
     def build(self) -> List[CommitMessage]:
         read_builder = self._table.new_read_builder()
-        partition_filter = self._resolve_partition_filter(read_builder)
+        partition_filter = self._resolve_partition_filter()
         if partition_filter is not None:
             read_builder = read_builder.with_partition_filter(partition_filter)
 
@@ -486,15 +487,16 @@ class GlobalIndexBuilder:
                 "(bucket = -1), but table '%s' has bucket = %s."
                 % (self._table.identifier, bucket)
             )
-        if self._core_options.deletion_vectors_enabled():
+        if (self._core_options.deletion_vectors_enabled()
+                and not (self._index_type in VINDEX_IDENTIFIERS
+                         and self._table.options.data_evolution_enabled())):
             raise ValueError(
-                "Generic global index does not support tables with deletion "
-                "vectors enabled. Table '%s' has "
-                "'deletion-vectors.enabled' = true."
-                % self._table.identifier
+                "Global index build with deletion vectors requires a native "
+                "vector index on a data-evolution table. Table '%s', index type '%s'."
+                % (self._table.identifier, self._index_type)
             )
 
-    def _resolve_partition_filter(self, read_builder) -> Optional[Predicate]:
+    def _resolve_partition_filter(self) -> Optional[Predicate]:
         if self._partition_filter is not None:
             return self._partition_filter
         if self._partitions is None:
@@ -504,7 +506,7 @@ class GlobalIndexBuilder:
         if isinstance(partitions, dict):
             partitions = [partitions]
 
-        predicate_builder = read_builder.new_predicate_builder()
+        predicate_builder = PredicateBuilder(self._table.partition_keys_fields)
         partition_predicates = []
         for partition in partitions:
             sub_predicates = []

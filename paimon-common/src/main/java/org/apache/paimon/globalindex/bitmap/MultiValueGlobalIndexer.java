@@ -33,6 +33,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -84,6 +85,7 @@ public class MultiValueGlobalIndexer implements SortedGlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             long totalRowCount,
+            @Nullable List<Range> rowRanges,
             ExecutorService executor) {
         return new MultiValueBitmapIndexReader(
                 fileReader, files, keySerializer, totalRowCount, executor);

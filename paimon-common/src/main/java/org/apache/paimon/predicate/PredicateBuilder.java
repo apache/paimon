@@ -70,6 +70,10 @@ public class PredicateBuilder {
         this.fieldNames = rowType.getFieldNames();
     }
 
+    public RowType rowType() {
+        return rowType;
+    }
+
     public int indexOf(String field) {
         return fieldNames.indexOf(field);
     }

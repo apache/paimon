@@ -26,6 +26,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.Range;
 
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -51,6 +52,7 @@ public class LuminaVectorGlobalIndexer implements VectorGlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             long totalRowCount,
+            List<Range> rowRanges,
             ExecutorService executor) {
         return new LuminaVectorGlobalIndexReader(fileReader, files, fieldType, options, executor);
     }

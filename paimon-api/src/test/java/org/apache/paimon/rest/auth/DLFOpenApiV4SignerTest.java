@@ -25,6 +25,7 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -162,6 +163,27 @@ public class DLFOpenApiV4SignerTest {
         String auth2 = signer.authorization(restAuthParameter, token, HOST, signHeaders);
 
         assertEquals(auth1, auth2);
+    }
+
+    @Test
+    public void testAuthorizationWithTurkishLocale() throws Exception {
+        Locale originalLocale = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.US);
+            DLFOpenApiV4Signer signer = new DLFOpenApiV4Signer(REGION);
+            DLFToken token = new DLFToken("TestAKId", "TestAKSecret", null, null);
+            RESTAuthParameter restAuthParameter =
+                    new RESTAuthParameter("/test/path", new HashMap<>(), "GET", null);
+            Map<String, String> headers = signer.signHeaders(null, NOW, null, HOST);
+            headers.put("x-acs-signature-nonce", "fixed-nonce-for-test");
+            headers.put("X-ACS-SIGNATURE-NONCE", headers.remove("x-acs-signature-nonce"));
+
+            String expected = signer.authorization(restAuthParameter, token, HOST, headers);
+            Locale.setDefault(new Locale("tr", "TR"));
+            assertEquals(expected, signer.authorization(restAuthParameter, token, HOST, headers));
+        } finally {
+            Locale.setDefault(originalLocale);
+        }
     }
 
     @Test

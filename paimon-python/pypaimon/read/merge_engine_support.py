@@ -156,20 +156,14 @@ def check_sequence_field_valid(table) -> None:
         )
 
 
-def check_supported(table) -> None:
-    """Raise ``NotImplementedError`` if the table's merge-engine
-    configuration is outside what pypaimon's read path implements, or
-    ``ValueError`` if it is an outright-invalid configuration that Java
-    rejects at schema validation.
-
-    Non-PK tables are always fine (no merge function involved).
-    """
+def check_sequence_field_supported(table) -> None:
+    """Validate sequence configuration and types before reading or writing."""
     if not table.is_primary_key_table:
         return
     # ``sequence.field`` validity is engine-independent in Java
     # (SchemaValidation.validateSequenceField). pypaimon has no
     # schema-creation validation, so enforce the same invariants here on
-    # the read path, before per-engine dispatch.
+    # both paths, before per-engine dispatch.
     check_sequence_field_valid(table)
     # ``sequence.field`` validity (above) is Java-aligned and engine
     # independent. Some field *types* are valid in Java but unimplemented in
@@ -186,6 +180,19 @@ def check_supported(table) -> None:
             "handled by Java via RecordComparator) and VARIANT are not "
             "supported. Open an issue to track support.".format(
                 ", ".join(sorted(unsupported_seq))))
+
+
+def check_supported(table) -> None:
+    """Raise ``NotImplementedError`` if the table's merge-engine
+    configuration is outside what pypaimon's read path implements, or
+    ``ValueError`` if it is an outright-invalid configuration that Java
+    rejects at schema validation.
+
+    Non-PK tables are always fine (no merge function involved).
+    """
+    if not table.is_primary_key_table:
+        return
+    check_sequence_field_supported(table)
     engine = table.options.merge_engine()
     if engine == MergeEngine.DEDUPLICATE:
         return

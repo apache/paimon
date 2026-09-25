@@ -445,6 +445,7 @@ These table options affect global index build and read behavior:
 | Option | Default | Description |
 |---|---|---|
 | `global-index.enabled` | `true` | Whether scans can use global indexes. |
+| `global-index.query-in-reader.enabled` | `false` | Query supported scalar global indexes per data split in readers instead of materializing index results during scan planning. |
 | `global-index.search-mode` | Not set | Legacy fallback search mode for global-index queries. Family-specific options take precedence. |
 | `scalar-index.search-mode` | `fast` | Search mode for BTree, Bitmap, Multivalue, and FM queries. |
 | `vector-index.search-mode` | `fast` | Search mode for vector queries. |
@@ -460,3 +461,6 @@ These table options affect global index build and read behavior:
 | `global-index.thread-num` | `32` | Maximum number of concurrent threads for global index I/O. |
 | `visibility-callback.enabled` | `false` | Whether JVM batch or bounded-stream writers wait after commit for existing partition indexes to cover newly appended ranges. Does not hide the committed snapshot. |
 | `visibility-callback.timeout` | `30 min` | Maximum wait time for visibility callback. |
+
+The reader-side query option applies to supported scalar indexes on data evolution tables. It is
+evaluated by the core scan, including scans used by Flink and Spark.

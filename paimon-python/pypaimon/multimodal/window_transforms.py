@@ -38,8 +38,9 @@ def to_tensor(values, dtype=None):
 def images_to_tensor(values, return_uint8=False):
     """Decode a non-empty sequence of image bytes to a TCHW tensor.
 
-    Apply EXIF orientation and preserve grayscale as one channel. Eight-bit
-    pixels become float32 in [0, 1], or stay uint8 with ``return_uint8=True``.
+    Apply EXIF orientation, expand palettes to RGB/RGBA, and preserve grayscale
+    as one channel. Eight-bit pixels become float32 in [0, 1], or stay uint8
+    with ``return_uint8=True``.
     Higher-bit-depth pixels always become float32 in their original units.
     All decoded frames must have the same shape.
     """
@@ -70,7 +71,10 @@ def _decode_image(payload):
             "or Pillow.") from error
 
     with Image.open(io.BytesIO(payload)) as image:
-        array = np.array(ImageOps.exif_transpose(image), copy=True)
+        image = ImageOps.exif_transpose(image)
+        if image.mode == "P":
+            image = image.convert("RGBA" if "transparency" in image.info else "RGB")
+        array = np.array(image, copy=True)
     if array.ndim == 2:
         array = array[:, :, None]
     return array

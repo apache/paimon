@@ -161,6 +161,104 @@ class MultimodalTableTest(unittest.TestCase):
         _, bodies = table.scan().read_blobs("video", parallelism=2)
         self.assertEqual([video_bytes] * 3, bodies["video"])
 
+    def test_add_images_as_video_encodes_and_stores_frame_rows(self):
+        table = self.conn.create_table(
+            "image_video_frames",
+            schema=_schema({
+                "episode_id": pa.int64(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "video",
+                "blob-as-descriptor": "true",
+            }),
+        )
+        calls = []
+
+        def encode(images, output_path, **options):
+            images = list(images)
+            calls.append((images, options))
+            with open(output_path, "wb") as output:
+                output.write(b"encoded-video")
+            return len(images)
+
+        with patch(
+                "pypaimon.multimodal.video._encode_images_to_video",
+                encode):
+            table.add_images_as_video(
+                [b"frame-0", b"frame-1"],
+                [{"episode_id": 42}, {"episode_id": 42}],
+                fps=30,
+                codec="mpeg4",
+                pixel_format="yuv420p",
+                gop_size=2,
+                codec_options={"qscale": "3"},
+            )
+
+        self.assertEqual(
+            [
+                (
+                    [b"frame-0", b"frame-1"],
+                    {
+                        "fps": 30,
+                        "codec": "mpeg4",
+                        "pixel_format": "yuv420p",
+                        "gop_size": 2,
+                        "codec_options": {"qscale": "3"},
+                    },
+                )
+            ],
+            calls,
+        )
+        rows = table.scan().select(["episode_id", "video"]).to_list()
+        descriptors = [
+            pmm.VideoFrameDescriptor.deserialize(row["video"])
+            for row in rows
+        ]
+        self.assertEqual([0, 1], [value.frame_index for value in descriptors])
+        _, bodies = table.scan().read_blobs("video")
+        self.assertEqual([b"encoded-video"] * 2, bodies["video"])
+
+    def test_add_images_as_video_rejects_frame_count_mismatch(self):
+        table = self.conn.create_table(
+            "mismatched_image_video_frames",
+            schema=_schema({
+                "episode_id": pa.int64(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "video",
+                "blob-as-descriptor": "true",
+            }),
+        )
+        output_paths = []
+
+        def encode(unused_images, output_path, **unused_options):
+            output_paths.append(output_path)
+            with open(output_path, "wb") as output:
+                output.write(b"one-frame-video")
+            return 1
+
+        with patch(
+                "pypaimon.multimodal.video._encode_images_to_video",
+                encode):
+            with self.assertRaisesRegex(
+                    ValueError,
+                    "Image count 1 does not match frame row count 2"):
+                table.add_images_as_video(
+                    [b"frame-0"],
+                    [{"episode_id": 42}, {"episode_id": 42}],
+                    fps=30,
+                    codec="mpeg4",
+                    pixel_format="yuv420p",
+                    gop_size=2,
+                )
+
+        self.assertFalse(os.path.exists(output_paths[0]))
+        self.assertIsNone(
+            table.raw_table.snapshot_manager().get_latest_snapshot()
+        )
+
     def test_add_videos_packs_multiple_videos_in_one_commit(self):
         from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
 
@@ -2394,6 +2492,52 @@ class MultimodalTableTest(unittest.TestCase):
             ],
             rows,
         )
+
+    def test_merge_preserves_fields_first_present_in_later_source_rows(self):
+        users = self.conn.create_table(
+            "sparse_merge",
+            data=[
+                {"id": 1, "name": "Alice", "age": 30},
+                {"id": 2, "name": "Bob", "age": 25},
+            ],
+            schema=_schema({
+                "id": pa.int32(), "name": pa.string(), "age": pa.int32(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        source = [{"id": 1}, {"id": 2, "name": "Bobby"},
+                  {"id": 3, "name": "Carol"}]
+
+        users.merge("id").when_matched_update() \
+            .when_not_matched_insert().execute(source)
+
+        self.assertEqual([
+            {"id": 1, "name": None, "age": 30},
+            {"id": 2, "name": "Bobby", "age": 25},
+            {"id": 3, "name": "Carol", "age": None},
+        ], sorted(users.scan().to_list(), key=lambda row: row["id"]))
+        self.assertEqual({"id": 1}, source[0])
+
+    def test_merge_preserves_later_source_only_fields_with_mapped_keys(self):
+        users = self.conn.create_table(
+            "sparse_mapped_merge",
+            data=[{"id": 1, "name": "Alice"}],
+            schema=_schema({"id": pa.int32(), "name": pa.string()}),
+            options=_PARQUET_OPTIONS,
+        )
+        values = {"name": source_col("new_name")}
+
+        users.merge({"id": "source_id"}).when_matched_update(values) \
+            .when_not_matched_insert({
+                "id": source_col("source_id"), **values,
+            }).execute([
+                {"source_id": 1},
+                {"source_id": 2, "new_name": "Bob"},
+            ])
+
+        self.assertEqual([
+            {"id": 1, "name": None}, {"id": 2, "name": "Bob"},
+        ], sorted(users.scan().to_list(), key=lambda row: row["id"]))
 
     def test_merge_supports_source_key_mapping(self):
         users = self.conn.create_table(

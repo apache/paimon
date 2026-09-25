@@ -143,7 +143,7 @@ public class IncrementalDeltaStartingScanner extends AbstractStartingScanner {
             }
         }
 
-        return StartingScanner.fromPlan(new PlanImpl(null, endingSnapshotId, result));
+        return StartingScanner.fromPlan(new PlanImpl(null, endingSnapshotId, null, result));
     }
 
     public static StartingScanner betweenSnapshotIds(

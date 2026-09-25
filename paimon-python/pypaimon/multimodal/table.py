@@ -133,6 +133,54 @@ class MultimodalTable:
             [(video, frames, first_frame)], video_column=video_column
         )
 
+    def add_images_as_video(
+            self,
+            images,
+            frames,
+            *,
+            fps,
+            codec,
+            pixel_format,
+            gop_size,
+            codec_options=None,
+            video_column=None):
+        """Encode ordered images as one MP4 and append its logical frame rows.
+
+        Images may be encoded image bytes or Pillow images. ``frames`` supplies
+        every table column except ``video_column`` and must contain one row per
+        image. Encoding finishes before the Paimon write starts.
+        """
+        import os
+        import tempfile
+
+        from pypaimon.multimodal.video import _encode_images_to_video
+
+        column = self._resolve_video_frame_column(video_column)
+        target_schema = _target_schema(self.raw_table)
+        non_video_schema = pa.schema([
+            field for field in target_schema if field.name != column
+        ])
+        frame_table = _to_arrow_table(frames, non_video_schema)
+        with tempfile.TemporaryDirectory(prefix="pypaimon_video_") as directory:
+            video_path = os.path.join(directory, "video.mp4")
+            image_count = _encode_images_to_video(
+                images,
+                video_path,
+                fps=fps,
+                codec=codec,
+                pixel_format=pixel_format,
+                gop_size=gop_size,
+                codec_options=codec_options,
+            )
+            if image_count != frame_table.num_rows:
+                raise ValueError(
+                    "Image count %d does not match frame row count %d."
+                    % (image_count, frame_table.num_rows)
+                )
+            return self.add_video(
+                video_path, frame_table, video_column=column
+            )
+
     def add_videos(self, videos, *, video_column=None):
         """Append several encoded videos with one writer and one commit.
 
@@ -599,7 +647,11 @@ def _to_arrow_table(data, target_schema=None):
     elif isinstance(data, pa.RecordBatch):
         table = pa.Table.from_batches([data])
     elif isinstance(data, list):
-        table = pa.Table.from_pylist(data)
+        # Inference from the first row alone drops fields in later source rows.
+        names = dict.fromkeys(name for row in data for name in row)
+        table = pa.Table.from_pydict({
+            name: [row.get(name) for row in data] for name in names
+        })
     elif isinstance(data, dict):
         table = pa.Table.from_pydict(data)
     elif hasattr(data, "__dataframe__") or data.__class__.__module__.startswith("pandas"):

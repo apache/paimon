@@ -78,14 +78,15 @@ public class DataEvolutionGlobalIndexCoverage {
     }
 
     public List<Range> unindexedRanges(RowType rowType, @Nullable Predicate predicate) {
-        return unindexedRanges(collectFieldIds(rowType, predicate));
+        return unindexedRanges(collectFieldIds(rowType, predicate), null);
     }
 
     public List<Range> unindexedRanges(int fieldId) {
-        return unindexedRanges(Collections.singleton(fieldId));
+        return unindexedRanges(Collections.singleton(fieldId), null);
     }
 
-    public List<Range> unindexedRanges(Collection<Integer> fieldIds) {
+    public List<Range> unindexedRanges(
+            Collection<Integer> fieldIds, @Nullable List<Range> plannedDataRanges) {
         if (searchMode == GlobalIndexSearchMode.FAST) {
             return Collections.emptyList();
         }
@@ -95,7 +96,7 @@ public class DataEvolutionGlobalIndexCoverage {
 
         List<Range> dataRanges;
         if (searchMode == GlobalIndexSearchMode.DETAIL) {
-            dataRanges = dataRangesByDataFiles();
+            dataRanges = plannedDataRanges == null ? dataRangesByDataFiles() : plannedDataRanges;
         } else {
             dataRanges = Collections.singletonList(new Range(0, snapshot.nextRowId() - 1));
         }

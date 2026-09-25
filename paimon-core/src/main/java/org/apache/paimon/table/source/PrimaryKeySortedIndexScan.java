@@ -116,7 +116,7 @@ public final class PrimaryKeySortedIndexScan {
                             definition.indexType(),
                             rowType.getField(definition.fieldId()),
                             definition.options());
-            return indexer.createReader(fileReader, ioMetas, totalRowCount, executor);
+            return indexer.createReader(fileReader, ioMetas, totalRowCount, null, executor);
         };
     }
 

@@ -268,7 +268,8 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
         table = self._create_pk_table(
             'seq_fr', merge_engine='first-row',
             extra_options={'sequence.field': 'ts'})
-        self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'high'}])
+        with self.assertRaises(ValueError):
+            self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'high'}])
         with self.assertRaises(ValueError) as ctx:
             table.new_read_builder().new_read()
         self.assertIn('FIRST_ROW', str(ctx.exception))
@@ -301,7 +302,8 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
         """
         table = self._create_pk_table(
             'seq_missing', extra_options={'sequence.field': 'nope'})
-        self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'x'}])
+        with self.assertRaises(ValueError):
+            self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'x'}])
         with self.assertRaises(ValueError) as ctx:
             table.new_read_builder().new_read()
         self.assertIn('nope', str(ctx.exception))
@@ -312,7 +314,8 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
         """
         table = self._create_pk_table(
             'seq_dup', extra_options={'sequence.field': 'ts,ts'})
-        self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'x'}])
+        with self.assertRaises(ValueError):
+            self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'x'}])
         with self.assertRaises(ValueError) as ctx:
             table.new_read_builder().new_read()
         self.assertIn('ts', str(ctx.exception))
@@ -326,7 +329,8 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
         """
         table = self._create_pk_table(
             'seq_empty_seg', extra_options={'sequence.field': 'ts,,ts2'})
-        self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'x'}])
+        with self.assertRaises(ValueError):
+            self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'x'}])
         with self.assertRaises(ValueError) as ctx:
             table.new_read_builder().new_read()
         # The empty field name is the one that can't be found in the schema.
@@ -340,7 +344,8 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
         table = self._create_pk_table(
             'seq_xpart', extra_options={'sequence.field': 'ts'},
             partition_keys=['ts2'])
-        self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'x'}])
+        with self.assertRaises(ValueError):
+            self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'x'}])
         with self.assertRaises(ValueError) as ctx:
             table.new_read_builder().new_read()
         self.assertIn('cross partition', str(ctx.exception).lower())
@@ -356,7 +361,8 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
             'seq_agg_on_seq', merge_engine='aggregation',
             extra_options={'sequence.field': 'ts',
                            'fields.ts.aggregate-function': 'sum'})
-        self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'x'}])
+        with self.assertRaises(ValueError):
+            self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'x'}])
         with self.assertRaises(ValueError) as ctx:
             table.new_read_builder().new_read()
         self.assertIn('fields.ts.aggregate-function', str(ctx.exception))
@@ -421,15 +427,8 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
         self.catalog.create_table('default.seq_complex', schema, False)
         table = self.catalog.get_table('default.seq_complex')
         wb = table.new_batch_write_builder()
-        w = wb.new_write()
-        c = wb.new_commit()
-        try:
-            w.write_arrow(pa.Table.from_pylist(
-                [{'id': 1, 'seq': [1, 2], 'val': 'x'}], schema=pa_schema))
-            c.commit(w.prepare_commit())
-        finally:
-            w.close()
-            c.close()
+        with self.assertRaises(NotImplementedError):
+            wb.new_write()
         with self.assertRaises(NotImplementedError) as ctx:
             table.new_read_builder().new_read()
         self.assertIn('seq', str(ctx.exception))

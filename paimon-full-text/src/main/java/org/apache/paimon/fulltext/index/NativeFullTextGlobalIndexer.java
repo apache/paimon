@@ -24,6 +24,7 @@ import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.utils.Range;
 
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -51,6 +52,7 @@ public class NativeFullTextGlobalIndexer implements GlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             long totalRowCount,
+            List<Range> rowRanges,
             ExecutorService executor) {
         return new NativeFullTextGlobalIndexReader(fileReader, files, executor);
     }

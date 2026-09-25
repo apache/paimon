@@ -333,6 +333,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         indexFileReader,
                         indexIOMetaList,
                         rowRangeEnd - rowRangeStart + 1,
+                        null,
                         executor);
         VectorSearch vectorSearch =
                 new VectorSearch(vector, searchLimit, vectorColumn.name(), options)
@@ -366,6 +367,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         indexFileReader,
                         indexIOMetaList,
                         rowRangeEnd - rowRangeStart + 1,
+                        null,
                         executor);
         BatchVectorSearch batchVectorSearch =
                 new BatchVectorSearch(vectors, searchLimit, vectorColumn.name(), options)

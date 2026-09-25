@@ -495,12 +495,17 @@ def _read_field(decoder: _RowDecoder, data_type) -> Any:
         elif type_name.startswith('TIMESTAMP'):
             precision = _parse_timestamp_precision(type_name)
             millis = decoder.read_long()
+            # The value is placed into the Arrow time unit from_paimon_type maps the
+            # precision to (0 -> s, 1-3 -> ms, 4-6 -> us, 7-9 -> ns), so it must be
+            # returned in that unit. nano_of_milli is only on the wire for precision > 3.
+            if precision == 0:
+                return millis // 1000
             if precision <= 3:
                 return millis
-            else:
-                nano_of_milli = decoder.read_var_int()
-                micros = millis * 1000 + nano_of_milli // 1000
-                return micros
+            nano_of_milli = decoder.read_var_int()
+            if precision <= 6:
+                return millis * 1000 + nano_of_milli // 1000
+            return millis * 1_000_000 + nano_of_milli
         elif type_name == 'VARIANT':
             value_bytes = decoder.read_bytes()
             metadata_bytes = decoder.read_bytes()

@@ -294,9 +294,17 @@ def _file_format_dataset(file_io: FileIO, file_format: str, file_path: str,
             fragment_options = {}
             if known_size is not None and not _pyarrow_lt_7():
                 fragment_options["file_size"] = known_size
-            fragment = parquet_format.make_fragment(
-                file_path_for_pyarrow, filesystem=filesystem,
-                **fragment_options)
+            try:
+                fragment = parquet_format.make_fragment(
+                    file_path_for_pyarrow, filesystem=filesystem,
+                    **fragment_options)
+            except TypeError as error:
+                # PyArrow 7-12 expose make_fragment but do not accept the
+                # file_size hint. The handler already received the size.
+                if not fragment_options or 'file_size' not in str(error):
+                    raise
+                fragment = parquet_format.make_fragment(
+                    file_path_for_pyarrow, filesystem=filesystem)
             # Reuse this fragment's footer for schema discovery and scanning.
             return ds.FileSystemDataset(
                 [fragment], fragment.physical_schema, parquet_format, filesystem)

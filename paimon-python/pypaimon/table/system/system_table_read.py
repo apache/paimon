@@ -32,7 +32,8 @@ import pyarrow
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.split import Split
-from pypaimon.schema.data_types import DataField, PyarrowFieldParser
+from pypaimon.schema.data_types import (
+    AtomicType, DataField, PyarrowFieldParser)
 from pypaimon.table.system.system_table_scan import SystemSplit
 
 if TYPE_CHECKING:  # pragma: no cover - type-only import
@@ -40,9 +41,15 @@ if TYPE_CHECKING:  # pragma: no cover - type-only import
 
 
 _PREDICATE_NOT_SUPPORTED = (
-    "predicate pushdown on system tables is not supported yet; "
-    "filter the resulting PyArrow / pandas table on the client side"
+    "string-match predicate pushdown (starts_with / ends_with / contains / "
+    "like) on system tables is not supported yet; filter the resulting "
+    "PyArrow / pandas table on the client side"
 )
+
+# Value comparisons (equal / greater-than / is-in / ...) have no PyArrow
+# compute kernel for nested columns such as ``$files.write_cols`` or
+# ``$table_indexes.dv_ranges``; only null checks work there.
+_COMPARISON_NEEDS_SCALAR = ("isNull", "isNotNull")
 
 
 class SystemTableRead:
@@ -95,11 +102,28 @@ class SystemTableRead:
         return con
 
     def _materialise(self, splits: List[Split]) -> pyarrow.Table:
-        if self.predicate is not None:
+        from pypaimon.read.push_down_utils import predicate_supports_arrow_filter
+
+        predicate = self.predicate
+        if predicate is not None and not isinstance(predicate, Predicate):
+            # Preserve the public error contract for non-Predicate filter
+            # objects (e.g. ``with_filter(object())``): predicate_supports_
+            # arrow_filter dereferences ``.method`` and would otherwise leak
+            # an internal AttributeError.
             raise NotImplementedError(_PREDICATE_NOT_SUPPORTED)
+        if predicate is not None and not predicate_supports_arrow_filter(
+            predicate
+        ):
+            raise NotImplementedError(_PREDICATE_NOT_SUPPORTED)
+        if predicate is not None:
+            self._reject_non_scalar_filter_fields(predicate)
 
         if not splits:
             return self._empty_table()
+
+        arrow_predicate = (
+            self.predicate.to_arrow() if self.predicate is not None else None
+        )
 
         projected_names = [f.name for f in self.read_type]
         slices: List[pyarrow.Table] = []
@@ -110,6 +134,10 @@ class SystemTableRead:
                     + type(split).__name__
                 )
             arrow_table = split.arrow_table()
+            # Filter on the full schema before projection so a predicate may
+            # reference columns that are not part of the projection.
+            if arrow_predicate is not None:
+                arrow_table = arrow_table.filter(arrow_predicate)
             if projected_names:
                 arrow_table = arrow_table.select(projected_names)
             slices.append(arrow_table)
@@ -118,6 +146,40 @@ class SystemTableRead:
         if self.limit is not None and combined.num_rows > self.limit:
             combined = combined.slice(0, self.limit)
         return combined
+
+    def _reject_non_scalar_filter_fields(self, predicate: Predicate) -> None:
+        """Reject value comparisons on nested system-table columns.
+
+        System tables expose list/map/row columns (e.g. ``$files.write_cols``,
+        ``$table_indexes.dv_ranges``). PyArrow has no equality / comparison /
+        is-in kernel for those types, so ``arrow_table.filter`` would raise an
+        internal ``ArrowNotImplementedError``. Surface the documented
+        ``NotImplementedError`` instead. Null checks are left alone because the
+        ``is_null`` / ``is_valid`` kernels do accept nested input.
+        """
+        field_types = {
+            f.name: f.type for f in self.system_table.row_type().fields
+        }
+        pending: List[Predicate] = [predicate]
+        while pending:
+            current = pending.pop()
+            if current.method in ("and", "or"):
+                pending.extend(current.literals or [])
+                continue
+            if current.method in _COMPARISON_NEEDS_SCALAR:
+                continue
+            field_type = field_types.get(current.field)
+            if field_type is not None and not isinstance(field_type, AtomicType):
+                raise NotImplementedError(
+                    "predicate pushdown of "
+                    + repr(current.method)
+                    + " on the non-scalar system-table column "
+                    + repr(current.field)
+                    + " (type "
+                    + type(field_type).__name__
+                    + ") is not supported; filter the resulting PyArrow / "
+                    + "pandas table on the client side"
+                )
 
     def _empty_table(self) -> pyarrow.Table:
         target_schema = PyarrowFieldParser.from_paimon_schema(self.read_type)

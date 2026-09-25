@@ -126,58 +126,15 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         coverageIndexFiles,
                         table.coreOptions().scalarIndexSearchMode());
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
-        Map<Integer, IndexMetaFileGroup> indexMetas = new HashMap<>();
-        Map<Integer, List<IndexMetaFileGroup>> extraIndexMetas = new HashMap<>();
-        for (IndexFileMeta indexFile : indexFiles) {
-            GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
-            String indexType = indexFile.indexType();
-            Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
-            int indexFieldId = meta.indexFieldId();
-            List<Integer> fieldIds = meta.getIndexedFieldIds();
-            IndexMetaFileGroup group = indexMetas.get(indexFieldId);
-            if (group == null) {
-                group = new IndexMetaFileGroup(indexFieldId, fieldIds);
-                indexMetas.put(indexFieldId, group);
-                if (meta.extraFieldIds() != null) {
-                    for (int extra : meta.extraFieldIds()) {
-                        extraIndexMetas.computeIfAbsent(extra, k -> new ArrayList<>()).add(group);
-                    }
-                }
-            } else {
-                checkArgument(
-                        group.fieldIds.equals(fieldIds),
-                        "Primary field %s owns multiple indexes with different columns %s and %s; "
-                                + "a primary column can own at most one index.",
-                        indexFieldId,
-                        group.fieldIds,
-                        fieldIds);
-            }
-            group.addFile(indexType, range, indexFile);
-        }
+        Map<Integer, List<IndexMetaFileGroup>> groupsByField = groupIndexFiles(indexFiles);
         IntFunction<Collection<GlobalIndexReader>> readersFunction =
                 fId -> {
-                    List<IndexMetaFileGroup> groups = new ArrayList<>();
-                    IndexMetaFileGroup group = indexMetas.get(fId);
-                    if (group != null) {
-                        groups.add(group);
-                    }
-                    List<IndexMetaFileGroup> extraGroups = extraIndexMetas.get(fId);
-                    if (extraGroups != null) {
-                        for (IndexMetaFileGroup extraGroup : extraGroups) {
-                            if (!groups.contains(extraGroup)) {
-                                groups.add(extraGroup);
-                            }
-                        }
-                    }
+                    List<IndexMetaFileGroup> groups =
+                            groupsByField.getOrDefault(fId, Collections.emptyList());
                     if (groups.isEmpty()) {
                         return Collections.emptyList();
                     }
 
-                    // A field can be covered by its dedicated primary index and by one or more
-                    // multi-column indexes that carry it as an extra field. These are alternative
-                    // sources of matches, possibly over different row ranges, so union them. The
-                    // previous primary-only choice made coverage planning believe the extra-field
-                    // tail was indexed while the evaluator silently ignored it.
                     List<GlobalIndexReader> allReaders = new ArrayList<>();
                     for (IndexMetaFileGroup indexGroup : groups) {
                         allReaders.addAll(createReaders(indexFileReader, indexGroup, rowType));
@@ -187,8 +144,48 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
     }
 
+    /** Groups metadata for both planning-time readers and reader-side query plans. */
+    static Map<Integer, List<IndexMetaFileGroup>> groupIndexFiles(
+            Collection<IndexFileMeta> indexFiles) {
+        Map<Integer, IndexMetaFileGroup> primaryGroups = new HashMap<>();
+        for (IndexFileMeta indexFile : indexFiles) {
+            GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
+            int indexFieldId = meta.indexFieldId();
+            List<Integer> fieldIds = meta.getIndexedFieldIds();
+            IndexMetaFileGroup group = primaryGroups.get(indexFieldId);
+            if (group == null) {
+                group = new IndexMetaFileGroup(indexFieldId, fieldIds);
+                primaryGroups.put(indexFieldId, group);
+            } else {
+                checkArgument(
+                        group.fieldIds.equals(fieldIds),
+                        "Primary field %s owns multiple indexes with different columns %s and %s; "
+                                + "a primary column can own at most one index.",
+                        indexFieldId,
+                        group.fieldIds,
+                        fieldIds);
+            }
+            group.addFile(indexFile.indexType(), meta.rowRange(), indexFile);
+        }
+
+        Map<Integer, List<IndexMetaFileGroup>> groupsByField = new HashMap<>();
+        for (IndexMetaFileGroup group : primaryGroups.values()) {
+            groupsByField.computeIfAbsent(group.indexFieldId, k -> new ArrayList<>()).add(group);
+        }
+        for (IndexMetaFileGroup group : primaryGroups.values()) {
+            for (int fieldId : group.fieldIds.subList(1, group.fieldIds.size())) {
+                List<IndexMetaFileGroup> groups =
+                        groupsByField.computeIfAbsent(fieldId, k -> new ArrayList<>());
+                if (!groups.contains(group)) {
+                    groups.add(group);
+                }
+            }
+        }
+        return groupsByField;
+    }
+
     /** All index files of one global index (single- or multi-column), grouped for reading. */
-    private static class IndexMetaFileGroup {
+    static class IndexMetaFileGroup {
 
         private final int indexFieldId;
         private final List<Integer> fieldIds;
@@ -203,6 +200,10 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             metas.computeIfAbsent(indexType, k -> new HashMap<>())
                     .computeIfAbsent(range, k -> new ArrayList<>())
                     .add(indexFile);
+        }
+
+        Map<String, Map<Range, List<IndexFileMeta>>> metas() {
+            return metas;
         }
 
         /** The primary index column. */
@@ -328,7 +329,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         };
     }
 
-    private static Filter<IndexManifestEntry> indexFileFilter(
+    static Filter<IndexManifestEntry> indexFileFilter(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter) {
@@ -401,7 +402,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     public GlobalIndexResult unindexedRowsForContributingFields(
             Collection<Integer> contributingFieldIds) {
         RoaringNavigableMap64 rows = new RoaringNavigableMap64();
-        for (Range range : coverage.unindexedRanges(contributingFieldIds)) {
+        for (Range range : coverage.unindexedRanges(contributingFieldIds, null)) {
             rows.addRange(range);
         }
         return GlobalIndexResult.create(rows);
@@ -435,7 +436,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                 List<IndexFileMeta> indexFileMetas = rangeMetas.getValue();
                 List<GlobalIndexIOMeta> globalMetas =
                         indexFileMetas.stream()
-                                .map(this::toGlobalMeta)
+                                .map(meta -> toGlobalMeta(meta, indexPathFactory))
                                 .collect(Collectors.toList());
                 futures.add(
                         CompletableFuture.supplyAsync(
@@ -445,6 +446,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                                         indexFileReadWrite,
                                                         globalMetas,
                                                         range.count(),
+                                                        null,
                                                         executor),
                                                 range.from,
                                                 range.to),
@@ -474,7 +476,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         return readers;
     }
 
-    private GlobalIndexIOMeta toGlobalMeta(IndexFileMeta meta) {
+    static GlobalIndexIOMeta toGlobalMeta(IndexFileMeta meta, IndexPathFactory indexPathFactory) {
         GlobalIndexMeta globalIndex = meta.globalIndexMeta();
         checkNotNull(globalIndex);
         Path filePath = indexPathFactory.toPath(meta);

@@ -18,12 +18,18 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.PostponeFixedBucketWriteBuilder;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.snapshot.ScannerTestBase;
 import org.apache.paimon.utils.Pair;
 
@@ -155,6 +161,32 @@ public class FileStoreScanPartitionBucketEntryTest extends ScannerTestBase {
         assertThat(entries).hasSize(1);
         assertThat(entries.get(0).partition().getInt(0)).isEqualTo(2);
         assertThat(entries.get(0).recordCount()).isEqualTo(5);
+    }
+
+    @Test
+    public void testReadPartitionEntriesIgnoresDeletedBucketLayout() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, -2);
+        table = createFileStoreTable(true, options, new Path(tablePath, "postpone-bucket-table"));
+        snapshotReader = table.newSnapshotReader();
+
+        PostponeFixedBucketWriteBuilder builder = table.newPostponeFixedBucketWriteBuilder();
+        try (TableWriteImpl<?> write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.writeAndReturn(rowData(1, 1, 1L), 0, 4);
+            commit.commit(write.prepareCommit());
+        }
+
+        builder = table.newPostponeFixedBucketWriteBuilder().withOverwrite(Collections.emptyMap());
+        try (TableWriteImpl<?> write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.writeAndReturn(rowData(1, 2, 2L), 0, 2);
+            commit.commit(write.prepareCommit());
+        }
+
+        assertThat(snapshotReader.partitionEntries())
+                .extracting(PartitionEntry::totalBuckets)
+                .containsExactly(2);
     }
 
     @Test
